@@ -1,6 +1,6 @@
-# VibeControl 2
+# Vibe-Rails
 
-> **Unified control panel for AI-powered development workflows with multi-LLM support, rule enforcement, and comprehensive session logging.**
+**Vibe-Rails** is an opinionated framework that helps keep AI coding assistants from going off the rails.
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-3178C6)](https://www.typescriptlang.org/)
@@ -9,18 +9,13 @@
 ---
 
 ## Overview
-
-**VibeControl** is a sophisticated desktop/web application designed to manage and enforce coding standards across AI-powered development workflows. It provides a unified interface for managing multiple LLM CLIs (Claude, Codex, Gemini) with comprehensive rule enforcement, session logging, and Model Context Protocol (MCP) integration.
-
-### Key Features
-
-- **Agent File Management** - Create and manage `agent.md` files with customizable coding rules
-- **Rule Enforcement** - Define standards with three enforcement levels (WARN/COMMIT/STOP)
-- **Multi-LLM Support** - Unified interface for Claude, Codex, and Gemini CLIs
-- **Environment Management** - Configure isolated environments for different LLM providers
-- **Session Logging** - Track and monitor all CLI session history with terminal output capture
-- **MCP Integration** - Custom Model Context Protocol server with specialized tools for semantic search and validation
-- **VS Code Extension** - Native integration with Visual Studio Code
+- **Environment Isolation** - Like Conda for LLMs. Create separate environments to experiment with Claude, Codex, or Gemini settings without breaking your primary setup
+- **Cross-LLM Learning** - Share context and learnings between different LLM providers (Claude, Codex, Gemini)
+- **RAG (Without The Rot) For Your Code** - Track things like repeated fixes the LLM forgets, including when you have to tell it the same thing 6 or 7 times in one session and it still doesn't understand, how you describe a feature and where that code lives, and file change summaries with commits, then only provide what’s useful at call time to prevent context rot.
+- **Few Shot Prompting** - Get Gemini or codex to code like Claude for code that has been done before with few shot prompting... Making them up to 20% better (research paper and eval data coming soon.)
+- **Rule Enforcement** - Define and enforce coding standards like test coverage, cyclomatic complexity, logging practices, and more. LLMs fix their errors before code can be pushed or before the tech debt get astronomical.
+- **Token Savings** - Learn your codebase and how you describe it, providing LLMs with smart file hints to reduce token usage and costs
+- **AGENTS.md Management** - Create and manage agent instruction files following the [agents.md specification](https://agents.md/)
 
 ---
 
@@ -54,8 +49,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/VibeControl2.git
-cd VibeControl2
+git clone https://github.com/robstokes857/vibe-rails.git
+cd vibe-rails
 
 # Build and run
 cd VibeRails
@@ -101,7 +96,7 @@ Press `F5` to launch the extension in development mode, then click the VibeRails
 
 ## Architecture
 
-VibeControl consists of four main components:
+Vibe-Rails consists of four main components:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -229,8 +224,8 @@ Standalone process with custom tools:
 
 ```bash
 # Clone with submodules
-git clone --recursive https://github.com/yourusername/VibeControl2.git
-cd VibeControl2
+git clone --recursive https://github.com/robstokes857/vibe-rails.git
+cd vibe-rails
 
 # Build backend
 cd VibeRails
@@ -770,8 +765,8 @@ We welcome contributions! Please follow these guidelines:
 
 ```bash
 # Clone with submodules
-git clone --recursive https://github.com/yourusername/VibeControl2.git
-cd VibeControl2
+git clone --recursive https://github.com/robstokes857/vibe-rails.git
+cd vibe-rails
 
 # Install .NET 10.0 SDK
 # https://dotnet.microsoft.com/download
