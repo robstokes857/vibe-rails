@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vibe Rails</title>
+    <link rel="icon" type="image/x-icon" href="assets/img/logo.ico">
+    <link rel="stylesheet" href="assets/bootstrap.min.css" />
+    <link rel="stylesheet" href="assets/xterm/xterm.css" />
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Header -->
+    <nav class="navbar navbar-dark sticky-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <img src="assets/img/logo.png" alt="VibeControl logo" class="brand-logo">
+                <span class="brand-text">VibeControl</span>
+            </a>
+            <div class="d-flex align-items-center gap-3 nav-actions">
+                <div class="breadcrumb-container" id="breadcrumb"></div>
+                <button id="vscode-exit-btn" class="btn btn-outline-light btn-sm" style="display: none;">
+                    Exit
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Container -->
+    <div class="container-fluid main-container">
+        <div id="app-content"></div>
+    </div>
+
+    <!-- Templates -->
+    <template id="main-menu-template">
+        <div class="row">
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="card menu-card" data-action="navigate" data-view="agents">
+                    <div class="card-body text-center">
+                        <img class="cli-logo mb-3" src="assets/img/icons/agent.svg" alt="Agents logo" style="height: 48px;">
+                        <h5 class="menu-title">Agent Files &amp; Rules</h5>
+                        <p class="menu-description">Manage agent.md files, rules, and VCA validation</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="card menu-card" data-action="navigate" data-view="config">
+                    <div class="card-body text-center">
+                        <img src="assets/img/icons/sliders-solid-full.svg" alt="Configuration" class="menu-icon-img mb-3">
+                        <h5 class="menu-title">Configuration</h5>
+                        <p class="menu-description">Configure API keys and settings for each CLI</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </template>
+
+    <template id="dashboard-template">
+        <div class="dashboard" data-dashboard="unified">
+            <div class="row mb-4">
+                <div class="col-12" data-context-heading-container></div>
+            </div>
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="row" data-local-quick-actions style="display: none;">
+                        <div class="col-6 col-md-4 col-lg-2 mb-3">
+                            <div class="card menu-card" data-action="launch-vscode" title="Open this project in Visual Studio Code editor">
+                                <div class="card-body text-center">
+                                    <img class="cli-logo mb-3" src="assets/img/vscode.svg" alt="VS Code logo">
+                                    <h5 class="menu-title">Launch VS Code</h5>
+                                    <p class="menu-description">Open in editor</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-4 col-lg-2 mb-3">
+                            <div class="card menu-card" data-action="launch-cli" data-cli="codex" title="Launch OpenAI Codex CLI in this project directory">
+                                <div class="card-body text-center">
+                                    <img class="cli-logo mb-3" src="assets/img/openai.svg" alt="OpenAI logo">
+                                    <h5 class="menu-title">Launch Codex</h5>
+                                    <p class="menu-description">OpenAI CLI</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-4 col-lg-2 mb-3">
+                            <div class="card menu-card" data-action="launch-cli" data-cli="claude" title="Launch Anthropic Claude CLI in this project directory">
+                                <div class="card-body text-center">
+                                    <img class="cli-logo mb-3" src="assets/img/claude-color.svg" alt="Claude logo">
+                                    <h5 class="menu-title">Launch Claude</h5>
+                                    <p class="menu-description">Anthropic CLI</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-4 col-lg-2 mb-3">
+                            <div class="card menu-card" data-action="launch-cli" data-cli="gemini" title="Launch Google Gemini CLI in this project directory">
+                                <div class="card-body text-center">
+                                    <img class="cli-logo mb-3" src="assets/img/gemini-color.svg" alt="Gemini logo">
+                                    <h5 class="menu-title">Launch Gemini</h5>
+                                    <p class="menu-description">Google CLI</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-4 col-lg-2 mb-3">
+                            <div class="card menu-card" data-action="navigate" data-view="environments" title="Create and manage custom LLM environments with specific settings, arguments, and prompts">
+                                <div class="card-body text-center">
+                                    <img class="cli-logo mb-3" src="assets/img/ann-llama.svg" alt="Anna Llama logo">
+                                    <h5 class="menu-title">Environments</h5>
+                                    <p class="menu-description">Conda for LLMs - custom CLI configs</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-4 col-lg-2 mb-3">
+                            <div class="card menu-card" data-action="navigate" data-view="agents" title="Manage agent.md files and rules that control AI behavior in your project">
+                                <div class="card-body text-center">
+                                    <img class="cli-logo mb-3" src="assets/img/icons/agent.svg" alt="Agents logo">
+                                    <h5 class="menu-title">Rules</h5>
+                                    <p class="menu-description">Manage AI behavior rules</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mb-4" data-local-history-section style="display: none;">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="card-title">Your LLM Environments</span>
+                                <p class="text-muted small mb-0 mt-1">Like Conda for LLMs - create isolated configs with custom args and prompts for each CLI</p>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-primary" type="button" data-action="create-environment-quick" title="Create a new environment with custom CLI arguments and prompts">
+                                    + Add
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" data-action="open-environments-settings" title="Manage all environments">
+                                    Settings
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="list-group project-history-list" data-local-project-history></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mb-4" data-local-file-tree-section style="display: none;">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            Agent Files in Project
+                        </div>
+                        <div class="card-body">
+                            <div data-local-file-tree></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </template>
+
+    <template id="environment-history-item-template">
+        <div class="list-group-item project-item p-3" data-env-item>
+            <div class="d-flex align-items-center gap-3">
+                <div class="project-logo-wrapper">
+                    <img class="project-logo" data-env-logo alt="" loading="lazy">
+                </div>
+                <div class="flex-grow-1 min-w-0">
+                    <div class="d-flex align-items-center mb-1">
+                        <h5 class="project-name mb-0 text-truncate me-2" data-env-name></h5>
+                        <span class="badge badge-cli" data-env-badge></span>
+                    </div>
+                    <div class="d-flex align-items-center text-muted small">
+                        <span data-env-time></span>
+                    </div>
+                </div>
+                <div class="project-actions ms-3 d-flex gap-2">
+                    <button class="btn btn-sm btn-primary project-launch px-3 d-flex align-items-center gap-2" type="button" data-env-launch>
+                        <img data-env-launch-logo alt="" style="height: 16px; width: 16px;">
+                        <span data-env-launch-text></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+
+    <template id="agents-template">
+        <div class="view" data-view="agents">
+            <div class="row">
+                <div class="col-12">
+                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
+                        &larr; Back
+                    </button>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <h2 class="mb-4">Agent Files &amp; Rules</h2>
+                </div>
+            </div>
+
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            Agent Files in Project
+                        </div>
+                        <div class="card-body">
+                            <div data-agent-file-tree></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 col-lg-3 mb-4">
+                    <div class="card menu-card" data-action="navigate" data-view="check-violations">
+                        <div class="card-body text-center">
+                            <span class="menu-icon">&#x2705;</span>
+                            <h5 class="menu-title">Check Violations</h5>
+                            <p class="menu-description">Run VCA validation</p>
+                        </div>
+                    </div>
+                </div>
+
+
+
+
+
+                <div class="col-md-6 col-lg-3 mb-4">
+                    <div class="card menu-card" data-action="navigate" data-view="active-rules">
+                        <div class="card-body text-center">
+                            <span class="menu-icon">&#x1F333;</span>
+                            <h5 class="menu-title">Active Rules</h5>
+                            <p class="menu-description">View rule hierarchy</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6 col-lg-3 mb-4">
+                    <div class="card menu-card" data-action="navigate" data-view="agent-create">
+                        <div class="card-body text-center">
+                            <span class="menu-icon">&#x2795;</span>
+                            <h5 class="menu-title">Create New Agent</h5>
+                            <p class="menu-description">Create with wizard</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="agent-edit-template">
+        <div class="view" data-view="agent-edit">
+            <div class="row mb-4">
+                <div class="col-12 d-flex align-items-center gap-4">
+                    <button class="btn btn-outline-primary" type="button" data-action="go-back">
+                        &larr; Back
+                    </button>
+                    <div class="d-flex align-items-center gap-3">
+                        <div>
+                            <h4 class="mb-0 text-white fw-semibold" data-agent-display-name></h4>
+                            <small class="text-muted" data-agent-path></small>
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary ms-2" type="button" data-action="set-custom-agent-name">
+                            <span>&#x270F;&#xFE0F;</span> Edit name
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Files affected - shown at top, always expanded -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card agent-edit-card">
+                        <div class="card-header">
+                            <div class="d-flex align-items-center gap-2">
+                                <span>&#x1F4C2;</span>
+                                <span class="fw-bold">Files affected by this agent</span>
+                                <span class="badge bg-secondary" data-agent-file-count></span>
+                            </div>
+                        </div>
+                        <div class="card-body" data-agent-files-container>
+                            <div data-agent-files-list>
+                                <div class="text-center text-muted">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <div class="card border-0 bg-transparent">
+                        <div class="card-header border-0 ps-0">
+                            <h4 class="mb-0 text-white">Current Rules</h4>
+                        </div>
+                        <div class="card-body px-0 pt-2">
+                            <div data-agent-rules></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mt-4">
+                <div class="col-md-4 col-lg-3 mb-3">
+                    <div class="card menu-card h-100" data-agent-action="show-available-rules">
+                        <div class="card-body text-center py-3">
+                            <span class="menu-icon">&#x1F4CB;</span>
+                            <h6 class="menu-title mb-0">Available Rules</h6>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 col-lg-3 mb-3">
+                    <div class="card menu-card h-100" data-agent-action="add-rule">
+                        <div class="card-body text-center py-3">
+                            <span class="menu-icon">&#x2795;</span>
+                            <h6 class="menu-title mb-0">Add Rule</h6>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 col-lg-3 mb-3">
+                    <div class="card menu-card h-100" data-agent-action="edit-rule">
+                        <div class="card-body text-center py-3">
+                            <span class="menu-icon">&#x270F;&#xFE0F;</span>
+                            <h6 class="menu-title mb-0">Edit Rule</h6>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 col-lg-3 mb-3">
+                    <div class="card menu-card h-100" data-agent-action="remove-rule">
+                        <div class="card-body text-center py-3">
+                            <span class="menu-icon">&#x1F5D1;&#xFE0F;</span>
+                            <h6 class="menu-title mb-0">Remove Rule</h6>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 col-lg-3 mb-3">
+                    <div class="card menu-card h-100" data-agent-action="validate-agent">
+                        <div class="card-body text-center py-3">
+                            <span class="menu-icon">&#x2705;</span>
+                            <h6 class="menu-title mb-0">Validate Rules</h6>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 col-lg-3 mb-3">
+                    <div class="card menu-card h-100" data-agent-action="edit-vscode">
+                        <div class="card-body text-center py-3">
+                            <img class="cli-logo mb-2" src="assets/img/vscode.svg" alt="VS Code logo" style="height: 36px;">
+                            <h6 class="menu-title mb-0">Edit in VS Code</h6>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 col-lg-3 mb-3">
+                    <div class="card menu-card danger-card h-100" data-agent-action="delete-agent">
+                        <div class="card-body text-center py-3">
+                            <span class="menu-icon">&#x26A0;&#xFE0F;</span>
+                            <h6 class="menu-title text-danger mb-0">Delete Agent</h6>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mt-4" data-agent-validation-section style="display: none;">
+                <div class="col-12">
+                    <div class="card agent-edit-card">
+                        <div class="card-header">
+                            <span class="fw-bold">Validation Results</span>
+                        </div>
+                        <div class="card-body" data-agent-validation-results></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="card agent-edit-card">
+                        <div class="card-header d-flex justify-content-between align-items-center" style="cursor: pointer;" data-agent-content-toggle>
+                            <div class="d-flex align-items-center gap-2">
+                                <span>&#x1F4C4;</span>
+                                <span class="fw-bold">Full Agent File Content</span>
+                            </div>
+                            <span class="toggle-icon">&#x25BC;</span>
+                        </div>
+                        <div class="card-body" style="display: none;" data-agent-content-container>
+                            <pre class="bg-dark text-light p-3 rounded mb-0"><code data-agent-full-content></code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="agent-create-template">
+        <div class="view" data-view="agent-create">
+            <div class="row">
+                <div class="col-12">
+                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
+                        &larr; Back
+                    </button>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <h2 class="mb-4">Create New Agent</h2>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="wizard-steps">
+                                <div class="wizard-step active">
+                                    <div class="wizard-step-number">1</div>
+                                    <div class="wizard-step-label">Select Directory</div>
+                                </div>
+                                <div class="wizard-step">
+                                    <div class="wizard-step-number">2</div>
+                                    <div class="wizard-step-label">Choose Rules</div>
+                                </div>
+                                <div class="wizard-step">
+                                    <div class="wizard-step-number">3</div>
+                                    <div class="wizard-step-label">Enforcement Levels</div>
+                                </div>
+                                <div class="wizard-step">
+                                    <div class="wizard-step-number">4</div>
+                                    <div class="wizard-step-label">Review</div>
+                                </div>
+                            </div>
+
+                            <div id="wizard-content">
+                                <!-- Wizard content is dynamically rendered by AgentController -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="check-violations-template">
+        <div class="view" data-view="check-violations">
+            <div class="row">
+                <div class="col-12">
+                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
+                        &larr; Back
+                    </button>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <h2 class="mb-4">VCA Validation</h2>
+                </div>
+            </div>
+
+            <!-- Manual Validation -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">Manual Validation</div>
+                        <div class="card-body">
+                            <p class="text-muted mb-3">
+                                Run VCA validation manually against all changed files in your repository.
+                            </p>
+                            <button class="btn btn-primary btn-lg" type="button" data-action="run-vca">
+                                Run VCA Validation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">Validation Results</div>
+                        <div class="card-body">
+                            <div id="validation-results">
+                                <p class="text-muted text-center">Click "Run VCA Validation" to check for rule violations</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="active-rules-template">
+        <div class="view" data-view="active-rules">
+            <div class="row">
+                <div class="col-12">
+                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
+                        &larr; Back
+                    </button>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <h2 class="mb-4">Active Rules Hierarchy</h2>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">Rules by Directory</div>
+                        <div class="card-body">
+                            <div data-active-rules></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="environments-template">
+        <div class="view" data-view="environments">
+            <div class="row">
+                <div class="col-12">
+                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
+                        &larr; Back
+                    </button>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12 d-flex justify-content-between align-items-center mb-4">
+                    <h2>Environment Management</h2>
+                    <button class="btn btn-primary" type="button" data-action="create-environment">
+                        Create New Environment
+                    </button>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">Environment Profiles</div>
+                        <div class="card-body">
+                            <div data-environments-table></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="configuration-template">
+        <div class="view" data-view="config">
+            <div class="row">
+                <div class="col-12">
+                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
+                        &larr; Back
+                    </button>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <h2 class="mb-4">Configuration</h2>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-4 mb-4">
+                    <div class="card menu-card" data-action="configure-cli" data-cli="codex">
+                        <div class="card-body text-center">
+                            <img class="cli-logo mb-3" src="assets/img/openai.svg" alt="OpenAI logo">
+                            <h5 class="menu-title">Configure Codex</h5>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 mb-4">
+                    <div class="card menu-card" data-action="configure-cli" data-cli="claude">
+                        <div class="card-body text-center">
+                            <img class="cli-logo mb-3" src="assets/img/claude-color.svg" alt="Claude logo">
+                            <h5 class="menu-title">Configure Claude</h5>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 mb-4">
+                    <div class="card menu-card" data-action="configure-cli" data-cli="gemini">
+                        <div class="card-body text-center">
+                            <img class="cli-logo mb-3" src="assets/img/gemini-color.svg" alt="Gemini logo">
+                            <h5 class="menu-title">Configure Gemini</h5>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="session-item-template">
+        <div class="list-group-item session-item p-3" data-session-item>
+            <div class="d-flex align-items-center gap-3">
+                <div class="project-logo-wrapper">
+                    <img class="project-logo" data-session-logo alt="" loading="lazy">
+                </div>
+                <div class="flex-grow-1 min-w-0">
+                    <div class="d-flex align-items-center mb-1">
+                        <span class="badge badge-cli me-2" data-session-badge></span>
+                        <span class="text-muted small" data-session-time></span>
+                    </div>
+                    <div class="project-path text-muted text-truncate mb-1" data-session-workdir></div>
+                    <div class="d-flex align-items-center text-muted small" data-session-env-container>
+                        <!-- Env info will go here -->
+                    </div>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge" data-session-status></span>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
+
+    <!-- Modal Container -->
+    <div id="modal-container"></div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay d-none">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+
+    <script src="assets/bootstrap.bundle.min.js"></script>
+    <script src="assets/xterm/xterm.min.js"></script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>

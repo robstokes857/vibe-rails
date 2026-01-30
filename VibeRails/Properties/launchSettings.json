@@ -1,0 +1,21 @@
+{
+  "profiles": {
+    "VibeRails": {
+      "commandName": "Project",
+      "commandLineArgs": "--open-browser",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "dotnetRunMessages": false
+    },
+    "LM_Bootstrap_Gemini": {
+      "commandName": "Project",
+      "commandLineArgs": "--lmbootstrap gemini",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "dotnetRunMessages": false
+    }
+  },
+  "$schema": "https://json.schemastore.org/launchsettings.json"
+}

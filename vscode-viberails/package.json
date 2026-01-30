@@ -1,0 +1,59 @@
+{
+  "name": "vscode-viberails",
+  "displayName": "VibeRails",
+  "description": "Launch and control VibeRails dashboard inside VS Code",
+  "version": "0.1.0",
+  "publisher": "viberails",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "viberails.open",
+        "title": "VibeRails: Open Dashboard",
+        "icon": {
+          "light": "media/icon.svg",
+          "dark": "media/icon.svg"
+        }
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "viberails.open",
+          "group": "navigation",
+          "when": "true"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "VibeRails",
+      "properties": {
+        "viberails.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the VibeRails executable. If empty, the extension will look for it in common locations."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
