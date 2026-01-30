@@ -1,0 +1,21 @@
+# Repository Guidelines
+
+This file provides instructions and context for humans and AI coding assistants working in this codebase.
+
+## Development Guidelines
+- Read AGENTS.md for detailed agent instructions and information about this project
+- Follow the rules and guidelines specified in this file exactly
+- Follow existing code patterns and conventions in the codebase
+- Keep changes focused and minimal
+
+## Vibe Rails Rules
+- Log all file changes
+- Cyclomatic complexity < 35
+- Require test coverage minimum 70%
+
+## Files
+- important-file.cs
+- another-file.cs
+
+## Prompts
+- Custom prompt here

@@ -1,0 +1,26 @@
+# NOTE: Update port to match server output (auto-selected from 5000-5999)
+@VibeRails_HostAddress = http://localhost:5000
+
+# Home page
+GET {{VibeRails_HostAddress}}/
+Accept: text/html
+
+###
+
+# Health check
+GET {{VibeRails_HostAddress}}/health
+Accept: application/json
+
+###
+
+# Read file from launch directory
+GET {{VibeRails_HostAddress}}/file/test.txt
+Accept: application/json
+
+###
+
+# OpenAPI spec
+GET {{VibeRails_HostAddress}}/openapi/v1.json
+Accept: application/json
+
+###
