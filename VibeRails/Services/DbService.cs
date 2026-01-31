@@ -84,7 +84,26 @@ namespace VibeRails.Services
                 )
                 """,
                 "CREATE INDEX IF NOT EXISTS idx_input_file_changes_input ON InputFileChanges(UserInputId)",
-                "CREATE INDEX IF NOT EXISTS idx_input_file_changes_filepath ON InputFileChanges(FilePath)"
+                "CREATE INDEX IF NOT EXISTS idx_input_file_changes_filepath ON InputFileChanges(FilePath)",
+                // Claude Plans tracking table
+                """
+                CREATE TABLE IF NOT EXISTS ClaudePlans (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    SessionId TEXT NOT NULL,
+                    UserInputId INTEGER,
+                    PlanFilePath TEXT,
+                    PlanContent TEXT NOT NULL,
+                    PlanSummary TEXT,
+                    Status TEXT NOT NULL DEFAULT 'created',
+                    CreatedUTC TEXT NOT NULL,
+                    CompletedUTC TEXT,
+                    FOREIGN KEY (SessionId) REFERENCES Sessions(Id),
+                    FOREIGN KEY (UserInputId) REFERENCES UserInputs(Id)
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS idx_claude_plans_session ON ClaudePlans(SessionId)",
+                "CREATE INDEX IF NOT EXISTS idx_claude_plans_status ON ClaudePlans(Status)",
+                "CREATE INDEX IF NOT EXISTS idx_claude_plans_created ON ClaudePlans(CreatedUTC DESC)"
             };
 
             foreach (var sql in statements)
@@ -373,6 +392,151 @@ namespace VibeRails.Services
                 // Log but don't fail the user's session
                 Console.Error.WriteLine($"[VibeRails] Error recording user input: {ex.Message}");
             }
+        }
+
+        // Claude Plan tracking methods
+
+        public async Task<long> CreateClaudePlanAsync(string sessionId, long? userInputId, string? planFilePath, string planContent, string? summary)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO ClaudePlans (SessionId, UserInputId, PlanFilePath, PlanContent, PlanSummary, Status, CreatedUTC)
+                VALUES ($sessionId, $userInputId, $planFilePath, $planContent, $planSummary, 'created', $createdUTC)
+                RETURNING Id;
+                """;
+
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+            cmd.Parameters.AddWithValue("$userInputId", userInputId ?? (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("$planFilePath", planFilePath ?? (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("$planContent", planContent);
+            cmd.Parameters.AddWithValue("$planSummary", summary ?? (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("$createdUTC", DateTime.UtcNow.ToString("O"));
+
+            var result = await cmd.ExecuteScalarAsync();
+            return (long)result!;
+        }
+
+        public async Task<ClaudePlanRecord?> GetClaudePlanAsync(long planId, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT Id, SessionId, UserInputId, PlanFilePath, PlanContent, PlanSummary, Status, CreatedUTC, CompletedUTC
+                FROM ClaudePlans
+                WHERE Id = $planId;
+                """;
+            cmd.Parameters.AddWithValue("$planId", planId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                return ReadClaudePlanRecord(reader);
+            }
+            return null;
+        }
+
+        public async Task<List<ClaudePlanRecord>> GetClaudePlansForSessionAsync(string sessionId, CancellationToken cancellationToken)
+        {
+            var plans = new List<ClaudePlanRecord>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT Id, SessionId, UserInputId, PlanFilePath, PlanContent, PlanSummary, Status, CreatedUTC, CompletedUTC
+                FROM ClaudePlans
+                WHERE SessionId = $sessionId
+                ORDER BY CreatedUTC DESC;
+                """;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                plans.Add(ReadClaudePlanRecord(reader));
+            }
+
+            return plans;
+        }
+
+        public async Task<List<ClaudePlanRecord>> GetRecentClaudePlansAsync(int limit, CancellationToken cancellationToken)
+        {
+            var plans = new List<ClaudePlanRecord>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT Id, SessionId, UserInputId, PlanFilePath, PlanContent, PlanSummary, Status, CreatedUTC, CompletedUTC
+                FROM ClaudePlans
+                ORDER BY CreatedUTC DESC
+                LIMIT $limit;
+                """;
+            cmd.Parameters.AddWithValue("$limit", limit);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                plans.Add(ReadClaudePlanRecord(reader));
+            }
+
+            return plans;
+        }
+
+        public async Task UpdateClaudePlanStatusAsync(long planId, string status)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                UPDATE ClaudePlans
+                SET Status = $status
+                WHERE Id = $planId;
+                """;
+            cmd.Parameters.AddWithValue("$planId", planId);
+            cmd.Parameters.AddWithValue("$status", status);
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task CompleteClaudePlanAsync(long planId)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                UPDATE ClaudePlans
+                SET Status = 'completed', CompletedUTC = $completedUTC
+                WHERE Id = $planId;
+                """;
+            cmd.Parameters.AddWithValue("$planId", planId);
+            cmd.Parameters.AddWithValue("$completedUTC", DateTime.UtcNow.ToString("O"));
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        private static ClaudePlanRecord ReadClaudePlanRecord(SqliteDataReader reader)
+        {
+            return new ClaudePlanRecord(
+                Id: reader.GetInt64(0),
+                SessionId: reader.GetString(1),
+                UserInputId: reader.IsDBNull(2) ? null : reader.GetInt64(2),
+                PlanFilePath: reader.IsDBNull(3) ? null : reader.GetString(3),
+                PlanContent: reader.GetString(4),
+                PlanSummary: reader.IsDBNull(5) ? null : reader.GetString(5),
+                Status: reader.GetString(6),
+                CreatedUTC: DateTime.Parse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                CompletedUTC: reader.IsDBNull(8) ? null : DateTime.Parse(reader.GetString(8), null, System.Globalization.DateTimeStyles.RoundtripKind)
+            );
         }
     }
 }

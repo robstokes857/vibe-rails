@@ -4,7 +4,6 @@ using VibeRails.DTOs;
 using VibeRails.Utils;
 
 
-
 // Capture launch directory FIRST (where the user ran the command from)
 string launchDirectory = Directory.GetCurrentDirectory();
 
@@ -73,6 +72,9 @@ var fileProvider = new PhysicalFileProvider(webRootPath);
 
 // Enable CORS for VS Code webview
 app.UseCors("VSCodeWebview");
+
+// Enable WebSockets for terminal
+app.UseWebSockets();
 
 // Enable default files (index.html) - must be before UseStaticFiles
 app.UseDefaultFiles(new DefaultFilesOptions

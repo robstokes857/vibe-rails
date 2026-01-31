@@ -21,5 +21,13 @@ namespace VibeRails.Interfaces
         Task<long> InsertUserInputAsync(string sessionId, int sequence, string inputText, string? gitCommitHash);
         Task InsertFileChangesAsync(long userInputId, long? previousInputId, List<FileChangeInfo> changes);
         Task RecordUserInputAsync(string sessionId, string inputText, IGitService gitService, CancellationToken cancellationToken = default);
+
+        // Claude Plan tracking
+        Task<long> CreateClaudePlanAsync(string sessionId, long? userInputId, string? planFilePath, string planContent, string? summary);
+        Task<ClaudePlanRecord?> GetClaudePlanAsync(long planId, CancellationToken cancellationToken);
+        Task<List<ClaudePlanRecord>> GetClaudePlansForSessionAsync(string sessionId, CancellationToken cancellationToken);
+        Task<List<ClaudePlanRecord>> GetRecentClaudePlansAsync(int limit, CancellationToken cancellationToken);
+        Task UpdateClaudePlanStatusAsync(long planId, string status);
+        Task CompleteClaudePlanAsync(long planId);
     }
 }
