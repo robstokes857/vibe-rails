@@ -8,10 +8,6 @@
 
 ---
 
-## Status
-- This repo is a lightweight, local-focused version of my personal setup. I'm stripping out multi-GPU/cluster support, heavy eval tooling, and other framework dependencies so it runs fast with Claude, Codex, and Gemini CLIs. I'm rebuilding it around the features I think most people will actually want for local workflows.
-
-
 ## Overview
 - **Environment Isolation** - Like Conda for LLMs. Create separate environments to experiment with Claude, Codex, or Gemini settings without breaking your primary setup
 - **Cross-LLM Learning** - Share context and learnings between different LLM providers (Claude, Codex, Gemini)
@@ -37,6 +33,9 @@
 - [License](#license)
 
 ---
+
+## Status
+- This repo is a lightweight, local-focused version of my personal setup. I'm stripping out multi-GPU/cluster support, heavy eval tooling, and other framework dependencies so it runs fast with Claude, Codex, and Gemini CLIs. I'm rebuilding it around the features I think most people will actually want for local workflows.
 
 ## Quick Start
 
