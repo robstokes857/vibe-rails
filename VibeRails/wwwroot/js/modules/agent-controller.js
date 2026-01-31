@@ -744,18 +744,17 @@ export class AgentController {
 
     renderStep1Directory(container) {
         const rootPath = this.app.data.configs?.rootPath || '';
-        const defaultPath = rootPath ? `${rootPath}/agent.md` : '';
+        const defaultPath = rootPath || '';
 
         container.innerHTML = `
             <h5 class="mb-4">Step 1: Select Directory</h5>
             <div class="mb-4">
-                <label class="form-label">Agent File Path</label>
+                <label class="form-label">Directory for AGENTS.md</label>
                 <input type="text" class="form-control" id="agent-directory"
-                       placeholder="/path/to/directory/agent.md"
+                       placeholder="/path/to/directory"
                        value="${this.wizardState.directory || defaultPath}">
                 <small class="form-text text-muted">
-                    Enter the full path where the agent.md file will be created.
-                    The file must be named <code>agent.md</code> or <code>agents.md</code>.
+                    Enter the directory where <code>AGENTS.md</code> will be created.
                 </small>
             </div>
             ${rootPath ? `
@@ -770,16 +769,14 @@ export class AgentController {
         `;
 
         document.getElementById('wizard-next-btn').addEventListener('click', () => {
-            const directory = document.getElementById('agent-directory').value.trim();
+            let directory = document.getElementById('agent-directory').value.trim();
             if (!directory) {
-                this.app.showToast('Validation Error', 'Please enter a path for the agent file', 'warning');
+                this.app.showToast('Validation Error', 'Please enter a directory path', 'warning');
                 return;
             }
-            if (!directory.endsWith('agent.md') && !directory.endsWith('agents.md')) {
-                this.app.showToast('Validation Error', 'File must be named agent.md or agents.md', 'warning');
-                return;
-            }
-            this.wizardState.directory = directory;
+            // Remove trailing slash if present and append AGENTS.md
+            directory = directory.replace(/[\\/]+$/, '');
+            this.wizardState.directory = `${directory}/AGENTS.md`;
             this.wizardState.currentStep = 2;
             this.renderWizardStep();
         });

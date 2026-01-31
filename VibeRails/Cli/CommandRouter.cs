@@ -30,12 +30,18 @@ namespace VibeRails.Cli
                 "gemini" => await GeminiCommands.ExecuteAsync(args, services, cancellationToken),
                 "codex" => await CodexCommands.ExecuteAsync(args, services, cancellationToken),
                 "claude" => await ClaudeCommands.ExecuteAsync(args, services, cancellationToken),
-                "help" or "--help" or "-h" => ShowHelp(),
+                "help" or "--help" or "-h" => ShowHelpAndReturn(),
                 _ => ShowUnknownCommand(args.Command)
             };
         }
 
-        private static int ShowHelp()
+        private static int ShowHelpAndReturn()
+        {
+            ShowHelp();
+            return 0;
+        }
+
+        public static void ShowHelp()
         {
             CliOutput.Help(
                 "vb [command] [subcommand] [options]",
@@ -63,8 +69,11 @@ namespace VibeRails.Cli
             Console.WriteLine("Run 'vb [command] --help' for more information on a command.");
             Console.WriteLine();
             Console.WriteLine("When run without arguments, launches the web UI.");
+        }
 
-            return 0;
+        public static void ShowVersion()
+        {
+            Console.WriteLine($"vb {VersionInfo.Version}");
         }
 
         private static int ShowUnknownCommand(string command)

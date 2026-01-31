@@ -255,11 +255,12 @@ export class BackendManager {
         // 4. Fallback: Use 'dotnet run' if csproj exists
         // For dotnet run, we need to run from the VibeRails project directory
         // but we pass the target folder as an argument or via environment
+        // Use --no-launch-profile to bypass launchSettings.json (which has --open-browser)
         const csprojPath = path.join(installFolder, 'VibeRails', 'VibeRails.csproj');
         if (fs.existsSync(csprojPath)) {
             return {
                 command: 'dotnet',
-                args: ['run', '--no-build', '--project', csprojPath],
+                args: ['run', '--no-build', '--no-launch-profile', '--project', csprojPath],
                 cwd  // Run from target project folder for local context
             };
         }
