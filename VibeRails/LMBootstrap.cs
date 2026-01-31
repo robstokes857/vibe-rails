@@ -73,6 +73,15 @@ public static class LMBootstrap
         var dbService = CreateDbService();
         await dbService.CreateSessionAsync(sessionId, cli, envName, workDir);
 
+        // Record initial git state as sequence 0 (baseline for tracking changes)
+        var initialCommitHash = await gitService.GetCurrentCommitHashAsync();
+        await dbService.InsertUserInputAsync(
+            sessionId,
+            sequence: 0,
+            inputText: "[SESSION_START]",
+            gitCommitHash: initialCommitHash
+        );
+
         int exitCode = 0;
         using var cts = new CancellationTokenSource();
 

@@ -17,6 +17,19 @@ public static class CliLoop
         using var scope = services.CreateScope();
         var scopedServices = scope.ServiceProvider;
 
+        // 0. Handle top-level --help and --version flags (no command required)
+        if (parsedArgs.Help)
+        {
+            CommandRouter.ShowHelp();
+            return (true, parsedArgs);
+        }
+
+        if (parsedArgs.Version)
+        {
+            CommandRouter.ShowVersion();
+            return (true, parsedArgs);
+        }
+
         // 1. Try new CLI commands first (env, agent, rules, validate, hooks, launch)
         var exitCode = await CommandRouter.RouteAsync(parsedArgs, scopedServices, CancellationToken.None);
         if (exitCode.HasValue)

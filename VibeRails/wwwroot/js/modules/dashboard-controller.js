@@ -154,6 +154,17 @@ export class DashboardController {
             this.bindMainMenu(menuSlot);
         }
 
+        // Terminal section - only show in local context
+        const terminalSection = root.querySelector('[data-terminal-section]');
+        if (terminalSection && isLocal) {
+            terminalSection.style.removeProperty('display');
+            const terminalContent = terminalSection.querySelector('[data-terminal-content]');
+            if (terminalContent) {
+                terminalContent.innerHTML = this.app.terminalController.renderTerminalPanel();
+                this.app.terminalController.bindTerminalActions(terminalContent);
+            }
+        }
+
         return fragment;
     }
 

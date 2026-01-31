@@ -5,6 +5,7 @@ using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Mcp;
+using VibeRails.Services.Terminal;
 namespace VibeRails;
 
 public static class Routes
@@ -15,6 +16,7 @@ public static class Routes
         MapEnvironmentEndpoints(app);
         MapCliLaunchEndpoints(app, launchDirectory);
         MapSessionEndpoints(app);
+        MapTerminalEndpoints(app, launchDirectory);
         MapMCPEndpoints(app, launchDirectory);
         MapAgentEndpoints(app);
         MapRulesEndpoints(app);
@@ -22,6 +24,7 @@ public static class Routes
         MapGeminiSettingsEndpoints(app);
         MapCodexSettingsEndpoints(app);
         MapClaudeSettingsEndpoints(app);
+        MapClaudePlanEndpoints(app);
     }
 
     private static void MapProjectEndpoints(WebApplication app, string launchDirectory)
@@ -335,6 +338,68 @@ public static class Routes
             return Results.Ok(sessions);
         }).WithName("GetRecentSessions");
 
+    }
+
+    private static void MapTerminalEndpoints(WebApplication app, string launchDirectory)
+    {
+        // GET /api/v1/terminal/status - Check if terminal session is active
+        app.MapGet("/api/v1/terminal/status", (ITerminalSessionService terminalService) =>
+        {
+            return Results.Ok(new TerminalStatusResponse(terminalService.HasActiveSession));
+        }).WithName("GetTerminalStatus");
+
+        // POST /api/v1/terminal/start - Start a new terminal session
+        app.MapPost("/api/v1/terminal/start", async (
+            ITerminalSessionService terminalService,
+            StartTerminalRequest? request) =>
+        {
+            if (terminalService.HasActiveSession)
+            {
+                return Results.BadRequest(new ErrorResponse("A terminal session is already active. Stop it first."));
+            }
+
+            var workDir = request?.WorkingDirectory ?? launchDirectory;
+            var success = await terminalService.StartSessionAsync(workDir);
+
+            if (!success)
+            {
+                return Results.BadRequest(new ErrorResponse("Failed to start terminal session"));
+            }
+
+            return Results.Ok(new TerminalStatusResponse(true));
+        }).WithName("StartTerminal");
+
+        // POST /api/v1/terminal/stop - Stop the current terminal session
+        app.MapPost("/api/v1/terminal/stop", async (ITerminalSessionService terminalService) =>
+        {
+            if (!terminalService.HasActiveSession)
+            {
+                return Results.Ok(new TerminalStatusResponse(false));
+            }
+
+            await terminalService.StopSessionAsync();
+            return Results.Ok(new TerminalStatusResponse(false));
+        }).WithName("StopTerminal");
+
+        // WebSocket endpoint for terminal I/O
+        app.Map("/api/v1/terminal/ws", async (HttpContext context, ITerminalSessionService terminalService) =>
+        {
+            if (!context.WebSockets.IsWebSocketRequest)
+            {
+                context.Response.StatusCode = 400;
+                return;
+            }
+
+            if (!terminalService.HasActiveSession)
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync("No active terminal session. Start one first via POST /api/v1/terminal/start");
+                return;
+            }
+
+            using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+            await terminalService.HandleWebSocketAsync(webSocket, context.RequestAborted);
+        });
     }
 
     private static void MapMCPEndpoints(WebApplication app, string launchDirectory)
@@ -1009,6 +1074,109 @@ public static class Routes
                 return Results.BadRequest(new ErrorResponse($"Failed to save Claude settings: {ex.Message}"));
             }
         }).WithName("UpdateClaudeSettings");
+    }
+
+    private static void MapClaudePlanEndpoints(WebApplication app)
+    {
+        // GET /api/v1/plans/session/{sessionId} - Get plans for a session
+        app.MapGet("/api/v1/plans/session/{sessionId}", async (
+            IDbService dbService,
+            string sessionId,
+            CancellationToken cancellationToken) =>
+        {
+            var plans = await dbService.GetClaudePlansForSessionAsync(sessionId, cancellationToken);
+            return Results.Ok(new ClaudePlanListResponse(plans, plans.Count));
+        }).WithName("GetSessionPlans");
+
+        // GET /api/v1/plans/recent - Get recent plans across all sessions
+        app.MapGet("/api/v1/plans/recent", async (
+            IDbService dbService,
+            int? limit,
+            CancellationToken cancellationToken) =>
+        {
+            var plans = await dbService.GetRecentClaudePlansAsync(limit ?? 20, cancellationToken);
+            return Results.Ok(new ClaudePlanListResponse(plans, plans.Count));
+        }).WithName("GetRecentPlans");
+
+        // GET /api/v1/plans/{planId} - Get a single plan
+        app.MapGet("/api/v1/plans/{planId}", async (
+            IDbService dbService,
+            long planId,
+            CancellationToken cancellationToken) =>
+        {
+            var plan = await dbService.GetClaudePlanAsync(planId, cancellationToken);
+            if (plan == null)
+            {
+                return Results.NotFound(new ErrorResponse($"Plan not found: {planId}"));
+            }
+            return Results.Ok(plan);
+        }).WithName("GetPlan");
+
+        // POST /api/v1/plans - Create a new plan
+        app.MapPost("/api/v1/plans", async (
+            IDbService dbService,
+            CreateClaudePlanRequest request,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrEmpty(request.SessionId))
+            {
+                return Results.BadRequest(new ErrorResponse("SessionId is required"));
+            }
+
+            if (string.IsNullOrEmpty(request.PlanContent))
+            {
+                return Results.BadRequest(new ErrorResponse("PlanContent is required"));
+            }
+
+            var planId = await dbService.CreateClaudePlanAsync(
+                request.SessionId,
+                request.UserInputId,
+                request.PlanFilePath,
+                request.PlanContent,
+                request.PlanSummary);
+
+            var plan = await dbService.GetClaudePlanAsync(planId, cancellationToken);
+            return Results.Ok(plan);
+        }).WithName("CreatePlan");
+
+        // PUT /api/v1/plans/{planId}/status - Update plan status
+        app.MapPut("/api/v1/plans/{planId}/status", async (
+            IDbService dbService,
+            long planId,
+            UpdateClaudePlanStatusRequest request,
+            CancellationToken cancellationToken) =>
+        {
+            var plan = await dbService.GetClaudePlanAsync(planId, cancellationToken);
+            if (plan == null)
+            {
+                return Results.NotFound(new ErrorResponse($"Plan not found: {planId}"));
+            }
+
+            if (string.IsNullOrEmpty(request.Status))
+            {
+                return Results.BadRequest(new ErrorResponse("Status is required"));
+            }
+
+            await dbService.UpdateClaudePlanStatusAsync(planId, request.Status);
+            return Results.Ok(new OK("Status updated"));
+        }).WithName("UpdatePlanStatus");
+
+        // POST /api/v1/plans/{planId}/complete - Mark plan as completed
+        app.MapPost("/api/v1/plans/{planId}/complete", async (
+            IDbService dbService,
+            long planId,
+            CancellationToken cancellationToken) =>
+        {
+            var plan = await dbService.GetClaudePlanAsync(planId, cancellationToken);
+            if (plan == null)
+            {
+                return Results.NotFound(new ErrorResponse($"Plan not found: {planId}"));
+            }
+
+            await dbService.CompleteClaudePlanAsync(planId);
+            var updatedPlan = await dbService.GetClaudePlanAsync(planId, cancellationToken);
+            return Results.Ok(updatedPlan);
+        }).WithName("CompletePlan");
     }
 }
 

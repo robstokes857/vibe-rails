@@ -10,6 +10,7 @@ import { EnvironmentController } from './js/modules/environment-controller.js';
 import { ConfigController } from './js/modules/config-controller.js';
 import { RuleController } from './js/modules/rule-controller.js';
 import { CliLauncher } from './js/modules/cli-launcher.js';
+import { TerminalController } from './js/modules/terminal-controller.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
 export class VibeControlApp {
@@ -34,6 +35,7 @@ export class VibeControlApp {
         this.configController = new ConfigController(this);
         this.ruleController = new RuleController(this);
         this.cliLauncher = new CliLauncher(this);
+        this.terminalController = new TerminalController(this);
         
         this.init();
     }
