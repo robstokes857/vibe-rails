@@ -202,6 +202,45 @@ namespace VibeRails.DTOs
         List<ValidationResultResponse> Results
     );
 
+    // Terminal Session DTOs
+    public record TerminalStatusResponse(
+        bool HasActiveSession
+    );
+
+    public record StartTerminalRequest(
+        string? WorkingDirectory = null
+    );
+
+    // Claude Plan DTOs
+    public record ClaudePlanRecord(
+        long Id,
+        string SessionId,
+        long? UserInputId,
+        string? PlanFilePath,
+        string PlanContent,
+        string? PlanSummary,
+        string Status,
+        DateTime CreatedUTC,
+        DateTime? CompletedUTC
+    );
+
+    public record CreateClaudePlanRequest(
+        string SessionId,
+        long? UserInputId,
+        string? PlanFilePath,
+        string PlanContent,
+        string? PlanSummary
+    );
+
+    public record UpdateClaudePlanStatusRequest(
+        string Status
+    );
+
+    public record ClaudePlanListResponse(
+        List<ClaudePlanRecord> Plans,
+        int TotalCount
+    );
+
     [JsonSerializable(typeof(HealthResponse))]
     [JsonSerializable(typeof(FileResponse))]
     [JsonSerializable(typeof(ErrorResponse))]
@@ -266,6 +305,15 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(CodexSettingsDto))]
     // Claude Settings DTOs
     [JsonSerializable(typeof(ClaudeSettingsDto))]
+    // Terminal Session DTOs
+    [JsonSerializable(typeof(TerminalStatusResponse))]
+    [JsonSerializable(typeof(StartTerminalRequest))]
+    // Claude Plan DTOs
+    [JsonSerializable(typeof(ClaudePlanRecord))]
+    [JsonSerializable(typeof(List<ClaudePlanRecord>))]
+    [JsonSerializable(typeof(CreateClaudePlanRequest))]
+    [JsonSerializable(typeof(UpdateClaudePlanStatusRequest))]
+    [JsonSerializable(typeof(ClaudePlanListResponse))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
     }

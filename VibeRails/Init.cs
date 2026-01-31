@@ -6,6 +6,7 @@ using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
 using VibeRails.Services.Mcp;
+using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 
 namespace VibeRails
@@ -45,6 +46,12 @@ namespace VibeRails
 
             // MCP Services
             serviceCollection.AddSingleton(CreateMcpSettings());
+
+            // Claude Agent Sync Service (syncs CLAUDE.md to AGENTS.md on session lifecycle)
+            serviceCollection.AddSingleton<IClaudeAgentSyncService, ClaudeAgentSyncService>();
+
+            // Terminal Session Service (scoped to work with other scoped services)
+            serviceCollection.AddScoped<ITerminalSessionService, TerminalSessionService>();
         }
 
         private static McpSettings CreateMcpSettings()

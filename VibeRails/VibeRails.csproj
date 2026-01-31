@@ -9,6 +9,7 @@
     <AssemblyName>vb</AssemblyName>
     <RootNamespace>VibeRails</RootNamespace>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <Version>1.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
