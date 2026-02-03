@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Text.Json;
 using System.Threading;
 using VibeRails.Interfaces;
 using VibeRails.Utils;
@@ -8,17 +9,49 @@ namespace VibeRails.Services
 {
     public class FileService : IFileService
     {
-        private const string HIDDEN_DIR = @".vibe_control";
+        private static readonly Lazy<string> _hiddenDir = new Lazy<string>(LoadInstallDirName);
         private const string ENV_DIR = @"envs";
         private const string HOSTORY_DIR = @"history";
         private const string CONFIG_FILE = @"config.json";
         private const string STATE_FILE = @"state.db";
         private const string EMPTT_JSON = @"{}";
 
+        private static string LoadInstallDirName()
+        {
+            try
+            {
+                // Try to read app_config.json from the same directory as the executable
+                var exeDir = AppContext.BaseDirectory;
+                var configPath = Path.Combine(exeDir, "app_config.json");
+
+                if (!File.Exists(configPath))
+                {
+                    Console.Error.WriteLine($"[VibeRails] Warning: Could not find app_config.json at '{configPath}', using fallback directory name");
+                    return ".vibe_rails"; // Fallback
+                }
+
+                var json = File.ReadAllText(configPath);
+
+                // Simple JSON parsing for AOT compatibility
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("installDirName", out var dirElement))
+                {
+                    return dirElement.GetString() ?? ".vibe_rails";
+                }
+
+                return ".vibe_rails";
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[VibeRails] Error loading install directory name from app_config.json: {ex.Message}");
+                return ".vibe_rails"; // Fallback
+            }
+        }
+
         public string GetGlobalSavePath()
         {
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return Path.Combine(home, HIDDEN_DIR);
+            return Path.Combine(home, _hiddenDir.Value);
         }
 
         public void InitGlobalSave()
@@ -55,7 +88,7 @@ namespace VibeRails.Services
         public void InitLocal(string rootPath)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
-            if (!Directory.Exists(Path.Combine(rootPath, HIDDEN_DIR)))
+            if (!Directory.Exists(Path.Combine(rootPath, _hiddenDir.Value)))
             {
                 Directory.CreateDirectory(rootPath);
             }
@@ -163,7 +196,5 @@ namespace VibeRails.Services
 
         public void DeleteFile(string path)
             => File.Delete(path);
-
-       
     }
 }

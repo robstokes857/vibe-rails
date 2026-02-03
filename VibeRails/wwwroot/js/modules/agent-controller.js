@@ -188,12 +188,17 @@ export class AgentController {
                 if (handler) {
                     element.addEventListener('click', handler);
                 }
-                
+
                 // Disable edit/remove buttons initially
                 if (action === 'edit-rule' || action === 'remove-rule') {
                     element.closest('.card').classList.add('disabled-card');
                     element.style.pointerEvents = 'none';
                     element.style.opacity = '0.5';
+                }
+
+                // Hide "Edit in VS Code" button when running inside VS Code
+                if (action === 'edit-vscode' && window.__viberails_VSCODE__) {
+                    element.closest('.col-md-4')?.remove();
                 }
             });
 

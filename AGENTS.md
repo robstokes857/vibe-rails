@@ -4,6 +4,8 @@
 
 **VibeControl** is a sophisticated desktop/web application for managing and enforcing coding standards across AI-powered development workflows. It serves as a unified control panel for multiple LLM CLIs (Claude, Codex, Gemini) with comprehensive rule enforcement, session logging, and MCP integration.
 
+**Live Site**: [https://viberails.ai/](https://viberails.ai/)
+
 ### Core Capabilities
 - **Agent File Management** - Create and manage `agent.md` files with customizable coding rules
 - **Rule Enforcement** - Define standards with three enforcement levels (WARN/COMMIT/STOP)
@@ -355,8 +357,8 @@ var result = await service.CallToolAsync("vector_search", args);
 - Indexes on `LastUsedUTC` for performance
 
 **Database Location**:
-- Global: `~/.vibe_control/vibecontrol.db`
-- Per-project: `.vibe_control/vibecontrol.db`
+- Global: `~/.vibe_rails/vibecontrol.db`
+- Per-project: `.vibe_rails/vibecontrol.db`
 
 ### API Layer
 
@@ -471,7 +473,7 @@ Different LLM CLI environments implement `IBaseLlmCliEnvironment` with specific 
 
 ### Application Configuration
 ```
-~/.vibe_control/                    # Global config directory
+~/.vibe_rails/                    # Global config directory
 ├── vibecontrol.db                  # SQLite database
 ├── config.json                     # Application settings
 ├── history/                        # CLI command history
@@ -492,7 +494,7 @@ Different LLM CLI environments implement `IBaseLlmCliEnvironment` with specific 
 project-root/
 ├── .git/
 ├── agent.md                        # or agents.md
-├── .vibe_control/                  # Optional project-specific config
+├── .vibe_rails/                  # Optional project-specific config
 │   └── vibecontrol.db              # Project-specific database
 └── src/
 ```
@@ -501,20 +503,20 @@ project-root/
 
 **Claude**:
 ```bash
-CLAUDE_CONFIG_DIR=~/.vibe_control/envs/myenv/claude
+CLAUDE_CONFIG_DIR=~/.vibe_rails/envs/myenv/claude
 ```
 
 **Codex**:
 ```bash
-CODEX_HOME=~/.vibe_control/envs/myenv/codex
+CODEX_HOME=~/.vibe_rails/envs/myenv/codex
 ```
 
 **Gemini**:
 ```bash
-XDG_CONFIG_HOME=~/.vibe_control/envs/myenv/gemini/config
-XDG_DATA_HOME=~/.vibe_control/envs/myenv/gemini/data
-XDG_STATE_HOME=~/.vibe_control/envs/myenv/gemini/state
-XDG_CACHE_HOME=~/.vibe_control/envs/myenv/gemini/cache
+XDG_CONFIG_HOME=~/.vibe_rails/envs/myenv/gemini/config
+XDG_DATA_HOME=~/.vibe_rails/envs/myenv/gemini/data
+XDG_STATE_HOME=~/.vibe_rails/envs/myenv/gemini/state
+XDG_CACHE_HOME=~/.vibe_rails/envs/myenv/gemini/cache
 ```
 
 ## Development Workflows
@@ -709,7 +711,7 @@ var result = await mcpService.CallToolAsync(
 
 **Issue**: Session logs not recording
 - **Cause**: Database connection issue or insufficient permissions
-- **Solution**: Check `~/.vibe_control/` directory permissions, verify SQLite access
+- **Solution**: Check `~/.vibe_rails/` directory permissions, verify SQLite access
 
 **Issue**: MCP server not connecting
 - **Cause**: MCP_Server.exe not found or port conflict

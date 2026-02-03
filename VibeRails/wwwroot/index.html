@@ -13,9 +13,9 @@
     <!-- Header -->
     <nav class="navbar navbar-dark sticky-top">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#">
-                <img src="assets/img/logo.png" alt="VibeControl logo" class="brand-logo">
-                <span class="brand-text">VibeControl</span>
+            <a class="navbar-brand" href="https://viberails.ai/" target="_blank" rel="noopener noreferrer">
+                <img src="assets/img/logo.png" alt="Vibe Rails logo" class="brand-logo">
+                <span class="brand-text">Vibe Rails</span>
             </a>
             <div class="d-flex align-items-center gap-3 nav-actions">
                 <div class="breadcrumb-container" id="breadcrumb"></div>
@@ -30,6 +30,16 @@
     <div class="container-fluid main-container">
         <div id="app-content"></div>
     </div>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+        <div class="container-fluid">
+            <p class="mb-0">
+                &copy; 2026 Robert Stokes &bull; All rights reserved &bull;
+                <a href="https://viberails.ai/" target="_blank" rel="noopener noreferrer" class="footer-link">viberails.ai</a>
+            </p>
+        </div>
+    </footer>
 
     <!-- Templates -->
     <template id="main-menu-template">
@@ -104,7 +114,7 @@
                         <div class="col-6 col-md-4 col-lg-2 mb-3">
                             <div class="card menu-card" data-action="navigate" data-view="environments" title="Create and manage custom LLM environments with specific settings, arguments, and prompts">
                                 <div class="card-body text-center">
-                                    <img class="cli-logo mb-3" src="assets/img/ann-llama.svg" alt="Anna Llama logo">
+                                    <img class="cli-logo mb-3" src="assets/img/icons/layer-group-solid-full.svg" alt="Environments" style="height: 48px;">
                                     <h5 class="menu-title">Environments</h5>
                                     <p class="menu-description">Conda for LLMs - custom CLI configs</p>
                                 </div>
@@ -136,7 +146,7 @@
                                     + Add
                                 </button>
                                 <button class="btn btn-sm btn-outline-secondary" type="button" data-action="open-environments-settings" title="Manage all environments">
-                                    Settings
+                                    <span>&#x2699;&#xFE0F;</span> Settings
                                 </button>
                             </div>
                         </div>

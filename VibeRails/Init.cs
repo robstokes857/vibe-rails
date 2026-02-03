@@ -52,6 +52,10 @@ namespace VibeRails
 
             // Terminal Session Service (scoped to work with other scoped services)
             serviceCollection.AddScoped<ITerminalSessionService, TerminalSessionService>();
+
+            // Update Service (singleton with HttpClient)
+            serviceCollection.AddHttpClient<UpdateService>();
+            serviceCollection.AddScoped<UpdateInstaller>();
         }
 
         private static McpSettings CreateMcpSettings()
