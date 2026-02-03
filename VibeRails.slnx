@@ -1,11 +1,4 @@
 <Solution>
-  <Folder Name="/Solution Items/" />
-  <Folder Name="/Solution Items/Build/">
-    <File Path="build/build.ps1" />
-    <File Path="build/debug_ubuntu.ps1" />
-    <File Path="build/interactive_ubuntu.ps1" />
-    <File Path="build/test_ubuntu.ps1" />
-  </Folder>
   <Project Path="MCP_Server/MCP_Server.csproj" />
   <Project Path="PtyNet/src/Pty.Net/Pty.Net.csproj" />
   <Project Path="Tests/Tests.csproj" />

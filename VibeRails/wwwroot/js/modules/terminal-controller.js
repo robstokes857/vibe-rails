@@ -158,7 +158,7 @@ export class TerminalController {
             <div class="card mb-4" id="terminal-panel">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <div class="d-flex align-items-center gap-2">
-                        <span class="terminal-icon">&#x1F4BB;</span>
+                        <img src="assets/img/icons/terminal-solid-full.svg" alt="Terminal" style="height: 20px; width: 20px;">
                         <span class="fw-bold">Terminal</span>
                         <span class="badge bg-secondary" id="terminal-status-badge">Not Started</span>
                     </div>

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.FileProviders;
 using VibeRails;
 using VibeRails.DTOs;
+using VibeRails.Services;
 using VibeRails.Utils;
 
 
@@ -22,6 +23,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 // Suppress HTTP request logs for clean CLI interaction
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.None);
 builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Warning);
+builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.None);
 
 // Configure Kestrel with auto-selected port
 int port = PortFinder.FindOpenPort();
@@ -54,7 +56,28 @@ var app = builder.Build();
 // Run startup checks
 await Init.StartUpChecks(app.Services);
 
-
+// Check for updates (async, non-blocking)
+_ = Task.Run(async () =>
+{
+    try
+    {
+        using var scope = app.Services.CreateScope();
+        var updateService = scope.ServiceProvider.GetService<UpdateService>();
+        if (updateService != null)
+        {
+            var updateInfo = await updateService.CheckForUpdateAsync();
+            if (updateInfo?.UpdateAvailable == true)
+            {
+                Console.WriteLine($"[VibeRails] Update available: v{updateInfo.CurrentVersion} -> v{updateInfo.LatestVersion}");
+                Console.WriteLine($"[VibeRails] Run 'vb update' to install the latest version.");
+            }
+        }
+    }
+    catch
+    {
+        // Silently ignore update check failures
+    }
+});
 
 // Handle all CLI modes (env, agent, rules, validate, hooks, launch, --lmbootstrap, --validate-vca, etc.)
 var (exit, _) = await CliLoop.RunAsync(args, app.Services);
