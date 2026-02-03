@@ -153,7 +153,12 @@ function Build-ExtensionPackages {
 
         # Return paths to .vsix files
         $distDir = Join-Path $extensionDir "dist"
-        return @(Get-ChildItem -Path $distDir -Filter "*.vsix" -File)
+        $vsixFiles = Get-ChildItem -Path $distDir -Filter "*.vsix" -File -ErrorAction SilentlyContinue
+        if (-not $vsixFiles) {
+            Write-Host "Warning: No .vsix files found in $distDir" -ForegroundColor Yellow
+            return @()
+        }
+        return @($vsixFiles)
     } finally {
         Pop-Location
     }
@@ -297,8 +302,7 @@ function Invoke-Rollback {
     # Revert version commit if pushed
     if ($script:VersionCommitPushed) {
         Write-Host "  Reverting version commit..." -ForegroundColor Yellow
-        git revert --no-commit HEAD 2>$null
-        git checkout HEAD -- $VersionFile 2>$null
+        git reset --hard HEAD~1 2>$null
     }
 
     # Restore original app_config.json content
