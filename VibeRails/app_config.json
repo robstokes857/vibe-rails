@@ -1,5 +1,7 @@
 {
-  "version": "1.1.0",
+  "version": "1.0.0",
   "installDirName": ".vibe_rails",
   "executableName": "vb"
 }
+
+
