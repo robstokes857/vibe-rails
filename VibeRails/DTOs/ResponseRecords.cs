@@ -314,6 +314,10 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(CreateClaudePlanRequest))]
     [JsonSerializable(typeof(UpdateClaudePlanStatusRequest))]
     [JsonSerializable(typeof(ClaudePlanListResponse))]
+    // Update DTOs
+    [JsonSerializable(typeof(UpdateInfo))]
+    [JsonSerializable(typeof(ReleaseAsset))]
+    [JsonSerializable(typeof(List<ReleaseAsset>))]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
     }

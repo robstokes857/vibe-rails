@@ -3,7 +3,7 @@
 **Vibe-Rails** is an opinionated framework that helps keep AI coding assistants from going off the rails.
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-3178C6)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-3178C6)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
@@ -136,7 +136,7 @@ Vibe-Rails consists of four main components:
 - **XTerm.js** for terminal emulation
 
 **Extension**
-- **TypeScript 5.3**
+- **TypeScript 5.9.3**
 - **VS Code API 1.85+**
 
 ---
@@ -389,7 +389,7 @@ vb --lmbootstrap codex --env team-alpha
 
 **Environment Configuration:**
 ```
-~/.vibe_control/envs/
+~/.vibe_rails/envs/
 ├── development/
 │   ├── claude/
 │   │   └── config.json
@@ -414,8 +414,8 @@ vb --lmbootstrap claude --env dev
 ```
 
 **Database Storage:**
-- Global: `~/.vibe_control/vibecontrol.db`
-- Project-specific: `<repo>/.vibe_control/vibecontrol.db`
+- Global: `~/.vibe_rails/vibecontrol.db`
+- Project-specific: `<repo>/.vibe_rails/vibecontrol.db`
 
 ### MCP Integration
 
@@ -449,7 +449,7 @@ var result = await service.CallToolAsync("vector_search", new Dictionary<string,
 
 **Global Configuration:**
 ```
-~/.vibe_control/
+~/.vibe_rails/
 ├── vibecontrol.db          # SQLite database
 ├── config.json             # Application settings
 └── envs/                   # Environment configurations
@@ -469,20 +469,20 @@ var result = await service.CallToolAsync("vector_search", new Dictionary<string,
 
 #### Claude
 ```bash
-CLAUDE_CONFIG_DIR=~/.vibe_control/envs/myenv/claude
+CLAUDE_CONFIG_DIR=~/.vibe_rails/envs/myenv/claude
 ```
 
 #### Codex
 ```bash
-CODEX_HOME=~/.vibe_control/envs/myenv/codex
+CODEX_HOME=~/.vibe_rails/envs/myenv/codex
 ```
 
 #### Gemini
 ```bash
-XDG_CONFIG_HOME=~/.vibe_control/envs/myenv/gemini/config
-XDG_DATA_HOME=~/.vibe_control/envs/myenv/gemini/data
-XDG_STATE_HOME=~/.vibe_control/envs/myenv/gemini/state
-XDG_CACHE_HOME=~/.vibe_control/envs/myenv/gemini/cache
+XDG_CONFIG_HOME=~/.vibe_rails/envs/myenv/gemini/config
+XDG_DATA_HOME=~/.vibe_rails/envs/myenv/gemini/data
+XDG_STATE_HOME=~/.vibe_rails/envs/myenv/gemini/state
+XDG_CACHE_HOME=~/.vibe_rails/envs/myenv/gemini/cache
 ```
 
 ### VS Code Extension Settings
@@ -800,7 +800,7 @@ dotnet run
 
 **Issue: Session logs not recording**
 - **Cause**: Database connection issue or insufficient permissions
-- **Solution**: Check `~/.vibe_control/` directory permissions, verify SQLite access
+- **Solution**: Check `~/.vibe_rails/` directory permissions, verify SQLite access
 
 **Issue: MCP server not connecting**
 - **Cause**: MCP_Server.exe not found or stdio transport corruption

@@ -25,6 +25,7 @@ public static class Routes
         MapCodexSettingsEndpoints(app);
         MapClaudeSettingsEndpoints(app);
         MapClaudePlanEndpoints(app);
+        MapUpdateEndpoints(app);
     }
 
     private static void MapProjectEndpoints(WebApplication app, string launchDirectory)
@@ -1177,6 +1178,46 @@ public static class Routes
             var updatedPlan = await dbService.GetClaudePlanAsync(planId, cancellationToken);
             return Results.Ok(updatedPlan);
         }).WithName("CompletePlan");
+    }
+
+    private static void MapUpdateEndpoints(WebApplication app)
+    {
+        // GET /api/v1/update/check - Check for available updates
+        app.MapGet("/api/v1/update/check", async (
+            UpdateService updateService,
+            CancellationToken cancellationToken) =>
+        {
+            var updateInfo = await updateService.CheckForUpdateAsync(cancellationToken);
+            return Results.Ok(updateInfo);
+        }).WithName("CheckForUpdate");
+
+        // GET /api/v1/update/version - Get current version
+        app.MapGet("/api/v1/update/version", () =>
+        {
+            return Results.Ok(new { version = VersionInfo.Version });
+        }).WithName("GetVersion");
+
+        // GET /api/version - API version endpoint
+        app.MapGet("/api/version", () =>
+        {
+            return Results.Ok(new { apiVersion = "v1", appVersion = VersionInfo.Version });
+        }).WithName("GetApiVersion");
+
+        // POST /api/v1/update/install - Trigger update installation
+        app.MapPost("/api/v1/update/install", async (
+            UpdateInstaller updateInstaller,
+            IHostApplicationLifetime lifetime,
+            CancellationToken cancellationToken) =>
+        {
+            var success = await updateInstaller.InstallUpdateAsync(cancellationToken);
+            if (success)
+            {
+                // Trigger graceful shutdown
+                lifetime.StopApplication();
+                return Results.Ok(new { message = "Update installation started. Application shutting down..." });
+            }
+            return Results.BadRequest(new { message = "Failed to start update installation" });
+        }).WithName("InstallUpdate");
     }
 }
 
