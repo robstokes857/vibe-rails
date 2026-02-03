@@ -5,6 +5,14 @@
   "version": "0.1.0",
   "publisher": "viberails",
   "icon": "media/vs-logo.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/robstokes857/vibe-rails.git"
+  },
+  "bugs": {
+    "url": "https://github.com/robstokes857/vibe-rails/issues"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },

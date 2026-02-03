@@ -11,6 +11,7 @@ tsconfig.json
 # Build artifacts
 dist/**
 *.vsix
+.vscodeignore.backup
 
 # Scripts
 scripts/**
@@ -21,8 +22,9 @@ AGENTS.md
 # Exclude all bin directories by default
 bin/**
 
-# vsce automatically includes bin/${TARGET}/ when using --target
-!bin/${TARGET}/**
+# Note: vsce doesn't support conditional includes based on --target
+# We need to manually package each platform separately
+# This is handled by the package-platforms.ps1 script
 
 # Git files
 .git
