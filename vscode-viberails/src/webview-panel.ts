@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 
 export class WebviewPanelManager {
     private panel: vscode.WebviewPanel | null = null;
@@ -99,10 +100,13 @@ export class WebviewPanelManager {
         const csp = [
             `default-src 'none'`,
             `script-src 'nonce-${nonce}' ${webview.cspSource}`,
-            `style-src ${webview.cspSource} 'unsafe-inline' https://fonts.googleapis.com`,
-            `img-src ${webview.cspSource} data: https:`,
+            `style-src ${webview.cspSource} 'unsafe-inline' https://fonts.googleapis.com`, // Note: 'unsafe-inline' required for Bootstrap
+            `img-src ${webview.cspSource} https:`,
             `font-src ${webview.cspSource} https://fonts.gstatic.com`,
             `connect-src http://localhost:${port}`,
+            `form-action 'none'`, // Prevent form submissions
+            `base-uri 'self'`, // Prevent base tag injection
+            `frame-ancestors 'none'`, // Prevent clickjacking
         ].join('; ');
 
         // Get the base URI for assets
@@ -162,12 +166,8 @@ export class WebviewPanelManager {
     }
 
     private getNonce(): string {
-        let text = '';
-        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        for (let i = 0; i < 32; i++) {
-            text += possible.charAt(Math.floor(Math.random() * possible.length));
-        }
-        return text;
+        // Use cryptographically secure random bytes instead of Math.random()
+        return crypto.randomBytes(16).toString('hex'); // 32-character hex string
     }
 
     public dispose(): void {

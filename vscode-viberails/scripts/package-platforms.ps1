@@ -61,12 +61,25 @@ Write-Host ""
 
 # Package each platform
 $vsixFiles = @()
+$vscodeignorePath = Join-Path $ExtensionRoot ".vscodeignore"
+$vscodeignoreBackup = Join-Path $ExtensionRoot ".vscodeignore.backup"
+
+# Backup original .vscodeignore
+Copy-Item $vscodeignorePath $vscodeignoreBackup -Force
 
 foreach ($platform in $platforms) {
     Write-Host "Packaging $platform..." -ForegroundColor Cyan
 
     Push-Location $ExtensionRoot
     try {
+        # Restore original .vscodeignore
+        Copy-Item $vscodeignoreBackup $vscodeignorePath -Force
+
+        # Append platform-specific inclusion to .vscodeignore
+        Write-Host "  Configuring .vscodeignore for $platform..." -ForegroundColor Gray
+        Add-Content -Path $vscodeignorePath -Value "`n# TEMPORARY: Include only $platform binaries"
+        Add-Content -Path $vscodeignorePath -Value "!bin/$platform/**"
+
         # Run vsce package
         vsce package --target $platform -o dist/
 
@@ -75,7 +88,7 @@ foreach ($platform in $platforms) {
         }
 
         # Find the created .vsix file
-        $vsixPattern = "vscode-viberails-$version-$platform.vsix"
+        $vsixPattern = "vscode-viberails-$platform-$version.vsix"
         $vsixPath = Join-Path $DistDir $vsixPattern
 
         if (Test-Path $vsixPath) {
@@ -92,6 +105,11 @@ foreach ($platform in $platforms) {
     Write-Host ""
 }
 
+# Restore original .vscodeignore
+Write-Host "Restoring original .vscodeignore..." -ForegroundColor Gray
+Copy-Item $vscodeignoreBackup $vscodeignorePath -Force
+Remove-Item $vscodeignoreBackup -Force
+
 # Display summary
 Write-Host "Packaging complete!" -ForegroundColor Green
 Write-Host ""
@@ -99,7 +117,7 @@ Write-Host "Generated packages:" -ForegroundColor Cyan
 foreach ($vsix in $vsixFiles) {
     $filename = Split-Path -Leaf $vsix
     $sizeMB = [math]::Round((Get-Item $vsix).Length / 1MB, 2)
-    Write-Host "  $filename ($sizeM MB)" -ForegroundColor White
+    Write-Host "  $filename ($sizeMB MB)" -ForegroundColor White
 }
 
 Write-Host ""

@@ -160,19 +160,37 @@ export class VibeControlApp {
 
     updateBreadcrumb() {
         const breadcrumb = document.getElementById('breadcrumb');
-        const crumbs = this.navigationStack.map((item, index) => {
+
+        // Use DOM methods instead of innerHTML to prevent XSS
+        const breadcrumbList = document.createElement('ol');
+        breadcrumbList.className = 'breadcrumb mb-0';
+
+        this.navigationStack.forEach((item, index) => {
             const viewName = typeof item === 'string' ? item : item.view;
             const displayName = this.getViewDisplayName(viewName);
             const isLast = index === this.navigationStack.length - 1;
 
-            return `
-                <li class="breadcrumb-item ${isLast ? 'active' : ''}">
-                    ${isLast ? displayName : `<a href="#" onclick="app.navigateToIndex(${index}); return false;">${displayName}</a>`}
-                </li>
-            `;
-        }).join('');
+            const li = document.createElement('li');
+            li.className = `breadcrumb-item${isLast ? ' active' : ''}`;
 
-        breadcrumb.innerHTML = `<ol class="breadcrumb mb-0">${crumbs}</ol>`;
+            if (isLast) {
+                li.textContent = displayName;
+            } else {
+                const link = document.createElement('a');
+                link.href = '#';
+                link.textContent = displayName;
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.navigateToIndex(index);
+                });
+                li.appendChild(link);
+            }
+
+            breadcrumbList.appendChild(li);
+        });
+
+        breadcrumb.innerHTML = ''; // Clear existing content
+        breadcrumb.appendChild(breadcrumbList);
     }
 
     navigateToIndex(index) {
@@ -371,12 +389,14 @@ export class VibeControlApp {
 
     showModal(title, content) {
         const modalContainer = document.getElementById('modal-container');
+        // Escape title to prevent XSS, content is trusted HTML template
+        const escapedTitle = this.escapeHtml(title);
         modalContainer.innerHTML = `
             <div class="modal fade show d-block" tabindex="-1">
                 <div class="modal-dialog modal-lg modal-dialog-scrollable">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h5 class="modal-title">${title}</h5>
+                            <h5 class="modal-title">${escapedTitle}</h5>
                             <button type="button" class="btn-close" onclick="app.closeModal()"></button>
                         </div>
                         <div class="modal-body">
@@ -400,12 +420,15 @@ export class VibeControlApp {
         const toast = document.createElement('div');
         toast.id = toastId;
         toast.className = `toast ${type} show`;
+        // Escape title and message to prevent XSS
+        const escapedTitle = this.escapeHtml(title);
+        const escapedMessage = this.escapeHtml(message);
         toast.innerHTML = `
             <div class="toast-header">
-                <strong class="me-auto">${title}</strong>
+                <strong class="me-auto">${escapedTitle}</strong>
                 <button type="button" class="btn-close" onclick="document.getElementById('${toastId}').remove()"></button>
             </div>
-            <div class="toast-body">${message}</div>
+            <div class="toast-body">${escapedMessage}</div>
         `;
         toastContainer.appendChild(toast);
         setTimeout(() => toast.remove(), 5000);
