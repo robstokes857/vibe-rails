@@ -62,6 +62,12 @@ export class VibeControlApp {
                     }
                 });
             }
+
+            // Hide "Edit in VS Code" button since we're already in VS Code
+            const editVsCodeCard = document.querySelector('[data-agent-action="edit-vscode"]');
+            if (editVsCodeCard) {
+                editVsCodeCard.closest('.col-md-4')?.remove();
+            }
         }
     }
 

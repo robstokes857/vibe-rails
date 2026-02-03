@@ -1,8 +1,8 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
-using Build5Nines.SharpVector;
 using MCP_Server.Models;
+using MCP_Server.Services;
 using ModelContextProtocol.Server;
 
 namespace MCP_Server.Tools;
@@ -12,10 +12,10 @@ public class VectorSearchTool
 {
     private static readonly string StoragePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".vibe_control", "vector");
+        ".vibe_rails", "vector");
 
-    private static BasicMemoryVectorDatabase? _userTermsDb;
-    private static BasicMemoryVectorDatabase? _conversationDb;
+    private static SimpleVectorDb? _userTermsDb;
+    private static SimpleVectorDb? _conversationDb;
     private static readonly List<UserTermEntry> _userTermEntries = new();
     private static readonly List<ConversationHistoryEntry> _conversationEntries = new();
     private static readonly object _lock = new();
@@ -29,8 +29,8 @@ public class VectorSearchTool
         {
             if (_initialized) return;
 
-            _userTermsDb = new BasicMemoryVectorDatabase();
-            _conversationDb = new BasicMemoryVectorDatabase();
+            _userTermsDb = new SimpleVectorDb();
+            _conversationDb = new SimpleVectorDb();
 
             Directory.CreateDirectory(StoragePath);
             LoadExistingData();

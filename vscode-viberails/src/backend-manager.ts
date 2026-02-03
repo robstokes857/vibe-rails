@@ -200,6 +200,18 @@ export class BackendManager {
         this.port = null;
     }
 
+    private getPlatformTarget(): string {
+        const platform = process.platform;
+        const arch = process.arch;
+
+        if (platform === 'win32' && arch === 'x64') return 'win32-x64';
+        if (platform === 'linux' && arch === 'x64') return 'linux-x64';
+        if (platform === 'darwin' && arch === 'x64') return 'darwin-x64';
+        if (platform === 'darwin' && arch === 'arm64') return 'darwin-arm64';
+
+        return `${platform}-${arch}`;
+    }
+
     private resolveExecutablePath(installFolder: string, targetProjectFolder: string | null): { command: string; args: string[]; cwd: string } | null {
         // The cwd is where we want to run (for local context) - use target project folder if available
         const cwd = targetProjectFolder || installFolder;
@@ -211,21 +223,55 @@ export class BackendManager {
             return { command: configPath, args: [], cwd };
         }
 
-        // 2. Check common development build paths relative to install folder
+        // 2. Check bundled binary in extension (production mode - NEW)
+        const extensionPath = vscode.extensions.getExtension('viberails.vscode-viberails')?.extensionPath;
+        if (extensionPath) {
+            const platformTarget = this.getPlatformTarget();
+            const exeName = platformTarget.startsWith('win32') ? 'vb.exe' : 'vb';
+            const bundledBinaryPath = path.join(extensionPath, 'bin', platformTarget, exeName);
+
+            if (fs.existsSync(bundledBinaryPath)) {
+                const bundledWwwroot = path.join(extensionPath, 'bin', platformTarget, 'wwwroot');
+                if (fs.existsSync(bundledWwwroot)) {
+                    this.outputChannel.appendLine(`[Mode] Using bundled extension binary`);
+                    this.outputChannel.appendLine(`[Binary] ${bundledBinaryPath}`);
+                    return { command: bundledBinaryPath, args: [], cwd };
+                }
+            }
+        }
+
+        // 3. Check for AOT (Ahead-of-Time compiled) builds - these are standalone, fast, and don't require runtime
+        const platform = process.platform === 'win32' ? 'win-x64' : 'linux-x64';
+        const exeName = process.platform === 'win32' ? 'vb.exe' : 'vb';
+
+        const aotPaths = [
+            // Installed location (via install script)
+            path.join(process.env.USERPROFILE || process.env.HOME || '', '.vibe_rails', exeName),
+            // Build artifacts in repo
+            path.join(installFolder, 'Scripts', 'artifacts', 'aot', platform, exeName),
+        ];
+
+        for (const p of aotPaths) {
+            if (fs.existsSync(p)) {
+                return { command: p, args: [], cwd };
+            }
+        }
+
+        // 4. Check common development build paths relative to install folder (these require .NET runtime)
         const devPaths = [
-            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net10.0', 'VibeRails.exe'),
-            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net10.0', 'VibeRails.exe'),
-            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net9.0', 'VibeRails.exe'),
-            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net9.0', 'VibeRails.exe'),
-            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net8.0', 'VibeRails.exe'),
-            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net8.0', 'VibeRails.exe'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net10.0', 'vb.exe'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net10.0', 'vb.exe'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net9.0', 'vb.exe'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net9.0', 'vb.exe'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net8.0', 'vb.exe'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net8.0', 'vb.exe'),
             // Linux/macOS variants (no .exe)
-            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net10.0', 'VibeRails'),
-            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net10.0', 'VibeRails'),
-            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net9.0', 'VibeRails'),
-            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net9.0', 'VibeRails'),
-            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net8.0', 'VibeRails'),
-            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net8.0', 'VibeRails'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net10.0', 'vb'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net10.0', 'vb'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net9.0', 'vb'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net9.0', 'vb'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Debug', 'net8.0', 'vb'),
+            path.join(installFolder, 'VibeRails', 'bin', 'Release', 'net8.0', 'vb'),
         ];
 
         for (const p of devPaths) {
@@ -234,15 +280,15 @@ export class BackendManager {
             }
         }
 
-        // 3. Check PATH environment variable for 'viberails' or 'VibeRails'
+        // 5. Check PATH environment variable for 'viberails' or 'vb'
         const pathEnv = process.env.PATH || '';
         const pathSeparator = process.platform === 'win32' ? ';' : ':';
         const pathDirs = pathEnv.split(pathSeparator);
 
         for (const dir of pathDirs) {
             const candidates = process.platform === 'win32'
-                ? ['VibeRails.exe', 'viberails.exe', 'vb.exe']
-                : ['VibeRails', 'viberails', 'vb'];
+                ? ['vb.exe', 'VibeRails.exe', 'viberails.exe']
+                : ['vb', 'VibeRails', 'viberails'];
 
             for (const candidate of candidates) {
                 const fullPath = path.join(dir, candidate);
@@ -252,19 +298,7 @@ export class BackendManager {
             }
         }
 
-        // 4. Fallback: Use 'dotnet run' if csproj exists
-        // For dotnet run, we need to run from the VibeRails project directory
-        // but we pass the target folder as an argument or via environment
-        // Use --no-launch-profile to bypass launchSettings.json (which has --open-browser)
-        const csprojPath = path.join(installFolder, 'VibeRails', 'VibeRails.csproj');
-        if (fs.existsSync(csprojPath)) {
-            return {
-                command: 'dotnet',
-                args: ['run', '--no-build', '--no-launch-profile', '--project', csprojPath],
-                cwd  // Run from target project folder for local context
-            };
-        }
-
+        // No executable found
         return null;
     }
 

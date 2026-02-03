@@ -1,3 +1,4 @@
+# Development files
 .vscode/**
 .vscode-test/**
 src/**
@@ -6,3 +7,27 @@ node_modules/**
 tsconfig.json
 **/*.ts
 **/*.map
+
+# Build artifacts
+dist/**
+*.vsix
+
+# Scripts
+scripts/**
+
+# Agent docs
+AGENTS.md
+
+# Exclude all bin directories by default
+bin/**
+
+# vsce automatically includes bin/${TARGET}/ when using --target
+!bin/${TARGET}/**
+
+# Git files
+.git
+.gitignore
+
+# Documentation (except README)
+*.md
+!README.md

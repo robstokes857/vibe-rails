@@ -11,7 +11,29 @@ export class WebviewPanelManager {
 
     constructor(extensionUri: vscode.Uri, workspaceFolder: string) {
         this.extensionUri = extensionUri;
-        this.wwwrootPath = path.join(workspaceFolder, 'VibeRails', 'wwwroot');
+
+        // Check for bundled wwwroot first (production mode)
+        const platformTarget = this.getPlatformTarget();
+        const bundledWwwroot = path.join(extensionUri.fsPath, 'bin', platformTarget, 'wwwroot');
+
+        if (fs.existsSync(bundledWwwroot)) {
+            this.wwwrootPath = bundledWwwroot;
+        } else {
+            // Fallback to development mode (repo structure)
+            this.wwwrootPath = path.join(workspaceFolder, 'VibeRails', 'wwwroot');
+        }
+    }
+
+    private getPlatformTarget(): string {
+        const platform = process.platform;
+        const arch = process.arch;
+
+        if (platform === 'win32' && arch === 'x64') return 'win32-x64';
+        if (platform === 'linux' && arch === 'x64') return 'linux-x64';
+        if (platform === 'darwin' && arch === 'x64') return 'darwin-x64';
+        if (platform === 'darwin' && arch === 'arm64') return 'darwin-arm64';
+
+        return `${platform}-${arch}`;
     }
 
     public isVisible(): boolean {

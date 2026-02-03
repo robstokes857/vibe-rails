@@ -121,21 +121,6 @@ code {
     font-weight: 600;
 }
 
-.context-toggle {
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-border);
-    color: var(--color-text);
-    border-radius: 999px;
-    padding: 0.4rem 1rem;
-    font-weight: 500;
-    transition: all var(--transition-speed);
-}
-
-.context-toggle:hover {
-    background: var(--color-bg-surface-hover);
-    border-color: var(--color-secondary);
-}
-
 .context-header-card {
     background: linear-gradient(135deg, rgba(91, 42, 134, 0.2), rgba(30, 30, 36, 0.6));
     border: 1px solid rgba(154, 198, 197, 0.2);
@@ -324,10 +309,6 @@ code {
     animation: pulse-green 2s infinite;
 }
 
-.status-indicator.offline {
-    background-color: var(--color-danger);
-}
-
 @keyframes pulse-green {
     0% {
         box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
@@ -338,19 +319,6 @@ code {
     100% {
         box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
     }
-}
-
-.status-value {
-    font-size: 2.5rem;
-    font-weight: 700;
-    color: var(--color-accent);
-}
-
-.status-label {
-    color: var(--color-text-muted);
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
 }
 
 /* Lists */
@@ -426,58 +394,7 @@ code {
     min-width: 0;
 }
 
-/* Agent Files List */
-.agent-file-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.agent-file-item {
-    cursor: pointer;
-    transition: all var(--transition-speed);
-    border-left: 3px solid transparent;
-    padding: 0.75rem 1rem;
-    position: relative;
-    overflow: hidden;
-}
-
-.agent-file-item:hover {
-    background-color: var(--color-bg-surface-hover);
-    border-left-color: var(--color-accent);
-    transform: translateX(2px);
-}
-
-.agent-file-icon {
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(154, 198, 197, 0.1);
-    border-radius: 8px;
-    flex-shrink: 0;
-}
-
-.file-icon-emoji {
-    font-size: 1.4rem;
-}
-
-.file-path-wrapper {
-    font-family: 'Consolas', monospace;
-    font-size: 0.9rem;
-    line-height: 1.4;
-}
-
-.file-dir {
-    color: var(--color-text-muted);
-    opacity: 0.7;
-}
-
-.file-name {
-    color: var(--color-accent);
-    font-weight: 600;
-}
+/* Agent Files Tree */
 
 .cli-logo {
     width: 40px;
@@ -509,6 +426,31 @@ code {
     background: rgba(91, 42, 134, 0.2);
     color: #ceb2ea;
     border: 1px solid rgba(91, 42, 134, 0.4);
+}
+
+/* Enforcement Badge Colors */
+.badge-warn, .badge-warning {
+    background: rgba(255, 152, 0, 0.2);
+    color: var(--color-warning);
+    border: 1px solid rgba(255, 152, 0, 0.4);
+}
+
+.badge-commit {
+    background: rgba(76, 175, 80, 0.2);
+    color: var(--color-success);
+    border: 1px solid rgba(76, 175, 80, 0.4);
+}
+
+.badge-stop, .badge-danger {
+    background: rgba(229, 115, 115, 0.2);
+    color: var(--color-danger);
+    border: 1px solid rgba(229, 115, 115, 0.4);
+}
+
+.badge-info {
+    background: rgba(119, 133, 172, 0.2);
+    color: var(--color-secondary);
+    border: 1px solid rgba(119, 133, 172, 0.4);
 }
 
 /* Forms */
@@ -1045,4 +987,54 @@ input.form-control:disabled {
 /* Section Headers in forms */
 .modal-body h6.text-muted {
     color: var(--color-text-muted) !important;
+}
+
+/* Loading Overlay */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(30, 30, 36, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    backdrop-filter: blur(4px);
+}
+
+.loading-overlay .spinner-border {
+    width: 3rem;
+    height: 3rem;
+    border-color: var(--color-primary);
+    border-right-color: transparent;
+}
+
+/* Footer */
+.app-footer {
+    margin-top: 4rem;
+    padding: 2rem 0;
+    background: linear-gradient(135deg, rgba(91, 42, 134, 0.15) 0%, rgba(154, 198, 197, 0.1) 100%);
+    border-top: 1px solid var(--color-border);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 0.9rem;
+}
+
+.app-footer p {
+    letter-spacing: 0.05em;
+}
+
+.footer-link {
+    color: var(--color-accent);
+    text-decoration: none;
+    transition: all var(--transition-speed);
+    border-bottom: 1px solid transparent;
+}
+
+.footer-link:hover {
+    color: var(--color-text);
+    border-bottom-color: var(--color-accent);
 }
