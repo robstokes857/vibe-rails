@@ -30,7 +30,25 @@ export class BackendManager {
 
         const execInfo = this.resolveExecutablePath(installFolder, targetProjectFolder);
         if (!execInfo) {
-            throw new Error('Could not find VibeRails executable. Please set viberails.executablePath in settings or ensure VibeRails.csproj exists.');
+            const extensionPath = vscode.extensions.getExtension('viberails.vscode-viberails')?.extensionPath;
+            const platformTarget = this.getPlatformTarget();
+            const exeName = platformTarget.startsWith('win32') ? 'vb.exe' : 'vb';
+            const expectedPath = extensionPath ? path.join(extensionPath, 'bin', platformTarget, exeName) : 'unknown';
+
+            const errorMsg = [
+                'VibeRails executable not found.',
+                '',
+                `Expected bundled binary at: ${expectedPath}`,
+                '',
+                'Solutions:',
+                '1. Reinstall the extension from the marketplace',
+                '2. Configure a custom path in settings: viberails.executablePath',
+                '3. Ensure the extension was installed with platform-specific binaries',
+                '',
+                `Platform: ${platformTarget}`
+            ].join('\n');
+
+            throw new Error(errorMsg);
         }
 
         this.outputChannel.appendLine(`Starting VibeRails backend: ${execInfo.command} ${execInfo.args.join(' ')}`);

@@ -131,8 +131,6 @@ async function resolveVibeRailsInstallation(): Promise<string> {
         path.join(process.env.USERPROFILE || process.env.HOME || '', 'source', 'VibeControl2'),
         path.join(process.env.USERPROFILE || process.env.HOME || '', 'repos', 'VibeControl2'),
         path.join(process.env.USERPROFILE || process.env.HOME || '', 'projects', 'VibeControl2'),
-        'c:\\source\\VibeControl2',
-        '/home/source/VibeControl2',
     ];
 
     for (const p of commonPaths) {

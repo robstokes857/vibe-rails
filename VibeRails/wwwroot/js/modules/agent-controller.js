@@ -285,7 +285,8 @@ export class AgentController {
             }
         } catch (error) {
             console.error('Failed to load agent files:', error);
-            listElement.innerHTML = `<p class="text-danger mb-0">Error loading files: ${error.message || 'Unknown error'}</p>`;
+            const errorMsg = this.app.escapeHtml(error.message || 'Unknown error');
+            listElement.innerHTML = `<p class="text-danger mb-0">Error loading files: ${errorMsg}</p>`;
         }
     }
 
@@ -396,7 +397,8 @@ export class AgentController {
             }
         } catch (error) {
             console.error('Failed to validate agent:', error);
-            resultsContainer.innerHTML = `<p class="text-danger">Error: ${error.message || 'Unknown error'}</p>`;
+            const errorMsg = this.app.escapeHtml(error.message || 'Unknown error');
+            resultsContainer.innerHTML = `<p class="text-danger">Error: ${errorMsg}</p>`;
             this.app.showError('Validation failed');
         }
     }
@@ -751,20 +753,24 @@ export class AgentController {
         const rootPath = this.app.data.configs?.rootPath || '';
         const defaultPath = rootPath || '';
 
+        // Escape user data to prevent XSS
+        const escapedDirectory = this.app.escapeHtml(this.wizardState.directory || defaultPath);
+        const escapedRootPath = this.app.escapeHtml(rootPath);
+
         container.innerHTML = `
             <h5 class="mb-4">Step 1: Select Directory</h5>
             <div class="mb-4">
                 <label class="form-label">Directory for AGENTS.md</label>
                 <input type="text" class="form-control" id="agent-directory"
                        placeholder="/path/to/directory"
-                       value="${this.wizardState.directory || defaultPath}">
+                       value="${escapedDirectory}">
                 <small class="form-text text-muted">
                     Enter the directory where <code>AGENTS.md</code> will be created.
                 </small>
             </div>
             ${rootPath ? `
                 <div class="alert alert-info">
-                    <strong>Current Project:</strong> ${rootPath}
+                    <strong>Current Project:</strong> ${escapedRootPath}
                 </div>
             ` : ''}
             <div class="d-flex justify-content-between mt-4">
