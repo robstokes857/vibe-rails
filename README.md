@@ -43,10 +43,16 @@
 
 ### Prerequisites
 
-- [.NET 10.0 SDK](https://dotnet.microsoft.com/download) or later
-- [Node.js 20+](https://nodejs.org/) (for VS Code extension development)
+**For End Users (Installing from VS Code Marketplace):**
+- VS Code 1.85.0 or later
+- One or more LLM CLIs: Claude CLI, OpenAI Codex, or Google Gemini CLI
+- **No other dependencies required** - binaries are bundled in the extension
+
+**For Contributors (Working on the Project):**
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download) or later (required to build the backend)
+- [Node.js 20+](https://nodejs.org/) (required to build the VS Code extension)
 - Git
-- One or more LLM CLIs: Claude, Codex, or Gemini
+- VS Code 1.85.0 or later
 
 ### Installation
 

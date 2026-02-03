@@ -34,7 +34,8 @@ function Get-LatestReleaseVersion {
         return [version]"0.0.0"
     }
     # Parse version from release tag (e.g., "v1.0.0" -> "1.0.0")
-    $tag = ($releases -split "`t")[0]
+    # gh release list format: TITLE\tSTATUS\tTAG\tDATE - we need column [2]
+    $tag = ($releases -split "`t")[2]
     $versionStr = $tag -replace "^v", ""
     try {
         return [version]$versionStr
@@ -130,6 +131,12 @@ function Build-ExtensionPackages {
             Write-Host "Warning: vsce not found. Install with: npm install -g @vscode/vsce" -ForegroundColor Yellow
             Write-Host "Skipping extension packaging." -ForegroundColor Yellow
             return @()
+        }
+
+        # Ensure dist directory exists
+        $distDir = Join-Path $extensionDir "dist"
+        if (-not (Test-Path $distDir)) {
+            New-Item -ItemType Directory -Force -Path $distDir | Out-Null
         }
 
         # Package extensions
@@ -330,27 +337,27 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 
 # Get current version
 $currentVersion = Get-LatestReleaseVersion
-Write-Host "Current version: " -NoNewline
+Write-Host "Current release: " -NoNewline
 Write-Host "v$currentVersion" -ForegroundColor Yellow
 
-# Prompt for bump type
-Write-Host "`nWhat type of release is this?"
-Write-Host "  [M]ajor - Breaking changes (v$((Get-BumpedVersion -Current $currentVersion -BumpType 'major')))"
-Write-Host "  [m]inor - New features (v$((Get-BumpedVersion -Current $currentVersion -BumpType 'minor')))"
-Write-Host "  [p]atch - Bug fixes (v$((Get-BumpedVersion -Current $currentVersion -BumpType 'patch')))"
+# Prompt for new version number
+Write-Host "`nSuggested versions:"
+Write-Host "  Major (breaking changes): v$((Get-BumpedVersion -Current $currentVersion -BumpType 'major'))"
+Write-Host "  Minor (new features):     v$((Get-BumpedVersion -Current $currentVersion -BumpType 'minor'))"
+Write-Host "  Patch (bug fixes):        v$((Get-BumpedVersion -Current $currentVersion -BumpType 'patch'))"
 Write-Host ""
 
 do {
-    $choice = Read-Host "Enter choice (M/m/p)"
-} while ($choice -notin @('M', 'm', 'p'))
-
-$bumpType = switch ($choice) {
-    'M' { 'major'; break }
-    'm' { 'minor'; break }
-    'p' { 'patch'; break }
-}
-
-$newVersion = Get-BumpedVersion -Current $currentVersion -BumpType $bumpType
+    $newVersionInput = Read-Host "Enter new version (e.g., 1.1.0)"
+    $newVersionInput = $newVersionInput.TrimStart('v')
+    try {
+        $newVersion = [version]$newVersionInput
+        $isValid = $true
+    } catch {
+        Write-Host "Invalid version format. Please use X.Y.Z format (e.g., 1.1.0)" -ForegroundColor Red
+        $isValid = $false
+    }
+} while (-not $isValid)
 $versionTag = "v$newVersion"
 $script:CurrentTag = $versionTag
 Write-Host "`nNew version will be: " -NoNewline
@@ -384,7 +391,8 @@ try {
     if (-not $SkipBuild) {
         Write-Host "`nRunning build..." -ForegroundColor Cyan
         $buildScript = Join-Path $ScriptDir "build.ps1"
-        & $buildScript
+        $vibeRailsProject = Join-Path $RepoRoot "VibeRails" "VibeRails.csproj"
+        & $buildScript -Project $vibeRailsProject
         if ($LASTEXITCODE -ne 0) {
             throw "Build failed!"
         }
