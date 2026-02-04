@@ -26,6 +26,54 @@ $script:ReleaseCreated = $false
 $script:OriginalVersionContent = $null
 $script:CurrentTag = $null
 
+# --- Pre-flight Checks ---
+
+function Test-PreFlightChecks {
+    Write-Host "`nRunning pre-flight checks..." -ForegroundColor Cyan
+
+    # Check if we're in a git repository
+    $gitDir = git rev-parse --git-dir 2>$null
+    if (-not $gitDir) {
+        throw "Not in a git repository"
+    }
+
+    # Check current branch
+    $currentBranch = git branch --show-current
+    if ($currentBranch -ne "main" -and $currentBranch -ne "master") {
+        throw "Must be on 'main' or 'master' branch. Currently on: $currentBranch"
+    }
+
+    # Check for uncommitted changes
+    $status = git status --porcelain
+    if ($status) {
+        Write-Host "`nUncommitted changes detected:" -ForegroundColor Red
+        git status --short
+        throw "Working directory must be clean. Commit or stash changes before deploying."
+    }
+
+    # Check if branch is up to date with remote
+    git fetch origin $currentBranch 2>$null
+    $localCommit = git rev-parse HEAD
+    $remoteCommit = git rev-parse "origin/$currentBranch" 2>$null
+
+    if ($remoteCommit -and $localCommit -ne $remoteCommit) {
+        $ahead = git rev-list --count "origin/$currentBranch..HEAD" 2>$null
+        $behind = git rev-list --count "HEAD..origin/$currentBranch" 2>$null
+
+        if ($behind -gt 0) {
+            throw "Local branch is behind remote by $behind commit(s). Run 'git pull' first."
+        }
+        if ($ahead -gt 0) {
+            Write-Host "  Warning: Local branch is ahead of remote by $ahead commit(s)" -ForegroundColor Yellow
+            Write-Host "  This is OK - changes will be pushed during deployment" -ForegroundColor Yellow
+        }
+    }
+
+    Write-Host "  ✓ On branch: $currentBranch" -ForegroundColor Green
+    Write-Host "  ✓ Working directory clean" -ForegroundColor Green
+    Write-Host "  ✓ Synced with remote" -ForegroundColor Green
+}
+
 # --- Helper Functions ---
 
 function Get-LatestReleaseVersion {
@@ -338,6 +386,9 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker is required for Linux builds."
 }
+
+# Run pre-flight checks
+Test-PreFlightChecks
 
 # Get current version
 $currentVersion = Get-LatestReleaseVersion
