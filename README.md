@@ -43,8 +43,8 @@
 
 ### Prerequisites
 
-**For End Users (Installing from VS Code Marketplace):**
-- VS Code 1.85.0 or later
+**For End Users:**
+- Just install from VS Code Marketplace... That's it
 - One or more LLM CLIs: Claude CLI, OpenAI Codex, or Google Gemini CLI
 - **No other dependencies required** - binaries are bundled in the extension
 
