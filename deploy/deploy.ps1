@@ -169,7 +169,7 @@ Write-Host "`nNew version will be: " -NoNewline
 Write-Host "v$newVersion" -ForegroundColor Green
 
 # Confirm
-$confirm = Read-Host "`nProceed with release v$newVersion? (Y/n)"
+$confirm = Read-Host "`nProceed with release v${newVersion}? (Y/n)"
 if ($confirm -and $confirm.ToLower() -ne 'y') {
     Write-Host "Aborted." -ForegroundColor Yellow
     exit 0
