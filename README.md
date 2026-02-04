@@ -56,7 +56,7 @@
 
 ### Installation
 
-#### Option 1: Standalone Web Server
+#### Build backend
 
 ```bash
 # Clone the repository
@@ -68,7 +68,7 @@ cd VibeRails
 dotnet run
 ```
 
-The dashboard will open in your default browser at `http://localhost:<auto-detected-port>`.
+The dashboard will open in your default browser at `http://localhost:{port 5000-5999}`.
 
 #### Option 2: VS Code Extension
 
@@ -87,23 +87,6 @@ code .
 ```
 
 Press `F5` to launch the extension in development mode, then click the VibeRails icon in the editor toolbar.
-
-### First Steps
-
-1. **Create an agent file** in your repository root named `agent.md`
-2. **Add coding rules** with enforcement levels:
-   ```markdown
-   ## Rules
-   - COMMIT: max_complexity=10
-   - STOP: min_coverage=80
-   - WARN: log_files_changed
-   ```
-3. **Launch a CLI** with environment isolation:
-   ```bash
-   vb --lmbootstrap claude --env development
-   ```
-
----
 
 ## Architecture
 
