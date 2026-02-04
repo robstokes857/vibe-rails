@@ -40,8 +40,8 @@
 
   <!-- Copy install scripts to output directory for update functionality -->
   <ItemGroup>
-    <Content Include="..\deploy\install.ps1" Link="install.ps1" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\deploy\install.sh" Link="install.sh" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Scripts\install.ps1" Link="install.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Scripts\install.sh" Link="install.sh" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
