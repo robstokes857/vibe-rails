@@ -241,12 +241,12 @@ $checksumContent
 
 **Windows (PowerShell):**
 ``````powershell
-irm https://raw.githubusercontent.com/$GithubRepo/main/deploy/install.ps1 | iex
+irm https://raw.githubusercontent.com/$GithubRepo/main/Scripts/install.ps1 | iex
 ``````
 
 **Linux/macOS:**
 ``````bash
-curl -fsSL https://raw.githubusercontent.com/$GithubRepo/main/deploy/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/$GithubRepo/main/Scripts/install.sh | bash
 ``````
 "@
 
