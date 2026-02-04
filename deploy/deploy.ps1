@@ -1,12 +1,6 @@
 #!/usr/bin/env pwsh
-# deploy.ps1 - Build and release to GitHub with interactive version bumping
+# deploy.ps1 - Build and release to GitHub
 # Requires: PowerShell 7+, gh CLI, Docker (for Linux builds)
-
-[CmdletBinding()]
-param(
-    [switch]$SkipBuild,
-    [switch]$DryRun
-)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -18,22 +12,13 @@ $AppConfigFile = Join-Path $RepoRoot "VibeRails" "app_config.json"
 $PackageJsonFile = Join-Path $RepoRoot "vscode-viberails" "package.json"
 $GithubRepo = "robstokes857/vibe-rails"
 
-# Track state for rollback
-$script:TagCreated = $false
-$script:TagPushed = $false
-$script:VersionCommitPushed = $false
-$script:ReleaseCreated = $false
-$script:OriginalVersionContent = $null
-$script:CurrentTag = $null
-
-# --- Pre-flight Checks ---
+# --- Helper Functions ---
 
 function Test-PreFlightChecks {
     Write-Host "`nRunning pre-flight checks..." -ForegroundColor Cyan
 
     # Check if we're in a git repository
-    $gitDir = git rev-parse --git-dir 2>$null
-    if (-not $gitDir) {
+    if (-not (git rev-parse --git-dir 2>$null)) {
         throw "Not in a git repository"
     }
 
@@ -57,15 +42,9 @@ function Test-PreFlightChecks {
     $remoteCommit = git rev-parse "origin/$currentBranch" 2>$null
 
     if ($remoteCommit -and $localCommit -ne $remoteCommit) {
-        $ahead = git rev-list --count "origin/$currentBranch..HEAD" 2>$null
         $behind = git rev-list --count "HEAD..origin/$currentBranch" 2>$null
-
         if ($behind -gt 0) {
             throw "Local branch is behind remote by $behind commit(s). Run 'git pull' first."
-        }
-        if ($ahead -gt 0) {
-            Write-Host "  Warning: Local branch is ahead of remote by $ahead commit(s)" -ForegroundColor Yellow
-            Write-Host "  This is OK - changes will be pushed during deployment" -ForegroundColor Yellow
         }
     }
 
@@ -74,14 +53,11 @@ function Test-PreFlightChecks {
     Write-Host "  ✓ Synced with remote" -ForegroundColor Green
 }
 
-# --- Helper Functions ---
-
 function Get-LatestReleaseVersion {
     $releases = gh release list --repo $GithubRepo --limit 1 2>$null
     if (-not $releases) {
         return [version]"0.0.0"
     }
-    # Parse version from release tag (e.g., "v1.0.0" -> "1.0.0")
     # gh release list format: TITLE\tSTATUS\tTAG\tDATE - we need column [2]
     $tag = ($releases -split "`t")[2]
     $versionStr = $tag -replace "^v", ""
@@ -92,53 +68,24 @@ function Get-LatestReleaseVersion {
     }
 }
 
-function Get-BumpedVersion {
-    param(
-        [version]$Current,
-        [string]$BumpType
-    )
-    switch ($BumpType.ToLower()) {
-        "major" { return [version]"$($Current.Major + 1).0.0" }
-        "minor" { return [version]"$($Current.Major).$($Current.Minor + 1).0" }
-        "patch" { return [version]"$($Current.Major).$($Current.Minor).$($Current.Build + 1)" }
-        default { throw "Invalid bump type: $BumpType" }
-    }
-}
-
-function Get-CurrentVersionFromConfig {
-    if (-not (Test-Path $AppConfigFile)) {
-        throw "app_config.json not found at $AppConfigFile"
-    }
-
-    $config = Get-Content $AppConfigFile -Raw | ConvertFrom-Json
-    return $config.version
-}
-
 function Update-AppConfigVersion {
     param([string]$Version)
-
-    if (-not (Test-Path $AppConfigFile)) {
-        throw "app_config.json not found at $AppConfigFile"
-    }
 
     $config = Get-Content $AppConfigFile -Raw | ConvertFrom-Json
     $config.version = $Version
     $config | ConvertTo-Json -Depth 100 | Set-Content $AppConfigFile -Encoding utf8NoBOM
-    Write-Host "Updated $AppConfigFile to version $Version" -ForegroundColor Green
+    Write-Host "Updated app_config.json to version $Version" -ForegroundColor Green
 }
 
 function Sync-ExtensionVersion {
     param([string]$Version)
 
-    if (-not (Test-Path $PackageJsonFile)) {
-        Write-Host "Warning: package.json not found at $PackageJsonFile" -ForegroundColor Yellow
-        return
+    if (Test-Path $PackageJsonFile) {
+        $packageJson = Get-Content $PackageJsonFile -Raw | ConvertFrom-Json
+        $packageJson.version = $Version
+        $packageJson | ConvertTo-Json -Depth 100 | Set-Content $PackageJsonFile -Encoding utf8NoBOM
+        Write-Host "Synced package.json version to $Version" -ForegroundColor Green
     }
-
-    $packageJson = Get-Content $PackageJsonFile -Raw | ConvertFrom-Json
-    $packageJson.version = $Version
-    $packageJson | ConvertTo-Json -Depth 100 | Set-Content $PackageJsonFile -Encoding utf8NoBOM
-    Write-Host "Synced package.json version to $Version" -ForegroundColor Green
 }
 
 function New-ReleaseArchives {
@@ -162,15 +109,12 @@ function New-ReleaseArchives {
     # Create Linux tar.gz
     $linuxTar = Join-Path $releaseDir "vb-linux-x64.tar.gz"
     Write-Host "Creating $linuxTar..." -ForegroundColor Cyan
-
-    # Use tar command (available on Windows 10+)
     Push-Location $linuxSource
     tar -czf $linuxTar -C $linuxSource .
     Pop-Location
 
     # Generate checksums
-    $files = @($winZip, $linuxTar)
-    foreach ($file in $files) {
+    foreach ($file in @($winZip, $linuxTar)) {
         $hash = (Get-FileHash -Algorithm SHA256 -Path $file).Hash.ToLowerInvariant()
         $checksumFile = "$file.sha256"
         "$hash  $(Split-Path -Leaf $file)" | Set-Content -Path $checksumFile -Encoding ascii
@@ -178,123 +122,6 @@ function New-ReleaseArchives {
     }
 
     return $releaseDir
-}
-
-function New-GitHubRelease {
-    param(
-        [string]$Version,
-        [string]$ReleaseDir,
-        [System.IO.FileInfo[]]$ExtensionPackages = @()
-    )
-
-    $tag = "v$Version"
-    $script:CurrentTag = $tag
-    $title = "VibeRails $Version"
-
-    # Get release assets (core packages)
-    $assets = Get-ChildItem -Path $ReleaseDir -File | ForEach-Object { $_.FullName }
-
-    # Add extension packages if available
-    if ($ExtensionPackages.Count -gt 0) {
-        $assets += $ExtensionPackages | ForEach-Object { $_.FullName }
-    }
-
-    # Build release notes from checksums
-    $checksumContent = Get-ChildItem -Path $ReleaseDir -Filter "*.sha256" | ForEach-Object {
-        Get-Content $_.FullName
-    }
-
-    $notes = @"
-## SHA256 Checksums
-
-``````
-$($checksumContent -join "`n")
-``````
-
-## Installation
-
-**VS Code Extension (Recommended):**
-Download the platform-specific .vsix file and install:
-``````bash
-code --install-extension vscode-viberails-$Version-win32-x64.vsix
-``````
-
-**Standalone CLI:**
-
-**Windows (PowerShell):**
-``````powershell
-irm https://raw.githubusercontent.com/$GithubRepo/main/Scripts/install.ps1 | iex
-``````
-
-**Linux/macOS:**
-``````bash
-curl -fsSL https://raw.githubusercontent.com/$GithubRepo/main/Scripts/install.sh | bash
-``````
-"@
-
-    Write-Host "`nCreating GitHub release $tag..." -ForegroundColor Cyan
-
-    # Create local tag
-    git tag -a $tag -m "Release $tag"
-    $script:TagCreated = $true
-
-    # Push tag to remote
-    git push origin $tag
-    $script:TagPushed = $true
-
-    # Create release with assets (files are positional args after the tag)
-    gh release create $tag @assets --repo $GithubRepo --title $title --notes $notes --generate-notes
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to create GitHub release"
-    }
-    $script:ReleaseCreated = $true
-
-    Write-Host "`nRelease created: https://github.com/$GithubRepo/releases/tag/$tag" -ForegroundColor Green
-}
-
-function Invoke-Rollback {
-    param([string]$ErrorMessage)
-
-    Write-Host "`n$ErrorMessage" -ForegroundColor Red
-    Write-Host "Rolling back changes..." -ForegroundColor Yellow
-
-    # Delete GitHub release if created
-    if ($script:ReleaseCreated -and $script:CurrentTag) {
-        Write-Host "  Deleting GitHub release..." -ForegroundColor Yellow
-        gh release delete $script:CurrentTag -y --repo $GithubRepo 2>$null
-    }
-
-    # Delete remote tag if pushed
-    if ($script:TagPushed -and $script:CurrentTag) {
-        Write-Host "  Deleting remote tag..." -ForegroundColor Yellow
-        git push --delete origin $script:CurrentTag 2>$null
-    }
-
-    # Delete local tag if created
-    if ($script:TagCreated -and $script:CurrentTag) {
-        Write-Host "  Deleting local tag..." -ForegroundColor Yellow
-        git tag -d $script:CurrentTag 2>$null
-    }
-
-    # Revert version commit if pushed
-    if ($script:VersionCommitPushed) {
-        Write-Host "  Reverting version commit..." -ForegroundColor Yellow
-        git reset --hard HEAD~1 2>$null
-    }
-
-    # Restore original app_config.json content
-    if ($script:OriginalVersionContent) {
-        Write-Host "  Restoring original app_config.json..." -ForegroundColor Yellow
-        Set-Content -Path $AppConfigFile -Value $script:OriginalVersionContent -Encoding utf8NoBOM
-    }
-
-    # Restore package.json if it was modified
-    if (Test-Path $PackageJsonFile) {
-        Write-Host "  Restoring package.json..." -ForegroundColor Yellow
-        git checkout HEAD -- $PackageJsonFile 2>$null
-    }
-
-    Write-Host "`nRollback complete. Please check the state manually." -ForegroundColor Yellow
 }
 
 # --- Main ---
@@ -325,14 +152,9 @@ Write-Host "Current release: " -NoNewline
 Write-Host "v$currentVersion" -ForegroundColor Yellow
 
 # Prompt for new version number
-Write-Host "`nSuggested versions:"
-Write-Host "  Major (breaking changes): v$((Get-BumpedVersion -Current $currentVersion -BumpType 'major'))"
-Write-Host "  Minor (new features):     v$((Get-BumpedVersion -Current $currentVersion -BumpType 'minor'))"
-Write-Host "  Patch (bug fixes):        v$((Get-BumpedVersion -Current $currentVersion -BumpType 'patch'))"
-Write-Host ""
-
+Write-Host "`nEnter new version (e.g., 1.1.0):"
 do {
-    $newVersionInput = Read-Host "Enter new version (e.g., 1.1.0)"
+    $newVersionInput = Read-Host "Version"
     $newVersionInput = $newVersionInput.TrimStart('v')
     try {
         $newVersion = [version]$newVersionInput
@@ -342,104 +164,96 @@ do {
         $isValid = $false
     }
 } while (-not $isValid)
-$versionTag = "v$newVersion"
-$script:CurrentTag = $versionTag
+
 Write-Host "`nNew version will be: " -NoNewline
-Write-Host $versionTag -ForegroundColor Green
+Write-Host "v$newVersion" -ForegroundColor Green
 
 # Confirm
-$confirm = Read-Host "`nProceed with release $($versionTag)? (Y/n)"
+$confirm = Read-Host "`nProceed with release v$newVersion? (Y/n)"
 if ($confirm -and $confirm.ToLower() -ne 'y') {
     Write-Host "Aborted." -ForegroundColor Yellow
     exit 0
 }
 
-if ($DryRun) {
-    Write-Host "`n[DRY RUN] Would release $versionTag" -ForegroundColor Yellow
-    exit 0
+# Update versions
+Update-AppConfigVersion -Version $newVersion
+Sync-ExtensionVersion -Version $newVersion
+
+# Run build
+Write-Host "`nRunning build..." -ForegroundColor Cyan
+$buildScript = Join-Path $ScriptDir "build.ps1"
+$vibeRailsProject = Join-Path $RepoRoot "VibeRails" "VibeRails.csproj"
+& $buildScript -Project $vibeRailsProject
+if ($LASTEXITCODE -ne 0) {
+    throw "Build failed!"
 }
 
-try {
-    # Save original app_config.json for rollback
-    if (Test-Path $AppConfigFile) {
-        $script:OriginalVersionContent = Get-Content -Path $AppConfigFile -Raw
-    }
+# Verify build outputs
+$winDir = Join-Path $ArtifactsDir "win-x64"
+$linuxDir = Join-Path $ArtifactsDir "linux-x64"
 
-    # Update app_config.json
-    Update-AppConfigVersion -Version $newVersion
-
-    # Sync extension version
-    Sync-ExtensionVersion -Version $newVersion
-
-    # Run build
-    if (-not $SkipBuild) {
-        Write-Host "`nRunning build..." -ForegroundColor Cyan
-        $buildScript = Join-Path $ScriptDir "build.ps1"
-        $vibeRailsProject = Join-Path $RepoRoot "VibeRails" "VibeRails.csproj"
-        & $buildScript -Project $vibeRailsProject
-        if ($LASTEXITCODE -ne 0) {
-            throw "Build failed!"
-        }
-    }
-
-    # Verify build outputs exist
-    $winDir = Join-Path $ArtifactsDir "win-x64"
-    $linuxDir = Join-Path $ArtifactsDir "linux-x64"
-
-    if (-not (Test-Path $winDir) -or -not (Test-Path $linuxDir)) {
-        throw "Build outputs not found. Expected directories at:`n  $winDir`n  $linuxDir"
-    }
-
-    # Verify app_config.json exists in build outputs and version matches
-    $winConfigPath = Join-Path $winDir "app_config.json"
-    $linuxConfigPath = Join-Path $linuxDir "app_config.json"
-
-    if (-not (Test-Path $winConfigPath)) {
-        throw "app_config.json not found in Windows build output at $winConfigPath"
-    }
-
-    if (-not (Test-Path $linuxConfigPath)) {
-        throw "app_config.json not found in Linux build output at $linuxConfigPath"
-    }
-
-    # Verify version in bundled config matches
-    $winConfig = Get-Content $winConfigPath -Raw | ConvertFrom-Json
-    if ($winConfig.version -ne $newVersion) {
-        throw "Version mismatch in Windows build! app_config.json has $($winConfig.version) but expected $newVersion"
-    }
-
-    $linuxConfig = Get-Content $linuxConfigPath -Raw | ConvertFrom-Json
-    if ($linuxConfig.version -ne $newVersion) {
-        throw "Version mismatch in Linux build! app_config.json has $($linuxConfig.version) but expected $newVersion"
-    }
-
-    Write-Host "Version validation passed: $newVersion" -ForegroundColor Green
-
-    # Create release archives
-    $releaseDir = New-ReleaseArchives -Version $newVersion
-
-    # Skip extension packages - those are published to VS Code marketplace separately
-    $extensionPackages = @()
-
-    # Commit version bump
-    Write-Host "`nCommitting version bump..." -ForegroundColor Cyan
-    git add $AppConfigFile
-    if (Test-Path $PackageJsonFile) {
-        git add $PackageJsonFile
-    }
-    git commit -m "Bump version to $newVersion"
-    git push
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to push version commit"
-    }
-    $script:VersionCommitPushed = $true
-
-    # Create GitHub release
-    New-GitHubRelease -Version $newVersion -ReleaseDir $releaseDir -ExtensionPackages $extensionPackages
-
-    Write-Host "`nDone!" -ForegroundColor Green
-
-} catch {
-    Invoke-Rollback -ErrorMessage $_.Exception.Message
-    exit 1
+if (-not (Test-Path $winDir) -or -not (Test-Path $linuxDir)) {
+    throw "Build outputs not found at $winDir and $linuxDir"
 }
+
+# Verify version in build outputs
+$winConfig = Get-Content (Join-Path $winDir "app_config.json") -Raw | ConvertFrom-Json
+$linuxConfig = Get-Content (Join-Path $linuxDir "app_config.json") -Raw | ConvertFrom-Json
+
+if ($winConfig.version -ne $newVersion -or $linuxConfig.version -ne $newVersion) {
+    throw "Version mismatch in build outputs! Expected $newVersion"
+}
+
+Write-Host "Version validation passed: $newVersion" -ForegroundColor Green
+
+# Create release archives
+$releaseDir = New-ReleaseArchives -Version $newVersion
+
+# Create release branch and commit everything
+Write-Host "`nCreating release branch..." -ForegroundColor Cyan
+$releaseBranch = "release/v$newVersion"
+git checkout -b $releaseBranch
+
+# Add all release artifacts
+git add $AppConfigFile
+if (Test-Path $PackageJsonFile) {
+    git add $PackageJsonFile
+}
+git add $releaseDir
+
+git commit -m "Release v$newVersion`n`nIncludes:`n- Version bump to $newVersion`n- Windows and Linux binaries`n- Release archives with checksums"
+
+# Push the branch
+Write-Host "Pushing release branch..." -ForegroundColor Cyan
+git push -u origin $releaseBranch
+
+# Create PR
+Write-Host "`nCreating pull request..." -ForegroundColor Cyan
+
+$checksumContent = Get-ChildItem -Path $releaseDir -Filter "*.sha256" | ForEach-Object {
+    Get-Content $_.FullName
+} | Out-String
+
+$prBody = @"
+Automated release for version $newVersion
+
+## Release Artifacts
+- Windows binary (x64)
+- Linux binary (x64)
+- Release archives with SHA256 checksums
+
+## SHA256 Checksums
+``````
+$checksumContent
+``````
+
+After merging this PR, create the GitHub release manually with the artifacts from this branch.
+"@
+
+$prUrl = gh pr create --title "Release v$newVersion" --body $prBody --base main --head $releaseBranch
+
+Write-Host "`nPull request created: $prUrl" -ForegroundColor Green
+Write-Host "`nNext steps:" -ForegroundColor Cyan
+Write-Host "  1. Review and merge the PR" -ForegroundColor White
+Write-Host "  2. After merge, create GitHub release with artifacts" -ForegroundColor White
+Write-Host "`nDone!" -ForegroundColor Green
