@@ -2,14 +2,14 @@
 # build.ps1 (PS 7+)
 # - Windows AOT built locally
 # - Linux AOT built via Docker (Linux AOT SDK image)
-# - SHA256 checksums.md written to Scripts/artifacts/aot
+# - SHA256 checksums.md written to deploy/artifacts/aot
 
 [CmdletBinding()]
 param(
     [string] $Project = "",
     [string] $Configuration = "Release",
     [string] $Framework = "net10.0",
-    [string] $OutputRoot = "Scripts/artifacts/aot",
+    [string] $OutputRoot = "deploy/artifacts/aot",
 
     # Windows build (local)
     [string] $WinRid = "win-x64",
