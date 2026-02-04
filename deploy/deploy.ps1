@@ -489,10 +489,10 @@ try {
     # Create release archives
     $releaseDir = New-ReleaseArchives -Version $newVersion
 
-    # Build extension packages
-    $extensionPackages = Build-ExtensionPackages -Version $newVersion
+    # Skip extension packages - those are published to VS Code marketplace separately
+    $extensionPackages = @()
 
-    # Commit version bump (include package.json if it was modified)
+    # Commit version bump
     Write-Host "`nCommitting version bump..." -ForegroundColor Cyan
     git add $AppConfigFile
     if (Test-Path $PackageJsonFile) {
