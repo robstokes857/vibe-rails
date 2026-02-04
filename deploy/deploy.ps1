@@ -209,51 +209,52 @@ Write-Host "Version validation passed: $newVersion" -ForegroundColor Green
 # Create release archives
 $releaseDir = New-ReleaseArchives -Version $newVersion
 
-# Create release branch and commit everything
-Write-Host "`nCreating release branch..." -ForegroundColor Cyan
-$releaseBranch = "release/v$newVersion"
-git checkout -b $releaseBranch
-
-# Add all release artifacts
+# Commit version changes to main (NOT the binaries)
+Write-Host "`nCommitting version changes..." -ForegroundColor Cyan
 git add $AppConfigFile
 if (Test-Path $PackageJsonFile) {
     git add $PackageJsonFile
 }
-git add $releaseDir
+git commit -m "Bump version to $newVersion"
 
-git commit -m "Release v$newVersion`n`nIncludes:`n- Version bump to $newVersion`n- Windows and Linux binaries`n- Release archives with checksums"
+# Push to main
+Write-Host "Pushing to main..." -ForegroundColor Cyan
+git push origin main
 
-# Push the branch
-Write-Host "Pushing release branch..." -ForegroundColor Cyan
-git push -u origin $releaseBranch
+# Create GitHub release with artifacts
+Write-Host "`nCreating GitHub release..." -ForegroundColor Cyan
+$tag = "v$newVersion"
 
-# Create PR
-Write-Host "`nCreating pull request..." -ForegroundColor Cyan
-
+# Get checksums for release notes
 $checksumContent = Get-ChildItem -Path $releaseDir -Filter "*.sha256" | ForEach-Object {
     Get-Content $_.FullName
 } | Out-String
 
-$prBody = @"
-Automated release for version $newVersion
-
-## Release Artifacts
-- Windows binary (x64)
-- Linux binary (x64)
-- Release archives with SHA256 checksums
-
+$releaseNotes = @"
 ## SHA256 Checksums
+
 ``````
 $checksumContent
 ``````
 
-After merging this PR, create the GitHub release manually with the artifacts from this branch.
+## Installation
+
+**Windows (PowerShell):**
+``````powershell
+irm https://raw.githubusercontent.com/$GithubRepo/main/deploy/install.ps1 | iex
+``````
+
+**Linux/macOS:**
+``````bash
+curl -fsSL https://raw.githubusercontent.com/$GithubRepo/main/deploy/install.sh | bash
+``````
 "@
 
-$prUrl = gh pr create --title "Release v$newVersion" --body $prBody --base main --head $releaseBranch
+# Get all release asset files
+$assets = Get-ChildItem -Path $releaseDir -File | ForEach-Object { $_.FullName }
 
-Write-Host "`nPull request created: $prUrl" -ForegroundColor Green
-Write-Host "`nNext steps:" -ForegroundColor Cyan
-Write-Host "  1. Review and merge the PR" -ForegroundColor White
-Write-Host "  2. After merge, create GitHub release with artifacts" -ForegroundColor White
+# Create release
+gh release create $tag @assets --repo $GithubRepo --title "VibeRails $newVersion" --notes $releaseNotes --generate-notes
+
+Write-Host "`nRelease created: https://github.com/$GithubRepo/releases/tag/$tag" -ForegroundColor Green
 Write-Host "`nDone!" -ForegroundColor Green
