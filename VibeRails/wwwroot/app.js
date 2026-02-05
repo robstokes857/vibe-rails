@@ -108,6 +108,15 @@ export class VibeControlApp {
             if (goBack) {
                 this.goBack();
             }
+
+            const goHome = e.target.closest('[data-action="navigate-home"]');
+            if (goHome) {
+                e.preventDefault();
+                this.navigationStack = ['dashboard'];
+                this.currentView = 'dashboard';
+                this.updateBreadcrumb();
+                this.loadView('dashboard');
+            }
         });
     }
 
