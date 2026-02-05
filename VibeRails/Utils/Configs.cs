@@ -81,7 +81,7 @@ namespace VibeRails.Utils
         // Known commands that indicate CLI mode
         private static readonly HashSet<string> KnownCommands = new(StringComparer.OrdinalIgnoreCase)
         {
-            "env", "agent", "rules", "validate", "hooks", "launch", "gemini", "codex", "claude", "help"
+            "env", "agent", "rules", "validate", "hooks", "launch", "gemini", "codex", "claude", "update", "help"
         };
 
         /// <summary>

@@ -1,4 +1,7 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using VibeRails.Cli;
+using VibeRails.Services;
 using VibeRails.Utils;
 
 namespace VibeRails;
@@ -16,6 +19,21 @@ public static class CliLoop
         // Create a scope for resolving scoped services
         using var scope = services.CreateScope();
         var scopedServices = scope.ServiceProvider;
+
+        // Handle update command
+        if (parsedArgs.Command?.ToLowerInvariant() == "update")
+        {
+            var updateInstaller = scopedServices.GetRequiredService<UpdateInstaller>();
+            var lifetime = scopedServices.GetRequiredService<IHostApplicationLifetime>();
+
+            var success = await updateInstaller.InstallUpdateAsync(CancellationToken.None);
+            if (success)
+            {
+                lifetime.StopApplication();
+            }
+            Environment.ExitCode = success ? 0 : 1;
+            return (true, parsedArgs);
+        }
 
         // 0. Handle top-level --help and --version flags (no command required)
         if (parsedArgs.Help)
