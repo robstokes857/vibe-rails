@@ -125,7 +125,7 @@ export class EnvironmentController {
                 await this.app.apiCall('/api/v1/environments', 'POST', { name, cli, customArgs });
                 this.app.closeModal();
                 await this.refreshEnvironments();
-                this.loadEnvironments();
+                this.app.navigate('environments');
             } catch (error) {
                 this.app.showError(`Failed to create environment: ${error.message}`);
             }
@@ -397,7 +397,7 @@ export class EnvironmentController {
 
                 this.app.closeModal();
                 await this.refreshEnvironments();
-                this.loadEnvironments();
+                this.app.navigate('environments');
             } catch (error) {
                 this.app.showError(`Failed to update environment: ${error.message}`);
             }
@@ -420,7 +420,7 @@ export class EnvironmentController {
             try {
                 await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(name)}`, 'DELETE');
                 await this.refreshEnvironments();
-                this.loadEnvironments();
+                this.app.navigate('environments');
             } catch (error) {
                 this.app.showError(`Failed to remove environment: ${error.message}`);
             }
