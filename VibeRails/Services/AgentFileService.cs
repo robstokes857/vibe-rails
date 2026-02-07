@@ -14,7 +14,6 @@ namespace VibeRails.Services
         Task AddRuleWithEnforcementAsync(string path, string ruleText, Enforcement enforcement, CancellationToken cancellationToken);
         Task DeleteRulesAsync(string path, CancellationToken cancellationToken, params string[] rules);
         Task UpdateRuleEnforcementAsync(string path, string ruleText, Enforcement enforcement, CancellationToken cancellationToken);
-        Task DeleteAgentFileAsync(string path, CancellationToken cancellationToken);
         Task<List<string>> GetDocumentedFilesAsync(string path, CancellationToken cancellationToken);
     }
 
@@ -235,15 +234,6 @@ namespace VibeRails.Services
             }
 
             await File.WriteAllLinesAsync(path, lines, cancellationToken);
-        }
-
-        public Task DeleteAgentFileAsync(string path, CancellationToken cancellationToken)
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-            return Task.CompletedTask;
         }
 
         public async Task<List<string>> GetDocumentedFilesAsync(string path, CancellationToken cancellationToken)

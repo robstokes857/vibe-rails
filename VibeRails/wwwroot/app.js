@@ -226,6 +226,7 @@ export class VibeControlApp {
     }
 
     loadView(view, data = {}) {
+        window.scrollTo(0, 0);
         const views = {
             'dashboard': () => this.dashboardController.loadDashboard(data),
             'launch-cli': () => this.cliLauncher.loadLaunchCLI(),
@@ -267,14 +268,17 @@ export class VibeControlApp {
                     const parts = agent.path.split(/[\\/]/);
                     const fileName = parts.pop();
                     const dirPath = parts.length > 0 ? parts.join('/') + '/' : '';
-                    const displayName = agent.customName || fileName;
+
+                    const infoHtml = agent.customName
+                        ? `<span class="agent-file-tree-name">${agent.customName}</span>
+                           <span class="agent-file-tree-path">${dirPath}${fileName}</span>`
+                        : `<span class="agent-file-tree-name agent-file-tree-name--path">${dirPath}${fileName}</span>`;
 
                     return `
                     <div class="agent-file-tree-item" onclick="app.navigate('agent-edit', ${JSON.stringify(agent).replace(/"/g, '&quot;')})">
                         <div class="agent-file-tree-icon">&#x1F4DD;</div>
                         <div class="agent-file-tree-info">
-                            <span class="agent-file-tree-name">${displayName}</span>
-                            <span class="agent-file-tree-path">${dirPath}${fileName}</span>
+                            ${infoHtml}
                         </div>
                         <span class="agent-file-tree-badge">${agent.ruleCount || 0} rules</span>
                     </div>

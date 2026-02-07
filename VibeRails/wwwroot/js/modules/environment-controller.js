@@ -43,8 +43,9 @@ export class EnvironmentController {
                 this.app.bindActions(tableSlot, '[data-action="launch-in-webui"]', (element) => {
                     const envId = parseInt(element.dataset.envId);
                     const envName = element.dataset.envName;
-                    if (envId && envName) {
-                        this.launchInWebUI(envId, envName);
+                    const envCli = element.dataset.envCli;
+                    if (envId && envName && envCli) {
+                        this.launchInWebUI(envId, envName, envCli);
                     }
                 });
             }
@@ -493,6 +494,7 @@ export class EnvironmentController {
         try {
             const response = await this.app.apiCall('/api/v1/environments', 'GET');
             this.app.data.environments = (response.environments || []).map(env => ({
+                id: env.id,
                 name: env.name,
                 cli: env.cli,
                 customArgs: env.customArgs,
@@ -506,19 +508,25 @@ export class EnvironmentController {
         }
     }
 
-    async launchInWebUI(envId, envName) {
-        // Navigate to dashboard with environment pre-selected
-        this.app.navigate('dashboard', { preselectedEnvId: envId });
+    async launchInWebUI(envId, envName, cli) {
+        // Go back to dashboard instead of pushing a duplicate breadcrumb entry
+        this.app.goBack();
 
         this.app.showToast('Web UI Terminal',
-            `Opening terminal with ${envName}...`,
+            `Launching ${envName} (${cli})...`,
             'info');
 
-        // Scroll to terminal section after navigation
-        setTimeout(() => {
+        // Scroll to terminal and auto-start the session
+        setTimeout(async () => {
             const terminalSection = document.querySelector('[data-terminal-section]');
             if (terminalSection) {
                 terminalSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+
+            const terminalContent = document.querySelector('[data-terminal-content]');
+            if (terminalContent) {
+                const selection = `env:${envId}:${cli}`;
+                await this.app.terminalController.startTerminal(terminalContent, selection);
             }
         }, 300);
     }

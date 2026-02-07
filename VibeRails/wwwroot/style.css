@@ -95,12 +95,17 @@ code {
 }
 
 .brand-text {
-    color: var(--color-text);
-    letter-spacing: 0.05em;
+    background: linear-gradient(135deg, #a77bf3 0%, var(--color-accent) 100%, #a77bf3 200%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    background-size: 200% auto;
+    animation: shine 5s linear infinite;
+    font-weight: 800;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    font-size: 0.9rem;
-    opacity: 0.9;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    font-size: 1.8rem;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
 }
 
 /* Breadcrumb */
@@ -481,7 +486,17 @@ code {
     font-family: 'Consolas', 'Monaco', monospace;
     color: #d0d0d0;
     max-height: 500px;
-    overflow-y: auto;
+}
+
+/* Ensure xterm handles its own scrolling correctly and fills container */
+#terminal-element {
+    padding: 10px;
+    background: #1e1e1e;
+    border-radius: 0 0 var(--border-radius) var(--border-radius);
+}
+
+.xterm .xterm-viewport {
+    border-radius: 0 0 var(--border-radius) var(--border-radius);
 }
 
 /* Wizard */
@@ -725,6 +740,11 @@ h1, h2, h3, h4, h5, h6 {
     font-weight: 600;
     font-size: 0.9rem;
     color: var(--color-accent);
+}
+
+.agent-file-tree-name--path {
+    font-family: 'Consolas', monospace;
+    font-size: 0.85rem;
 }
 
 .agent-file-tree-path {

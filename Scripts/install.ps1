@@ -44,7 +44,7 @@ $zipUrl = $zipAsset.browser_download_url
 $checksumUrl = $checksumAsset.browser_download_url
 
 # Create temp directory
-$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "vibe-rails-install-$(Get-Random)"
+$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "vibe_rails_install_$(Get-Random)"
 New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
 
 try {
@@ -73,14 +73,12 @@ try {
         Write-Host "Checksum verified!" -ForegroundColor Green
     }
 
-    # Create install directory
-    if (Test-Path $InstallDir) {
-        Write-Host "Removing existing installation..." -ForegroundColor Yellow
-        Remove-Item -Recurse -Force $InstallDir
+    # Create install directory if it doesn't exist
+    if (-not (Test-Path $InstallDir)) {
+        New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     }
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-    # Extract
+    # Extract (overwrites app files, preserves user data like state.db, envs/, etc.)
     Write-Host "Extracting to $InstallDir..." -ForegroundColor Cyan
     Expand-Archive -Path $zipPath -DestinationPath $InstallDir -Force
 

@@ -72,7 +72,7 @@ public class UpdateInstaller
         }
 
         // Copy to temp directory to avoid permission issues
-        var tempDir = Path.Combine(Path.GetTempPath(), "vibe-rails-update");
+        var tempDir = Path.Combine(Path.GetTempPath(), "vibe_rails_update");
         Directory.CreateDirectory(tempDir);
 
         var tempScriptPath = Path.Combine(tempDir, scriptName);

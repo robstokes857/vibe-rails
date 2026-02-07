@@ -178,7 +178,6 @@ export class AgentController {
                 'remove-rule': () => this.removeRule(),
                 'validate-agent': () => this.validateAgent(agent),
                 'edit-vscode': () => this.editInVSCode(agent),
-                'delete-agent': () => this.deleteAgent(agent),
                 'show-available-rules': () => this.showAvailableRules()
             };
 
@@ -617,29 +616,6 @@ export class AgentController {
         } catch (error) {
             this.app.showError(`Failed to open ${agent.name} in VS Code`);
         }
-    }
-
-    async deleteAgent(agent) {
-        this.app.showModal('Confirm Delete', `
-            <p>Are you sure you want to delete the agent <strong>"${agent.name}"</strong>?</p>
-            <p class="text-muted">This action cannot be undone.</p>
-            <div class="d-flex gap-2 justify-content-end">
-                <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
-                <button type="button" class="btn btn-danger" id="confirm-delete-agent-btn">Delete</button>
-            </div>
-        `);
-
-        document.getElementById('confirm-delete-agent-btn').onclick = async () => {
-            this.app.closeModal();
-            try {
-                await this.app.apiCall(`/api/v1/agents?path=${encodeURIComponent(agent.path)}`, 'DELETE');
-                this.app.showToast('Deleted', 'Agent file deleted successfully', 'success');
-                await this.app.refreshDashboardData();
-                this.app.goBack();
-            } catch (error) {
-                this.app.showError('Failed to delete agent');
-            }
-        };
     }
 
     showAgentCustomNameModal(agent) {
