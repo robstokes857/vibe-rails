@@ -5,6 +5,7 @@ using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
+using VibeRails.Services.Messaging;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Terminal;
 using VibeRails.Services.VCA;
@@ -73,6 +74,13 @@ namespace VibeRails
             // Update Service (singleton with HttpClient)
             serviceCollection.AddHttpClient<UpdateService>();
             serviceCollection.AddScoped<UpdateInstaller>();
+
+            // WebSocket Messaging Client (singleton - auto-reconnects, URL from app_config.json)
+            serviceCollection.AddSingleton(_ =>
+            {
+                var config = LoadAppConfiguration();
+                return new MessagingClient(config.FrontendUrl);
+            });
         }
 
         private static McpSettings CreateMcpSettings()
@@ -163,8 +171,8 @@ namespace VibeRails
                 if (File.Exists(configPath))
                 {
                     var json = File.ReadAllText(configPath);
-                    return System.Text.Json.JsonSerializer.Deserialize<AppConfiguration>(json,
-                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                    return System.Text.Json.JsonSerializer.Deserialize(json,
+                        AppJsonSerializerContext.Default.AppConfiguration)
                         ?? new AppConfiguration();
                 }
             }

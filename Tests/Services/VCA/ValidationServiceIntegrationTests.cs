@@ -3,6 +3,8 @@ using VibeRails.Services;
 using VibeRails.Services.VCA;
 using Xunit;
 
+using VcaRuleWithSource = VibeRails.Services.VCA.RuleWithSource;
+
 namespace Tests.Services.VCA
 {
     public class ValidationServiceIntegrationTests
@@ -26,7 +28,7 @@ namespace Tests.Services.VCA
             // Arrange
             _mockFileAndRuleParser
                 .Setup(x => x.GetFilesAndRulesAsync("/root", false, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new Dictionary<string, List<RuleWithSource>>());
+                .ReturnsAsync(new Dictionary<string, List<VcaRuleWithSource>>());
 
             // Act
             var result = await _validationService.ValidateAsync("/root", false, CancellationToken.None);
@@ -41,11 +43,11 @@ namespace Tests.Services.VCA
         public async Task ValidateAsync_WithPassingRules_ShouldReturnNoViolations()
         {
             // Arrange
-            var filesAndRules = new Dictionary<string, List<RuleWithSource>>
+            var filesAndRules = new Dictionary<string, List<VcaRuleWithSource>>
             {
-                ["test.cs"] = new List<RuleWithSource>
+                ["test.cs"] = new List<VcaRuleWithSource>
                 {
-                    new RuleWithSource(
+                    new VcaRuleWithSource(
                         new RuleWithEnforcement("Log all file changes", Enforcement.WARN),
                         "AGENTS.md")
                 }
@@ -72,11 +74,11 @@ namespace Tests.Services.VCA
         public async Task ValidateAsync_WithFailingRule_ShouldReturnViolation()
         {
             // Arrange
-            var filesAndRules = new Dictionary<string, List<RuleWithSource>>
+            var filesAndRules = new Dictionary<string, List<VcaRuleWithSource>>
             {
-                ["package.json"] = new List<RuleWithSource>
+                ["package.json"] = new List<VcaRuleWithSource>
                 {
-                    new RuleWithSource(
+                    new VcaRuleWithSource(
                         new RuleWithEnforcement("Package file changes", Enforcement.STOP),
                         "AGENTS.md")
                 }
@@ -110,16 +112,16 @@ namespace Tests.Services.VCA
         public async Task ValidateAsync_WithMultipleFilesAndRules_ShouldProcessAll()
         {
             // Arrange
-            var filesAndRules = new Dictionary<string, List<RuleWithSource>>
+            var filesAndRules = new Dictionary<string, List<VcaRuleWithSource>>
             {
-                ["test1.cs"] = new List<RuleWithSource>
+                ["test1.cs"] = new List<VcaRuleWithSource>
                 {
-                    new RuleWithSource(new RuleWithEnforcement("Rule 1", Enforcement.WARN), "AGENTS.md"),
-                    new RuleWithSource(new RuleWithEnforcement("Rule 2", Enforcement.COMMIT), "AGENTS.md")
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule 1", Enforcement.WARN), "AGENTS.md"),
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule 2", Enforcement.COMMIT), "AGENTS.md")
                 },
-                ["test2.cs"] = new List<RuleWithSource>
+                ["test2.cs"] = new List<VcaRuleWithSource>
                 {
-                    new RuleWithSource(new RuleWithEnforcement("Rule 3", Enforcement.STOP), "src/AGENTS.md")
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule 3", Enforcement.STOP), "src/AGENTS.md")
                 }
             };
 
@@ -157,7 +159,7 @@ namespace Tests.Services.VCA
             // Arrange
             _mockFileAndRuleParser
                 .Setup(x => x.GetFilesAndRulesAsync("/root", true, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new Dictionary<string, List<RuleWithSource>>());
+                .ReturnsAsync(new Dictionary<string, List<VcaRuleWithSource>>());
 
             // Act
             await _validationService.ValidateAsync("/root", true, CancellationToken.None);
@@ -172,13 +174,13 @@ namespace Tests.Services.VCA
         public async Task ValidateAsync_WithNoDuplicateRules_ShouldCountAllRules()
         {
             // Arrange
-            var filesAndRules = new Dictionary<string, List<RuleWithSource>>
+            var filesAndRules = new Dictionary<string, List<VcaRuleWithSource>>
             {
-                ["test.cs"] = new List<RuleWithSource>
+                ["test.cs"] = new List<VcaRuleWithSource>
                 {
-                    new RuleWithSource(new RuleWithEnforcement("Rule A", Enforcement.WARN), "AGENTS.md"),
-                    new RuleWithSource(new RuleWithEnforcement("Rule B", Enforcement.WARN), "AGENTS.md"),
-                    new RuleWithSource(new RuleWithEnforcement("Rule C", Enforcement.WARN), "AGENTS.md")
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule A", Enforcement.WARN), "AGENTS.md"),
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule B", Enforcement.WARN), "AGENTS.md"),
+                    new VcaRuleWithSource(new RuleWithEnforcement("Rule C", Enforcement.WARN), "AGENTS.md")
                 }
             };
 

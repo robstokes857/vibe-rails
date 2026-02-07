@@ -1,7 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using VibeRails.Cli;
+using VibeRails.DB;
+using VibeRails.Interfaces;
 using VibeRails.Services;
+using VibeRails.Services.LlmClis;
+using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 
 namespace VibeRails;
@@ -59,7 +63,7 @@ public static class CliLoop
         // 2. Check for LMBootstrap mode - runs CLI wrapper without web server
         if (parsedArgs.IsLMBootstrap)
         {
-            await LMBootstrap.RunAsync(services);
+            await RunTerminalSessionAsync(parsedArgs, scopedServices);
             return (true, parsedArgs);
         }
 
@@ -89,5 +93,54 @@ public static class CliLoop
 
         // No CLI mode matched - continue to web server
         return (false, parsedArgs);
+    }
+
+    private static async Task RunTerminalSessionAsync(ParsedArgs parsedArgs, IServiceProvider services)
+    {
+        var dbService = services.GetRequiredService<IDbService>();
+        var envService = services.GetRequiredService<LlmCliEnvironmentService>();
+        var repository = services.GetRequiredService<IRepository>();
+
+        // Resolve LLM type (smart resolution: LLM enum name → base CLI, otherwise → DB lookup)
+        LLM llm;
+        string? environmentName = null;
+
+        if (Enum.TryParse<LLM>(parsedArgs.LMBootstrapCli, true, out var parsedLlm))
+        {
+            llm = parsedLlm;
+        }
+        else
+        {
+            // Custom environment - resolve via DB
+            var env = await repository.FindEnvironmentByNameAsync(parsedArgs.LMBootstrapCli ?? "");
+            if (env == null)
+                throw new InvalidOperationException($"Unknown CLI or environment: {parsedArgs.LMBootstrapCli}");
+
+            llm = env.LLM;
+            environmentName = env.CustomName;
+        }
+
+        // Resolve working directory
+        var workingDirectory = parsedArgs.WorkDir;
+        if (string.IsNullOrEmpty(workingDirectory))
+        {
+            var gitService = new GitService();
+            try
+            {
+                workingDirectory = await gitService.GetRootPathAsync();
+            }
+            catch
+            {
+                workingDirectory = Directory.GetCurrentDirectory();
+            }
+        }
+
+        // Create runner and run
+        var gitServiceForSession = new GitService(workingDirectory);
+        var terminalStateService = new TerminalStateService(dbService, gitServiceForSession);
+        var runner = new TerminalRunner(terminalStateService, envService);
+
+        var exitCode = await runner.RunCliAsync(llm, workingDirectory, environmentName, parsedArgs.ExtraArgs, CancellationToken.None);
+        Environment.ExitCode = exitCode;
     }
 }

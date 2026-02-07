@@ -116,7 +116,7 @@ namespace VibeRails.Services
 
 
 
-        // Session logging methods for LMBootstrap
+        // Session logging methods for terminal sessions
 
         public async Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir)
         {

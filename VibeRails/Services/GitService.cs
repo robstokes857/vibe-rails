@@ -13,6 +13,14 @@ namespace VibeRails.Services
 
     public class GitService : IGitService
     {
+        private readonly string? _workingDirectory;
+
+        public GitService() { }
+
+        public GitService(string workingDirectory)
+        {
+            _workingDirectory = workingDirectory;
+        }
 
         public async Task<string> GetRootPathAsync(CancellationToken cancellationToken = default)
         {
@@ -203,7 +211,7 @@ namespace VibeRails.Services
                     RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true,
-                    WorkingDirectory = Directory.GetCurrentDirectory()
+                    WorkingDirectory = _workingDirectory ?? Directory.GetCurrentDirectory()
                 }
             };
 

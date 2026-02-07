@@ -17,9 +17,13 @@ export class TerminalController {
         }
     }
 
-    async startSession() {
+    async startSession(cli = null, environmentName = null) {
         try {
-            const response = await this.app.apiCall('/api/v1/terminal/start', 'POST', {});
+            const body = {};
+            if (cli) body.cli = cli;
+            if (environmentName) body.environmentName = environmentName;
+
+            const response = await this.app.apiCall('/api/v1/terminal/start', 'POST', body);
 
             if (response.hasActiveSession) {
                 return true;
@@ -43,7 +47,7 @@ export class TerminalController {
         }
     }
 
-    async connect(terminalElement, cliToLaunch = null) {
+    async connect(terminalElement) {
         if (this.isConnected) {
             return;
         }
@@ -57,6 +61,8 @@ export class TerminalController {
             fontSize: 14,
             allowProposedApi: true,
             unicodeVersion: '11',
+            disableStdin: false,
+            cursorStyle: 'block',
             theme: {
                 background: '#1e1e1e',
                 foreground: '#d4d4d4',
@@ -101,14 +107,7 @@ export class TerminalController {
 
         this.socket.onopen = () => {
             this.isConnected = true;
-            console.log('Terminal WebSocket connected');
-
-            // Auto-launch CLI after connection is established
-            if (cliToLaunch) {
-                setTimeout(() => {
-                    this.socket.send(cliToLaunch + '\r');
-                }, 300);
-            }
+            console.log('Terminal WebSocket connected - CLI is already running');
         };
 
         this.socket.onmessage = async (event) => {
@@ -124,7 +123,9 @@ export class TerminalController {
 
         this.socket.onclose = () => {
             this.isConnected = false;
-            this.terminal.write('\r\n\x1b[33m[Terminal disconnected]\x1b[0m\r\n');
+            if (this.terminal) {
+                this.terminal.write('\r\n\x1b[33m[Terminal disconnected]\x1b[0m\r\n');
+            }
             console.log('Terminal WebSocket closed');
         };
 
@@ -256,47 +257,40 @@ export class TerminalController {
     async checkAndRestoreSession(container) {
         const status = await this.checkStatus();
         if (status.hasActiveSession) {
-            await this.showActiveTerminal(container, null); // Don't auto-launch CLI on restore
+            await this.showActiveTerminal(container);
         }
     }
 
     async startTerminal(container, selection) {
-        const success = await this.startSession();
-        if (!success) return;
-
-        let command = null;
         let displayName = null;
+        let cli = null;
+        let environmentName = null;
 
         if (selection.startsWith('base:')) {
-            // Base CLI: just the CLI name (sends directly to PTY shell)
-            command = selection.replace('base:', '');
-            displayName = command.charAt(0).toUpperCase() + command.slice(1);
+            // Base CLI
+            cli = selection.replace('base:', '');
+            displayName = cli.charAt(0).toUpperCase() + cli.slice(1);
         } else if (selection.startsWith('env:')) {
-            // Custom environment: env:id:cli — ask backend for the bootstrap command
+            // Custom environment: env:id:cli
             const parts = selection.split(':');
             const envId = parseInt(parts[1]);
             const cliType = parts[2];
             const env = this.app.data.environments.find(e => e.id === envId);
             const envName = env?.name || '';
             displayName = `${envName} (${cliType})`;
-
-            try {
-                const params = new URLSearchParams({ cli: cliType });
-                if (envName) params.append('environmentName', envName);
-                const result = await this.app.apiCall(
-                    `/api/v1/terminal/bootstrap-command?${params.toString()}`, 'GET');
-                command = result.command;
-            } catch (error) {
-                console.error('Failed to get bootstrap command:', error);
-                command = cliType; // Fallback to base CLI
-            }
+            cli = cliType;
+            environmentName = envName;
         }
 
-        await this.showActiveTerminal(container, command);
+        // Single API call - start session with CLI directly (like the CLI path)
+        const success = await this.startSession(cli, environmentName);
+        if (!success) return;
+
+        await this.showActiveTerminal(container);
         this.app.showToast('Terminal Started', `Launching ${displayName}...`, 'success');
     }
 
-    async showActiveTerminal(container, command) {
+    async showActiveTerminal(container) {
         const placeholder = container.querySelector('#terminal-placeholder');
         const terminalContainer = container.querySelector('#terminal-container');
         const terminalElement = container.querySelector('#terminal-element');
@@ -316,8 +310,8 @@ export class TerminalController {
             statusBadge.classList.add('bg-success');
         }
 
-        // Connect to the terminal and auto-launch the command
-        await this.connect(terminalElement, command);
+        // Connect to the terminal - CLI is already running in the PTY
+        await this.connect(terminalElement);
     }
 
     async stopTerminal(container) {

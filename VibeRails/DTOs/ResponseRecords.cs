@@ -204,11 +204,14 @@ namespace VibeRails.DTOs
 
     // Terminal Session DTOs
     public record TerminalStatusResponse(
-        bool HasActiveSession
+        bool HasActiveSession,
+        string? SessionId = null
     );
 
     public record StartTerminalRequest(
-        string? WorkingDirectory = null
+        string? WorkingDirectory = null,
+        string? Cli = null,
+        string? EnvironmentName = null
     );
 
     public record BootstrapCommandResponse(
@@ -340,6 +343,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(ReleaseAsset))]
     [JsonSerializable(typeof(List<ReleaseAsset>))]
+    // App Configuration (for app_config.json)
+    [JsonSerializable(typeof(Services.AppConfiguration))]
+    [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {
     }
