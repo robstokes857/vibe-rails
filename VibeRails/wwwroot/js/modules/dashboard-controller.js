@@ -254,10 +254,28 @@ export class DashboardController {
                 });
             }
 
+            const webUIButton = node.querySelector('[data-env-launch-webui]');
+            if (webUIButton) {
+                webUIButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    this.launchEnvInWebUI(env.id, env.name, env.cli);
+                });
+            }
+
             fragment.appendChild(node);
         });
 
         container.appendChild(fragment);
+    }
+
+    async launchEnvInWebUI(envId, envName, cli) {
+        this.app.showToast('Web UI Terminal', `Launching ${envName} (${cli})...`, 'info');
+
+        const terminalContent = document.querySelector('[data-terminal-content]');
+        if (terminalContent) {
+            const selection = `env:${envId}:${cli}`;
+            await this.app.terminalController.startTerminal(terminalContent, selection);
+        }
     }
 
     async launchVSCode() {

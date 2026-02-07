@@ -13,7 +13,7 @@
     <!-- Header -->
     <nav class="navbar navbar-dark sticky-top">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#" data-action="navigate-home">
+            <a class="navbar-brand animate-fade-up" href="#" data-action="navigate-home">
                 <img src="assets/img/logo.png" alt="Vibe Rails logo" class="brand-logo">
                 <span class="brand-text">Vibe Rails</span>
             </a>
@@ -44,7 +44,7 @@
     <!-- Templates -->
     <template id="main-menu-template">
         <div class="row">
-            <div class="col-md-6 col-lg-4 mb-4">
+            <div class="col-md-6 col-lg-4 mb-4 animate-fade-up delay-100">
                 <div class="card menu-card" data-action="navigate" data-view="agents">
                     <div class="card-body text-center">
                         <img class="cli-logo mb-3" src="assets/img/icons/agent.svg" alt="Agents logo" style="height: 48px;">
@@ -54,7 +54,7 @@
                 </div>
             </div>
 
-            <div class="col-md-6 col-lg-4 mb-4">
+            <div class="col-md-6 col-lg-4 mb-4 animate-fade-up delay-200">
                 <div class="card menu-card" data-action="navigate" data-view="config">
                     <div class="card-body text-center">
                         <img src="assets/img/icons/sliders-solid-full.svg" alt="Configuration" class="menu-icon-img mb-3">
@@ -69,10 +69,10 @@
 
     <template id="dashboard-template">
         <div class="dashboard" data-dashboard="unified">
-            <div class="row mb-4">
+            <div class="row mb-4 animate-fade-up delay-200">
                 <div class="col-12" data-context-heading-container></div>
             </div>
-            <div class="row mb-4">
+            <div class="row mb-4 animate-fade-up delay-400">
                 <div class="col-12">
                     <div class="row" data-local-quick-actions style="display: none;">
                         <div class="col-6 col-md-4 col-lg-2 mb-3">
@@ -133,7 +133,7 @@
                 </div>
             </div>
 
-            <div class="row mb-4" data-local-history-section style="display: none;">
+            <div class="row mb-4 animate-fade-up delay-600" data-local-history-section style="display: none;">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
@@ -157,7 +157,13 @@
                 </div>
             </div>
 
-            <div class="row mb-4" data-local-file-tree-section style="display: none;">
+            <div class="row mb-4 animate-fade-up delay-700" data-terminal-section style="display: none;">
+                <div class="col-12" data-terminal-content>
+                    <!-- Terminal panel will be rendered here by TerminalController -->
+                </div>
+            </div>
+
+            <div class="row mb-4 animate-fade-up delay-800" data-local-file-tree-section style="display: none;">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-header">
@@ -167,12 +173,6 @@
                             <div data-local-file-tree></div>
                         </div>
                     </div>
-                </div>
-            </div>
-
-            <div class="row mb-4" data-terminal-section style="display: none;">
-                <div class="col-12" data-terminal-content>
-                    <!-- Terminal panel will be rendered here by TerminalController -->
                 </div>
             </div>
 
@@ -195,6 +195,9 @@
                     </div>
                 </div>
                 <div class="project-actions ms-3 d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-primary px-3 d-flex align-items-center gap-2" type="button" data-env-launch-webui title="Launch in Web UI Terminal">
+                        Web UI
+                    </button>
                     <button class="btn btn-sm btn-primary project-launch px-3 d-flex align-items-center gap-2" type="button" data-env-launch>
                         <img data-env-launch-logo alt="" style="height: 16px; width: 16px;">
                         <span data-env-launch-text></span>
@@ -375,15 +378,6 @@
                         <div class="card-body text-center py-3">
                             <img class="cli-logo mb-2" src="assets/img/vscode.svg" alt="VS Code logo" style="height: 36px;">
                             <h6 class="menu-title mb-0">Edit in VS Code</h6>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-md-4 col-lg-3 mb-3">
-                    <div class="card menu-card danger-card h-100" data-agent-action="delete-agent">
-                        <div class="card-body text-center py-3">
-                            <span class="menu-icon">&#x26A0;&#xFE0F;</span>
-                            <h6 class="menu-title text-danger mb-0">Delete Agent</h6>
                         </div>
                     </div>
                 </div>

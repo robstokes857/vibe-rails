@@ -206,21 +206,6 @@ public static class AgentRoutes
             ));
         }).WithName("UpdateRuleEnforcement");
 
-        // DELETE /api/v1/agents?path={path} - Delete agent file
-        app.MapDelete("/api/v1/agents", async (
-            IAgentFileService agentService,
-            string path,
-            CancellationToken cancellationToken) =>
-        {
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            {
-                return Results.NotFound(new ErrorResponse($"Agent file not found: {path}"));
-            }
-
-            await agentService.DeleteAgentFileAsync(path, cancellationToken);
-            return Results.Ok(new OK("Agent file deleted"));
-        }).WithName("DeleteAgent");
-
         // GET /api/v1/agents/content?path={path} - Get raw agent file content
         app.MapGet("/api/v1/agents/content", async (
             IAgentFileService agentService,

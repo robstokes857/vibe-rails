@@ -98,14 +98,10 @@ if [ -n "$CHECKSUM_URL" ]; then
     echo -e "${GREEN}Checksum verified!${NC}"
 fi
 
-# Create install directory
-if [ -d "$INSTALL_DIR" ]; then
-    echo -e "${YELLOW}Removing existing installation...${NC}"
-    rm -rf "$INSTALL_DIR"
-fi
+# Create install directory if it doesn't exist
 mkdir -p "$INSTALL_DIR"
 
-# Extract
+# Extract (overwrites app files, preserves user data like state.db, envs/, etc.)
 echo -e "${CYAN}Extracting to $INSTALL_DIR...${NC}"
 tar -xzf "$TAR_PATH" -C "$INSTALL_DIR"
 
