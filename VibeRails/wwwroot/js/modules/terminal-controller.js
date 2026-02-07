@@ -48,9 +48,17 @@ export class TerminalController {
     }
 
     async connect(terminalElement) {
-        if (this.isConnected) {
-            return;
+        // Clean up any stale state from previous navigation
+        // (DOM was destroyed but our references weren't cleared)
+        if (this.terminal) {
+            try { this.terminal.dispose(); } catch (e) { /* already disposed */ }
+            this.terminal = null;
         }
+        if (this.socket) {
+            try { this.socket.close(); } catch (e) { /* already closed */ }
+            this.socket = null;
+        }
+        this.isConnected = false;
 
         // Initialize xterm.js with Unicode support
         this.terminal = new Terminal({
