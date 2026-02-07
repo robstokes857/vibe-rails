@@ -111,7 +111,7 @@ namespace VibeRails.Services.LlmClis.Launchers
 
             return new LaunchResult(
                 Success: true,
-                Message: $"{CliExecutable} launched in new terminal window via LMBootstrap",
+                Message: $"{CliExecutable} launched in new terminal window with session tracking",
                 ProcessId: null
             );
         }
@@ -146,7 +146,7 @@ namespace VibeRails.Services.LlmClis.Launchers
 
             return new LaunchResult(
                 Success: true,
-                Message: $"{CliExecutable} launched in new terminal window via LMBootstrap",
+                Message: $"{CliExecutable} launched in new terminal window with session tracking",
                 ProcessId: null
             );
         }
@@ -194,7 +194,7 @@ namespace VibeRails.Services.LlmClis.Launchers
 
                     return new LaunchResult(
                         Success: true,
-                        Message: $"{CliExecutable} launched in {terminal} via LMBootstrap",
+                        Message: $"{CliExecutable} launched in {terminal} with session tracking",
                         ProcessId: null
                     );
                 }

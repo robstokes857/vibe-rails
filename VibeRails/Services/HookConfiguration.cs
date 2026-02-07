@@ -12,5 +12,6 @@ namespace VibeRails.Services
         public string InstallDirName { get; set; } = "";
         public string ExecutableName { get; set; } = "";
         public HookConfiguration Hooks { get; set; } = new();
+        public string FrontendUrl { get; set; } = "http://localhost:5164";
     }
 }

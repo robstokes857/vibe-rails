@@ -2,41 +2,43 @@
 
 ## Environment Launcher (--env)
 
-The `--env` flag launches an LLM CLI with environment isolation. It's the core mechanism behind
-both the Web UI terminal and the `vb launch` command.
+The `--env` flag launches an LLM CLI with environment isolation and session tracking. It's the core mechanism behind both the Web UI terminal and the `vb launch` command.
 
 ### Aliases
 
-`--env`, `--environment`, and `--lmbootstrap` all do the same thing. They set `IsLMBootstrap = true`
-and store the value in `LMBootstrapCli`.
+`--env`, `--environment`, and `--lmbootstrap` all do the same thing. They set `IsLMBootstrap = true` and store the value in `LMBootstrapCli` (property names kept for backward compatibility).
 
 ### Smart Resolution
 
 The value passed to `--env` is resolved in this order:
 
 1. **LLM enum match** (case-insensitive: claude, codex, gemini) — launch that CLI with default config
-2. **Custom environment name** — look up in DB via `FindEnvironmentByNameAsync()`, find which CLI it's associated with, load its config
+2. **Custom environment name** — look up in DB via `GetEnvironmentByNameAsync()`, find which CLI it's associated with, load its config
 
 ### Working Directory Resolution
 
 `--workdir` is optional:
 1. If `--workdir <path>` is provided — use that path
 2. Else — detect git root from current directory (`git rev-parse --show-toplevel`)
-3. If neither works — error with helpful message
+3. If neither works — use current directory
 
-### What LMBootstrap Does
+### How It Works
 
-When `vb --env <value>` runs, [LMBootstrap.cs](../LMBootstrap.cs) handles it:
+When `vb --env <value>` runs, [CliLoop.cs → RunTerminalSessionAsync()](../CliLoop.cs) handles it:
 
 1. Resolves the value to an LLM type + optional environment name
 2. Resolves working directory (--workdir or git root)
-3. If custom environment: sets isolated config env vars on its PTY
-   - Claude: `CLAUDE_CONFIG_DIR` → `{envPath}/{envName}/claude`
-   - Codex: `CODEX_HOME` → `{envPath}/{envName}/codex`
-   - Gemini: `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, etc. → `{envPath}/{envName}/gemini/*`
-4. Creates a session in the database for logging
-5. Launches the CLI executable (claude/codex/gemini) inside the PTY
-6. Tracks user inputs and terminal output
+3. Creates a `TerminalSession` for tracking (database session, git changes, logging)
+4. Creates a `PtyService` to manage the PTY process
+5. If custom environment: `LlmCliEnvironmentService` sets isolated config env vars
+   - Claude: `CLAUDE_CONFIG_DIR` → `~/.config/{cli}/{envName}/claude`
+   - Codex: `CODEX_HOME` → `~/.config/{cli}/{envName}/codex`
+   - Gemini: `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, etc. → `~/.config/{cli}/{envName}/gemini/*`
+6. Launches the CLI executable (claude/codex/gemini) inside the PTY
+7. Tracks user inputs, terminal output, and git file changes
+8. Completes session with exit code when PTY exits
+
+See [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for details on `TerminalSession` and `PtyService`.
 
 ### Examples
 
@@ -55,13 +57,12 @@ vb --environment codex                  # Same as --env codex
 
 ## Command Router
 
-[CommandRouter.cs](CommandRouter.cs) routes CLI commands to their handlers. CLI commands are checked
-**before** LMBootstrap mode, so `vb launch claude --env research` routes to `LaunchCommands` (not LMBootstrap).
+[CommandRouter.cs](CommandRouter.cs) routes CLI commands to their handlers. CLI commands are checked **before** environment launcher mode, so `vb launch claude --env research` routes to `LaunchCommands` (not the environment launcher).
 
 ### Command Priority
 
 1. Known commands (`env`, `agent`, `rules`, `validate`, `hooks`, `launch`, `gemini`, `codex`, `claude`) — handled by `CommandRouter`
-2. `--env` / `--lmbootstrap` flag — handled by `LMBootstrap`
+2. `--env` / `--environment` / `--lmbootstrap` flag — handled by `CliLoop.RunTerminalSessionAsync()`
 3. No arguments — launches web server
 
 ## Files
@@ -80,5 +81,5 @@ vb --environment codex                  # Same as --env codex
 | [Commands/CodexCommands.cs](Commands/CodexCommands.cs) | `vb codex` — Codex CLI settings |
 | [Commands/ClaudeCommands.cs](Commands/ClaudeCommands.cs) | `vb claude` — Claude CLI settings |
 
-See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for Web UI terminal details.
+See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for Web UI terminal and session tracking details.
 See also: [Services/LlmClis/Launchers/AGENTS.md](../Services/LlmClis/Launchers/AGENTS.md) for launcher internals.

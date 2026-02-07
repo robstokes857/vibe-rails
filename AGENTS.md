@@ -48,7 +48,6 @@ VibeControl2/
 ├── VibeRails/                      # Main ASP.NET Core application
 │   ├── Program.cs                  # Entry point (web server + CLI loop)
 │   ├── Init.cs                     # Dependency injection setup
-│   ├── LMBootstrap.cs              # Terminal-based LLM CLI wrapper mode
 │   ├── CliLoop.cs                  # CLI interaction loop
 │   ├── Routes.cs                   # API endpoint definitions
 │   │
@@ -143,18 +142,18 @@ vb
 - Provides REST API for managing agents, environments, sessions
 - Runs background CLI loop (currently minimal)
 
-#### 2. LMBootstrap Mode (CLI Wrapper)
+#### 2. Terminal Session Mode (CLI Wrapper)
 ```bash
-vb --env claude                    # Launch base CLI
+vb --env claude                    # Launch base CLI with session tracking
 vb --env "my-research-setup"       # Launch custom environment (DB lookup)
 vb --env gemini --workdir /project # Explicit working directory
 ```
 - Unified `--env` flag (`--environment` and `--lmbootstrap` are aliases)
 - Smart resolution: LLM name → base CLI, otherwise → custom environment DB lookup
-- `--workdir` optional: uses git root if available, required only outside git repos
+- `--workdir` optional: uses git root if available, falls back to current directory
 - Wraps LLM CLI execution (claude/codex/gemini) with environment isolation
-- Captures terminal output for session logging
-- Stores session data in SQLite database
+- Full session tracking: database logging, user input tracking, git change detection
+- Stores session data in SQLite database with complete history
 
 See [Cli/AGENTS.md](VibeRails/Cli/AGENTS.md) for full details.
 
@@ -180,17 +179,23 @@ Browser renders agent list with rules
 ```
 vb --env myenv (or vb --env claude)
   ↓
-LMBootstrap.RunAsync()
+CliLoop.RunTerminalSessionAsync()
   ↓ Smart resolves: LLM name → base CLI, custom name → DB lookup
   ↓ Resolves working directory (--workdir or git root)
-  ↓ Gets/creates environment record (if custom env)
-  ↓ Creates EzTerminal wrapper (PtyNet)
-  ↓ Sets isolated config env vars (CLAUDE_CONFIG_DIR, CODEX_HOME, XDG_*, etc.)
+  ↓ Creates TerminalSession (session lifecycle)
+  ↓ Creates PtyService (PTY management)
+  ↓ Sets isolated config env vars via LlmCliEnvironmentService
+  ↓   - CLAUDE_CONFIG_DIR, CODEX_HOME, XDG_*, etc.
+  ↓ Spawns PTY via EzTerminal with output/input handlers
   ↓ Executes: claude [args]
   ↓
-Terminal output → TerminalOutputFilter → DbService.LogSessionOutputAsync()
+Terminal output → TerminalOutputFilter → TerminalSession.HandleOutput()
   ↓
-SQLite: Sessions & SessionLogs tables
+Terminal input → InputAccumulator → TerminalSession.HandleInput()
+  ↓
+Git changes tracked on each user input (Enter key)
+  ↓
+SQLite: Sessions, SessionLogs, UserInputs, InputFileChanges tables
 ```
 
 #### Multi-LLM Environment Management
@@ -230,16 +235,23 @@ Preselected environment auto-selected in dropdown
   ↓
 User clicks "Start" → startTerminal() parses selection
   ↓
-If base CLI: sends "claude\r" directly to PTY
-If custom env: calls GET /api/v1/terminal/bootstrap-command
+Single API call: POST /api/v1/terminal/start
+  Body: { cli: "Gemini", environmentName: "test_g" }
   ↓
-Backend returns: vb --env "{envName}" --workdir "{dir}"
+Backend: TerminalRoutes.cs resolves LLM enum, fetches custom args from DB
   ↓
-Command sent to PTY shell via WebSocket (/api/v1/terminal/ws)
+TerminalSessionService.StartSessionAsync() spawns LLM CLI directly in PTY
+  ↓ Creates TerminalSession for tracking
+  ↓ Sets isolated environment vars (XDG_CONFIG_HOME, etc.)
+  ↓ Spawns: gemini --yolo (with environment isolation)
   ↓
-LMBootstrap resolves env name → sets config env vars → launches CLI
+Frontend connects WebSocket to /api/v1/terminal/ws
   ↓
-CLI runs with isolated environment configuration active
+Bidirectional byte stream: PTY ↔ WebSocket
+  ↓ Output teed to session tracking (DB logging)
+  ↓ Input teed to session tracking (git change detection)
+  ↓
+CLI runs with full session tracking (same as CLI path)
 ```
 
 #### MCP Architecture
@@ -537,7 +549,7 @@ project-root/
 └── src/
 ```
 
-### Environment Variables (LMBootstrap Mode)
+### Environment Variables (Terminal Session Mode)
 
 **Claude**:
 ```bash
@@ -812,7 +824,7 @@ builder.Logging.SetMinimumLevel(LogLevel.Debug);
 - Input validation on all MCP tool calls
 
 ### Process Security
-- LMBootstrap mode uses pseudo-terminal (PTY) for safe terminal emulation
+- Terminal session mode uses pseudo-terminal (PTY) for safe terminal emulation
 - No shell injection vulnerabilities in CLI launching
 - Terminal output filtered before database storage
 

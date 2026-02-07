@@ -340,5 +340,23 @@ model = ""o3""
 
         public Task RecordUserInputAsync(string sessionId, string inputText, IGitService gitService, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task<long> CreateClaudePlanAsync(string sessionId, long? userInputId, string? planFilePath, string planContent, string? summary)
+            => Task.FromResult(0L);
+
+        public Task<ClaudePlanRecord?> GetClaudePlanAsync(long planId, CancellationToken cancellationToken)
+            => Task.FromResult<ClaudePlanRecord?>(null);
+
+        public Task<List<ClaudePlanRecord>> GetClaudePlansForSessionAsync(string sessionId, CancellationToken cancellationToken)
+            => Task.FromResult(new List<ClaudePlanRecord>());
+
+        public Task<List<ClaudePlanRecord>> GetRecentClaudePlansAsync(int limit, CancellationToken cancellationToken)
+            => Task.FromResult(new List<ClaudePlanRecord>());
+
+        public Task UpdateClaudePlanStatusAsync(long planId, string status)
+            => Task.CompletedTask;
+
+        public Task CompleteClaudePlanAsync(long planId)
+            => Task.CompletedTask;
     }
 }
