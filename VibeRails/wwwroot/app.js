@@ -227,7 +227,7 @@ export class VibeControlApp {
 
     loadView(view, data = {}) {
         const views = {
-            'dashboard': () => this.dashboardController.loadDashboard(),
+            'dashboard': () => this.dashboardController.loadDashboard(data),
             'launch-cli': () => this.cliLauncher.loadLaunchCLI(),
             'agents': () => this.agentController.loadAgents(),
             'agent-edit': () => this.agentController.loadAgentEdit(data),

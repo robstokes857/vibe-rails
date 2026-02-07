@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using VibeRails.Services;
+using VibeRails.Services.VCA;
 
 namespace VibeRails.Utils
 {
@@ -16,8 +17,7 @@ namespace VibeRails.Utils
             var scopedServices = scope.ServiceProvider;
 
             var gitService = scopedServices.GetRequiredService<IGitService>();
-            var agentFileService = scopedServices.GetRequiredService<IAgentFileService>();
-            var validationService = scopedServices.GetRequiredService<IRuleValidationService>();
+            var validationService = scopedServices.GetRequiredService<VibeRails.Services.VCA.ValidationService>();
 
             var args = Configs.GetAarguments();
             var isPreCommit = args.PreCommit;
@@ -31,51 +31,34 @@ namespace VibeRails.Utils
                     return 2;
                 }
 
-                var changedFiles = isPreCommit
-                    ? await gitService.GetStagedFilesAsync(CancellationToken.None)
-                    : await gitService.GetChangedFileAsync(CancellationToken.None);
+                // Run new modular validation service
+                var results = await validationService.ValidateAsync(rootPath, isPreCommit, CancellationToken.None);
 
-                if (changedFiles.Count == 0)
+                if (results.TotalFiles == 0)
                 {
                     Console.WriteLine("No files to validate");
                     return 0;
                 }
 
-                var agentFiles = await agentFileService.GetAgentFiles(CancellationToken.None);
-                var allRulesWithSource = new List<(RuleWithEnforcement Rule, string SourceFile)>();
-
-                foreach (var agentFile in agentFiles)
-                {
-                    var rules = await agentFileService.GetRulesWithEnforcementAsync(
-                        agentFile, CancellationToken.None);
-                    foreach (var rule in rules)
-                    {
-                        allRulesWithSource.Add((rule, agentFile));
-                    }
-                }
-
-                if (allRulesWithSource.Count == 0)
+                if (results.TotalRules == 0)
                 {
                     Console.WriteLine("No VCA rules defined");
                     return 0;
                 }
 
-                // Convert to RuleWithSource list for proper validation
-                var rulesWithSource = allRulesWithSource
-                    .Select(r => new RuleWithSource(r.Rule, r.SourceFile))
+                // Convert new result format to old format for OutputResults
+                var resultsWithSource = results.Results
+                    .Select(r => (
+                        Result: new ValidationResult(
+                            r.RuleName,
+                            r.Enforcement,
+                            r.Passed,
+                            r.Message,
+                            r.FilePath != null ? new List<string> { r.FilePath } : null),
+                        SourceFile: r.SourceFile))
                     .ToList();
 
-                var results = await validationService.ValidateWithSourceAsync(
-                    changedFiles, rulesWithSource, rootPath, CancellationToken.None);
-
-                // Map results back to source files
-                var resultsWithSource = new List<(ValidationResult Result, string SourceFile)>();
-                for (int i = 0; i < results.Results.Count && i < allRulesWithSource.Count; i++)
-                {
-                    resultsWithSource.Add((results.Results[i], allRulesWithSource[i].SourceFile));
-                }
-
-                return OutputResults(resultsWithSource, changedFiles.Count, rootPath);
+                return OutputResults(resultsWithSource, results.TotalFiles, rootPath);
             }
             catch (Exception ex)
             {
@@ -138,9 +121,9 @@ namespace VibeRails.Utils
                     return 0;
                 }
 
-                // Convert to RuleWithSource list for proper validation
+                // Convert to RuleWithSource list for proper validation (using OLD validation service)
                 var rulesWithSource = allRulesWithSource
-                    .Select(r => new RuleWithSource(r.Rule, r.SourceFile))
+                    .Select(r => new VibeRails.Services.RuleWithSource(r.Rule, r.SourceFile))
                     .ToList();
 
                 var results = await validationService.ValidateWithSourceAsync(
@@ -232,19 +215,39 @@ namespace VibeRails.Utils
 
                 if (install)
                 {
-                    var success = await hookService.InstallHooksAsync(rootPath, CancellationToken.None);
-                    Console.WriteLine(success
-                        ? "VCA hooks installed successfully (pre-commit + commit-msg)"
-                        : "Failed to install hooks");
-                    return success ? 0 : 1;
+                    var result = await hookService.InstallHooksAsync(rootPath, CancellationToken.None);
+                    if (result.Success)
+                    {
+                        Console.WriteLine("VCA hooks installed successfully (pre-commit + commit-msg)");
+                        return 0;
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine($"Failed to install hooks: {result.ErrorMessage}");
+                        if (result.Details != null)
+                        {
+                            Console.Error.WriteLine($"Details: {result.Details}");
+                        }
+                        return 1;
+                    }
                 }
                 else
                 {
-                    var success = await hookService.UninstallHooksAsync(rootPath, CancellationToken.None);
-                    Console.WriteLine(success
-                        ? "VCA hooks uninstalled"
-                        : "Failed to uninstall hooks");
-                    return success ? 0 : 1;
+                    var result = await hookService.UninstallHooksAsync(rootPath, CancellationToken.None);
+                    if (result.Success)
+                    {
+                        Console.WriteLine("VCA hooks uninstalled");
+                        return 0;
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine($"Failed to uninstall hooks: {result.ErrorMessage}");
+                        if (result.Details != null)
+                        {
+                            Console.Error.WriteLine($"Details: {result.Details}");
+                        }
+                        return 1;
+                    }
                 }
             }
             catch (Exception ex)

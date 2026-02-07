@@ -60,6 +60,7 @@ namespace VibeRails.Cli
                 },
                 new Dictionary<string, string>
                 {
+                    ["--env <name>"] = "Launch a CLI or custom environment directly",
                     ["--help, -h"] = "Show this help message",
                     ["--version, -v"] = "Show version information"
                 }

@@ -7,6 +7,20 @@ This directory contains the CLI launcher implementations for different LLM provi
 2. Specifying environment variable configuration
 3. Launching the CLI in platform-specific terminals
 
+## Unified `--env` Flag
+
+All launchers build commands using the unified `--env` flag:
+
+- **Custom environment**: `vb --env "{envName}" --workdir "{dir}"`
+- **Base CLI (no custom env)**: `vb --env {cliName} --workdir "{dir}"`
+
+The `--env`, `--environment`, and `--lmbootstrap` flags are all aliases — they all trigger
+LMBootstrap mode. The value is resolved smartly:
+1. If it matches an LLM enum name (claude/codex/gemini, case-insensitive) → base CLI launch
+2. Otherwise → custom environment name, looked up in DB via `FindEnvironmentByNameAsync()`
+
+See [Cli/AGENTS.md](../../../Cli/AGENTS.md) for full details on how `--env` resolution works.
+
 ## Architecture
 
 ```

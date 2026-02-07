@@ -54,6 +54,11 @@ namespace VibeRails.Cli.Commands
             Console.WriteLine("  vb launch codex --dir /path/to/project");
             Console.WriteLine("  vb launch gemini -- --model gemini-pro");
             Console.WriteLine("  vb launch vscode");
+            Console.WriteLine();
+            Console.WriteLine("Or use --env directly:");
+            Console.WriteLine("  vb --env claude                    # Launch Claude with default config");
+            Console.WriteLine("  vb --env \"my-claude-setup\"         # Launch custom environment by name");
+            Console.WriteLine("  vb --env gemini --workdir /project # Launch with specific directory");
 
             return 0;
         }
@@ -78,7 +83,7 @@ namespace VibeRails.Cli.Commands
                 return 1;
             }
 
-            var envName = args.Env;
+            var envName = args.LMBootstrapCli;
             var extraArgs = args.ExtraArgs ?? Array.Empty<string>();
 
             CliOutput.Info($"Launching {llm} CLI...");

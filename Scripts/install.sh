@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install.sh - Install VibeRails (vb) on Linux/macOS
-# Usage: curl -fsSL https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash
+# Usage: wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash
 
 set -euo pipefail
 
@@ -41,7 +41,7 @@ if [ "$OS_TYPE" = "macos" ]; then
 fi
 
 # Check for required tools
-for cmd in curl tar sha256sum; do
+for cmd in wget tar sha256sum; do
     if ! command -v "$cmd" &> /dev/null; then
         echo -e "${RED}Error: Required command '$cmd' not found.${NC}"
         exit 1
@@ -52,7 +52,7 @@ done
 echo -e "${CYAN}Fetching latest release...${NC}"
 RELEASE_URL="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
 
-RELEASE_JSON=$(curl -fsSL -H "User-Agent: VibeRails-Installer" "$RELEASE_URL") || {
+RELEASE_JSON=$(wget -qO- --header="User-Agent: VibeRails-Installer" "$RELEASE_URL") || {
     echo -e "${RED}Error: Could not fetch release info. Check your internet connection.${NC}"
     exit 1
 }
@@ -78,11 +78,11 @@ TAR_PATH="$TEMP_DIR/$ASSET_NAME"
 CHECKSUM_PATH="$TEMP_DIR/$ASSET_NAME.sha256"
 
 echo -e "${CYAN}Downloading $ASSET_NAME...${NC}"
-curl -fsSL -o "$TAR_PATH" "$TAR_URL"
+wget -q -O "$TAR_PATH" "$TAR_URL"
 
 if [ -n "$CHECKSUM_URL" ]; then
     echo -e "${CYAN}Downloading checksum...${NC}"
-    curl -fsSL -o "$CHECKSUM_PATH" "$CHECKSUM_URL"
+    wget -q -O "$CHECKSUM_PATH" "$CHECKSUM_URL"
 
     # Verify checksum
     echo -e "${CYAN}Verifying checksum...${NC}"

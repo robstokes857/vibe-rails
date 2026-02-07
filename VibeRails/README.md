@@ -1,6 +1,6 @@
-# Vibe-Rails
+# VibeRails
 
-**Vibe-Rails** is an opinionated framework that helps keep AI coding assistants from going off the rails.
+**VibeRails** is an opinionated framework that helps keep AI coding assistants from going off the rails.
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-3178C6)](https://www.typescriptlang.org/)
@@ -97,7 +97,7 @@ Press `F5` to launch the extension in development mode, then click the VibeRails
 
 ## Architecture
 
-Vibe-Rails consists of four main components:
+VibeRails consists of four main components:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -856,6 +856,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Built with modern .NET 10.0, Native AOT compilation, and the Model Context Protocol for next-generation AI development workflows.
 
-**Last Updated**: 2026-01-31
-**Version**: 2.0
+**Last Updated**: 2026-02-05
+**Version**: 1.1.5
 **Maintained By**: Robert Stokes

@@ -21,7 +21,7 @@ This will:
 Open terminal and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash
+wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash
 ```
 
 This will:

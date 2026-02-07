@@ -9,7 +9,7 @@
     },
     "LM_Bootstrap_Gemini": {
       "commandName": "Project",
-      "commandLineArgs": "--lmbootstrap gemini",
+      "commandLineArgs": "--lmbootstrap Gemini --env \"Gemini YOLO\"",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },

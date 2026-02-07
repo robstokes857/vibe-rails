@@ -86,6 +86,24 @@ namespace VibeRails.DB
             return null;
         }
 
+        public async Task<LLM_Environment?> FindEnvironmentByNameAsync(string name, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectEnvironmentByName;
+            cmd.Parameters.AddWithValue("$customName", name);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                return ReadEnvironment(reader);
+            }
+
+            return null;
+        }
+
         public async Task<LLM_Environment> GetOrCreateEnvironmentAsync(string name, LLM llm, CancellationToken cancellationToken = default)
         {
             var existing = await GetEnvironmentByNameAndLlmAsync(name, llm, cancellationToken);

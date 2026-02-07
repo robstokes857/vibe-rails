@@ -9,7 +9,7 @@
     <AssemblyName>vb</AssemblyName>
     <RootNamespace>VibeRails</RootNamespace>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-    <Version>1.0.0</Version>
+    <Version>1.1.5</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -42,6 +42,11 @@
   <ItemGroup>
     <Content Include="..\Scripts\install.ps1" Link="install.ps1" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\Scripts\install.sh" Link="install.sh" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Copy hook scripts to output directory -->
+  <ItemGroup>
+    <Content Include="scripts\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

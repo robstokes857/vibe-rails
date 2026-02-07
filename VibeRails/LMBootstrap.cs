@@ -13,30 +13,66 @@ public static class LMBootstrap
     public static async Task RunAsync(IServiceProvider services)
     {
         var args = Configs.GetAarguments();
-        var cli = args.LMBootstrapCli ?? throw new ArgumentException("CLI name required");
-        var envName = args.Env;
-
-        LLM llm = Enum.TryParse<LLM>(cli, true, out var parsedLlm) ? parsedLlm : LLM.NotSet;
-        if (llm == LLM.NotSet)
-        {
-            throw new ArgumentException($"Unsupported CLI/LLM: {cli}");
-        }
+        var envInput = args.LMBootstrapCli ?? throw new ArgumentException("CLI or environment name required");
 
         // Create a scope for scoped services
         using var scope = services.CreateScope();
         var scopedServices = scope.ServiceProvider;
 
         var gitService = scopedServices.GetRequiredService<IGitService>();
-
-        string workDir = await gitService.GetRootPathAsync();
-        ArgumentNullException.ThrowIfNullOrWhiteSpace(workDir);
         var repo = scopedServices.GetRequiredService<IRepository>();
 
-        // Only persist environment if user provided a name; otherwise use defaults without saving
-        LLM_Environment? env = null;
+        // Smart resolution: is it an LLM name (claude/codex/gemini) or a custom environment name?
+        LLM llm;
+        string? envName = null;
+
+        if (Enum.TryParse<LLM>(envInput, true, out var parsedLlm) && parsedLlm != LLM.NotSet)
+        {
+            // It's a base CLI name (claude, codex, gemini)
+            llm = parsedLlm;
+        }
+        else
+        {
+            // It's a custom environment name — look it up in the DB
+            var env = await repo.FindEnvironmentByNameAsync(envInput);
+            if (env == null)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Error: '{envInput}' is not a recognized CLI or environment name.");
+                Console.ResetColor();
+                Console.WriteLine("Valid CLIs: claude, codex, gemini");
+                Console.WriteLine("Or create a custom environment: vb env create <name> --cli <claude|codex|gemini>");
+                return;
+            }
+            llm = env.LLM;
+            envName = env.CustomName;
+        }
+
+        var cli = llm.ToString().ToLowerInvariant();
+
+        // --workdir is optional: use it if provided, otherwise detect from git repo
+        string? workDir = !string.IsNullOrEmpty(args.WorkDir)
+            ? args.WorkDir
+            : await gitService.GetRootPathAsync();
+
+        if (string.IsNullOrWhiteSpace(workDir))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Error: No working directory found.");
+            Console.ResetColor();
+            Console.WriteLine("Either run from inside a git repository or pass --workdir <path>.");
+            Console.WriteLine();
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  vb --env claude --workdir /path/to/project");
+            Console.WriteLine("  cd /path/to/project && vb --env claude");
+            return;
+        }
+
+        // Only persist environment if using a custom environment name
+        LLM_Environment? envRecord = null;
         if (!string.IsNullOrEmpty(envName))
         {
-            env = await repo.GetOrCreateEnvironmentAsync(envName, llm);
+            envRecord = await repo.GetOrCreateEnvironmentAsync(envName, llm);
         }
 
         var extraArgs = args.ExtraArgs.ToList();
@@ -180,19 +216,5 @@ public static class LMBootstrap
         var dbService = new DbService();
         dbService.InitializeDatabase();
         return dbService;
-    }
-
-    private static string? GetGitRepoRoot(string startPath)
-    {
-        var dir = new DirectoryInfo(startPath);
-        while (dir != null)
-        {
-            if (Directory.Exists(Path.Combine(dir.FullName, ".git")))
-            {
-                return dir.FullName;
-            }
-            dir = dir.Parent;
-        }
-        return null;
     }
 }

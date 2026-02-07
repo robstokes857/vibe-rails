@@ -3,7 +3,7 @@ export class DashboardController {
         this.app = app;
     }
 
-    async loadDashboard() {
+    async loadDashboard(data = {}) {
         await this.app.refreshDashboardData();
 
         // Fetch custom project name if in local context
@@ -23,10 +23,10 @@ export class DashboardController {
         if (!content) return;
 
         content.innerHTML = '';
-        content.appendChild(this.renderUnifiedDashboard());
+        content.appendChild(this.renderUnifiedDashboard(data));
     }
 
-    renderUnifiedDashboard() {
+    renderUnifiedDashboard(data = {}) {
         const fragment = this.app.cloneTemplate('dashboard-template');
         const root = fragment.querySelector('[data-dashboard]');
         if (!root) return fragment;
@@ -161,7 +161,11 @@ export class DashboardController {
             const terminalContent = terminalSection.querySelector('[data-terminal-content]');
             if (terminalContent) {
                 terminalContent.innerHTML = this.app.terminalController.renderTerminalPanel();
-                this.app.terminalController.bindTerminalActions(terminalContent);
+                // Pass preselected environment ID if navigating from environments page
+                this.app.terminalController.bindTerminalActions(
+                    terminalContent,
+                    data.preselectedEnvId || null
+                );
             }
         }
 
@@ -258,7 +262,7 @@ export class DashboardController {
 
     async launchVSCode() {
         try {
-            const response = await this.app.apiCall('/api/cli/launch/vscode', 'POST');
+            const response = await this.app.apiCall('/api/v1/cli/launch/vscode', 'POST');
             this.app.showToast('VS Code', response.message || 'VS Code launched successfully', 'success');
         } catch (error) {
             this.app.showError('Failed to launch VS Code');

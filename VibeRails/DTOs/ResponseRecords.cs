@@ -211,6 +211,24 @@ namespace VibeRails.DTOs
         string? WorkingDirectory = null
     );
 
+    public record BootstrapCommandResponse(
+        string Command
+    );
+
+    // Version/Update DTOs
+    public record VersionResponse(
+        string Version
+    );
+
+    public record ApiVersionResponse(
+        string ApiVersion,
+        string AppVersion
+    );
+
+    public record MessageResponse(
+        string Message
+    );
+
     // Claude Plan DTOs
     public record ClaudePlanRecord(
         long Id,
@@ -308,13 +326,17 @@ namespace VibeRails.DTOs
     // Terminal Session DTOs
     [JsonSerializable(typeof(TerminalStatusResponse))]
     [JsonSerializable(typeof(StartTerminalRequest))]
+    [JsonSerializable(typeof(BootstrapCommandResponse))]
     // Claude Plan DTOs
     [JsonSerializable(typeof(ClaudePlanRecord))]
     [JsonSerializable(typeof(List<ClaudePlanRecord>))]
     [JsonSerializable(typeof(CreateClaudePlanRequest))]
     [JsonSerializable(typeof(UpdateClaudePlanStatusRequest))]
     [JsonSerializable(typeof(ClaudePlanListResponse))]
-    // Update DTOs
+    // Version/Update DTOs
+    [JsonSerializable(typeof(VersionResponse))]
+    [JsonSerializable(typeof(ApiVersionResponse))]
+    [JsonSerializable(typeof(MessageResponse))]
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(ReleaseAsset))]
     [JsonSerializable(typeof(List<ReleaseAsset>))]
