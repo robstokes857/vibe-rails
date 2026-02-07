@@ -101,6 +101,11 @@ try {
     Write-Host ""
     Write-Host "Installation complete!" -ForegroundColor Green
     Write-Host ""
+    Write-Host "Installed to: $InstallDir" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "To get started, open a NEW terminal and run:" -ForegroundColor Yellow
+    Write-Host "  vb --help" -ForegroundColor White
+    Write-Host ""
 
 } finally {
     # Cleanup
