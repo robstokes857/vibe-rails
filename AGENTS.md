@@ -798,7 +798,7 @@ builder.Logging.SetMinimumLevel(LogLevel.Debug);
 - Test MCP tools independently
 
 ### Pull Request Process
-1. Create feature branch from `master`
+1. Create feature branch from `main`
 2. Implement changes with tests
 3. Update documentation (this file if architecture changes)
 4. Run `dotnet test` to verify all tests pass
