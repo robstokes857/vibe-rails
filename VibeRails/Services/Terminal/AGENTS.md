@@ -26,7 +26,8 @@ xterm.js terminal emulator:
 - **xterm.js** - Terminal UI with Unicode 11 support
 - **Cascadia Code font** - Proper rendering of box-drawing characters
 - **WebSocket client** - Connects to backend PTY
-- **CLI dropdown** - Select Claude, Codex, or Gemini to auto-launch
+- **CLI dropdown** - Select base CLIs or custom environments via optgroups
+- **Bootstrap command** - Custom environments call backend to get the full `vb --env` command
 
 ### API Routes
 
@@ -36,6 +37,19 @@ xterm.js terminal emulator:
 | `/api/v1/terminal/start` | POST | Start a new PTY session |
 | `/api/v1/terminal/stop` | POST | Stop the active PTY session |
 | `/api/v1/terminal/ws` | WebSocket | Bidirectional PTY communication |
+| `/api/v1/terminal/bootstrap-command` | GET | Get the `vb --env` command for launching a CLI with environment config |
+
+### Bootstrap Command Endpoint
+
+```
+GET /api/v1/terminal/bootstrap-command?cli={type}&environmentName={name}
+```
+
+Returns the full command to send to the PTY shell. The frontend sends this command
+to the already-running PTY via WebSocket. Inside the PTY, `vb --env` starts LMBootstrap,
+which sets up isolated config env vars and launches the CLI.
+
+See [Cli/AGENTS.md](../../Cli/AGENTS.md) for how `--env` / LMBootstrap works.
 
 ## What We Did
 
@@ -44,14 +58,18 @@ xterm.js terminal emulator:
 3. **Added CLI selector** - Dropdown to pick which LLM CLI to launch
 4. **Auto-launch CLI** - Selected CLI runs automatically after terminal connects
 5. **Proper fonts** - Cascadia Code/Mono for box-drawing characters
+6. **Custom environment support** - Dropdown shows optgroups for base CLIs and custom environments
+7. **Bootstrap command endpoint** - Backend builds the `vb --env` command so frontend doesn't need to know about exe paths or working directories
+8. **"Web UI" button** - Environments page has a button that navigates to dashboard with environment pre-selected
 
 ## What Was Removed (Intentionally)
 
 - Session tracking and database logging
-- Environment overrides (CLAUDE_CONFIG_DIR, CODEX_HOME, etc.)
 - Input accumulator for keystroke tracking
 - Claude agent sync (CLAUDE.md/AGENTS.md)
 - Git commit hash tracking
+
+Note: Environment config isolation is handled by LMBootstrap (runs inside the PTY), not by the terminal service itself.
 
 ## Future Enhancements
 
@@ -65,11 +83,6 @@ xterm.js terminal emulator:
 - Frontend can capture LLM output (debounced after 500ms silence)
 - Send to backend API for storage
 - Custom events available: `terminal-user-input`, `terminal-llm-output`
-
-### Environment Management
-- Use existing LLM_Environment system
-- Override config directories per environment
-- Custom prompts/args per environment
 
 ### Multiple Sessions
 - Support multiple concurrent PTY sessions

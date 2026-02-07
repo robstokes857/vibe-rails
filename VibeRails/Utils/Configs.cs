@@ -13,7 +13,6 @@ namespace VibeRails.Utils
         // LMBootstrap mode args
         public bool IsLMBootstrap { get; set; }
         public string? LMBootstrapCli { get; set; }
-        public string? Env { get; set; }
         public string? WorkDir { get; set; }
         public string[] ExtraArgs { get; set; } = [];
 
@@ -102,17 +101,12 @@ namespace VibeRails.Utils
                     switch (arg)
                     {
                         case "--lmbootstrap":
+                        case "--environment":
+                        case "--env":
                             parsed.IsLMBootstrap = true;
                             if (i + 1 < args.Length && !args[i + 1].StartsWith("-"))
                             {
                                 parsed.LMBootstrapCli = args[++i];
-                            }
-                            break;
-
-                        case "--env":
-                            if (i + 1 < args.Length)
-                            {
-                                parsed.Env = args[++i];
                             }
                             break;
 

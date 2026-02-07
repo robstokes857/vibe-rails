@@ -84,13 +84,9 @@ namespace VibeRails.Services.LlmClis.Launchers
             // Get the path to the current executable (vb)
             var exePath = Environment.ProcessPath ?? "vb";
 
-            // Build the --lmbootstrap command
-            var bootstrapArgs = $"--lmbootstrap {CliExecutable}";
-            if (!string.IsNullOrEmpty(envName))
-            {
-                bootstrapArgs += $" --env \"{envName}\"";
-            }
-            bootstrapArgs += $" --workdir \"{workingDirectory}\"";
+            // Build the --env command (unified flag for both base CLIs and custom environments)
+            var envValue = !string.IsNullOrEmpty(envName) ? $"\"{envName}\"" : CliExecutable;
+            var bootstrapArgs = $"--env {envValue} --workdir \"{workingDirectory}\"";
 
             // Add any additional args
             if (args.Length > 0)
@@ -128,13 +124,9 @@ namespace VibeRails.Services.LlmClis.Launchers
             // Get the path to the current executable (vb)
             var exePath = Environment.ProcessPath ?? "vb";
 
-            // Build the --lmbootstrap command
-            var bootstrapArgs = $"--lmbootstrap {CliExecutable}";
-            if (!string.IsNullOrEmpty(envName))
-            {
-                bootstrapArgs += $" --env \"{envName}\"";
-            }
-            bootstrapArgs += $" --workdir \"{workingDirectory}\"";
+            // Build the --env command (unified flag for both base CLIs and custom environments)
+            var envValue = !string.IsNullOrEmpty(envName) ? $"\"{envName}\"" : CliExecutable;
+            var bootstrapArgs = $"--env {envValue} --workdir \"{workingDirectory}\"";
 
             // Add any additional args
             if (args.Length > 0)
@@ -142,7 +134,7 @@ namespace VibeRails.Services.LlmClis.Launchers
                 bootstrapArgs += " -- " + string.Join(" ", args);
             }
 
-            // Use osascript to open Terminal.app and run vb --lmbootstrap
+            // Use osascript to open Terminal.app and run vb --env
             var script = $"tell application \"Terminal\" to do script \"\\\"{exePath}\\\" {bootstrapArgs}\"";
 
             Process.Start(new ProcessStartInfo
@@ -167,13 +159,9 @@ namespace VibeRails.Services.LlmClis.Launchers
             // Get the path to the current executable (vb)
             var exePath = Environment.ProcessPath ?? "vb";
 
-            // Build the --lmbootstrap command
-            var bootstrapArgs = $"--lmbootstrap {CliExecutable}";
-            if (!string.IsNullOrEmpty(envName))
-            {
-                bootstrapArgs += $" --env \"{envName}\"";
-            }
-            bootstrapArgs += $" --workdir \"{workingDirectory}\"";
+            // Build the --env command (unified flag for both base CLIs and custom environments)
+            var envValue = !string.IsNullOrEmpty(envName) ? $"\"{envName}\"" : CliExecutable;
+            var bootstrapArgs = $"--env {envValue} --workdir \"{workingDirectory}\"";
 
             // Add any additional args
             if (args.Length > 0)
@@ -181,7 +169,7 @@ namespace VibeRails.Services.LlmClis.Launchers
                 bootstrapArgs += " -- " + string.Join(" ", args);
             }
 
-            // Full command to run vb --lmbootstrap
+            // Full command to run vb --env
             var fullCommand = $"\"{exePath}\" {bootstrapArgs}; exec bash";
 
             // Try common terminal emulators in order of preference

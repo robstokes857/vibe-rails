@@ -1,6 +1,7 @@
 using Microsoft.Extensions.FileProviders;
 using VibeRails;
 using VibeRails.DTOs;
+using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Utils;
 

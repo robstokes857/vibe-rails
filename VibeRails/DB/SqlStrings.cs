@@ -70,6 +70,13 @@ namespace VibeRails.DB
             FROM Environments
             WHERE CustomName = $customName AND LLM = $llm;
             """;
+        public const string SelectEnvironmentByName = """
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC
+            FROM Environments
+            WHERE CustomName = $customName
+            ORDER BY LastUsedUTC DESC
+            LIMIT 1;
+            """;
         public const string SelectAllEnvironments = """
             SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC
             FROM Environments

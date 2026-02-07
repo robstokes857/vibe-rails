@@ -187,15 +187,59 @@ export class TerminalController {
         `;
     }
 
-    bindTerminalActions(container) {
+    async populateTerminalSelector(container, preselectedEnvId = null) {
+        const cliSelect = container.querySelector('#terminal-cli-select');
+        if (!cliSelect) return;
+
+        // Fetch environments from app data (already loaded in dashboard)
+        const environments = this.app.data.environments || [];
+
+        // Clear existing options
+        cliSelect.innerHTML = '';
+
+        // Base CLIs optgroup
+        const baseGroup = document.createElement('optgroup');
+        baseGroup.label = 'Base CLIs';
+        baseGroup.innerHTML = `
+            <option value="base:claude">Claude (default)</option>
+            <option value="base:codex">Codex (default)</option>
+            <option value="base:gemini">Gemini (default)</option>
+        `;
+        cliSelect.appendChild(baseGroup);
+
+        // Custom Environments optgroup
+        if (environments.length > 0) {
+            const envGroup = document.createElement('optgroup');
+            envGroup.label = 'Custom Environments';
+
+            environments.forEach(env => {
+                const option = document.createElement('option');
+                option.value = `env:${env.id}:${env.cli}`;
+                option.textContent = `${env.name} (${env.cli})`;
+                option.dataset.envName = env.name;
+                option.dataset.envCli = env.cli;
+                if (preselectedEnvId && env.id === preselectedEnvId) {
+                    option.selected = true;
+                }
+                envGroup.appendChild(option);
+            });
+
+            cliSelect.appendChild(envGroup);
+        }
+    }
+
+    async bindTerminalActions(container, preselectedEnvId = null) {
+        // Populate selector with environments
+        await this.populateTerminalSelector(container, preselectedEnvId);
+
         const startBtn = container.querySelector('#terminal-start-btn');
         const stopBtn = container.querySelector('#terminal-stop-btn');
         const cliSelect = container.querySelector('#terminal-cli-select');
 
         if (startBtn) {
             startBtn.addEventListener('click', async () => {
-                const cli = cliSelect?.value || 'claude';
-                await this.startTerminal(container, cli);
+                const selection = cliSelect?.value || 'base:claude';
+                await this.startTerminal(container, selection);
             });
         }
 
@@ -216,16 +260,43 @@ export class TerminalController {
         }
     }
 
-    async startTerminal(container, cli) {
+    async startTerminal(container, selection) {
         const success = await this.startSession();
-        if (success) {
-            await this.showActiveTerminal(container, cli);
-            const cliName = cli.charAt(0).toUpperCase() + cli.slice(1);
-            this.app.showToast('Terminal Started', `Launching ${cliName}...`, 'success');
+        if (!success) return;
+
+        let command = null;
+        let displayName = null;
+
+        if (selection.startsWith('base:')) {
+            // Base CLI: just the CLI name (sends directly to PTY shell)
+            command = selection.replace('base:', '');
+            displayName = command.charAt(0).toUpperCase() + command.slice(1);
+        } else if (selection.startsWith('env:')) {
+            // Custom environment: env:id:cli — ask backend for the bootstrap command
+            const parts = selection.split(':');
+            const envId = parseInt(parts[1]);
+            const cliType = parts[2];
+            const env = this.app.data.environments.find(e => e.id === envId);
+            const envName = env?.name || '';
+            displayName = `${envName} (${cliType})`;
+
+            try {
+                const params = new URLSearchParams({ cli: cliType });
+                if (envName) params.append('environmentName', envName);
+                const result = await this.app.apiCall(
+                    `/api/v1/terminal/bootstrap-command?${params.toString()}`, 'GET');
+                command = result.command;
+            } catch (error) {
+                console.error('Failed to get bootstrap command:', error);
+                command = cliType; // Fallback to base CLI
+            }
         }
+
+        await this.showActiveTerminal(container, command);
+        this.app.showToast('Terminal Started', `Launching ${displayName}...`, 'success');
     }
 
-    async showActiveTerminal(container, cli) {
+    async showActiveTerminal(container, command) {
         const placeholder = container.querySelector('#terminal-placeholder');
         const terminalContainer = container.querySelector('#terminal-container');
         const terminalElement = container.querySelector('#terminal-element');
@@ -245,8 +316,8 @@ export class TerminalController {
             statusBadge.classList.add('bg-success');
         }
 
-        // Connect to the terminal (pass CLI to auto-launch after connection)
-        await this.connect(terminalElement, cli);
+        // Connect to the terminal and auto-launch the command
+        await this.connect(terminalElement, command);
     }
 
     async stopTerminal(container) {

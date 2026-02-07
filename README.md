@@ -1,6 +1,6 @@
-# Vibe-Rails
+# VibeRails
 
-**Vibe-Rails** is an opinionated framework that helps keep AI coding assistants from going off the rails.
+**VibeRails** is an opinionated framework that helps keep AI coding assistants from going off the rails.
 
 **Live Site**: [https://viberails.ai/](https://viberails.ai/)
 
@@ -18,6 +18,7 @@
 - **Rule Enforcement** - Define and enforce coding standards like test coverage, cyclomatic complexity, logging practices, and more. LLMs fix their errors before code can be pushed or before the tech debt get astronomical.
 - **Token Savings** - Learn your codebase and how you describe it, providing LLMs with smart file hints to reduce token usage and costs
 - **AGENTS.md Management** - Create and manage agent instruction files following the [agents.md specification](https://agents.md/)
+- **Web Terminal** - Launch CLIs directly in the browser with xterm.js. Select base CLIs (Claude, Codex, Gemini) or custom environments from a visual dropdown with optgroups
 
 ---
 
@@ -71,4 +72,47 @@ npm run compile
 code .
 ```
 
+---
+
+## Web Terminal Features
+
+The integrated Web UI terminal lets you interact with LLM CLIs directly in your browser:
+
+### Key Features
+- Launch Claude, Codex, or Gemini CLIs in a browser-based terminal (xterm.js)
+- Select from custom environments in a visual dropdown (Base CLIs vs Custom Environments)
+- Auto-populate environment settings (custom args, prompts, model configs)
+- Navigate from Environment Management → Dashboard with environment pre-selected
+- Real-time CLI output with proper Unicode and color support
+- PTY-backed sessions with full shell capabilities
+
+### Usage
+
+**Standard Launch:**
+1. Go to Dashboard
+2. Scroll to Terminal section
+3. Select a CLI or custom environment from dropdown
+4. Click "Start" to launch
+
+**Quick Launch from Environments:**
+1. Go to Environments page
+2. Click "Web UI" button next to any environment
+3. Dashboard opens with terminal section visible
+4. Environment is pre-selected in dropdown
+5. Click "Start" to launch with environment config applied
+
+### Environment Integration
+
+When you select a custom environment in the terminal:
+- The backend automatically applies your custom args (e.g., `--verbose`, `--sandbox`)
+- Your custom prompt is injected at session start
+- Model-specific settings are configured (Claude model, Codex sandbox mode, etc.)
+- The environment's "Last Used" timestamp is updated
+
+This gives you quick access to different configurations without remembering command-line flags!
+
+---
+
+**Version**: 1.1.5
+**Last Updated**: 2026-02-05
 **Maintained By**: Robert Stokes

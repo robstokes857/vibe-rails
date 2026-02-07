@@ -7,6 +7,8 @@ using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.VCA;
+using VibeRails.Services.VCA.Validators;
 using VibeRails.Utils;
 
 namespace VibeRails
@@ -31,6 +33,21 @@ namespace VibeRails
             // VCA Validation services (for git hooks)
             serviceCollection.AddScoped<IRuleValidationService, RuleValidationService>();
             serviceCollection.AddScoped<IHookInstallationService, HookInstallationService>();
+
+            // NEW VCA Validation Architecture (modular)
+            // Infrastructure services
+            serviceCollection.AddScoped<IFileClassifier, FileClassifier>();
+            serviceCollection.AddScoped<IFileReader, FileReader>();
+            serviceCollection.AddScoped<IPathNormalizer, PathNormalizer>();
+
+            // Core VCA services
+            serviceCollection.AddScoped<IFileAndRuleParser, FileAndRuleParser>();
+            serviceCollection.AddScoped<IValidatorList, ValidatorList>();
+            serviceCollection.AddScoped<VibeRails.Services.VCA.ValidationService>();
+
+            // Individual validators
+            serviceCollection.AddScoped<LogAllFileChangesValidator>();
+            serviceCollection.AddScoped<PackageChangeValidator>();
 
             // LLM CLI Environment services
             serviceCollection.AddScoped<IClaudeLlmCliEnvironment, ClaudeLlmCliEnvironment>();
@@ -108,15 +125,26 @@ namespace VibeRails
         {
             try
             {
+                // Load configuration to check if auto-install is enabled
+                var configuration = LoadAppConfiguration();
+                if (!configuration.Hooks.InstallOnStartup)
+                {
+                    return;
+                }
+
                 var hookService = services.GetRequiredService<IHookInstallationService>();
 
                 // Only install if not already installed
                 if (!hookService.IsHookInstalled(projectRoot))
                 {
-                    var success = await hookService.InstallPreCommitHookAsync(projectRoot, CancellationToken.None);
-                    if (success)
+                    var result = await hookService.InstallPreCommitHookAsync(projectRoot, CancellationToken.None);
+                    if (result.Success)
                     {
                         Console.WriteLine("VCA pre-commit hook installed automatically.");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Note: Could not auto-install pre-commit hook: {result.ErrorMessage}");
                     }
                 }
             }
@@ -125,6 +153,27 @@ namespace VibeRails
                 // Silent failure - just log to console
                 Console.WriteLine($"Note: Could not auto-install pre-commit hook: {ex.Message}");
             }
+        }
+
+        private static AppConfiguration LoadAppConfiguration()
+        {
+            try
+            {
+                var configPath = Path.Combine(AppContext.BaseDirectory, "app_config.json");
+                if (File.Exists(configPath))
+                {
+                    var json = File.ReadAllText(configPath);
+                    return System.Text.Json.JsonSerializer.Deserialize<AppConfiguration>(json,
+                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                        ?? new AppConfiguration();
+                }
+            }
+            catch
+            {
+                // If config fails to load, use defaults
+            }
+
+            return new AppConfiguration();
         }
     }
 }

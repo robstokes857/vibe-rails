@@ -612,7 +612,7 @@ export class AgentController {
 
     async editInVSCode(agent) {
         try {
-            await this.app.apiCall('/api/cli/launch/vscode', 'POST', { path: agent.path });
+            await this.app.apiCall('/api/v1/cli/launch/vscode', 'POST', { path: agent.path });
             this.app.showToast('VS Code', `Opened ${agent.name} in VS Code`, 'success');
         } catch (error) {
             this.app.showError(`Failed to open ${agent.name} in VS Code`);

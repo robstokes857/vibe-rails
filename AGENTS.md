@@ -1,8 +1,12 @@
-# AGENTS.md - VibeControl Project Documentation
+# AGENTS.md - VibeRails Project Documentation
+
+## Terminology Note
+
+**"Web UI Chat"** refers to the xterm.js-based terminal interface where users interact with CLI tools (Claude, Codex, Gemini) through a browser-based terminal emulator. This is NOT a separate chat UI - it's the PTY-backed terminal that runs actual CLI sessions.
 
 ## Project Overview
 
-**VibeControl** is a sophisticated desktop/web application for managing and enforcing coding standards across AI-powered development workflows. It serves as a unified control panel for multiple LLM CLIs (Claude, Codex, Gemini) with comprehensive rule enforcement, session logging, and MCP integration.
+**VibeRails** is a sophisticated desktop/web application for managing and enforcing coding standards across AI-powered development workflows. It serves as a unified control panel for multiple LLM CLIs (Claude, Codex, Gemini) with comprehensive rule enforcement, session logging, and MCP integration.
 
 **Live Site**: [https://viberails.ai/](https://viberails.ai/)
 
@@ -10,7 +14,7 @@
 - **Agent File Management** - Create and manage `agent.md` files with customizable coding rules
 - **Rule Enforcement** - Define standards with three enforcement levels (WARN/COMMIT/STOP)
 - **Multi-LLM Support** - Unified interface for Claude, Codex, and Gemini CLIs
-- **Environment Management** - Configure separate environments for different LLM providers
+- **Environment Management** - Configure separate environments for different LLM providers with custom args and prompts. Launch environments directly in the Web UI terminal with the "Web UI" button or select from the terminal's environment dropdown
 - **Session Logging** - Track and monitor all CLI session history and outputs
 - **MCP Integration** - Custom Model Context Protocol server with specialized tools
 
@@ -22,7 +26,6 @@
 - **SQLite** - Local database with WAL mode for concurrency
 - **ModelContextProtocol NuGet Package** (v0.5.0-preview.1) - MCP foundation with custom service layer and tools
 - **Pty.Net** - Cross-platform pseudo-terminal support (git submodule)
-- **ToonSharp** - Utility library (git submodule)
 
 ### Frontend
 - **Vanilla JavaScript** - No framework dependencies
@@ -38,9 +41,11 @@
 
 ## Project Structure
 
+> **Note:** The project directory is named `VibeControl2` for legacy reasons, but the project branding is **VibeRails**.
+
 ```
-VibeControl/
-├── VibeControl/                    # Main ASP.NET Core application
+VibeControl2/
+├── VibeRails/                      # Main ASP.NET Core application
 │   ├── Program.cs                  # Entry point (web server + CLI loop)
 │   ├── Init.cs                     # Dependency injection setup
 │   ├── LMBootstrap.cs              # Terminal-based LLM CLI wrapper mode
@@ -96,20 +101,21 @@ VibeControl/
 │       ├── index.html              # Main UI dashboard (SPA)
 │       ├── app.js                  # Frontend application logic
 │       ├── style.css               # Custom styling
+│       ├── js/modules/
+│       │   ├── terminal-controller.js  # Web terminal with environment-aware selector
+│       │   ├── environment-controller.js # Environment CRUD + Web UI launch button
+│       │   └── dashboard-controller.js  # Dashboard with state passing for preselection
 │       └── assets/                 # Images, fonts, icons
 │
 ├── MCP_Server/                     # Standalone custom MCP server
 │   ├── Program.cs                  # MCP server entry point (Stdio transport)
 │   ├── Tools/                      # Custom MCP tools
 │   │   ├── EchoTool.cs            # Echo/test tool
-│   │   ├── RulesTool.cs           # Content validation rules
-│   │   └── VectorSearchTool.cs     # Vector search capability (SharpVector)
+│   │   └── RulesTool.cs           # Content validation rules
 │   └── Models/                     # MCP message models
 │
 ├── PtyNet/                         # Git submodule: PTY library
 │   └── src/Pty.Net/               # Cross-platform terminal emulation
-│
-├── ToonLib/                        # Git submodule: ToonSharp library
 │
 ├── Tests/                          # xUnit test suite
 │   ├── AgentFileServiceTests.cs
@@ -126,11 +132,11 @@ VibeControl/
 
 ### Application Modes
 
-VibeControl operates in two primary modes:
+VibeRails operates in two primary modes:
 
 #### 1. Web Server Mode (Default)
 ```bash
-vibecontrol
+vb
 ```
 - Launches ASP.NET web server on available port
 - Opens browser to dashboard UI
@@ -139,12 +145,18 @@ vibecontrol
 
 #### 2. LMBootstrap Mode (CLI Wrapper)
 ```bash
-vibecontrol --lmbootstrap claude --env myenv
+vb --env claude                    # Launch base CLI
+vb --env "my-research-setup"       # Launch custom environment (DB lookup)
+vb --env gemini --workdir /project # Explicit working directory
 ```
-- Wraps LLM CLI execution (claude/codex/gemini)
+- Unified `--env` flag (`--environment` and `--lmbootstrap` are aliases)
+- Smart resolution: LLM name → base CLI, otherwise → custom environment DB lookup
+- `--workdir` optional: uses git root if available, required only outside git repos
+- Wraps LLM CLI execution (claude/codex/gemini) with environment isolation
 - Captures terminal output for session logging
-- Applies environment-specific configurations
 - Stores session data in SQLite database
+
+See [Cli/AGENTS.md](VibeRails/Cli/AGENTS.md) for full details.
 
 ### Component Interaction Flow
 
@@ -166,14 +178,14 @@ Browser renders agent list with rules
 
 #### Session Logging Flow
 ```
-vibecontrol --lmbootstrap claude --env myenv
+vb --env myenv (or vb --env claude)
   ↓
 LMBootstrap.RunAsync()
-  ↓ Resolves git repository root
-  ↓ Gets/creates project record
-  ↓ Loads environment configuration
+  ↓ Smart resolves: LLM name → base CLI, custom name → DB lookup
+  ↓ Resolves working directory (--workdir or git root)
+  ↓ Gets/creates environment record (if custom env)
   ↓ Creates EzTerminal wrapper (PtyNet)
-  ↓ Sets environment variables
+  ↓ Sets isolated config env vars (CLAUDE_CONFIG_DIR, CODEX_HOME, XDG_*, etc.)
   ↓ Executes: claude [args]
   ↓
 Terminal output → TerminalOutputFilter → DbService.LogSessionOutputAsync()
@@ -196,9 +208,43 @@ LlmCliEnvironmentService
 Each environment defines isolated config directories
 ```
 
+#### Web Terminal Environment Integration Flow
+```
+User navigates to Environments page
+  ↓
+Clicks "Web UI" button next to custom environment
+  ↓
+environment-controller.js calls launchInWebUI(envId, envName)
+  ↓
+app.navigate('dashboard', { preselectedEnvId: envId })
+  ↓
+dashboard-controller.js receives data.preselectedEnvId
+  ↓
+Passes to terminalController.bindTerminalActions(container, envId)
+  ↓
+populateTerminalSelector() fetches from app.data.environments
+  ↓
+Renders <optgroup> for Base CLIs + <optgroup> for Custom Environments
+  ↓
+Preselected environment auto-selected in dropdown
+  ↓
+User clicks "Start" → startTerminal() parses selection
+  ↓
+If base CLI: sends "claude\r" directly to PTY
+If custom env: calls GET /api/v1/terminal/bootstrap-command
+  ↓
+Backend returns: vb --env "{envName}" --workdir "{dir}"
+  ↓
+Command sent to PTY shell via WebSocket (/api/v1/terminal/ws)
+  ↓
+LMBootstrap resolves env name → sets config env vars → launches CLI
+  ↓
+CLI runs with isolated environment configuration active
+```
+
 #### MCP Architecture
 ```
-VibeControl (Main App)
+VibeRails (Main App)
   ↓
 McpClientService (Custom service layer)
   ↓ Uses ModelContextProtocol NuGet package
@@ -208,15 +254,14 @@ MCP_Server.exe (Separate process)
   ↓ Uses ModelContextProtocol NuGet package
   ↓ Custom tools:
   ├─→ EchoTool (test/debug)
-  ├─→ RulesTool (content validation)
-  └─→ VectorSearchTool (SharpVector semantic search)
+  └─→ RulesTool (content validation)
 ```
 
 ## Key Components
 
 ### Services Layer
 
-#### AgentFileService ([Services/AgentFileService.cs](VibeControl/Services/AgentFileService.cs))
+#### AgentFileService ([Services/AgentFileService.cs](VibeRails/Services/AgentFileService.cs))
 **Purpose**: Manage agent.md files with rule definitions
 
 **Key Methods**:
@@ -237,7 +282,7 @@ MCP_Server.exe (Separate process)
 - WARN: log_files_changed
 ```
 
-#### RulesService ([Services/RulesService.cs](VibeControl/Services/RulesService.cs))
+#### RulesService ([Services/RulesService.cs](VibeRails/Services/RulesService.cs))
 **Purpose**: Define available rules and enforcement logic
 
 **Available Rules** (12 total):
@@ -259,7 +304,7 @@ MCP_Server.exe (Separate process)
 - `COMMIT` - Block commits that violate rule
 - `STOP` - Immediately halt execution on violation
 
-#### DbService ([Services/DbService.cs](VibeControl/Services/DbService.cs))
+#### DbService ([Services/DbService.cs](VibeRails/Services/DbService.cs))
 **Purpose**: High-level database operations wrapper
 
 **Key Methods**:
@@ -270,7 +315,7 @@ MCP_Server.exe (Separate process)
 - `GetRecentProjectsAsync()` - Get recently used projects
 - `GetRecentSessionsAsync()` - Get recent CLI sessions
 
-#### GitService ([Services/GitService.cs](VibeControl/Services/GitService.cs))
+#### GitService ([Services/GitService.cs](VibeRails/Services/GitService.cs))
 **Purpose**: Git repository operations
 
 **Key Methods**:
@@ -279,7 +324,7 @@ MCP_Server.exe (Separate process)
 - `GetCurrentBranchAsync()` - Get active git branch
 - `GetRecentCommitsAsync()` - Retrieve commit history
 
-#### McpClientService ([Services/Mcp/McpClientService.cs](VibeControl/Services/Mcp/McpClientService.cs))
+#### McpClientService ([Services/Mcp/McpClientService.cs](VibeRails/Services/Mcp/McpClientService.cs))
 **Purpose**: Custom MCP client service layer built on ModelContextProtocol NuGet package
 
 **Architecture**:
@@ -329,16 +374,9 @@ var result = await service.CallToolAsync("vector_search", args);
 - **Output**: Validation results with violations
 - **Use Case**: Pre-commit validation, code review automation
 
-##### VectorSearchTool ([MCP_Server/Tools/VectorSearchTool.cs](MCP_Server/Tools/VectorSearchTool.cs))
-- **Purpose**: Semantic search using SharpVector library
-- **Input**: Search query, optional context
-- **Output**: Semantically similar content
-- **Use Case**: Code similarity search, documentation lookup
-- **Dependencies**: Build5Nines.SharpVector (v1.0.0)
-
 ### Data Layer
 
-#### Repository ([DB/Repository.cs](VibeControl/DB/Repository.cs))
+#### Repository ([DB/Repository.cs](VibeRails/DB/Repository.cs))
 **Purpose**: SQLite data access implementation
 
 **Database Tables**:
@@ -362,7 +400,7 @@ var result = await service.CallToolAsync("vector_search", args);
 
 ### API Layer
 
-#### Routes ([Routes.cs](VibeControl/Routes.cs))
+#### Routes ([Routes.cs](VibeRails/Routes.cs))
 **Purpose**: REST API endpoint definitions
 
 **Agent Management**:
@@ -395,7 +433,7 @@ var result = await service.CallToolAsync("vector_search", args);
 
 ### Frontend Layer
 
-#### app.js ([wwwroot/app.js](VibeControl/wwwroot/app.js))
+#### app.js ([wwwroot/app.js](VibeRails/wwwroot/app.js))
 **Purpose**: Single-page application logic
 
 **State Management**:
@@ -426,7 +464,7 @@ const state = {
 - Dynamic content injection with data binding
 - Event delegation for dynamic elements
 
-#### index.html ([wwwroot/index.html](VibeControl/wwwroot/index.html))
+#### index.html ([wwwroot/index.html](VibeRails/wwwroot/index.html))
 **Purpose**: Main UI dashboard (Single Page Application)
 
 **Structure**:
@@ -444,7 +482,7 @@ const state = {
 ## Design Patterns
 
 ### Dependency Injection
-All services registered in [Init.cs](VibeControl/Init.cs) with appropriate lifetimes:
+All services registered in [Init.cs](VibeRails/Init.cs) with appropriate lifetimes:
 - **Scoped**: Services tied to request lifecycle (DbService, Repository)
 - **Singleton**: Long-lived services (GitService, RulesService, MCP settings)
 
@@ -561,9 +599,9 @@ public class MyLlmCliEnvironment : BaseLlmCliEnvironment
 builder.Services.AddSingleton<IMyLlmCliEnvironment, MyLlmCliEnvironment>();
 ```
 
-3. **Update LLM enum** in [DTOs/LLM.cs](VibeControl/DTOs/LLM.cs)
+3. **Update LLM enum** in [DTOs/LLM.cs](VibeRails/DTOs/LLM.cs)
 
-4. **Add launcher logic** in [Services/LlmClis/LaunchLLMService.cs](VibeControl/Services/LlmClis/LaunchLLMService.cs)
+4. **Add launcher logic** in [Services/LlmClis/LaunchLLMService.cs](VibeRails/Services/LlmClis/LaunchLLMService.cs)
 
 5. **Update frontend** to support new CLI option
 
@@ -671,7 +709,9 @@ await agentFileService.AddRuleAsync(
 
 ### Task: Launch Claude CLI with environment
 ```bash
-vibecontrol --lmbootstrap claude --env production
+vb --env claude                    # Base CLI, default config
+vb --env production                # Custom environment (looked up in DB)
+vb --env claude --workdir /project # With explicit working directory
 ```
 
 ### Task: Retrieve session logs
@@ -723,7 +763,7 @@ var result = await mcpService.CallToolAsync(
 
 ### Debug Logging
 
-Enable verbose logging in [Program.cs](VibeControl/Program.cs):
+Enable verbose logging in [Program.cs](VibeRails/Program.cs):
 ```csharp
 // Modify logging level
 builder.Logging.SetMinimumLevel(LogLevel.Debug);
@@ -800,7 +840,6 @@ builder.Logging.SetMinimumLevel(LogLevel.Debug);
 - Stdio transport for efficient IPC (no network overhead)
 - Tools executed asynchronously
 - Server process kept alive between calls
-- Vector search uses efficient SharpVector implementation
 
 ## Future Enhancements
 
@@ -828,9 +867,8 @@ builder.Logging.SetMinimumLevel(LogLevel.Debug);
 - [ASP.NET Core Documentation](https://docs.microsoft.com/aspnet/core)
 - [Model Context Protocol Spec](https://modelcontextprotocol.io/)
 - [ModelContextProtocol NuGet Package](https://www.nuget.org/packages/ModelContextProtocol)
-- [Pty.Net GitHub](https://github.com/link-to-ptynet)
+- [Pty.Net (Forked)](../PtyNet/README.md)
 - [XTerm.js Documentation](https://xtermjs.org/)
-- [SharpVector Documentation](https://github.com/Build5Nines/SharpVector)
 
 ### Related Projects
 - **Claude CLI** - Anthropic's Claude command-line interface
@@ -841,14 +879,225 @@ builder.Logging.SetMinimumLevel(LogLevel.Debug);
 ### Key Dependencies
 - **Microsoft.Data.Sqlite** (v10.0.2) - SQLite database access
 - **ModelContextProtocol** (v0.5.0-preview.1) - MCP foundation
-- **Build5Nines.SharpVector** (v1.0.0) - Vector embeddings for semantic search
 - **Pty.Net** (git submodule) - Pseudo-terminal support
 
 ---
 
-**Last Updated**: 2026-01-23
-**Version**: 1.0
-**Maintained By**: VibeControl Development Team
+## Git Hook Installation System
+
+### Overview
+
+VibeRails includes a sophisticated git hook installation system that automatically enforces VCA (Vibe Control Architecture) rules at commit time. The system has been completely refactored from hardcoded scripts to a modular, testable, and maintainable architecture.
+
+### Architecture
+
+#### HookInstallationService ([Services/HookInstallationService.cs](VibeRails/Services/HookInstallationService.cs))
+
+**Purpose**: Manage installation and uninstallation of git hooks for VCA enforcement
+
+**Key Improvements (Refactored 2026-02-06)**:
+- ✅ **Extracted scripts to files** - Hook scripts moved from C# strings to [scripts/](VibeRails/scripts/) directory
+- ✅ **Proper error handling** - Returns detailed `HookInstallationResult` with specific error types
+- ✅ **Structured logging** - Integrated with `ILogger<T>` for comprehensive diagnostics
+- ✅ **Atomic operations** - Rollback support if installation partially fails
+- ✅ **Configuration support** - Respects `app_config.json` settings for auto-install behavior
+- ✅ **Cross-platform safe** - Handles Windows, Linux, and macOS correctly
+- ✅ **Comprehensive tests** - Full test coverage in [Tests/Services/HookInstallationServiceTests.cs](Tests/Services/HookInstallationServiceTests.cs)
+
+**Hook Scripts**:
+1. **pre-commit-hook.sh** - Validates VCA rules before commit
+   - Runs `vb --validate-vca --pre-commit`
+   - Blocks commits if validation fails
+   - Allows bypass with `git commit --no-verify`
+
+2. **commit-msg-hook.sh** - Validates COMMIT-level acknowledgments
+   - Runs `vb --commit-msg "$1"`
+   - Ensures required acknowledgments in commit message
+   - Enforces COMMIT-level rule compliance
+
+**Installation Behavior**:
+- **Auto-install on startup** - Hooks installed automatically when VibeRails starts (configurable)
+- **Preserves existing hooks** - Appends to existing hook files, doesn't overwrite
+- **Marker-based management** - Uses markers to track VibeRails sections
+- **Safe uninstallation** - Removes only VibeRails sections, keeps other hooks intact
+
+**Key Methods**:
+
+```csharp
+// Install both pre-commit and commit-msg hooks
+Task<HookInstallationResult> InstallHooksAsync(string repoPath, CancellationToken ct);
+
+// Uninstall both hooks
+Task<HookInstallationResult> UninstallHooksAsync(string repoPath, CancellationToken ct);
+
+// Install individual hooks
+Task<HookInstallationResult> InstallPreCommitHookAsync(string repoPath, CancellationToken ct);
+Task<HookInstallationResult> UninstallPreCommitHookAsync(string repoPath, CancellationToken ct);
+
+// Check installation status
+bool IsHookInstalled(string repoPath);
+```
+
+**Error Handling**:
+
+The service returns detailed error information via `HookInstallationResult`:
+
+```csharp
+public enum HookInstallationError
+{
+    HooksDirectoryNotFound,
+    HooksDirectoryCreationFailed,
+    PermissionDenied,
+    FileReadError,
+    FileWriteError,
+    ChmodExecutionFailed,
+    ScriptResourceNotFound,
+    PartialInstallationFailure,
+    UnknownError
+}
+```
+
+**Configuration** ([app_config.json](VibeRails/app_config.json)):
+
+```json
+{
+  "hooks": {
+    "autoInstall": true,
+    "installOnStartup": true
+  }
+}
+```
+
+**Usage Examples**:
+
+```csharp
+// Install hooks
+var result = await hookService.InstallHooksAsync(repoPath, cancellationToken);
+if (!result.Success)
+{
+    Console.Error.WriteLine($"Installation failed: {result.ErrorMessage}");
+    if (result.Details != null)
+    {
+        Console.Error.WriteLine($"Details: {result.Details}");
+    }
+}
+
+// Check if installed
+if (hookService.IsHookInstalled(repoPath))
+{
+    Console.WriteLine("Hooks are installed");
+}
+
+// Uninstall hooks
+var uninstallResult = await hookService.UninstallHooksAsync(repoPath, cancellationToken);
+```
+
+**CLI Commands**:
+
+```bash
+# Check hook status
+vb hooks status
+
+# Install hooks manually (if auto-install disabled)
+vb hooks install
+
+# Uninstall hooks
+vb hooks uninstall
+```
+
+**API Endpoints**:
+
+```
+GET  /api/v1/hooks/status        # Check if hooks are installed
+POST /api/v1/hooks/install       # Install hooks via API
+DELETE /api/v1/hooks             # Uninstall hooks via API
+```
+
+**Testing**:
+
+Comprehensive test suite covers:
+- ✅ Fresh installation in empty repository
+- ✅ Creating hooks directory if it doesn't exist
+- ✅ Appending to existing hooks from other tools
+- ✅ Replacing old VibeRails hook versions
+- ✅ Uninstalling while preserving other hooks
+- ✅ Permission error handling
+- ✅ Logging verification
+- ✅ Atomic rollback on partial failures
+
+Run tests:
+```bash
+cd Tests
+dotnet test --filter "HookInstallationServiceTests"
+```
+
+**Design Patterns**:
+- **Dependency Injection** - `ILogger<T>` injected for structured logging
+- **Result Pattern** - Methods return `HookInstallationResult` instead of bool
+- **Template Method** - Common installation logic extracted to `InstallHookAsync()`
+- **Atomic Operations** - Rollback on failure ensures consistent state
+
+**File Locations**:
+```
+VibeRails/
+├── scripts/                          # Hook script templates
+│   ├── pre-commit-hook.sh           # Pre-commit validation script
+│   └── commit-msg-hook.sh           # Commit message validation script
+├── Services/
+│   ├── HookInstallationService.cs   # Main service implementation
+│   ├── HookInstallationResult.cs    # Result types
+│   └── HookConfiguration.cs         # Configuration models
+└── app_config.json                   # Application configuration
+
+.git/hooks/                           # Git hooks directory (per repo)
+├── pre-commit                        # Installed pre-commit hook
+└── commit-msg                        # Installed commit-msg hook
+```
+
+**Logging Output**:
+
+The service provides comprehensive logging:
+- Information: Hook installation start/completion
+- Debug: Script loading, file operations, hook content details
+- Warning: Missing end markers, partial content
+- Error: Permission issues, file I/O failures, chmod failures
+
+**Cross-Platform Behavior**:
+- **Windows**: Hooks work via Git Bash (no chmod needed)
+- **Linux/macOS**: Hooks made executable via `chmod +x`
+- **All platforms**: Scripts use `#!/bin/sh` shebang for POSIX compatibility
+
+**Security Considerations**:
+- Scripts loaded from application directory, not user input
+- File paths validated to prevent directory traversal
+- Markers prevent accidental corruption of other hooks
+- No shell injection vulnerabilities in hook execution
+
+**Migration Notes**:
+
+Previous implementation had these issues (fixed):
+❌ Scripts hardcoded as C# strings (hard to maintain)
+❌ Returns bool only (no error context)
+❌ No logging (silent failures)
+❌ No configuration support
+❌ chmod failures ignored
+❌ No tests
+❌ No rollback on partial failure
+
+Current implementation:
+✅ Scripts in separate files (easy to edit and test)
+✅ Detailed error results with error types
+✅ Structured logging throughout
+✅ Configurable auto-install behavior
+✅ chmod failures reported
+✅ Comprehensive test coverage
+✅ Atomic operations with rollback
+
+---
+
+**Last Updated**: 2026-02-06
+**Version**: 1.1.5
+**Maintained By**: Robert Stokes
 
 ## Vibe Control Rules
 - Log all file changes (WARN)

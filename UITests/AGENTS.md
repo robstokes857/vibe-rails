@@ -1,6 +1,6 @@
 # UI Testing Suite
 
-This directory contains the [Playwright](https://playwright.dev/) end-to-end testing suite for the VibeControl frontend.
+This directory contains the [Playwright](https://playwright.dev/) end-to-end testing suite for the VibeRails frontend.
 
 ## Prerequisites
 
@@ -10,37 +10,37 @@ This directory contains the [Playwright](https://playwright.dev/) end-to-end tes
 
 Before running tests for the first time, install the dependencies:
 
-`powershell
+```powershell
 # Install npm packages
 npm install
 
 # Install browser binaries
 npx playwright install chromium
-`
+```
 
 ## Running Tests
 
 ### Standard Run
 Run all tests in headless mode (console output):
-`powershell
+```powershell
 npx playwright test
-`
+```
 
 ### UI Mode (Recommended for Debugging)
 Open the interactive Playwright UI to see tests running step-by-step:
-`powershell
+```powershell
 npx playwright test --ui
-`
+```
 
 ### View Report
 If a test fails, you can view the detailed HTML report:
-`powershell
+```powershell
 npx playwright show-report
-`
+```
 
 ## Configuration
 
-- **Target Files:** The tests serve files directly from ../VibeControl/wwwroot.
+- **Target Files:** The tests serve files directly from ../VibeRails/wwwroot.
 - **Server:** Uses http-server on port 8080.
 - **Logic:** Tests are located in the ./tests directory.
 

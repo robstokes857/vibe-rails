@@ -40,6 +40,13 @@ export class EnvironmentController {
                         this.launchEnvironment(name, cli);
                     }
                 });
+                this.app.bindActions(tableSlot, '[data-action="launch-in-webui"]', (element) => {
+                    const envId = parseInt(element.dataset.envId);
+                    const envName = element.dataset.envName;
+                    if (envId && envName) {
+                        this.launchInWebUI(envId, envName);
+                    }
+                });
             }
         }
 
@@ -72,8 +79,11 @@ export class EnvironmentController {
                                 <td>${env.lastUsed || 'Never'}</td>
                                 <td>
                                     <div class="btn-group btn-group-sm">
-                                        <button class="btn btn-outline-success" type="button" data-action="launch-environment" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch">
+                                        <button class="btn btn-outline-success" type="button" data-action="launch-environment" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in external terminal">
                                             Launch
+                                        </button>
+                                        <button class="btn btn-outline-primary" type="button" data-action="launch-in-webui" data-env-id="${env.id}" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in Web UI Terminal">
+                                            Web UI
                                         </button>
                                         <button class="btn btn-outline-secondary" type="button" data-action="edit-environment" data-env-name="${env.name}" title="Settings">
                                             Settings
@@ -494,5 +504,22 @@ export class EnvironmentController {
             console.error('Failed to refresh environments:', error);
             this.app.data.environments = [];
         }
+    }
+
+    async launchInWebUI(envId, envName) {
+        // Navigate to dashboard with environment pre-selected
+        this.app.navigate('dashboard', { preselectedEnvId: envId });
+
+        this.app.showToast('Web UI Terminal',
+            `Opening terminal with ${envName}...`,
+            'info');
+
+        // Scroll to terminal section after navigation
+        setTimeout(() => {
+            const terminalSection = document.querySelector('[data-terminal-section]');
+            if (terminalSection) {
+                terminalSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }, 300);
     }
 }
