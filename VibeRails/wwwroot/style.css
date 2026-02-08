@@ -5,24 +5,33 @@
 
 :root {
     /* Color Palette */
-    --color-bg-base: #1e1e24;       /* Darkest Slate Background */
-    --color-bg-surface: #2b2b36;    /* Card/Surface Background */
+    --color-bg-base: #1e1e24;
+    /* Darkest Slate Background */
+    --color-bg-surface: #2b2b36;
+    /* Card/Surface Background */
     --color-bg-surface-hover: #32323f;
-    
-    --color-primary: #5b2a86;       /* Medium Purple */
-    --color-primary-dark: #360568;  /* Deep Purple */
-    --color-secondary: #7785ac;     /* Muted Blue/Purple */
-    --color-accent: #9ac6c5;        /* Soft Teal/Cyan */
-    
-    --color-text: #f0f0f5;          /* Primary Text */
-    --color-text-muted: #9494a8;    /* Muted Text */
-    
+
+    --color-primary: #5b2a86;
+    /* Medium Purple */
+    --color-primary-dark: #360568;
+    /* Deep Purple */
+    --color-secondary: #7785ac;
+    /* Muted Blue/Purple */
+    --color-accent: #9ac6c5;
+    /* Soft Teal/Cyan */
+
+    --color-text: #f0f0f5;
+    /* Primary Text */
+    --color-text-muted: #9494a8;
+    /* Muted Text */
+
     --color-success: #4caf50;
     --color-warning: #ff9800;
     --color-danger: #e57373;
-    
-    --color-border: #3e3e4a;        /* Subtle Borders */
-    
+
+    --color-border: #3e3e4a;
+    /* Subtle Borders */
+
     /* Layout */
     --border-radius: 12px;
     --transition-speed: 0.25s;
@@ -33,9 +42,9 @@
 /* Global Reset & Base */
 body {
     background-color: var(--color-bg-base);
-    background-image: 
+    /* background-image: 
         radial-gradient(circle at 10% 10%, rgba(91, 42, 134, 0.08), transparent 40%),
-        radial-gradient(circle at 90% 90%, rgba(154, 198, 197, 0.05), transparent 40%);
+        radial-gradient(circle at 90% 90%, rgba(154, 198, 197, 0.05), transparent 40%); */
     color: var(--color-text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     min-height: 100vh;
@@ -105,7 +114,7 @@ code {
     letter-spacing: 0.1em;
     text-transform: uppercase;
     font-size: 1.8rem;
-    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
 }
 
 /* Breadcrumb */
@@ -155,7 +164,8 @@ code {
     border-radius: var(--border-radius);
     box-shadow: var(--shadow-soft);
     transition: transform var(--transition-speed), box-shadow var(--transition-speed);
-    margin-bottom: 0; /* Bootstrap override */
+    margin-bottom: 0;
+    /* Bootstrap override */
 }
 
 .menu-card::before {
@@ -219,12 +229,14 @@ code {
     height: 2.5rem;
     width: auto;
     transition: all 0.4s ease;
-    filter: sepia(1) saturate(5) hue-rotate(200deg) brightness(0.8); /* Match color-secondary roughly */
+    filter: sepia(1) saturate(5) hue-rotate(200deg) brightness(0.8);
+    /* Match color-secondary roughly */
 }
 
 .menu-card:hover .menu-icon-img {
     transform: scale(1.2) rotate(-5deg);
-    filter: sepia(1) saturate(5) hue-rotate(140deg) brightness(1.1); /* Match color-accent roughly */
+    filter: sepia(1) saturate(5) hue-rotate(140deg) brightness(1.1);
+    /* Match color-accent roughly */
 }
 
 .menu-card:hover .menu-icon {
@@ -259,7 +271,8 @@ code {
     color: #fff;
 }
 
-.btn-primary:hover, .btn-primary:focus {
+.btn-primary:hover,
+.btn-primary:focus {
     background-color: var(--color-primary-dark);
     box-shadow: 0 4px 12px rgba(91, 42, 134, 0.4);
 }
@@ -290,7 +303,8 @@ code {
 
 .btn-outline-primary {
     border: 1px solid var(--color-primary);
-    color: var(--color-primary); /* Changed to primary */
+    color: var(--color-primary);
+    /* Changed to primary */
     background: transparent;
 }
 
@@ -318,9 +332,11 @@ code {
     0% {
         box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
     }
+
     70% {
         box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
     }
+
     100% {
         box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
     }
@@ -434,7 +450,8 @@ code {
 }
 
 /* Enforcement Badge Colors */
-.badge-warn, .badge-warning {
+.badge-warn,
+.badge-warning {
     background: rgba(255, 152, 0, 0.2);
     color: var(--color-warning);
     border: 1px solid rgba(255, 152, 0, 0.4);
@@ -446,7 +463,8 @@ code {
     border: 1px solid rgba(76, 175, 80, 0.4);
 }
 
-.badge-stop, .badge-danger {
+.badge-stop,
+.badge-danger {
     background: rgba(229, 115, 115, 0.2);
     color: var(--color-danger);
     border: 1px solid rgba(229, 115, 115, 0.4);
@@ -459,14 +477,16 @@ code {
 }
 
 /* Forms */
-.form-control, .form-select {
+.form-control,
+.form-select {
     background-color: var(--color-bg-base);
     border: 1px solid var(--color-border);
     color: var(--color-text);
     border-radius: 8px;
 }
 
-.form-control:focus, .form-select:focus {
+.form-control:focus,
+.form-select:focus {
     background-color: var(--color-bg-base);
     border-color: var(--color-primary);
     box-shadow: 0 0 0 2px rgba(91, 42, 134, 0.25);
@@ -564,7 +584,7 @@ code {
 }
 
 .table thead th {
-    background-color: rgba(0,0,0,0.2);
+    background-color: rgba(0, 0, 0, 0.2);
     border-bottom-width: 2px;
     color: var(--color-text-muted);
     font-weight: 600;
@@ -608,7 +628,12 @@ code {
 }
 
 /* Typography Utilities */
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
     color: var(--color-text);
     font-weight: 600;
 }
@@ -631,7 +656,7 @@ h1, h2, h3, h4, h5, h6 {
 .rule-card:hover {
     border-color: var(--color-accent) !important;
     background: var(--color-bg-surface-hover);
-    box-shadow: 0 8px 20px rgba(0,0,0,0.3), 0 0 10px rgba(154, 198, 197, 0.1);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3), 0 0 10px rgba(154, 198, 197, 0.1);
 }
 
 .rule-card.active {
@@ -1039,6 +1064,7 @@ input.form-control:disabled {
         opacity: 0;
         transform: translate3d(0, 30px, 0);
     }
+
     to {
         opacity: 1;
         transform: translate3d(0, 0, 0);
@@ -1047,19 +1073,49 @@ input.form-control:disabled {
 
 .animate-fade-up {
     animation: fadeInUp 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
-    opacity: 0; /* Start hidden */
+    opacity: 0;
+    /* Start hidden */
 }
 
-.delay-100 { animation-delay: 0.1s; }
-.delay-200 { animation-delay: 0.2s; }
-.delay-300 { animation-delay: 0.3s; }
-.delay-400 { animation-delay: 0.4s; }
-.delay-500 { animation-delay: 0.5s; }
-.delay-600 { animation-delay: 0.6s; }
-.delay-700 { animation-delay: 0.7s; }
-.delay-800 { animation-delay: 0.8s; }
-.delay-900 { animation-delay: 0.9s; }
-.delay-1000 { animation-delay: 1.0s; }
+.delay-100 {
+    animation-delay: 0.1s;
+}
+
+.delay-200 {
+    animation-delay: 0.2s;
+}
+
+.delay-300 {
+    animation-delay: 0.3s;
+}
+
+.delay-400 {
+    animation-delay: 0.4s;
+}
+
+.delay-500 {
+    animation-delay: 0.5s;
+}
+
+.delay-600 {
+    animation-delay: 0.6s;
+}
+
+.delay-700 {
+    animation-delay: 0.7s;
+}
+
+.delay-800 {
+    animation-delay: 0.8s;
+}
+
+.delay-900 {
+    animation-delay: 0.9s;
+}
+
+.delay-1000 {
+    animation-delay: 1.0s;
+}
 
 /* Glowing Gradient Text for Hero */
 .text-gradient {
