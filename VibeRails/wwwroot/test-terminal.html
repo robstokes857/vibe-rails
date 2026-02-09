@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terminal Takeover Test</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <style>
+        body {
+            margin: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            color: #569cd6;
+        }
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        #check-status {
+            background: #0e639c;
+            color: white;
+        }
+        #check-status:hover {
+            background: #1177bb;
+        }
+        #connect {
+            background: #28a745;
+            color: white;
+        }
+        #connect:hover {
+            background: #34ce57;
+        }
+        #disconnect {
+            background: #d73a49;
+            color: white;
+        }
+        #disconnect:hover {
+            background: #f44747;
+        }
+        #status {
+            padding: 8px 12px;
+            background: #2d2d30;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        #terminal {
+            width: 100%;
+            max-width: 1200px;
+            background: #1e1e1e;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #3e3e42;
+            /* Let terminal size itself based on rows/cols */
+        }
+    </style>
+</head>
+<body>
+    <h1>🖥️ Terminal Takeover Test</h1>
+    <p>This page tests the terminal WebSocket takeover functionality.</p>
+
+    <div class="controls">
+        <label for="port-input" style="font-weight: 600;">Port:</label>
+        <input type="number" id="port-input" value="5000" placeholder="5000-5999" min="5000" max="5999"
+               style="width: 100px; padding: 8px; border: 1px solid #3e3e42; border-radius: 4px; background: #2d2d30; color: #d4d4d4; font-weight: 600;">
+        <button id="check-status">Check Status</button>
+        <button id="connect" disabled>Connect</button>
+        <button id="disconnect" disabled>Disconnect</button>
+        <span id="status">Enter port number</span>
+    </div>
+
+    <div id="terminal"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script>
+        let terminal = null;
+        let socket = null;
+        const checkStatusBtn = document.getElementById('check-status');
+        const connectBtn = document.getElementById('connect');
+        const disconnectBtn = document.getElementById('disconnect');
+        const portInput = document.getElementById('port-input');
+        const statusEl = document.getElementById('status');
+
+        function getPort() {
+            return portInput.value;
+        }
+
+        function getApiBase() {
+            return `http://localhost:${getPort()}`;
+        }
+
+        function getWsUrl() {
+            return `ws://localhost:${getPort()}/api/v1/terminal/ws`;
+        }
+
+        function validatePort() {
+            const port = portInput.value;
+            if (port && port >= 5000 && port <= 5999) {
+                checkStatusBtn.disabled = false;
+                return true;
+            } else {
+                checkStatusBtn.disabled = true;
+                connectBtn.disabled = true;
+                return false;
+            }
+        }
+
+        // Enable check button when port is entered
+        portInput.addEventListener('input', validatePort);
+
+        // Allow Enter key to trigger check status
+        portInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && validatePort()) {
+                checkStatusBtn.click();
+            }
+        });
+
+        checkStatusBtn.addEventListener('click', async () => {
+            if (!validatePort()) return;
+            try {
+                statusEl.textContent = 'Checking...';
+                statusEl.style.color = '#dcdcaa';
+                const res = await fetch(`${getApiBase()}/api/v1/terminal/status`);
+                const data = await res.json();
+
+                if (data.hasActiveSession) {
+                    statusEl.textContent = `Active: ${data.sessionId}`;
+                    statusEl.style.color = '#4ec9b0';
+                    connectBtn.disabled = false;
+                } else {
+                    statusEl.textContent = 'No active session';
+                    statusEl.style.color = '#808080';
+                    connectBtn.disabled = true;
+                }
+            } catch (error) {
+                statusEl.textContent = `Error: ${error.message}`;
+                statusEl.style.color = '#f44747';
+                connectBtn.disabled = true;
+            }
+        });
+
+        connectBtn.addEventListener('click', () => {
+            if (!terminal) {
+                terminal = new Terminal({
+                    cols: 120,
+                    rows: 30,
+                    cursorBlink: false,
+                    fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace',
+                    fontSize: 14,
+                    allowProposedApi: true,
+                    unicodeVersion: '11',
+                    disableStdin: false,
+                    convertEol: false,
+                    cursorStyle: 'block',
+                    theme: {
+                        background: '#1e1e1e',
+                        foreground: '#d4d4d4',
+                        cursor: '#d4d4d4',
+                        selection: '#264f78',
+                    }
+                });
+                terminal.open(document.getElementById('terminal'));
+            }
+
+            socket = new WebSocket(getWsUrl());
+
+            socket.onopen = () => {
+                statusEl.textContent = 'Connected';
+                statusEl.style.color = '#4ec9b0';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+
+                // Display connection banner
+                terminal.writeln('\x1b[36m[Connected to session]\x1b[0m\r\n');
+
+                // Send Ctrl+L to refresh the screen after a moment
+                setTimeout(() => {
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        socket.send('\x0C'); // Ctrl+L (form feed) - screen refresh
+                    }
+                }, 100);
+            };
+
+            socket.onmessage = async (event) => {
+                if (event.data instanceof Blob) {
+                    const buffer = await event.data.arrayBuffer();
+                    const text = new TextDecoder('utf-8').decode(buffer);
+                    terminal.write(text);
+                } else {
+                    terminal.write(event.data);
+                }
+            };
+
+            socket.onclose = () => {
+                statusEl.textContent = 'Disconnected';
+                statusEl.style.color = '#808080';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            };
+
+            socket.onerror = (error) => {
+                statusEl.textContent = 'Connection error';
+                statusEl.style.color = '#f44747';
+                console.error('WebSocket error:', error);
+            };
+
+            terminal.onData((data) => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(data);
+                }
+            });
+        });
+
+        disconnectBtn.addEventListener('click', () => {
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+        });
+    </script>
+</body>
+</html>

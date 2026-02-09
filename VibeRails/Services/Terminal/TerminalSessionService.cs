@@ -67,14 +67,44 @@ public class TerminalSessionService : ITerminalSessionService
             return;
         }
 
+        WebSocket? oldWebSocket = null;
+
         lock (s_lock)
         {
             if (s_activeWebSocket != null)
             {
-                _ = webSocket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Another client is already connected", cancellationToken);
-                return;
+                Console.WriteLine("[Terminal] WebSocket takeover - disconnecting previous viewer");
+                oldWebSocket = s_activeWebSocket;
             }
             s_activeWebSocket = webSocket;
+        }
+
+        // Close old connection OUTSIDE the lock to avoid deadlock
+        if (oldWebSocket != null && oldWebSocket.State == WebSocketState.Open)
+        {
+            try
+            {
+                // Send takeover message to old terminal before closing
+                const string message = "\r\n\x1b[33m[Session taken over by another viewer]\x1b[0m\r\n";
+                var messageBytes = System.Text.Encoding.UTF8.GetBytes(message);
+                await oldWebSocket.SendAsync(
+                    new ArraySegment<byte>(messageBytes),
+                    WebSocketMessageType.Binary,
+                    true,
+                    CancellationToken.None
+                );
+
+                // Give it a moment to display
+                await Task.Delay(100);
+
+                // Now close the connection
+                await oldWebSocket.CloseAsync(
+                    WebSocketCloseStatus.NormalClosure,
+                    "Session taken over",
+                    CancellationToken.None
+                );
+            }
+            catch { /* Best effort - old connection might already be dead */ }
         }
 
         try
@@ -84,7 +114,8 @@ public class TerminalSessionService : ITerminalSessionService
         finally
         {
             lock (s_lock) { s_activeWebSocket = null; }
-            await CleanupAsync();
+            // Don't call CleanupAsync() here - PTY should survive WebSocket disconnects
+            // Only explicit StopSessionAsync() should dispose the PTY
         }
     }
 

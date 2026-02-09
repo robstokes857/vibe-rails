@@ -38,15 +38,12 @@ builder.Services.AddOpenApi();
 // Register DI services
 Init.RegisterServices(builder.Services);
 
-// Add CORS support for VS Code webview
+// Add CORS support for VS Code webview and local file access
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("VSCodeWebview", policy =>
     {
-        policy.SetIsOriginAllowed(origin =>
-            origin.StartsWith("vscode-webview://") ||
-            origin.StartsWith("http://localhost") ||
-            origin.StartsWith("https://localhost"))
+        policy.AllowAnyOrigin() // Allow all origins including null (file://)
             .AllowAnyHeader()
             .AllowAnyMethod();
     });

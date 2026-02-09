@@ -181,11 +181,12 @@ public class TerminalRunner
         }
         finally
         {
+            // Just close WebSocket gracefully if still open
             if (webSocket.State == WebSocketState.Open)
                 try { await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Done", CancellationToken.None); } catch { }
 
-            pty.Dispose();
-            await _stateService.CompleteSessionAsync(sessionId, 0);
+            // DON'T dispose PTY or complete session here!
+            // PTY should only be disposed by TerminalSessionService.CleanupAsync() on explicit stop
         }
     }
 }

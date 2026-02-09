@@ -29,7 +29,9 @@ Embedded terminal for running LLM CLI tools (Claude, Codex, Gemini) with full se
 - Thread-safe using lock for concurrent access
 - Calls `TerminalRunner.StartWebAsync()` to spawn PTY and get connection
 - Calls `TerminalRunner.HandleWebSocketAsync()` to pipe WebSocket ↔ PTY bidirectionally
-- Prevents multiple concurrent WebSocket connections to same PTY session
+- **Takeover pattern**: When new WebSocket connects, sends yellow ANSI message to old connection, then disconnects it
+- PTY persists across WebSocket disconnects - only disposed on explicit `StopSessionAsync()` call
+- Session survives viewer changes, enabling external terminal viewers to take control
 
 ### Two Terminal Paths (Identical Session Tracking)
 
@@ -71,8 +73,9 @@ TerminalRunner.HandleWebSocketAsync() spawns TWO independent async tasks that ru
 
 **Cleanup:**
 - When either task completes, WebSocket is closed gracefully
-- PTY connection is disposed
-- Session is marked complete in DB with exit code
+- PTY connection is **NOT** disposed in HandleWebSocketAsync - only closed on explicit StopSessionAsync()
+- This allows session persistence across WebSocket disconnects (viewer takeover support)
+- Session is marked complete in DB with exit code only when PTY is explicitly stopped
 
 ### Session Tracking Flow
 
@@ -91,7 +94,7 @@ When a session starts:
 | `/api/v1/terminal/status` | GET | Check if terminal session is active, returns session ID |
 | `/api/v1/terminal/start` | POST | Launch LLM CLI with session tracking (`{cli, environmentName, workingDirectory}`) |
 | `/api/v1/terminal/stop` | POST | Stop the active PTY session and complete session tracking |
-| `/api/v1/terminal/ws` | WebSocket | Bidirectional PTY communication |
+| `/api/v1/terminal/ws` | WebSocket | Bidirectional PTY communication - supports takeover (disconnects previous viewer) |
 
 ### Terminal Start Flow (Web UI)
 
@@ -177,6 +180,110 @@ xterm.js terminal emulator with full PTY communication:
 - **CLI dropdown** - Select base CLIs (`base:claude`) or custom environments (`env:123:gemini`) via optgroups
 - **Single API call flow** - `POST /api/v1/terminal/start` launches CLI directly, then WebSocket connects
 - **Session restoration** - On page load, checks `/api/v1/terminal/status` and reconnects if active session exists
+
+## External Terminal Viewers (Takeover Feature)
+
+External HTML pages can discover and connect to active terminal sessions, taking over control from the main UI.
+
+### Use Cases
+- **Testing**: Verify terminal WebSocket functionality independently
+- **Remote Access**: Future foundation for mobile/webapp relay via outbound WebSocket
+- **Multi-Viewer**: Switch between different viewers (desktop, mobile, external tools)
+
+### How Takeover Works
+1. External viewer calls `GET /api/v1/terminal/status` to discover active session
+2. External viewer connects to `ws://localhost:{port}/api/v1/terminal/ws`
+3. `TerminalSessionService` detects existing WebSocket connection
+4. Backend sends yellow ANSI message to old terminal: `[Session taken over by another viewer]`
+5. Old WebSocket is closed gracefully, new WebSocket takes over
+6. PTY session persists - only the viewer changes
+7. New viewer has full bidirectional control (input/output)
+
+### Test Pages
+
+**`VibeRails/wwwroot/test-terminal.html`** - Simple local test page
+- Minimal UI for quick WebSocket testing
+- Port input (defaults to 5000, validates 5000-5999 range)
+- Session status check and connect buttons
+- xterm.js terminal matching main app configuration
+
+**`UITests/terminal-tests/index.html`** - Full external viewer
+- Complete UI with session discovery and status display
+- Configurable port input (5000-5999)
+- xterm.js with FitAddon for responsive terminal sizing
+- Session info panel showing active session ID
+- Proper disconnect handling with reconnect capability
+
+### Terminal Configuration (Critical for Proper Rendering)
+
+Both external viewers use **identical xterm.js configuration** to main app:
+
+```javascript
+new Terminal({
+    cols: 120,              // MUST match PTY spawn dimensions
+    rows: 30,               // MUST match PTY spawn dimensions
+    cursorBlink: false,     // Disable local cursor (PTY handles cursor)
+    fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace',
+    fontSize: 14,
+    allowProposedApi: true, // Enable proposed xterm.js APIs for better rendering
+    unicodeVersion: '11',   // Proper Unicode box-drawing characters
+    disableStdin: false,    // Enable input
+    convertEol: false,      // Don't convert EOL (raw PTY data)
+    cursorStyle: 'block',
+    theme: { /* VS Code dark theme colors */ }
+})
+```
+
+**Why This Matters:**
+- **cols/rows mismatch** causes broken box-drawing characters and UI corruption (especially Gemini CLI)
+- **unicodeVersion: '11'** required for proper rendering of `▀▄╭╮│` and other Unicode glyphs
+- **allowProposedApi: true** enables advanced xterm.js features for better rendering
+- **convertEol: false** prevents xterm from manipulating raw PTY data
+- **cursorBlink: false** prevents phantom cursor at bottom (PTY controls cursor via ANSI codes)
+
+### Connection Flow for External Viewers
+
+1. **User enters port** (5000-5999) and clicks "Check Session"
+2. **Session discovery**: `GET /api/v1/terminal/status`
+   - Returns: `{ hasActiveSession: true, sessionId: "abc123" }`
+3. **User clicks Connect**
+4. **WebSocket connection**: `ws://localhost:{port}/api/v1/terminal/ws`
+5. **Takeover occurs**: Old viewer gets yellow message and disconnects
+6. **Screen refresh**: External viewer sends Ctrl+L (`\x0C`) to trigger shell redraw
+   - Without this, terminal appears blank (joining mid-session means no buffer replay)
+   - Ctrl+L forces shell to redraw its current state (prompt, UI elements, etc.)
+7. **Full control**: External viewer now has bidirectional terminal I/O
+
+### CORS Configuration
+
+External viewers (file:// protocol) require permissive CORS policy:
+
+```csharp
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("VSCodeWebview", policy =>
+    {
+        policy.AllowAnyOrigin()     // Allows null origin (file://)
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+```
+
+**Why AllowAnyOrigin:** file:// protocol sends `Origin: null`, which requires either `AllowAnyOrigin()` or explicit null origin handling. `AllowAnyOrigin()` is simpler and works for development/testing scenarios.
+
+### Limitations and Future Enhancements
+
+**Current Limitations:**
+- No output buffer/history replay - joining mid-session shows blank screen until new output
+- Single active session model - only one PTY session can run at a time
+- Takeover is destructive - old viewer is disconnected, not maintained in parallel
+
+**Future Enhancements:**
+- **Output buffering**: Store last N bytes of PTY output, replay to new connections
+- **Remote relay**: Outbound WebSocket to cloud relay for mobile/webapp access
+- **Multi-session support**: Track multiple PTY sessions with session IDs
+- **Broadcast mode**: Multiple viewers watch same session (read-only or collaborative input)
 
 ## Environment Isolation
 
