@@ -157,7 +157,7 @@
                     cols: 120,
                     rows: 30,
                     cursorBlink: false,
-                    fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace',
+                    fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
                     fontSize: 14,
                     allowProposedApi: true,
                     unicodeVersion: '11',
@@ -168,13 +168,34 @@
                         background: '#1e1e1e',
                         foreground: '#d4d4d4',
                         cursor: '#d4d4d4',
+                        cursorAccent: '#1e1e1e',
                         selection: '#264f78',
+                        black: '#1e1e1e',
+                        red: '#f44747',
+                        green: '#608b4e',
+                        yellow: '#dcdcaa',
+                        blue: '#569cd6',
+                        magenta: '#c586c0',
+                        cyan: '#4ec9b0',
+                        white: '#d4d4d4',
+                        brightBlack: '#808080',
+                        brightRed: '#f44747',
+                        brightGreen: '#608b4e',
+                        brightYellow: '#dcdcaa',
+                        brightBlue: '#569cd6',
+                        brightMagenta: '#c586c0',
+                        brightCyan: '#4ec9b0',
+                        brightWhite: '#ffffff'
                     }
                 });
                 terminal.open(document.getElementById('terminal'));
+            } else {
+                // Reset terminal state before receiving replay data
+                terminal.reset();
             }
 
             socket = new WebSocket(getWsUrl());
+            socket.binaryType = 'arraybuffer';
 
             socket.onopen = () => {
                 statusEl.textContent = 'Connected';
@@ -182,32 +203,26 @@
                 connectBtn.disabled = true;
                 disconnectBtn.disabled = false;
 
-                // Display connection banner
-                terminal.writeln('\x1b[36m[Connected to session]\x1b[0m\r\n');
-
-                // Send Ctrl+L to refresh the screen after a moment
-                setTimeout(() => {
-                    if (socket && socket.readyState === WebSocket.OPEN) {
-                        socket.send('\x0C'); // Ctrl+L (form feed) - screen refresh
-                    }
-                }, 100);
+                // Backend will replay buffered output to rebuild screen state
+                // No need to send Ctrl+L anymore
             };
 
-            socket.onmessage = async (event) => {
-                if (event.data instanceof Blob) {
-                    const buffer = await event.data.arrayBuffer();
-                    const text = new TextDecoder('utf-8').decode(buffer);
-                    terminal.write(text);
-                } else {
-                    terminal.write(event.data);
-                }
+            socket.onmessage = (event) => {
+                terminal.write(new Uint8Array(event.data));
             };
 
-            socket.onclose = () => {
-                statusEl.textContent = 'Disconnected';
+            socket.onclose = (event) => {
+                const reason = event.reason || 'Connection closed';
+                const message = reason.includes('taken over') ? 'Taken over' : 'Disconnected';
+                statusEl.textContent = message;
                 statusEl.style.color = '#808080';
                 connectBtn.disabled = false;
                 disconnectBtn.disabled = true;
+
+                // Show takeover message in terminal if applicable
+                if (reason.includes('taken over')) {
+                    terminal.writeln('\r\n\x1b[33m[Session taken over by another viewer]\x1b[0m\r\n');
+                }
             };
 
             socket.onerror = (error) => {

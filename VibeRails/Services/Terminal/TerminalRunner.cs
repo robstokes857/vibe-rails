@@ -1,6 +1,5 @@
-using System.Net.WebSockets;
-using Pty.Net;
 using VibeRails.Services.LlmClis;
+using VibeRails.Services.Terminal.Consumers;
 
 namespace VibeRails.Services.Terminal;
 
@@ -16,68 +15,16 @@ public class TerminalRunner
     }
 
     /// <summary>
-    /// CLI path: Uses EzTerminal to spawn shell, send command, and handle Console I/O + DB tracking.
-    /// Blocks until terminal exits.
+    /// Build the CLI command string and environment dictionary.
+    /// Shared by both CLI and Web paths.
     /// </summary>
-    public async Task<int> RunCliAsync(LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct)
+    public (string command, Dictionary<string, string> environment) PrepareSession(
+        LLM llm, string? envName, string[]? extraArgs)
     {
-        var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, ct);
-
         var cli = llm.ToString().ToLower();
         var command = extraArgs?.Length > 0
             ? $"{cli} {string.Join(" ", extraArgs.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))}"
             : cli;
-
-        var exitCode = 0;
-        try
-        {
-            using var terminal = new EzTerminal(
-                userOutputHandler: input => _stateService.RecordInput(sessionId, input),
-                terminalOutputHandler: output =>
-                {
-                    Console.Write(output);
-                    _stateService.LogOutput(sessionId, output);
-                },
-                cancellationToken: ct,
-                onExit: () => { });
-
-            terminal.WithWorkingDirectory(workDir);
-
-            // Apply env isolation if custom environment
-            if (!string.IsNullOrEmpty(envName))
-            {
-                var envVars = _envService.GetEnvironmentVariables(envName, llm);
-                terminal.WithEnvironment(envVars);
-            }
-
-            await terminal.Run(command, ct);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Terminal error: {ex.Message}");
-            exitCode = 1;
-        }
-        finally
-        {
-            await _stateService.CompleteSessionAsync(sessionId, exitCode);
-        }
-
-        return exitCode;
-    }
-
-    /// <summary>
-    /// Web UI path: Spawns PTY directly and returns connection + session ID. Caller uses HandleWebSocketAsync to pump WebSocket ↔ PTY.
-    /// </summary>
-    public async Task<(IPtyConnection pty, string sessionId)> StartWebAsync(LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct)
-    {
-        var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, ct);
-
-        var cli = llm.ToString().ToLower();
-        var command = extraArgs?.Length > 0
-            ? $"{cli} {string.Join(" ", extraArgs.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))}"
-            : cli;
-
-        var shell = OperatingSystem.IsWindows() ? "pwsh.exe" : "bash";
 
         var environment = new Dictionary<string, string>
         {
@@ -86,7 +33,6 @@ public class TerminalRunner
             ["PYTHONIOENCODING"] = "utf-8"
         };
 
-        // Apply env isolation if custom environment
         if (!string.IsNullOrEmpty(envName))
         {
             var envVars = _envService.GetEnvironmentVariables(envName, llm);
@@ -94,99 +40,120 @@ public class TerminalRunner
                 environment[kvp.Key] = kvp.Value;
         }
 
-        var options = new PtyOptions
-        {
-            Name = "VibeRails-WebTerminal",
-            Cols = 120,
-            Rows = 30,
-            Cwd = workDir,
-            App = shell,
-            CommandLine = Array.Empty<string>(),
-            Environment = environment
-        };
-
-        var pty = await PtyProvider.SpawnAsync(options, ct);
-
-        // Send the command to the shell
-        var fullCommand = $"{command}\r";
-        var cmdBytes = System.Text.Encoding.UTF8.GetBytes(fullCommand);
-        await pty.WriterStream.WriteAsync(cmdBytes, ct);
-        await pty.WriterStream.FlushAsync(ct);
-
-        return (pty, sessionId);
+        return (command, environment);
     }
 
     /// <summary>
-    /// Web UI path: Pipe WebSocket ↔ PTY bidirectionally.
+    /// Create a Terminal + DB session with DbLoggingConsumer already wired.
+    /// Used by both CLI and Web paths.
     /// </summary>
-    public async Task HandleWebSocketAsync(IPtyConnection pty, string sessionId, WebSocket webSocket, CancellationToken ct)
+    public async Task<(Terminal terminal, string sessionId)> CreateSessionAsync(
+        LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct)
     {
-        try
+        var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, ct);
+        var (command, environment) = PrepareSession(llm, envName, extraArgs);
+
+        var terminal = await Terminal.CreateAsync(workDir, environment, ct: ct);
+
+        // Always wire up DB logging
+        terminal.Subscribe(new DbLoggingConsumer(_stateService, sessionId));
+
+        // Send the CLI command to the shell
+        await terminal.SendCommandAsync(command, ct);
+
+        return (terminal, sessionId);
+    }
+
+    /// <summary>
+    /// CLI path: creates terminal, wires Console I/O, blocks until exit.
+    /// </summary>
+    public async Task<int> RunCliAsync(LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct)
+    {
+        var (terminal, sessionId) = await CreateSessionAsync(llm, workDir, envName, extraArgs, ct);
+        var exitCode = 0;
+
+        await using (terminal)
         {
-            // PTY output → WebSocket
-            var outputTask = Task.Run(async () =>
+            // Wire up console output
+            terminal.Subscribe(new ConsoleOutputConsumer());
+
+            // Start the read loop
+            terminal.StartReadLoop();
+
+            // Console input loop (blocks until cancelled or PTY exits)
+            try
             {
-                var buffer = new byte[4096];
-                try
-                {
-                    while (!ct.IsCancellationRequested && webSocket.State == WebSocketState.Open)
-                    {
-                        var bytesRead = await pty.ReaderStream.ReadAsync(buffer, ct);
-                        if (bytesRead == 0) break;
-
-                        // Log to DB
-                        var text = System.Text.Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                        _stateService.LogOutput(sessionId, text);
-
-                        // Send to WebSocket
-                        await webSocket.SendAsync(new ArraySegment<byte>(buffer, 0, bytesRead), WebSocketMessageType.Binary, true, ct);
-                    }
-                }
-                catch (OperationCanceledException) { }
-                catch (WebSocketException) { }
-            }, ct);
-
-            // WebSocket input → PTY
-            var inputTask = Task.Run(async () =>
+                await ConsoleInputLoopAsync(terminal, sessionId, ct);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
             {
-                var buffer = new byte[4096];
-                try
-                {
-                    while (!ct.IsCancellationRequested && webSocket.State == WebSocketState.Open)
-                    {
-                        var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
-                        if (result.MessageType == WebSocketMessageType.Close) break;
-                        if (result.Count > 0)
-                        {
-                            // Log input to DB
-                            var input = System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count);
-                            _stateService.RecordInput(sessionId, input);
+                Console.Error.WriteLine($"Terminal error: {ex.Message}");
+                exitCode = 1;
+            }
 
-                            // Write to PTY
-                            await pty.WriterStream.WriteAsync(buffer, 0, result.Count, ct);
-                            await pty.WriterStream.FlushAsync(ct);
-                        }
-                    }
-                }
-                catch (OperationCanceledException) { }
-                catch (WebSocketException) { }
-            }, ct);
-
-            // Wait for either to complete
-            await Task.WhenAny(outputTask, inputTask);
+            try { exitCode = terminal.ExitCode; } catch { }
         }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"WebSocket error: {ex.Message}");
-        }
-        finally
-        {
-            // Just close WebSocket gracefully if still open
-            if (webSocket.State == WebSocketState.Open)
-                try { await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Done", CancellationToken.None); } catch { }
 
-            // DON'T dispose PTY or complete session here!
-            // PTY should only be disposed by TerminalSessionService.CleanupAsync() on explicit stop
+        await _stateService.CompleteSessionAsync(sessionId, exitCode);
+        return exitCode;
+    }
+
+    /// <summary>
+    /// CLI + Web concurrent path: creates terminal, wires Console I/O,
+    /// registers with TerminalSessionService so web viewers can connect.
+    /// </summary>
+    public async Task<int> RunCliWithWebAsync(
+        LLM llm, string workDir, string? envName, string[]? extraArgs,
+        ITerminalSessionService sessionService, CancellationToken ct)
+    {
+        var (terminal, sessionId) = await CreateSessionAsync(llm, workDir, envName, extraArgs, ct);
+        var exitCode = 0;
+
+        await using (terminal)
+        {
+            terminal.Subscribe(new ConsoleOutputConsumer());
+            terminal.StartReadLoop();
+
+            // Register so web UI can find this terminal
+            sessionService.RegisterExternalTerminal(terminal, sessionId);
+
+            try
+            {
+                await ConsoleInputLoopAsync(terminal, sessionId, ct);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Terminal error: {ex.Message}");
+                exitCode = 1;
+            }
+            finally
+            {
+                await sessionService.UnregisterTerminalAsync();
+            }
+
+            try { exitCode = terminal.ExitCode; } catch { }
+        }
+
+        await _stateService.CompleteSessionAsync(sessionId, exitCode);
+        return exitCode;
+    }
+
+    /// <summary>
+    /// Console.ReadKey → PTY write loop for CLI path.
+    /// </summary>
+    private async Task ConsoleInputLoopAsync(Terminal terminal, string sessionId, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            var key = Console.ReadKey(intercept: true);
+            var input = KeyTranslator.TranslateKey(key);
+            if (!string.IsNullOrEmpty(input))
+            {
+                _stateService.RecordInput(sessionId, input);
+                await terminal.WriteAsync(input, ct);
+            }
         }
     }
 }

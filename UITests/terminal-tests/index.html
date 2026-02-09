@@ -350,45 +350,43 @@
                 return;
             }
 
+            // Reset terminal state before receiving replay data
+            if (terminal) {
+                terminal.reset();
+            }
+
             updateStatus('Connecting...', 'disconnected');
 
             socket = new WebSocket(getWsUrl());
+            socket.binaryType = 'arraybuffer';
 
             socket.onopen = () => {
                 updateStatus('Connected', 'connected');
                 connectBtn.disabled = true;
                 disconnectBtn.disabled = false;
 
-                // Display connection banner
-                terminal.writeln('\x1b[36m[Connected to session]\x1b[0m\r\n');
-
-                // Send Ctrl+L to refresh the screen after a moment
-                setTimeout(() => {
-                    if (socket && socket.readyState === WebSocket.OPEN) {
-                        socket.send('\x0C'); // Ctrl+L (form feed) - screen refresh
-                    }
-                }, 100);
+                // Backend will replay buffered output to rebuild screen state
+                // No need to send Ctrl+L anymore
 
                 terminal.focus();
             };
 
-            socket.onmessage = async (event) => {
-                // Handle binary data
-                if (event.data instanceof Blob) {
-                    const buffer = await event.data.arrayBuffer();
-                    const text = new TextDecoder('utf-8').decode(buffer);
-                    terminal.write(text);
-                } else {
-                    terminal.write(event.data);
-                }
+            socket.onmessage = (event) => {
+                terminal.write(new Uint8Array(event.data));
             };
 
             socket.onclose = (event) => {
                 const reason = event.reason || 'Connection closed';
-                updateStatus(`Disconnected: ${reason}`, 'disconnected');
+                const message = reason.includes('taken over') ? 'Session taken over by another viewer' : `Disconnected: ${reason}`;
+                updateStatus(message, 'disconnected');
                 connectBtn.disabled = false;
                 disconnectBtn.disabled = true;
                 socket = null;
+
+                // Show takeover message in terminal if applicable
+                if (reason.includes('taken over')) {
+                    terminal.writeln('\r\n\x1b[33m[Session taken over by another viewer]\x1b[0m\r\n');
+                }
             };
 
             socket.onerror = (error) => {

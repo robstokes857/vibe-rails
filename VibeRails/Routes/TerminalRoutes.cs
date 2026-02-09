@@ -85,6 +85,11 @@ public static class TerminalRoutes
                 return Results.Ok(new TerminalStatusResponse(false, null));
             }
 
+            if (terminalService.IsExternallyOwned)
+            {
+                return Results.BadRequest(new ErrorResponse("Terminal is controlled from CLI. Stop it from the command line."));
+            }
+
             await terminalService.StopSessionAsync();
             return Results.Ok(new TerminalStatusResponse(false, null));
         }).WithName("StopTerminal");

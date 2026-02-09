@@ -4,7 +4,35 @@ Embedded terminal for running LLM CLI tools (Claude, Codex, Gemini) with full se
 
 ## Architecture
 
+### Core Design: Unified PTY with Pub/Sub Output
+
+```
+Terminal (owns PTY, runs single read loop)
+  ├── CircularBuffer (always captures last 16KB for replay)
+  ├── Subscribe(ITerminalConsumer) → IDisposable token
+  │   ├── ConsoleOutputConsumer  (CLI path: Console.Write)
+  │   ├── DbLoggingConsumer      (both paths: TerminalStateService.LogOutput)
+  │   └── WebSocketConsumer      (Web path: WebSocket.SendAsync)
+  ├── WriteAsync(string) / WriteBytesAsync(ReadOnlyMemory<byte>)
+  └── SendCommandAsync(string) → appends \r and writes
+```
+
+Both CLI and Web paths use the same `Terminal` class. The only difference is which consumers are subscribed and how input is sourced.
+
 ### Core Components
+
+**`Terminal.cs`** - Unified PTY abstraction (the heart of the system)
+- Owns `IPtyConnection` lifecycle (spawn, read, write, dispose)
+- Single background read loop dispatches output to all subscribers via `ITerminalConsumer`
+- Thread-safe subscriber management with `Lock` + snapshot-then-iterate pattern
+- Built-in `CircularBuffer` (16KB) for output replay to new WebSocket connections
+- Factory method `CreateAsync()` for async PTY spawn (no blocking `.Result`)
+- `IAsyncDisposable` — cancels read loop, kills PTY, cleans up
+- Uses `ReadOnlyMemory<byte>` for zero-copy output dispatch
+
+**`ITerminalConsumer.cs`** - Output consumer interface
+- Single method: `void OnOutput(ReadOnlyMemory<byte> data)`
+- Synchronous — read loop must not await per-consumer (prevents backpressure stalling)
 
 **`TerminalStateService.cs`** - All state management for terminal sessions
 - Interface: `ITerminalStateService`
@@ -12,80 +40,70 @@ Embedded terminal for running LLM CLI tools (Claude, Codex, Gemini) with full se
 - Uses `InputAccumulator` for keystroke buffering
 - Uses `TerminalOutputFilter` to skip transient ANSI content
 - No PTY or WebSocket knowledge
-- Room for future state management beyond DB
 
-**`TerminalRunner.cs`** - PTY lifecycle management
-- `RunCliAsync()` - CLI path: uses EzTerminal, blocks until exit, pipes Console I/O
-- `StartWebAsync()` - Web UI path: spawns PTY via PtyProvider, sends CLI command, returns IPtyConnection + session ID
-- `HandleWebSocketAsync()` - Web UI path: bidirectional WebSocket ↔ PTY piping with two async tasks
-  - Output task: reads from `pty.ReaderStream`, logs to DB, sends to WebSocket
-  - Input task: receives from WebSocket, logs to DB, writes to `pty.WriterStream`
-- Configures environment variables via `LlmCliEnvironmentService`
-- Both paths use same state service for tracking
-- Web UI uses PtyProvider directly (NOT EzTerminalStream) for maximum control
+**`TerminalRunner.cs`** - Session orchestrator (thin layer)
+- `PrepareSession()` — builds CLI command string + environment dictionary (shared by both paths)
+- `CreateSessionAsync()` — creates DB session, spawns Terminal, subscribes DbLoggingConsumer, sends CLI command
+- `RunCliAsync()` — CLI path: calls CreateSessionAsync, subscribes ConsoleOutputConsumer, runs Console.ReadKey input loop
+- No WebSocket code, no EzTerminal, no raw PTY manipulation
 
-**`TerminalSessionService.cs`** - Web UI service (minimal glue)
-- Holds static `IPtyConnection` and session ID (singleton pattern for single active session)
-- Thread-safe using lock for concurrent access
-- Calls `TerminalRunner.StartWebAsync()` to spawn PTY and get connection
-- Calls `TerminalRunner.HandleWebSocketAsync()` to pipe WebSocket ↔ PTY bidirectionally
+**`TerminalSessionService.cs`** - Web UI session lifecycle
+- Holds static `Terminal` instance (singleton pattern for single active session)
+- Thread-safe using `Lock` for concurrent access
+- Calls `TerminalRunner.CreateSessionAsync()` to create Terminal + session
+- WebSocket handling: subscribe `WebSocketConsumer`, run input loop, unsubscribe on disconnect
 - **Takeover pattern**: When new WebSocket connects, sends yellow ANSI message to old connection, then disconnects it
-- PTY persists across WebSocket disconnects - only disposed on explicit `StopSessionAsync()` call
-- Session survives viewer changes, enabling external terminal viewers to take control
+- Buffer replay + Ctrl+L on new connections for screen reconstruction
+- Terminal persists across WebSocket disconnects — only disposed on explicit `StopSessionAsync()`
 
-### Two Terminal Paths (Identical Session Tracking)
+### Consumer Implementations
 
-1. **CLI Path** (`vb --env <cli>`)
-   - Entry: `CliLoop.cs` → `RunTerminalSessionAsync()`
-   - Creates `TerminalStateService` + `TerminalRunner`
-   - Calls `runner.RunCliAsync()` - uses `EzTerminal`, blocks until exit
+**`Consumers/ConsoleOutputConsumer.cs`** - CLI path
+- Decodes UTF-8 from `ReadOnlyMemory<byte>`, writes to `Console.Write`
+
+**`Consumers/DbLoggingConsumer.cs`** - Both paths
+- Decodes UTF-8, calls `ITerminalStateService.LogOutput(sessionId, text)`
+- Subscribed by `TerminalRunner.CreateSessionAsync()` for every session
+
+**`Consumers/WebSocketConsumer.cs`** - Web path
+- Sends raw bytes to WebSocket as binary frames
+- Fire-and-forget send to avoid blocking read loop on WebSocket backpressure
+- Subscribed/unsubscribed per WebSocket connection in `TerminalSessionService`
+
+### Three Terminal Paths (Same Terminal Class, Same Tracking)
+
+1. **CLI-Only Path** (`vb --env <cli>` without web server — standalone mode, not currently used)
+   - Entry: `CliLoop.cs` → `TerminalRunner.RunCliAsync()`
+   - RunCliAsync: `CreateSessionAsync()` → subscribe ConsoleOutputConsumer → `StartReadLoop()` → Console.ReadKey input loop
+   - Blocks until cancelled or PTY exits
    - Full session tracking (DB, git, logging)
 
-2. **Web UI Path** (Browser/VS Code terminal)
+2. **CLI + Web Path** (`vb --env <cli>` — default behavior)
+   - Entry: `Program.cs` detects `IsLMBootstrap`, starts web server, calls `CliLoop.RunTerminalWithWebAsync()`
+   - Calls `TerminalRunner.RunCliWithWebAsync()` which:
+     - Creates Terminal + ConsoleOutputConsumer (same as CLI-only)
+     - Calls `sessionService.RegisterExternalTerminal()` to populate static state
+     - Web server runs concurrently — browser can connect to `/api/v1/terminal/ws`
+     - Both ConsoleOutputConsumer and WebSocketConsumer active simultaneously (pub/sub)
+     - On CLI exit: `sessionService.UnregisterTerminalAsync()` sends "[CLI session ended]" to web viewer
+   - Web server shuts down after terminal exits
+   - Web UI "Stop" button is disabled for CLI-owned sessions (`IsExternallyOwned`)
+
+3. **Web UI Path** (Browser/VS Code terminal)
    - Entry: `POST /api/v1/terminal/start` → `TerminalSessionService.StartSessionAsync()`
-   - Creates `TerminalStateService` + `TerminalRunner`
-   - Calls `runner.StartWebAsync()` - spawns PTY directly via PtyProvider, returns IPtyConnection + session ID
-   - WebSocket connects, calls `runner.HandleWebSocketAsync()` - spawns two tasks for bidirectional piping
-   - **Same tracking as CLI path** ✅
-
-### Bidirectional WebSocket Piping (Web UI Path)
-
-**Critical Implementation Pattern:**
-
-TerminalRunner.HandleWebSocketAsync() spawns TWO independent async tasks that run concurrently:
-
-1. **Output Task (PTY → WebSocket → Browser)**
-   - Reads from `pty.ReaderStream` in 4KB chunks
-   - Decodes UTF-8 and logs to DB via `_stateService.LogOutput()`
-   - Sends raw bytes to WebSocket as Binary messages
-   - Continues until PTY exits (bytesRead == 0) or cancellation
-
-2. **Input Task (Browser → WebSocket → PTY)**
-   - Receives from WebSocket in 4KB chunks
-   - Decodes UTF-8 and logs to DB via `_stateService.RecordInput()`
-   - Writes raw bytes to `pty.WriterStream` and flushes immediately
-   - Continues until WebSocket closes or cancellation
-
-**Why Two Tasks:**
-- PTY output and user input are independent streams that must be handled simultaneously
-- Using `Task.WhenAny()` allows either task to terminate the session (PTY exit or WebSocket close)
-- Each task has independent error handling (catches OperationCanceledException, WebSocketException)
-
-**Cleanup:**
-- When either task completes, WebSocket is closed gracefully
-- PTY connection is **NOT** disposed in HandleWebSocketAsync - only closed on explicit StopSessionAsync()
-- This allows session persistence across WebSocket disconnects (viewer takeover support)
-- Session is marked complete in DB with exit code only when PTY is explicitly stopped
+   - Calls `TerminalRunner.CreateSessionAsync()` → `terminal.StartReadLoop()`
+   - WebSocket connects → subscribe WebSocketConsumer → WebSocket input loop → unsubscribe on disconnect
+   - Terminal persists across WebSocket reconnects
 
 ### Session Tracking Flow
 
 When a session starts:
-1. Session created in database (`Sessions` table)
+1. Session created in database (`Sessions` table) via `TerminalRunner.CreateSessionAsync()`
 2. `[SESSION_START]` user input recorded with git commit hash
-3. Output filtered (skip ANSI-only transient content) and logged to `SessionLogs`
+3. `DbLoggingConsumer` subscribed — output filtered (skip ANSI-only transient content) and logged to `SessionLogs`
 4. User input buffered by `InputAccumulator`, logged on Enter key
 5. Git changes tracked between inputs (`InputFileChanges` table)
-6. Session completed with exit code when PTY exits
+6. Session completed with exit code when Terminal is disposed
 
 ### API Routes
 
@@ -93,7 +111,7 @@ When a session starts:
 |----------|--------|-------------|
 | `/api/v1/terminal/status` | GET | Check if terminal session is active, returns session ID |
 | `/api/v1/terminal/start` | POST | Launch LLM CLI with session tracking (`{cli, environmentName, workingDirectory}`) |
-| `/api/v1/terminal/stop` | POST | Stop the active PTY session and complete session tracking |
+| `/api/v1/terminal/stop` | POST | Stop the active terminal session and complete session tracking |
 | `/api/v1/terminal/ws` | WebSocket | Bidirectional PTY communication - supports takeover (disconnects previous viewer) |
 
 ### Terminal Start Flow (Web UI)
@@ -112,74 +130,26 @@ Body: {
 1. Route handler validates CLI type and resolves LLM enum (`Gemini`)
 2. Looks up custom environment in DB to get `CustomArgs` if environmentName provided
 3. Calls `TerminalSessionService.StartSessionAsync(LLM.Gemini, workDir, "test_g", ["--yolo"])`
-4. TerminalSessionService calls `TerminalRunner.StartWebAsync()`:
+4. TerminalSessionService calls `TerminalRunner.CreateSessionAsync()`:
    - Creates session in DB via `TerminalStateService.CreateSessionAsync()`
-   - Configures environment variables (config dir isolation + UTF-8 encoding)
-   - Spawns shell PTY via `PtyProvider.SpawnAsync()` (pwsh.exe on Windows, bash on Linux/Mac)
-   - Sends CLI command as text: `gemini --yolo\r`
-   - Returns `(IPtyConnection pty, string sessionId)`
-5. TerminalSessionService stores static `s_pty` and `s_sessionId`
+   - Builds environment dictionary (UTF-8 encoding + config dir isolation)
+   - Spawns shell PTY via `Terminal.CreateAsync()` (pwsh.exe on Windows, bash on Linux/Mac)
+   - Subscribes `DbLoggingConsumer` for output logging
+   - Sends CLI command: `gemini --yolo\r`
+   - Returns `(Terminal, sessionId)`
+5. TerminalSessionService calls `terminal.StartReadLoop()` and stores static reference
 6. Returns session ID to frontend
 
 **Frontend Flow:**
 1. Receives success response with session ID
 2. Shows terminal UI and connects WebSocket to `/api/v1/terminal/ws`
-3. TerminalSessionService.HandleWebSocketAsync() is called:
-   - Retrieves static `s_pty` and `s_sessionId`
-   - Calls `TerminalRunner.HandleWebSocketAsync()` which spawns two tasks:
-
-     **Output Task (PTY → WebSocket):**
-     ```csharp
-     while (!ct.IsCancellationRequested && webSocket.State == WebSocketState.Open)
-     {
-         var bytesRead = await pty.ReaderStream.ReadAsync(buffer, ct);
-         if (bytesRead == 0) break;
-
-         // Log to database
-         var text = System.Text.Encoding.UTF8.GetString(buffer, 0, bytesRead);
-         _stateService.LogOutput(sessionId, text);
-
-         // Send to WebSocket
-         await webSocket.SendAsync(new ArraySegment<byte>(buffer, 0, bytesRead),
-                                   WebSocketMessageType.Binary, true, ct);
-     }
-     ```
-
-     **Input Task (WebSocket → PTY):**
-     ```csharp
-     while (!ct.IsCancellationRequested && webSocket.State == WebSocketState.Open)
-     {
-         var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
-         if (result.MessageType == WebSocketMessageType.Close) break;
-         if (result.Count > 0)
-         {
-             // Log input to database
-             var input = System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count);
-             _stateService.RecordInput(sessionId, input);
-
-             // Write to PTY
-             await pty.WriterStream.WriteAsync(buffer, 0, result.Count, ct);
-             await pty.WriterStream.FlushAsync(ct);
-         }
-     }
-     ```
-4. xterm.js terminal receives binary output and displays to user
-5. User keystrokes sent to WebSocket → PTY → running CLI
-6. Full bidirectional byte stream + session tracking active
-
-## Frontend (`terminal-controller.js`)
-
-xterm.js terminal emulator with full PTY communication:
-
-- **xterm.js** - Terminal UI with Unicode 11 support and VS Code theme
-- **Cascadia Code font** - Proper rendering of box-drawing characters and Unicode glyphs
-- **WebSocket client** - Binary message handling for PTY communication
-  - `socket.onmessage` - Receives binary data, decodes UTF-8, writes to xterm.js
-  - `terminal.onData` - Captures user input, sends to WebSocket
-  - Null safety: checks `if (this.terminal)` before writing on disconnect
-- **CLI dropdown** - Select base CLIs (`base:claude`) or custom environments (`env:123:gemini`) via optgroups
-- **Single API call flow** - `POST /api/v1/terminal/start` launches CLI directly, then WebSocket connects
-- **Session restoration** - On page load, checks `/api/v1/terminal/status` and reconnects if active session exists
+3. `TerminalSessionService.HandleWebSocketAsync()`:
+   - Handles WebSocket takeover if previous viewer exists
+   - Replays buffered output from `terminal.GetReplayBuffer()`
+   - Sends Ctrl+L to force screen redraw
+   - Subscribes `WebSocketConsumer` for output → WebSocket
+   - Runs WebSocket input loop: receives input → `terminal.WriteBytesAsync()` + DB logging
+   - On disconnect: `subscription.Dispose()` auto-unsubscribes consumer
 
 ## External Terminal Viewers (Takeover Feature)
 
@@ -195,8 +165,8 @@ External HTML pages can discover and connect to active terminal sessions, taking
 2. External viewer connects to `ws://localhost:{port}/api/v1/terminal/ws`
 3. `TerminalSessionService` detects existing WebSocket connection
 4. Backend sends yellow ANSI message to old terminal: `[Session taken over by another viewer]`
-5. Old WebSocket is closed gracefully, new WebSocket takes over
-6. PTY session persists - only the viewer changes
+5. Old WebSocket is closed gracefully, old `WebSocketConsumer` is unsubscribed
+6. New `WebSocketConsumer` subscribed, buffer replayed, Ctrl+L sent
 7. New viewer has full bidirectional control (input/output)
 
 ### Test Pages
@@ -223,7 +193,7 @@ new Terminal({
     cols: 120,              // MUST match PTY spawn dimensions
     rows: 30,               // MUST match PTY spawn dimensions
     cursorBlink: false,     // Disable local cursor (PTY handles cursor)
-    fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace',
+    fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
     fontSize: 14,
     allowProposedApi: true, // Enable proposed xterm.js APIs for better rendering
     unicodeVersion: '11',   // Proper Unicode box-drawing characters
@@ -234,13 +204,6 @@ new Terminal({
 })
 ```
 
-**Why This Matters:**
-- **cols/rows mismatch** causes broken box-drawing characters and UI corruption (especially Gemini CLI)
-- **unicodeVersion: '11'** required for proper rendering of `▀▄╭╮│` and other Unicode glyphs
-- **allowProposedApi: true** enables advanced xterm.js features for better rendering
-- **convertEol: false** prevents xterm from manipulating raw PTY data
-- **cursorBlink: false** prevents phantom cursor at bottom (PTY controls cursor via ANSI codes)
-
 ### Connection Flow for External Viewers
 
 1. **User enters port** (5000-5999) and clicks "Check Session"
@@ -248,61 +211,26 @@ new Terminal({
    - Returns: `{ hasActiveSession: true, sessionId: "abc123" }`
 3. **User clicks Connect**
 4. **WebSocket connection**: `ws://localhost:{port}/api/v1/terminal/ws`
-5. **Takeover occurs**: Old viewer gets yellow message and disconnects
-6. **Screen refresh**: External viewer sends Ctrl+L (`\x0C`) to trigger shell redraw
-   - Without this, terminal appears blank (joining mid-session means no buffer replay)
-   - Ctrl+L forces shell to redraw its current state (prompt, UI elements, etc.)
-7. **Full control**: External viewer now has bidirectional terminal I/O
+5. **Takeover occurs**: Old viewer gets yellow message, WebSocketConsumer unsubscribed
+6. **Buffer replay**: Last 16KB of output replayed to new viewer
+7. **Screen refresh**: Ctrl+L sent to force shell redraw
+8. **Full control**: New WebSocketConsumer subscribed, bidirectional I/O active
 
-### CORS Configuration
+### Future Enhancements
 
-External viewers (file:// protocol) require permissive CORS policy:
-
-```csharp
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("VSCodeWebview", policy =>
-    {
-        policy.AllowAnyOrigin()     // Allows null origin (file://)
-              .AllowAnyHeader()
-              .AllowAnyMethod();
-    });
-});
-```
-
-**Why AllowAnyOrigin:** file:// protocol sends `Origin: null`, which requires either `AllowAnyOrigin()` or explicit null origin handling. `AllowAnyOrigin()` is simpler and works for development/testing scenarios.
-
-### Limitations and Future Enhancements
-
-**Current Limitations:**
-- No output buffer/history replay - joining mid-session shows blank screen until new output
-- Single active session model - only one PTY session can run at a time
-- Takeover is destructive - old viewer is disconnected, not maintained in parallel
-
-**Future Enhancements:**
-- **Output buffering**: Store last N bytes of PTY output, replay to new connections
-- **Remote relay**: Outbound WebSocket to cloud relay for mobile/webapp access
-- **Multi-session support**: Track multiple PTY sessions with session IDs
-- **Broadcast mode**: Multiple viewers watch same session (read-only or collaborative input)
+- **Remote relay**: Outbound WebSocket to cloud relay for mobile/webapp access (just another ITerminalConsumer)
+- **Multi-session support**: Track multiple Terminal instances with session IDs
+- **Broadcast mode**: Multiple WebSocketConsumers subscribed simultaneously (read-only or collaborative)
+- **Resize support**: `terminal.Resize()` propagates to PTY
 
 ## Environment Isolation
 
-Environment variables are configured via `LlmCliEnvironmentService.GetEnvironmentVariables()`:
-- Looks up environment by name from database
+Environment variables configured via `TerminalRunner.PrepareSession()` + `LlmCliEnvironmentService.GetEnvironmentVariables()`:
+- UTF-8 encoding always set (`LANG`, `LC_ALL`, `PYTHONIOENCODING`)
+- Looks up custom environment by name from database
 - Resolves `~/.config/{cli}/{env}` config directory path
 - Sets `XDG_CONFIG_HOME` (Linux/Mac) or `APPDATA` (Windows) to isolated config dir
-- Returns full environment dictionary to merge with process env
-- Both CLI and Web UI paths apply same isolation in their respective PTY spawning code
-
-**UTF-8 Encoding (Web UI only):**
-Web UI path explicitly sets UTF-8 encoding for proper Unicode rendering:
-```csharp
-environment["LANG"] = "en_US.UTF-8";
-environment["LC_ALL"] = "en_US.UTF-8";
-environment["PYTHONIOENCODING"] = "utf-8";
-```
-
-**Both paths use the same environment isolation mechanism - conda-like model with config directory environment variables, NOT CLI flags.**
+- Both CLI and Web paths use same `PrepareSession()` method
 
 ## Database Schema
 
@@ -316,14 +244,19 @@ environment["PYTHONIOENCODING"] = "utf-8";
 
 | File | Purpose | Key Implementation Details |
 |------|---------|---------------------------|
-| `PtyNet/src/Pty.Net/EzTerminal.cs` | PTY wrapper for Console I/O (CLI path) | Handles Console.ReadKey, translates to ANSI escape codes, pipes to PTY stdin/stdout, blocks until exit |
-| `Services/Terminal/TerminalStateService.cs` | All state management for terminal sessions | Creates/completes sessions in DB, logs output via TerminalOutputFilter, manages InputAccumulator per session, integrates git tracking |
-| `Services/Terminal/TerminalRunner.cs` | PTY lifecycle + I/O piping for both paths | CLI: uses EzTerminal blocking model, Web: uses PtyProvider direct with 2 async tasks for bidirectional piping |
-| `Services/Terminal/TerminalSessionService.cs` | Web UI glue service (minimal wrapper) | Singleton pattern with static IPtyConnection, thread-safe locking, prevents multiple WebSocket connections |
-| `wwwroot/js/modules/terminal-controller.js` | xterm.js frontend with WebSocket client | Binary message handling (Blob → ArrayBuffer → UTF-8), null-safe disconnect, session restoration on page load |
-| `CliLoop.cs` | CLI path entry point | `RunTerminalSessionAsync()` creates TerminalStateService + TerminalRunner, resolves LLM enum or DB environment |
-| `Routes/TerminalRoutes.cs` | API endpoint definitions | /start (POST), /stop (POST), /status (GET), /ws (WebSocket), /bootstrap-command (GET for external terminals) |
-| `DTOs/ResponseRecords.cs` | Request/response types | StartTerminalRequest, TerminalStatusResponse, BootstrapCommandResponse |
-| `Utils/InputAccumulator.cs` | Keystroke buffering and Enter detection | Buffers input until \r or \n detected, then flushes to DB with git diff tracking via callback |
-| `Utils/TerminalOutputFilter.cs` | ANSI-only content filtering | Skips transient ANSI escape sequences (cursor positioning, clearing, etc.) to reduce DB log noise |
-| `Services/LlmClis/LlmCliEnvironmentService.cs` | Environment variable resolution | Resolves `~/.config/{cli}/{env}` path, sets XDG_CONFIG_HOME (Linux/Mac) or APPDATA (Windows) for config isolation |
+| `Services/Terminal/Terminal.cs` | Unified PTY abstraction | Factory spawn, single read loop, pub/sub consumers, CircularBuffer, IAsyncDisposable, ReadOnlyMemory<byte> |
+| `Services/Terminal/ITerminalConsumer.cs` | Output consumer interface | `void OnOutput(ReadOnlyMemory<byte>)` — synchronous, zero-copy |
+| `Services/Terminal/Consumers/ConsoleOutputConsumer.cs` | Console output (CLI) | UTF-8 decode → Console.Write |
+| `Services/Terminal/Consumers/DbLoggingConsumer.cs` | DB logging (both paths) | UTF-8 decode → TerminalStateService.LogOutput |
+| `Services/Terminal/Consumers/WebSocketConsumer.cs` | WebSocket output (Web) | Fire-and-forget binary send |
+| `Services/Terminal/KeyTranslator.cs` | ANSI key translation (CLI) | Console.ReadKey → escape sequences (arrows, F-keys, etc.) |
+| `Services/Terminal/CircularBuffer.cs` | Output replay buffer | Thread-safe circular byte buffer, ReadOnlySpan<byte> append |
+| `Services/Terminal/TerminalStateService.cs` | DB session tracking | Creates/completes sessions, logs output via filter, manages InputAccumulator |
+| `Services/Terminal/TerminalRunner.cs` | Session orchestrator | PrepareSession, CreateSessionAsync (shared), RunCliAsync (CLI) |
+| `Services/Terminal/TerminalSessionService.cs` | Web UI session lifecycle | Static Terminal storage, WebSocket takeover, subscribe/unsubscribe, buffer replay |
+| `wwwroot/js/modules/terminal-controller.js` | xterm.js frontend | Binary WebSocket, session restoration, reconnect button |
+| `CliLoop.cs` | CLI entry point | `RunTerminalSessionAsync()` resolves LLM/env, calls runner.RunCliAsync |
+| `Routes/TerminalRoutes.cs` | API endpoints | /start, /stop, /status, /ws, /bootstrap-command |
+| `Utils/InputAccumulator.cs` | Keystroke buffering | Buffers until Enter, flushes to DB with git diff tracking |
+| `Utils/TerminalOutputFilter.cs` | ANSI filtering | Skips transient escape sequences to reduce DB noise |
+| `Services/LlmClis/LlmCliEnvironmentService.cs` | Env var resolution | Config dir isolation (XDG_CONFIG_HOME / APPDATA) |

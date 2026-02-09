@@ -77,44 +77,46 @@ _ = Task.Run(async () =>
     }
 });
 
-// Handle all CLI modes (env, agent, rules, validate, hooks, launch, --lmbootstrap, --validate-vca, etc.)
-var (exit, _) = await CliLoop.RunAsync(args, app.Services);
+// Configure middleware and routes BEFORE CliLoop so the app is ready to serve in all modes
+app.UseCors("VSCodeWebview");
+app.UseWebSockets();
+
+if (Directory.Exists(webRootPath))
+{
+    var fileProvider = new PhysicalFileProvider(webRootPath);
+    app.UseDefaultFiles(new DefaultFilesOptions
+    {
+        FileProvider = fileProvider,
+        DefaultFileNames = new List<string> { "index.html" }
+    });
+    app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
+}
+
+app.MapApiEndpoints(launchDirectory);
+app.MapOpenApi();
+
+// Handle all CLI modes (env, agent, rules, validate, hooks, launch, etc.)
+// --env falls through with exit=false so the web server starts alongside the CLI terminal
+var (exit, parsedArgs) = await CliLoop.RunAsync(args, app.Services);
 if (exit)
 {
     return;
 }
 
-if (!Directory.Exists(webRootPath))
-{
-    throw new Exception("webroot not found");
-}
-
-var fileProvider = new PhysicalFileProvider(webRootPath);
-
-// Enable CORS for VS Code webview
-app.UseCors("VSCodeWebview");
-
-// Enable WebSockets for terminal
-app.UseWebSockets();
-
-// Enable default files (index.html) - must be before UseStaticFiles
-app.UseDefaultFiles(new DefaultFilesOptions
-{
-    FileProvider = fileProvider,
-    DefaultFileNames = new List<string> { "index.html" }
-});
-
-app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
-
-// Map API endpoints
-app.MapApiEndpoints(launchDirectory);
-app.MapOpenApi();
-
-
 // Start server in background (non-blocking)
 await app.StartAsync();
-
 string serverUrl = $"http://localhost:{port}";
+
+if (parsedArgs.IsLMBootstrap)
+{
+    // CLI + Web concurrent mode: terminal runs in foreground, web server in background
+    Console.WriteLine($"[VibeRails] Web viewer: {serverUrl}");
+    await CliLoop.RunTerminalWithWebAsync(parsedArgs, app.Services);
+    await app.StopAsync();
+    return;
+}
+
+// Standard web-only mode
 Console.WriteLine($"Vibe Rails server running on {serverUrl}");
 Console.WriteLine($"Launch directory: {launchDirectory}");
 Console.WriteLine("Press Ctrl+C to stop the server.");
@@ -128,6 +130,3 @@ if (args.Contains("--open-browser"))
 
 // Wait for shutdown signal (Ctrl+C)
 await app.WaitForShutdownAsync();
-
-
-
