@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
+using Serilog;
 
 namespace MCP_Server.Tools;
 
@@ -187,6 +188,7 @@ public class RulesTool
         }
         catch (Exception ex)
         {
+            Log.Error(ex, "Failed to validate VCA rules for working directory {WorkDir}", workingDirectory ?? "current");
             return $"ERROR: Failed to validate VCA rules: {ex.Message}";
         }
     }
@@ -238,9 +240,9 @@ public class RulesTool
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Silently fail - will return empty list
+            Log.Warning(ex, "Failed to get staged files from git in {GitRoot}", gitRoot);
         }
         return files;
     }
@@ -275,15 +277,16 @@ public class RulesTool
                     .Where(f => !f.Contains("node_modules") && !f.Contains(".git"));
                 agentFiles.AddRange(files);
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore search errors
+                Log.Warning(ex, "Failed to search for AGENTS.md files in {GitRoot}", gitRoot);
             }
 
             return agentFiles.Distinct().ToList();
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Warning(ex, "Failed to find AGENTS.md files in {GitRoot}", gitRoot);
             return agentFiles;
         }
     }
@@ -454,9 +457,9 @@ public class RulesTool
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // If we can't read the file, return empty set
+            Log.Warning(ex, "Failed to read documented files from {AgentFile}", agentFilePath);
         }
 
         return documentedFiles;

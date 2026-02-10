@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using VibeRails.Cli;
 using VibeRails.DB;
+using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
@@ -23,21 +23,6 @@ public static class CliLoop
         // Create a scope for resolving scoped services
         using var scope = services.CreateScope();
         var scopedServices = scope.ServiceProvider;
-
-        // Handle update command
-        if (parsedArgs.Command?.ToLowerInvariant() == "update")
-        {
-            var updateInstaller = scopedServices.GetRequiredService<UpdateInstaller>();
-            var lifetime = scopedServices.GetRequiredService<IHostApplicationLifetime>();
-
-            var success = await updateInstaller.InstallUpdateAsync(CancellationToken.None);
-            if (success)
-            {
-                lifetime.StopApplication();
-            }
-            Environment.ExitCode = success ? 0 : 1;
-            return (true, parsedArgs);
-        }
 
         // 0. Handle top-level --help and --version flags (no command required)
         if (parsedArgs.Help)
@@ -144,7 +129,8 @@ public static class CliLoop
         // Create runner and run with web access
         var gitServiceForSession = new GitService(workingDirectory);
         var terminalStateService = new TerminalStateService(dbService, gitServiceForSession);
-        var runner = new TerminalRunner(terminalStateService, envService);
+        var mcpSettings = scopedServices.GetRequiredService<McpSettings>();
+        var runner = new TerminalRunner(terminalStateService, envService, mcpSettings);
 
         var exitCode = await runner.RunCliWithWebAsync(llm, workingDirectory, environmentName, parsedArgs.ExtraArgs, sessionService, CancellationToken.None);
         Environment.ExitCode = exitCode;

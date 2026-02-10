@@ -42,19 +42,23 @@ Both CLI and Web paths use the same `Terminal` class. The only difference is whi
 - No PTY or WebSocket knowledge
 
 **`TerminalRunner.cs`** - Session orchestrator (thin layer)
-- `PrepareSession()` — builds CLI command string + environment dictionary (shared by both paths)
+- `PrepareSession()` — builds CLI command string + environment dictionary (shared by all paths)
 - `CreateSessionAsync()` — creates DB session, spawns Terminal, subscribes DbLoggingConsumer, sends CLI command
-- `RunCliAsync()` — CLI path: calls CreateSessionAsync, subscribes ConsoleOutputConsumer, runs Console.ReadKey input loop
-- No WebSocket code, no EzTerminal, no raw PTY manipulation
+- `RunCliAsync()` — CLI-only path: calls CreateSessionAsync, subscribes ConsoleOutputConsumer, runs Console.ReadKey input loop
+- `RunCliWithWebAsync()` — CLI+Web concurrent path: same as RunCliAsync but also calls `RegisterExternalTerminal()` / `UnregisterTerminalAsync()` so web viewers can connect to the same PTY
+- No WebSocket code, no raw PTY manipulation
 
-**`TerminalSessionService.cs`** - Web UI session lifecycle
+**`TerminalSessionService.cs`** - Session lifecycle + external terminal registration
 - Holds static `Terminal` instance (singleton pattern for single active session)
 - Thread-safe using `Lock` for concurrent access
-- Calls `TerminalRunner.CreateSessionAsync()` to create Terminal + session
+- Calls `TerminalRunner.CreateSessionAsync()` to create Terminal + session (Web UI path)
+- `RegisterExternalTerminal()` — CLI path registers its Terminal in static state so web requests see it
+- `UnregisterTerminalAsync()` — CLI path clears state on exit, sends "[CLI session ended]" to active web viewer
+- `IsExternallyOwned` — tracks whether session is CLI-owned (web "Stop" button disabled)
 - WebSocket handling: subscribe `WebSocketConsumer`, run input loop, unsubscribe on disconnect
 - **Takeover pattern**: When new WebSocket connects, sends yellow ANSI message to old connection, then disconnects it
 - Buffer replay + Ctrl+L on new connections for screen reconstruction
-- Terminal persists across WebSocket disconnects — only disposed on explicit `StopSessionAsync()`
+- Terminal persists across WebSocket disconnects — only disposed on explicit `StopSessionAsync()` (web) or CLI exit
 
 ### Consumer Implementations
 
@@ -252,11 +256,12 @@ Environment variables configured via `TerminalRunner.PrepareSession()` + `LlmCli
 | `Services/Terminal/KeyTranslator.cs` | ANSI key translation (CLI) | Console.ReadKey → escape sequences (arrows, F-keys, etc.) |
 | `Services/Terminal/CircularBuffer.cs` | Output replay buffer | Thread-safe circular byte buffer, ReadOnlySpan<byte> append |
 | `Services/Terminal/TerminalStateService.cs` | DB session tracking | Creates/completes sessions, logs output via filter, manages InputAccumulator |
-| `Services/Terminal/TerminalRunner.cs` | Session orchestrator | PrepareSession, CreateSessionAsync (shared), RunCliAsync (CLI) |
-| `Services/Terminal/TerminalSessionService.cs` | Web UI session lifecycle | Static Terminal storage, WebSocket takeover, subscribe/unsubscribe, buffer replay |
-| `wwwroot/js/modules/terminal-controller.js` | xterm.js frontend | Binary WebSocket, session restoration, reconnect button |
-| `CliLoop.cs` | CLI entry point | `RunTerminalSessionAsync()` resolves LLM/env, calls runner.RunCliAsync |
-| `Routes/TerminalRoutes.cs` | API endpoints | /start, /stop, /status, /ws, /bootstrap-command |
+| `Services/Terminal/TerminalRunner.cs` | Session orchestrator | PrepareSession, CreateSessionAsync (shared), RunCliAsync (CLI-only), RunCliWithWebAsync (CLI+Web) |
+| `Services/Terminal/TerminalSessionService.cs` | Session lifecycle + registration | Static Terminal storage, RegisterExternalTerminal/UnregisterTerminalAsync, WebSocket takeover, buffer replay |
+| `wwwroot/js/modules/terminal-controller.js` | xterm.js frontend | Binary arraybuffer WebSocket, session restoration, reconnect button (shows on disconnect only) |
+| `CliLoop.cs` | CLI entry point | `RunTerminalWithWebAsync()` resolves LLM/env, calls runner.RunCliWithWebAsync |
+| `Program.cs` | App entry point | Middleware setup before CliLoop, concurrent CLI+Web mode branch |
+| `Routes/TerminalRoutes.cs` | API endpoints | /start, /stop (guarded for CLI-owned), /status, /ws, /bootstrap-command |
 | `Utils/InputAccumulator.cs` | Keystroke buffering | Buffers until Enter, flushes to DB with git diff tracking |
 | `Utils/TerminalOutputFilter.cs` | ANSI filtering | Skips transient escape sequences to reduce DB noise |
 | `Services/LlmClis/LlmCliEnvironmentService.cs` | Env var resolution | Config dir isolation (XDG_CONFIG_HOME / APPDATA) |

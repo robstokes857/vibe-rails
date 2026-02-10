@@ -1,6 +1,6 @@
 <Solution>
   <Project Path="MCP_Server/MCP_Server.csproj" />
-  <Project Path="PtyNet/src/Pty.Net/Pty.Net.csproj" />
+  <Project Path="Pty.Net/Pty.Net.csproj" />
   <Project Path="Tests/Tests.csproj" />
   <Project Path="VibeRails/VibeRails.csproj" />
 </Solution>

@@ -73,7 +73,6 @@ namespace VibeRails
 
             // Update Service (singleton with HttpClient)
             serviceCollection.AddHttpClient<UpdateService>();
-            serviceCollection.AddScoped<UpdateInstaller>();
 
             // WebSocket Messaging Client (singleton - auto-reconnects, URL from app_config.json)
             serviceCollection.AddSingleton(_ =>

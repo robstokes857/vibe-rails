@@ -1,3 +1,4 @@
+using VibeRails.DTOs;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal.Consumers;
 
@@ -7,11 +8,13 @@ public class TerminalRunner
 {
     private readonly ITerminalStateService _stateService;
     private readonly LlmCliEnvironmentService _envService;
+    private readonly McpSettings _mcpSettings;
 
-    public TerminalRunner(ITerminalStateService stateService, LlmCliEnvironmentService envService)
+    public TerminalRunner(ITerminalStateService stateService, LlmCliEnvironmentService envService, McpSettings mcpSettings)
     {
         _stateService = stateService;
         _envService = envService;
+        _mcpSettings = mcpSettings;
     }
 
     /// <summary>
@@ -22,9 +25,27 @@ public class TerminalRunner
         LLM llm, string? envName, string[]? extraArgs)
     {
         var cli = llm.ToString().ToLower();
-        var command = extraArgs?.Length > 0
+        var cliCommand = extraArgs?.Length > 0
             ? $"{cli} {string.Join(" ", extraArgs.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))}"
             : cli;
+
+        var builder = new ShellCommandBuilder()
+            .SetLaunchCommand(cliCommand);
+
+        // Register MCP server before launch
+        if (!string.IsNullOrEmpty(_mcpSettings.ServerPath) && File.Exists(_mcpSettings.ServerPath))
+        {
+            var mcpSetup = llm switch
+            {
+                LLM.Claude => $"claude mcp add viberails-mcp \"{_mcpSettings.ServerPath}\"",
+                LLM.Codex => $"codex mcp add viberails-mcp -- \"{_mcpSettings.ServerPath}\"",
+                LLM.Gemini => $"gemini mcp add --scope user viberails-mcp \"{_mcpSettings.ServerPath}\"",
+                _ => null
+            };
+
+            if (mcpSetup != null)
+                builder.AddSetup(mcpSetup);
+        }
 
         var environment = new Dictionary<string, string>
         {
@@ -40,7 +61,7 @@ public class TerminalRunner
                 environment[kvp.Key] = kvp.Value;
         }
 
-        return (command, environment);
+        return (builder.Build(), environment);
     }
 
     /// <summary>

@@ -67,7 +67,9 @@ _ = Task.Run(async () =>
             if (updateInfo?.UpdateAvailable == true)
             {
                 Console.WriteLine($"[VibeRails] Update available: v{updateInfo.CurrentVersion} -> v{updateInfo.LatestVersion}");
-                Console.WriteLine($"[VibeRails] Run 'vb update' to install the latest version.");
+                Console.WriteLine("[VibeRails] Install latest version:");
+                Console.WriteLine("[VibeRails]   Windows: irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.ps1 | iex");
+                Console.WriteLine("[VibeRails]   Linux:   wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash");
             }
         }
     }

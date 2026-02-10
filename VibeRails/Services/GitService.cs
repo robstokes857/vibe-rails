@@ -201,7 +201,7 @@ namespace VibeRails.Services
 
         private async Task<string> RunGitCommandAsync(string arguments, CancellationToken cancellationToken)
         {
-            var process = new System.Diagnostics.Process
+            using var process = new System.Diagnostics.Process
             {
                 StartInfo = new System.Diagnostics.ProcessStartInfo
                 {

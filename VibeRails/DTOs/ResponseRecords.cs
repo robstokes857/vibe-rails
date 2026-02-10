@@ -347,8 +347,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ApiVersionResponse))]
     [JsonSerializable(typeof(MessageResponse))]
     [JsonSerializable(typeof(UpdateInfo))]
-    [JsonSerializable(typeof(ReleaseAsset))]
-    [JsonSerializable(typeof(List<ReleaseAsset>))]
     // App Settings DTOs
     [JsonSerializable(typeof(AppSettingsDto))]
     // App Configuration (for app_config.json)

@@ -57,34 +57,12 @@ public class UpdateService
                 ? urlElement.GetString()
                 : null;
 
-            var assets = new List<ReleaseAsset>();
-            if (root.TryGetProperty("assets", out var assetsElement) && assetsElement.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var asset in assetsElement.EnumerateArray())
-                {
-                    var name = asset.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
-                    var downloadUrl = asset.TryGetProperty("browser_download_url", out var urlEl) ? urlEl.GetString() : null;
-                    var size = asset.TryGetProperty("size", out var sizeEl) ? sizeEl.GetInt64() : 0;
-
-                    if (name != null && downloadUrl != null)
-                    {
-                        assets.Add(new ReleaseAsset
-                        {
-                            Name = name,
-                            DownloadUrl = downloadUrl,
-                            Size = size
-                        });
-                    }
-                }
-            }
-
             _cachedUpdateInfo = new UpdateInfo
             {
                 CurrentVersion = currentVersion,
                 LatestVersion = latestVersion,
                 UpdateAvailable = updateAvailable,
-                ReleaseNotesUrl = releaseNotesUrl,
-                Assets = assets
+                ReleaseNotesUrl = releaseNotesUrl
             };
 
             _lastCheck = DateTime.UtcNow;
@@ -126,12 +104,4 @@ public class UpdateInfo
     public string LatestVersion { get; set; } = string.Empty;
     public bool UpdateAvailable { get; set; }
     public string? ReleaseNotesUrl { get; set; }
-    public List<ReleaseAsset> Assets { get; set; } = new();
-}
-
-public class ReleaseAsset
-{
-    public string Name { get; set; } = string.Empty;
-    public string DownloadUrl { get; set; } = string.Empty;
-    public long Size { get; set; }
 }

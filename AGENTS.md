@@ -113,8 +113,7 @@ VibeControl2/
 │   │   └── RulesTool.cs           # Content validation rules
 │   └── Models/                     # MCP message models
 │
-├── PtyNet/                         # Git submodule: PTY library
-│   └── src/Pty.Net/               # Cross-platform terminal emulation
+├── Pty.Net/                        # Cross-platform PTY library (ConPTY/forkpty)
 │
 ├── Tests/                          # xUnit test suite
 │   ├── AgentFileServiceTests.cs
@@ -131,7 +130,7 @@ VibeControl2/
 
 ### Application Modes
 
-VibeRails operates in two primary modes:
+VibeRails operates in three primary modes:
 
 #### 1. Web Server Mode (Default)
 ```bash
@@ -140,20 +139,31 @@ vb
 - Launches ASP.NET web server on available port
 - Opens browser to dashboard UI
 - Provides REST API for managing agents, environments, sessions
-- Runs background CLI loop (currently minimal)
+- Terminal sessions started from Web UI via `POST /api/v1/terminal/start`
 
-#### 2. Terminal Session Mode (CLI Wrapper)
+#### 2. CLI + Web Mode (Terminal Session)
 ```bash
-vb --env claude                    # Launch base CLI with session tracking
+vb --env claude                    # Launch base CLI with session tracking + web viewer
 vb --env "my-research-setup"       # Launch custom environment (DB lookup)
 vb --env gemini --workdir /project # Explicit working directory
 ```
 - Unified `--env` flag (`--environment` and `--lmbootstrap` are aliases)
 - Smart resolution: LLM name → base CLI, otherwise → custom environment DB lookup
 - `--workdir` optional: uses git root if available, falls back to current directory
-- Wraps LLM CLI execution (claude/codex/gemini) with environment isolation
+- **Starts web server in background** — prints URL for browser access to same terminal
+- CLI runs in foreground (Console.ReadKey input loop)
+- Web viewers connect via WebSocket — both Console and WebSocket consumers active simultaneously (pub/sub)
 - Full session tracking: database logging, user input tracking, git change detection
-- Stores session data in SQLite database with complete history
+- Web UI "Stop" button disabled for CLI-owned sessions
+- Web server shuts down when CLI terminal exits
+
+#### 3. CLI-Only Commands
+```bash
+vb env list                        # List environments
+vb validate                        # Run VCA validation
+vb hooks install                   # Install git hooks
+```
+- Pure CLI commands that exit immediately without starting a web server
 
 See [Cli/AGENTS.md](VibeRails/Cli/AGENTS.md) for full details.
 
@@ -175,23 +185,27 @@ Response [AgentFileListResponse]
 Browser renders agent list with rules
 ```
 
-#### Session Logging Flow
+#### Session Logging Flow (CLI + Web)
 ```
 vb --env myenv (or vb --env claude)
   ↓
-CliLoop.RunTerminalSessionAsync()
+Program.cs starts web server → CliLoop.RunTerminalWithWebAsync()
   ↓ Smart resolves: LLM name → base CLI, custom name → DB lookup
   ↓ Resolves working directory (--workdir or git root)
-  ↓ Creates TerminalSession (session lifecycle)
-  ↓ Creates PtyService (PTY management)
-  ↓ Sets isolated config env vars via LlmCliEnvironmentService
-  ↓   - CLAUDE_CONFIG_DIR, CODEX_HOME, XDG_*, etc.
-  ↓ Spawns PTY via EzTerminal with output/input handlers
-  ↓ Executes: claude [args]
+  ↓ TerminalRunner.RunCliWithWebAsync():
+  ↓   Creates Terminal (spawns PTY via PtyProvider)
+  ↓   Subscribes DbLoggingConsumer + ConsoleOutputConsumer
+  ↓   Registers Terminal with TerminalSessionService (web access)
+  ↓   Sets isolated config env vars via LlmCliEnvironmentService
+  ↓     - CLAUDE_CONFIG_DIR, CODEX_HOME, XDG_*, etc.
+  ↓   Sends CLI command to PTY shell: claude [args]
   ↓
-Terminal output → TerminalOutputFilter → TerminalSession.HandleOutput()
+Terminal.ReadLoop → dispatches to all ITerminalConsumer subscribers:
+  ├── ConsoleOutputConsumer → Console.Write (CLI output)
+  ├── DbLoggingConsumer → TerminalOutputFilter → TerminalStateService.LogOutput()
+  └── WebSocketConsumer → WebSocket binary frames (if browser connected)
   ↓
-Terminal input → InputAccumulator → TerminalSession.HandleInput()
+Console.ReadKey / WebSocket input → InputAccumulator → TerminalStateService.RecordInput()
   ↓
 Git changes tracked on each user input (Enter key)
   ↓
@@ -879,7 +893,7 @@ builder.Logging.SetMinimumLevel(LogLevel.Debug);
 - [ASP.NET Core Documentation](https://docs.microsoft.com/aspnet/core)
 - [Model Context Protocol Spec](https://modelcontextprotocol.io/)
 - [ModelContextProtocol NuGet Package](https://www.nuget.org/packages/ModelContextProtocol)
-- [Pty.Net (Forked)](../PtyNet/README.md)
+- [Pty.Net](https://github.com/microsoft/vs-pty.net) (inlined fork, ConPTY only)
 - [XTerm.js Documentation](https://xtermjs.org/)
 
 ### Related Projects

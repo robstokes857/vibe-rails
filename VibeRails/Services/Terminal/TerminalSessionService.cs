@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal.Consumers;
@@ -32,10 +33,10 @@ public class TerminalSessionService : ITerminalSessionService
     public string? ActiveSessionId => s_sessionId;
     public bool IsExternallyOwned { get { lock (s_lock) return s_externallyOwned; } }
 
-    public TerminalSessionService(IDbService dbService, LlmCliEnvironmentService envService, IGitService gitService)
+    public TerminalSessionService(IDbService dbService, LlmCliEnvironmentService envService, IGitService gitService, McpSettings mcpSettings)
     {
         _stateService = new TerminalStateService(dbService, gitService);
-        _runner = new TerminalRunner(_stateService, envService);
+        _runner = new TerminalRunner(_stateService, envService, mcpSettings);
     }
 
     public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null)

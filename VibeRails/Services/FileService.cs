@@ -11,10 +11,10 @@ namespace VibeRails.Services
     {
         private static readonly Lazy<string> _hiddenDir = new Lazy<string>(LoadInstallDirName);
         private const string ENV_DIR = @"envs";
-        private const string HOSTORY_DIR = @"history";
+        private const string HISTORY_DIR = @"history";
         private const string CONFIG_FILE = @"config.json";
         private const string STATE_FILE = @"state.db";
-        private const string EMPTT_JSON = @"{}";
+        private const string EMPTY_JSON = @"{}";
 
         private static string LoadInstallDirName()
         {
@@ -58,7 +58,7 @@ namespace VibeRails.Services
         {
             string globalDir = GetGlobalSavePath();
             string envDir = Path.Combine(globalDir, ENV_DIR);
-            string historyDir = Path.Combine(globalDir, HOSTORY_DIR);
+            string historyDir = Path.Combine(globalDir, HISTORY_DIR);
             string stateFile = Path.Combine(globalDir, STATE_FILE);
             string configFile = Path.Combine(globalDir, CONFIG_FILE);
             Configs.SetConfigPath(configFile);
@@ -81,7 +81,7 @@ namespace VibeRails.Services
             // SQLite database will be created by StateService.InitializeDatabase()
             if (!File.Exists(configFile))
             {
-                File.WriteAllText(configFile, EMPTT_JSON);
+                File.WriteAllText(configFile, EMPTY_JSON);
             }
         }
 

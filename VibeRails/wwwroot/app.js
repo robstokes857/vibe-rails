@@ -119,6 +119,12 @@ export class VibeControlApp {
                 this.updateBreadcrumb();
                 this.loadView('dashboard');
             }
+
+            const goSettings = e.target.closest('[data-action="navigate-settings"]');
+            if (goSettings) {
+                e.preventDefault();
+                this.navigate('settings');
+            }
         });
     }
 
