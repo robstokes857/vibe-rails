@@ -69,6 +69,16 @@
                 </div>
             </div>
 
+            <div class="col-md-6 col-lg-4 mb-4 animate-fade-up delay-300">
+                <div class="card menu-card" data-action="navigate" data-view="settings">
+                    <div class="card-body text-center">
+                        <span class="menu-icon mb-3" style="font-size: 48px;">&#x2699;&#xFE0F;</span>
+                        <h5 class="menu-title">Settings</h5>
+                        <p class="menu-description">Configure remote access and API keys</p>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </template>
 
@@ -178,6 +188,10 @@
                 <div class="col-12" data-terminal-content>
                     <!-- Terminal panel will be rendered here by TerminalController -->
                 </div>
+            </div>
+
+            <div class="row mb-4 animate-fade-up delay-800" data-main-menu>
+                <!-- Main menu cards injected here by DashboardController.renderMainMenu() -->
             </div>
 
             <div class="row mb-4 animate-fade-up delay-800" data-local-file-tree-section style="display: none;">
@@ -634,6 +648,49 @@
                         <div class="card-body text-center">
                             <img class="cli-logo mb-3" src="assets/img/gemini-color.svg" alt="Gemini logo">
                             <h5 class="menu-title">Configure Gemini</h5>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="settings-template">
+        <div class="view" data-view="settings">
+            <div class="row">
+                <div class="col-12">
+                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
+                        &larr; Back
+                    </button>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <h2 class="mb-4">Settings</h2>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-8 col-lg-6">
+                    <div class="card">
+                        <div class="card-header">Application Settings</div>
+                        <div class="card-body">
+                            <form id="app-settings-form">
+                                <div class="mb-4">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="setting-remote-access">
+                                        <label class="form-check-label" for="setting-remote-access">Turn on Remote Access</label>
+                                    </div>
+                                    <small class="form-text text-muted">Allow remote connections to this VibeRails instance</small>
+                                </div>
+                                <div class="mb-4">
+                                    <label class="form-label" for="setting-api-key">API Key</label>
+                                    <input type="text" class="form-control" id="setting-api-key" placeholder="Enter API key">
+                                    <small class="form-text text-muted">API key for authenticating remote requests</small>
+                                </div>
+                                <button type="submit" class="btn btn-primary">Save Settings</button>
+                            </form>
                         </div>
                     </div>
                 </div>

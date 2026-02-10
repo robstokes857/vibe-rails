@@ -232,6 +232,12 @@ namespace VibeRails.DTOs
         string Message
     );
 
+    // App Settings DTOs
+    public record AppSettingsDto(
+        bool RemoteAccess,
+        string ApiKey
+    );
+
     // Claude Plan DTOs
     public record ClaudePlanRecord(
         long Id,
@@ -343,6 +349,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(ReleaseAsset))]
     [JsonSerializable(typeof(List<ReleaseAsset>))]
+    // App Settings DTOs
+    [JsonSerializable(typeof(AppSettingsDto))]
     // App Configuration (for app_config.json)
     [JsonSerializable(typeof(Services.AppConfiguration))]
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]

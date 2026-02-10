@@ -423,5 +423,25 @@ namespace VibeRails.Utils
             _rootPath = path;
         }
 
+        private static bool _remoteAccess = false;
+        private static string _apiKey = string.Empty;
+
+        public static bool GetRemoteAccess()
+        {
+            return _remoteAccess;
+        }
+        public static void SetRemoteAccess(bool value)
+        {
+            _remoteAccess = value;
+        }
+        public static string GetApiKey()
+        {
+            return _apiKey;
+        }
+        public static void SetApiKey(string value)
+        {
+            _apiKey = value;
+        }
+
     }
 }

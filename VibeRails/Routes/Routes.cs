@@ -16,5 +16,6 @@ public static class RouteExtensions
         LlmSettingsRoutes.Map(app);
         ClaudePlanRoutes.Map(app);
         UpdateRoutes.Map(app);
+        AppSettingsRoutes.Map(app);
     }
 }

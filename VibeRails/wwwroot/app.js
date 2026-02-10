@@ -11,6 +11,7 @@ import { ConfigController } from './js/modules/config-controller.js';
 import { RuleController } from './js/modules/rule-controller.js';
 import { CliLauncher } from './js/modules/cli-launcher.js';
 import { TerminalController } from './js/modules/terminal-controller.js';
+import { SettingsController } from './js/modules/settings-controller.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
 export class VibeControlApp {
@@ -36,7 +37,8 @@ export class VibeControlApp {
         this.ruleController = new RuleController(this);
         this.cliLauncher = new CliLauncher(this);
         this.terminalController = new TerminalController(this);
-        
+        this.settingsController = new SettingsController(this);
+
         this.init();
     }
 
@@ -220,7 +222,8 @@ export class VibeControlApp {
             'check-violations': 'Check Violations',
             'active-rules': 'Active Rules',
             'environments': 'Environments',
-            'config': 'Configuration'
+            'config': 'Configuration',
+            'settings': 'Settings'
         };
         return names[view] || view;
     }
@@ -237,7 +240,8 @@ export class VibeControlApp {
             'active-rules': () => this.ruleController.loadActiveRules(),
             'environments': () => this.environmentController.loadEnvironments(),
             'config': () => this.configController.loadConfiguration(),
-            'sessions': () => this.sessionController.loadSessions()
+            'sessions': () => this.sessionController.loadSessions(),
+            'settings': () => this.settingsController.loadSettings()
         };
 
         const loadFunc = views[view];

@@ -105,6 +105,8 @@ namespace VibeRails
 
         public static async Task StartUpChecks(IServiceProvider serviceProvider)
         {
+            InitAppSettings();
+
             using var scope = serviceProvider.CreateScope();
             var fileService = scope.ServiceProvider.GetRequiredService<IFileService>();
             fileService.InitGlobalSave();
@@ -161,6 +163,13 @@ namespace VibeRails
                 // Silent failure - just log to console
                 Console.WriteLine($"Note: Could not auto-install pre-commit hook: {ex.Message}");
             }
+        }
+
+        public static void InitAppSettings()
+        {
+            var config = LoadAppConfiguration();
+            Configs.SetRemoteAccess(config.RemoteAccess);
+            Configs.SetApiKey(config.ApiKey);
         }
 
         private static AppConfiguration LoadAppConfiguration()
