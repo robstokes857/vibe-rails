@@ -50,34 +50,6 @@
     </footer>
 
     <!-- Templates -->
-    <template id="main-menu-template">
-        <div class="row">
-            <div class="col-md-6 col-lg-4 mb-4 animate-fade-up delay-100">
-                <div class="card menu-card" data-action="navigate" data-view="agents">
-                    <div class="card-body text-center">
-                        <img class="cli-logo mb-3" src="assets/img/icons/agent.svg" alt="Agents logo"
-                            style="height: 48px;">
-                        <h5 class="menu-title">Agent Files &amp; Rules</h5>
-                        <p class="menu-description">Manage agent.md files, rules, and VCA validation</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-6 col-lg-4 mb-4 animate-fade-up delay-200">
-                <div class="card menu-card" data-action="navigate" data-view="config">
-                    <div class="card-body text-center">
-                        <img src="assets/img/icons/sliders-solid-full.svg" alt="Configuration"
-                            class="menu-icon-img mb-3">
-                        <h5 class="menu-title">Configuration</h5>
-                        <p class="menu-description">Configure API keys and settings for each CLI</p>
-                    </div>
-                </div>
-            </div>
-
-
-        </div>
-    </template>
-
     <template id="dashboard-template">
         <div class="dashboard" data-dashboard="unified">
             <div class="row mb-4 animate-fade-up delay-200">
@@ -186,9 +158,6 @@
                 </div>
             </div>
 
-            <div class="row mb-4 animate-fade-up delay-800" data-main-menu>
-                <!-- Main menu cards injected here by DashboardController.renderMainMenu() -->
-            </div>
 
             <div class="row mb-4 animate-fade-up delay-800" data-local-file-tree-section style="display: none;">
                 <div class="col-12">

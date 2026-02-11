@@ -238,6 +238,13 @@ namespace VibeRails.DTOs
         string ApiKey
     );
 
+    // Signed Message DTOs (matches VibeRails-Front TerminalSignedMessage shape)
+    public record SignedMessage(string Message, string Signature);
+    public record SignatureVerificationResponse(bool Verified, string Message);
+
+    // Proxy relay DTOs (sent from proxy WS to browser)
+    public record ProxyRelayMessage(string Type, string Message, string? Signature = null, bool? Verified = null);
+
     // Claude Plan DTOs
     public record ClaudePlanRecord(
         long Id,
@@ -349,6 +356,10 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateInfo))]
     // App Settings DTOs
     [JsonSerializable(typeof(AppSettingsDto))]
+    // Signed Message DTOs
+    [JsonSerializable(typeof(SignedMessage))]
+    [JsonSerializable(typeof(SignatureVerificationResponse))]
+    [JsonSerializable(typeof(ProxyRelayMessage))]
     // App Configuration (for app_config.json)
     [JsonSerializable(typeof(Services.AppConfiguration))]
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]

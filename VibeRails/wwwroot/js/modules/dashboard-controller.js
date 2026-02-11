@@ -148,12 +148,6 @@ export class DashboardController {
             }
         });
 
-        const menuSlot = root.querySelector('[data-main-menu]');
-        if (menuSlot) {
-            menuSlot.appendChild(this.renderMainMenu());
-            this.bindMainMenu(menuSlot);
-        }
-
         // Terminal section - only show in local context
         const terminalSection = root.querySelector('[data-terminal-section]');
         if (terminalSection && isLocal) {
@@ -170,23 +164,6 @@ export class DashboardController {
         }
 
         return fragment;
-    }
-
-    renderMainMenu() {
-        return this.app.cloneTemplate('main-menu-template');
-    }
-
-    bindMainMenu(container) {
-        if (!container) return;
-
-        this.app.bindActions(container, '[data-action="navigate"]', (element) => {
-            const view = element.dataset.view;
-            if (view) {
-                this.app.navigate(view);
-            }
-        });
-
-        this.app.bindAction(container, '[data-action="exit-app"]', () => window.close());
     }
 
     populateEnvironmentsList(container) {

@@ -30,8 +30,12 @@
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Certs\" />
     <Folder Include="wwwroot\assets\" />
+  </ItemGroup>
+
+  <!-- Copy public cert to output directory -->
+  <ItemGroup>
+    <Content Include="Certs\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Copy app_config.json to output directory -->

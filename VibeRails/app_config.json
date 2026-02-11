@@ -6,5 +6,5 @@
     "autoInstall": true,
     "installOnStartup": true
   },
-  "frontendUrl": "http://localhost:5164"
+  "frontendUrl": "https://localhost:5164"
 }

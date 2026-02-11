@@ -5,6 +5,7 @@ using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
+using System.Security.Cryptography.X509Certificates;
 using VibeRails.Services.Messaging;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Terminal;
@@ -80,6 +81,10 @@ namespace VibeRails
                 var config = LoadAppConfiguration();
                 return new MessagingClient(config.FrontendUrl);
             });
+
+            // Message signature validator — load public cert once, scoped service
+            var publicCert = X509CertificateLoader.LoadPkcs12FromFile(Path.Combine("Certs", "public.pfx"), null);
+            serviceCollection.AddScoped(_ => new MessageSignatureValidator(publicCert));
         }
 
         private static McpSettings CreateMcpSettings()
