@@ -152,6 +152,29 @@
                 </div>
             </div>
 
+            <div class="row mb-4 animate-fade-up delay-650" data-sandbox-section style="display: none;">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="card-title">Sandboxes</span>
+                                <p class="text-muted small mb-0 mt-1">Isolated git repo for parallel AI workflows</p>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-primary" type="button"
+                                    data-action="create-sandbox"
+                                    title="Create a new sandbox from the current branch">
+                                    + New Sandbox
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="list-group project-history-list" data-sandbox-list></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="row mb-4 animate-fade-up delay-700" data-terminal-section style="display: none;">
                 <div class="col-12" data-terminal-content>
                     <!-- Terminal panel will be rendered here by TerminalController -->
@@ -205,6 +228,68 @@
         </div>
     </template>
 
+    <template id="sandbox-item-template">
+        <div class="list-group-item project-item p-3" data-sandbox-item>
+            <div class="d-flex align-items-center gap-3">
+                <div class="project-logo-wrapper" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+                    <img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="Sandbox" style="height: 24px; width: 24px; opacity: 0.7;">
+                </div>
+                <div class="flex-grow-1 min-w-0">
+                    <div class="d-flex align-items-center mb-1">
+                        <h5 class="project-name mb-0 text-truncate me-2" data-sandbox-name></h5>
+                        <span class="badge bg-secondary" data-sandbox-branch></span>
+                    </div>
+                    <div class="d-flex align-items-center text-muted small">
+                        <span data-sandbox-time></span>
+                        <span class="mx-2">&bull;</span>
+                        <span class="text-truncate" data-sandbox-path style="max-width: 300px;"></span>
+                    </div>
+                </div>
+                <div class="project-actions ms-3 d-flex gap-2">
+                    <div class="btn-group">
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle"
+                                data-bs-toggle="dropdown" aria-expanded="false">Claude</button>
+                            <ul class="dropdown-menu dropdown-menu-dark">
+                                <li><a class="dropdown-item" href="#"
+                                    data-sandbox-launch-cli="claude" data-launch-mode="webui">Web UI</a></li>
+                                <li><a class="dropdown-item" href="#"
+                                    data-sandbox-launch-cli="claude" data-launch-mode="terminal">External Terminal</a></li>
+                            </ul>
+                        </div>
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle"
+                                data-bs-toggle="dropdown" aria-expanded="false">Codex</button>
+                            <ul class="dropdown-menu dropdown-menu-dark">
+                                <li><a class="dropdown-item" href="#"
+                                    data-sandbox-launch-cli="codex" data-launch-mode="webui">Web UI</a></li>
+                                <li><a class="dropdown-item" href="#"
+                                    data-sandbox-launch-cli="codex" data-launch-mode="terminal">External Terminal</a></li>
+                            </ul>
+                        </div>
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle"
+                                data-bs-toggle="dropdown" aria-expanded="false">Gemini</button>
+                            <ul class="dropdown-menu dropdown-menu-dark">
+                                <li><a class="dropdown-item" href="#"
+                                    data-sandbox-launch-cli="gemini" data-launch-mode="webui">Web UI</a></li>
+                                <li><a class="dropdown-item" href="#"
+                                    data-sandbox-launch-cli="gemini" data-launch-mode="terminal">External Terminal</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                        data-sandbox-vscode title="Open in VS Code">
+                        <img src="assets/img/vscode.svg" alt="VS Code" style="height: 14px; width: 14px;">
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" type="button"
+                        data-sandbox-delete title="Delete sandbox">
+                        &times;
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
 
     <template id="agents-template">
         <div class="view" data-view="agents">

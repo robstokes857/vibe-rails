@@ -67,7 +67,7 @@ public static class TerminalRoutes
             }
 
             // Start the terminal session with the LLM CLI
-            var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs);
+            var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title);
 
             if (!success)
             {

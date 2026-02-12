@@ -11,6 +11,7 @@ namespace VibeRails.Services
     {
         private static readonly Lazy<string> _hiddenDir = new Lazy<string>(LoadInstallDirName);
         private const string ENV_DIR = @"envs";
+        private const string SANDBOXES_DIR = @"sandboxes";
         private const string HISTORY_DIR = @"history";
         private const string CONFIG_FILE = @"config.json";
         private const string STATE_FILE = @"state.db";
@@ -58,12 +59,14 @@ namespace VibeRails.Services
         {
             string globalDir = GetGlobalSavePath();
             string envDir = Path.Combine(globalDir, ENV_DIR);
+            string sandboxDir = Path.Combine(globalDir, SANDBOXES_DIR);
             string historyDir = Path.Combine(globalDir, HISTORY_DIR);
             string stateFile = Path.Combine(globalDir, STATE_FILE);
             string configFile = Path.Combine(globalDir, CONFIG_FILE);
             Configs.SetConfigPath(configFile);
             Configs.SetStatePath(stateFile);
             Configs.SetEnvPath(envDir);
+            Configs.SetSandboxPath(sandboxDir);
             Configs.SetHistoryPath(historyDir);
 
             if (!Directory.Exists(globalDir))
@@ -73,6 +76,10 @@ namespace VibeRails.Services
             if (!Directory.Exists(envDir))
             {
                 Directory.CreateDirectory(envDir);
+            }
+            if (!Directory.Exists(sandboxDir))
+            {
+                Directory.CreateDirectory(sandboxDir);
             }
             if (!Directory.Exists(historyDir))
             {

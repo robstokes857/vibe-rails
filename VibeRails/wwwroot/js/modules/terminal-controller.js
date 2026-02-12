@@ -316,6 +316,29 @@ export class TerminalController {
         this.app.showToast('Terminal Started', `Launching ${displayName}...`, 'success');
     }
 
+    async startTerminalWithOptions(options, container) {
+        // options: { cli, environmentName?, workingDirectory?, title? }
+        const body = { cli: options.cli };
+        if (options.environmentName) body.environmentName = options.environmentName;
+        if (options.workingDirectory) body.workingDirectory = options.workingDirectory;
+        if (options.title) body.title = options.title;
+
+        try {
+            const response = await this.app.apiCall('/api/v1/terminal/start', 'POST', body);
+            if (!response.hasActiveSession) {
+                this.app.showError('Failed to start terminal session');
+                return;
+            }
+        } catch (error) {
+            this.app.showError('Failed to start terminal: ' + error.message);
+            return;
+        }
+
+        await this.showActiveTerminal(container);
+        const displayName = options.title || options.cli;
+        this.app.showToast('Terminal Started', `Launching ${displayName}...`, 'success');
+    }
+
     async showActiveTerminal(container) {
         const placeholder = container.querySelector('#terminal-placeholder');
         const terminalContainer = container.querySelector('#terminal-container');

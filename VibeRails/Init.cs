@@ -57,6 +57,9 @@ namespace VibeRails
             serviceCollection.AddScoped<IGeminiLlmCliEnvironment, GeminiLlmCliEnvironment>();
             serviceCollection.AddScoped<LlmCliEnvironmentService>();
 
+            // Sandbox service
+            serviceCollection.AddScoped<ISandboxService, SandboxService>();
+
             // LLM CLI Launcher services
             serviceCollection.AddScoped<IClaudeLlmCliLauncher, ClaudeLlmCliLauncher>();
             serviceCollection.AddScoped<ICodexLlmCliLauncher, CodexLlmCliLauncher>();

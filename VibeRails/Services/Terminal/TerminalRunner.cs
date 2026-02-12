@@ -69,12 +69,12 @@ public class TerminalRunner
     /// Used by both CLI and Web paths.
     /// </summary>
     public async Task<(Terminal terminal, string sessionId)> CreateSessionAsync(
-        LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct)
+        LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct, string? title = null)
     {
         var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, ct);
         var (command, environment) = PrepareSession(llm, envName, extraArgs);
 
-        var terminal = await Terminal.CreateAsync(workDir, environment, ct: ct);
+        var terminal = await Terminal.CreateAsync(workDir, environment, title: title, ct: ct);
 
         // Always wire up DB logging
         terminal.Subscribe(new DbLoggingConsumer(_stateService, sessionId));

@@ -146,6 +146,24 @@ namespace VibeRails.DTOs
         string CustomName
     );
 
+    // Sandbox DTOs
+    public record CreateSandboxRequest(
+        string Name
+    );
+
+    public record SandboxResponse(
+        int Id,
+        string Name,
+        string Path,
+        string Branch,
+        string? CommitHash,
+        DateTime CreatedUTC
+    );
+
+    public record SandboxListResponse(
+        List<SandboxResponse> Sandboxes
+    );
+
     // Environment DTOs
     public record CreateEnvironmentRequest(
         string Name,
@@ -211,7 +229,8 @@ namespace VibeRails.DTOs
     public record StartTerminalRequest(
         string? WorkingDirectory = null,
         string? Cli = null,
-        string? EnvironmentName = null
+        string? EnvironmentName = null,
+        string? Title = null
     );
 
     public record BootstrapCommandResponse(
@@ -327,6 +346,11 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ValidationResultResponse))]
     [JsonSerializable(typeof(List<ValidationResultResponse>))]
     [JsonSerializable(typeof(ValidationResponse))]
+    // Sandbox DTOs
+    [JsonSerializable(typeof(CreateSandboxRequest))]
+    [JsonSerializable(typeof(SandboxResponse))]
+    [JsonSerializable(typeof(SandboxListResponse))]
+    [JsonSerializable(typeof(List<SandboxResponse>))]
     // Environment DTOs
     [JsonSerializable(typeof(CreateEnvironmentRequest))]
     [JsonSerializable(typeof(UpdateEnvironmentRequest))]

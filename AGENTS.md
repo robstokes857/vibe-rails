@@ -15,6 +15,7 @@
 - **Rule Enforcement** - Define standards with three enforcement levels (WARN/COMMIT/STOP)
 - **Multi-LLM Support** - Unified interface for Claude, Codex, and Gemini CLIs
 - **Environment Management** - Configure separate environments for different LLM providers with custom args and prompts. Launch environments directly in the Web UI terminal with the "Web UI" button or select from the terminal's environment dropdown
+- **Sandbox Management** - Create isolated git clone sandboxes for parallel AI workflows. Shallow clones current branch with all dirty/untracked files. Launch terminals or VS Code directly into sandbox directories.
 - **Session Logging** - Track and monitor all CLI session history and outputs
 - **MCP Integration** - Custom Model Context Protocol server with specialized tools
 
@@ -57,6 +58,7 @@ VibeControl2/
 │   │   ├── FileService.cs         # File system abstraction
 │   │   ├── GitService.cs          # Git repository interaction
 │   │   ├── RulesService.cs        # Rule parsing and enforcement
+│   │   ├── SandboxService.cs      # Sandbox creation, deletion, listing
 │   │   ├── Mcp/
 │   │   │   └── McpClientService.cs # Custom MCP client service
 │   │   └── LlmClis/               # LLM CLI environment management
@@ -77,6 +79,7 @@ VibeControl2/
 │   │
 │   ├── DTOs/                       # Data transfer objects
 │   │   ├── ResponseRecords.cs      # API response types
+│   │   ├── Sandbox.cs              # Sandbox entity model
 │   │   ├── LLM.cs                  # LLM enum (Claude, Codex, Gemini)
 │   │   ├── LLM_Environment.cs      # Environment configuration
 │   │   ├── McpDtos.cs              # MCP protocol DTOs
@@ -103,6 +106,7 @@ VibeControl2/
 │       ├── js/modules/
 │       │   ├── terminal-controller.js  # Web terminal with environment-aware selector
 │       │   ├── environment-controller.js # Environment CRUD + Web UI launch button
+│       │   ├── sandbox-controller.js   # Sandbox CRUD + launch into sandbox directory
 │       │   └── dashboard-controller.js  # Dashboard with state passing for preselection
 │       └── assets/                 # Images, fonts, icons
 │
@@ -348,7 +352,28 @@ MCP_Server.exe (Separate process)
 - `IsGitRepositoryAsync(path)` - Check if directory is git repo
 - `GetGitRootAsync(path)` - Find repository root directory
 - `GetCurrentBranchAsync()` - Get active git branch
+- `GetCurrentCommitHashAsync()` - Get current HEAD commit hash
 - `GetRecentCommitsAsync()` - Retrieve commit history
+- `GetFileChangesSinceAsync(commitHash)` - Get file changes since a commit
+
+#### SandboxService ([Services/SandboxService.cs](VibeRails/Services/SandboxService.cs))
+**Purpose**: Create and manage isolated git clone sandboxes for parallel AI workflows
+
+**Key Methods**:
+- `CreateSandboxAsync(name, projectPath)` - Shallow clone current branch, copy all dirty/untracked files, save to DB
+- `DeleteSandboxAsync(sandboxId)` - Remove sandbox directory and DB record
+- `GetSandboxesAsync(projectPath)` - List sandboxes for a project
+
+**Creation Flow**:
+1. Validate name (alphanumeric, hyphens, underscores only)
+2. Check for duplicate name+project in DB
+3. Get current branch and commit hash from source project
+4. `git clone --depth 1 --branch {branch} --single-branch "{projectPath}" "{sandboxPath}"`
+5. Parse `git status --porcelain` for all dirty/untracked files
+6. Copy each non-deleted file to sandbox (skips `.vibe_rails/` paths)
+7. Save sandbox record to DB
+
+**Storage**: Global at `~/.vibe_rails/sandboxes/{name}` (not project-local)
 
 #### McpClientService ([Services/Mcp/McpClientService.cs](VibeRails/Services/Mcp/McpClientService.cs))
 **Purpose**: Custom MCP client service layer built on ModelContextProtocol NuGet package
@@ -410,6 +435,9 @@ var result = await service.CallToolAsync("vector_search", args);
   - `Id`, `Path`, `Name`, `LastUsedUTC`
 - `LlmEnvironments` - Environment configurations
   - `Id`, `Name`, `LlmType`, `ConfigJson`
+- `Sandboxes` - Sandbox git clones (project-scoped via ProjectPath)
+  - `Id`, `Name`, `Path`, `ProjectPath`, `Branch`, `CommitHash`, `CreatedUTC`
+  - `UNIQUE(Name, ProjectPath)`
 - `Sessions` - CLI session metadata
   - `Id`, `ProjectId`, `EnvironmentId`, `StartedUTC`, `EndedUTC`, `ExitCode`
 - `SessionLogs` - Terminal output logs
@@ -444,6 +472,12 @@ var result = await service.CallToolAsync("vector_search", args);
 - `GET /api/v1/environments/{name}/launch` - Get environment vars
 - `POST /api/v1/cli/launch/{cli}` - Launch CLI in terminal
 - `POST /api/cli/launch/vscode` - Launch VS Code
+
+**Sandboxes** (project-scoped):
+- `GET /api/v1/sandboxes` - List sandboxes for current project
+- `POST /api/v1/sandboxes` - Create sandbox (shallow clone + dirty files)
+- `DELETE /api/v1/sandboxes/{id}` - Delete sandbox (removes directory + DB record)
+- `POST /api/v1/sandboxes/{id}/launch/vscode` - Launch VS Code in sandbox directory
 
 **Session Logging**:
 - `GET /api/v1/sessions/{sessionId}/logs` - Get session logs
@@ -541,7 +575,8 @@ Different LLM CLI environments implement `IBaseLlmCliEnvironment` with specific 
 ├── vibecontrol.db                  # SQLite database
 ├── config.json                     # Application settings
 ├── history/                        # CLI command history
-└── envs/                           # Environment configurations
+├── envs/                           # Environment configurations
+├── sandboxes/                      # Sandbox git clones (one dir per sandbox)
     ├── myenv/
     │   ├── claude/                 # Claude CLI config
     │   │   └── config.json
@@ -1121,8 +1156,8 @@ Current implementation:
 
 ---
 
-**Last Updated**: 2026-02-06
-**Version**: 1.1.5
+**Last Updated**: 2026-02-12
+**Version**: 1.2.0
 **Maintained By**: Robert Stokes
 
 ## Vibe Control Rules

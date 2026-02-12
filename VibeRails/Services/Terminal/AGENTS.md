@@ -27,6 +27,7 @@ Both CLI and Web paths use the same `Terminal` class. The only difference is whi
 - Thread-safe subscriber management with `Lock` + snapshot-then-iterate pattern
 - Built-in `CircularBuffer` (16KB) for output replay to new WebSocket connections
 - Factory method `CreateAsync()` for async PTY spawn (no blocking `.Result`)
+- Optional `string? title` parameter on `CreateAsync()` — sets `PtyOptions.Name` and sends ANSI escape `\x1b]0;{title}\x07` to set terminal title bar
 - `IAsyncDisposable` — cancels read loop, kills PTY, cleans up
 - Uses `ReadOnlyMemory<byte>` for zero-copy output dispatch
 
@@ -43,7 +44,7 @@ Both CLI and Web paths use the same `Terminal` class. The only difference is whi
 
 **`TerminalRunner.cs`** - Session orchestrator (thin layer)
 - `PrepareSession()` — builds CLI command string + environment dictionary (shared by all paths)
-- `CreateSessionAsync()` — creates DB session, spawns Terminal, subscribes DbLoggingConsumer, sends CLI command
+- `CreateSessionAsync()` — creates DB session, spawns Terminal (with optional title), subscribes DbLoggingConsumer, sends CLI command
 - `RunCliAsync()` — CLI-only path: calls CreateSessionAsync, subscribes ConsoleOutputConsumer, runs Console.ReadKey input loop
 - `RunCliWithWebAsync()` — CLI+Web concurrent path: same as RunCliAsync but also calls `RegisterExternalTerminal()` / `UnregisterTerminalAsync()` so web viewers can connect to the same PTY
 - No WebSocket code, no raw PTY manipulation
@@ -114,7 +115,7 @@ When a session starts:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/v1/terminal/status` | GET | Check if terminal session is active, returns session ID |
-| `/api/v1/terminal/start` | POST | Launch LLM CLI with session tracking (`{cli, environmentName, workingDirectory}`) |
+| `/api/v1/terminal/start` | POST | Launch LLM CLI with session tracking (`{cli, environmentName, workingDirectory, title}`) |
 | `/api/v1/terminal/stop` | POST | Stop the active terminal session and complete session tracking |
 | `/api/v1/terminal/ws` | WebSocket | Bidirectional PTY communication - supports takeover (disconnects previous viewer) |
 
@@ -126,18 +127,20 @@ POST /api/v1/terminal/start
 Body: {
   cli: "Gemini",
   environmentName: "test_g",  // optional
-  workingDirectory: "..."     // optional
+  workingDirectory: "...",    // optional
+  title: "Sandbox: my-sandbox" // optional — sets terminal title bar via ANSI escape
 }
 ```
 
 **Backend Flow:**
 1. Route handler validates CLI type and resolves LLM enum (`Gemini`)
 2. Looks up custom environment in DB to get `CustomArgs` if environmentName provided
-3. Calls `TerminalSessionService.StartSessionAsync(LLM.Gemini, workDir, "test_g", ["--yolo"])`
+3. Calls `TerminalSessionService.StartSessionAsync(LLM.Gemini, workDir, "test_g", ["--yolo"], title: "Sandbox: my-sandbox")`
 4. TerminalSessionService calls `TerminalRunner.CreateSessionAsync()`:
    - Creates session in DB via `TerminalStateService.CreateSessionAsync()`
    - Builds environment dictionary (UTF-8 encoding + config dir isolation)
-   - Spawns shell PTY via `Terminal.CreateAsync()` (pwsh.exe on Windows, bash on Linux/Mac)
+   - Spawns shell PTY via `Terminal.CreateAsync()` with optional title (pwsh.exe on Windows, bash on Linux/Mac)
+   - If title provided: sets `PtyOptions.Name` and sends ANSI escape `\x1b]0;{title}\x07`
    - Subscribes `DbLoggingConsumer` for output logging
    - Sends CLI command: `gemini --yolo\r`
    - Returns `(Terminal, sessionId)`

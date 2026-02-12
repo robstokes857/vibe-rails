@@ -148,6 +148,19 @@ export class DashboardController {
             }
         });
 
+        // Sandboxes section - only show in local context
+        const sandboxSection = root.querySelector('[data-sandbox-section]');
+        if (sandboxSection && isLocal) {
+            sandboxSection.style.removeProperty('display');
+            const sandboxList = root.querySelector('[data-sandbox-list]');
+            if (sandboxList) {
+                this.populateSandboxesList(sandboxList);
+            }
+            this.app.bindAction(sandboxSection, '[data-action="create-sandbox"]', () => {
+                this.app.sandboxController.createSandbox();
+            });
+        }
+
         // Terminal section - only show in local context
         const terminalSection = root.querySelector('[data-terminal-section]');
         if (terminalSection && isLocal) {
@@ -236,6 +249,79 @@ export class DashboardController {
                 webUIButton.addEventListener('click', (event) => {
                     event.stopPropagation();
                     this.launchEnvInWebUI(env.id, env.name, env.cli);
+                });
+            }
+
+            fragment.appendChild(node);
+        });
+
+        container.appendChild(fragment);
+    }
+
+    populateSandboxesList(container) {
+        if (!container) return;
+        container.innerHTML = '';
+
+        const sandboxes = this.app.data.sandboxes || [];
+
+        if (sandboxes.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">No sandboxes yet. Create one to work in an isolated copy of your project.</p>';
+            return;
+        }
+
+        const template = document.getElementById('sandbox-item-template');
+        if (!template) {
+            container.innerHTML = '<p class="text-muted text-center">Template not found.</p>';
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        sandboxes.forEach((sb) => {
+            const node = template.content.cloneNode(true);
+
+            const name = node.querySelector('[data-sandbox-name]');
+            if (name) name.textContent = sb.name;
+
+            const branch = node.querySelector('[data-sandbox-branch]');
+            if (branch) branch.textContent = sb.branch;
+
+            const time = node.querySelector('[data-sandbox-time]');
+            if (time) time.textContent = sb.created;
+
+            const path = node.querySelector('[data-sandbox-path]');
+            if (path) path.textContent = sb.path;
+
+            // Launch CLI dropdown items (Web UI or External Terminal)
+            node.querySelectorAll('[data-sandbox-launch-cli]').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const cli = btn.dataset.sandboxLaunchCli;
+                    const mode = btn.dataset.launchMode;
+                    if (mode === 'terminal') {
+                        this.app.sandboxController.launchInExternalTerminal(sb.id, sb.name, cli);
+                    } else {
+                        this.app.sandboxController.launchInWebUI(sb.id, sb.name, cli);
+                    }
+                });
+            });
+
+            // VS Code button
+            const vscodeBtn = node.querySelector('[data-sandbox-vscode]');
+            if (vscodeBtn) {
+                vscodeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.app.sandboxController.launchVSCode(sb.id, sb.name);
+                });
+            }
+
+            // Delete button
+            const deleteBtn = node.querySelector('[data-sandbox-delete]');
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.app.sandboxController.deleteSandbox(sb.id, sb.name);
                 });
             }
 

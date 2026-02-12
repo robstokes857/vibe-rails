@@ -8,6 +8,7 @@ namespace VibeRails.Services
         Task<List<string>> GetStagedFilesAsync(CancellationToken cancellationToken);
         Task<string> GetRootPathAsync(CancellationToken cancellationToken = default);
         Task<string?> GetCurrentCommitHashAsync(CancellationToken cancellationToken = default);
+        Task<string?> GetCurrentBranchAsync(CancellationToken cancellationToken = default);
         Task<List<FileChangeInfo>> GetFileChangesSinceAsync(string commitHash, CancellationToken cancellationToken = default);
     }
 
@@ -78,6 +79,19 @@ namespace VibeRails.Services
             {
                 var hash = await RunGitCommandAsync("rev-parse HEAD", cancellationToken);
                 return string.IsNullOrWhiteSpace(hash) ? null : hash.Trim();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public async Task<string?> GetCurrentBranchAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var branch = await RunGitCommandAsync("rev-parse --abbrev-ref HEAD", cancellationToken);
+                return string.IsNullOrWhiteSpace(branch) ? null : branch.Trim();
             }
             catch
             {

@@ -35,12 +35,13 @@ public sealed class Terminal : IAsyncDisposable
         int cols = 120,
         int rows = 30,
         int replayBufferSize = 16384,
+        string? title = null,
         CancellationToken ct = default)
     {
         var shell = OperatingSystem.IsWindows() ? "pwsh.exe" : "bash";
         var options = new PtyOptions
         {
-            Name = "VibeRails-Terminal",
+            Name = title ?? "VibeRails-Terminal",
             Cols = cols,
             Rows = rows,
             Cwd = workingDirectory,
@@ -50,7 +51,18 @@ public sealed class Terminal : IAsyncDisposable
         };
 
         var pty = await PtyProvider.SpawnAsync(options, ct);
-        return new Terminal(pty, replayBufferSize);
+        var terminal = new Terminal(pty, replayBufferSize);
+
+        // Set terminal title via ANSI escape sequence if provided
+        if (!string.IsNullOrEmpty(title))
+        {
+            var titleSequence = $"\x1b]0;{title}\x07";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(titleSequence);
+            await pty.WriterStream.WriteAsync(bytes, ct);
+            await pty.WriterStream.FlushAsync(ct);
+        }
+
+        return terminal;
     }
 
     /// <summary>

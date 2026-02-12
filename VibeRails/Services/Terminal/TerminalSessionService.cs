@@ -11,7 +11,7 @@ public interface ITerminalSessionService
     bool HasActiveSession { get; }
     string? ActiveSessionId { get; }
     bool IsExternallyOwned { get; }
-    Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null);
+    Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null);
     Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken);
     Task StopSessionAsync();
     void RegisterExternalTerminal(Terminal terminal, string sessionId);
@@ -39,7 +39,7 @@ public class TerminalSessionService : ITerminalSessionService
         _runner = new TerminalRunner(_stateService, envService, mcpSettings);
     }
 
-    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null)
+    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null)
     {
         lock (s_lock)
         {
@@ -49,7 +49,7 @@ public class TerminalSessionService : ITerminalSessionService
         try
         {
             var (terminal, sessionId) = await _runner.CreateSessionAsync(
-                llm, workingDirectory, environmentName, extraArgs, CancellationToken.None);
+                llm, workingDirectory, environmentName, extraArgs, CancellationToken.None, title);
 
             // Start the read loop (DB logging consumer is already wired by CreateSessionAsync)
             terminal.StartReadLoop();

@@ -73,6 +73,7 @@ namespace VibeRails.Utils
         private static string _rootPath = string.Empty;
         private static string _historyPath = string.Empty;
         private static string _envPath = string.Empty;
+        private static string _sandboxPath = string.Empty;
         private static string _configPath = string.Empty;
         private static string _statePath = string.Empty;
         private static ParsedArgs _args = new();
@@ -387,6 +388,14 @@ namespace VibeRails.Utils
         public static void SetEnvPath(string path)
         {
             _envPath = path;
+        }
+        public static string GetSandboxPath()
+        {
+            return _sandboxPath;
+        }
+        public static void SetSandboxPath(string path)
+        {
+            _sandboxPath = path;
         }
         public static string GetConfigPath()
         {
