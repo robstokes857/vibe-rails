@@ -164,25 +164,22 @@ public class TerminalRunner
 
         await using (terminal)
         {
-            var consoleConsumer = new ConsoleOutputConsumer();
-            terminal.Subscribe(consoleConsumer);
+            terminal.Subscribe(new ConsoleOutputConsumer());
 
-            // When a remote browser connects, mute local console output
-            // so only the browser viewer sees terminal output (avoids double display).
-            // When the browser disconnects, unmute so CLI resumes normal operation.
+            // When a remote browser connects, disconnect the local WebUI viewer
+            // so only one viewer is active at a time.
             if (remoteConn != null)
             {
+                Console.WriteLine("[Terminal] Remote connection established — wiring disconnect handler");
                 remoteConn.OnReplayRequested += () =>
                 {
-                    consoleConsumer.Muted = true;
-                    Console.WriteLine("\r\n[Remote viewer connected — terminal output redirected to browser]");
+                    Console.WriteLine("[Terminal] OnReplayRequested fired — disconnecting local viewer");
                     _ = sessionService.DisconnectLocalViewerAsync("Session taken over by remote viewer");
                 };
-                remoteConn.OnBrowserDisconnected += () =>
-                {
-                    consoleConsumer.Muted = false;
-                    Console.WriteLine("\r\n[Remote viewer disconnected — terminal output resumed]");
-                };
+            }
+            else
+            {
+                Console.WriteLine("[Terminal] No remote connection — local disconnect handler NOT wired");
             }
 
             terminal.StartReadLoop();

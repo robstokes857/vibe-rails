@@ -206,6 +206,8 @@ public class TerminalSessionService : ITerminalSessionService
             s_activeWebSocket = null;
         }
 
+        Console.WriteLine($"[Terminal] DisconnectLocalViewerAsync called: reason='{reason}', hasWebSocket={wsToClose != null}, state={wsToClose?.State}");
+
         if (wsToClose?.State == WebSocketState.Open)
         {
             try
@@ -214,8 +216,12 @@ public class TerminalSessionService : ITerminalSessionService
                 await wsToClose.SendAsync(msg, WebSocketMessageType.Binary, true, CancellationToken.None);
                 await Task.Delay(100);
                 await wsToClose.CloseAsync(WebSocketCloseStatus.NormalClosure, reason, CancellationToken.None);
+                Console.WriteLine("[Terminal] Local viewer disconnected successfully");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Terminal] Error disconnecting local viewer: {ex.Message}");
+            }
         }
     }
 
