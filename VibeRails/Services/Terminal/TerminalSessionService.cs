@@ -16,6 +16,7 @@ public interface ITerminalSessionService
     Task StopSessionAsync();
     void RegisterExternalTerminal(Terminal terminal, string sessionId);
     Task UnregisterTerminalAsync();
+    Task DisconnectLocalViewerAsync(string reason);
 }
 
 public class TerminalSessionService : ITerminalSessionService
@@ -48,7 +49,7 @@ public class TerminalSessionService : ITerminalSessionService
 
         try
         {
-            var (terminal, sessionId) = await _runner.CreateSessionAsync(
+            var (terminal, sessionId, _) = await _runner.CreateSessionAsync(
                 llm, workingDirectory, environmentName, extraArgs, CancellationToken.None, title);
 
             // Subscribe to terminal exit event
@@ -194,6 +195,28 @@ public class TerminalSessionService : ITerminalSessionService
         }
 
         await CleanupAsync();
+    }
+
+    public async Task DisconnectLocalViewerAsync(string reason)
+    {
+        WebSocket? wsToClose;
+        lock (s_lock)
+        {
+            wsToClose = s_activeWebSocket;
+            s_activeWebSocket = null;
+        }
+
+        if (wsToClose?.State == WebSocketState.Open)
+        {
+            try
+            {
+                var msg = System.Text.Encoding.UTF8.GetBytes($"\r\n\x1b[33m[{reason}]\x1b[0m\r\n");
+                await wsToClose.SendAsync(msg, WebSocketMessageType.Binary, true, CancellationToken.None);
+                await Task.Delay(100);
+                await wsToClose.CloseAsync(WebSocketCloseStatus.NormalClosure, reason, CancellationToken.None);
+            }
+            catch { }
+        }
     }
 
     private static async Task WebSocketInputLoopAsync(

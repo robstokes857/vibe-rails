@@ -11,5 +11,6 @@ public interface IRemoteTerminalConnection : IAsyncDisposable
     Task SendOutputAsync(ReadOnlyMemory<byte> data);
     event Action<byte[]> OnInputReceived;
     event Action? OnReplayRequested;
+    event Action? OnBrowserDisconnected;
     bool IsConnected { get; }
 }

@@ -17,6 +17,9 @@ public sealed class RemoteOutputConsumer : ITerminalConsumer
     public void OnOutput(ReadOnlyMemory<byte> data)
     {
         if (!_connection.IsConnected) return;
-        _ = _connection.SendOutputAsync(data);
+        // Must copy: data points to Terminal's shared read buffer which gets
+        // reused on the next read. Without copying, the async send races with
+        // the next buffer fill, causing corrupted output (random characters).
+        _ = _connection.SendOutputAsync(data.ToArray());
     }
 }

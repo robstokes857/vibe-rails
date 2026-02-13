@@ -16,6 +16,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
 
     public event Action<byte[]>? OnInputReceived;
     public event Action? OnReplayRequested;
+    public event Action? OnBrowserDisconnected;
     public bool IsConnected => _socket?.State == WebSocketState.Open;
 
     public async Task ConnectAsync(string sessionId, CancellationToken ct)
@@ -103,12 +104,20 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                         inputBytes = ms.ToArray();
                     }
 
-                    // Check for replay command from server (sent when browser connects)
-                    if (result.MessageType == WebSocketMessageType.Text &&
-                        Encoding.UTF8.GetString(inputBytes) == "__replay__")
+                    // Check for control commands from server
+                    if (result.MessageType == WebSocketMessageType.Text)
                     {
-                        OnReplayRequested?.Invoke();
-                        continue;
+                        var text = Encoding.UTF8.GetString(inputBytes);
+                        if (text == "__replay__")
+                        {
+                            OnReplayRequested?.Invoke();
+                            continue;
+                        }
+                        if (text == "__browser_disconnected__")
+                        {
+                            OnBrowserDisconnected?.Invoke();
+                            continue;
+                        }
                     }
 
                     OnInputReceived?.Invoke(inputBytes);

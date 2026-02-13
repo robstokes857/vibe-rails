@@ -67,9 +67,9 @@ public class TerminalRunner
 
     /// <summary>
     /// Create a Terminal + DB session with DbLoggingConsumer already wired.
-    /// Used by both CLI and Web paths.
+    /// Used by both CLI and Web paths. Returns the remote connection if one was established.
     /// </summary>
-    public async Task<(Terminal terminal, string sessionId)> CreateSessionAsync(
+    public async Task<(Terminal terminal, string sessionId, IRemoteTerminalConnection? remoteConnection)> CreateSessionAsync(
         LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct, string? title = null)
     {
         var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, ct);
@@ -81,6 +81,7 @@ public class TerminalRunner
         terminal.Subscribe(new DbLoggingConsumer(_stateService, sessionId));
 
         // Connect to remote server if remote access is enabled
+        IRemoteTerminalConnection? activeRemoteConn = null;
         if (ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey()))
         {
             var remoteConn = new RemoteTerminalConnection();
@@ -96,9 +97,12 @@ public class TerminalRunner
                     var replay = terminal.GetReplayBuffer();
                     if (replay.Length > 0)
                         _ = remoteConn.SendOutputAsync(replay);
-                    _ = terminal.WriteBytesAsync(new byte[] { 0x0C }, CancellationToken.None);
+                    // Don't send Ctrl+L — the replay buffer is sufficient for the remote
+                    // browser. Ctrl+L causes the shell to redraw the entire screen, and
+                    // since the browser already got the replay, it would show doubled content.
                 };
                 _stateService.TrackRemoteConnection(sessionId, remoteConn);
+                activeRemoteConn = remoteConn;
             }
             else
             {
@@ -109,7 +113,7 @@ public class TerminalRunner
         // Send the CLI command to the shell
         await terminal.SendCommandAsync(command, ct);
 
-        return (terminal, sessionId);
+        return (terminal, sessionId, activeRemoteConn);
     }
 
     /// <summary>
@@ -117,7 +121,7 @@ public class TerminalRunner
     /// </summary>
     public async Task<int> RunCliAsync(LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct)
     {
-        var (terminal, sessionId) = await CreateSessionAsync(llm, workDir, envName, extraArgs, ct);
+        var (terminal, sessionId, _) = await CreateSessionAsync(llm, workDir, envName, extraArgs, ct);
         var exitCode = 0;
 
         await using (terminal)
@@ -155,12 +159,32 @@ public class TerminalRunner
         LLM llm, string workDir, string? envName, string[]? extraArgs,
         ITerminalSessionService sessionService, CancellationToken ct)
     {
-        var (terminal, sessionId) = await CreateSessionAsync(llm, workDir, envName, extraArgs, ct);
+        var (terminal, sessionId, remoteConn) = await CreateSessionAsync(llm, workDir, envName, extraArgs, ct);
         var exitCode = 0;
 
         await using (terminal)
         {
-            terminal.Subscribe(new ConsoleOutputConsumer());
+            var consoleConsumer = new ConsoleOutputConsumer();
+            terminal.Subscribe(consoleConsumer);
+
+            // When a remote browser connects, mute local console output
+            // so only the browser viewer sees terminal output (avoids double display).
+            // When the browser disconnects, unmute so CLI resumes normal operation.
+            if (remoteConn != null)
+            {
+                remoteConn.OnReplayRequested += () =>
+                {
+                    consoleConsumer.Muted = true;
+                    Console.WriteLine("\r\n[Remote viewer connected — terminal output redirected to browser]");
+                    _ = sessionService.DisconnectLocalViewerAsync("Session taken over by remote viewer");
+                };
+                remoteConn.OnBrowserDisconnected += () =>
+                {
+                    consoleConsumer.Muted = false;
+                    Console.WriteLine("\r\n[Remote viewer disconnected — terminal output resumed]");
+                };
+            }
+
             terminal.StartReadLoop();
 
             // Register so web UI can find this terminal
