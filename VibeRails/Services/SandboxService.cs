@@ -39,7 +39,7 @@ namespace VibeRails.Services
                 throw new InvalidOperationException($"A sandbox named '{name}' already exists for this project.");
 
             // Compute sandbox path (global sandboxes dir)
-            var sandboxBasePath = Configs.GetSandboxPath();
+            var sandboxBasePath = ParserConfigs.GetSandboxPath();
             var sandboxPath = Path.Combine(sandboxBasePath, name);
 
             if (Directory.Exists(sandboxPath))
@@ -56,14 +56,23 @@ namespace VibeRails.Services
             // Get dirty + untracked files from source and copy them over
             await CopyDirtyFilesAsync(projectPath, sandboxPath, ct);
 
+            // If the source project has a real remote, point the sandbox at it
+            // (the clone's origin currently points at the local filesystem path)
+            var remoteUrl = await SetupSandboxRemoteAsync(projectPath, sandboxPath, ct);
+
+            // Create and checkout a sandbox-specific branch
+            var sandboxBranch = $"sandbox/{name}";
+            await RunGitCommandAsync(sandboxPath, $"checkout -b \"{sandboxBranch}\"", ct);
+
             // Save to DB
             var sandbox = new Sandbox
             {
                 Name = name,
                 Path = sandboxPath,
                 ProjectPath = projectPath,
-                Branch = branch,
+                Branch = sandboxBranch,
                 CommitHash = commitHash,
+                RemoteUrl = remoteUrl,
                 CreatedUTC = DateTime.UtcNow
             };
 
@@ -88,6 +97,45 @@ namespace VibeRails.Services
         public async Task<List<Sandbox>> GetSandboxesAsync(string projectPath, CancellationToken ct = default)
         {
             return await _repository.GetSandboxesByProjectAsync(projectPath, ct);
+        }
+
+        /// <summary>
+        /// Gets the real remote URL from the source project and sets it in the sandbox.
+        /// If the source has no remote, removes the local-path origin from the sandbox.
+        /// Returns the remote URL if one was found, null otherwise.
+        /// </summary>
+        private static async Task<string?> SetupSandboxRemoteAsync(string projectPath, string sandboxPath, CancellationToken ct)
+        {
+            // Get the real remote URL from the source project
+            string? remoteUrl = null;
+            try
+            {
+                remoteUrl = await RunGitCommandAsync(projectPath, "remote get-url origin", ct);
+            }
+            catch
+            {
+                // No remote configured in source — that's fine
+            }
+
+            if (!string.IsNullOrWhiteSpace(remoteUrl))
+            {
+                // Source has a real remote — point the sandbox at it
+                await RunGitCommandAsync(sandboxPath, $"remote set-url origin \"{remoteUrl}\"", ct);
+                return remoteUrl;
+            }
+            else
+            {
+                // Source has no remote — remove the local-path origin from the sandbox
+                try
+                {
+                    await RunGitCommandAsync(sandboxPath, "remote remove origin", ct);
+                }
+                catch
+                {
+                    // Ignore if origin doesn't exist
+                }
+                return null;
+            }
         }
 
         private static async Task RunGitCloneAsync(string sourcePath, string destPath, string branch, CancellationToken ct)
@@ -150,7 +198,7 @@ namespace VibeRails.Services
                 filePath = filePath.Replace('\\', '/');
 
                 // Skip .vibe_rails directory contents
-                if (filePath.StartsWith(".vibe_rails/", StringComparison.OrdinalIgnoreCase))
+                if (filePath.StartsWith($"{PathConstants.DEFAULT_INSTALL_DIR_NAME}/", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 var sourceFull = Path.Combine(projectPath, filePath);

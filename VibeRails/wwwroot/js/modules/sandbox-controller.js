@@ -14,6 +14,7 @@ export class SandboxController {
                 path: sb.path,
                 branch: sb.branch,
                 commitHash: sb.commitHash,
+                remoteUrl: sb.remoteUrl || null,
                 created: this.app.formatRelativeTime(sb.createdUTC)
             }));
         } catch (error) {

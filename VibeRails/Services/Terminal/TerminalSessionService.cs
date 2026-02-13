@@ -33,9 +33,9 @@ public class TerminalSessionService : ITerminalSessionService
     public string? ActiveSessionId => s_sessionId;
     public bool IsExternallyOwned { get { lock (s_lock) return s_externallyOwned; } }
 
-    public TerminalSessionService(IDbService dbService, LlmCliEnvironmentService envService, IGitService gitService, McpSettings mcpSettings)
+    public TerminalSessionService(IDbService dbService, LlmCliEnvironmentService envService, IGitService gitService, McpSettings mcpSettings, IRemoteStateService remoteStateService)
     {
-        _stateService = new TerminalStateService(dbService, gitService);
+        _stateService = new TerminalStateService(dbService, gitService, remoteStateService);
         _runner = new TerminalRunner(_stateService, envService, mcpSettings);
     }
 
@@ -50,6 +50,14 @@ public class TerminalSessionService : ITerminalSessionService
         {
             var (terminal, sessionId) = await _runner.CreateSessionAsync(
                 llm, workingDirectory, environmentName, extraArgs, CancellationToken.None, title);
+
+            // Subscribe to terminal exit event
+            terminal.Exited += async (sender, exitCode) =>
+            {
+                var capturedSessionId = sessionId;
+                await _stateService.CompleteSessionAsync(capturedSessionId, exitCode);
+                await CleanupAsync();
+            };
 
             // Start the read loop (DB logging consumer is already wired by CreateSessionAsync)
             terminal.StartReadLoop();
@@ -172,10 +180,19 @@ public class TerminalSessionService : ITerminalSessionService
 
     public async Task StopSessionAsync()
     {
+        string? sessionId;
         lock (s_lock)
         {
             if (s_externallyOwned) return;
+            sessionId = s_sessionId;
         }
+
+        // Complete the session before cleanup
+        if (sessionId != null)
+        {
+            await _stateService.CompleteSessionAsync(sessionId, 0);
+        }
+
         await CleanupAsync();
     }
 

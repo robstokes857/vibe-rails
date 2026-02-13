@@ -15,7 +15,7 @@ namespace VibeRails.Services.LlmClis.Launchers
         // Override to set XDG environment variables for Gemini
         public new Dictionary<string, string> GetEnvironmentVariables(string envName)
         {
-            var envBasePath = Configs.GetEnvPath();
+            var envBasePath = ParserConfigs.GetEnvPath();
             var geminiBasePath = Path.Combine(envBasePath, envName, ConfigSubdirectory);
 
             return new Dictionary<string, string>

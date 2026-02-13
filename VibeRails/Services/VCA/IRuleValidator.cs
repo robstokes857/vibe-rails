@@ -3,6 +3,13 @@ using VibeRails.Services;
 namespace VibeRails.Services.VCA
 {
     /// <summary>
+    /// Validation context that provides additional data to validators
+    /// </summary>
+    public record ValidationContext(
+        string? CommitMessage = null,
+        Dictionary<string, object>? AdditionalData = null);
+
+    /// <summary>
     /// Strategy interface for validators - each rule type implements this
     /// </summary>
     public interface IRuleValidator
@@ -19,13 +26,15 @@ namespace VibeRails.Services.VCA
         /// <param name="rule">The rule to check</param>
         /// <param name="sourceFile">The AGENTS.md file where this rule came from (for context-aware validation)</param>
         /// <param name="rootPath">The repository root path</param>
+        /// <param name="context">Optional validation context (e.g., commit message)</param>
         /// <param name="ct">Cancellation token</param>
         Task<RuleValidationResult> ValidateAsync(
             string filePath,
             RuleWithEnforcement rule,
             string sourceFile,
             string rootPath,
-            CancellationToken ct);
+            ValidationContext? context = null,
+            CancellationToken ct = default);
     }
 
     /// <summary>

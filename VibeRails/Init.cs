@@ -23,7 +23,7 @@ namespace VibeRails
             serviceCollection.AddScoped<IDbService, DbService>();
             serviceCollection.AddScoped<IRepository>(sp =>
             {
-                var connectionString = $"Data Source={Configs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
+                var connectionString = $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
                 return new Repository(connectionString);
             });
             serviceCollection.AddScoped<IGitService, GitService>();
@@ -75,14 +75,18 @@ namespace VibeRails
             // Terminal Session Service (scoped to work with other scoped services)
             serviceCollection.AddScoped<ITerminalSessionService, TerminalSessionService>();
 
+            // Remote State Service (for terminal session remote registration)
+            serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>();
+
             // Update Service (singleton with HttpClient)
             serviceCollection.AddHttpClient<UpdateService>();
 
-            // WebSocket Messaging Client (singleton - auto-reconnects, URL from app_config.json)
-            serviceCollection.AddSingleton(_ =>
+            // WebSocket Messaging Client (singleton - auto-reconnects, URL from appsettings.json)
+            serviceCollection.AddSingleton<MessagingClient>(sp =>
             {
-                var config = LoadAppConfiguration();
-                return new MessagingClient(config.FrontendUrl);
+                var configuration = sp.GetRequiredService<IConfiguration>();
+                var frontendUrl = configuration["VibeRails:FrontendUrl"] ?? "https://localhost:5164";
+                return new MessagingClient(frontendUrl);
             });
 
             // Message signature validator — load public cert once, scoped service
@@ -112,7 +116,11 @@ namespace VibeRails
 
         public static async Task StartUpChecks(IServiceProvider serviceProvider)
         {
-            InitAppSettings();
+            var configuration = serviceProvider.GetRequiredService<IConfiguration>();
+
+            // Initialize version info and app settings
+            VersionInfo.Initialize(configuration);
+            InitAppSettings(configuration);
 
             using var scope = serviceProvider.CreateScope();
             var fileService = scope.ServiceProvider.GetRequiredService<IFileService>();
@@ -123,8 +131,8 @@ namespace VibeRails
             dbService.InitializeDatabase();
 
             var isLocal = fileService.TryGetProjectRootPath();
-            Configs.SetLocalContext(isLocal.inGet);
-            Configs.SetRootPath(isLocal.projectRoot);
+            ParserConfigs.SetLocalContext(isLocal.inGet);
+            ParserConfigs.SetRootPath(isLocal.projectRoot);
 
             //Launch for global context only
             if (!isLocal.inGet)
@@ -140,64 +148,41 @@ namespace VibeRails
 
         private static async Task TryInstallPreCommitHookAsync(IServiceProvider services, string projectRoot)
         {
-            try
+            var configuration = services.GetRequiredService<IConfiguration>();
+            var installOnStartup = configuration.GetValue<bool>("VibeRails:Hooks:InstallOnStartup");
+
+            if (!installOnStartup)
             {
-                // Load configuration to check if auto-install is enabled
-                var configuration = LoadAppConfiguration();
-                if (!configuration.Hooks.InstallOnStartup)
-                {
-                    return;
-                }
-
-                var hookService = services.GetRequiredService<IHookInstallationService>();
-
-                // Only install if not already installed
-                if (!hookService.IsHookInstalled(projectRoot))
-                {
-                    var result = await hookService.InstallPreCommitHookAsync(projectRoot, CancellationToken.None);
-                    if (result.Success)
-                    {
-                        Console.WriteLine("VCA pre-commit hook installed automatically.");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Note: Could not auto-install pre-commit hook: {result.ErrorMessage}");
-                    }
-                }
+                return;
             }
-            catch (Exception ex)
+
+            var hookService = services.GetRequiredService<IHookInstallationService>();
+
+            // Only install if not already installed
+            if (!hookService.IsHookInstalled(projectRoot))
             {
-                // Silent failure - just log to console
-                Console.WriteLine($"Note: Could not auto-install pre-commit hook: {ex.Message}");
+                var result = await hookService.InstallPreCommitHookAsync(projectRoot, CancellationToken.None);
+                if (result.Success)
+                {
+                    Console.WriteLine("VCA pre-commit hook installed automatically.");
+                }
+                else
+                {
+                    Console.WriteLine($"Note: Could not auto-install pre-commit hook: {result.ErrorMessage}");
+                }
             }
         }
 
-        public static void InitAppSettings()
+        public static void InitAppSettings(IConfiguration configuration)
         {
-            var config = LoadAppConfiguration();
-            Configs.SetRemoteAccess(config.RemoteAccess);
-            Configs.SetApiKey(config.ApiKey);
-        }
+            // Load FrontendUrl from appsettings.json
+            var frontendUrl = configuration["VibeRails:FrontendUrl"] ?? "https://localhost:5164";
+            ParserConfigs.SetFrontendUrl(frontendUrl);
 
-        private static AppConfiguration LoadAppConfiguration()
-        {
-            try
-            {
-                var configPath = Path.Combine(AppContext.BaseDirectory, "app_config.json");
-                if (File.Exists(configPath))
-                {
-                    var json = File.ReadAllText(configPath);
-                    return System.Text.Json.JsonSerializer.Deserialize(json,
-                        AppJsonSerializerContext.Default.AppConfiguration)
-                        ?? new AppConfiguration();
-                }
-            }
-            catch
-            {
-                // If config fails to load, use defaults
-            }
-
-            return new AppConfiguration();
+            // Load ApiKey and RemoteAccess from settings.json in ~/.vibe_rails/
+            var settings = Config.Load();
+            ParserConfigs.SetRemoteAccess(settings.RemoteAccess);
+            ParserConfigs.SetApiKey(settings.ApiKey);
         }
     }
 }

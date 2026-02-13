@@ -12,70 +12,31 @@ public static class AppSettingsRoutes
         // GET /api/v1/settings - Read current app settings
         app.MapGet("/api/v1/settings", () =>
         {
-            try
-            {
-                var configPath = Path.Combine(AppContext.BaseDirectory, "app_config.json");
-                if (File.Exists(configPath))
-                {
-                    var json = File.ReadAllText(configPath);
-                    var config = JsonSerializer.Deserialize(json,
-                        AppJsonSerializerContext.Default.AppConfiguration)
-                        ?? new AppConfiguration();
-
-                    return Results.Ok(new AppSettingsDto(
-                        config.RemoteAccess,
-                        config.ApiKey
-                    ));
-                }
-
-                return Results.Ok(new AppSettingsDto(false, ""));
-            }
-            catch (Exception ex)
-            {
-                return Results.BadRequest(new ErrorResponse($"Failed to read settings: {ex.Message}"));
-            }
+            var settings = Config.Load();
+            return Results.Ok(new AppSettingsDto(
+                settings.RemoteAccess,
+                settings.ApiKey
+            ));
         }).WithName("GetAppSettings");
 
         // POST /api/v1/settings - Update app settings
-        app.MapPost("/api/v1/settings", (AppSettingsDto settings) =>
+        app.MapPost("/api/v1/settings", (AppSettingsDto settingsDto) =>
         {
-            try
-            {
-                var configPath = Path.Combine(AppContext.BaseDirectory, "app_config.json");
+            // Load existing settings from settings.json
+            var settings = Config.Load();
 
-                // Read existing config to preserve all other fields
-                AppConfiguration config;
-                if (File.Exists(configPath))
-                {
-                    var json = File.ReadAllText(configPath);
-                    config = JsonSerializer.Deserialize(json,
-                        AppJsonSerializerContext.Default.AppConfiguration)
-                        ?? new AppConfiguration();
-                }
-                else
-                {
-                    config = new AppConfiguration();
-                }
+            // Update only the RemoteAccess and ApiKey fields
+            settings.RemoteAccess = settingsDto.RemoteAccess;
+            settings.ApiKey = settingsDto.ApiKey;
 
-                // Update only the settings fields
-                config.RemoteAccess = settings.RemoteAccess;
-                config.ApiKey = settings.ApiKey;
+            // Save back to settings.json
+            Config.Save(settings);
 
-                // Write back to file
-                var updatedJson = JsonSerializer.Serialize(config,
-                    AppJsonSerializerContext.Default.AppConfiguration);
-                File.WriteAllText(configPath, updatedJson);
+            // Update static Configs so runtime reflects the change immediately
+            ParserConfigs.SetRemoteAccess(settingsDto.RemoteAccess);
+            ParserConfigs.SetApiKey(settingsDto.ApiKey);
 
-                // Update static Configs so runtime reflects the change immediately
-                Configs.SetRemoteAccess(settings.RemoteAccess);
-                Configs.SetApiKey(settings.ApiKey);
-
-                return Results.Ok(settings);
-            }
-            catch (Exception ex)
-            {
-                return Results.BadRequest(new ErrorResponse($"Failed to save settings: {ex.Message}"));
-            }
+            return Results.Ok(settingsDto);
         }).WithName("UpdateAppSettings");
     }
 }

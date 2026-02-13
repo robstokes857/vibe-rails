@@ -244,40 +244,21 @@
                         <span class="mx-2">&bull;</span>
                         <span class="text-truncate" data-sandbox-path style="max-width: 300px;"></span>
                     </div>
-                </div>
-                <div class="project-actions ms-3 d-flex gap-2">
-                    <div class="btn-group">
-                        <div class="btn-group" role="group">
-                            <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle"
-                                data-bs-toggle="dropdown" aria-expanded="false">Claude</button>
-                            <ul class="dropdown-menu dropdown-menu-dark">
-                                <li><a class="dropdown-item" href="#"
-                                    data-sandbox-launch-cli="claude" data-launch-mode="webui">Web UI</a></li>
-                                <li><a class="dropdown-item" href="#"
-                                    data-sandbox-launch-cli="claude" data-launch-mode="terminal">External Terminal</a></li>
-                            </ul>
-                        </div>
-                        <div class="btn-group" role="group">
-                            <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle"
-                                data-bs-toggle="dropdown" aria-expanded="false">Codex</button>
-                            <ul class="dropdown-menu dropdown-menu-dark">
-                                <li><a class="dropdown-item" href="#"
-                                    data-sandbox-launch-cli="codex" data-launch-mode="webui">Web UI</a></li>
-                                <li><a class="dropdown-item" href="#"
-                                    data-sandbox-launch-cli="codex" data-launch-mode="terminal">External Terminal</a></li>
-                            </ul>
-                        </div>
-                        <div class="btn-group" role="group">
-                            <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle"
-                                data-bs-toggle="dropdown" aria-expanded="false">Gemini</button>
-                            <ul class="dropdown-menu dropdown-menu-dark">
-                                <li><a class="dropdown-item" href="#"
-                                    data-sandbox-launch-cli="gemini" data-launch-mode="webui">Web UI</a></li>
-                                <li><a class="dropdown-item" href="#"
-                                    data-sandbox-launch-cli="gemini" data-launch-mode="terminal">External Terminal</a></li>
-                            </ul>
-                        </div>
+                    <div class="text-muted small mt-1" data-sandbox-remote style="display: none;">
+                        <span style="opacity: 0.7;">Remote:</span>
+                        <span class="text-truncate" data-sandbox-remote-url style="max-width: 400px;"></span>
                     </div>
+                </div>
+                <div class="project-actions ms-3 d-flex gap-2 align-items-center">
+                    <select class="form-select form-select-sm" data-sandbox-cli-select style="width: auto;">
+                        <option value="base:claude">Claude</option>
+                        <option value="base:codex">Codex</option>
+                        <option value="base:gemini">Gemini</option>
+                    </select>
+                    <button class="btn btn-sm btn-outline-primary" type="button"
+                        data-sandbox-launch-webui title="Launch in Web UI">Web UI</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                        data-sandbox-launch-terminal title="Launch in External Terminal">Terminal</button>
                     <button class="btn btn-sm btn-outline-secondary" type="button"
                         data-sandbox-vscode title="Open in VS Code">
                         <img src="assets/img/vscode.svg" alt="VS Code" style="height: 14px; width: 14px;">

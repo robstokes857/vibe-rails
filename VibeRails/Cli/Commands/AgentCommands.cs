@@ -59,7 +59,7 @@ namespace VibeRails.Cli.Commands
 
         private static async Task<int> ListAsync(IAgentFileService agentService, IRepository repository, CancellationToken cancellationToken)
         {
-            if (!Configs.IsLocalContext())
+            if (!ParserConfigs.IsLocalContext())
             {
                 CliOutput.Error("Not in a local project context. Run from within a git repository.");
                 return 1;
@@ -82,7 +82,7 @@ namespace VibeRails.Cli.Commands
                 var customName = await repository.GetAgentCustomNameAsync(path, cancellationToken);
 
                 // Make path relative to root
-                var rootPath = Configs.GetRootPath();
+                var rootPath = ParserConfigs.GetRootPath();
                 var relativePath = path;
                 if (!string.IsNullOrEmpty(rootPath) && path.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
                 {

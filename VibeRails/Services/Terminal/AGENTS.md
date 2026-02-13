@@ -40,7 +40,17 @@ Both CLI and Web paths use the same `Terminal` class. The only difference is whi
 - Creates sessions, logs output, records input, completes sessions
 - Uses `InputAccumulator` for keystroke buffering
 - Uses `TerminalOutputFilter` to skip transient ANSI content
+- Registers/deregisters terminals with frontend via `RemoteStateService` when remote access is enabled
 - No PTY or WebSocket knowledge
+
+**`RemoteStateService.cs`** - Remote terminal registration with frontend
+- Interface: `IRemoteStateService`
+- Sends HTTP POST/DELETE to frontend at `/api/v1/terminal` endpoints
+- Registers terminal sessions when created, deregisters when completed
+- Only sends requests if `Config.RemoteAccess` is enabled and `Config.ApiKey` is configured
+- Uses AOT-compatible source-generated JSON serialization via `RemoteStateJsonContext`
+- HttpClient injected via DI using `AddHttpClient<IRemoteStateService, RemoteStateService>()`
+- Silently fails on errors to avoid blocking terminal startup/shutdown
 
 **`TerminalRunner.cs`** - Session orchestrator (thin layer)
 - `PrepareSession()` — builds CLI command string + environment dictionary (shared by all paths)
@@ -261,10 +271,12 @@ Environment variables configured via `TerminalRunner.PrepareSession()` + `LlmCli
 | `Services/Terminal/TerminalStateService.cs` | DB session tracking | Creates/completes sessions, logs output via filter, manages InputAccumulator |
 | `Services/Terminal/TerminalRunner.cs` | Session orchestrator | PrepareSession, CreateSessionAsync (shared), RunCliAsync (CLI-only), RunCliWithWebAsync (CLI+Web) |
 | `Services/Terminal/TerminalSessionService.cs` | Session lifecycle + registration | Static Terminal storage, RegisterExternalTerminal/UnregisterTerminalAsync, WebSocket takeover, buffer replay |
+| `Services/Terminal/RemoteStateService.cs` | Frontend terminal registration | HTTP POST/DELETE to frontend `/api/v1/terminal`, AOT-compatible JSON, injected HttpClient |
 | `wwwroot/js/modules/terminal-controller.js` | xterm.js frontend | Binary arraybuffer WebSocket, session restoration, reconnect button (shows on disconnect only) |
 | `CliLoop.cs` | CLI entry point | `RunTerminalWithWebAsync()` resolves LLM/env, calls runner.RunCliWithWebAsync |
 | `Program.cs` | App entry point | Middleware setup before CliLoop, concurrent CLI+Web mode branch |
 | `Routes/TerminalRoutes.cs` | API endpoints | /start, /stop (guarded for CLI-owned), /status, /ws, /bootstrap-command |
 | `Utils/InputAccumulator.cs` | Keystroke buffering | Buffers until Enter, flushes to DB with git diff tracking |
 | `Utils/TerminalOutputFilter.cs` | ANSI filtering | Skips transient escape sequences to reduce DB noise |
+| `Utils/Config.cs` | Settings management | Loads/saves settings.json from ~/.vibe_rails/, AOT-compatible JSON |
 | `Services/LlmClis/LlmCliEnvironmentService.cs` | Env var resolution | Config dir isolation (XDG_CONFIG_HOME / APPDATA) |

@@ -39,9 +39,6 @@
   </ItemGroup>
 
   <!-- Copy app_config.json to output directory -->
-  <ItemGroup>
-    <Content Update="app_config.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
 
   <!-- Copy hook scripts to output directory -->
   <ItemGroup>

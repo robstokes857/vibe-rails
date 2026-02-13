@@ -204,6 +204,7 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$projectPath", sandbox.ProjectPath);
             cmd.Parameters.AddWithValue("$branch", sandbox.Branch);
             cmd.Parameters.AddWithValue("$commitHash", (object?)sandbox.CommitHash ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$remoteUrl", (object?)sandbox.RemoteUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$createdUTC", sandbox.CreatedUTC.ToString("O"));
 
             var result = await cmd.ExecuteScalarAsync(cancellationToken);
@@ -398,7 +399,8 @@ namespace VibeRails.DB
                 ProjectPath = reader.GetString(3),
                 Branch = reader.GetString(4),
                 CommitHash = reader.IsDBNull(5) ? null : reader.GetString(5),
-                CreatedUTC = DateTime.Parse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind)
+                RemoteUrl = reader.IsDBNull(6) ? null : reader.GetString(6),
+                CreatedUTC = DateTime.Parse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind)
             };
         }
 

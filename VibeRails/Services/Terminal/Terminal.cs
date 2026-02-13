@@ -20,6 +20,11 @@ public sealed class Terminal : IAsyncDisposable
     public int Pid => _pty.Pid;
     public int ExitCode => _pty.ExitCode;
 
+    /// <summary>
+    /// Event fired when the PTY process exits (naturally or via kill).
+    /// </summary>
+    public event EventHandler<int>? Exited;
+
     private Terminal(IPtyConnection pty, int replayBufferSize)
     {
         _pty = pty;
@@ -199,6 +204,19 @@ public sealed class Terminal : IAsyncDisposable
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[Terminal] Read loop error: {ex.Message}");
+        }
+        finally
+        {
+            // Notify listeners that the PTY has exited
+            try
+            {
+                var exitCode = _pty.ExitCode;
+                Exited?.Invoke(this, exitCode);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Terminal] Error notifying exit handlers: {ex.Message}");
+            }
         }
     }
 

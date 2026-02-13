@@ -18,7 +18,7 @@ public static class CliLoop
     /// </summary>
     public static async Task<(bool exit, ParsedArgs parsedArgs)> RunAsync(string[] args, IServiceProvider services)
     {
-        ParsedArgs parsedArgs = Configs.ParseArgs(args);
+        ParsedArgs parsedArgs = ParserConfigs.ParseArgs(args);
 
         // Create a scope for resolving scoped services
         using var scope = services.CreateScope();
@@ -128,7 +128,8 @@ public static class CliLoop
 
         // Create runner and run with web access
         var gitServiceForSession = new GitService(workingDirectory);
-        var terminalStateService = new TerminalStateService(dbService, gitServiceForSession);
+        var remoteStateService = scopedServices.GetRequiredService<IRemoteStateService>();
+        var terminalStateService = new TerminalStateService(dbService, gitServiceForSession, remoteStateService);
         var mcpSettings = scopedServices.GetRequiredService<McpSettings>();
         var runner = new TerminalRunner(terminalStateService, envService, mcpSettings);
 

@@ -157,6 +157,7 @@ namespace VibeRails.DTOs
         string Path,
         string Branch,
         string? CommitHash,
+        string? RemoteUrl,
         DateTime CreatedUTC
     );
 
@@ -384,8 +385,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SignedMessage))]
     [JsonSerializable(typeof(SignatureVerificationResponse))]
     [JsonSerializable(typeof(ProxyRelayMessage))]
-    // App Configuration (for app_config.json)
-    [JsonSerializable(typeof(Services.AppConfiguration))]
+    // App Configuration (for appsettings.json VibeRails section)
+    [JsonSerializable(typeof(Services.VibeRailsConfiguration))]
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {

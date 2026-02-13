@@ -15,13 +15,13 @@ public static class SandboxRoutes
             ISandboxService sandboxService,
             CancellationToken cancellationToken) =>
         {
-            var projectPath = Configs.GetRootPath();
+            var projectPath = ParserConfigs.GetRootPath();
             if (string.IsNullOrEmpty(projectPath))
                 return Results.BadRequest(new ErrorResponse("Not in a local project context"));
 
             var sandboxes = await sandboxService.GetSandboxesAsync(projectPath, cancellationToken);
             var response = sandboxes.Select(s => new SandboxResponse(
-                s.Id, s.Name, s.Path, s.Branch, s.CommitHash, s.CreatedUTC
+                s.Id, s.Name, s.Path, s.Branch, s.CommitHash, s.RemoteUrl, s.CreatedUTC
             )).ToList();
 
             return Results.Ok(new SandboxListResponse(response));
@@ -33,7 +33,7 @@ public static class SandboxRoutes
             CreateSandboxRequest? request,
             CancellationToken cancellationToken) =>
         {
-            var projectPath = Configs.GetRootPath();
+            var projectPath = ParserConfigs.GetRootPath();
             if (string.IsNullOrEmpty(projectPath))
                 return Results.BadRequest(new ErrorResponse("Not in a local project context"));
 
@@ -46,7 +46,7 @@ public static class SandboxRoutes
                     request.Name, projectPath, cancellationToken);
                 return Results.Ok(new SandboxResponse(
                     sandbox.Id, sandbox.Name, sandbox.Path,
-                    sandbox.Branch, sandbox.CommitHash, sandbox.CreatedUTC));
+                    sandbox.Branch, sandbox.CommitHash, sandbox.RemoteUrl, sandbox.CreatedUTC));
             }
             catch (InvalidOperationException ex)
             {

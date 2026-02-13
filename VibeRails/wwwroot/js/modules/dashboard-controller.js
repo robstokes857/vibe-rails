@@ -292,20 +292,39 @@ export class DashboardController {
             const path = node.querySelector('[data-sandbox-path]');
             if (path) path.textContent = sb.path;
 
-            // Launch CLI dropdown items (Web UI or External Terminal)
-            node.querySelectorAll('[data-sandbox-launch-cli]').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
+            // Show remote URL if available
+            const remoteContainer = node.querySelector('[data-sandbox-remote]');
+            const remoteUrlEl = node.querySelector('[data-sandbox-remote-url]');
+            if (remoteContainer && remoteUrlEl && sb.remoteUrl) {
+                remoteContainer.style.removeProperty('display');
+                remoteUrlEl.textContent = sb.remoteUrl;
+            }
+
+            // Populate CLI select with environments
+            const cliSelect = node.querySelector('[data-sandbox-cli-select]');
+            if (cliSelect) {
+                this.populateSandboxCliSelect(cliSelect);
+            }
+
+            // Web UI launch button
+            const webUiBtn = node.querySelector('[data-sandbox-launch-webui]');
+            if (webUiBtn) {
+                webUiBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const cli = btn.dataset.sandboxLaunchCli;
-                    const mode = btn.dataset.launchMode;
-                    if (mode === 'terminal') {
-                        this.app.sandboxController.launchInExternalTerminal(sb.id, sb.name, cli);
-                    } else {
-                        this.app.sandboxController.launchInWebUI(sb.id, sb.name, cli);
-                    }
+                    const { cli, environmentName } = this.parseSandboxCliSelection(cliSelect);
+                    this.app.sandboxController.launchInWebUI(sb.id, sb.name, cli, environmentName);
                 });
-            });
+            }
+
+            // External Terminal launch button
+            const terminalBtn = node.querySelector('[data-sandbox-launch-terminal]');
+            if (terminalBtn) {
+                terminalBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const { cli, environmentName } = this.parseSandboxCliSelection(cliSelect);
+                    this.app.sandboxController.launchInExternalTerminal(sb.id, sb.name, cli, environmentName);
+                });
+            }
 
             // VS Code button
             const vscodeBtn = node.querySelector('[data-sandbox-vscode]');
@@ -329,6 +348,49 @@ export class DashboardController {
         });
 
         container.appendChild(fragment);
+    }
+
+    populateSandboxCliSelect(selectEl) {
+        const environments = this.app.data.environments || [];
+
+        // Clear and re-add base CLIs
+        selectEl.innerHTML = '';
+
+        const baseGroup = document.createElement('optgroup');
+        baseGroup.label = 'Base CLIs';
+        baseGroup.innerHTML = `
+            <option value="base:claude">Claude</option>
+            <option value="base:codex">Codex</option>
+            <option value="base:gemini">Gemini</option>
+        `;
+        selectEl.appendChild(baseGroup);
+
+        if (environments.length > 0) {
+            const envGroup = document.createElement('optgroup');
+            envGroup.label = 'Custom Environments';
+            environments.forEach(env => {
+                const option = document.createElement('option');
+                option.value = `env:${env.id}:${env.cli}`;
+                option.textContent = `${env.name} (${env.cli})`;
+                envGroup.appendChild(option);
+            });
+            selectEl.appendChild(envGroup);
+        }
+    }
+
+    parseSandboxCliSelection(selectEl) {
+        const value = selectEl?.value || 'base:claude';
+        if (value.startsWith('base:')) {
+            return { cli: value.replace('base:', ''), environmentName: null };
+        }
+        if (value.startsWith('env:')) {
+            const parts = value.split(':');
+            const envId = parseInt(parts[1]);
+            const cli = parts[2];
+            const env = (this.app.data.environments || []).find(e => e.id === envId);
+            return { cli, environmentName: env?.name || null };
+        }
+        return { cli: value, environmentName: null };
     }
 
     async launchEnvInWebUI(envId, envName, cli) {

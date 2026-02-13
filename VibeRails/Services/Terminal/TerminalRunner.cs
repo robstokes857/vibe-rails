@@ -1,6 +1,7 @@
 using VibeRails.DTOs;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal.Consumers;
+using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
 
@@ -78,6 +79,32 @@ public class TerminalRunner
 
         // Always wire up DB logging
         terminal.Subscribe(new DbLoggingConsumer(_stateService, sessionId));
+
+        // Connect to remote server if remote access is enabled
+        if (ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey()))
+        {
+            var remoteConn = new RemoteTerminalConnection();
+            await remoteConn.ConnectAsync(sessionId, ct);
+
+            if (remoteConn.IsConnected)
+            {
+                terminal.Subscribe(new RemoteOutputConsumer(remoteConn));
+                remoteConn.OnInputReceived += bytes =>
+                    _ = terminal.WriteBytesAsync(bytes, CancellationToken.None);
+                remoteConn.OnReplayRequested += () =>
+                {
+                    var replay = terminal.GetReplayBuffer();
+                    if (replay.Length > 0)
+                        _ = remoteConn.SendOutputAsync(replay);
+                    _ = terminal.WriteBytesAsync(new byte[] { 0x0C }, CancellationToken.None);
+                };
+                _stateService.TrackRemoteConnection(sessionId, remoteConn);
+            }
+            else
+            {
+                await remoteConn.DisposeAsync();
+            }
+        }
 
         // Send the CLI command to the shell
         await terminal.SendCommandAsync(command, ct);
