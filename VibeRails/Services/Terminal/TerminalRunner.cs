@@ -92,6 +92,17 @@ public class TerminalRunner
                 terminal.Subscribe(new RemoteOutputConsumer(remoteConn));
                 remoteConn.OnInputReceived += bytes =>
                     _ = terminal.WriteBytesAsync(bytes, CancellationToken.None);
+                remoteConn.OnResizeRequested += (cols, rows) =>
+                {
+                    try
+                    {
+                        terminal.Resize(cols, rows);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[Remote] Failed to resize PTY to {cols}x{rows}: {ex.Message}");
+                    }
+                };
                 remoteConn.OnReplayRequested += () =>
                 {
                     var replay = terminal.GetReplayBuffer();

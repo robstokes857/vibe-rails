@@ -12,5 +12,6 @@ public interface IRemoteTerminalConnection : IAsyncDisposable
     event Action<byte[]> OnInputReceived;
     event Action? OnReplayRequested;
     event Action? OnBrowserDisconnected;
+    event Action<int, int>? OnResizeRequested;
     bool IsConnected { get; }
 }

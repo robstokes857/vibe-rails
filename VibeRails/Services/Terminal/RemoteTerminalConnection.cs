@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using System.Text;
+using System.Globalization;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
@@ -10,6 +11,10 @@ namespace VibeRails.Services.Terminal;
 /// </summary>
 public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
 {
+    private const string ReplayCommand = "__replay__";
+    private const string BrowserDisconnectedCommand = "__browser_disconnected__";
+    private const string ResizePrefix = "__resize__:";
+
     private ClientWebSocket? _socket;
     private CancellationTokenSource? _cts;
     private Task? _receiveLoop;
@@ -17,6 +22,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
     public event Action<byte[]>? OnInputReceived;
     public event Action? OnReplayRequested;
     public event Action? OnBrowserDisconnected;
+    public event Action<int, int>? OnResizeRequested;
     public bool IsConnected => _socket?.State == WebSocketState.Open;
 
     public async Task ConnectAsync(string sessionId, CancellationToken ct)
@@ -108,14 +114,19 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
                         var text = Encoding.UTF8.GetString(inputBytes);
-                        if (text == "__replay__")
+                        if (text == ReplayCommand)
                         {
                             OnReplayRequested?.Invoke();
                             continue;
                         }
-                        if (text == "__browser_disconnected__")
+                        if (text == BrowserDisconnectedCommand)
                         {
                             OnBrowserDisconnected?.Invoke();
+                            continue;
+                        }
+                        if (TryParseResize(text, out var cols, out var rows))
+                        {
+                            OnResizeRequested?.Invoke(cols, rows);
                             continue;
                         }
                     }
@@ -132,6 +143,32 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         }
 
         Console.WriteLine("[Remote] WebSocket receive loop ended");
+    }
+
+    private static bool TryParseResize(string text, out int cols, out int rows)
+    {
+        cols = 0;
+        rows = 0;
+
+        if (!text.StartsWith(ResizePrefix, StringComparison.Ordinal))
+            return false;
+
+        var payload = text[ResizePrefix.Length..];
+        var parts = payload.Split(',', 2, StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+            return false;
+
+        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out cols))
+            return false;
+
+        if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out rows))
+            return false;
+
+        // Ignore unrealistic values from malformed clients.
+        if (cols is < 10 or > 1000 || rows is < 5 or > 500)
+            return false;
+
+        return true;
     }
 
     public async ValueTask DisposeAsync()
