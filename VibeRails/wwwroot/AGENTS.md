@@ -11,6 +11,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [app.js](app.js) | Central controller, routing, API layer |
 | [js/modules/terminal-controller.js](js/modules/terminal-controller.js) | xterm.js terminal with environment-aware CLI selector |
 | [js/modules/environment-controller.js](js/modules/environment-controller.js) | Environment CRUD + "Web UI" launch button |
+| [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Dashboard layout with state passing for preselection |
 
 ## Terminal Environment Integration
@@ -40,6 +41,31 @@ The terminal dropdown shows two groups:
 3. Dashboard passes `preselectedEnvId` to `terminalController.bindTerminalActions()`
 4. `populateTerminalSelector()` pre-selects the environment in the dropdown
 5. Terminal section scrolls into view
+
+## Sandbox Management
+
+The sandbox section appears on the dashboard when running in a local git project context (`isLocal`).
+
+### Flow: Creating a Sandbox
+
+1. User clicks "+ New Sandbox" button on dashboard
+2. `sandboxController.createSandbox()` shows modal with name input
+3. On submit, POSTs to `/api/v1/sandboxes` with `{ name }`
+4. Backend clones repo, copies dirty files, saves to DB
+5. Dashboard refreshes sandbox list
+
+### Flow: Launching Terminal in Sandbox
+
+1. User clicks a CLI button (Claude/Codex/Gemini) on a sandbox card
+2. `sandboxController.launchInWebUI(sandboxId, sandboxName, cli)` calls `terminalController.startTerminalWithOptions()`
+3. `startTerminalWithOptions()` POSTs to `/api/v1/terminal/start` with `{ cli, workingDirectory: sandboxPath, title: "Sandbox: {name}" }`
+4. Terminal starts in sandbox directory with title bar showing sandbox name
+
+### Flow: Launch VS Code in Sandbox
+
+1. User clicks VS Code button on a sandbox card
+2. POSTs to `/api/v1/sandboxes/{id}/launch/vscode`
+3. Backend calls `Process.Start("code", ".")` with `WorkingDirectory = sandbox.Path`
 
 ### Key Design Decisions
 

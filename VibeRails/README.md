@@ -524,7 +524,7 @@ VibeControl2/
 │   ├── Tools/
 │   └── Program.cs
 │
-├── PtyNet/                     # Git submodule
+├── Pty.Net/                    # Cross-platform PTY library
 ├── Tests/                      # xUnit tests
 └── Scripts/                    # PowerShell scripts
 ```

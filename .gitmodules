@@ -1,6 +1,3 @@
-[submodule "PtyNet"]
-	path = PtyNet
-	url = https://github.com/robstokes857/vs-pty.net.git
 [submodule "ToonLib"]
 	path = ToonLib
 	url = https://github.com/robstokes857/ToonSharp

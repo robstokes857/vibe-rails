@@ -10,9 +10,9 @@ public static class ProjectRoutes
         app.MapGet("/api/v1/IsLocal", () =>
         {
             return Results.Ok(new IsLocalResponse(
-                IsLocalContext: Utils.Configs.IsLocalContext(),
+                IsLocalContext: Utils.ParserConfigs.IsLocalContext(),
                 LaunchDirectory: launchDirectory,
-                RootPath: Utils.Configs.GetRootPath()
+                RootPath: Utils.ParserConfigs.GetRootPath()
             ));
         }).WithName("IsLocal");
 

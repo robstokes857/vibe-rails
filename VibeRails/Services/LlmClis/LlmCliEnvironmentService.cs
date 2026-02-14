@@ -29,7 +29,7 @@ namespace VibeRails.Services.LlmClis
         public async Task CreateEnvironmentAsync(LLM_Environment environment, CancellationToken cancellationToken)
         {
             // Set the environment path
-            var envBasePath = Configs.GetEnvPath();
+            var envBasePath = ParserConfigs.GetEnvPath();
             environment.Path = Path.Combine(envBasePath, environment.CustomName);          
             environment.LastUsedUTC = DateTime.UtcNow;
 
@@ -52,7 +52,7 @@ namespace VibeRails.Services.LlmClis
 
         public Dictionary<string, string> GetEnvironmentVariables(string envName, LLM llm)
         {
-            var envBasePath = Configs.GetEnvPath();
+            var envBasePath = ParserConfigs.GetEnvPath();
             var envPath = Path.Combine(envBasePath, envName);
 
             return llm switch

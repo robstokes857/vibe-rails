@@ -148,10 +148,17 @@ export class DashboardController {
             }
         });
 
-        const menuSlot = root.querySelector('[data-main-menu]');
-        if (menuSlot) {
-            menuSlot.appendChild(this.renderMainMenu());
-            this.bindMainMenu(menuSlot);
+        // Sandboxes section - only show in local context
+        const sandboxSection = root.querySelector('[data-sandbox-section]');
+        if (sandboxSection && isLocal) {
+            sandboxSection.style.removeProperty('display');
+            const sandboxList = root.querySelector('[data-sandbox-list]');
+            if (sandboxList) {
+                this.populateSandboxesList(sandboxList);
+            }
+            this.app.bindAction(sandboxSection, '[data-action="create-sandbox"]', () => {
+                this.app.sandboxController.createSandbox();
+            });
         }
 
         // Terminal section - only show in local context
@@ -170,23 +177,6 @@ export class DashboardController {
         }
 
         return fragment;
-    }
-
-    renderMainMenu() {
-        return this.app.cloneTemplate('main-menu-template');
-    }
-
-    bindMainMenu(container) {
-        if (!container) return;
-
-        this.app.bindActions(container, '[data-action="navigate"]', (element) => {
-            const view = element.dataset.view;
-            if (view) {
-                this.app.navigate(view);
-            }
-        });
-
-        this.app.bindAction(container, '[data-action="exit-app"]', () => window.close());
     }
 
     populateEnvironmentsList(container) {
@@ -266,6 +256,141 @@ export class DashboardController {
         });
 
         container.appendChild(fragment);
+    }
+
+    populateSandboxesList(container) {
+        if (!container) return;
+        container.innerHTML = '';
+
+        const sandboxes = this.app.data.sandboxes || [];
+
+        if (sandboxes.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">No sandboxes yet. Create one to work in an isolated copy of your project.</p>';
+            return;
+        }
+
+        const template = document.getElementById('sandbox-item-template');
+        if (!template) {
+            container.innerHTML = '<p class="text-muted text-center">Template not found.</p>';
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        sandboxes.forEach((sb) => {
+            const node = template.content.cloneNode(true);
+
+            const name = node.querySelector('[data-sandbox-name]');
+            if (name) name.textContent = sb.name;
+
+            const branch = node.querySelector('[data-sandbox-branch]');
+            if (branch) branch.textContent = sb.branch;
+
+            const time = node.querySelector('[data-sandbox-time]');
+            if (time) time.textContent = sb.created;
+
+            const path = node.querySelector('[data-sandbox-path]');
+            if (path) path.textContent = sb.path;
+
+            // Show remote URL if available
+            const remoteContainer = node.querySelector('[data-sandbox-remote]');
+            const remoteUrlEl = node.querySelector('[data-sandbox-remote-url]');
+            if (remoteContainer && remoteUrlEl && sb.remoteUrl) {
+                remoteContainer.style.removeProperty('display');
+                remoteUrlEl.textContent = sb.remoteUrl;
+            }
+
+            // Populate CLI select with environments
+            const cliSelect = node.querySelector('[data-sandbox-cli-select]');
+            if (cliSelect) {
+                this.populateSandboxCliSelect(cliSelect);
+            }
+
+            // Web UI launch button
+            const webUiBtn = node.querySelector('[data-sandbox-launch-webui]');
+            if (webUiBtn) {
+                webUiBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const { cli, environmentName } = this.parseSandboxCliSelection(cliSelect);
+                    this.app.sandboxController.launchInWebUI(sb.id, sb.name, cli, environmentName);
+                });
+            }
+
+            // External Terminal launch button
+            const terminalBtn = node.querySelector('[data-sandbox-launch-terminal]');
+            if (terminalBtn) {
+                terminalBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const { cli, environmentName } = this.parseSandboxCliSelection(cliSelect);
+                    this.app.sandboxController.launchInExternalTerminal(sb.id, sb.name, cli, environmentName);
+                });
+            }
+
+            // VS Code button
+            const vscodeBtn = node.querySelector('[data-sandbox-vscode]');
+            if (vscodeBtn) {
+                vscodeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.app.sandboxController.launchVSCode(sb.id, sb.name);
+                });
+            }
+
+            // Delete button
+            const deleteBtn = node.querySelector('[data-sandbox-delete]');
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.app.sandboxController.deleteSandbox(sb.id, sb.name);
+                });
+            }
+
+            fragment.appendChild(node);
+        });
+
+        container.appendChild(fragment);
+    }
+
+    populateSandboxCliSelect(selectEl) {
+        const environments = this.app.data.environments || [];
+
+        // Clear and re-add base CLIs
+        selectEl.innerHTML = '';
+
+        const baseGroup = document.createElement('optgroup');
+        baseGroup.label = 'Base CLIs';
+        baseGroup.innerHTML = `
+            <option value="base:claude">Claude</option>
+            <option value="base:codex">Codex</option>
+            <option value="base:gemini">Gemini</option>
+        `;
+        selectEl.appendChild(baseGroup);
+
+        if (environments.length > 0) {
+            const envGroup = document.createElement('optgroup');
+            envGroup.label = 'Custom Environments';
+            environments.forEach(env => {
+                const option = document.createElement('option');
+                option.value = `env:${env.id}:${env.cli}`;
+                option.textContent = `${env.name} (${env.cli})`;
+                envGroup.appendChild(option);
+            });
+            selectEl.appendChild(envGroup);
+        }
+    }
+
+    parseSandboxCliSelection(selectEl) {
+        const value = selectEl?.value || 'base:claude';
+        if (value.startsWith('base:')) {
+            return { cli: value.replace('base:', ''), environmentName: null };
+        }
+        if (value.startsWith('env:')) {
+            const parts = value.split(':');
+            const envId = parseInt(parts[1]);
+            const cli = parts[2];
+            const env = (this.app.data.environments || []).find(e => e.id === envId);
+            return { cli, environmentName: env?.name || null };
+        }
+        return { cli: value, environmentName: null };
     }
 
     async launchEnvInWebUI(envId, envName, cli) {

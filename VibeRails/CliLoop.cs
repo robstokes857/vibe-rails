@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using VibeRails.Cli;
 using VibeRails.DB;
+using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
@@ -18,26 +18,11 @@ public static class CliLoop
     /// </summary>
     public static async Task<(bool exit, ParsedArgs parsedArgs)> RunAsync(string[] args, IServiceProvider services)
     {
-        ParsedArgs parsedArgs = Configs.ParseArgs(args);
+        ParsedArgs parsedArgs = ParserConfigs.ParseArgs(args);
 
         // Create a scope for resolving scoped services
         using var scope = services.CreateScope();
         var scopedServices = scope.ServiceProvider;
-
-        // Handle update command
-        if (parsedArgs.Command?.ToLowerInvariant() == "update")
-        {
-            var updateInstaller = scopedServices.GetRequiredService<UpdateInstaller>();
-            var lifetime = scopedServices.GetRequiredService<IHostApplicationLifetime>();
-
-            var success = await updateInstaller.InstallUpdateAsync(CancellationToken.None);
-            if (success)
-            {
-                lifetime.StopApplication();
-            }
-            Environment.ExitCode = success ? 0 : 1;
-            return (true, parsedArgs);
-        }
 
         // 0. Handle top-level --help and --version flags (no command required)
         if (parsedArgs.Help)
@@ -60,11 +45,10 @@ public static class CliLoop
             return (true, parsedArgs);
         }
 
-        // 2. Check for LMBootstrap mode - runs CLI wrapper without web server
+        // 2. Check for LMBootstrap mode - fall through to start web server + CLI terminal concurrently
         if (parsedArgs.IsLMBootstrap)
         {
-            await RunTerminalSessionAsync(parsedArgs, scopedServices);
-            return (true, parsedArgs);
+            return (false, parsedArgs);
         }
 
         // 3. Check for VCA validation mode - validates rules without web server
@@ -95,11 +79,18 @@ public static class CliLoop
         return (false, parsedArgs);
     }
 
-    private static async Task RunTerminalSessionAsync(ParsedArgs parsedArgs, IServiceProvider services)
+    /// <summary>
+    /// Runs the CLI terminal with web server access. Called from Program.cs after the web server is started.
+    /// </summary>
+    public static async Task RunTerminalWithWebAsync(ParsedArgs parsedArgs, IServiceProvider services)
     {
-        var dbService = services.GetRequiredService<IDbService>();
-        var envService = services.GetRequiredService<LlmCliEnvironmentService>();
-        var repository = services.GetRequiredService<IRepository>();
+        using var scope = services.CreateScope();
+        var scopedServices = scope.ServiceProvider;
+
+        var dbService = scopedServices.GetRequiredService<IDbService>();
+        var envService = scopedServices.GetRequiredService<LlmCliEnvironmentService>();
+        var repository = scopedServices.GetRequiredService<IRepository>();
+        var sessionService = scopedServices.GetRequiredService<ITerminalSessionService>();
 
         // Resolve LLM type (smart resolution: LLM enum name → base CLI, otherwise → DB lookup)
         LLM llm;
@@ -135,12 +126,14 @@ public static class CliLoop
             }
         }
 
-        // Create runner and run
+        // Create runner and run with web access
         var gitServiceForSession = new GitService(workingDirectory);
-        var terminalStateService = new TerminalStateService(dbService, gitServiceForSession);
-        var runner = new TerminalRunner(terminalStateService, envService);
+        var remoteStateService = scopedServices.GetRequiredService<IRemoteStateService>();
+        var terminalStateService = new TerminalStateService(dbService, gitServiceForSession, remoteStateService);
+        var mcpSettings = scopedServices.GetRequiredService<McpSettings>();
+        var runner = new TerminalRunner(terminalStateService, envService, mcpSettings);
 
-        var exitCode = await runner.RunCliAsync(llm, workingDirectory, environmentName, parsedArgs.ExtraArgs, CancellationToken.None);
+        var exitCode = await runner.RunCliWithWebAsync(llm, workingDirectory, environmentName, parsedArgs.ExtraArgs, sessionService, CancellationToken.None);
         Environment.ExitCode = exitCode;
     }
 }

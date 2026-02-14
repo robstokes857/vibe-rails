@@ -146,6 +146,25 @@ namespace VibeRails.DTOs
         string CustomName
     );
 
+    // Sandbox DTOs
+    public record CreateSandboxRequest(
+        string Name
+    );
+
+    public record SandboxResponse(
+        int Id,
+        string Name,
+        string Path,
+        string Branch,
+        string? CommitHash,
+        string? RemoteUrl,
+        DateTime CreatedUTC
+    );
+
+    public record SandboxListResponse(
+        List<SandboxResponse> Sandboxes
+    );
+
     // Environment DTOs
     public record CreateEnvironmentRequest(
         string Name,
@@ -211,7 +230,8 @@ namespace VibeRails.DTOs
     public record StartTerminalRequest(
         string? WorkingDirectory = null,
         string? Cli = null,
-        string? EnvironmentName = null
+        string? EnvironmentName = null,
+        string? Title = null
     );
 
     public record BootstrapCommandResponse(
@@ -231,6 +251,19 @@ namespace VibeRails.DTOs
     public record MessageResponse(
         string Message
     );
+
+    // App Settings DTOs
+    public record AppSettingsDto(
+        bool RemoteAccess,
+        string ApiKey
+    );
+
+    // Signed Message DTOs (matches VibeRails-Front TerminalSignedMessage shape)
+    public record SignedMessage(string Message, string Signature);
+    public record SignatureVerificationResponse(bool Verified, string Message);
+
+    // Proxy relay DTOs (sent from proxy WS to browser)
+    public record ProxyRelayMessage(string Type, string Message, string? Signature = null, bool? Verified = null);
 
     // Claude Plan DTOs
     public record ClaudePlanRecord(
@@ -314,6 +347,11 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ValidationResultResponse))]
     [JsonSerializable(typeof(List<ValidationResultResponse>))]
     [JsonSerializable(typeof(ValidationResponse))]
+    // Sandbox DTOs
+    [JsonSerializable(typeof(CreateSandboxRequest))]
+    [JsonSerializable(typeof(SandboxResponse))]
+    [JsonSerializable(typeof(SandboxListResponse))]
+    [JsonSerializable(typeof(List<SandboxResponse>))]
     // Environment DTOs
     [JsonSerializable(typeof(CreateEnvironmentRequest))]
     [JsonSerializable(typeof(UpdateEnvironmentRequest))]
@@ -341,10 +379,14 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ApiVersionResponse))]
     [JsonSerializable(typeof(MessageResponse))]
     [JsonSerializable(typeof(UpdateInfo))]
-    [JsonSerializable(typeof(ReleaseAsset))]
-    [JsonSerializable(typeof(List<ReleaseAsset>))]
-    // App Configuration (for app_config.json)
-    [JsonSerializable(typeof(Services.AppConfiguration))]
+    // App Settings DTOs
+    [JsonSerializable(typeof(AppSettingsDto))]
+    // Signed Message DTOs
+    [JsonSerializable(typeof(SignedMessage))]
+    [JsonSerializable(typeof(SignatureVerificationResponse))]
+    [JsonSerializable(typeof(ProxyRelayMessage))]
+    // App Configuration (for appsettings.json VibeRails section)
+    [JsonSerializable(typeof(Services.VibeRailsConfiguration))]
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
     internal partial class AppJsonSerializerContext : JsonSerializerContext
     {

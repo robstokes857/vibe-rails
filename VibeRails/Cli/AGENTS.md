@@ -24,21 +24,25 @@ The value passed to `--env` is resolved in this order:
 
 ### How It Works
 
-When `vb --env <value>` runs, [CliLoop.cs → RunTerminalSessionAsync()](../CliLoop.cs) handles it:
+When `vb --env <value>` runs, `CliLoop.RunAsync()` returns `(false, parsedArgs)` to fall through to `Program.cs`, which starts the web server and calls `CliLoop.RunTerminalWithWebAsync()`:
 
 1. Resolves the value to an LLM type + optional environment name
 2. Resolves working directory (--workdir or git root)
-3. Creates a `TerminalSession` for tracking (database session, git changes, logging)
-4. Creates a `PtyService` to manage the PTY process
-5. If custom environment: `LlmCliEnvironmentService` sets isolated config env vars
+3. Calls `TerminalRunner.RunCliWithWebAsync()` which:
+   - Creates `Terminal` via `CreateSessionAsync()` (spawns PTY, creates DB session, subscribes DbLoggingConsumer)
+   - Subscribes `ConsoleOutputConsumer` for CLI output
+   - Starts the read loop
+   - Registers the Terminal with `TerminalSessionService` (so web viewers can connect via WebSocket)
+   - Runs Console.ReadKey input loop (blocks until PTY exits)
+   - On exit: unregisters terminal (sends "[CLI session ended]" to any web viewer), disposes PTY
+4. If custom environment: `LlmCliEnvironmentService` sets isolated config env vars
    - Claude: `CLAUDE_CONFIG_DIR` → `~/.config/{cli}/{envName}/claude`
    - Codex: `CODEX_HOME` → `~/.config/{cli}/{envName}/codex`
    - Gemini: `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, etc. → `~/.config/{cli}/{envName}/gemini/*`
-6. Launches the CLI executable (claude/codex/gemini) inside the PTY
-7. Tracks user inputs, terminal output, and git file changes
-8. Completes session with exit code when PTY exits
 
-See [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for details on `TerminalSession` and `PtyService`.
+The web server runs concurrently in the background. Browser can connect to the same terminal session via `/api/v1/terminal/ws`. Both Console and WebSocket consumers receive PTY output simultaneously (pub/sub). When the CLI exits, the web server shuts down.
+
+See [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for details on the `Terminal` class, consumers, and `TerminalSessionService`.
 
 ### Examples
 
@@ -62,8 +66,8 @@ vb --environment codex                  # Same as --env codex
 ### Command Priority
 
 1. Known commands (`env`, `agent`, `rules`, `validate`, `hooks`, `launch`, `gemini`, `codex`, `claude`) — handled by `CommandRouter`
-2. `--env` / `--environment` / `--lmbootstrap` flag — handled by `CliLoop.RunTerminalSessionAsync()`
-3. No arguments — launches web server
+2. `--env` / `--environment` / `--lmbootstrap` flag — falls through to `Program.cs` which starts web server + runs `CliLoop.RunTerminalWithWebAsync()` concurrently
+3. No arguments — launches web server only
 
 ## Files
 

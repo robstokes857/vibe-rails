@@ -15,6 +15,13 @@ namespace VibeRails.DB
         Task UpdateEnvironmentAsync(LLM_Environment environment, CancellationToken cancellationToken = default);
         Task DeleteEnvironmentAsync(int id, CancellationToken cancellationToken = default);
 
+        // Sandbox operations (project-scoped)
+        Task<Sandbox> SaveSandboxAsync(Sandbox sandbox, CancellationToken cancellationToken = default);
+        Task<List<Sandbox>> GetSandboxesByProjectAsync(string projectPath, CancellationToken cancellationToken = default);
+        Task<Sandbox?> GetSandboxByIdAsync(int id, CancellationToken cancellationToken = default);
+        Task<Sandbox?> GetSandboxByNameAndProjectAsync(string name, string projectPath, CancellationToken cancellationToken = default);
+        Task DeleteSandboxAsync(int id, CancellationToken cancellationToken = default);
+
         // Agent metadata operations
         Task<string?> GetAgentCustomNameAsync(string path, CancellationToken cancellationToken = default);
         Task SetAgentCustomNameAsync(string path, string customName, CancellationToken cancellationToken = default);

@@ -14,7 +14,7 @@ namespace VibeRails.Services
 
         public DbService()
         {
-            _connectionString = $"Data Source={Configs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
+            _connectionString = $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
         }
 
         public void InitializeDatabase()

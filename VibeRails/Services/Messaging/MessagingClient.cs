@@ -4,19 +4,15 @@ using System.Text;
 namespace VibeRails.Services.Messaging;
 
 /// <summary>
-/// Bulletproof WebSocket messaging client with auto-connect, auto-reconnect,
+/// WebSocket messaging client with auto-connect, auto-reconnect,
 /// and queued sends. Register as a singleton and inject anywhere.
 ///
 /// Usage:
-///   // Inject via DI (auto-configured with frontendUrl from app_config.json):
 ///   var client = serviceProvider.GetRequiredService&lt;MessagingClient&gt;();
+///   client.SetApiKey("your-api-key");
 ///   client.OnMessageReceived += (sender, msg) => Console.WriteLine(msg);
-///   await client.ConnectAsync();          // uses configured default URL
-///   await client.SendAsync("hello");      // auto-connects if needed
-///   await client.SendJsonAsync(json);     // send pre-serialized JSON
-///
-///   // Or connect to a custom URL:
-///   await client.ConnectAsync("ws://other-server:1234/ws/messaging");
+///   await client.ConnectAsync();
+///   await client.SendAsync("hello");
 /// </summary>
 public sealed class MessagingClient : IDisposable
 {
@@ -26,11 +22,9 @@ public sealed class MessagingClient : IDisposable
     private Task? _receiveLoop;
     private Task? _reconnectLoop;
     private string? _uri;
+    private string? _apiKey;
     private bool _disposed;
 
-    /// <summary>
-    /// Creates a MessagingClient with a pre-configured default server URL.
-    /// </summary>
     public MessagingClient(string defaultUri)
     {
         _defaultUri = NormalizeToWsUri(defaultUri);
@@ -41,8 +35,8 @@ public sealed class MessagingClient : IDisposable
         uri = uri.Replace("https://", "wss://").Replace("http://", "ws://");
         if (!uri.StartsWith("ws://") && !uri.StartsWith("wss://"))
             uri = "ws://" + uri;
-        if (!uri.Contains("/ws/messaging"))
-            uri = uri.TrimEnd('/') + "/ws/messaging";
+        if (!uri.Contains("/ws/v1/terminal"))
+            uri = uri.TrimEnd('/') + "/ws/v1/terminal";
         return uri;
     }
 
@@ -63,6 +57,14 @@ public sealed class MessagingClient : IDisposable
 
     /// <summary>True if the WebSocket is currently connected and open.</summary>
     public bool IsConnected => _socket?.State == WebSocketState.Open;
+
+    /// <summary>
+    /// Set the API key used for authentication via X-Api-Key header.
+    /// </summary>
+    public void SetApiKey(string apiKey)
+    {
+        _apiKey = apiKey;
+    }
 
     /// <summary>
     /// Connect using the default URL from config. Safe to call multiple times.
@@ -86,6 +88,15 @@ public sealed class MessagingClient : IDisposable
         if (IsConnected) return;
 
         await ConnectInternalAsync(ct);
+    }
+
+    /// <summary>
+    /// Connect with a specific API key. Convenience overload.
+    /// </summary>
+    public Task ConnectAsync(string uri, string apiKey, CancellationToken ct = default)
+    {
+        _apiKey = apiKey;
+        return ConnectAsync(uri, ct);
     }
 
     /// <summary>
@@ -117,15 +128,12 @@ public sealed class MessagingClient : IDisposable
         else
         {
             _sendQueue.Enqueue(message);
-            // Make sure reconnect loop is running
             if (_uri != null) StartReconnectLoop();
         }
     }
 
     /// <summary>
     /// Send a pre-serialized JSON string. If disconnected, the message is queued.
-    /// Use JsonSerializer.Serialize(payload, AppJsonSerializerContext.Default.YourType)
-    /// for AOT-safe serialization before calling this.
     /// </summary>
     public Task SendJsonAsync(string json, CancellationToken ct = default)
     {
@@ -148,7 +156,6 @@ public sealed class MessagingClient : IDisposable
             catch { }
         }
 
-        // Wait for loops to finish
         if (_receiveLoop != null)
         {
             try { await _receiveLoop; } catch { }
@@ -184,6 +191,16 @@ public sealed class MessagingClient : IDisposable
 
     // ────────────────────────── Internals ──────────────────────────
 
+    private ClientWebSocket CreateSocket()
+    {
+        var ws = new ClientWebSocket();
+        if (!string.IsNullOrEmpty(_apiKey))
+        {
+            ws.Options.SetRequestHeader("X-Api-Key", _apiKey);
+        }
+        return ws;
+    }
+
     private async Task ConnectInternalAsync(CancellationToken ct)
     {
         _cts?.Cancel();
@@ -191,23 +208,20 @@ public sealed class MessagingClient : IDisposable
         _cts = new CancellationTokenSource();
 
         _socket?.Dispose();
-        _socket = new ClientWebSocket();
+        _socket = CreateSocket();
 
         try
         {
             await _socket.ConnectAsync(new Uri(_uri!), ct);
             OnConnectionChanged?.Invoke(this, true);
 
-            // Drain any queued messages
             await DrainQueueAsync(_cts.Token);
 
-            // Start the receive loop
             _receiveLoop = Task.Run(() => ReceiveLoopAsync(_cts.Token));
         }
         catch
         {
             OnConnectionChanged?.Invoke(this, false);
-            // Kick off background reconnect
             StartReconnectLoop();
         }
     }
@@ -231,28 +245,24 @@ public sealed class MessagingClient : IDisposable
             try
             {
                 _socket?.Dispose();
-                _socket = new ClientWebSocket();
+                _socket = CreateSocket();
 
                 using var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 await _socket.ConnectAsync(new Uri(_uri), connectCts.Token);
 
                 OnConnectionChanged?.Invoke(this, true);
 
-                // Reset backoff on success
                 delay = InitialReconnectDelayMs;
 
-                // Drain queued messages
                 _cts?.Dispose();
                 _cts = new CancellationTokenSource();
                 await DrainQueueAsync(_cts.Token);
 
-                // Restart receive loop
                 _receiveLoop = Task.Run(() => ReceiveLoopAsync(_cts.Token));
                 return;
             }
             catch
             {
-                // Exponential backoff
                 delay = (int)Math.Min(delay * ReconnectBackoffMultiplier, MaxReconnectDelayMs);
             }
         }

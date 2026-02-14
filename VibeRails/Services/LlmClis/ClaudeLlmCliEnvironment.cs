@@ -158,7 +158,7 @@ namespace VibeRails.Services.LlmClis
 
         private string GetSettingsFilePath(string envName)
         {
-            var envBasePath = Configs.GetEnvPath();
+            var envBasePath = ParserConfigs.GetEnvPath();
             return Path.Combine(envBasePath, envName, GetConfigSubdirectory(), "settings.json");
         }
     }

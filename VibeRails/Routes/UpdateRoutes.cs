@@ -28,20 +28,5 @@ public static class UpdateRoutes
             return Results.Ok(new ApiVersionResponse("v1", VersionInfo.Version));
         }).WithName("GetApiVersion");
 
-        // POST /api/v1/update/install - Trigger update installation
-        app.MapPost("/api/v1/update/install", async (
-            UpdateInstaller updateInstaller,
-            IHostApplicationLifetime lifetime,
-            CancellationToken cancellationToken) =>
-        {
-            var success = await updateInstaller.InstallUpdateAsync(cancellationToken);
-            if (success)
-            {
-                // Trigger graceful shutdown
-                lifetime.StopApplication();
-                return Results.Ok(new MessageResponse("Update installation started. Application shutting down..."));
-            }
-            return Results.BadRequest(new MessageResponse("Failed to start update installation"));
-        }).WithName("InstallUpdate");
     }
 }

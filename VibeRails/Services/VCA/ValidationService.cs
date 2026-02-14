@@ -40,8 +40,9 @@ namespace VibeRails.Services.VCA
         /// </summary>
         /// <param name="rootPath">Repository root path</param>
         /// <param name="stagedOnly">If true, only validate staged files (pre-commit). If false, validate all changed files.</param>
+        /// <param name="context">Optional validation context (e.g., commit message)</param>
         /// <param name="cancellationToken">Cancellation token</param>
-        public async Task<VcaValidationResultSet> ValidateAsync(string rootPath, bool stagedOnly, CancellationToken cancellationToken)
+        public async Task<VcaValidationResultSet> ValidateAsync(string rootPath, bool stagedOnly, ValidationContext? context = null, CancellationToken cancellationToken = default)
         {
             var results = new List<FileValidationResult>();
             var filesAndRules = await _fileAndRuleParser.GetFilesAndRulesAsync(rootPath, stagedOnly, cancellationToken);
@@ -59,6 +60,7 @@ namespace VibeRails.Services.VCA
                         ruleWithSource.Rule,
                         ruleWithSource.SourceFile,
                         rootPath,
+                        context,
                         cancellationToken);
 
                     // Only collect violations (failed validations)
@@ -91,9 +93,10 @@ namespace VibeRails.Services.VCA
         /// <param name="rule">The rule to check</param>
         /// <param name="sourceFile">The AGENTS.md file where this rule came from (for context-aware validation)</param>
         /// <param name="rootPath">The repository root path</param>
+        /// <param name="context">Optional validation context (e.g., commit message)</param>
         /// <param name="cancellation">Cancellation token</param>
         /// <returns>True if validation passes, false if it fails</returns>
-        public Task<bool> IsGoodCodeAsync(string filePath, RuleWithEnforcement rule, string sourceFile, string rootPath, CancellationToken cancellation);
+        public Task<bool> IsGoodCodeAsync(string filePath, RuleWithEnforcement rule, string sourceFile, string rootPath, ValidationContext? context, CancellationToken cancellation);
     }
 
     /// <summary>

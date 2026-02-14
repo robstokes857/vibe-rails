@@ -1,42 +1,15 @@
-using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 
 namespace VibeRails;
 
 public static class VersionInfo
 {
-    private static readonly Lazy<string> _version = new Lazy<string>(LoadVersion);
+    private static string? _version;
 
-    public static string Version => _version.Value;
+    public static string Version => _version ?? "1.0.0";
 
-    private static string LoadVersion()
+    public static void Initialize(IConfiguration configuration)
     {
-        try
-        {
-            // Try to read app_config.json from the same directory as the executable
-            var exeDir = AppContext.BaseDirectory;
-            var configPath = Path.Combine(exeDir, "app_config.json");
-
-            if (!File.Exists(configPath))
-            {
-                Console.Error.WriteLine($"[VibeRails] Warning: Could not find app_config.json at '{configPath}', using fallback version");
-                return "1.0.0"; // Fallback
-            }
-
-            var json = File.ReadAllText(configPath);
-
-            // Simple JSON parsing for AOT compatibility
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("version", out var versionElement))
-            {
-                return versionElement.GetString() ?? "1.0.0";
-            }
-
-            return "1.0.0";
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[VibeRails] Error loading version from app_config.json: {ex.Message}");
-            return "1.0.0"; // Fallback
-        }
+        _version = configuration["VibeRails:Version"] ?? "1.0.0";
     }
 }

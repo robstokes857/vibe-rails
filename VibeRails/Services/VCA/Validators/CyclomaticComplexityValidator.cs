@@ -31,7 +31,8 @@ namespace VibeRails.Services.VCA.Validators
             RuleWithEnforcement rule,
             string sourceFile,
             string rootPath,
-            CancellationToken ct)
+            ValidationContext? context = null,
+            CancellationToken ct = default)
         {
             var fullPath = Path.Combine(rootPath, filePath);
             if (!await _fileReader.ExistsAsync(fullPath, ct))

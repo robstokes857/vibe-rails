@@ -190,6 +190,99 @@ namespace VibeRails.DB
 
         #endregion
 
+        #region Sandbox CRUD (Project-Scoped)
+
+        public async Task<Sandbox> SaveSandboxAsync(Sandbox sandbox, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.InsertSandbox;
+            cmd.Parameters.AddWithValue("$name", sandbox.Name);
+            cmd.Parameters.AddWithValue("$path", sandbox.Path);
+            cmd.Parameters.AddWithValue("$projectPath", sandbox.ProjectPath);
+            cmd.Parameters.AddWithValue("$branch", sandbox.Branch);
+            cmd.Parameters.AddWithValue("$commitHash", (object?)sandbox.CommitHash ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$remoteUrl", (object?)sandbox.RemoteUrl ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$createdUTC", sandbox.CreatedUTC.ToString("O"));
+
+            var result = await cmd.ExecuteScalarAsync(cancellationToken);
+            sandbox.Id = Convert.ToInt32(result);
+            return sandbox;
+        }
+
+        public async Task<List<Sandbox>> GetSandboxesByProjectAsync(string projectPath, CancellationToken cancellationToken = default)
+        {
+            var sandboxes = new List<Sandbox>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectSandboxesByProject;
+            cmd.Parameters.AddWithValue("$projectPath", projectPath);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                sandboxes.Add(ReadSandbox(reader));
+            }
+
+            return sandboxes;
+        }
+
+        public async Task<Sandbox?> GetSandboxByIdAsync(int id, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectSandboxById;
+            cmd.Parameters.AddWithValue("$id", id);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                return ReadSandbox(reader);
+            }
+
+            return null;
+        }
+
+        public async Task<Sandbox?> GetSandboxByNameAndProjectAsync(string name, string projectPath, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectSandboxByNameAndProject;
+            cmd.Parameters.AddWithValue("$name", name);
+            cmd.Parameters.AddWithValue("$projectPath", projectPath);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                return ReadSandbox(reader);
+            }
+
+            return null;
+        }
+
+        public async Task DeleteSandboxAsync(int id, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.DeleteSandbox;
+            cmd.Parameters.AddWithValue("$id", id);
+
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        #endregion
+
         #region Agent Metadata
 
         public async Task<string?> GetAgentCustomNameAsync(string path, CancellationToken cancellationToken = default)
@@ -293,6 +386,21 @@ namespace VibeRails.DB
                 CustomPrompt = reader.GetString(5),
                 CreatedUTC = DateTime.Parse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind),
                 LastUsedUTC = DateTime.Parse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind)
+            };
+        }
+
+        private static Sandbox ReadSandbox(SqliteDataReader reader)
+        {
+            return new Sandbox
+            {
+                Id = reader.GetInt32(0),
+                Name = reader.GetString(1),
+                Path = reader.GetString(2),
+                ProjectPath = reader.GetString(3),
+                Branch = reader.GetString(4),
+                CommitHash = reader.IsDBNull(5) ? null : reader.GetString(5),
+                RemoteUrl = reader.IsDBNull(6) ? null : reader.GetString(6),
+                CreatedUTC = DateTime.Parse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind)
             };
         }
 

@@ -56,7 +56,7 @@ namespace VibeRails.Cli.Commands
 
         private static async Task<int> StatusAsync(IHookInstallationService hookService, IGitService gitService, CancellationToken cancellationToken)
         {
-            if (!Configs.IsLocalContext())
+            if (!ParserConfigs.IsLocalContext())
             {
                 CliOutput.Error("Not in a git repository.");
                 return 1;

@@ -83,7 +83,8 @@ namespace VibeRails.Services
         RequireTestCoverageMinimum80,
         RequireTestCoverageMinimum100,
         SkipTestCoverage,
-        PackageChangeDetected
+        PackageChangeDetected,
+        CheckCommitMessageForWords
     }
     public static class RuleParser
     {
@@ -101,7 +102,8 @@ namespace VibeRails.Services
             { Rule.RequireTestCoverageMinimum80, "Require test coverage minimum 80%" },
             { Rule.RequireTestCoverageMinimum100, "Require test coverage minimum 100%" },
             { Rule.SkipTestCoverage, "Skip test coverage" },
-            { Rule.PackageChangeDetected, "Package file changes" }
+            { Rule.PackageChangeDetected, "Package file changes" },
+            { Rule.CheckCommitMessageForWords, "Check commit message for" }
         };
 
         private static Dictionary<Rule, string> _descriptions = new Dictionary<Rule, string>()
@@ -118,7 +120,8 @@ namespace VibeRails.Services
             { Rule.RequireTestCoverageMinimum80, "Requires at least 80% test coverage for changed code files. High test coverage is expected for critical code." },
             { Rule.RequireTestCoverageMinimum100, "Requires 100% test coverage for changed code files. Full coverage is mandatory." },
             { Rule.SkipTestCoverage, "Disables test coverage checking for this project or directory." },
-            { Rule.PackageChangeDetected, "Detects changes to package/dependency files (package.json, .csproj, requirements.txt, etc.) and alerts or blocks based on enforcement level." }
+            { Rule.PackageChangeDetected, "Detects changes to package/dependency files (package.json, .csproj, requirements.txt, etc.) and alerts or blocks based on enforcement level." },
+            { Rule.CheckCommitMessageForWords, "Checks commit messages for specific forbidden words (CSV list). Useful for catching recurring LLM mistakes. Format: 'Check commit message for: word1,word2,word3'" }
         };
 
         public static List<string> GetRules()

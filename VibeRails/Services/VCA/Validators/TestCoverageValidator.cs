@@ -29,7 +29,8 @@ namespace VibeRails.Services.VCA.Validators
             RuleWithEnforcement rule,
             string sourceFile,
             string rootPath,
-            CancellationToken ct)
+            ValidationContext? context = null,
+            CancellationToken ct = default)
         {
             // Test coverage validation requires looking at all files together, not one at a time
             // For now, we skip per-file validation

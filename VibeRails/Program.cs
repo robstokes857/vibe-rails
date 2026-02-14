@@ -38,15 +38,12 @@ builder.Services.AddOpenApi();
 // Register DI services
 Init.RegisterServices(builder.Services);
 
-// Add CORS support for VS Code webview
+// Add CORS support for VS Code webview and local file access
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("VSCodeWebview", policy =>
     {
-        policy.SetIsOriginAllowed(origin =>
-            origin.StartsWith("vscode-webview://") ||
-            origin.StartsWith("http://localhost") ||
-            origin.StartsWith("https://localhost"))
+        policy.AllowAnyOrigin() // Allow all origins including null (file://)
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -70,7 +67,9 @@ _ = Task.Run(async () =>
             if (updateInfo?.UpdateAvailable == true)
             {
                 Console.WriteLine($"[VibeRails] Update available: v{updateInfo.CurrentVersion} -> v{updateInfo.LatestVersion}");
-                Console.WriteLine($"[VibeRails] Run 'vb update' to install the latest version.");
+                Console.WriteLine("[VibeRails] Install latest version:");
+                Console.WriteLine("[VibeRails]   Windows: irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.ps1 | iex");
+                Console.WriteLine("[VibeRails]   Linux:   wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash");
             }
         }
     }
@@ -80,44 +79,46 @@ _ = Task.Run(async () =>
     }
 });
 
-// Handle all CLI modes (env, agent, rules, validate, hooks, launch, --lmbootstrap, --validate-vca, etc.)
-var (exit, _) = await CliLoop.RunAsync(args, app.Services);
+// Configure middleware and routes BEFORE CliLoop so the app is ready to serve in all modes
+app.UseCors("VSCodeWebview");
+app.UseWebSockets();
+
+if (Directory.Exists(webRootPath))
+{
+    var fileProvider = new PhysicalFileProvider(webRootPath);
+    app.UseDefaultFiles(new DefaultFilesOptions
+    {
+        FileProvider = fileProvider,
+        DefaultFileNames = new List<string> { "index.html" }
+    });
+    app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
+}
+
+app.MapApiEndpoints(launchDirectory);
+app.MapOpenApi();
+
+// Handle all CLI modes (env, agent, rules, validate, hooks, launch, etc.)
+// --env falls through with exit=false so the web server starts alongside the CLI terminal
+var (exit, parsedArgs) = await CliLoop.RunAsync(args, app.Services);
 if (exit)
 {
     return;
 }
 
-if (!Directory.Exists(webRootPath))
-{
-    throw new Exception("webroot not found");
-}
-
-var fileProvider = new PhysicalFileProvider(webRootPath);
-
-// Enable CORS for VS Code webview
-app.UseCors("VSCodeWebview");
-
-// Enable WebSockets for terminal
-app.UseWebSockets();
-
-// Enable default files (index.html) - must be before UseStaticFiles
-app.UseDefaultFiles(new DefaultFilesOptions
-{
-    FileProvider = fileProvider,
-    DefaultFileNames = new List<string> { "index.html" }
-});
-
-app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
-
-// Map API endpoints
-app.MapApiEndpoints(launchDirectory);
-app.MapOpenApi();
-
-
 // Start server in background (non-blocking)
 await app.StartAsync();
-
 string serverUrl = $"http://localhost:{port}";
+
+if (parsedArgs.IsLMBootstrap)
+{
+    // CLI + Web concurrent mode: terminal runs in foreground, web server in background
+    Console.WriteLine($"[VibeRails] Web viewer: {serverUrl}");
+    await CliLoop.RunTerminalWithWebAsync(parsedArgs, app.Services);
+    await app.StopAsync();
+    return;
+}
+
+// Standard web-only mode
 Console.WriteLine($"Vibe Rails server running on {serverUrl}");
 Console.WriteLine($"Launch directory: {launchDirectory}");
 Console.WriteLine("Press Ctrl+C to stop the server.");
@@ -131,6 +132,3 @@ if (args.Contains("--open-browser"))
 
 // Wait for shutdown signal (Ctrl+C)
 await app.WaitForShutdownAsync();
-
-
-

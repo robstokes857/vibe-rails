@@ -19,7 +19,7 @@ namespace VibeRails.Utils
             var gitService = scopedServices.GetRequiredService<IGitService>();
             var validationService = scopedServices.GetRequiredService<VibeRails.Services.VCA.ValidationService>();
 
-            var args = Configs.GetAarguments();
+            var args = ParserConfigs.GetArguments();
             var isPreCommit = args.PreCommit;
 
             try
@@ -31,8 +31,8 @@ namespace VibeRails.Utils
                     return 2;
                 }
 
-                // Run new modular validation service
-                var results = await validationService.ValidateAsync(rootPath, isPreCommit, CancellationToken.None);
+                // Run new modular validation service (no commit message context for pre-commit)
+                var results = await validationService.ValidateAsync(rootPath, isPreCommit, null, CancellationToken.None);
 
                 if (results.TotalFiles == 0)
                 {
@@ -76,8 +76,7 @@ namespace VibeRails.Utils
             var scopedServices = scope.ServiceProvider;
 
             var gitService = scopedServices.GetRequiredService<IGitService>();
-            var agentFileService = scopedServices.GetRequiredService<IAgentFileService>();
-            var validationService = scopedServices.GetRequiredService<IRuleValidationService>();
+            var validationService = scopedServices.GetRequiredService<VibeRails.Services.VCA.ValidationService>();
 
             try
             {
@@ -96,46 +95,32 @@ namespace VibeRails.Utils
 
                 var commitMessage = await File.ReadAllTextAsync(commitMsgFile);
 
-                // Get staged files and rules
-                var changedFiles = await gitService.GetStagedFilesAsync(CancellationToken.None);
-                if (changedFiles.Count == 0)
+                // Get staged files and validate with commit message context
+                var context = new ValidationContext(CommitMessage: commitMessage);
+                var results = await validationService.ValidateAsync(rootPath, stagedOnly: true, context, CancellationToken.None);
+
+                if (results.TotalFiles == 0)
                 {
                     return 0;
                 }
 
-                var agentFiles = await agentFileService.GetAgentFiles(CancellationToken.None);
-                var allRulesWithSource = new List<(RuleWithEnforcement Rule, string SourceFile)>();
-
-                foreach (var agentFile in agentFiles)
-                {
-                    var rules = await agentFileService.GetRulesWithEnforcementAsync(
-                        agentFile, CancellationToken.None);
-                    foreach (var rule in rules)
-                    {
-                        allRulesWithSource.Add((rule, agentFile));
-                    }
-                }
-
-                if (allRulesWithSource.Count == 0)
+                if (results.TotalRules == 0)
                 {
                     return 0;
                 }
 
-                // Convert to RuleWithSource list for proper validation (using OLD validation service)
-                var rulesWithSource = allRulesWithSource
-                    .Select(r => new VibeRails.Services.RuleWithSource(r.Rule, r.SourceFile))
+                // Convert results to old format for compatibility with OutputResults
+                var allRulesWithSource = results.Results
+                    .Select(r => (
+                        Result: new ValidationResult(r.RuleName, r.Enforcement, r.Passed, r.Message,
+                            r.FilePath != null ? new List<string> { r.FilePath } : null),
+                        SourceFile: r.SourceFile))
                     .ToList();
-
-                var results = await validationService.ValidateWithSourceAsync(
-                    changedFiles, rulesWithSource, rootPath, CancellationToken.None);
 
                 // Find COMMIT-level violations that need acknowledgment
                 var commitViolations = new List<(ValidationResult Result, string SourceFile, string Slug)>();
-                for (int i = 0; i < results.Results.Count && i < allRulesWithSource.Count; i++)
+                foreach (var (result, sourceFile) in allRulesWithSource)
                 {
-                    var result = results.Results[i];
-                    var sourceFile = allRulesWithSource[i].SourceFile;
-
                     if (!result.Passed && result.Enforcement == Enforcement.COMMIT)
                     {
                         var slug = GenerateRuleSlug(result.RuleName);
