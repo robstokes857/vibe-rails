@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading.Channels;
@@ -12,11 +11,6 @@ namespace VibeRails.Services.Terminal;
 /// </summary>
 public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
 {
-    private const string ReplayCommand = "__replay__";
-    private const string BrowserDisconnectedCommand = "__browser_disconnected__";
-    private const string DisconnectBrowserCommand = "__disconnect_browser__";
-    private const string ResizePrefix = "__resize__:";
-
     private readonly Channel<OutboundFrame> _outbound = Channel.CreateUnbounded<OutboundFrame>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
@@ -104,17 +98,34 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                     byte[] inputBytes;
                     if (result.EndOfMessage)
                     {
+                        if (result.Count > TerminalControlProtocol.MaxMessageBytes)
+                        {
+                            Console.Error.WriteLine($"[Remote] Inbound message exceeded limit ({result.Count} bytes)");
+                            break;
+                        }
                         inputBytes = buffer[..result.Count].ToArray();
                     }
                     else
                     {
                         using var ms = new MemoryStream();
                         ms.Write(buffer, 0, result.Count);
+                        if (ms.Length > TerminalControlProtocol.MaxMessageBytes)
+                        {
+                            Console.Error.WriteLine($"[Remote] Inbound fragmented message exceeded limit ({ms.Length} bytes)");
+                            break;
+                        }
                         while (!result.EndOfMessage)
                         {
                             result = await _socket.ReceiveAsync(buffer, ct);
                             ms.Write(buffer, 0, result.Count);
+                            if (ms.Length > TerminalControlProtocol.MaxMessageBytes)
+                            {
+                                Console.Error.WriteLine($"[Remote] Inbound fragmented message exceeded limit ({ms.Length} bytes)");
+                                break;
+                            }
                         }
+                        if (ms.Length > TerminalControlProtocol.MaxMessageBytes)
+                            break;
                         inputBytes = ms.ToArray();
                     }
 
@@ -122,17 +133,17 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
                         var text = Encoding.UTF8.GetString(inputBytes);
-                        if (text == ReplayCommand)
+                        if (text == TerminalControlProtocol.ReplayCommand)
                         {
                             OnReplayRequested?.Invoke();
                             continue;
                         }
-                        if (text == BrowserDisconnectedCommand)
+                        if (text == TerminalControlProtocol.BrowserDisconnectedCommand)
                         {
                             OnBrowserDisconnected?.Invoke();
                             continue;
                         }
-                        if (TryParseResize(text, out var cols, out var rows))
+                        if (TerminalControlProtocol.TryParseResizeCommand(text, out var cols, out var rows))
                         {
                             OnResizeRequested?.Invoke(cols, rows);
                             continue;
@@ -182,38 +193,6 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         {
             Console.Error.WriteLine($"[Remote] Send loop error: {ex.Message}");
         }
-    }
-
-    private static bool TryParseResize(string text, out int cols, out int rows)
-    {
-        cols = 0;
-        rows = 0;
-
-        if (!text.StartsWith(ResizePrefix, StringComparison.Ordinal))
-            return false;
-
-        var payload = text[ResizePrefix.Length..];
-        var parts = payload.Split(',', 2, StringSplitOptions.TrimEntries);
-        if (parts.Length != 2)
-            return false;
-
-        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out cols))
-            return false;
-
-        if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out rows))
-            return false;
-
-        // Ignore unrealistic values from malformed clients.
-        if (cols is < 10 or > 1000 || rows is < 5 or > 500)
-            return false;
-
-        return true;
-    }
-
-    public static string DisconnectBrowserControlMessage(string reason)
-    {
-        var trimmed = string.IsNullOrWhiteSpace(reason) ? "Session taken over by local viewer" : reason.Trim();
-        return $"{DisconnectBrowserCommand}:{trimmed}";
     }
 
     public async ValueTask DisposeAsync()

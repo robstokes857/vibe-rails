@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net.WebSockets;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
@@ -135,17 +134,6 @@ public class TerminalSessionService : ITerminalSessionService
             }
         }
 
-        // Send Ctrl+L for screen redraw after buffer replay
-        try
-        {
-            await terminal.WriteBytesAsync(new byte[] { 0x0C }, cancellationToken);
-            Console.WriteLine("[Terminal] Sent Ctrl+L to trigger screen refresh for new viewer");
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[Terminal] Failed to send Ctrl+L: {ex.Message}");
-        }
-
         // Subscribe WebSocket as output consumer
         using var wsConsumer = new WebSocketConsumer(webSocket, cancellationToken);
         using var subscription = terminal.Subscribe(wsConsumer);
@@ -255,17 +243,34 @@ public class TerminalSessionService : ITerminalSessionService
                 byte[] inputBytes;
                 if (result.EndOfMessage)
                 {
+                    if (result.Count > TerminalControlProtocol.MaxMessageBytes)
+                    {
+                        Console.Error.WriteLine($"[Terminal] Viewer message exceeded limit ({result.Count} bytes)");
+                        break;
+                    }
                     inputBytes = buffer[..result.Count].ToArray();
                 }
                 else
                 {
                     using var ms = new MemoryStream();
                     ms.Write(buffer, 0, result.Count);
+                    if (ms.Length > TerminalControlProtocol.MaxMessageBytes)
+                    {
+                        Console.Error.WriteLine($"[Terminal] Viewer fragmented message exceeded limit ({ms.Length} bytes)");
+                        break;
+                    }
                     while (!result.EndOfMessage)
                     {
                         result = await webSocket.ReceiveAsync(buffer, ct);
                         ms.Write(buffer, 0, result.Count);
+                        if (ms.Length > TerminalControlProtocol.MaxMessageBytes)
+                        {
+                            Console.Error.WriteLine($"[Terminal] Viewer fragmented message exceeded limit ({ms.Length} bytes)");
+                            break;
+                        }
                     }
+                    if (ms.Length > TerminalControlProtocol.MaxMessageBytes)
+                        break;
                     inputBytes = ms.ToArray();
                 }
 
@@ -273,7 +278,7 @@ public class TerminalSessionService : ITerminalSessionService
 
                 // Reserved control message from browser to keep PTY dimensions in sync.
                 if (result.MessageType == WebSocketMessageType.Text &&
-                    TryParseResizeCommand(input, out var cols, out var rows))
+                    TerminalControlProtocol.TryParseResizeCommand(input, out var cols, out var rows))
                 {
                     try
                     {
@@ -299,32 +304,6 @@ public class TerminalSessionService : ITerminalSessionService
             if (webSocket.State == WebSocketState.Open)
                 try { await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Done", CancellationToken.None); } catch { }
         }
-    }
-
-    private static bool TryParseResizeCommand(string input, out int cols, out int rows)
-    {
-        cols = 0;
-        rows = 0;
-
-        const string prefix = "__resize__:";
-        if (!input.StartsWith(prefix, StringComparison.Ordinal))
-            return false;
-
-        var payload = input[prefix.Length..];
-        var parts = payload.Split(',', 2, StringSplitOptions.TrimEntries);
-        if (parts.Length != 2)
-            return false;
-
-        if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out cols))
-            return false;
-
-        if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out rows))
-            return false;
-
-        if (cols is < 10 or > 1000 || rows is < 5 or > 500)
-            return false;
-
-        return true;
     }
 
     private static async Task HandleTakeoverAsync(WebSocket newWebSocket)

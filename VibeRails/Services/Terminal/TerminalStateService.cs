@@ -94,7 +94,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         if (remoteConn?.IsConnected != true)
             return;
 
-        await remoteConn.SendControlAsync(RemoteTerminalConnection.DisconnectBrowserControlMessage(reason));
+        await remoteConn.SendControlAsync(TerminalControlProtocol.BuildDisconnectBrowserCommand(reason));
     }
 
     public async Task CompleteSessionAsync(string sessionId, int exitCode)
