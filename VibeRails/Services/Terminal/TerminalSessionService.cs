@@ -1,5 +1,5 @@
-using System.Net.WebSockets;
 using System.Globalization;
+using System.Net.WebSockets;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.LlmClis;
@@ -109,6 +109,17 @@ public class TerminalSessionService : ITerminalSessionService
         // Handle WebSocket takeover
         await HandleTakeoverAsync(webSocket);
 
+        // Local viewer connected: enforce single-viewer mode by disconnecting any
+        // remote browser currently attached through the relay.
+        try
+        {
+            await _stateService.RequestRemoteViewerDisconnectAsync(sessionId, "Session taken over by local viewer");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Terminal] Failed to disconnect remote viewer: {ex.Message}");
+        }
+
         // Replay buffered output so new viewer sees current screen state
         var replay = terminal.GetReplayBuffer();
         if (replay.Length > 0)
@@ -136,7 +147,7 @@ public class TerminalSessionService : ITerminalSessionService
         }
 
         // Subscribe WebSocket as output consumer
-        var wsConsumer = new WebSocketConsumer(webSocket, cancellationToken);
+        using var wsConsumer = new WebSocketConsumer(webSocket, cancellationToken);
         using var subscription = terminal.Subscribe(wsConsumer);
 
         // Run WebSocket input loop (blocks until WebSocket closes or cancellation)
@@ -180,9 +191,6 @@ public class TerminalSessionService : ITerminalSessionService
         {
             try
             {
-                var msg = System.Text.Encoding.UTF8.GetBytes("\r\n\x1b[33m[CLI session ended]\x1b[0m\r\n");
-                await wsToClose.SendAsync(msg, WebSocketMessageType.Binary, true, CancellationToken.None);
-                await Task.Delay(100);
                 await wsToClose.CloseAsync(WebSocketCloseStatus.NormalClosure, "CLI session ended", CancellationToken.None);
             }
             catch { }
@@ -222,9 +230,6 @@ public class TerminalSessionService : ITerminalSessionService
         {
             try
             {
-                var msg = System.Text.Encoding.UTF8.GetBytes($"\r\n\x1b[33m[{reason}]\x1b[0m\r\n");
-                await wsToClose.SendAsync(msg, WebSocketMessageType.Binary, true, CancellationToken.None);
-                await Task.Delay(100);
                 await wsToClose.CloseAsync(WebSocketCloseStatus.NormalClosure, reason, CancellationToken.None);
                 Console.WriteLine("[Terminal] Local viewer disconnected successfully");
             }
@@ -245,30 +250,45 @@ public class TerminalSessionService : ITerminalSessionService
             {
                 var result = await webSocket.ReceiveAsync(buffer, ct);
                 if (result.MessageType == WebSocketMessageType.Close) break;
-                if (result.Count > 0)
+                if (result.Count <= 0) continue;
+
+                byte[] inputBytes;
+                if (result.EndOfMessage)
                 {
-                    var input = System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count);
-
-                    // Reserved control message from browser to keep PTY dimensions in sync.
-                    if (result.MessageType == WebSocketMessageType.Text &&
-                        TryParseResizeCommand(input, out var cols, out var rows))
-                    {
-                        try
-                        {
-                            terminal.Resize(cols, rows);
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.Error.WriteLine($"[Terminal] Failed to resize PTY to {cols}x{rows}: {ex.Message}");
-                        }
-                        continue;
-                    }
-
-                    // Log input to DB
-                    stateService.RecordInput(sessionId, input);
-
-                    await terminal.WriteBytesAsync(buffer.AsMemory(0, result.Count), ct);
+                    inputBytes = buffer[..result.Count].ToArray();
                 }
+                else
+                {
+                    using var ms = new MemoryStream();
+                    ms.Write(buffer, 0, result.Count);
+                    while (!result.EndOfMessage)
+                    {
+                        result = await webSocket.ReceiveAsync(buffer, ct);
+                        ms.Write(buffer, 0, result.Count);
+                    }
+                    inputBytes = ms.ToArray();
+                }
+
+                var input = System.Text.Encoding.UTF8.GetString(inputBytes);
+
+                // Reserved control message from browser to keep PTY dimensions in sync.
+                if (result.MessageType == WebSocketMessageType.Text &&
+                    TryParseResizeCommand(input, out var cols, out var rows))
+                {
+                    try
+                    {
+                        terminal.Resize(cols, rows);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[Terminal] Failed to resize PTY to {cols}x{rows}: {ex.Message}");
+                    }
+                    continue;
+                }
+
+                // Log input to DB
+                stateService.RecordInput(sessionId, input);
+                await terminal.WriteBytesAsync(inputBytes, ct);
             }
         }
         catch (OperationCanceledException) { }
@@ -325,13 +345,6 @@ public class TerminalSessionService : ITerminalSessionService
             if (oldWebSocket.State == WebSocketState.Open)
             {
                 Console.WriteLine("[Terminal] WebSocket takeover - disconnecting previous viewer");
-
-                const string message = "\r\n\x1b[33m[Session taken over by another viewer]\x1b[0m\r\n";
-                var messageBytes = System.Text.Encoding.UTF8.GetBytes(message);
-                await oldWebSocket.SendAsync(messageBytes, WebSocketMessageType.Binary, true, CancellationToken.None);
-
-                await Task.Delay(100);
-
                 await oldWebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Session taken over", CancellationToken.None);
                 Console.WriteLine("[Terminal] Old WebSocket closed successfully");
             }

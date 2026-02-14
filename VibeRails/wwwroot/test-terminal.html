@@ -60,10 +60,11 @@
             width: 100%;
             max-width: 1200px;
             background: #1e1e1e;
-            padding: 10px;
+            padding: 0;
             border-radius: 4px;
             border: 1px solid #3e3e42;
-            /* Let terminal size itself based on rows/cols */
+            height: 520px;
+            overflow: hidden;
         }
     </style>
 </head>
@@ -84,14 +85,29 @@
     <div id="terminal"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
     <script>
         let terminal = null;
+        let fitAddon = null;
+        let resizeDebounceId = null;
         let socket = null;
+        const resizePrefix = '__resize__:';
         const checkStatusBtn = document.getElementById('check-status');
         const connectBtn = document.getElementById('connect');
         const disconnectBtn = document.getElementById('disconnect');
         const portInput = document.getElementById('port-input');
         const statusEl = document.getElementById('status');
+
+        function sendResizeIfConnected() {
+            if (!terminal || !socket || socket.readyState !== WebSocket.OPEN) return;
+            socket.send(`${resizePrefix}${terminal.cols},${terminal.rows}`);
+        }
+
+        function fitAndSyncTerminal() {
+            if (!terminal) return;
+            if (fitAddon) fitAddon.fit();
+            sendResizeIfConnected();
+        }
 
         function getPort() {
             return portInput.value;
@@ -189,6 +205,16 @@
                     }
                 });
                 terminal.open(document.getElementById('terminal'));
+                if (window.FitAddon?.FitAddon) {
+                    fitAddon = new window.FitAddon.FitAddon();
+                    terminal.loadAddon(fitAddon);
+                    fitAndSyncTerminal();
+                }
+
+                window.addEventListener('resize', () => {
+                    if (resizeDebounceId) clearTimeout(resizeDebounceId);
+                    resizeDebounceId = setTimeout(() => fitAndSyncTerminal(), 100);
+                });
             } else {
                 // Reset terminal state before receiving replay data
                 terminal.reset();
@@ -205,9 +231,14 @@
 
                 // Backend will replay buffered output to rebuild screen state
                 // No need to send Ctrl+L anymore
+                fitAndSyncTerminal();
             };
 
             socket.onmessage = (event) => {
+                if (typeof event.data === 'string') {
+                    terminal.write(event.data);
+                    return;
+                }
                 terminal.write(new Uint8Array(event.data));
             };
 

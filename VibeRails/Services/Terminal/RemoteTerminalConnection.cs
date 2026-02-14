@@ -1,6 +1,7 @@
+using System.Globalization;
 using System.Net.WebSockets;
 using System.Text;
-using System.Globalization;
+using System.Threading.Channels;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
@@ -13,10 +14,15 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
 {
     private const string ReplayCommand = "__replay__";
     private const string BrowserDisconnectedCommand = "__browser_disconnected__";
+    private const string DisconnectBrowserCommand = "__disconnect_browser__";
     private const string ResizePrefix = "__resize__:";
+
+    private readonly Channel<OutboundFrame> _outbound = Channel.CreateUnbounded<OutboundFrame>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
     private ClientWebSocket? _socket;
     private CancellationTokenSource? _cts;
+    private Task? _sendLoop;
     private Task? _receiveLoop;
 
     public event Action<byte[]>? OnInputReceived;
@@ -52,6 +58,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
             await _socket.ConnectAsync(new Uri(wsUri), connectCts.Token);
 
             Console.WriteLine($"[Remote] WebSocket connected to server for session {sessionId[..8]}...");
+            _sendLoop = Task.Run(() => SendLoopAsync(_cts.Token));
             _receiveLoop = Task.Run(() => ReceiveLoopAsync(_cts.Token));
         }
         catch (Exception ex)
@@ -62,19 +69,20 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         }
     }
 
-    public async Task SendOutputAsync(ReadOnlyMemory<byte> data)
+    public Task SendOutputAsync(ReadOnlyMemory<byte> data)
     {
-        if (_socket?.State != WebSocketState.Open)
-            return;
+        // Copy because caller memory may be reused by PTY read loop.
+        TryQueueFrame(WebSocketMessageType.Binary, data.ToArray());
+        return Task.CompletedTask;
+    }
 
-        try
-        {
-            await _socket.SendAsync(data, WebSocketMessageType.Binary, true, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[Remote] Send error: {ex.Message}");
-        }
+    public Task SendControlAsync(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return Task.CompletedTask;
+
+        TryQueueFrame(WebSocketMessageType.Text, Encoding.UTF8.GetBytes(message));
+        return Task.CompletedTask;
     }
 
     private async Task ReceiveLoopAsync(CancellationToken ct)
@@ -100,7 +108,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                     }
                     else
                     {
-                        using var ms = new System.IO.MemoryStream();
+                        using var ms = new MemoryStream();
                         ms.Write(buffer, 0, result.Count);
                         while (!result.EndOfMessage)
                         {
@@ -145,6 +153,37 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         Console.WriteLine("[Remote] WebSocket receive loop ended");
     }
 
+    private void TryQueueFrame(WebSocketMessageType messageType, byte[] payload)
+    {
+        if (_socket?.State != WebSocketState.Open || payload.Length == 0)
+            return;
+
+        _outbound.Writer.TryWrite(new OutboundFrame(payload, messageType));
+    }
+
+    private async Task SendLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (await _outbound.Reader.WaitToReadAsync(ct))
+            {
+                while (_outbound.Reader.TryRead(out var frame))
+                {
+                    if (_socket?.State != WebSocketState.Open)
+                        return;
+
+                    await _socket.SendAsync(frame.Payload, frame.MessageType, true, ct);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (WebSocketException) { }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Remote] Send loop error: {ex.Message}");
+        }
+    }
+
     private static bool TryParseResize(string text, out int cols, out int rows)
     {
         cols = 0;
@@ -171,9 +210,16 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         return true;
     }
 
+    public static string DisconnectBrowserControlMessage(string reason)
+    {
+        var trimmed = string.IsNullOrWhiteSpace(reason) ? "Session taken over by local viewer" : reason.Trim();
+        return $"{DisconnectBrowserCommand}:{trimmed}";
+    }
+
     public async ValueTask DisposeAsync()
     {
         _cts?.Cancel();
+        _outbound.Writer.TryComplete();
 
         if (_socket?.State == WebSocketState.Open)
         {
@@ -184,6 +230,11 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
             catch { }
         }
 
+        if (_sendLoop != null)
+        {
+            try { await _sendLoop; } catch { }
+        }
+
         if (_receiveLoop != null)
         {
             try { await _receiveLoop; } catch { }
@@ -192,4 +243,6 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         _socket?.Dispose();
         _cts?.Dispose();
     }
+
+    private sealed record OutboundFrame(byte[] Payload, WebSocketMessageType MessageType);
 }

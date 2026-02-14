@@ -3,8 +3,13 @@ export class TerminalController {
     constructor(app) {
         this.app = app;
         this.terminal = null;
+        this.fitAddon = null;
         this.socket = null;
         this.isConnected = false;
+        this.resizePrefix = '__resize__:';
+        this.resizeDebounceId = null;
+        this.resizeObserver = null;
+        this.windowResizeHandler = null;
     }
 
     async checkStatus() {
@@ -54,6 +59,8 @@ export class TerminalController {
             try { this.terminal.dispose(); } catch (e) { /* already disposed */ }
             this.terminal = null;
         }
+        this.fitAddon = null;
+        this.teardownResizeHandling();
         if (this.socket) {
             try { this.socket.close(); } catch (e) { /* already closed */ }
             this.socket = null;
@@ -96,7 +103,14 @@ export class TerminalController {
             }
         });
 
+        if (window.FitAddon?.FitAddon) {
+            this.fitAddon = new window.FitAddon.FitAddon();
+            this.terminal.loadAddon(this.fitAddon);
+        }
+
         this.terminal.open(terminalElement);
+        this.setupResizeHandling(terminalElement);
+        this.fitAndSyncTerminal();
         this.terminal.focus();
 
         // Connect to WebSocket
@@ -116,17 +130,24 @@ export class TerminalController {
 
         this.socket.onopen = () => {
             this.isConnected = true;
+            this.fitAndSyncTerminal();
             console.log('Terminal WebSocket connected - CLI is already running');
         };
 
         this.socket.onmessage = (event) => {
+            if (typeof event.data === 'string') {
+                this.terminal.write(event.data);
+                return;
+            }
             this.terminal.write(new Uint8Array(event.data));
         };
 
-        this.socket.onclose = () => {
+        this.socket.onclose = (event) => {
             this.isConnected = false;
             if (this.terminal) {
-                this.terminal.write('\r\n\x1b[33m[Terminal disconnected]\x1b[0m\r\n');
+                const reason = event.reason || 'Terminal disconnected';
+                const color = reason.includes('taken over') ? '33' : '90';
+                this.terminal.write(`\r\n\x1b[${color}m[${reason}]\x1b[0m\r\n`);
             }
             console.log('Terminal WebSocket closed');
 
@@ -157,7 +178,53 @@ export class TerminalController {
         });
     }
 
+    sendResizeToPty() {
+        if (!this.terminal || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+        this.socket.send(`${this.resizePrefix}${this.terminal.cols},${this.terminal.rows}`);
+    }
+
+    fitAndSyncTerminal() {
+        if (!this.terminal) return;
+        if (this.fitAddon) {
+            this.fitAddon.fit();
+        }
+        this.sendResizeToPty();
+    }
+
+    setupResizeHandling(terminalElement) {
+        const debouncedFit = () => {
+            if (this.resizeDebounceId) clearTimeout(this.resizeDebounceId);
+            this.resizeDebounceId = setTimeout(() => this.fitAndSyncTerminal(), 100);
+        };
+
+        this.windowResizeHandler = debouncedFit;
+        window.addEventListener('resize', this.windowResizeHandler);
+
+        if (typeof ResizeObserver !== 'undefined') {
+            this.resizeObserver = new ResizeObserver(() => debouncedFit());
+            this.resizeObserver.observe(terminalElement);
+        }
+    }
+
+    teardownResizeHandling() {
+        if (this.resizeDebounceId) {
+            clearTimeout(this.resizeDebounceId);
+            this.resizeDebounceId = null;
+        }
+
+        if (this.resizeObserver) {
+            try { this.resizeObserver.disconnect(); } catch (e) { /* no-op */ }
+            this.resizeObserver = null;
+        }
+
+        if (this.windowResizeHandler) {
+            window.removeEventListener('resize', this.windowResizeHandler);
+            this.windowResizeHandler = null;
+        }
+    }
+
     disconnect() {
+        this.teardownResizeHandling();
         if (this.socket) {
             this.socket.close();
             this.socket = null;
@@ -166,6 +233,7 @@ export class TerminalController {
             this.terminal.dispose();
             this.terminal = null;
         }
+        this.fitAddon = null;
         this.isConnected = false;
     }
 
@@ -196,8 +264,8 @@ export class TerminalController {
                         </button>
                     </div>
                 </div>
-                <div class="card-body p-0" id="terminal-container" style="display: none; min-height: 400px;">
-                    <div id="terminal-element" style="height: 100%; min-height: 400px;"></div>
+                <div class="card-body p-0" id="terminal-container" style="display: none; height: 520px; overflow: hidden;">
+                    <div id="terminal-element" style="width: 100%; height: 100%;"></div>
                 </div>
                 <div class="card-body text-center text-muted" id="terminal-placeholder">
                     <p class="mb-3">Launch an embedded terminal session.</p>

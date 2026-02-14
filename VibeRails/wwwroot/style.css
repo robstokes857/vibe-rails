@@ -522,8 +522,8 @@ code {
     color: var(--color-text-muted);
 }
 
-/* Terminal / Logs */
-.terminal {
+/* Terminal / Logs (scope to avoid xterm.js root .terminal class collision) */
+.terminal:not(.xterm) {
     background: #15151a;
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius);
@@ -531,13 +531,15 @@ code {
     font-family: 'Consolas', 'Monaco', monospace;
     color: #d0d0d0;
     max-height: 500px;
+    overflow-y: auto;
 }
 
 /* Ensure xterm handles its own scrolling correctly and fills container */
 #terminal-element {
-    padding: 10px;
+    padding: 0;
     background: #1e1e1e;
     border-radius: 0 0 var(--border-radius) var(--border-radius);
+    overflow: hidden;
 }
 
 .xterm .xterm-viewport {

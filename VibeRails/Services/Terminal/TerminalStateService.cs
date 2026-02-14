@@ -9,6 +9,7 @@ public interface ITerminalStateService
     void LogOutput(string sessionId, string text);
     void RecordInput(string sessionId, string input);
     void TrackRemoteConnection(string sessionId, IRemoteTerminalConnection connection);
+    Task RequestRemoteViewerDisconnectAsync(string sessionId, string reason);
     Task CompleteSessionAsync(string sessionId, int exitCode);
 }
 
@@ -17,8 +18,12 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private readonly IDbService _dbService;
     private readonly IGitService _gitService;
     private readonly IRemoteStateService _remoteStateService;
-    private readonly Dictionary<string, InputAccumulator> _inputAccumulators = new();
-    private readonly Dictionary<string, IRemoteTerminalConnection> _remoteConnections = new();
+
+    // Shared across scoped TerminalStateService instances so terminal state remains
+    // consistent across start/WS/reconnect/stop requests.
+    private static readonly Dictionary<string, InputAccumulator> s_inputAccumulators = new();
+    private static readonly Dictionary<string, IRemoteTerminalConnection> s_remoteConnections = new();
+    private static readonly Lock s_stateLock = new();
 
     public TerminalStateService(IDbService dbService, IGitService gitService, IRemoteStateService remoteStateService)
     {
@@ -35,10 +40,13 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         var commitHash = await _gitService.GetCurrentCommitHashAsync(ct);
         await _dbService.InsertUserInputAsync(sessionId, 0, "[SESSION_START]", commitHash);
 
-        _inputAccumulators[sessionId] = new InputAccumulator(async inputText =>
+        lock (s_stateLock)
         {
-            await _dbService.RecordUserInputAsync(sessionId, inputText, _gitService, ct);
-        });
+            s_inputAccumulators[sessionId] = new InputAccumulator(async inputText =>
+            {
+                await _dbService.RecordUserInputAsync(sessionId, inputText, _gitService, ct);
+            });
+        }
 
         // Register terminal remotely if configured
         if (ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey()))
@@ -57,22 +65,56 @@ public class TerminalStateService : ITerminalStateService, IDisposable
 
     public void RecordInput(string sessionId, string input)
     {
-        if (_inputAccumulators.TryGetValue(sessionId, out var accumulator))
+        InputAccumulator? accumulator;
+        lock (s_stateLock)
+        {
+            s_inputAccumulators.TryGetValue(sessionId, out accumulator);
+        }
+
+        if (accumulator != null)
             accumulator.Append(input);
     }
 
     public void TrackRemoteConnection(string sessionId, IRemoteTerminalConnection connection)
     {
-        _remoteConnections[sessionId] = connection;
+        lock (s_stateLock)
+        {
+            s_remoteConnections[sessionId] = connection;
+        }
+    }
+
+    public async Task RequestRemoteViewerDisconnectAsync(string sessionId, string reason)
+    {
+        IRemoteTerminalConnection? remoteConn;
+        lock (s_stateLock)
+        {
+            s_remoteConnections.TryGetValue(sessionId, out remoteConn);
+        }
+
+        if (remoteConn?.IsConnected != true)
+            return;
+
+        await remoteConn.SendControlAsync(RemoteTerminalConnection.DisconnectBrowserControlMessage(reason));
     }
 
     public async Task CompleteSessionAsync(string sessionId, int exitCode)
     {
         await _dbService.CompleteSessionAsync(sessionId, exitCode);
-        _inputAccumulators.Remove(sessionId);
+
+        lock (s_stateLock)
+        {
+            s_inputAccumulators.Remove(sessionId);
+        }
 
         // Disconnect remote WebSocket if active
-        if (_remoteConnections.Remove(sessionId, out var remoteConn))
+        IRemoteTerminalConnection? remoteConn;
+        lock (s_stateLock)
+        {
+            s_remoteConnections.TryGetValue(sessionId, out remoteConn);
+            s_remoteConnections.Remove(sessionId);
+        }
+
+        if (remoteConn != null)
         {
             await remoteConn.DisposeAsync();
         }
@@ -86,6 +128,6 @@ public class TerminalStateService : ITerminalStateService, IDisposable
 
     public void Dispose()
     {
-        _inputAccumulators.Clear();
+        // Shared state is session-managed via CompleteSessionAsync.
     }
 }
