@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Threading;
+using Microsoft.Extensions.Configuration;
 using VibeRails.Interfaces;
 using VibeRails.Utils;
 
@@ -9,62 +10,33 @@ namespace VibeRails.Services
 {
     public class FileService : IFileService
     {
-        private static readonly Lazy<string> _hiddenDir = new Lazy<string>(LoadInstallDirName);
-        private const string ENV_DIR = @"envs";
-        private const string HOSTORY_DIR = @"history";
-        private const string CONFIG_FILE = @"config.json";
-        private const string STATE_FILE = @"state.db";
-        private const string EMPTT_JSON = @"{}";
+        private readonly string _hiddenDir;
+        private const string EMPTY_JSON = @"{}";
 
-        private static string LoadInstallDirName()
+        public FileService(IConfiguration configuration)
         {
-            try
-            {
-                // Try to read app_config.json from the same directory as the executable
-                var exeDir = AppContext.BaseDirectory;
-                var configPath = Path.Combine(exeDir, "app_config.json");
-
-                if (!File.Exists(configPath))
-                {
-                    Console.Error.WriteLine($"[VibeRails] Warning: Could not find app_config.json at '{configPath}', using fallback directory name");
-                    return ".vibe_rails"; // Fallback
-                }
-
-                var json = File.ReadAllText(configPath);
-
-                // Simple JSON parsing for AOT compatibility
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("installDirName", out var dirElement))
-                {
-                    return dirElement.GetString() ?? ".vibe_rails";
-                }
-
-                return ".vibe_rails";
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[VibeRails] Error loading install directory name from app_config.json: {ex.Message}");
-                return ".vibe_rails"; // Fallback
-            }
+            _hiddenDir = configuration["VibeRails:InstallDirName"] ?? PathConstants.DEFAULT_INSTALL_DIR_NAME;
         }
 
         public string GetGlobalSavePath()
         {
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return Path.Combine(home, _hiddenDir.Value);
+            return Path.Combine(home, _hiddenDir);
         }
 
         public void InitGlobalSave()
         {
             string globalDir = GetGlobalSavePath();
-            string envDir = Path.Combine(globalDir, ENV_DIR);
-            string historyDir = Path.Combine(globalDir, HOSTORY_DIR);
-            string stateFile = Path.Combine(globalDir, STATE_FILE);
-            string configFile = Path.Combine(globalDir, CONFIG_FILE);
-            Configs.SetConfigPath(configFile);
-            Configs.SetStatePath(stateFile);
-            Configs.SetEnvPath(envDir);
-            Configs.SetHistoryPath(historyDir);
+            string envDir = Path.Combine(globalDir, PathConstants.ENVS_SUBDIR);
+            string sandboxDir = Path.Combine(globalDir, PathConstants.SANDBOXES_SUBDIR);
+            string historyDir = Path.Combine(globalDir, PathConstants.HISTORY_SUBDIR);
+            string stateFile = Path.Combine(globalDir, PathConstants.STATE_FILENAME);
+            string configFile = Path.Combine(globalDir, PathConstants.CONFIG_FILENAME);
+            ParserConfigs.SetConfigPath(configFile);
+            ParserConfigs.SetStatePath(stateFile);
+            ParserConfigs.SetEnvPath(envDir);
+            ParserConfigs.SetSandboxPath(sandboxDir);
+            ParserConfigs.SetHistoryPath(historyDir);
 
             if (!Directory.Exists(globalDir))
             {
@@ -74,6 +46,10 @@ namespace VibeRails.Services
             {
                 Directory.CreateDirectory(envDir);
             }
+            if (!Directory.Exists(sandboxDir))
+            {
+                Directory.CreateDirectory(sandboxDir);
+            }
             if (!Directory.Exists(historyDir))
             {
                 Directory.CreateDirectory(historyDir);
@@ -81,14 +57,14 @@ namespace VibeRails.Services
             // SQLite database will be created by StateService.InitializeDatabase()
             if (!File.Exists(configFile))
             {
-                File.WriteAllText(configFile, EMPTT_JSON);
+                File.WriteAllText(configFile, EMPTY_JSON);
             }
         }
 
         public void InitLocal(string rootPath)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
-            if (!Directory.Exists(Path.Combine(rootPath, _hiddenDir.Value)))
+            if (!Directory.Exists(Path.Combine(rootPath, _hiddenDir)))
             {
                 Directory.CreateDirectory(rootPath);
             }

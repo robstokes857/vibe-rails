@@ -67,7 +67,7 @@ public static class TerminalRoutes
             }
 
             // Start the terminal session with the LLM CLI
-            var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs);
+            var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title);
 
             if (!success)
             {
@@ -83,6 +83,11 @@ public static class TerminalRoutes
             if (!terminalService.HasActiveSession)
             {
                 return Results.Ok(new TerminalStatusResponse(false, null));
+            }
+
+            if (terminalService.IsExternallyOwned)
+            {
+                return Results.BadRequest(new ErrorResponse("Terminal is controlled from CLI. Stop it from the command line."));
             }
 
             await terminalService.StopSessionAsync();

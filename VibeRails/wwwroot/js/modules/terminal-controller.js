@@ -3,8 +3,13 @@ export class TerminalController {
     constructor(app) {
         this.app = app;
         this.terminal = null;
+        this.fitAddon = null;
         this.socket = null;
         this.isConnected = false;
+        this.resizePrefix = '__resize__:';
+        this.resizeDebounceId = null;
+        this.resizeObserver = null;
+        this.windowResizeHandler = null;
     }
 
     async checkStatus() {
@@ -54,6 +59,8 @@ export class TerminalController {
             try { this.terminal.dispose(); } catch (e) { /* already disposed */ }
             this.terminal = null;
         }
+        this.fitAddon = null;
+        this.teardownResizeHandling();
         if (this.socket) {
             try { this.socket.close(); } catch (e) { /* already closed */ }
             this.socket = null;
@@ -96,7 +103,14 @@ export class TerminalController {
             }
         });
 
+        if (window.FitAddon?.FitAddon) {
+            this.fitAddon = new window.FitAddon.FitAddon();
+            this.terminal.loadAddon(this.fitAddon);
+        }
+
         this.terminal.open(terminalElement);
+        this.setupResizeHandling(terminalElement);
+        this.fitAndSyncTerminal();
         this.terminal.focus();
 
         // Connect to WebSocket
@@ -112,29 +126,43 @@ export class TerminalController {
         }
 
         this.socket = new WebSocket(wsUrl);
+        this.socket.binaryType = 'arraybuffer';
 
         this.socket.onopen = () => {
             this.isConnected = true;
+            this.fitAndSyncTerminal();
             console.log('Terminal WebSocket connected - CLI is already running');
         };
 
-        this.socket.onmessage = async (event) => {
-            // Handle binary data properly for Unicode
-            if (event.data instanceof Blob) {
-                const buffer = await event.data.arrayBuffer();
-                const text = new TextDecoder('utf-8').decode(buffer);
-                this.terminal.write(text);
-            } else {
+        this.socket.onmessage = (event) => {
+            if (typeof event.data === 'string') {
                 this.terminal.write(event.data);
+                return;
             }
+            this.terminal.write(new Uint8Array(event.data));
         };
 
-        this.socket.onclose = () => {
+        this.socket.onclose = (event) => {
             this.isConnected = false;
             if (this.terminal) {
-                this.terminal.write('\r\n\x1b[33m[Terminal disconnected]\x1b[0m\r\n');
+                const reason = event.reason || 'Terminal disconnected';
+                const color = reason.includes('taken over') ? '33' : '90';
+                this.terminal.write(`\r\n\x1b[${color}m[${reason}]\x1b[0m\r\n`);
             }
             console.log('Terminal WebSocket closed');
+
+            // Show reconnect button and update status badge
+            const panel = document.getElementById('terminal-panel');
+            if (panel) {
+                const reconnectBtn = panel.querySelector('#terminal-reconnect-btn');
+                const statusBadge = panel.querySelector('#terminal-status-badge');
+                if (reconnectBtn) reconnectBtn.classList.remove('d-none');
+                if (statusBadge) {
+                    statusBadge.textContent = 'Disconnected';
+                    statusBadge.classList.remove('bg-success');
+                    statusBadge.classList.add('bg-warning');
+                }
+            }
         };
 
         this.socket.onerror = (error) => {
@@ -150,7 +178,53 @@ export class TerminalController {
         });
     }
 
+    sendResizeToPty() {
+        if (!this.terminal || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+        this.socket.send(`${this.resizePrefix}${this.terminal.cols},${this.terminal.rows}`);
+    }
+
+    fitAndSyncTerminal() {
+        if (!this.terminal) return;
+        if (this.fitAddon) {
+            this.fitAddon.fit();
+        }
+        this.sendResizeToPty();
+    }
+
+    setupResizeHandling(terminalElement) {
+        const debouncedFit = () => {
+            if (this.resizeDebounceId) clearTimeout(this.resizeDebounceId);
+            this.resizeDebounceId = setTimeout(() => this.fitAndSyncTerminal(), 100);
+        };
+
+        this.windowResizeHandler = debouncedFit;
+        window.addEventListener('resize', this.windowResizeHandler);
+
+        if (typeof ResizeObserver !== 'undefined') {
+            this.resizeObserver = new ResizeObserver(() => debouncedFit());
+            this.resizeObserver.observe(terminalElement);
+        }
+    }
+
+    teardownResizeHandling() {
+        if (this.resizeDebounceId) {
+            clearTimeout(this.resizeDebounceId);
+            this.resizeDebounceId = null;
+        }
+
+        if (this.resizeObserver) {
+            try { this.resizeObserver.disconnect(); } catch (e) { /* no-op */ }
+            this.resizeObserver = null;
+        }
+
+        if (this.windowResizeHandler) {
+            window.removeEventListener('resize', this.windowResizeHandler);
+            this.windowResizeHandler = null;
+        }
+    }
+
     disconnect() {
+        this.teardownResizeHandling();
         if (this.socket) {
             this.socket.close();
             this.socket = null;
@@ -159,6 +233,7 @@ export class TerminalController {
             this.terminal.dispose();
             this.terminal = null;
         }
+        this.fitAddon = null;
         this.isConnected = false;
     }
 
@@ -180,13 +255,17 @@ export class TerminalController {
                         <button class="btn btn-sm btn-primary" id="terminal-start-btn">
                             Start
                         </button>
+                        <button class="btn btn-sm btn-outline-light d-none" id="terminal-reconnect-btn" title="Reconnect to active session">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                            Reconnect
+                        </button>
                         <button class="btn btn-sm btn-danger d-none" id="terminal-stop-btn">
                             Stop
                         </button>
                     </div>
                 </div>
-                <div class="card-body p-0" id="terminal-container" style="display: none; min-height: 400px;">
-                    <div id="terminal-element" style="height: 100%; min-height: 400px;"></div>
+                <div class="card-body p-0" id="terminal-container" style="display: none; height: 520px; overflow: hidden;">
+                    <div id="terminal-element" style="width: 100%; height: 100%;"></div>
                 </div>
                 <div class="card-body text-center text-muted" id="terminal-placeholder">
                     <p class="mb-3">Launch an embedded terminal session.</p>
@@ -242,6 +321,7 @@ export class TerminalController {
         await this.populateTerminalSelector(container, preselectedEnvId);
 
         const startBtn = container.querySelector('#terminal-start-btn');
+        const reconnectBtn = container.querySelector('#terminal-reconnect-btn');
         const stopBtn = container.querySelector('#terminal-stop-btn');
         const cliSelect = container.querySelector('#terminal-cli-select');
 
@@ -249,6 +329,12 @@ export class TerminalController {
             startBtn.addEventListener('click', async () => {
                 const selection = cliSelect?.value || 'base:claude';
                 await this.startTerminal(container, selection);
+            });
+        }
+
+        if (reconnectBtn) {
+            reconnectBtn.addEventListener('click', async () => {
+                await this.reconnectTerminal(container);
             });
         }
 
@@ -298,11 +384,35 @@ export class TerminalController {
         this.app.showToast('Terminal Started', `Launching ${displayName}...`, 'success');
     }
 
+    async startTerminalWithOptions(options, container) {
+        // options: { cli, environmentName?, workingDirectory?, title? }
+        const body = { cli: options.cli };
+        if (options.environmentName) body.environmentName = options.environmentName;
+        if (options.workingDirectory) body.workingDirectory = options.workingDirectory;
+        if (options.title) body.title = options.title;
+
+        try {
+            const response = await this.app.apiCall('/api/v1/terminal/start', 'POST', body);
+            if (!response.hasActiveSession) {
+                this.app.showError('Failed to start terminal session');
+                return;
+            }
+        } catch (error) {
+            this.app.showError('Failed to start terminal: ' + error.message);
+            return;
+        }
+
+        await this.showActiveTerminal(container);
+        const displayName = options.title || options.cli;
+        this.app.showToast('Terminal Started', `Launching ${displayName}...`, 'success');
+    }
+
     async showActiveTerminal(container) {
         const placeholder = container.querySelector('#terminal-placeholder');
         const terminalContainer = container.querySelector('#terminal-container');
         const terminalElement = container.querySelector('#terminal-element');
         const startBtn = container.querySelector('#terminal-start-btn');
+        const reconnectBtn = container.querySelector('#terminal-reconnect-btn');
         const stopBtn = container.querySelector('#terminal-stop-btn');
         const cliSelect = container.querySelector('#terminal-cli-select');
         const statusBadge = container.querySelector('#terminal-status-badge');
@@ -310,16 +420,46 @@ export class TerminalController {
         if (placeholder) placeholder.style.display = 'none';
         if (terminalContainer) terminalContainer.style.display = 'block';
         if (startBtn) startBtn.classList.add('d-none');
+        if (reconnectBtn) reconnectBtn.classList.add('d-none');
         if (stopBtn) stopBtn.classList.remove('d-none');
         if (cliSelect) cliSelect.disabled = true;
         if (statusBadge) {
             statusBadge.textContent = 'Connected';
-            statusBadge.classList.remove('bg-secondary');
+            statusBadge.classList.remove('bg-secondary', 'bg-warning');
             statusBadge.classList.add('bg-success');
         }
 
         // Connect to the terminal - CLI is already running in the PTY
         await this.connect(terminalElement);
+    }
+
+    async reconnectTerminal(container) {
+        const terminalElement = container.querySelector('#terminal-element');
+        const reconnectBtn = container.querySelector('#terminal-reconnect-btn');
+        const statusBadge = container.querySelector('#terminal-status-badge');
+
+        // Disconnect existing connection
+        this.disconnect();
+
+        // Update status
+        if (statusBadge) {
+            statusBadge.textContent = 'Reconnecting...';
+            statusBadge.classList.remove('bg-success');
+            statusBadge.classList.add('bg-warning');
+        }
+
+        // Reconnect to the session
+        await this.connect(terminalElement);
+
+        // Hide reconnect button and update status on success
+        if (reconnectBtn) reconnectBtn.classList.add('d-none');
+        if (statusBadge) {
+            statusBadge.textContent = 'Connected';
+            statusBadge.classList.remove('bg-warning');
+            statusBadge.classList.add('bg-success');
+        }
+
+        this.app.showToast('Terminal Reconnected', 'Successfully reconnected to terminal session', 'success');
     }
 
     async stopTerminal(container) {
@@ -328,6 +468,7 @@ export class TerminalController {
         const placeholder = container.querySelector('#terminal-placeholder');
         const terminalContainer = container.querySelector('#terminal-container');
         const startBtn = container.querySelector('#terminal-start-btn');
+        const reconnectBtn = container.querySelector('#terminal-reconnect-btn');
         const stopBtn = container.querySelector('#terminal-stop-btn');
         const cliSelect = container.querySelector('#terminal-cli-select');
         const statusBadge = container.querySelector('#terminal-status-badge');
@@ -335,6 +476,7 @@ export class TerminalController {
         if (placeholder) placeholder.style.display = 'block';
         if (terminalContainer) terminalContainer.style.display = 'none';
         if (startBtn) startBtn.classList.remove('d-none');
+        if (reconnectBtn) reconnectBtn.classList.add('d-none');
         if (stopBtn) stopBtn.classList.add('d-none');
         if (cliSelect) cliSelect.disabled = false;
         if (statusBadge) {

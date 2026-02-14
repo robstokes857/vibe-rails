@@ -23,9 +23,8 @@ public class GeminiSettingsTests : IDisposable
 
         _mockFileService = new MockFileService();
         _mockDbService = new MockDbService();
-        var mcpSettings = new McpSettings("");
 
-        _service = new GeminiLlmCliEnvironment(_mockDbService, _mockFileService, mcpSettings);
+        _service = new GeminiLlmCliEnvironment(_mockDbService, _mockFileService);
     }
 
     public void Dispose()

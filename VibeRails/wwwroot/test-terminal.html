@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terminal Takeover Test</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <style>
+        body {
+            margin: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            color: #569cd6;
+        }
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        #check-status {
+            background: #0e639c;
+            color: white;
+        }
+        #check-status:hover {
+            background: #1177bb;
+        }
+        #connect {
+            background: #28a745;
+            color: white;
+        }
+        #connect:hover {
+            background: #34ce57;
+        }
+        #disconnect {
+            background: #d73a49;
+            color: white;
+        }
+        #disconnect:hover {
+            background: #f44747;
+        }
+        #status {
+            padding: 8px 12px;
+            background: #2d2d30;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        #terminal {
+            width: 100%;
+            max-width: 1200px;
+            background: #1e1e1e;
+            padding: 0;
+            border-radius: 4px;
+            border: 1px solid #3e3e42;
+            height: 520px;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <h1>🖥️ Terminal Takeover Test</h1>
+    <p>This page tests the terminal WebSocket takeover functionality.</p>
+
+    <div class="controls">
+        <label for="port-input" style="font-weight: 600;">Port:</label>
+        <input type="number" id="port-input" value="5000" placeholder="5000-5999" min="5000" max="5999"
+               style="width: 100px; padding: 8px; border: 1px solid #3e3e42; border-radius: 4px; background: #2d2d30; color: #d4d4d4; font-weight: 600;">
+        <button id="check-status">Check Status</button>
+        <button id="connect" disabled>Connect</button>
+        <button id="disconnect" disabled>Disconnect</button>
+        <span id="status">Enter port number</span>
+    </div>
+
+    <div id="terminal"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <script>
+        let terminal = null;
+        let fitAddon = null;
+        let resizeDebounceId = null;
+        let socket = null;
+        const resizePrefix = '__resize__:';
+        const checkStatusBtn = document.getElementById('check-status');
+        const connectBtn = document.getElementById('connect');
+        const disconnectBtn = document.getElementById('disconnect');
+        const portInput = document.getElementById('port-input');
+        const statusEl = document.getElementById('status');
+
+        function sendResizeIfConnected() {
+            if (!terminal || !socket || socket.readyState !== WebSocket.OPEN) return;
+            socket.send(`${resizePrefix}${terminal.cols},${terminal.rows}`);
+        }
+
+        function fitAndSyncTerminal() {
+            if (!terminal) return;
+            if (fitAddon) fitAddon.fit();
+            sendResizeIfConnected();
+        }
+
+        function getPort() {
+            return portInput.value;
+        }
+
+        function getApiBase() {
+            return `http://localhost:${getPort()}`;
+        }
+
+        function getWsUrl() {
+            return `ws://localhost:${getPort()}/api/v1/terminal/ws`;
+        }
+
+        function validatePort() {
+            const port = portInput.value;
+            if (port && port >= 5000 && port <= 5999) {
+                checkStatusBtn.disabled = false;
+                return true;
+            } else {
+                checkStatusBtn.disabled = true;
+                connectBtn.disabled = true;
+                return false;
+            }
+        }
+
+        // Enable check button when port is entered
+        portInput.addEventListener('input', validatePort);
+
+        // Allow Enter key to trigger check status
+        portInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && validatePort()) {
+                checkStatusBtn.click();
+            }
+        });
+
+        checkStatusBtn.addEventListener('click', async () => {
+            if (!validatePort()) return;
+            try {
+                statusEl.textContent = 'Checking...';
+                statusEl.style.color = '#dcdcaa';
+                const res = await fetch(`${getApiBase()}/api/v1/terminal/status`);
+                const data = await res.json();
+
+                if (data.hasActiveSession) {
+                    statusEl.textContent = `Active: ${data.sessionId}`;
+                    statusEl.style.color = '#4ec9b0';
+                    connectBtn.disabled = false;
+                } else {
+                    statusEl.textContent = 'No active session';
+                    statusEl.style.color = '#808080';
+                    connectBtn.disabled = true;
+                }
+            } catch (error) {
+                statusEl.textContent = `Error: ${error.message}`;
+                statusEl.style.color = '#f44747';
+                connectBtn.disabled = true;
+            }
+        });
+
+        connectBtn.addEventListener('click', () => {
+            if (!terminal) {
+                terminal = new Terminal({
+                    cols: 120,
+                    rows: 30,
+                    cursorBlink: false,
+                    fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
+                    fontSize: 14,
+                    allowProposedApi: true,
+                    unicodeVersion: '11',
+                    disableStdin: false,
+                    convertEol: false,
+                    cursorStyle: 'block',
+                    theme: {
+                        background: '#1e1e1e',
+                        foreground: '#d4d4d4',
+                        cursor: '#d4d4d4',
+                        cursorAccent: '#1e1e1e',
+                        selection: '#264f78',
+                        black: '#1e1e1e',
+                        red: '#f44747',
+                        green: '#608b4e',
+                        yellow: '#dcdcaa',
+                        blue: '#569cd6',
+                        magenta: '#c586c0',
+                        cyan: '#4ec9b0',
+                        white: '#d4d4d4',
+                        brightBlack: '#808080',
+                        brightRed: '#f44747',
+                        brightGreen: '#608b4e',
+                        brightYellow: '#dcdcaa',
+                        brightBlue: '#569cd6',
+                        brightMagenta: '#c586c0',
+                        brightCyan: '#4ec9b0',
+                        brightWhite: '#ffffff'
+                    }
+                });
+                terminal.open(document.getElementById('terminal'));
+                if (window.FitAddon?.FitAddon) {
+                    fitAddon = new window.FitAddon.FitAddon();
+                    terminal.loadAddon(fitAddon);
+                    fitAndSyncTerminal();
+                }
+
+                window.addEventListener('resize', () => {
+                    if (resizeDebounceId) clearTimeout(resizeDebounceId);
+                    resizeDebounceId = setTimeout(() => fitAndSyncTerminal(), 100);
+                });
+            } else {
+                // Reset terminal state before receiving replay data
+                terminal.reset();
+            }
+
+            socket = new WebSocket(getWsUrl());
+            socket.binaryType = 'arraybuffer';
+
+            socket.onopen = () => {
+                statusEl.textContent = 'Connected';
+                statusEl.style.color = '#4ec9b0';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+
+                // Backend will replay buffered output to rebuild screen state
+                // No need to send Ctrl+L anymore
+                fitAndSyncTerminal();
+            };
+
+            socket.onmessage = (event) => {
+                if (typeof event.data === 'string') {
+                    terminal.write(event.data);
+                    return;
+                }
+                terminal.write(new Uint8Array(event.data));
+            };
+
+            socket.onclose = (event) => {
+                const reason = event.reason || 'Connection closed';
+                const message = reason.includes('taken over') ? 'Taken over' : 'Disconnected';
+                statusEl.textContent = message;
+                statusEl.style.color = '#808080';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+
+                // Show takeover message in terminal if applicable
+                if (reason.includes('taken over')) {
+                    terminal.writeln('\r\n\x1b[33m[Session taken over by another viewer]\x1b[0m\r\n');
+                }
+            };
+
+            socket.onerror = (error) => {
+                statusEl.textContent = 'Connection error';
+                statusEl.style.color = '#f44747';
+                console.error('WebSocket error:', error);
+            };
+
+            terminal.onData((data) => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(data);
+                }
+            });
+        });
+
+        disconnectBtn.addEventListener('click', () => {
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+        });
+    </script>
+</body>
+</html>

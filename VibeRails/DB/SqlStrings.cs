@@ -42,6 +42,22 @@ namespace VibeRails.DB
             """;
         public const string CreateProjectMetadataPathIndex = "CREATE INDEX IF NOT EXISTS idx_project_metadata_path ON ProjectMetadata(Path)";
 
+        // Sandboxes Table (project-scoped via ProjectPath)
+        public const string CreateSandboxesTable = """
+            CREATE TABLE IF NOT EXISTS Sandboxes (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Name TEXT NOT NULL,
+                Path TEXT NOT NULL,
+                ProjectPath TEXT NOT NULL,
+                Branch TEXT NOT NULL DEFAULT '',
+                CommitHash TEXT,
+                RemoteUrl TEXT,
+                CreatedUTC TEXT NOT NULL,
+                UNIQUE(Name, ProjectPath)
+            )
+            """;
+        public const string CreateSandboxesIndex = "CREATE INDEX IF NOT EXISTS idx_sandboxes_project ON Sandboxes(ProjectPath)";
+
         public static readonly string[] InitStatements =
         [
             CreateEnvironmentsTable,
@@ -49,10 +65,15 @@ namespace VibeRails.DB
             CreateAgentMetadataTable,
             CreateAgentMetadataPathIndex,
             CreateProjectMetadataTable,
-            CreateProjectMetadataPathIndex
+            CreateProjectMetadataPathIndex,
+            CreateSandboxesTable,
+            CreateSandboxesIndex
         ];
 
-        public static readonly string[] MigrationStatements = [];
+        public static readonly string[] MigrationStatements =
+        [
+            "ALTER TABLE Sandboxes ADD COLUMN RemoteUrl TEXT;"
+        ];
 
         // Environment CRUD (global)
         public const string InsertEnvironment = """
@@ -104,6 +125,30 @@ namespace VibeRails.DB
             WHERE Id = $id;
             """;
         public const string DeleteEnvironment = "DELETE FROM Environments WHERE Id = $id;";
+
+        // Sandbox CRUD (project-scoped)
+        public const string InsertSandbox = """
+            INSERT INTO Sandboxes (Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, CreatedUTC)
+            VALUES ($name, $path, $projectPath, $branch, $commitHash, $remoteUrl, $createdUTC)
+            RETURNING Id;
+            """;
+        public const string SelectSandboxesByProject = """
+            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, CreatedUTC
+            FROM Sandboxes
+            WHERE ProjectPath = $projectPath
+            ORDER BY CreatedUTC DESC;
+            """;
+        public const string SelectSandboxById = """
+            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, CreatedUTC
+            FROM Sandboxes
+            WHERE Id = $id;
+            """;
+        public const string SelectSandboxByNameAndProject = """
+            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, CreatedUTC
+            FROM Sandboxes
+            WHERE Name = $name AND ProjectPath = $projectPath;
+            """;
+        public const string DeleteSandbox = "DELETE FROM Sandboxes WHERE Id = $id;";
 
         // AgentMetadata CRUD
         public const string UpsertAgentMetadata = """

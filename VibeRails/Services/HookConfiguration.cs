@@ -6,12 +6,12 @@ namespace VibeRails.Services
         public bool InstallOnStartup { get; set; } = true;
     }
 
-    public class AppConfiguration
+    public class VibeRailsConfiguration
     {
         public string Version { get; set; } = "";
         public string InstallDirName { get; set; } = "";
         public string ExecutableName { get; set; } = "";
         public HookConfiguration Hooks { get; set; } = new();
-        public string FrontendUrl { get; set; } = "http://localhost:5164";
+        public string FrontendUrl { get; set; } = "https://localhost:5164";
     }
 }

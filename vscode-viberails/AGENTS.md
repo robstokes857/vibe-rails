@@ -70,4 +70,4 @@ The extension integrates with VibeRails agent system:
 - **Rules**: Per-agent behavioral rules and constraints
 - **History**: Session tracking and management
 
-All agent configurations are stored in `~/.viberails/` directory.
+All agent configurations are stored in `~/.vibe_rails/` directory.

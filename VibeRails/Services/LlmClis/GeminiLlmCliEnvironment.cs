@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using VibeRails.DTOs;
@@ -9,12 +8,9 @@ namespace VibeRails.Services.LlmClis
 {
     public class GeminiLlmCliEnvironment : BaseLlmCliEnvironment, IGeminiLlmCliEnvironment
     {
-        private readonly string _mcpServerPath;
-
-        public GeminiLlmCliEnvironment(IDbService dbService, IFileService fileService, DTOs.McpSettings mcpSettings)
+        public GeminiLlmCliEnvironment(IDbService dbService, IFileService fileService)
             : base(dbService, fileService)
         {
-            _mcpServerPath = mcpSettings.ServerPath;
         }
 
         public override string GetConfigSubdirectory() => "gemini";
@@ -53,58 +49,7 @@ namespace VibeRails.Services.LlmClis
                 await _fileService.WriteAllTextAsync(settingsFile, defaultSettings, FileMode.Create, FileShare.None, cancellationToken);
             }
 
-            // Add MCP server using gemini mcp add command
-            await AddMcpServerViaCliAsync(geminiBasePath, cancellationToken);
-
             await Task.CompletedTask;
-        }
-
-        private async Task AddMcpServerViaCliAsync(string geminiBasePath, CancellationToken cancellationToken)
-        {
-            // Only add if MCP server path is configured
-            if (string.IsNullOrEmpty(_mcpServerPath) || !File.Exists(_mcpServerPath))
-            {
-                return;
-            }
-
-            // Set XDG environment variables to target this environment's config
-            var envVars = new Dictionary<string, string>
-            {
-                ["XDG_CONFIG_HOME"] = Path.Combine(geminiBasePath, "config"),
-                ["XDG_DATA_HOME"] = Path.Combine(geminiBasePath, "data"),
-                ["XDG_CACHE_HOME"] = Path.Combine(geminiBasePath, "cache"),
-                ["XDG_STATE_HOME"] = Path.Combine(geminiBasePath, "state")
-            };
-
-            // Use gemini mcp add command with --scope user to add to the environment's settings
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "gemini",
-                Arguments = $"mcp add --scope user viberails-mcp \"{_mcpServerPath}\"",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            // Set XDG environment variables
-            foreach (var (key, value) in envVars)
-            {
-                startInfo.Environment[key] = value;
-            }
-
-            try
-            {
-                using var process = Process.Start(startInfo);
-                if (process != null)
-                {
-                    await process.WaitForExitAsync(cancellationToken);
-                }
-            }
-            catch
-            {
-                // Silently fail - MCP server won't be added but environment is still usable
-            }
         }
 
         public async Task<GeminiSettingsDto> GetSettings(string envName, CancellationToken cancellationToken)
@@ -176,7 +121,7 @@ namespace VibeRails.Services.LlmClis
 
         private string GetSettingsFilePath(string envName)
         {
-            var envBasePath = Configs.GetEnvPath();
+            var envBasePath = ParserConfigs.GetEnvPath();
             return Path.Combine(envBasePath, envName, GetConfigSubdirectory(), "config", "gemini", "settings.json");
         }
     }

@@ -59,7 +59,10 @@ namespace VibeRails.Services.VCA
                     Rule.SkipTestCoverage, "Test coverage checking skipped"),
 
                 // Package change detection
-                [Rule.PackageChangeDetected] = serviceProvider.GetRequiredService<PackageChangeValidator>()
+                [Rule.PackageChangeDetected] = serviceProvider.GetRequiredService<PackageChangeValidator>(),
+
+                // Commit message word check
+                [Rule.CheckCommitMessageForWords] = new CommitMessageWordValidator()
             };
         }
 
@@ -68,6 +71,7 @@ namespace VibeRails.Services.VCA
             RuleWithEnforcement rule,
             string sourceFile,
             string rootPath,
+            ValidationContext? context,
             CancellationToken cancellation)
         {
             // Parse the rule text to get the Rule enum
@@ -85,7 +89,7 @@ namespace VibeRails.Services.VCA
             }
 
             // Execute validation
-            var result = await validator.ValidateAsync(filePath, rule, sourceFile, rootPath, cancellation);
+            var result = await validator.ValidateAsync(filePath, rule, sourceFile, rootPath, context, cancellation);
             return result.IsValid;
         }
     }

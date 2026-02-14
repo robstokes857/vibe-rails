@@ -9,7 +9,7 @@
     <AssemblyName>vb</AssemblyName>
     <RootNamespace>VibeRails</RootNamespace>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-    <Version>1.1.5</Version>
+    <Version>1.2.2</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\PtyNet\src\Pty.Net\Pty.Net.csproj" />
+    <ProjectReference Include="..\Pty.Net\Pty.Net.csproj" />
   </ItemGroup>
 
   <!-- Copy wwwroot to output directory -->
@@ -30,20 +30,15 @@
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Certs\" />
     <Folder Include="wwwroot\assets\" />
   </ItemGroup>
 
-  <!-- Copy app_config.json to output directory -->
+  <!-- Copy public cert to output directory -->
   <ItemGroup>
-    <Content Update="app_config.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Certs\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- Copy install scripts to output directory for update functionality -->
-  <ItemGroup>
-    <Content Include="..\Scripts\install.ps1" Link="install.ps1" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\Scripts\install.sh" Link="install.sh" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
+  <!-- Copy app_config.json to output directory -->
 
   <!-- Copy hook scripts to output directory -->
   <ItemGroup>

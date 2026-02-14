@@ -125,6 +125,31 @@ code {
     border: 1px solid var(--color-border);
 }
 
+.nav-settings-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: all var(--transition-speed);
+}
+
+.nav-settings-btn:hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: rgba(154, 198, 197, 0.1);
+    transform: rotate(45deg);
+}
+
+.nav-settings-btn:active {
+    transform: rotate(90deg) scale(0.95);
+}
+
 .breadcrumb-item {
     color: var(--color-text-muted);
     font-size: 0.9rem;
@@ -497,8 +522,8 @@ code {
     color: var(--color-text-muted);
 }
 
-/* Terminal / Logs */
-.terminal {
+/* Terminal / Logs (scope to avoid xterm.js root .terminal class collision) */
+.terminal:not(.xterm) {
     background: #15151a;
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius);
@@ -506,13 +531,15 @@ code {
     font-family: 'Consolas', 'Monaco', monospace;
     color: #d0d0d0;
     max-height: 500px;
+    overflow-y: auto;
 }
 
 /* Ensure xterm handles its own scrolling correctly and fills container */
 #terminal-element {
-    padding: 10px;
+    padding: 0;
     background: #1e1e1e;
     border-radius: 0 0 var(--border-radius) var(--border-radius);
+    overflow: hidden;
 }
 
 .xterm .xterm-viewport {

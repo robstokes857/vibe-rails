@@ -25,7 +25,8 @@ namespace VibeRails.Services.VCA.Validators
             RuleWithEnforcement rule,
             string sourceFile,
             string rootPath,
-            CancellationToken ct)
+            ValidationContext? context = null,
+            CancellationToken ct = default)
         {
             // Get documented files from the AGENTS.md Files section
             var documentedFiles = await _agentFileService.GetDocumentedFilesAsync(sourceFile, ct);

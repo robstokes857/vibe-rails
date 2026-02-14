@@ -4,6 +4,7 @@ using System.Text.Json;
 using MCP_Server.Models;
 using MCP_Server.Services;
 using ModelContextProtocol.Server;
+using Serilog;
 
 namespace MCP_Server.Tools;
 
@@ -57,7 +58,7 @@ public class VectorSearchTool
                         _userTermsDb!.AddText(text, entry.Id);
                     }
                 }
-                catch { /* Skip malformed lines */ }
+                catch (Exception ex) { Log.Warning(ex, "Failed to parse JSONL line"); }
             }
         }
 
@@ -75,7 +76,7 @@ public class VectorSearchTool
                         _conversationDb!.AddText(entry.Content, entry.Id);
                     }
                 }
-                catch { /* Skip malformed lines */ }
+                catch (Exception ex) { Log.Warning(ex, "Failed to parse JSONL line"); }
             }
         }
     }
@@ -256,9 +257,14 @@ public class VectorSearchTool
                 await writer.WriteLineAsync(content);
                 return;
             }
-            catch (IOException) when (i < maxRetries - 1)
+            catch (IOException ex) when (i < maxRetries - 1)
             {
+                Log.Warning(ex, "Retry {Attempt} writing to {Path}", i + 1, path);
                 await Task.Delay(100 * (i + 1));
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Failed to write to {Path} after {MaxRetries} attempts", path, maxRetries);
             }
         }
     }

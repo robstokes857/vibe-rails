@@ -1,9 +1,9 @@
 # DB Layer — Business Logic & Technical Reference
 
-This document describes how Environments, AgentMetadata, and Sessions work at the database layer.
+This document describes how Environments, Sandboxes, AgentMetadata, and Sessions work at the database layer.
 
 > **Contents:**
-> [Database Overview](#database-overview) | [Environments](#environments) | [AgentMetadata](#agentmetadata) | [ProjectMetadata](#projectmetadata) | [Sessions](#sessions) | [Entity Relationships](#entity-relationships) | [Repository Patterns](#repository-patterns)
+> [Database Overview](#database-overview) | [Environments](#environments) | [Sandboxes](#sandboxes) | [AgentMetadata](#agentmetadata) | [ProjectMetadata](#projectmetadata) | [Sessions](#sessions) | [Entity Relationships](#entity-relationships) | [Repository Patterns](#repository-patterns)
 
 ---
 
@@ -73,6 +73,63 @@ CREATE TABLE IF NOT EXISTS Environments (
 | `SaveEnvironmentAsync` | `INSERT ... RETURNING Id` |
 | `UpdateEnvironmentAsync` | Full field update by `Id` (CustomName, LLM, Path, CustomArgs, CustomPrompt, LastUsedUTC) |
 | `DeleteEnvironmentAsync` | Delete by `Id` — **no deletion guard at DB layer**. The "cannot delete Default" rule is in `Routes.cs`. |
+
+---
+
+## Sandboxes
+
+### Business Logic
+
+A **Sandbox** is an isolated git clone of a project where users can run parallel AI workflows without affecting the main codebase. Sandboxes are stored **globally** at `~/.vibe_rails/sandboxes/{name}` but scoped to projects via `ProjectPath`.
+
+| Rule | Details |
+|---|---|
+| **Unique identity** | Identified by the pair `(Name, ProjectPath)`. The same sandbox name can exist for different projects. |
+| **Global storage** | Sandbox directories live at `~/.vibe_rails/sandboxes/{name}`, NOT inside the project directory. |
+| **Project scoping** | `ProjectPath` links a sandbox to its source project. API queries filter by current project path. |
+| **Shallow clone** | Created via `git clone --depth 1 --branch {branch} --single-branch` for fast creation. |
+| **Dirty files** | All dirty + untracked files from the source project are copied into the sandbox after cloning. |
+| **Deletion** | Deleting a sandbox removes both the directory (`Directory.Delete(recursive: true)`) and the DB record. |
+| **Name validation** | Names must match `^[a-zA-Z0-9_-]+$` (alphanumeric, hyphens, underscores, no spaces). |
+
+### Technical Details
+
+**Schema:**
+```sql
+CREATE TABLE IF NOT EXISTS Sandboxes (
+    Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    Name        TEXT    NOT NULL,
+    Path        TEXT    NOT NULL,
+    ProjectPath TEXT    NOT NULL,
+    Branch      TEXT    NOT NULL DEFAULT '',
+    CommitHash  TEXT,
+    CreatedUTC  TEXT    NOT NULL,
+    UNIQUE(Name, ProjectPath)
+);
+```
+
+**Index:** `idx_sandboxes_project` on `(ProjectPath)`
+
+**Model:** `Sandbox` class in `DTOs/Sandbox.cs`
+
+**Key operations:**
+
+| Method | Behavior |
+|---|---|
+| `SaveSandboxAsync(sandbox)` | `INSERT ... RETURNING Id` |
+| `GetSandboxesByProjectAsync(projectPath)` | All sandboxes for a project, ordered by `CreatedUTC DESC` |
+| `GetSandboxByIdAsync(id)` | Lookup by primary key |
+| `GetSandboxByNameAndProjectAsync(name, projectPath)` | Lookup by unique `(Name, ProjectPath)` pair |
+| `DeleteSandboxAsync(id)` | Delete by `Id` — directory cleanup handled by `SandboxService`, not the DB layer |
+
+**API endpoints:**
+
+| Endpoint | Method | Behavior |
+|---|---|---|
+| `/api/v1/sandboxes` | GET | List sandboxes for current project |
+| `/api/v1/sandboxes` | POST | Create sandbox (body: `{ name }`) |
+| `/api/v1/sandboxes/{id}` | DELETE | Delete sandbox + directory |
+| `/api/v1/sandboxes/{id}/launch/vscode` | POST | Launch VS Code in sandbox directory |
 
 ---
 
@@ -282,8 +339,9 @@ CREATE TABLE IF NOT EXISTS InputFileChanges (
 
 ## Entity Relationships
 
-Environments, AgentMetadata, and ProjectMetadata have **no foreign key relationships** — they are fully independent tables.
+Environments, Sandboxes, AgentMetadata, and ProjectMetadata have **no foreign key relationships** — they are fully independent tables.
 Sessions reference environments and working directories by string value only — no FK constraints.
+Sandboxes reference projects by `ProjectPath` string value — no FK to any project table.
 
 ```
 Environments              AgentMetadata         ProjectMetadata
@@ -293,7 +351,19 @@ Environments              AgentMetadata         ProjectMetadata
 | LLM          |          | CustomName  |       | CustomName      |
 | Path         |          +-------------+       +-----------------+
 | CustomArgs   |
-| CustomPrompt |          Sessions
+| CustomPrompt |          Sandboxes
+| CreatedUTC   |          +-------------------+
+| LastUsedUTC  |          | Id (PK)           |
++--------------+          | Name              |
+UQ(CustomName, LLM)      | Path              |
+                          | ProjectPath       |  <-- string, not FK
+                          | Branch            |
+                          | CommitHash        |
+                          | CreatedUTC        |
+                          +-------------------+
+                          UQ(Name, ProjectPath)
+
+                          Sessions
 | CreatedUTC   |          +-------------------+
 | LastUsedUTC  |          | Id (PK)           |
 +--------------+          | Cli               |

@@ -45,7 +45,7 @@ namespace VibeRails.Services
 
         public async Task<List<string>> GetAgentFiles(CancellationToken cancellationToken)
         {
-            if (!Configs.IsLocalContext())
+            if (!ParserConfigs.IsLocalContext())
                 return new();
 
             var root = await _gitService.GetRootPathAsync(cancellationToken);
