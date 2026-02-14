@@ -49,8 +49,17 @@ public class TerminalSessionService : ITerminalSessionService
 
         try
         {
-            var (terminal, sessionId, _) = await _runner.CreateSessionAsync(
+            var (terminal, sessionId, remoteConn) = await _runner.CreateSessionAsync(
                 llm, workingDirectory, environmentName, extraArgs, CancellationToken.None, title);
+
+            // When a remote browser connects, disconnect the local WebUI viewer
+            if (remoteConn != null)
+            {
+                remoteConn.OnReplayRequested += () =>
+                {
+                    _ = DisconnectLocalViewerAsync("Session taken over by remote viewer");
+                };
+            }
 
             // Subscribe to terminal exit event
             terminal.Exited += async (sender, exitCode) =>
