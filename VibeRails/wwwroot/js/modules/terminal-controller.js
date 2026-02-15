@@ -28,6 +28,12 @@ export class TerminalController {
             if (cli) body.cli = cli;
             if (environmentName) body.environmentName = environmentName;
 
+            // Check if Make Remote toggle is checked
+            const makeRemoteCheckbox = document.querySelector('#terminal-make-remote');
+            if (makeRemoteCheckbox?.checked) {
+                body.makeRemote = true;
+            }
+
             const response = await this.app.apiCall('/api/v1/terminal/start', 'POST', body);
 
             if (response.hasActiveSession) {
@@ -252,6 +258,10 @@ export class TerminalController {
                             <option value="codex">Codex</option>
                             <option value="gemini">Gemini</option>
                         </select>
+                        <div class="form-check form-switch ms-2" id="terminal-make-remote-toggle" style="display: none;">
+                            <input class="form-check-input" type="checkbox" id="terminal-make-remote" title="Share this session with remote VibeRails-Front server">
+                            <label class="form-check-label small" for="terminal-make-remote">Make Remote</label>
+                        </div>
                         <button class="btn btn-sm btn-primary" id="terminal-start-btn">
                             Start
                         </button>
@@ -319,6 +329,21 @@ export class TerminalController {
     async bindTerminalActions(container, preselectedEnvId = null) {
         // Populate selector with environments
         await this.populateTerminalSelector(container, preselectedEnvId);
+
+        // Check if remote access is configured and show/hide Make Remote toggle
+        try {
+            const settings = await this.app.apiCall('/api/v1/settings', 'GET');
+            const makeRemoteToggle = container.querySelector('#terminal-make-remote-toggle');
+            if (makeRemoteToggle) {
+                if (settings.remoteAccess && settings.apiKey) {
+                    makeRemoteToggle.style.removeProperty('display');
+                } else {
+                    makeRemoteToggle.style.display = 'none';
+                }
+            }
+        } catch (error) {
+            console.error('Failed to fetch settings for Make Remote toggle:', error);
+        }
 
         const startBtn = container.querySelector('#terminal-start-btn');
         const reconnectBtn = container.querySelector('#terminal-reconnect-btn');
@@ -390,6 +415,12 @@ export class TerminalController {
         if (options.environmentName) body.environmentName = options.environmentName;
         if (options.workingDirectory) body.workingDirectory = options.workingDirectory;
         if (options.title) body.title = options.title;
+
+        // Check if Make Remote toggle is checked
+        const makeRemoteCheckbox = document.querySelector('#terminal-make-remote');
+        if (makeRemoteCheckbox?.checked) {
+            body.makeRemote = true;
+        }
 
         try {
             const response = await this.app.apiCall('/api/v1/terminal/start', 'POST', body);

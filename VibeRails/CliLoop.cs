@@ -138,7 +138,7 @@ public static class CliLoop
         var mcpSettings = scopedServices.GetRequiredService<McpSettings>();
         var runner = new TerminalRunner(terminalStateService, envService, mcpSettings);
 
-        var exitCode = await runner.RunCliWithWebAsync(llm, workingDirectory, environmentName, parsedArgs.ExtraArgs, sessionService, CancellationToken.None);
+        var exitCode = await runner.RunCliWithWebAsync(llm, workingDirectory, environmentName, parsedArgs.ExtraArgs, sessionService, parsedArgs.MakeRemote, CancellationToken.None);
         Environment.ExitCode = exitCode;
     }
 }
