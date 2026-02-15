@@ -91,6 +91,7 @@ public static class CliLoop
         var envService = scopedServices.GetRequiredService<LlmCliEnvironmentService>();
         var repository = scopedServices.GetRequiredService<IRepository>();
         var sessionService = scopedServices.GetRequiredService<ITerminalSessionService>();
+        var ioObserverService = scopedServices.GetRequiredService<ITerminalIoObserverService>();
 
         // Resolve LLM type (smart resolution: LLM enum name → base CLI, otherwise → DB lookup)
         LLM llm;
@@ -129,7 +130,11 @@ public static class CliLoop
         // Create runner and run with web access
         var gitServiceForSession = new GitService(workingDirectory);
         var remoteStateService = scopedServices.GetRequiredService<IRemoteStateService>();
-        var terminalStateService = new TerminalStateService(dbService, gitServiceForSession, remoteStateService);
+        var terminalStateService = new TerminalStateService(
+            dbService,
+            gitServiceForSession,
+            remoteStateService,
+            ioObserverService);
         var mcpSettings = scopedServices.GetRequiredService<McpSettings>();
         var runner = new TerminalRunner(terminalStateService, envService, mcpSettings);
 

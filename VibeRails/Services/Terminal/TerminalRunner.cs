@@ -91,7 +91,13 @@ public class TerminalRunner
             {
                 terminal.Subscribe(new RemoteOutputConsumer(remoteConn));
                 remoteConn.OnInputReceived += bytes =>
-                    _ = terminal.WriteBytesAsync(bytes, CancellationToken.None);
+                    _ = TerminalIoRouter.RouteInputAsync(
+                        _stateService,
+                        terminal,
+                        sessionId,
+                        bytes,
+                        TerminalIoSource.RemoteWebUi,
+                        CancellationToken.None);
                 remoteConn.OnResizeRequested += (cols, rows) =>
                 {
                     try
@@ -231,8 +237,13 @@ public class TerminalRunner
             var input = KeyTranslator.TranslateKey(key);
             if (!string.IsNullOrEmpty(input))
             {
-                _stateService.RecordInput(sessionId, input);
-                await terminal.WriteAsync(input, ct);
+                await TerminalIoRouter.RouteInputAsync(
+                    _stateService,
+                    terminal,
+                    sessionId,
+                    input,
+                    TerminalIoSource.LocalCli,
+                    ct);
             }
         }
     }

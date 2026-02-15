@@ -34,9 +34,15 @@ public class TerminalSessionService : ITerminalSessionService
     public string? ActiveSessionId => s_sessionId;
     public bool IsExternallyOwned { get { lock (s_lock) return s_externallyOwned; } }
 
-    public TerminalSessionService(IDbService dbService, LlmCliEnvironmentService envService, IGitService gitService, McpSettings mcpSettings, IRemoteStateService remoteStateService)
+    public TerminalSessionService(
+        IDbService dbService,
+        LlmCliEnvironmentService envService,
+        IGitService gitService,
+        McpSettings mcpSettings,
+        IRemoteStateService remoteStateService,
+        ITerminalIoObserverService ioObserverService)
     {
-        _stateService = new TerminalStateService(dbService, gitService, remoteStateService);
+        _stateService = new TerminalStateService(dbService, gitService, remoteStateService, ioObserverService);
         _runner = new TerminalRunner(_stateService, envService, mcpSettings);
     }
 
@@ -291,9 +297,13 @@ public class TerminalSessionService : ITerminalSessionService
                     continue;
                 }
 
-                // Log input to DB
-                stateService.RecordInput(sessionId, input);
-                await terminal.WriteBytesAsync(inputBytes, ct);
+                await TerminalIoRouter.RouteInputAsync(
+                    stateService,
+                    terminal,
+                    sessionId,
+                    inputBytes,
+                    TerminalIoSource.LocalWebUi,
+                    ct);
             }
         }
         catch (OperationCanceledException) { }

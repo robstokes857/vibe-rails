@@ -6,8 +6,8 @@ namespace VibeRails.Services.Terminal;
 public interface ITerminalStateService
 {
     Task<string> CreateSessionAsync(string cli, string workDir, string? envName, CancellationToken ct = default);
-    void LogOutput(string sessionId, string text);
-    void RecordInput(string sessionId, string input);
+    void LogOutput(string sessionId, string text, TerminalIoSource source = TerminalIoSource.Pty);
+    void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown);
     void TrackRemoteConnection(string sessionId, IRemoteTerminalConnection connection);
     Task RequestRemoteViewerDisconnectAsync(string sessionId, string reason);
     Task CompleteSessionAsync(string sessionId, int exitCode);
@@ -18,6 +18,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private readonly IDbService _dbService;
     private readonly IGitService _gitService;
     private readonly IRemoteStateService _remoteStateService;
+    private readonly ITerminalIoObserverService _ioObserverService;
 
     // Shared across scoped TerminalStateService instances so terminal state remains
     // consistent across start/WS/reconnect/stop requests.
@@ -25,11 +26,16 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private static readonly Dictionary<string, IRemoteTerminalConnection> s_remoteConnections = new();
     private static readonly Lock s_stateLock = new();
 
-    public TerminalStateService(IDbService dbService, IGitService gitService, IRemoteStateService remoteStateService)
+    public TerminalStateService(
+        IDbService dbService,
+        IGitService gitService,
+        IRemoteStateService remoteStateService,
+        ITerminalIoObserverService ioObserverService)
     {
         _dbService = dbService;
         _gitService = gitService;
         _remoteStateService = remoteStateService;
+        _ioObserverService = ioObserverService;
     }
 
     public async Task<string> CreateSessionAsync(string cli, string workDir, string? envName, CancellationToken ct = default)
@@ -57,14 +63,27 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         return sessionId;
     }
 
-    public void LogOutput(string sessionId, string text)
+    public void LogOutput(string sessionId, string text, TerminalIoSource source = TerminalIoSource.Pty)
     {
-        if (!TerminalOutputFilter.IsTransient(text))
-            _ = _dbService.LogSessionOutputAsync(sessionId, text, false);
+        _ioObserverService.Publish(new TerminalIoEvent(
+            sessionId,
+            TerminalIoDirection.Output,
+            source,
+            text,
+            DateTimeOffset.UtcNow));
+        // Intentionally do not persist terminal output to SessionLogs for now.
+        // Keep observer hook only; output persistence can be re-enabled centrally here.
     }
 
-    public void RecordInput(string sessionId, string input)
+    public void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown)
     {
+        _ioObserverService.Publish(new TerminalIoEvent(
+            sessionId,
+            TerminalIoDirection.Input,
+            source,
+            input,
+            DateTimeOffset.UtcNow));
+
         InputAccumulator? accumulator;
         lock (s_stateLock)
         {
@@ -101,9 +120,16 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     {
         await _dbService.CompleteSessionAsync(sessionId, exitCode);
 
+        InputAccumulator? accumulatorToDispose;
         lock (s_stateLock)
         {
+            s_inputAccumulators.TryGetValue(sessionId, out accumulatorToDispose);
             s_inputAccumulators.Remove(sessionId);
+        }
+
+        if (accumulatorToDispose != null)
+        {
+            await accumulatorToDispose.DisposeAsync();
         }
 
         // Disconnect remote WebSocket if active

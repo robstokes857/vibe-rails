@@ -73,6 +73,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<IClaudeAgentSyncService, ClaudeAgentSyncService>();
 
             // Terminal Session Service (scoped to work with other scoped services)
+            serviceCollection.AddScoped<ITerminalIoObserverService, TerminalIoObserverService>();
             serviceCollection.AddScoped<ITerminalSessionService, TerminalSessionService>();
 
             // Remote State Service (for terminal session remote registration)
