@@ -11,6 +11,7 @@ Primary files:
 - `Services/Terminal/TerminalRunner.cs`
 - `Services/Terminal/TerminalSessionService.cs`
 - `Services/Terminal/TerminalStateService.cs`
+- `Services/Terminal/TerminalIoRouter.cs`
 - `Services/Terminal/RemoteTerminalConnection.cs`
 - `Services/Terminal/RemoteStateService.cs`
 - `Services/Terminal/TerminalControlProtocol.cs`
@@ -42,6 +43,7 @@ Design invariants:
 2. Output fan-out is synchronous dispatch to consumers.
 3. Consumers must be non-blocking.
 4. Replay buffer is always maintained by `Terminal`.
+5. All input and output routing should pass through `TerminalIoRouter`.
 
 ## Control Protocol
 Defined in `TerminalControlProtocol.cs`.
@@ -77,7 +79,7 @@ Validation:
 - Decodes UTF-8 and writes to host console.
 
 `DbLoggingConsumer.cs`
-- Decodes UTF-8 and forwards to `ITerminalStateService.LogOutput(...)`.
+- Routes PTY output through `TerminalIoRouter.RouteOutput(...)`.
 
 `WebSocketConsumer.cs`
 - Local viewer output consumer.
@@ -105,14 +107,14 @@ Session orchestrator.
 4. If remote access is enabled and API key exists:
    - opens relay socket via `RemoteTerminalConnection.ConnectAsync`
    - subscribes `RemoteOutputConsumer`
-   - wires remote input -> PTY write
+   - wires remote input -> `TerminalIoRouter.RouteInputAsync(..., RemoteWebUi)`
    - wires remote resize -> PTY resize
    - wires remote replay request -> send replay buffer
    - tracks remote connection in `TerminalStateService`
 5. Sends final CLI command to shell.
 
 `RunCliAsync(...)`
-- Creates session, subscribes `ConsoleOutputConsumer`, starts read loop, runs console input loop.
+- Creates session, subscribes `ConsoleOutputConsumer`, starts read loop, runs console input loop through `TerminalIoRouter`.
 
 `RunCliWithWebAsync(...)`
 - Same as `RunCliAsync` plus external registration for local web viewer access.
@@ -136,7 +138,7 @@ Key behavior:
   3. requests remote viewer disconnect (`RequestRemoteViewerDisconnectAsync`)
   4. sends replay buffer to new local viewer
   5. subscribes `WebSocketConsumer`
-  6. runs input loop (supports fragmentation, size guard, resize control)
+  6. runs input loop (supports fragmentation, size guard, resize control) and routes user input through `TerminalIoRouter`
 - `DisconnectLocalViewerAsync(reason)` closes local viewer with provided reason.
 - `StopSessionAsync` is blocked for externally owned sessions.
 
@@ -159,6 +161,28 @@ Notes:
 - Uses static dictionaries for session accumulators and remote connections (shared across scoped instances).
 - Uses `InputAccumulator` for input recording.
 - On complete: closes remote connection and deregisters remote active terminal.
+- Accepts source metadata in `RecordInput`/`LogOutput`.
+- Publishes terminal I/O events through `ITerminalIoObserverService`.
+
+### `TerminalIoRouter.cs`
+Single I/O funnel and hook point.
+
+Responsibilities:
+- `RouteInputAsync(...)`:
+  - decodes input text
+  - calls `ITerminalStateService.RecordInput(...)`
+  - writes bytes to PTY
+- `RouteOutput(...)`:
+  - decodes output text
+  - calls `ITerminalStateService.LogOutput(...)`
+
+### `TerminalIoObserverService.cs`
+DI-based observer dispatch.
+
+Hook surface:
+- Implement `ITerminalIoObserver`.
+- Register in DI (for example: `AddScoped<ITerminalIoObserver, MyObserver>()`).
+- Events are delivered as `TerminalIoEvent` with source values such as `LocalCli`, `LocalWebUi`, `RemoteWebUi`, and `Pty`.
 
 ### `RemoteTerminalConnection.cs`
 Client WebSocket from CLI app -> relay server `/ws/v1/terminal`.
@@ -238,6 +262,7 @@ From `Routes/TerminalRoutes.cs`:
 2. One active local web viewer at a time.
 3. Replay buffer is byte-based (16KB), not line-aware.
 4. Input/output are raw terminal bytes; rendering correctness depends on xterm configuration and PTY dimensions.
+5. `ITerminalIoObserverService` dispatch is in-process only (no persisted stream by default).
 
 ## Common Failure Points
 1. Concurrent `SendAsync` on same WebSocket (avoided by channel-backed send loops).

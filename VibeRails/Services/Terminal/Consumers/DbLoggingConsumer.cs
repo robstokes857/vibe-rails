@@ -16,7 +16,6 @@ public sealed class DbLoggingConsumer : ITerminalConsumer
 
     public void OnOutput(ReadOnlyMemory<byte> data)
     {
-        var text = System.Text.Encoding.UTF8.GetString(data.Span);
-        _stateService.LogOutput(_sessionId, text);
+        TerminalIoRouter.RouteOutput(_stateService, _sessionId, data, TerminalIoSource.Pty);
     }
 }
