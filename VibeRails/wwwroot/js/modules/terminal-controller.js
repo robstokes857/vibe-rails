@@ -362,7 +362,7 @@ export class TerminalController {
 
         if (selection.startsWith('base:')) {
             // Base CLI
-            cli = selection.replace('base:', '');
+            cli = selection.replace('base:', '').toLowerCase();
             displayName = cli.charAt(0).toUpperCase() + cli.slice(1);
         } else if (selection.startsWith('env:')) {
             // Custom environment: env:id:cli
@@ -372,7 +372,7 @@ export class TerminalController {
             const env = this.app.data.environments.find(e => e.id === envId);
             const envName = env?.name || '';
             displayName = `${envName} (${cliType})`;
-            cli = cliType;
+            cli = cliType.toLowerCase();  // Ensure lowercase for backend
             environmentName = envName;
         }
 
