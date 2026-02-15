@@ -344,15 +344,6 @@ export class EnvironmentController {
                     <input type="text" class="form-control" id="env-custom-args" value="${escapeHtml(env.customArgs || '')}" placeholder="e.g., --yolo --sandbox">
                     <small class="form-text text-muted">Arguments passed to the CLI when launching with this environment</small>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label">Custom Prompt</label>
-                    <textarea class="form-control" id="env-custom-prompt" rows="6" placeholder="Leave empty to use default prompt">${escapeHtml(env.customPrompt || '')}</textarea>
-                    <small class="form-text text-muted">Initial prompt sent to the CLI. Leave empty to use default.</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Default Prompt (for reference)</label>
-                    <textarea class="form-control" rows="4" disabled>${escapeHtml(env.defaultPrompt || '')}</textarea>
-                </div>
                 ${geminiSettingsHtml}
                 ${codexSettingsHtml}
                 ${claudeSettingsHtml}
@@ -363,10 +354,9 @@ export class EnvironmentController {
         document.getElementById('edit-env-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const customArgs = document.getElementById('env-custom-args').value;
-            const customPrompt = document.getElementById('env-custom-prompt').value;
 
             try {
-                await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(name)}`, 'PUT', { customArgs, customPrompt });
+                await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(name)}`, 'PUT', { customArgs });
 
                 // Save Gemini-specific settings if applicable
                 if (isGemini) {
