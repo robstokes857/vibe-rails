@@ -59,6 +59,9 @@ namespace VibeRails.Utils
         public string? ClaudeDisallowedTools { get; set; }  // --disallowed-tools "tool1,tool2"
         public bool? ClaudeSkipPermissions { get; set; }    // --skip-permissions / --no-skip-permissions
 
+        // Remote connection options
+        public bool MakeRemote { get; set; }    // --make-remote
+
         // Output options
         public bool Verbose { get; set; }      // --verbose
 

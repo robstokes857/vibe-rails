@@ -5,7 +5,7 @@ namespace VibeRails.Services.Terminal;
 
 public interface ITerminalStateService
 {
-    Task<string> CreateSessionAsync(string cli, string workDir, string? envName, CancellationToken ct = default);
+    Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default);
     void LogOutput(string sessionId, string text, TerminalIoSource source = TerminalIoSource.Pty);
     void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown);
     void TrackRemoteConnection(string sessionId, IRemoteTerminalConnection connection);
@@ -38,7 +38,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         _ioObserverService = ioObserverService;
     }
 
-    public async Task<string> CreateSessionAsync(string cli, string workDir, string? envName, CancellationToken ct = default)
+    public async Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default)
     {
         var sessionId = Guid.NewGuid().ToString();
         await _dbService.CreateSessionAsync(sessionId, cli, envName, workDir);
@@ -54,8 +54,8 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             });
         }
 
-        // Register terminal remotely if configured
-        if (ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey()))
+        // Register terminal remotely if configured AND user wants remote
+        if (ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey()) && makeRemote)
         {
             await _remoteStateService.RegisterTerminalAsync(sessionId, cli, workDir, envName);
         }

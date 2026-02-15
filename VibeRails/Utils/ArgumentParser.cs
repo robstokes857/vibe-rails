@@ -110,6 +110,10 @@ namespace VibeRails.Utils
                     }
                     return true;
 
+                case "--make-remote":
+                    parsed.MakeRemote = true;
+                    return true;
+
                 default:
                     return false;
             }

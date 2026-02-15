@@ -45,7 +45,11 @@ public class TerminalRunner
             };
 
             if (mcpSetup != null)
+            {
                 builder.AddSetup(mcpSetup);
+                // Clear screen to hide MCP setup messages (e.g., "already added" warnings)
+                builder.AddSetup("clear");
+            }
         }
 
         var environment = new Dictionary<string, string>
@@ -70,9 +74,9 @@ public class TerminalRunner
     /// Used by both CLI and Web paths. Returns the remote connection if one was established.
     /// </summary>
     public async Task<(Terminal terminal, string sessionId, IRemoteTerminalConnection? remoteConnection)> CreateSessionAsync(
-        LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct, string? title = null)
+        LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct, string? title = null, bool makeRemote = false)
     {
-        var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, ct);
+        var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, makeRemote, ct);
         var (command, environment) = PrepareSession(llm, envName, extraArgs);
 
         var terminal = await Terminal.CreateAsync(workDir, environment, title: title, ct: ct);
@@ -80,9 +84,9 @@ public class TerminalRunner
         // Always wire up DB logging
         terminal.Subscribe(new DbLoggingConsumer(_stateService, sessionId));
 
-        // Connect to remote server if remote access is enabled
+        // Connect to remote server if remote access is enabled AND user wants remote
         IRemoteTerminalConnection? activeRemoteConn = null;
-        if (ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey()))
+        if (ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey()) && makeRemote)
         {
             var remoteConn = new RemoteTerminalConnection();
             await remoteConn.ConnectAsync(sessionId, ct);
@@ -174,9 +178,9 @@ public class TerminalRunner
     /// </summary>
     public async Task<int> RunCliWithWebAsync(
         LLM llm, string workDir, string? envName, string[]? extraArgs,
-        ITerminalSessionService sessionService, CancellationToken ct)
+        ITerminalSessionService sessionService, bool makeRemote = false, CancellationToken ct = default)
     {
-        var (terminal, sessionId, remoteConn) = await CreateSessionAsync(llm, workDir, envName, extraArgs, ct);
+        var (terminal, sessionId, remoteConn) = await CreateSessionAsync(llm, workDir, envName, extraArgs, ct, makeRemote: makeRemote);
         var exitCode = 0;
 
         await using (terminal)
