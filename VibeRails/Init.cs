@@ -92,8 +92,8 @@ namespace VibeRails
             });
 
             // Message signature validator — load public cert once, scoped service
-            var publicCert = X509CertificateLoader.LoadPkcs12FromFile(Path.Combine("Certs", "public.pfx"), null);
-            serviceCollection.AddScoped(_ => new MessageSignatureValidator(publicCert));
+            //var publicCert = X509CertificateLoader.LoadPkcs12FromFile(Path.Combine("Certs", "public.pfx"), null);
+            //serviceCollection.AddScoped(_ => new MessageSignatureValidator(publicCert));
 
             // Authentication service (singleton - one token per instance)
             serviceCollection.AddSingleton<IAuthService, AuthService>();

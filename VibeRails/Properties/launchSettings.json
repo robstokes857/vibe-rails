@@ -22,6 +22,14 @@
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
       "dotnetRunMessages": false
+    },
+    "help": {
+      "commandName": "Project",
+      "commandLineArgs": "--hekp",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "dotnetRunMessages": false
     }
   },
   "$schema": "https://json.schemastore.org/launchsettings.json"
