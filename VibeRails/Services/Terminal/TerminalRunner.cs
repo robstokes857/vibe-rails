@@ -1,3 +1,4 @@
+using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal.Consumers;
@@ -111,7 +112,7 @@ public class TerminalRunner
                     }
                     catch (Exception ex)
                     {
-                        Console.Error.WriteLine($"[Remote] Failed to resize PTY to {cols}x{rows}: {ex.Message}");
+                        Log.Error(ex, "[Remote] Failed to resize PTY to {Cols}x{Rows}", cols, rows);
                     }
                 };
                 remoteConn.OnReplayRequested += () =>
@@ -162,7 +163,7 @@ public class TerminalRunner
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Terminal error: {ex.Message}");
+                Log.Error(ex, "[Terminal] Terminal error");
                 exitCode = 1;
             }
 
@@ -192,16 +193,16 @@ public class TerminalRunner
             // so only one viewer is active at a time.
             if (remoteConn != null)
             {
-                Console.WriteLine("[Terminal] Remote connection established — wiring disconnect handler");
+                Log.Information("[Terminal] Remote connection established — wiring disconnect handler");
                 remoteConn.OnReplayRequested += () =>
                 {
-                    Console.WriteLine("[Terminal] OnReplayRequested fired — disconnecting local viewer");
+                    Log.Information("[Terminal] OnReplayRequested fired — disconnecting local viewer");
                     _ = sessionService.DisconnectLocalViewerAsync("Session taken over by remote viewer");
                 };
             }
             else
             {
-                Console.WriteLine("[Terminal] No remote connection — local disconnect handler NOT wired");
+                Log.Information("[Terminal] No remote connection — local disconnect handler NOT wired");
             }
 
             terminal.StartReadLoop();
@@ -216,7 +217,7 @@ public class TerminalRunner
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Terminal error: {ex.Message}");
+                Log.Error(ex, "[Terminal] Terminal error");
                 exitCode = 1;
             }
             finally

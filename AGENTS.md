@@ -1053,7 +1053,7 @@ public enum HookInstallationError
 }
 ```
 
-**Configuration** ([app_config.json](VibeRails/app_config.json)):
+**Configuration** ([appsettings.json](VibeRails/appsettings.json)):
 
 ```json
 {
@@ -1143,7 +1143,7 @@ VibeRails/
 │   ├── HookInstallationService.cs   # Main service implementation
 │   ├── HookInstallationResult.cs    # Result types
 │   └── HookConfiguration.cs         # Configuration models
-└── app_config.json                   # Application configuration
+└──appsettings.json                   # Application configuration
 
 .git/hooks/                           # Git hooks directory (per repo)
 ├── pre-commit                        # Installed pre-commit hook

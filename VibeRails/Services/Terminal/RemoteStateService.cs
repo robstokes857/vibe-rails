@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
+using Serilog;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
@@ -72,8 +73,14 @@ public class RemoteStateService : IRemoteStateService
         var json = JsonSerializer.Serialize(payload, RemoteStateJsonContext.Default.RegisterTerminalRequest);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        await _httpClient.SendAsync(request);
-
+        try
+        {
+            await _httpClient.SendAsync(request);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[Remote] Failed to register terminal");
+        }
     }
 
     public async Task DeregisterTerminalAsync(string sessionId)
@@ -91,8 +98,14 @@ public class RemoteStateService : IRemoteStateService
         var json = JsonSerializer.Serialize(payload, RemoteStateJsonContext.Default.DeregisterTerminalRequest);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        await _httpClient.SendAsync(request);
-
+        try
+        {
+            await _httpClient.SendAsync(request);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[Remote] Failed to deregister terminal");
+        }
     }
 
     private string GetHostUrl()

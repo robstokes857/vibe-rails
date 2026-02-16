@@ -1,4 +1,5 @@
 using Pty.Net;
+using Serilog;
 
 namespace VibeRails.Services.Terminal;
 
@@ -195,7 +196,7 @@ public sealed class Terminal : IAsyncDisposable
                     }
                     catch (Exception ex)
                     {
-                        Console.Error.WriteLine($"[Terminal] Consumer error: {ex.Message}");
+                        Log.Error(ex, "[Terminal] Consumer error");
                     }
                 }
             }
@@ -203,7 +204,7 @@ public sealed class Terminal : IAsyncDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Terminal] Read loop error: {ex.Message}");
+            Log.Error(ex, "[Terminal] Read loop error");
         }
         finally
         {
@@ -215,7 +216,7 @@ public sealed class Terminal : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[Terminal] Error notifying exit handlers: {ex.Message}");
+                Log.Error(ex, "[Terminal] Error notifying exit handlers");
             }
         }
     }
