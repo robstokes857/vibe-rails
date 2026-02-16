@@ -482,11 +482,18 @@ export class VibeControlApp {
         try {
             const options = {
                 method,
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include'  // Send cookies with requests
             };
             if (data) options.body = JSON.stringify(data);
             const baseUrl = window.__viberails_API_BASE__ || '';
             const response = await fetch(baseUrl + endpoint, options);
+
+            if (response.status === 401) {
+                window.location.href = (baseUrl || '') + '/auth/bootstrap';
+                throw new Error('Unauthorized');
+            }
+
             if (!response.ok) throw new Error(`API call failed: ${response.statusText}`);
             return await response.json();
         } catch (error) {

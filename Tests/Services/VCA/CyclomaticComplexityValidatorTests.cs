@@ -33,7 +33,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Cyclomatic complexity < 20", Enforcement.WARN);
 
             // Act
-            var result = await _validator.ValidateAsync("test.cs", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validator.ValidateAsync("test.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.True(result.IsValid);
@@ -51,7 +51,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Cyclomatic complexity < 20", Enforcement.WARN);
 
             // Act
-            var result = await _validator.ValidateAsync("test.py", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validator.ValidateAsync("test.py", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.True(result.IsValid);
@@ -78,7 +78,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Cyclomatic complexity < 20", Enforcement.WARN);
 
             // Act
-            var result = await _validator.ValidateAsync("test.cs", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validator.ValidateAsync("test.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.True(result.IsValid);
@@ -125,7 +125,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Cyclomatic complexity < 20", Enforcement.WARN);
 
             // Act
-            var result = await _validator.ValidateAsync("test.cs", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validator.ValidateAsync("test.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.False(result.IsValid);

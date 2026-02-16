@@ -2,6 +2,7 @@ using VibeRails.DTOs;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal.Consumers;
 using VibeRails.Utils;
+using static VibeRails.Utils.ShellArgSanitizer;
 
 namespace VibeRails.Services.Terminal;
 
@@ -27,7 +28,7 @@ public class TerminalRunner
     {
         var cli = llm.ToString().ToLower();
         var cliCommand = extraArgs?.Length > 0
-            ? $"{cli} {string.Join(" ", extraArgs.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))}"
+            ? $"{cli} {BuildSafeArgString(extraArgs)}"
             : cli;
 
         var builder = new ShellCommandBuilder()

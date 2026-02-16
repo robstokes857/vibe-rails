@@ -38,7 +38,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Log all file changes", Enforcement.WARN);
 
             // Act
-            var result = await _validator.ValidateAsync("src/MyClass.cs", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validator.ValidateAsync("src/MyClass.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.True(result.IsValid);
@@ -61,7 +61,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Log all file changes", Enforcement.COMMIT);
 
             // Act
-            var result = await _validator.ValidateAsync("src/UndocumentedFile.cs", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validator.ValidateAsync("src/UndocumentedFile.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.False(result.IsValid);
@@ -86,7 +86,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Log all file changes", Enforcement.WARN);
 
             // Act
-            var result = await _validator.ValidateAsync("src/MyClass.cs", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validator.ValidateAsync("src/MyClass.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.True(result.IsValid);

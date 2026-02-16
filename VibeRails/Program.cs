@@ -1,6 +1,8 @@
 using Microsoft.Extensions.FileProviders;
 using VibeRails;
+using VibeRails.Auth;
 using VibeRails.DTOs;
+using VibeRails.Middleware;
 using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Utils;
@@ -33,19 +35,22 @@ builder.WebHost.ConfigureKestrel(options =>
     options.ListenLocalhost(port);
 });
 
-builder.Services.AddOpenApi();
-
 // Register DI services
 Init.RegisterServices(builder.Services);
 
-// Add CORS support for VS Code webview and local file access
+// Add CORS support for localhost and VSCode webview
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("VSCodeWebview", policy =>
     {
-        policy.AllowAnyOrigin() // Allow all origins including null (file://)
+        policy.WithOrigins($"http://localhost:{port}", $"http://127.0.0.1:{port}")
+            .SetIsOriginAllowed(origin =>
+                origin.StartsWith("vscode-webview://", StringComparison.OrdinalIgnoreCase) ||
+                origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
+                origin.StartsWith("http://127.0.0.1:", StringComparison.OrdinalIgnoreCase))
+            .AllowAnyMethod()
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowCredentials();
     });
 });
 
@@ -81,8 +86,10 @@ _ = Task.Run(async () =>
 
 // Configure middleware and routes BEFORE CliLoop so the app is ready to serve in all modes
 app.UseCors("VSCodeWebview");
+app.UseMiddleware<CookieAuthMiddleware>();  // Auth checks happen FIRST
 app.UseWebSockets();
 
+// Static files middleware runs AFTER auth - if auth passes, files are served
 if (Directory.Exists(webRootPath))
 {
     var fileProvider = new PhysicalFileProvider(webRootPath);
@@ -95,7 +102,6 @@ if (Directory.Exists(webRootPath))
 }
 
 app.MapApiEndpoints(launchDirectory);
-app.MapOpenApi();
 
 // Handle all CLI modes (env, agent, rules, validate, hooks, launch, etc.)
 // --env falls through with exit=false so the web server starts alongside the CLI terminal
@@ -119,15 +125,25 @@ if (parsedArgs.IsLMBootstrap)
 }
 
 // Standard web-only mode
+// Generate one-time bootstrap code for authentication
+var authService = app.Services.GetRequiredService<IAuthService>();
+var bootstrapCode = authService.GenerateBootstrapCode();
+var bootstrapUrl = $"{serverUrl}/auth/bootstrap?code={bootstrapCode}";
+
 Console.WriteLine($"Vibe Rails server running on {serverUrl}");
 Console.WriteLine($"Launch directory: {launchDirectory}");
+Console.WriteLine();
+Console.WriteLine($"Open this URL to access the dashboard:");
+Console.WriteLine($"  {bootstrapUrl}");
+Console.WriteLine();
+Console.WriteLine("(Link expires in 2 minutes and can only be used once)");
 Console.WriteLine("Press Ctrl+C to stop the server.");
 Console.WriteLine();
 
-// Launch browser only if --open-browser flag is passed
-if (args.Contains("--open-browser"))
+// Launch browser only if --open-browser or --launch-browser flag is passed
+if (args.Contains("--open-browser") || args.Contains("--launch-browser"))
 {
-    LaunchBrowser.Launch(serverUrl);
+    LaunchBrowser.Launch(bootstrapUrl);
 }
 
 // Wait for shutdown signal (Ctrl+C)

@@ -26,4 +26,10 @@
     <ProjectReference Include="..\VibeRails\VibeRails.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="test_agent.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

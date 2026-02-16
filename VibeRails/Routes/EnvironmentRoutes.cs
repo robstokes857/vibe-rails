@@ -2,6 +2,7 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
+using VibeRails.Utils;
 
 namespace VibeRails.Routes;
 
@@ -61,6 +62,12 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {request.Cli}"));
             }
 
+            var argsError = ShellArgSanitizer.Validate(request.CustomArgs);
+            if (argsError != null)
+            {
+                return Results.BadRequest(new ErrorResponse(argsError));
+            }
+
             var environment = new LLM_Environment
             {
                 LLM = llm,
@@ -103,6 +110,11 @@ public static class EnvironmentRoutes
 
             if (request.CustomArgs != null)
             {
+                var argsError = ShellArgSanitizer.Validate(request.CustomArgs);
+                if (argsError != null)
+                {
+                    return Results.BadRequest(new ErrorResponse(argsError));
+                }
                 environment.CustomArgs = request.CustomArgs;
             }
 
