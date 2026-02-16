@@ -90,7 +90,7 @@ public class TerminalSessionService : ITerminalSessionService
         {
             Console.Error.WriteLine($"[Terminal] Failed to start session: {ex.Message}");
             await CleanupAsync();
-            return false;
+            throw;
         }
     }
 
