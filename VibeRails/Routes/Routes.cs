@@ -19,6 +19,6 @@ public static class RouteExtensions
         ClaudePlanRoutes.Map(app);
         UpdateRoutes.Map(app);
         AppSettingsRoutes.Map(app);
-        ProxyRoutes.Map(app);
+        //ProxyRoutes.Map(app);
     }
 }
