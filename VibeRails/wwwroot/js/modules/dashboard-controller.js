@@ -164,9 +164,9 @@ export class DashboardController {
             });
         }
 
-        // Terminal section - only show in local context
+        // Terminal section
         const terminalSection = root.querySelector('[data-terminal-section]');
-        if (terminalSection && isLocal) {
+        if (terminalSection) {
             terminalSection.style.removeProperty('display');
             const terminalContent = terminalSection.querySelector('[data-terminal-content]');
             if (terminalContent) {
