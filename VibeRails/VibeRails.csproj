@@ -38,8 +38,6 @@
     <Content Include="Certs\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- Copy app_config.json to output directory -->
-
   <!-- Copy hook scripts to output directory -->
   <ItemGroup>
     <Content Include="scripts\**\*" CopyToOutputDirectory="PreserveNewest" />

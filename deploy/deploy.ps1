@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $ScriptDir = Split-Path -Parent $PSCommandPath
 $RepoRoot = Split-Path -Parent $ScriptDir
 $ArtifactsDir = Join-Path $ScriptDir "artifacts" "aot"
-$AppConfigFile = Join-Path $RepoRoot "VibeRails" "app_config.json"
+$AppSettingsFile = Join-Path $RepoRoot "VibeRails" "appsettings.json"
 $PackageJsonFile = Join-Path $RepoRoot "vscode-viberails" "package.json"
 $GithubRepo = "robstokes857/vibe-rails"
 
@@ -68,13 +68,13 @@ function Get-LatestReleaseVersion {
     }
 }
 
-function Update-AppConfigVersion {
+function Update-AppSettingsVersion {
     param([string]$Version)
 
-    $config = Get-Content $AppConfigFile -Raw | ConvertFrom-Json
-    $config.version = $Version
-    $config | ConvertTo-Json -Depth 100 | Set-Content $AppConfigFile -Encoding utf8NoBOM
-    Write-Host "Updated app_config.json to version $Version" -ForegroundColor Green
+    $config = Get-Content $AppSettingsFile -Raw | ConvertFrom-Json
+    $config.VibeRails.Version = $Version
+    $config | ConvertTo-Json -Depth 100 | Set-Content $AppSettingsFile -Encoding utf8NoBOM
+    Write-Host "Updated appsettings.json to version $Version" -ForegroundColor Green
 }
 
 function Sync-ExtensionVersion {
@@ -176,7 +176,7 @@ if ($confirm -and $confirm.ToLower() -ne 'y') {
 }
 
 # Update versions
-Update-AppConfigVersion -Version $newVersion
+Update-AppSettingsVersion -Version $newVersion
 Sync-ExtensionVersion -Version $newVersion
 
 # Run build
@@ -197,10 +197,10 @@ if (-not (Test-Path $winDir) -or -not (Test-Path $linuxDir)) {
 }
 
 # Verify version in build outputs
-$winConfig = Get-Content (Join-Path $winDir "app_config.json") -Raw | ConvertFrom-Json
-$linuxConfig = Get-Content (Join-Path $linuxDir "app_config.json") -Raw | ConvertFrom-Json
+$winConfig = Get-Content (Join-Path $winDir "appsettings.json") -Raw | ConvertFrom-Json
+$linuxConfig = Get-Content (Join-Path $linuxDir "appsettings.json") -Raw | ConvertFrom-Json
 
-if ($winConfig.version -ne $newVersion -or $linuxConfig.version -ne $newVersion) {
+if ($winConfig.VibeRails.Version -ne $newVersion -or $linuxConfig.VibeRails.Version -ne $newVersion) {
     throw "Version mismatch in build outputs! Expected $newVersion"
 }
 
@@ -211,7 +211,7 @@ $releaseDir = New-ReleaseArchives -Version $newVersion
 
 # Commit version changes to main (NOT the binaries)
 Write-Host "`nCommitting version changes..." -ForegroundColor Cyan
-git add $AppConfigFile
+git add $AppSettingsFile
 if (Test-Path $PackageJsonFile) {
     git add $PackageJsonFile
 }
