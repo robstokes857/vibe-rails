@@ -68,14 +68,21 @@ public static class TerminalRoutes
             }
 
             // Start the terminal session with the LLM CLI
-            var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote);
-
-            if (!success)
+            try
             {
-                return Results.BadRequest(new ErrorResponse("Failed to start terminal session"));
-            }
+                var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote);
 
-            return Results.Ok(new TerminalStatusResponse(true, terminalService.ActiveSessionId));
+                if (!success)
+                {
+                    return Results.BadRequest(new ErrorResponse("Failed to start terminal session"));
+                }
+
+                return Results.Ok(new TerminalStatusResponse(true, terminalService.ActiveSessionId));
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new ErrorResponse($"Failed to start terminal session: {ex.Message}"));
+            }
         }).WithName("StartTerminal");
 
         // POST /api/v1/terminal/stop - Stop the current terminal session
