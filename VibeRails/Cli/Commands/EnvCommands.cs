@@ -121,6 +121,13 @@ namespace VibeRails.Cli.Commands
                 return 1;
             }
 
+            var argsError = ShellArgSanitizer.Validate(args.Args);
+            if (argsError != null)
+            {
+                CliOutput.Error(argsError);
+                return 1;
+            }
+
             var environment = new LLM_Environment
             {
                 CustomName = name,
@@ -166,6 +173,12 @@ namespace VibeRails.Cli.Commands
             // Update fields if provided
             if (args.Args != null)
             {
+                var argsError = ShellArgSanitizer.Validate(args.Args);
+                if (argsError != null)
+                {
+                    CliOutput.Error(argsError);
+                    return 1;
+                }
                 environment.CustomArgs = args.Args;
             }
             if (args.Prompt != null)

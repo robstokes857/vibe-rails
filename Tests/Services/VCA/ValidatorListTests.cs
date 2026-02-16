@@ -41,7 +41,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Unknown rule", Enforcement.WARN);
 
             // Act
-            var result = await _validatorList.IsGoodCodeAsync("test.cs", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validatorList.IsGoodCodeAsync("test.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.True(result);
@@ -59,7 +59,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Package file changes", Enforcement.WARN);
 
             // Act
-            var result = await _validatorList.IsGoodCodeAsync("package.json", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validatorList.IsGoodCodeAsync("package.json", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.False(result);
@@ -77,7 +77,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Cyclomatic complexity disabled", Enforcement.WARN);
 
             // Act
-            var result = await _validatorList.IsGoodCodeAsync("test.cs", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validatorList.IsGoodCodeAsync("test.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.True(result);
@@ -95,7 +95,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Skip test coverage", Enforcement.WARN);
 
             // Act
-            var result = await _validatorList.IsGoodCodeAsync("test.cs", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validatorList.IsGoodCodeAsync("test.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.True(result);
@@ -115,7 +115,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement($"Log file changes > {expectedThreshold} lines", Enforcement.WARN);
 
             // Act - Just verify it doesn't throw
-            var result = await _validatorList.IsGoodCodeAsync("test.cs", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validatorList.IsGoodCodeAsync("test.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert - Should not throw and return a result
             Assert.True(result || !result); // Just checking it executed

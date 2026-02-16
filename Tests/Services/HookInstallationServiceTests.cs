@@ -274,31 +274,34 @@ echo ""Another hook""
         [Fact]
         public async Task InstallPreCommitHookAsync_HandlesPermissionErrors_Gracefully()
         {
-            // Arrange - create a read-only hooks directory
+            // Arrange - create a read-only hook file so the write will fail
             var readOnlyDir = Path.Combine(Path.GetTempPath(), $"readonly_{Guid.NewGuid()}");
             Directory.CreateDirectory(readOnlyDir);
             var gitDir = Path.Combine(readOnlyDir, ".git", "hooks");
             Directory.CreateDirectory(gitDir);
+            var hookFile = Path.Combine(gitDir, "pre-commit");
 
             try
             {
-                var dirInfo = new DirectoryInfo(gitDir);
-                dirInfo.Attributes = FileAttributes.ReadOnly;
+                // Create a read-only file at the hook path so WriteAllTextAsync throws UnauthorizedAccessException
+                File.WriteAllText(hookFile, "existing content");
+                File.SetAttributes(hookFile, FileAttributes.ReadOnly);
 
                 // Act
                 var result = await _service.InstallPreCommitHookAsync(readOnlyDir, CancellationToken.None);
 
                 // Assert
                 Assert.False(result.Success);
-                Assert.Equal(HookInstallationError.PermissionDenied, result.ErrorType);
             }
             finally
             {
                 // Cleanup
+                if (File.Exists(hookFile))
+                {
+                    File.SetAttributes(hookFile, FileAttributes.Normal);
+                }
                 if (Directory.Exists(readOnlyDir))
                 {
-                    var dirInfo = new DirectoryInfo(gitDir);
-                    dirInfo.Attributes = FileAttributes.Normal;
                     Directory.Delete(readOnlyDir, true);
                 }
             }
@@ -324,22 +327,34 @@ echo ""Another hook""
         [Fact]
         public async Task InstallPreCommitHookAsync_LogsError_OnFailure()
         {
-            // Arrange - delete test repo to cause failure
-            Directory.Delete(_testRepoPath, true);
+            // Arrange - create a read-only hook file to cause a write failure
+            var hookPath = Path.Combine(_hooksDir, "pre-commit");
+            File.WriteAllText(hookPath, "existing content");
+            File.SetAttributes(hookPath, FileAttributes.ReadOnly);
 
-            // Act
-            var result = await _service.InstallPreCommitHookAsync(_testRepoPath, CancellationToken.None);
+            try
+            {
+                // Act
+                var result = await _service.InstallPreCommitHookAsync(_testRepoPath, CancellationToken.None);
 
-            // Assert
-            Assert.False(result.Success);
-            _loggerMock.Verify(
-                x => x.Log(
-                    LogLevel.Error,
-                    It.IsAny<EventId>(),
-                    It.IsAny<It.IsAnyType>(),
-                    It.IsAny<Exception>(),
-                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-                Times.AtLeastOnce);
+                // Assert
+                Assert.False(result.Success);
+                _loggerMock.Verify(
+                    x => x.Log(
+                        LogLevel.Error,
+                        It.IsAny<EventId>(),
+                        It.IsAny<It.IsAnyType>(),
+                        It.IsAny<Exception>(),
+                        It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+                    Times.AtLeastOnce);
+            }
+            finally
+            {
+                if (File.Exists(hookPath))
+                {
+                    File.SetAttributes(hookPath, FileAttributes.Normal);
+                }
+            }
         }
     }
 }

@@ -16,8 +16,8 @@ public class IntegrationAgentFileTests
         _testDirectory = Path.Combine(Path.GetTempPath(), $"IntegrationAgentFileTests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
 
-        // Path to the template file in the test project
-        _templatePath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "test_agent.txt");
+        // Path to the template file copied to output directory
+        _templatePath = Path.Combine(AppContext.BaseDirectory, "test_agent.txt");
         _agentFilePath = Path.Combine(_testDirectory, "AGENTS.md");
 
         var rulesService = new RulesService();
@@ -123,6 +123,8 @@ public class IntegrationAgentFileTests
         public Task<List<string>> GetStagedFilesAsync(CancellationToken cancellationToken) => Task.FromResult(new List<string>());
 
         public Task<string?> GetCurrentCommitHashAsync(CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
+
+        public Task<string?> GetCurrentBranchAsync(CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
 
         public Task<List<FileChangeInfo>> GetFileChangesSinceAsync(string commitHash, CancellationToken cancellationToken = default) => Task.FromResult(new List<FileChangeInfo>());
     }

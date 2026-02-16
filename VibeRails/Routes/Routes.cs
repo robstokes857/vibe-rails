@@ -4,6 +4,7 @@ public static class RouteExtensions
 {
     public static void MapApiEndpoints(this WebApplication app, string launchDirectory)
     {
+        AuthRoutes.Map(app);  // Must be first - no auth required for this endpoint
         ProjectRoutes.Map(app, launchDirectory);
         EnvironmentRoutes.Map(app);
         CliLaunchRoutes.Map(app, launchDirectory);

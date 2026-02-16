@@ -2,6 +2,7 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
+using VibeRails.Utils;
 
 namespace VibeRails.Routes;
 
@@ -48,9 +49,7 @@ public static class CliLaunchRoutes
                 {
                     if (!string.IsNullOrEmpty(environment.CustomArgs))
                     {
-                        // Parse custom args and prepend them
-                        var customArgs = environment.CustomArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                        args.InsertRange(0, customArgs);
+                        args.InsertRange(0, ShellArgSanitizer.ParseAndValidate(environment.CustomArgs));
                     }
 
                     // Update last used timestamp

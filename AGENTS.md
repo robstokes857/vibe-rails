@@ -855,6 +855,41 @@ builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
 ## Security Considerations
 
+### Web UI Authentication
+VibeRails implements production-grade cookie-based authentication to prevent unauthorized localhost access:
+
+**One-Time Bootstrap Code Flow:**
+- On startup, server generates a cryptographically secure 256-bit bootstrap code (32 bytes, URL-safe base64)
+- Code is printed in console: `http://localhost:PORT/auth/bootstrap?code=...`
+- Code expires in 2 minutes and is single-use only
+- First browser to use the code gets authenticated and code is consumed
+- Subsequent attempts with same code receive 403 Forbidden
+
+**Session Cookie Security:**
+- 512-bit session tokens (64 bytes) generated per app instance
+- `HttpOnly` flag prevents JavaScript access (XSS protection)
+- `SameSite=Lax` blocks cross-site attacks from evil.com
+- Constant-time comparisons prevent timing attacks
+- Cookies validated on every request via middleware
+
+**Attack Mitigation:**
+- **Port Scanning Attack**: Evil.com can detect the server but cannot authenticate (requires bootstrap code)
+- **Cookie Theft**: HttpOnly + SameSite prevents JavaScript access and cross-origin sends
+- **Replay Attack**: Bootstrap codes are single-use and expire quickly
+- **Timing Attack**: Constant-time comparisons via `CryptographicOperations.FixedTimeEquals()`
+
+**VSCode Extension Compatibility:**
+- Extension webview bypasses cookie auth (different origin: `vscode-webview://`)
+- Origin-based trust model (VSCode is local, trusted application)
+- Health check endpoint `/api/v1/IsLocal` allows extension startup verification
+
+**Browser Launch:**
+```bash
+vb --open-browser    # Auto-launches with secure URL
+vb --launch-browser  # Alternative flag
+vb                   # Prints URL to copy/paste
+```
+
 ### Input Validation
 - All file paths validated to prevent directory traversal
 - SQL queries parameterized to prevent injection

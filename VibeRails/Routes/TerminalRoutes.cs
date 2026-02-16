@@ -2,6 +2,7 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Terminal;
+using VibeRails.Utils;
 
 namespace VibeRails.Routes;
 
@@ -59,7 +60,7 @@ public static class TerminalRoutes
                 {
                     if (!string.IsNullOrEmpty(environment.CustomArgs))
                     {
-                        extraArgs = environment.CustomArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        extraArgs = ShellArgSanitizer.ParseAndValidate(environment.CustomArgs);
                     }
                     environment.LastUsedUTC = DateTime.UtcNow;
                     await repository.UpdateEnvironmentAsync(environment, cancellationToken);
@@ -148,8 +149,7 @@ public static class TerminalRoutes
                 {
                     if (!string.IsNullOrEmpty(environment.CustomArgs))
                     {
-                        var customArgs = environment.CustomArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                        extraArgs.AddRange(customArgs);
+                        extraArgs.AddRange(ShellArgSanitizer.ParseAndValidate(environment.CustomArgs));
                     }
                     environment.LastUsedUTC = DateTime.UtcNow;
                     await repository.UpdateEnvironmentAsync(environment, cancellationToken);
@@ -163,7 +163,7 @@ public static class TerminalRoutes
             // Build command
             var bootstrapArgs = $"--env {envValue} --workdir \"{workDir}\"";
             if (extraArgs.Count > 0)
-                bootstrapArgs += " -- " + string.Join(" ", extraArgs);
+                bootstrapArgs += " -- " + ShellArgSanitizer.BuildSafeArgString(extraArgs.ToArray());
 
             string command;
             if (OperatingSystem.IsWindows())

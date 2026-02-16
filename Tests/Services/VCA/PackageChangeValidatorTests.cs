@@ -27,7 +27,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Package file changes", Enforcement.WARN);
 
             // Act
-            var result = await _validator.ValidateAsync("MyClass.cs", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validator.ValidateAsync("MyClass.cs", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.True(result.IsValid);
@@ -43,7 +43,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Package file changes", Enforcement.WARN);
 
             // Act
-            var result = await _validator.ValidateAsync("package.json", rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validator.ValidateAsync("package.json", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.False(result.IsValid);
@@ -65,7 +65,7 @@ namespace Tests.Services.VCA
             var rule = new RuleWithEnforcement("Package file changes", Enforcement.STOP);
 
             // Act
-            var result = await _validator.ValidateAsync(fileName, rule, "AGENTS.md", "/root", CancellationToken.None);
+            var result = await _validator.ValidateAsync(fileName, rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
             Assert.False(result.IsValid);

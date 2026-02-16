@@ -68,8 +68,17 @@ namespace VibeRails.Services.VCA
         public bool IsTestFile(string filePath)
         {
             var name = Path.GetFileName(filePath).ToLowerInvariant();
-            return name.Contains("test") || name.Contains("spec") ||
-                   filePath.Contains("/test/", StringComparison.OrdinalIgnoreCase) ||
+            var nameWithoutExt = Path.GetFileNameWithoutExtension(name);
+
+            // Check if filename ends with "test" or "tests" (e.g., MyTest.cs, MyTests.cs)
+            // or contains ".test." or ".spec." segments (e.g., my.test.js, my.spec.ts)
+            if (nameWithoutExt.EndsWith("test") || nameWithoutExt.EndsWith("tests") ||
+                nameWithoutExt.EndsWith("spec") || nameWithoutExt.EndsWith("specs") ||
+                name.Contains(".test.") || name.Contains(".spec."))
+                return true;
+
+            // Check if file is in a test/tests directory
+            return filePath.Contains("/test/", StringComparison.OrdinalIgnoreCase) ||
                    filePath.Contains("/tests/", StringComparison.OrdinalIgnoreCase) ||
                    filePath.Contains("\\test\\", StringComparison.OrdinalIgnoreCase) ||
                    filePath.Contains("\\tests\\", StringComparison.OrdinalIgnoreCase);

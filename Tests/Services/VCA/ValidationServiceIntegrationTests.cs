@@ -31,7 +31,7 @@ namespace Tests.Services.VCA
                 .ReturnsAsync(new Dictionary<string, List<VcaRuleWithSource>>());
 
             // Act
-            var result = await _validationService.ValidateAsync("/root", false, CancellationToken.None);
+            var result = await _validationService.ValidateAsync("/root", false, null, CancellationToken.None);
 
             // Assert
             Assert.Empty(result.Results);
@@ -58,11 +58,11 @@ namespace Tests.Services.VCA
                 .ReturnsAsync(filesAndRules);
 
             _mockValidatorList
-                .Setup(x => x.IsGoodCodeAsync(It.IsAny<string>(), It.IsAny<RuleWithEnforcement>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Setup(x => x.IsGoodCodeAsync(It.IsAny<string>(), It.IsAny<RuleWithEnforcement>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ValidationContext?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(true);
 
             // Act
-            var result = await _validationService.ValidateAsync("/root", false, CancellationToken.None);
+            var result = await _validationService.ValidateAsync("/root", false, null, CancellationToken.None);
 
             // Assert
             Assert.Empty(result.Results);
@@ -89,11 +89,11 @@ namespace Tests.Services.VCA
                 .ReturnsAsync(filesAndRules);
 
             _mockValidatorList
-                .Setup(x => x.IsGoodCodeAsync("package.json", It.IsAny<RuleWithEnforcement>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Setup(x => x.IsGoodCodeAsync("package.json", It.IsAny<RuleWithEnforcement>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ValidationContext?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(false);
 
             // Act
-            var result = await _validationService.ValidateAsync("/root", true, CancellationToken.None);
+            var result = await _validationService.ValidateAsync("/root", true, null, CancellationToken.None);
 
             // Assert
             Assert.Single(result.Results);
@@ -131,16 +131,16 @@ namespace Tests.Services.VCA
 
             // Rule 2 fails for test1.cs
             _mockValidatorList
-                .Setup(x => x.IsGoodCodeAsync("test1.cs", It.Is<RuleWithEnforcement>(r => r.RuleText == "Rule 2"), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Setup(x => x.IsGoodCodeAsync("test1.cs", It.Is<RuleWithEnforcement>(r => r.RuleText == "Rule 2"), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ValidationContext?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(false);
 
             // All others pass
             _mockValidatorList
-                .Setup(x => x.IsGoodCodeAsync(It.IsAny<string>(), It.Is<RuleWithEnforcement>(r => r.RuleText != "Rule 2"), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Setup(x => x.IsGoodCodeAsync(It.IsAny<string>(), It.Is<RuleWithEnforcement>(r => r.RuleText != "Rule 2"), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ValidationContext?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(true);
 
             // Act
-            var result = await _validationService.ValidateAsync("/root", false, CancellationToken.None);
+            var result = await _validationService.ValidateAsync("/root", false, null, CancellationToken.None);
 
             // Assert
             Assert.Single(result.Results); // Only one failure
@@ -162,7 +162,7 @@ namespace Tests.Services.VCA
                 .ReturnsAsync(new Dictionary<string, List<VcaRuleWithSource>>());
 
             // Act
-            await _validationService.ValidateAsync("/root", true, CancellationToken.None);
+            await _validationService.ValidateAsync("/root", true, null, CancellationToken.None);
 
             // Assert
             _mockFileAndRuleParser.Verify(
@@ -189,11 +189,11 @@ namespace Tests.Services.VCA
                 .ReturnsAsync(filesAndRules);
 
             _mockValidatorList
-                .Setup(x => x.IsGoodCodeAsync(It.IsAny<string>(), It.IsAny<RuleWithEnforcement>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Setup(x => x.IsGoodCodeAsync(It.IsAny<string>(), It.IsAny<RuleWithEnforcement>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ValidationContext?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(true);
 
             // Act
-            var result = await _validationService.ValidateAsync("/root", false, CancellationToken.None);
+            var result = await _validationService.ValidateAsync("/root", false, null, CancellationToken.None);
 
             // Assert
             Assert.Equal(1, result.TotalFiles);

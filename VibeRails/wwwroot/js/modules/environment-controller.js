@@ -80,17 +80,33 @@ export class EnvironmentController {
                                 <td>${env.lastUsed || 'Never'}</td>
                                 <td>
                                     <div class="btn-group btn-group-sm">
-                                        <button class="btn btn-outline-success" type="button" data-action="launch-environment" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in external terminal">
-                                            Launch
+                                        <button class="btn btn-outline-success d-inline-flex align-items-center gap-1" type="button" data-action="launch-environment" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in external terminal">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                                <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
+                                                <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
+                                            </svg>
+                                            <span>Launch</span>
                                         </button>
-                                        <button class="btn btn-outline-primary" type="button" data-action="launch-in-webui" data-env-id="${env.id}" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in Web UI Terminal">
-                                            Web UI
+                                        <button class="btn btn-primary d-inline-flex align-items-center gap-1" type="button" data-action="launch-in-webui" data-env-id="${env.id}" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in Web UI Terminal">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                                <path fill-rule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/>
+                                                <path fill-rule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/>
+                                            </svg>
+                                            <span>Web UI</span>
                                         </button>
-                                        <button class="btn btn-outline-secondary" type="button" data-action="edit-environment" data-env-name="${env.name}" title="Settings">
-                                            Settings
+                                        <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-1" type="button" data-action="edit-environment" data-env-name="${env.name}" title="Settings">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                                <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492M5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0"/>
+                                                <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a1.873 1.873 0 0 1-2.357 1.211l-.301-.099c-1.75-.576-3.284 1.237-2.708 2.987l.099.301a1.873 1.873 0 0 1-1.211 2.357l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a1.873 1.873 0 0 1 1.211 2.357l-.099.301c-.576 1.75.957 3.563 2.708 2.987l.301-.099a1.873 1.873 0 0 1 2.357 1.211l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a1.873 1.873 0 0 1 2.357-1.211l.301.099c1.75.576 3.284-1.237 2.708-2.987l-.099-.301a1.873 1.873 0 0 1 1.211-2.357l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a1.873 1.873 0 0 1-1.211-2.357l.099-.301c.576-1.75-.957-3.563-2.708-2.987l-.301.099a1.873 1.873 0 0 1-2.357-1.211z"/>
+                                            </svg>
+                                            <span>Settings</span>
                                         </button>
-                                        <button class="btn btn-outline-danger" type="button" data-action="remove-environment" data-env-name="${env.name}" title="Delete">
-                                            Delete
+                                        <button class="btn btn-outline-danger d-inline-flex align-items-center gap-1" type="button" data-action="remove-environment" data-env-name="${env.name}" title="Delete">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                                <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/>
+                                                <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1 0-2H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1zm-3.118 1L11 4H5v9a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1z"/>
+                                            </svg>
+                                            <span>Delete</span>
                                         </button>
                                     </div>
                                 </td>

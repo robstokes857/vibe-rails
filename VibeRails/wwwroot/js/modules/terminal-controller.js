@@ -182,6 +182,22 @@ export class TerminalController {
                 this.socket.send(data);
             }
         });
+
+        // Handle clipboard paste events explicitly
+        this.terminal.attachCustomKeyEventHandler((event) => {
+            // Ctrl+V or Cmd+V (paste)
+            if ((event.ctrlKey || event.metaKey) && event.key === 'v' && event.type === 'keydown') {
+                navigator.clipboard.readText().then(text => {
+                    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                        this.socket.send(text);
+                    }
+                }).catch(err => {
+                    console.error('Failed to read clipboard:', err);
+                });
+                return false; // Prevent default handling
+            }
+            return true; // Allow other keys to be handled normally
+        });
     }
 
     sendResizeToPty() {
