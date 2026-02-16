@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.LlmClis;
@@ -88,7 +89,7 @@ public class TerminalSessionService : ITerminalSessionService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Terminal] Failed to start session: {ex.Message}");
+            Log.Error(ex, "[Terminal] Failed to start session");
             await CleanupAsync();
             throw;
         }
@@ -122,7 +123,7 @@ public class TerminalSessionService : ITerminalSessionService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Terminal] Failed to disconnect remote viewer: {ex.Message}");
+            Log.Error(ex, "[Terminal] Failed to disconnect remote viewer");
         }
 
         // Replay buffered output so new viewer sees current screen state
@@ -132,11 +133,11 @@ public class TerminalSessionService : ITerminalSessionService
             try
             {
                 await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
-                Console.WriteLine($"[Terminal] Replayed {replay.Length} bytes of buffered output to new viewer");
+                Log.Information("[Terminal] Replayed {Bytes} bytes of buffered output to new viewer", replay.Length);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[Terminal] Failed to replay buffer: {ex.Message}");
+                Log.Error(ex, "[Terminal] Failed to replay buffer");
             }
         }
 
@@ -218,18 +219,18 @@ public class TerminalSessionService : ITerminalSessionService
             s_activeWebSocket = null;
         }
 
-        Console.WriteLine($"[Terminal] DisconnectLocalViewerAsync called: reason='{reason}', hasWebSocket={wsToClose != null}, state={wsToClose?.State}");
+        Log.Information("[Terminal] DisconnectLocalViewerAsync called: reason={Reason}, hasWebSocket={HasWs}, state={State}", reason, wsToClose != null, wsToClose?.State);
 
         if (wsToClose?.State == WebSocketState.Open)
         {
             try
             {
                 await wsToClose.CloseAsync(WebSocketCloseStatus.NormalClosure, reason, CancellationToken.None);
-                Console.WriteLine("[Terminal] Local viewer disconnected successfully");
+                Log.Information("[Terminal] Local viewer disconnected successfully");
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[Terminal] Error disconnecting local viewer: {ex.Message}");
+                Log.Error(ex, "[Terminal] Error disconnecting local viewer");
             }
         }
     }
@@ -251,7 +252,7 @@ public class TerminalSessionService : ITerminalSessionService
                 {
                     if (result.Count > TerminalControlProtocol.MaxMessageBytes)
                     {
-                        Console.Error.WriteLine($"[Terminal] Viewer message exceeded limit ({result.Count} bytes)");
+                        Log.Warning("[Terminal] Viewer message exceeded limit ({Bytes} bytes)", result.Count);
                         break;
                     }
                     inputBytes = buffer[..result.Count].ToArray();
@@ -262,7 +263,7 @@ public class TerminalSessionService : ITerminalSessionService
                     ms.Write(buffer, 0, result.Count);
                     if (ms.Length > TerminalControlProtocol.MaxMessageBytes)
                     {
-                        Console.Error.WriteLine($"[Terminal] Viewer fragmented message exceeded limit ({ms.Length} bytes)");
+                        Log.Warning("[Terminal] Viewer fragmented message exceeded limit ({Bytes} bytes)", ms.Length);
                         break;
                     }
                     while (!result.EndOfMessage)
@@ -271,7 +272,7 @@ public class TerminalSessionService : ITerminalSessionService
                         ms.Write(buffer, 0, result.Count);
                         if (ms.Length > TerminalControlProtocol.MaxMessageBytes)
                         {
-                            Console.Error.WriteLine($"[Terminal] Viewer fragmented message exceeded limit ({ms.Length} bytes)");
+                            Log.Warning("[Terminal] Viewer fragmented message exceeded limit ({Bytes} bytes)", ms.Length);
                             break;
                         }
                     }
@@ -292,7 +293,7 @@ public class TerminalSessionService : ITerminalSessionService
                     }
                     catch (Exception ex)
                     {
-                        Console.Error.WriteLine($"[Terminal] Failed to resize PTY to {cols}x{rows}: {ex.Message}");
+                        Log.Error(ex, "[Terminal] Failed to resize PTY to {Cols}x{Rows}", cols, rows);
                     }
                     continue;
                 }
@@ -333,18 +334,18 @@ public class TerminalSessionService : ITerminalSessionService
         {
             if (oldWebSocket.State == WebSocketState.Open)
             {
-                Console.WriteLine("[Terminal] WebSocket takeover - disconnecting previous viewer");
+                Log.Information("[Terminal] WebSocket takeover - disconnecting previous viewer");
                 await oldWebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Session taken over", CancellationToken.None);
-                Console.WriteLine("[Terminal] Old WebSocket closed successfully");
+                Log.Information("[Terminal] Old WebSocket closed successfully");
             }
             else
             {
-                Console.WriteLine($"[Terminal] Old WebSocket was already in state: {oldWebSocket.State}");
+                Log.Information("[Terminal] Old WebSocket was already in state: {State}", oldWebSocket.State);
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Terminal] Error closing old WebSocket: {ex.Message}");
+            Log.Error(ex, "[Terminal] Error closing old WebSocket");
         }
     }
 

@@ -87,7 +87,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<MessagingClient>(sp =>
             {
                 var configuration = sp.GetRequiredService<IConfiguration>();
-                var frontendUrl = configuration["VibeRails:FrontendUrl"] ?? "https://localhost:5164";
+                var frontendUrl = configuration["VibeRails:FrontendUrl"] ?? throw new InvalidOperationException("VibeRails:FrontendUrl is not configured in appsettings.json");
                 return new MessagingClient(frontendUrl);
             });
 
@@ -181,7 +181,7 @@ namespace VibeRails
         public static void InitAppSettings(IConfiguration configuration)
         {
             // Load FrontendUrl from appsettings.json
-            var frontendUrl = configuration["VibeRails:FrontendUrl"] ?? "https://localhost:5164";
+            var frontendUrl = configuration["VibeRails:FrontendUrl"] ?? throw new InvalidOperationException("VibeRails:FrontendUrl is not configured in appsettings.json");
             ParserConfigs.SetFrontendUrl(frontendUrl);
 
             // Load ApiKey and RemoteAccess from settings.json in ~/.vibe_rails/

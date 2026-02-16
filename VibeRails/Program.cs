@@ -1,4 +1,5 @@
 using Microsoft.Extensions.FileProviders;
+using Serilog;
 using VibeRails;
 using VibeRails.Auth;
 using VibeRails.DTOs;
@@ -15,7 +16,23 @@ string launchDirectory = Directory.GetCurrentDirectory();
 string exeDirectory = AppContext.BaseDirectory;
 string webRootPath = Path.Combine(exeDirectory, "wwwroot");
 
+// Configure Serilog — file sink to ~/.vibe_rails/logs/
+var logDir = Path.Combine(PathConstants.GetInstallDirPath(), "logs");
+Directory.CreateDirectory(logDir);
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .WriteTo.File(
+        Path.Combine(logDir, "vb-.log"),
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 7,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
+
 var builder = WebApplication.CreateSlimBuilder(args);
+
+// CreateSlimBuilder doesn't load appsettings.json by default — add it explicitly
+builder.Configuration.AddJsonFile(Path.Combine(exeDirectory, "appsettings.json"), optional: false, reloadOnChange: false);
+builder.Configuration.AddJsonFile(Path.Combine(exeDirectory, $"appsettings.{builder.Environment.EnvironmentName}.json"), optional: true, reloadOnChange: false);
 
 // Configure JSON serialization for AOT
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -140,8 +157,8 @@ Console.WriteLine("(Link expires in 2 minutes and can only be used once)");
 Console.WriteLine("Press Ctrl+C to stop the server.");
 Console.WriteLine();
 
-// Launch browser only if --open-browser or --launch-browser flag is passed
-if (args.Contains("--open-browser") || args.Contains("--launch-browser"))
+// Launch browser if any browser flag is passed
+if (args.Any(a => a is "--open-browser" or "--launch-browser" or "--launch-web" or "--web"))
 {
     LaunchBrowser.Launch(bootstrapUrl);
 }

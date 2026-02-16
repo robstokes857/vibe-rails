@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading.Channels;
+using Serilog;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
@@ -51,13 +52,13 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
             connectCts.CancelAfter(TimeSpan.FromSeconds(10));
             await _socket.ConnectAsync(new Uri(wsUri), connectCts.Token);
 
-            Console.WriteLine($"[Remote] WebSocket connected to server for session {sessionId[..8]}...");
+            Log.Information("[Remote] WebSocket connected to server for session {SessionId}...", sessionId[..8]);
             _sendLoop = Task.Run(() => SendLoopAsync(_cts.Token));
             _receiveLoop = Task.Run(() => ReceiveLoopAsync(_cts.Token));
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Remote] Failed to connect WebSocket: {ex.Message}");
+            Log.Error(ex, "[Remote] Failed to connect WebSocket");
             _socket.Dispose();
             _socket = null;
         }
@@ -100,7 +101,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                     {
                         if (result.Count > TerminalControlProtocol.MaxMessageBytes)
                         {
-                            Console.Error.WriteLine($"[Remote] Inbound message exceeded limit ({result.Count} bytes)");
+                            Log.Warning("[Remote] Inbound message exceeded limit ({Bytes} bytes)", result.Count);
                             break;
                         }
                         inputBytes = buffer[..result.Count].ToArray();
@@ -111,7 +112,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                         ms.Write(buffer, 0, result.Count);
                         if (ms.Length > TerminalControlProtocol.MaxMessageBytes)
                         {
-                            Console.Error.WriteLine($"[Remote] Inbound fragmented message exceeded limit ({ms.Length} bytes)");
+                            Log.Warning("[Remote] Inbound fragmented message exceeded limit ({Bytes} bytes)", ms.Length);
                             break;
                         }
                         while (!result.EndOfMessage)
@@ -120,7 +121,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                             ms.Write(buffer, 0, result.Count);
                             if (ms.Length > TerminalControlProtocol.MaxMessageBytes)
                             {
-                                Console.Error.WriteLine($"[Remote] Inbound fragmented message exceeded limit ({ms.Length} bytes)");
+                                Log.Warning("[Remote] Inbound fragmented message exceeded limit ({Bytes} bytes)", ms.Length);
                                 break;
                             }
                         }
@@ -158,10 +159,10 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         catch (WebSocketException) { }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Remote] Receive loop error: {ex.Message}");
+            Log.Error(ex, "[Remote] Receive loop error");
         }
 
-        Console.WriteLine("[Remote] WebSocket receive loop ended");
+        Log.Information("[Remote] WebSocket receive loop ended");
     }
 
     private void TryQueueFrame(WebSocketMessageType messageType, byte[] payload)
@@ -191,7 +192,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         catch (WebSocketException) { }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Remote] Send loop error: {ex.Message}");
+            Log.Error(ex, "[Remote] Send loop error");
         }
     }
 

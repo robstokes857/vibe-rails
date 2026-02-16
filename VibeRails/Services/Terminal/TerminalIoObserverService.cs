@@ -1,3 +1,5 @@
+using Serilog;
+
 namespace VibeRails.Services.Terminal;
 
 /// <summary>
@@ -46,7 +48,7 @@ public sealed class TerminalIoObserverService : ITerminalIoObserverService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[TerminalIoObserverService] Observer error: {ex.Message}");
+            Log.Error(ex, "[TerminalIoObserverService] Observer error");
         }
     }
 }
