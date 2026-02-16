@@ -1,3 +1,5 @@
+import { getFileTypeVisual } from './file-type-icons.js';
+
 export class AgentController {
     constructor(app) {
         this.app = app;
@@ -80,28 +82,14 @@ export class AgentController {
         // Use API-fetched rules with descriptions if available
         const rulesWithDescriptions = this.app.data.availableRulesWithDescriptions || [];
 
-        let rules;
-        if (rulesWithDescriptions.length > 0) {
-            rules = rulesWithDescriptions.map(rule => `
-                <div class="list-group-item">
-                    <div class="mb-1">
-                        <strong>${this.app.escapeHtml(rule.name)}</strong>
-                    </div>
-                    <small class="text-muted">${this.app.escapeHtml(rule.description)}</small>
+        const rules = rulesWithDescriptions.map(rule => `
+            <div class="list-group-item">
+                <div class="mb-1">
+                    <strong>${this.app.escapeHtml(rule.name)}</strong>
                 </div>
-            `).join('');
-        } else {
-            // Fallback to simple list without descriptions
-            const availableRules = this.app.data.availableRules.length > 0
-                ? this.app.data.availableRules
-                : this.app.getAvailableRules().map(r => r.name);
-
-            rules = availableRules.map(ruleText => `
-                <div class="list-group-item">
-                    <strong>${this.app.escapeHtml(ruleText)}</strong>
-                </div>
-            `).join('');
-        }
+                <small class="text-muted">${this.app.escapeHtml(rule.description)}</small>
+            </div>
+        `).join('');
 
         this.app.showModal('Available VCA Rules', `
             <div class="list-group">
@@ -214,15 +202,8 @@ export class AgentController {
         }
 
         const getEnforcementBadge = (level) => {
-            const icons = {
-                'WARN': '⚠️',
-                'COMMENT': '💬',
-                'STOP': '🛑',
-                'INFO': 'ℹ️'
-            };
-            const icon = icons[level] || '';
             const className = level ? `badge-${level.toLowerCase()}` : 'bg-secondary';
-            return `<span class="badge ${className} px-3 py-2">${icon} ${level}</span>`;
+            return `<span class="badge ${className} px-3 py-2">${level}</span>`;
         };
 
         return `
@@ -235,7 +216,12 @@ export class AgentController {
                                 <span class="fw-medium text-light" style="font-size: 1.05rem;">${rule.text}</span>
                             </div>
                             <div class="d-flex align-items-center gap-3">
-                                <button class="btn btn-sm btn-primary">Select</button>
+                                <button class="btn btn-sm btn-primary d-flex align-items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.757.757 0 0 1 0-1.06.733.733 0 0 1 1.047 0l3.052 3.093 5.42-6.447z"/>
+                                    </svg>
+                                    Select
+                                </button>
                                 <div class="flex-shrink-0">
                                     ${getEnforcementBadge(rule.enforcement)}
                                 </div>
@@ -348,12 +334,16 @@ export class AgentController {
         // Render root files (if any and space remaining)
         for (const fileName of summary.rootFiles) {
             if (itemCount >= maxItems) break;
+            const fileType = getFileTypeVisual(fileName);
 
             html += `
                 <div class="file-summary-item file-item">
-                    <div class="file-summary-icon file-icon"></div>
+                    <div class="file-summary-icon file-icon" title="${this.app.escapeHtml(fileType.name)}">
+                        <img src="${this.app.escapeHtml(fileType.iconPath)}" alt="${this.app.escapeHtml(fileType.name)} icon" loading="lazy">
+                    </div>
                     <div class="file-summary-info">
                         <span class="file-summary-name">${this.app.escapeHtml(fileName)}</span>
+                        <span class="file-summary-meta">${this.app.escapeHtml(fileType.name)}</span>
                     </div>
                 </div>
             `;
@@ -435,50 +425,24 @@ export class AgentController {
         const existingRuleTexts = agent.rules.map(r => r.text);
         const unusedRulesWithDescriptions = rulesWithDescriptions.filter(r => !existingRuleTexts.includes(r.name));
 
-        // Fallback to simple list if no descriptions available
-        if (unusedRulesWithDescriptions.length === 0 && rulesWithDescriptions.length === 0) {
-            let availableRules = this.app.data.availableRules.length > 0
-                ? this.app.data.availableRules
-                : this.app.getAvailableRules().map(r => r.name);
-            const unusedRules = availableRules.filter(r => !existingRuleTexts.includes(r));
-
-            if (unusedRules.length === 0) {
-                this.app.showToast('Add Rule', 'All available rules are already added', 'info');
-                return;
-            }
-
-            const ruleOptions = unusedRules.map(rule => `
-                <div class="list-group-item list-group-item-action" data-rule="${this.app.escapeHtml(rule)}" style="cursor: pointer;">
-                    <strong>${this.app.escapeHtml(rule)}</strong>
-                </div>
-            `).join('');
-
-            this.app.showModal('Add Rule', `
-                <p class="text-muted mb-3">Select a rule to add to this agent file:</p>
-                <div class="list-group">
-                    ${ruleOptions}
-                </div>
-            `);
-        } else {
-            if (unusedRulesWithDescriptions.length === 0) {
-                this.app.showToast('Add Rule', 'All available rules are already added', 'info');
-                return;
-            }
-
-            const ruleOptions = unusedRulesWithDescriptions.map(rule => `
-                <div class="list-group-item list-group-item-action" data-rule="${this.app.escapeHtml(rule.name)}" style="cursor: pointer;">
-                    <div class="mb-1"><strong>${this.app.escapeHtml(rule.name)}</strong></div>
-                    <small class="text-muted">${this.app.escapeHtml(rule.description)}</small>
-                </div>
-            `).join('');
-
-            this.app.showModal('Add Rule', `
-                <p class="text-muted mb-3">Select a rule to add to this agent file:</p>
-                <div class="list-group">
-                    ${ruleOptions}
-                </div>
-            `);
+        if (unusedRulesWithDescriptions.length === 0) {
+            this.app.showToast('Add Rule', 'All available rules are already added', 'info');
+            return;
         }
+
+        const ruleOptions = unusedRulesWithDescriptions.map(rule => `
+            <div class="list-group-item list-group-item-action" data-rule="${this.app.escapeHtml(rule.name)}" style="cursor: pointer;">
+                <div class="mb-1"><strong>${this.app.escapeHtml(rule.name)}</strong></div>
+                <small class="text-muted">${this.app.escapeHtml(rule.description)}</small>
+            </div>
+        `).join('');
+
+        this.app.showModal('Add Rule', `
+            <p class="text-muted mb-3">Select a rule to add to this agent file:</p>
+            <div class="list-group">
+                ${ruleOptions}
+            </div>
+        `);
 
         // Bind click handlers - show enforcement picker after selecting rule
         document.querySelectorAll('[data-rule]').forEach(el => {
@@ -579,11 +543,20 @@ export class AgentController {
 
         const rule = this.currentAgent.rules[this.selectedRuleIndex];
 
-        this.app.showModal('Confirm Delete', `
-            <p>Are you sure you want to remove the rule <strong>"${rule.text}"</strong>?</p>
+        this.app.showModal('Remove Rule', `
+            <div class="text-center py-3">
+                <div class="mb-3 text-danger">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
+                    </svg>
+                </div>
+                <h5>Remove rule from agent?</h5>
+                <p>Are you sure you want to remove <strong>"${this.app.escapeHtml(rule.text)}"</strong>?</p>
+                <p class="text-muted small px-4">This rule will be removed from the agent file. You can add it back later if needed.</p>
+            </div>
             <div class="d-flex gap-2 justify-content-end">
                 <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
-                <button type="button" class="btn btn-danger" id="confirm-delete-rule-btn">Delete</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-rule-btn">Remove Rule</button>
             </div>
         `);
 
@@ -630,7 +603,13 @@ export class AgentController {
                 </div>
                 <div class="d-flex gap-2 justify-content-end">
                     <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save Custom Name</button>
+                    <button type="submit" class="btn btn-primary d-flex align-items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M11 2H9v3h2z"/>
+                            <path d="M1.5 0h11.586a1.5 1.5 0 0 1 1.06.44l1.415 1.414A1.5 1.5 0 0 1 16 2.914V14.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 14.5v-13A1.5 1.5 0 0 1 1.5 0M1 1.5v13a.5.5 0 0 0 .5.5H2v-4.5A1.5 1.5 0 0 1 3.5 9h9a1.5 1.5 0 0 1 1.5 1.5V15h.5a.5.5 0 0 0 .5-.5V2.914a.5.5 0 0 0-.146-.353l-1.415-1.415A.5.5 0 0 0 13.086 1H13v4.5A1.5 1.5 0 0 1 11.5 7h-7A1.5 1.5 0 0 1 3 5.5V1H1.5a.5.5 0 0 0-.5.5m3 4a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V1H4zM3 15h10v-4.5a.5.5 0 0 0-.5-.5h-9a.5.5 0 0 0-.5.5z"/>
+                        </svg>
+                        Save Custom Name
+                    </button>
                 </div>
             </form>
         `);
@@ -751,7 +730,12 @@ export class AgentController {
             ` : ''}
             <div class="d-flex justify-content-between mt-4">
                 <button class="btn btn-outline-secondary" type="button" data-action="go-back">Cancel</button>
-                <button class="btn btn-primary" type="button" id="wizard-next-btn">Next</button>
+                <button class="btn btn-primary d-flex align-items-center gap-2" type="button" id="wizard-next-btn">
+                    Next
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path fill-rule="evenodd" d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8"/>
+                    </svg>
+                </button>
             </div>
         `;
 
@@ -773,39 +757,19 @@ export class AgentController {
         // Use rules with descriptions if available
         const rulesWithDescriptions = this.app.data.availableRulesWithDescriptions || [];
 
-        let ruleCheckboxes;
-        if (rulesWithDescriptions.length > 0) {
-            ruleCheckboxes = rulesWithDescriptions.map((rule, index) => {
-                const isChecked = this.wizardState.selectedRules.some(r => r.text === rule.name);
-                return `
-                    <div class="form-check mb-3 pb-2 border-bottom">
-                        <input class="form-check-input" type="checkbox" id="rule-${index}"
-                               data-rule="${this.app.escapeHtml(rule.name)}" ${isChecked ? 'checked' : ''}>
-                        <label class="form-check-label" for="rule-${index}">
-                            <strong>${this.app.escapeHtml(rule.name)}</strong>
-                            <br><small class="text-muted">${this.app.escapeHtml(rule.description)}</small>
-                        </label>
-                    </div>
-                `;
-            }).join('');
-        } else {
-            const availableRules = this.app.data.availableRules.length > 0
-                ? this.app.data.availableRules
-                : this.app.getAvailableRules().map(r => r.name);
-
-            ruleCheckboxes = availableRules.map((rule, index) => {
-                const isChecked = this.wizardState.selectedRules.some(r => r.text === rule);
-                return `
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" id="rule-${index}"
-                               data-rule="${this.app.escapeHtml(rule)}" ${isChecked ? 'checked' : ''}>
-                        <label class="form-check-label" for="rule-${index}">
-                            ${this.app.escapeHtml(rule)}
-                        </label>
-                    </div>
-                `;
-            }).join('');
-        }
+        const ruleCheckboxes = rulesWithDescriptions.map((rule, index) => {
+            const isChecked = this.wizardState.selectedRules.some(r => r.text === rule.name);
+            return `
+                <div class="form-check mb-3 pb-2 border-bottom">
+                    <input class="form-check-input" type="checkbox" id="rule-${index}"
+                           data-rule="${this.app.escapeHtml(rule.name)}" ${isChecked ? 'checked' : ''}>
+                    <label class="form-check-label" for="rule-${index}">
+                        <strong>${this.app.escapeHtml(rule.name)}</strong>
+                        <br><small class="text-muted">${this.app.escapeHtml(rule.description)}</small>
+                    </label>
+                </div>
+            `;
+        }).join('');
 
         container.innerHTML = `
             <h5 class="mb-4">Step 2: Choose Rules</h5>
@@ -816,9 +780,17 @@ export class AgentController {
                 </div>
             </div>
             <div class="d-flex justify-content-between">
-                <button class="btn btn-outline-secondary" type="button" id="wizard-prev-btn">Back</button>
-                <button class="btn btn-primary" type="button" id="wizard-next-btn">
+                <button class="btn btn-outline-secondary d-flex align-items-center gap-2" type="button" id="wizard-prev-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
+                    </svg>
+                    Back
+                </button>
+                <button class="btn btn-primary d-flex align-items-center gap-2" type="button" id="wizard-next-btn">
                     Next ${this.wizardState.selectedRules.length > 0 ? `(${this.wizardState.selectedRules.length} selected)` : ''}
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path fill-rule="evenodd" d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8"/>
+                    </svg>
                 </button>
             </div>
         `;
@@ -917,8 +889,18 @@ export class AgentController {
                 ${ruleCards}
             </div>
             <div class="d-flex justify-content-between mt-4">
-                <button class="btn btn-outline-secondary" type="button" id="wizard-prev-btn">Back</button>
-                <button class="btn btn-primary" type="button" id="wizard-next-btn">Review</button>
+                <button class="btn btn-outline-secondary d-flex align-items-center gap-2" type="button" id="wizard-prev-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
+                    </svg>
+                    Back
+                </button>
+                <button class="btn btn-primary d-flex align-items-center gap-2" type="button" id="wizard-next-btn">
+                    Review
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path fill-rule="evenodd" d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8"/>
+                    </svg>
+                </button>
             </div>
         `;
 
@@ -977,8 +959,16 @@ export class AgentController {
                 </div>
             </div>
             <div class="d-flex justify-content-between">
-                <button class="btn btn-outline-secondary" type="button" id="wizard-prev-btn">Back</button>
-                <button class="btn btn-success btn-lg" type="button" id="wizard-create-btn">
+                <button class="btn btn-outline-secondary d-flex align-items-center gap-2" type="button" id="wizard-prev-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
+                    </svg>
+                    Back
+                </button>
+                <button class="btn btn-success btn-lg d-flex align-items-center gap-2" type="button" id="wizard-create-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
+                    </svg>
                     Create Agent File
                 </button>
             </div>

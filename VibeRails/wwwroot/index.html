@@ -22,12 +22,10 @@
             <div class="d-flex align-items-center gap-3 nav-actions">
                 <div class="breadcrumb-container" id="breadcrumb"></div>
                 <button class="nav-settings-btn" type="button" data-action="navigate-settings" title="Settings">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 512 512" fill="currentColor">
-                        <path d="M495.9 166.6c3.2 8.7 .5 18.4-6.4 24.6l-43.3 39.4c1.1 8.3 1.7 16.8 1.7 25.4s-.6 17.1-1.7 25.4l43.3 39.4c6.9 6.2 9.6 15.9 6.4 24.6c-4.4 11.9-9.7 23.3-15.8 34.3l-4.7 8.1c-6.6 11-14 21.4-22.1 31.2c-5.9 7.2-15.7 9.6-24.5 6.8l-55.7-17.7c-13.4 10.3-28.2 18.9-44 25.4l-12.5 57.1c-2 9.1-9 16.3-18.2 17.8c-13.8 2.3-28 3.5-42.5 3.5s-28.7-1.2-42.5-3.5c-9.2-1.5-16.2-8.7-18.2-17.8l-12.5-57.1c-15.8-6.5-30.6-15.1-44-25.4L83.1 425.9c-8.8 2.8-18.6 .3-24.5-6.8c-8.1-9.8-15.5-20.2-22.1-31.2l-4.7-8.1c-6.1-11-11.4-22.4-15.8-34.3c-3.2-8.7-.5-18.4 6.4-24.6l43.3-39.4C64.6 273.1 64 264.6 64 256s.6-17.1 1.7-25.4L22.4 191.2c-6.9-6.2-9.6-15.9-6.4-24.6c4.4-11.9 9.7-23.3 15.8-34.3l4.7-8.1c6.6-11 14-21.4 22.1-31.2c5.9-7.2 15.7-9.6 24.5-6.8l55.7 17.7c13.4-10.3 28.2-18.9 44-25.4l12.5-57.1c2-9.1 9-16.3 18.2-17.8C227.3 1.2 241.5 0 256 0s28.7 1.2 42.5 3.5c9.2 1.5 16.2 8.7 18.2 17.8l12.5 57.1c15.8 6.5 30.6 15.1 44 25.4l55.7-17.7c8.8-2.8 18.6-.3 24.5 6.8c8.1 9.8 15.5 20.2 22.1 31.2l4.7 8.1c6.1 11 11.4 22.4 15.8 34.3zM256 336a80 80 0 1 0 0-160 80 80 0 1 0 0 160z"/>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-1.905.928l-.34-.12c-1.353-.475-2.749.921-2.274 2.274l.12.34a1.464 1.464 0 0 1-.928 1.905l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .928 1.905l-.12.34c-.475 1.353.921 2.749 2.274 2.274l.34-.12a1.464 1.464 0 0 1 1.905.928l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 1.905-.928l.34.12c1.353.475 2.749-.921 2.274-2.274l-.12-.34a1.464 1.464 0 0 1 .928-1.905l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.928-1.905l.12-.34c.475-1.353-.921-2.749-2.274-2.274l-.34.12a1.464 1.464 0 0 1-1.905-.928zM8 10.466a2.466 2.466 0 1 1 0-4.932 2.466 2.466 0 0 1 0 4.932"/>
                     </svg>
-                </button>
-                <button id="vscode-exit-btn" class="btn btn-outline-light btn-sm" style="display: none;">
-                    Exit
+                    <span>Settings</span>
                 </button>
             </div>
         </div>
@@ -102,8 +100,8 @@
                             <div class="card menu-card" data-action="navigate" data-view="environments"
                                 title="Create and manage custom LLM environments with specific settings, arguments, and prompts">
                                 <div class="card-body text-center">
-                                    <img class="cli-logo mb-3" src="assets/img/icons/boxes-stacked-solid-full.svg"
-                                        alt="Environments" style="height: 48px;">
+                                    <img class="cli-logo mb-3 icon-tone-purple" src="assets/img/icons/sliders-solid-full.svg"
+                                        alt="Environments icon" style="height: 48px;">
                                     <h5 class="menu-title">Environments</h5>
                                     <p class="menu-description">Conda for LLMs - Custom Envs</p>
                                 </div>
@@ -113,8 +111,8 @@
                             <div class="card menu-card" data-action="navigate" data-view="agents"
                                 title="Manage agent.md files and rules that control AI behavior in your project">
                                 <div class="card-body text-center">
-                                    <img class="cli-logo mb-3" src="assets/img/icons/handcuffs-solid-full.svg"
-                                        alt="Agents logo" style="height: 48px;">
+                                    <img class="cli-logo mb-3 icon-tone-slate" src="assets/img/icons/handcuffs-solid-full.svg"
+                                        alt="Rules icon" style="height: 48px;">
                                     <h5 class="menu-title">Rules</h5>
                                     <p class="menu-description">Keep AI from going off the rails</p>
                                 </div>
@@ -124,24 +122,36 @@
                 </div>
             </div>
 
-            <div class="row mb-4 animate-fade-up delay-600" data-local-history-section style="display: none;">
+            <div class="row mb-4 animate-fade-up delay-600" data-terminal-section style="display: none;">
+                <div class="col-12" data-terminal-content>
+                    <!-- Terminal panel will be rendered here by TerminalController -->
+                </div>
+            </div>
+
+            <div class="row mb-4 animate-fade-up delay-650" data-local-history-section style="display: none;">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <div>
-                                <span class="card-title"><img src="assets/img/icons/layer-group-solid-full.svg" alt="" style="height: 18px; width: 18px; margin-right: 6px; vertical-align: text-bottom; opacity: 0.8;">Your LLM Environments</span>
+                                <span class="card-title"><img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-tone-purple" style="height: 18px; width: 18px; margin-right: 6px; vertical-align: text-bottom; opacity: 0.85;">Custom LLM Environments</span>
                                 <p class="text-muted small mb-0 mt-1">Like Conda for LLMs - create isolated configs with
                                     custom args and prompts for each CLI</p>
                             </div>
                             <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-primary" type="button"
+                                <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button"
                                     data-action="create-environment-quick"
                                     title="Create a new environment with custom CLI arguments and prompts">
-                                    + Add
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                                    </svg>
+                                    Add
                                 </button>
-                                <button class="btn btn-sm btn-outline-secondary" type="button"
+                                <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2" type="button"
                                     data-action="open-environments-settings" title="Manage all environments">
-                                    <span>&#x2699;&#xFE0F;</span> Settings
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-1.905.928l-.34-.12c-1.353-.475-2.749.921-2.274 2.274l.12.34a1.464 1.464 0 0 1-.928 1.905l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .928 1.905l-.12.34c-.475 1.353.921 2.749 2.274 2.274l.34-.12a1.464 1.464 0 0 1 1.905.928l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 1.905-.928l.34.12c1.353.475 2.749-.921 2.274-2.274l-.12-.34a1.464 1.464 0 0 1 .928-1.905l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.928-1.905l.12-.34c.475-1.353-.921-2.749-2.274-2.274l-.34.12a1.464 1.464 0 0 1-1.905-.928zM8 10.466a2.466 2.466 0 1 1 0-4.932 2.466 2.466 0 0 1 0 4.932"/>
+                                    </svg>
+                                    Settings
                                 </button>
                             </div>
                         </div>
@@ -152,19 +162,22 @@
                 </div>
             </div>
 
-            <div class="row mb-4 animate-fade-up delay-650" data-sandbox-section style="display: none;">
+            <div class="row mb-4 animate-fade-up delay-700" data-sandbox-section style="display: none;">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <div>
-                                <span class="card-title"><img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="" style="height: 18px; width: 18px; margin-right: 6px; vertical-align: text-bottom; opacity: 0.8;">Sandboxes</span>
+                                <span class="card-title"><img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="" class="icon-tone-slate" style="height: 18px; width: 18px; margin-right: 6px; vertical-align: text-bottom; opacity: 0.85;">Code Sandboxes For Multi LLM Parallel Processing</span>
                                 <p class="text-muted small mb-0 mt-1">Isolated git repo for parallel AI workflows</p>
                             </div>
                             <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-primary" type="button"
+                                <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button"
                                     data-action="create-sandbox"
                                     title="Create a new sandbox from the current branch">
-                                    + New Sandbox
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                                    </svg>
+                                    New Sandbox
                                 </button>
                             </div>
                         </div>
@@ -175,18 +188,11 @@
                 </div>
             </div>
 
-            <div class="row mb-4 animate-fade-up delay-700" data-terminal-section style="display: none;">
-                <div class="col-12" data-terminal-content>
-                    <!-- Terminal panel will be rendered here by TerminalController -->
-                </div>
-            </div>
-
-
             <div class="row mb-4 animate-fade-up delay-800" data-local-file-tree-section style="display: none;">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-header">
-                            Agent Files in Project
+                            Select Agent File To Edit
                         </div>
                         <div class="card-body">
                             <div data-local-file-tree></div>
@@ -214,18 +220,21 @@
                     </div>
                 </div>
                 <div class="project-actions ms-3 d-flex gap-2">
-                    <button class="btn btn-sm btn-primary px-3 d-flex align-items-center gap-2" type="button"
-                        data-env-launch-webui title="Launch in Web UI Terminal">
+                    <button class="btn btn-sm btn-outline-secondary px-3 d-flex align-items-center gap-2"
+                        type="button" data-env-launch title="Launch in External Terminal">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                            <path fill-rule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/>
-                            <path fill-rule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/>
+                            <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
+                            <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
                         </svg>
-                        <span>Web UI</span>
-                    </button>
-                    <button class="btn btn-sm btn-primary project-launch px-3 d-flex align-items-center gap-2"
-                        type="button" data-env-launch>
-                        <img data-env-launch-logo alt="" style="height: 16px; width: 16px;">
                         <span data-env-launch-text></span>
+                    </button>
+                    <button class="btn btn-sm btn-outline-success px-3 d-flex align-items-center gap-2" type="button"
+                        data-env-launch-webui title="Launch in Web Terminal">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/>
+                            <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"/>
+                        </svg>
+                        <span>Launch in Web</span>
                     </button>
                 </div>
             </div>
@@ -236,7 +245,7 @@
         <div class="list-group-item project-item p-3" data-sandbox-item>
             <div class="d-flex align-items-center gap-3">
                 <div class="project-logo-wrapper" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
-                    <img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="Sandbox" style="height: 24px; width: 24px; opacity: 0.7;">
+                    <img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="Sandbox" class="icon-tone-slate" style="height: 24px; width: 24px; opacity: 0.9;">
                 </div>
                 <div class="flex-grow-1 min-w-0">
                     <div class="d-flex align-items-center mb-1">
@@ -259,13 +268,13 @@
                         <option value="base:codex">Codex</option>
                         <option value="base:gemini">Gemini</option>
                     </select>
-                    <button class="btn btn-sm btn-primary d-flex align-items-center gap-1" type="button"
-                        data-sandbox-launch-webui title="Launch in Web UI">
+                    <button class="btn btn-sm btn-outline-success d-flex align-items-center gap-1" type="button"
+                        data-sandbox-launch-webui title="Launch in Web Terminal">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                            <path fill-rule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/>
-                            <path fill-rule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/>
+                            <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/>
+                            <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"/>
                         </svg>
-                        <span>Web UI</span>
+                        <span>Web Terminal</span>
                     </button>
                     <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" type="button"
                         data-sandbox-launch-terminal title="Launch in External Terminal">
@@ -273,18 +282,19 @@
                             <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
                             <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
                         </svg>
-                        <span>Terminal</span>
+                        <span>CLI Terminal</span>
                     </button>
                     <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" type="button"
                         data-sandbox-vscode title="Open in VS Code">
                         <img src="assets/img/vscode.svg" alt="VS Code" style="height: 16px; width: 16px;">
                         <span>VS Code</span>
                     </button>
-                    <button class="btn btn-sm btn-outline-danger d-flex align-items-center justify-content-center" type="button"
-                        data-sandbox-delete title="Delete sandbox" style="width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 16px; line-height: 1;">
+                    <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1" type="button"
+                        data-sandbox-delete title="Delete sandbox">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                            <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
                         </svg>
+                        <span>Delete</span>
                     </button>
                 </div>
             </div>
@@ -295,8 +305,11 @@
         <div class="view" data-view="agents">
             <div class="row">
                 <div class="col-12">
-                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
-                        &larr; Back
+                    <button class="btn btn-outline-primary mb-4 d-flex align-items-center gap-2" type="button" data-action="go-back">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
+                        </svg>
+                        Back
                     </button>
                 </div>
             </div>
@@ -309,48 +322,48 @@
 
             <div class="row mb-4">
                 <div class="col-12">
-                    <div class="card">
-                        <div class="card-header">
-                            Agent Files in Project
+                    <div class="row">
+                        <div class="col-md-6 col-lg-3 mb-4">
+                            <div class="card menu-card" data-action="navigate" data-view="check-violations">
+                                <div class="card-body text-center">
+                                    <span class="menu-icon">&#x2705;</span>
+                                    <h5 class="menu-title">Check Violations</h5>
+                                    <p class="menu-description">Run VCA validation</p>
+                                </div>
+                            </div>
                         </div>
-                        <div class="card-body">
-                            <div data-agent-file-tree></div>
+
+                        <div class="col-md-6 col-lg-3 mb-4">
+                            <div class="card menu-card" data-action="navigate" data-view="active-rules">
+                                <div class="card-body text-center">
+                                    <span class="menu-icon">&#x1F333;</span>
+                                    <h5 class="menu-title">Active Rules</h5>
+                                    <p class="menu-description">View rule hierarchy</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6 col-lg-3 mb-4">
+                            <div class="card menu-card" data-action="navigate" data-view="agent-create">
+                                <div class="card-body text-center">
+                                    <span class="menu-icon">&#x2795;</span>
+                                    <h5 class="menu-title">Create New Agent</h5>
+                                    <p class="menu-description">Create with wizard</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="row">
-                <div class="col-md-6 col-lg-3 mb-4">
-                    <div class="card menu-card" data-action="navigate" data-view="check-violations">
-                        <div class="card-body text-center">
-                            <span class="menu-icon">&#x2705;</span>
-                            <h5 class="menu-title">Check Violations</h5>
-                            <p class="menu-description">Run VCA validation</p>
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            Select Agent File To Edit
                         </div>
-                    </div>
-                </div>
-
-
-
-
-
-                <div class="col-md-6 col-lg-3 mb-4">
-                    <div class="card menu-card" data-action="navigate" data-view="active-rules">
-                        <div class="card-body text-center">
-                            <span class="menu-icon">&#x1F333;</span>
-                            <h5 class="menu-title">Active Rules</h5>
-                            <p class="menu-description">View rule hierarchy</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-md-6 col-lg-3 mb-4">
-                    <div class="card menu-card" data-action="navigate" data-view="agent-create">
-                        <div class="card-body text-center">
-                            <span class="menu-icon">&#x2795;</span>
-                            <h5 class="menu-title">Create New Agent</h5>
-                            <p class="menu-description">Create with wizard</p>
+                        <div class="card-body">
+                            <div data-agent-file-tree></div>
                         </div>
                     </div>
                 </div>
@@ -370,9 +383,12 @@
                             <h4 class="mb-0 text-white fw-semibold" data-agent-display-name></h4>
                             <small class="text-muted" data-agent-path></small>
                         </div>
-                        <button class="btn btn-sm btn-outline-secondary ms-2" type="button"
+                        <button class="btn btn-sm btn-outline-secondary ms-2 d-flex align-items-center gap-2" type="button"
                             data-action="set-custom-agent-name">
-                            <span>&#x270F;&#xFE0F;</span> Edit name
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/>
+                            </svg>
+                            Edit name
                         </button>
                     </div>
                 </div>
@@ -442,7 +458,11 @@
                 <div class="col-md-4 col-lg-3 mb-3">
                     <div class="card menu-card h-100" data-agent-action="remove-rule">
                         <div class="card-body text-center py-3">
-                            <span class="menu-icon">&#x1F5D1;&#xFE0F;</span>
+                            <div class="mb-2 text-danger">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
+                                </svg>
+                            </div>
                             <h6 class="menu-title mb-0">Remove Rule</h6>
                         </div>
                     </div>
@@ -503,8 +523,11 @@
         <div class="view" data-view="agent-create">
             <div class="row">
                 <div class="col-12">
-                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
-                        &larr; Back
+                    <button class="btn btn-outline-primary mb-4 d-flex align-items-center gap-2" type="button" data-action="go-back">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
+                        </svg>
+                        Back
                     </button>
                 </div>
             </div>
@@ -552,8 +575,11 @@
         <div class="view" data-view="check-violations">
             <div class="row">
                 <div class="col-12">
-                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
-                        &larr; Back
+                    <button class="btn btn-outline-primary mb-4 d-flex align-items-center gap-2" type="button" data-action="go-back">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
+                        </svg>
+                        Back
                     </button>
                 </div>
             </div>
@@ -573,7 +599,10 @@
                             <p class="text-muted mb-3">
                                 Run VCA validation manually against all changed files in your repository.
                             </p>
-                            <button class="btn btn-primary btn-lg" type="button" data-action="run-vca">
+                            <button class="btn btn-primary btn-lg d-flex align-items-center gap-2" type="button" data-action="run-vca">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
+                                </svg>
                                 Run VCA Validation
                             </button>
                         </div>
@@ -601,8 +630,11 @@
         <div class="view" data-view="active-rules">
             <div class="row">
                 <div class="col-12">
-                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
-                        &larr; Back
+                    <button class="btn btn-outline-primary mb-4 d-flex align-items-center gap-2" type="button" data-action="go-back">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
+                        </svg>
+                        Back
                     </button>
                 </div>
             </div>
@@ -630,8 +662,11 @@
         <div class="view" data-view="environments">
             <div class="row">
                 <div class="col-12">
-                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
-                        &larr; Back
+                    <button class="btn btn-outline-primary mb-4 d-flex align-items-center gap-2" type="button" data-action="go-back">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
+                        </svg>
+                        Back
                     </button>
                 </div>
             </div>
@@ -639,7 +674,10 @@
             <div class="row">
                 <div class="col-12 d-flex justify-content-between align-items-center mb-4">
                     <h2>Environment Management</h2>
-                    <button class="btn btn-primary" type="button" data-action="create-environment">
+                    <button class="btn btn-primary d-flex align-items-center gap-2" type="button" data-action="create-environment">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                        </svg>
                         Create New Environment
                     </button>
                 </div>
@@ -662,8 +700,11 @@
         <div class="view" data-view="config">
             <div class="row">
                 <div class="col-12">
-                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
-                        &larr; Back
+                    <button class="btn btn-outline-primary mb-4 d-flex align-items-center gap-2" type="button" data-action="go-back">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
+                        </svg>
+                        Back
                     </button>
                 </div>
             </div>
@@ -709,8 +750,11 @@
         <div class="view" data-view="settings">
             <div class="row">
                 <div class="col-12">
-                    <button class="btn btn-outline-primary mb-4" type="button" data-action="go-back">
-                        &larr; Back
+                    <button class="btn btn-outline-primary mb-4 d-flex align-items-center gap-2" type="button" data-action="go-back">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
+                        </svg>
+                        Back
                     </button>
                 </div>
             </div>
@@ -739,7 +783,13 @@
                                     <input type="text" class="form-control" id="setting-api-key" placeholder="Enter API key">
                                     <small class="form-text text-muted">API key for authenticating remote requests</small>
                                 </div>
-                                <button type="submit" class="btn btn-primary">Save Settings</button>
+                                <button type="submit" class="btn btn-primary d-flex align-items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M11 2H9v3h2z"/>
+                                        <path d="M1.5 0h11.586a1.5 1.5 0 0 1 1.06.44l1.415 1.414A1.5 1.5 0 0 1 16 2.914V14.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 14.5v-13A1.5 1.5 0 0 1 1.5 0M1 1.5v13a.5.5 0 0 0 .5.5H2v-4.5A1.5 1.5 0 0 1 3.5 9h9a1.5 1.5 0 0 1 1.5 1.5V15h.5a.5.5 0 0 0 .5-.5V2.914a.5.5 0 0 0-.146-.353l-1.415-1.415A.5.5 0 0 0 13.086 1H13v4.5A1.5 1.5 0 0 1 11.5 7h-7A1.5 1.5 0 0 1 3 5.5V1H1.5a.5.5 0 0 0-.5.5m3 4a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V1H4zM3 15h10v-4.5a.5.5 0 0 0-.5-.5h-9a.5.5 0 0 0-.5.5z"/>
+                                    </svg>
+                                    Save Settings
+                                </button>
                             </form>
                         </div>
                     </div>

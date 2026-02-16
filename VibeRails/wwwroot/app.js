@@ -23,8 +23,6 @@ export class VibeControlApp {
             agents: [],
             environments: [],
             sandboxes: [],
-            rules: this.getAvailableRules(),
-            availableRules: [],
             availableRulesWithDescriptions: [],
             isLocal: false,
             configs: null
@@ -54,20 +52,8 @@ export class VibeControlApp {
     }
 
     setupVSCodeIntegration() {
-        // Show exit button if running inside VS Code webview
+        // Apply VS Code-specific UI adjustments when in webview
         if (window.__viberails_VSCODE__) {
-            const exitBtn = document.getElementById('vscode-exit-btn');
-            if (exitBtn) {
-                exitBtn.style.display = 'block';
-
-                // Add click event listener (CSP-compliant, no inline onclick)
-                exitBtn.addEventListener('click', () => {
-                    if (window.__viberails_close__) {
-                        window.__viberails_close__();
-                    }
-                });
-            }
-
             // Hide "Edit in VS Code" button since we're already in VS Code
             const editVsCodeCard = document.querySelector('[data-agent-action="edit-vscode"]');
             if (editVsCodeCard) {
@@ -349,23 +335,6 @@ export class VibeControlApp {
     // Helper Methods & Data
     // ============================================
 
-    getAvailableRules() {
-        return [
-            { name: 'Log all file changes', description: 'Track every file modification', category: 'logging' },
-            { name: 'Log file changes > 5 lines', description: 'Only log significant changes', category: 'logging' },
-            { name: 'Log file changes > 10 lines', description: 'Log moderate to large changes', category: 'logging' },
-            { name: 'Check cyclomatic complexity < 10', description: 'Enforce simple code structure', category: 'complexity' },
-            { name: 'Check cyclomatic complexity < 15', description: 'Allow moderate complexity', category: 'complexity' },
-            { name: 'Check cyclomatic complexity < 20', description: 'Allow higher complexity', category: 'complexity' },
-            { name: 'Cyclomatic complexity disabled', description: 'Skip complexity checks', category: 'complexity' },
-            { name: 'Require test coverage', description: 'Tests must exist', category: 'testing' },
-            { name: 'Require test coverage minimum 50%', description: 'Half of code must be tested', category: 'testing' },
-            { name: 'Require test coverage minimum 70%', description: 'High test coverage required', category: 'testing' },
-            { name: 'Require test coverage minimum 80%', description: 'Very high test coverage', category: 'testing' },
-            { name: 'Skip test coverage', description: 'Disable coverage checks', category: 'testing' }
-        ];
-    }
-
     showCustomNameModal() {
         const path = this.data.configs?.rootPath || '';
         const currentName = this.getProjectNameFromPath(path);
@@ -549,10 +518,8 @@ export class VibeControlApp {
                 try {
                     const rulesResponse = await this.apiCall('/api/v1/rules/details', 'GET');
                     this.data.availableRulesWithDescriptions = rulesResponse.rules || [];
-                    this.data.availableRules = this.data.availableRulesWithDescriptions.map(r => r.name);
                 } catch (error) {
                     console.error('Failed to fetch available rules:', error);
-                    this.data.availableRules = [];
                     this.data.availableRulesWithDescriptions = [];
                 }
 
@@ -565,7 +532,6 @@ export class VibeControlApp {
                 }
             } else {
                 this.data.agents = [];
-                this.data.availableRules = [];
                 this.data.sandboxes = [];
             }
 

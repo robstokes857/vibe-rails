@@ -262,13 +262,18 @@ export class TerminalController {
     renderTerminalPanel() {
         return `
             <div class="card mb-4" id="terminal-panel">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <div class="d-flex align-items-center gap-2">
-                        <img src="assets/img/icons/terminal-solid-full.svg" alt="Terminal" style="height: 20px; width: 20px;">
-                        <span class="fw-bold">Terminal</span>
-                        <span class="badge bg-secondary" id="terminal-status-badge">Not Started</span>
+                <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
+                    <div class="terminal-header-main">
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <span class="card-title d-inline-flex align-items-center gap-2">
+                                <img src="assets/img/icons/terminal-solid-full.svg" alt="Terminal" style="height: 18px; width: 18px; opacity: 0.85;">
+                                Web Terminal
+                            </span>
+                            <span class="badge bg-secondary" id="terminal-status-badge">Not Started</span>
+                        </div>
+                        <p class="text-muted small mb-0 mt-1">Launch a web-based terminal session for interacting with your selected CLI and connect to it remotely.</p>
                     </div>
-                    <div class="d-flex gap-2 align-items-center" id="terminal-actions">
+                    <div class="d-flex gap-2 align-items-center flex-wrap justify-content-end" id="terminal-actions">
                         <select class="form-select form-select-sm" id="terminal-cli-select" style="width: auto;">
                             <option value="claude" selected>Claude</option>
                             <option value="codex">Codex</option>
@@ -278,8 +283,12 @@ export class TerminalController {
                             <input class="form-check-input" type="checkbox" id="terminal-make-remote" title="Share this session with remote VibeRails-Front server">
                             <label class="form-check-label small" for="terminal-make-remote">Make Remote</label>
                         </div>
-                        <button class="btn btn-sm btn-primary" id="terminal-start-btn">
-                            Start
+                        <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1" id="terminal-start-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                                <path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814z"/>
+                                <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1z"/>
+                            </svg>
+                            <span>Start</span>
                         </button>
                         <button class="btn btn-sm btn-outline-light d-none" id="terminal-reconnect-btn" title="Reconnect to active session">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>

@@ -129,25 +129,39 @@ code {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
+    gap: 0.4rem;
+    padding: 0 0.7rem;
+    width: auto;
     height: 36px;
-    border-radius: 50%;
+    border-radius: 999px;
     border: 1px solid var(--color-border);
     background: rgba(255, 255, 255, 0.03);
     color: var(--color-text-muted);
     cursor: pointer;
     transition: all var(--transition-speed);
+    white-space: nowrap;
 }
 
 .nav-settings-btn:hover {
     color: var(--color-accent);
     border-color: var(--color-accent);
     background: rgba(154, 198, 197, 0.1);
-    transform: rotate(45deg);
 }
 
 .nav-settings-btn:active {
-    transform: rotate(90deg) scale(0.95);
+    transform: scale(0.95);
+}
+
+.nav-settings-btn svg {
+    transition: transform var(--transition-speed);
+}
+
+.nav-settings-btn:hover svg {
+    transform: rotate(45deg);
+}
+
+.nav-settings-btn:active svg {
+    transform: rotate(90deg);
 }
 
 .breadcrumb-item {
@@ -327,15 +341,66 @@ code {
 }
 
 .btn-outline-primary {
-    border: 1px solid var(--color-primary);
-    color: var(--color-primary);
-    /* Changed to primary */
-    background: transparent;
+    border: 1px solid #8f5bc8;
+    color: #e7d9ff;
+    background: rgba(91, 42, 134, 0.08);
+    font-weight: 600;
 }
 
 .btn-outline-primary:hover {
     background: var(--color-primary);
     color: #fff;
+    border-color: #a87de2;
+}
+
+.btn-outline-primary:focus,
+.btn-outline-primary:active {
+    color: #fff;
+    border-color: #a87de2;
+    background: var(--color-primary-dark);
+    box-shadow: 0 0 0 0.2rem rgba(167, 123, 243, 0.25);
+}
+
+.btn-outline-success {
+    border: 1px solid #00bc8c;
+    color: #00bc8c;
+    background: transparent;
+    font-weight: 600;
+}
+
+.btn-outline-success:hover {
+    color: #ffffff;
+    background: #00bc8c;
+    border-color: #00bc8c;
+}
+
+.btn-outline-success:focus,
+.btn-outline-success:active {
+    color: #ffffff;
+    background: #00a97d;
+    border-color: #009e75;
+    box-shadow: 0 0 0 0.2rem rgba(0, 188, 140, 0.25);
+}
+
+.btn-outline-danger {
+    border: 1px solid #d06a6a;
+    color: #ffdada;
+    background: rgba(229, 115, 115, 0.06);
+    font-weight: 600;
+}
+
+.btn-outline-danger:hover {
+    color: #ffffff;
+    background: #b95252;
+    border-color: #e28787;
+}
+
+.btn-outline-danger:focus,
+.btn-outline-danger:active {
+    color: #ffffff;
+    background: #934242;
+    border-color: #e28787;
+    box-shadow: 0 0 0 0.2rem rgba(229, 115, 115, 0.25);
 }
 
 /* Status Elements */
@@ -449,6 +514,14 @@ code {
     filter: drop-shadow(0 6px 12px rgba(2, 6, 23, 0.15));
 }
 
+.icon-tone-purple {
+    filter: brightness(0) saturate(100%) invert(54%) sepia(30%) saturate(1033%) hue-rotate(231deg) brightness(92%) contrast(90%) drop-shadow(0 6px 12px rgba(2, 6, 23, 0.2));
+}
+
+.icon-tone-slate {
+    filter: brightness(0) saturate(100%) invert(47%) sepia(14%) saturate(475%) hue-rotate(177deg) brightness(90%) contrast(88%) drop-shadow(0 6px 12px rgba(2, 6, 23, 0.2));
+}
+
 /* Badges */
 .badge {
     padding: 0.4em 0.8em;
@@ -544,6 +617,29 @@ code {
 
 .xterm .xterm-viewport {
     border-radius: 0 0 var(--border-radius) var(--border-radius);
+}
+
+#terminal-panel .terminal-header-main {
+    min-width: 280px;
+    flex: 1 1 420px;
+}
+
+#terminal-panel #terminal-actions {
+    flex: 1 1 320px;
+}
+
+#terminal-panel #terminal-cli-select {
+    min-width: 220px;
+}
+
+@media (max-width: 992px) {
+    #terminal-panel #terminal-actions {
+        justify-content: flex-start !important;
+    }
+
+    #terminal-panel #terminal-cli-select {
+        flex: 1 1 220px;
+    }
 }
 
 /* Wizard */
@@ -884,17 +980,21 @@ h6 {
 }
 
 .file-summary-icon.file-icon {
-    background: linear-gradient(135deg, rgba(154, 198, 197, 0.2), rgba(154, 198, 197, 0.1));
-    border: 1px solid rgba(154, 198, 197, 0.3);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    min-width: 34px;
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    padding: 5px;
 }
 
-.file-summary-icon.file-icon::before {
-    content: '';
-    width: 12px;
-    height: 14px;
-    background: var(--color-accent);
-    border-radius: 2px;
-    opacity: 0.8;
+.file-summary-icon.file-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    filter: brightness(0) invert(1);
+    opacity: 0.92;
 }
 
 .file-summary-info {

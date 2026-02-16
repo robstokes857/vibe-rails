@@ -39,7 +39,13 @@ export class SandboxController {
                 </div>
                 <div class="d-flex gap-2 justify-content-end">
                     <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary" id="create-sandbox-submit-btn">Create Sandbox</button>
+                    <button type="submit" class="btn btn-primary d-flex align-items-center gap-2" id="create-sandbox-submit-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+                            <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                        </svg>
+                        Create Sandbox
+                    </button>
                 </div>
             </form>
         `);
@@ -81,11 +87,18 @@ export class SandboxController {
     async deleteSandbox(id, name) {
         const escapedName = this.app.escapeHtml(name);
         this.app.showModal('Delete Sandbox', `
-            <p>Are you sure you want to delete the sandbox <strong>"${escapedName}"</strong>?</p>
-            <p class="text-muted small">This will permanently delete the sandbox directory and all its contents. This cannot be undone.</p>
+            <div class="text-center py-3">
+                <div class="mb-3 text-danger">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
+                    </svg>
+                </div>
+                <h5>Are you sure you want to delete "${escapedName}"?</h5>
+                <p class="text-muted small px-4">This will permanently delete the sandbox directory and all its contents. This action cannot be undone.</p>
+            </div>
             <div class="d-flex gap-2 justify-content-end">
                 <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
-                <button type="button" class="btn btn-danger" id="confirm-delete-sandbox-btn">Delete</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-sandbox-btn">Delete Sandbox</button>
             </div>
         `);
 
@@ -107,7 +120,7 @@ export class SandboxController {
 
     // Launch terminal into sandbox directory
     async launchInWebUI(sandboxId, sandboxName, cli, environmentName) {
-        this.app.showToast('Web UI Terminal',
+        this.app.showToast('Web Terminal',
             `Launching ${cli} in sandbox "${sandboxName}"...`, 'info');
 
         const sandbox = this.app.data.sandboxes.find(s => s.id === sandboxId);
