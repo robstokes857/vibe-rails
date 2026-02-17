@@ -156,9 +156,27 @@ namespace VibeRails.DTOs
         string Name,
         string Path,
         string Branch,
+        string? SourceBranch,
         string? CommitHash,
         string? RemoteUrl,
         DateTime CreatedUTC
+    );
+
+    public record SandboxDiffFileResponse(
+        string FileName,
+        string Language,
+        string OriginalContent,
+        string ModifiedContent
+    );
+
+    public record SandboxDiffResponse(
+        List<SandboxDiffFileResponse> Files,
+        int TotalChanges
+    );
+
+    public record MergeBackResponse(
+        bool Success,
+        string Message
     );
 
     public record SandboxListResponse(
@@ -353,6 +371,10 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SandboxResponse))]
     [JsonSerializable(typeof(SandboxListResponse))]
     [JsonSerializable(typeof(List<SandboxResponse>))]
+    [JsonSerializable(typeof(SandboxDiffFileResponse))]
+    [JsonSerializable(typeof(SandboxDiffResponse))]
+    [JsonSerializable(typeof(List<SandboxDiffFileResponse>))]
+    [JsonSerializable(typeof(MergeBackResponse))]
     // Environment DTOs
     [JsonSerializable(typeof(CreateEnvironmentRequest))]
     [JsonSerializable(typeof(UpdateEnvironmentRequest))]

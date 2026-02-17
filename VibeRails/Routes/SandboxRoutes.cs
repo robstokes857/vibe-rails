@@ -21,7 +21,7 @@ public static class SandboxRoutes
 
             var sandboxes = await sandboxService.GetSandboxesAsync(projectPath, cancellationToken);
             var response = sandboxes.Select(s => new SandboxResponse(
-                s.Id, s.Name, s.Path, s.Branch, s.CommitHash, s.RemoteUrl, s.CreatedUTC
+                s.Id, s.Name, s.Path, s.Branch, s.SourceBranch, s.CommitHash, s.RemoteUrl, s.CreatedUTC
             )).ToList();
 
             return Results.Ok(new SandboxListResponse(response));
@@ -46,7 +46,7 @@ public static class SandboxRoutes
                     request.Name, projectPath, cancellationToken);
                 return Results.Ok(new SandboxResponse(
                     sandbox.Id, sandbox.Name, sandbox.Path,
-                    sandbox.Branch, sandbox.CommitHash, sandbox.RemoteUrl, sandbox.CreatedUTC));
+                    sandbox.Branch, sandbox.SourceBranch, sandbox.CommitHash, sandbox.RemoteUrl, sandbox.CreatedUTC));
             }
             catch (InvalidOperationException ex)
             {
@@ -157,5 +157,62 @@ public static class SandboxRoutes
                 StandardError: result.Success ? "" : result.Message
             ));
         }).WithName("LaunchCliInSandbox");
+
+        // GET /api/v1/sandboxes/{id}/diff - Get diff of changes in sandbox
+        app.MapGet("/api/v1/sandboxes/{id:int}/diff", async (
+            ISandboxService sandboxService,
+            int id,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await sandboxService.GetDiffAsync(id, cancellationToken);
+                var response = new SandboxDiffResponse(
+                    result.Files.Select(f => new SandboxDiffFileResponse(
+                        f.FileName, f.Language, f.OriginalContent, f.ModifiedContent
+                    )).ToList(),
+                    result.TotalChanges
+                );
+                return Results.Ok(response);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
+        }).WithName("GetSandboxDiff");
+
+        // POST /api/v1/sandboxes/{id}/push - Push sandbox branch to remote
+        app.MapPost("/api/v1/sandboxes/{id:int}/push", async (
+            ISandboxService sandboxService,
+            int id,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var message = await sandboxService.PushToRemoteAsync(id, cancellationToken);
+                return Results.Ok(new MergeBackResponse(true, message));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
+        }).WithName("PushSandboxToRemote");
+
+        // POST /api/v1/sandboxes/{id}/merge - Merge sandbox into source project locally
+        app.MapPost("/api/v1/sandboxes/{id:int}/merge", async (
+            ISandboxService sandboxService,
+            int id,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var message = await sandboxService.MergeLocallyAsync(id, cancellationToken);
+                return Results.Ok(new MergeBackResponse(true, message));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
+        }).WithName("MergeSandboxLocally");
     }
 }

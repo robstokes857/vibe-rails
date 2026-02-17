@@ -52,6 +52,7 @@ namespace VibeRails.DB
                 Branch TEXT NOT NULL DEFAULT '',
                 CommitHash TEXT,
                 RemoteUrl TEXT,
+                SourceBranch TEXT,
                 CreatedUTC TEXT NOT NULL,
                 UNIQUE(Name, ProjectPath)
             )
@@ -72,7 +73,8 @@ namespace VibeRails.DB
 
         public static readonly string[] MigrationStatements =
         [
-            "ALTER TABLE Sandboxes ADD COLUMN RemoteUrl TEXT;"
+            "ALTER TABLE Sandboxes ADD COLUMN RemoteUrl TEXT;",
+            "ALTER TABLE Sandboxes ADD COLUMN SourceBranch TEXT;"
         ];
 
         // Environment CRUD (global)
@@ -128,23 +130,23 @@ namespace VibeRails.DB
 
         // Sandbox CRUD (project-scoped)
         public const string InsertSandbox = """
-            INSERT INTO Sandboxes (Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, CreatedUTC)
-            VALUES ($name, $path, $projectPath, $branch, $commitHash, $remoteUrl, $createdUTC)
+            INSERT INTO Sandboxes (Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC)
+            VALUES ($name, $path, $projectPath, $branch, $commitHash, $remoteUrl, $sourceBranch, $createdUTC)
             RETURNING Id;
             """;
         public const string SelectSandboxesByProject = """
-            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, CreatedUTC
+            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC
             FROM Sandboxes
             WHERE ProjectPath = $projectPath
             ORDER BY CreatedUTC DESC;
             """;
         public const string SelectSandboxById = """
-            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, CreatedUTC
+            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC
             FROM Sandboxes
             WHERE Id = $id;
             """;
         public const string SelectSandboxByNameAndProject = """
-            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, CreatedUTC
+            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC
             FROM Sandboxes
             WHERE Name = $name AND ProjectPath = $projectPath;
             """;
