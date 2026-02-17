@@ -11,6 +11,23 @@ namespace VibeRails.Services
         Task<Sandbox> CreateSandboxAsync(string name, string projectPath, CancellationToken ct = default);
         Task DeleteSandboxAsync(int sandboxId, CancellationToken ct = default);
         Task<List<Sandbox>> GetSandboxesAsync(string projectPath, CancellationToken ct = default);
+        Task<SandboxDiffResult> GetDiffAsync(int sandboxId, CancellationToken ct = default);
+        Task<string> PushToRemoteAsync(int sandboxId, CancellationToken ct = default);
+        Task<string> MergeLocallyAsync(int sandboxId, CancellationToken ct = default);
+    }
+
+    public class SandboxDiffFile
+    {
+        public string FileName { get; set; } = "";
+        public string Language { get; set; } = "plaintext";
+        public string OriginalContent { get; set; } = "";
+        public string ModifiedContent { get; set; } = "";
+    }
+
+    public class SandboxDiffResult
+    {
+        public List<SandboxDiffFile> Files { get; set; } = new();
+        public int TotalChanges { get; set; }
     }
 
     public class SandboxService : ISandboxService
@@ -71,6 +88,7 @@ namespace VibeRails.Services
                 Path = sandboxPath,
                 ProjectPath = projectPath,
                 Branch = sandboxBranch,
+                SourceBranch = branch,
                 CommitHash = commitHash,
                 RemoteUrl = remoteUrl,
                 CreatedUTC = DateTime.UtcNow
@@ -100,6 +118,200 @@ namespace VibeRails.Services
         public async Task<List<Sandbox>> GetSandboxesAsync(string projectPath, CancellationToken ct = default)
         {
             return await _repository.GetSandboxesByProjectAsync(projectPath, ct);
+        }
+
+        public async Task<SandboxDiffResult> GetDiffAsync(int sandboxId, CancellationToken ct = default)
+        {
+            var sandbox = await _repository.GetSandboxByIdAsync(sandboxId, ct);
+            if (sandbox == null)
+                throw new InvalidOperationException("Sandbox not found.");
+
+            if (!Directory.Exists(sandbox.Path))
+                throw new InvalidOperationException("Sandbox directory no longer exists.");
+
+            var files = new List<SandboxDiffFile>();
+
+            // Get committed changes since the original commit
+            var changedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrWhiteSpace(sandbox.CommitHash))
+            {
+                var diffOutput = await RunGitCommandAsync(sandbox.Path,
+                    $"diff --name-only {sandbox.CommitHash}..HEAD", ct);
+                if (!string.IsNullOrWhiteSpace(diffOutput))
+                {
+                    foreach (var line in diffOutput.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+                        changedFiles.Add(line.Trim());
+                }
+            }
+
+            // Also get uncommitted changes
+            var statusOutput = await RunGitCommandAsync(sandbox.Path,
+                "status --porcelain=v1 --untracked-files=all --ignore-submodules", ct);
+            if (!string.IsNullOrWhiteSpace(statusOutput))
+            {
+                foreach (var line in statusOutput.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (line.Length < 4) continue;
+                    var filePath = line.Substring(3).Trim();
+                    var arrowIndex = filePath.IndexOf("->", StringComparison.Ordinal);
+                    if (arrowIndex >= 0)
+                        filePath = filePath.Substring(arrowIndex + 2).Trim();
+                    changedFiles.Add(filePath.Replace('\\', '/'));
+                }
+            }
+
+            foreach (var filePath in changedFiles.OrderBy(f => f))
+            {
+                // Get original content from the base commit
+                var originalContent = "";
+                if (!string.IsNullOrWhiteSpace(sandbox.CommitHash))
+                {
+                    try
+                    {
+                        originalContent = await RunGitCommandAsync(sandbox.Path,
+                            $"show {sandbox.CommitHash}:\"{filePath}\"", ct);
+                    }
+                    catch
+                    {
+                        // File didn't exist at the base commit (new file)
+                    }
+                }
+
+                // Get modified content from disk
+                var modifiedContent = "";
+                var fullPath = Path.Combine(sandbox.Path, filePath);
+                if (File.Exists(fullPath))
+                {
+                    modifiedContent = await File.ReadAllTextAsync(fullPath, ct);
+                }
+
+                files.Add(new SandboxDiffFile
+                {
+                    FileName = filePath,
+                    Language = GetLanguageFromExtension(filePath),
+                    OriginalContent = originalContent,
+                    ModifiedContent = modifiedContent
+                });
+            }
+
+            return new SandboxDiffResult { Files = files, TotalChanges = files.Count };
+        }
+
+        public async Task<string> PushToRemoteAsync(int sandboxId, CancellationToken ct = default)
+        {
+            var sandbox = await _repository.GetSandboxByIdAsync(sandboxId, ct);
+            if (sandbox == null)
+                throw new InvalidOperationException("Sandbox not found.");
+
+            if (string.IsNullOrWhiteSpace(sandbox.RemoteUrl))
+                throw new InvalidOperationException("Cannot push: sandbox has no remote URL configured.");
+
+            if (!Directory.Exists(sandbox.Path))
+                throw new InvalidOperationException("Sandbox directory no longer exists.");
+
+            // Check for uncommitted changes
+            var status = await RunGitCommandAsync(sandbox.Path, "status --porcelain", ct);
+            if (!string.IsNullOrWhiteSpace(status))
+                throw new InvalidOperationException("Sandbox has uncommitted changes. Please commit or stash them before pushing.");
+
+            await RunGitCommandAsync(sandbox.Path, $"push -u origin \"{sandbox.Branch}\"", throwOnError: true, ct);
+
+            return $"Branch '{sandbox.Branch}' pushed to remote successfully.";
+        }
+
+        public async Task<string> MergeLocallyAsync(int sandboxId, CancellationToken ct = default)
+        {
+            var sandbox = await _repository.GetSandboxByIdAsync(sandboxId, ct);
+            if (sandbox == null)
+                throw new InvalidOperationException("Sandbox not found.");
+
+            if (!Directory.Exists(sandbox.Path))
+                throw new InvalidOperationException("Sandbox directory no longer exists.");
+
+            if (!Directory.Exists(sandbox.ProjectPath))
+                throw new InvalidOperationException("Source project directory no longer exists.");
+
+            // Check sandbox has committed changes
+            var sandboxStatus = await RunGitCommandAsync(sandbox.Path, "status --porcelain", ct);
+            if (!string.IsNullOrWhiteSpace(sandboxStatus))
+                throw new InvalidOperationException("Sandbox has uncommitted changes. Please commit or stash them before merging.");
+
+            // Check source project is clean
+            var sourceStatus = await RunGitCommandAsync(sandbox.ProjectPath, "status --porcelain", ct);
+            if (!string.IsNullOrWhiteSpace(sourceStatus))
+                throw new InvalidOperationException("Source project has uncommitted changes. Please commit or stash them before merging.");
+
+            // Check source project is on the expected branch
+            var sourceBranch = sandbox.SourceBranch ?? "main";
+            var sourceGit = new GitService(sandbox.ProjectPath);
+            var currentSourceBranch = await sourceGit.GetCurrentBranchAsync(ct);
+            if (currentSourceBranch != sourceBranch)
+                throw new InvalidOperationException(
+                    $"Source project is on branch '{currentSourceBranch}', but sandbox was created from '{sourceBranch}'. " +
+                    $"Please checkout '{sourceBranch}' in the source project first.");
+
+            var remoteName = $"sandbox-{sandbox.Name}";
+
+            try
+            {
+                await RunGitCommandAsync(sandbox.ProjectPath,
+                    $"remote add \"{remoteName}\" \"{sandbox.Path}\"", throwOnError: true, ct);
+
+                await RunGitCommandAsync(sandbox.ProjectPath,
+                    $"fetch \"{remoteName}\"", throwOnError: true, ct);
+
+                await RunGitCommandAsync(sandbox.ProjectPath,
+                    $"merge \"{remoteName}/{sandbox.Branch}\" --no-edit", throwOnError: true, ct);
+
+                return $"Sandbox '{sandbox.Name}' merged into '{sourceBranch}' successfully.";
+            }
+            catch (Exception ex) when (ex.Message.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
+                                       ex.Message.Contains("merge", StringComparison.OrdinalIgnoreCase))
+            {
+                try { await RunGitCommandAsync(sandbox.ProjectPath, "merge --abort", ct); }
+                catch { /* best effort abort */ }
+
+                throw new InvalidOperationException(
+                    "Merge conflict detected. The merge has been aborted. " +
+                    "You may need to manually merge the changes.");
+            }
+            finally
+            {
+                try { await RunGitCommandAsync(sandbox.ProjectPath, $"remote remove \"{remoteName}\"", ct); }
+                catch { /* best effort cleanup */ }
+            }
+        }
+
+        private static string GetLanguageFromExtension(string filePath)
+        {
+            var ext = Path.GetExtension(filePath).TrimStart('.').ToLowerInvariant();
+            return ext switch
+            {
+                "js" => "javascript",
+                "ts" => "typescript",
+                "tsx" => "typescript",
+                "jsx" => "javascript",
+                "py" => "python",
+                "cs" => "csharp",
+                "css" => "css",
+                "html" or "htm" => "html",
+                "json" => "json",
+                "md" => "markdown",
+                "xml" => "xml",
+                "yaml" or "yml" => "yaml",
+                "sh" or "bash" => "shell",
+                "sql" => "sql",
+                "rs" => "rust",
+                "go" => "go",
+                "java" => "java",
+                "rb" => "ruby",
+                "php" => "php",
+                "cpp" or "cc" or "cxx" => "cpp",
+                "c" or "h" => "c",
+                "swift" => "swift",
+                _ => "plaintext"
+            };
         }
 
         /// <summary>
@@ -242,6 +454,11 @@ namespace VibeRails.Services
 
         private static async Task<string> RunGitCommandAsync(string workingDirectory, string arguments, CancellationToken ct)
         {
+            return await RunGitCommandAsync(workingDirectory, arguments, throwOnError: false, ct);
+        }
+
+        private static async Task<string> RunGitCommandAsync(string workingDirectory, string arguments, bool throwOnError, CancellationToken ct)
+        {
             using var process = new Process
             {
                 StartInfo = new ProcessStartInfo
@@ -263,7 +480,16 @@ namespace VibeRails.Services
 
             await process.WaitForExitAsync(ct);
 
-            return (await outputTask).Trim();
+            var output = (await outputTask).Trim();
+            var error = (await errorTask).Trim();
+
+            if (throwOnError && process.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    !string.IsNullOrWhiteSpace(error) ? error : $"Git command failed with exit code {process.ExitCode}");
+            }
+
+            return output;
         }
     }
 }

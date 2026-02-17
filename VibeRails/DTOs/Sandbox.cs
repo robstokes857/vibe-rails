@@ -9,6 +9,7 @@ namespace VibeRails.DTOs
         public string Branch { get; set; } = "";
         public string? CommitHash { get; set; }
         public string? RemoteUrl { get; set; }
+        public string? SourceBranch { get; set; }
         public DateTime CreatedUTC { get; set; } = DateTime.UtcNow;
     }
 }

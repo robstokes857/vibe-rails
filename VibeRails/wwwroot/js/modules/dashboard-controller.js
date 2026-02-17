@@ -359,6 +359,41 @@ export class DashboardController {
                 });
             }
 
+            // See Changes (diff) button
+            const diffBtn = node.querySelector('[data-sandbox-diff]');
+            if (diffBtn) {
+                diffBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.app.sandboxController.showDiff(sb.id, sb.name);
+                });
+            }
+
+            // Push to Remote button (only visible when remoteUrl is set)
+            const pushBtn = node.querySelector('[data-sandbox-push-remote]');
+            if (pushBtn) {
+                if (sb.remoteUrl) {
+                    pushBtn.style.removeProperty('display');
+                    pushBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.app.sandboxController.pushToRemote(sb.id, sb.name);
+                    });
+                }
+            }
+
+            // Merge Local button (only visible when sourceBranch is set)
+            const mergeBtn = node.querySelector('[data-sandbox-merge-local]');
+            if (mergeBtn) {
+                if (sb.sourceBranch) {
+                    mergeBtn.style.removeProperty('display');
+                    const mergeLabel = mergeBtn.querySelector('[data-sandbox-merge-label]');
+                    if (mergeLabel) mergeLabel.textContent = `Merge \u2192 ${sb.sourceBranch}`;
+                    mergeBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.app.sandboxController.mergeLocally(sb.id, sb.name, sb.sourceBranch);
+                    });
+                }
+            }
+
             // Delete button
             const deleteBtn = node.querySelector('[data-sandbox-delete]');
             if (deleteBtn) {
