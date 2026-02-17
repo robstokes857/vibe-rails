@@ -21,12 +21,6 @@
             </a>
             <div class="d-flex align-items-center gap-3 nav-actions">
                 <div class="breadcrumb-container" id="breadcrumb"></div>
-                <button class="nav-settings-btn" type="button" data-action="navigate-settings" title="Settings">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
-                        <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-1.905.928l-.34-.12c-1.353-.475-2.749.921-2.274 2.274l.12.34a1.464 1.464 0 0 1-.928 1.905l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .928 1.905l-.12.34c-.475 1.353.921 2.749 2.274 2.274l.34-.12a1.464 1.464 0 0 1 1.905.928l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 1.905-.928l.34.12c1.353.475 2.749-.921 2.274-2.274l-.12-.34a1.464 1.464 0 0 1 .928-1.905l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.928-1.905l.12-.34c.475-1.353-.921-2.749-2.274-2.274l-.34.12a1.464 1.464 0 0 1-1.905-.928zM8 10.466a2.466 2.466 0 1 1 0-4.932 2.466 2.466 0 0 1 0 4.932"/>
-                    </svg>
-                    <span>Settings</span>
-                </button>
             </div>
         </div>
     </nav>
@@ -53,75 +47,114 @@
             <div class="row mb-4 animate-fade-up delay-200">
                 <div class="col-12" data-context-heading-container></div>
             </div>
-            <div class="row mb-4 animate-fade-up delay-400">
+
+            <div class="row mb-4 animate-fade-up delay-400" data-local-quick-actions style="display: none;">
                 <div class="col-12">
-                    <div class="row" data-local-quick-actions style="display: none;">
-                        <div class="col-6 col-md-4 col-lg-2 mb-3">
-                            <div class="card menu-card" data-action="launch-vscode"
-                                title="Open this project in Visual Studio Code editor">
-                                <div class="card-body text-center">
-                                    <img class="cli-logo mb-3" src="assets/img/vscode.svg" alt="VS Code logo">
-                                    <h5 class="menu-title">Launch VS Code</h5>
-                                    <p class="menu-description">Open in editor</p>
+                    <!-- Launchers - Full Width Row -->
+                    <div class="quick-action-group mb-4">
+                        <h6 class="text-uppercase fw-bold mb-3 px-1 d-flex align-items-center gap-2" style="letter-spacing: 0.1em; color: var(--color-text);">
+                            <img src="assets/img/icons/terminal-solid-full.svg" alt="" style="height: 18px; width: 18px; opacity: 0.85;">
+                            Launch Terminals
+                        </h6>
+                        <div class="row g-3">
+                            <div class="col-6 col-md-3">
+                                <div class="card menu-card-compact h-100" data-action="launch-vscode" title="Open this project in Visual Studio Code">
+                                    <div class="card-body p-3 d-flex align-items-center gap-3">
+                                        <img class="cli-logo-sm" src="assets/img/vscode.svg" alt="VS Code">
+                                        <div class="text-start">
+                                            <h6 class="mb-0 small fw-bold text-uppercase">VS Code</h6>
+                                            <p class="text-muted x-small mb-0">Editor</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="card menu-card-compact h-100" data-action="launch-cli" data-cli="claude" title="Launch Claude CLI">
+                                    <div class="card-body p-3 d-flex align-items-center gap-3">
+                                        <img class="cli-logo-sm" src="assets/img/claude-color.svg" alt="Claude">
+                                        <div class="text-start">
+                                            <h6 class="mb-0 small fw-bold text-uppercase">Claude</h6>
+                                            <p class="text-muted x-small mb-0">Anthropic</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="card menu-card-compact h-100" data-action="launch-cli" data-cli="gemini" title="Launch Gemini CLI">
+                                    <div class="card-body p-3 d-flex align-items-center gap-3">
+                                        <img class="cli-logo-sm" src="assets/img/gemini-color.svg" alt="Gemini">
+                                        <div class="text-start">
+                                            <h6 class="mb-0 small fw-bold text-uppercase">Gemini</h6>
+                                            <p class="text-muted x-small mb-0">Google</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="card menu-card-compact h-100" data-action="launch-cli" data-cli="codex" title="Launch Codex CLI">
+                                    <div class="card-body p-3 d-flex align-items-center gap-3">
+                                        <img class="cli-logo-sm" src="assets/img/openai.svg" alt="Codex">
+                                        <div class="text-start">
+                                            <h6 class="mb-0 small fw-bold text-uppercase">Codex</h6>
+                                            <p class="text-muted x-small mb-0">OpenAI</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        <div class="col-6 col-md-4 col-lg-2 mb-3">
-                            <div class="card menu-card" data-action="launch-cli" data-cli="codex"
-                                title="Launch OpenAI Codex CLI in this project directory">
-                                <div class="card-body text-center">
-                                    <img class="cli-logo mb-3" src="assets/img/openai.svg" alt="OpenAI logo">
-                                    <h5 class="menu-title">Launch Codex</h5>
-                                    <p class="menu-description">OpenAI CLI</p>
+                    </div>
+
+                    <!-- Management Row -->
+                    <div class="quick-action-group">
+                        <h6 class="text-uppercase fw-bold mb-3 px-1 d-flex align-items-center gap-2" style="letter-spacing: 0.1em; color: var(--color-text);">
+                            <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-tone-purple" style="height: 18px; width: 18px; opacity: 0.85;">
+                            Management
+                        </h6>
+                        <div class="row g-3">
+                            <div class="col-sm-6 col-md-3">
+                                <div class="card menu-card h-100" data-action="navigate" data-view="environments" title="Manage custom LLM environments">
+                                    <div class="card-body text-center py-3">
+                                        <img class="cli-logo mb-2 icon-tone-purple" src="assets/img/icons/sliders-solid-full.svg" alt="Envs" style="height: 32px;">
+                                        <h6 class="menu-title mb-1 text-uppercase">Environments</h6>
+                                        <p class="menu-description x-small mb-0">Custom LLM Configs</p>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="col-6 col-md-4 col-lg-2 mb-3">
-                            <div class="card menu-card" data-action="launch-cli" data-cli="claude"
-                                title="Launch Anthropic Claude CLI in this project directory">
-                                <div class="card-body text-center">
-                                    <img class="cli-logo mb-3" src="assets/img/claude-color.svg" alt="Claude logo">
-                                    <h5 class="menu-title">Launch Claude</h5>
-                                    <p class="menu-description">Anthropic CLI</p>
+                            <div class="col-sm-6 col-md-3">
+                                <div class="card menu-card h-100" data-action="navigate" data-view="agents" title="Manage agent files and rules">
+                                    <div class="card-body text-center py-3">
+                                        <img class="cli-logo mb-2 icon-tone-slate" src="assets/img/icons/handcuffs-solid-full.svg" alt="Rules" style="height: 32px;">
+                                        <h6 class="menu-title mb-1 text-uppercase">Rules & Agents</h6>
+                                        <p class="menu-description x-small mb-0">AI Behavior Control</p>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="col-6 col-md-4 col-lg-2 mb-3">
-                            <div class="card menu-card" data-action="launch-cli" data-cli="gemini"
-                                title="Launch Google Gemini CLI in this project directory">
-                                <div class="card-body text-center">
-                                    <img class="cli-logo mb-3" src="assets/img/gemini-color.svg" alt="Gemini logo">
-                                    <h5 class="menu-title">Launch Gemini</h5>
-                                    <p class="menu-description">Google CLI</p>
+                            <div class="col-sm-6 col-md-3">
+                                <div class="card menu-card h-100" data-action="navigate-to-sandboxes" title="Manage parallel AI sandboxes">
+                                    <div class="card-body text-center py-3">
+                                        <img class="cli-logo mb-2 icon-tone-teal" src="assets/img/icons/boxes-stacked-solid-full.svg" alt="Sandboxes" style="height: 32px;">
+                                        <h6 class="menu-title mb-1 text-uppercase">Sandboxes</h6>
+                                        <p class="menu-description x-small mb-0">Parallel Workflows</p>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="col-6 col-md-4 col-lg-2 mb-3">
-                            <div class="card menu-card" data-action="navigate" data-view="environments"
-                                title="Create and manage custom LLM environments with specific settings, arguments, and prompts">
-                                <div class="card-body text-center">
-                                    <img class="cli-logo mb-3 icon-tone-purple" src="assets/img/icons/sliders-solid-full.svg"
-                                        alt="Environments icon" style="height: 48px;">
-                                    <h5 class="menu-title">Environments</h5>
-                                    <p class="menu-description">Conda for LLMs - Custom Envs</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-6 col-md-4 col-lg-2 mb-3">
-                            <div class="card menu-card" data-action="navigate" data-view="agents"
-                                title="Manage agent.md files and rules that control AI behavior in your project">
-                                <div class="card-body text-center">
-                                    <img class="cli-logo mb-3 icon-tone-slate" src="assets/img/icons/handcuffs-solid-full.svg"
-                                        alt="Rules icon" style="height: 48px;">
-                                    <h5 class="menu-title">Rules</h5>
-                                    <p class="menu-description">Keep AI from going off the rails</p>
+                            <div class="col-sm-6 col-md-3">
+                                <div class="card menu-card h-100" data-action="navigate" data-view="settings" title="Application settings and remote access">
+                                    <div class="card-body text-center py-3">
+                                        <div class="cli-logo mb-2 text-muted" style="height: 32px; display: flex; align-items: center; justify-content: center;">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                                                <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-1.905.928l-.34-.12c-1.353-.475-2.749.921-2.274 2.274l.12.34a1.464 1.464 0 0 1-.928 1.905l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .928 1.905l-.12.34c-.475 1.353.921 2.749 2.274 2.274l.34-.12a1.464 1.464 0 0 1 1.905.928l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 1.905-.928l.34.12c1.353.475 2.749-.921 2.274-2.274l-.12-.34a1.464 1.464 0 0 1 .928-1.905l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.928-1.905l.12-.34c.475-1.353-.921-2.749-2.274-2.274l-.34.12a1.464 1.464 0 0 1-1.905-.928zM8 10.466a2.466 2.466 0 1 1 0-4.932 2.466 2.466 0 0 1 0 4.932"/>
+                                            </svg>
+                                        </div>
+                                        <h6 class="menu-title mb-1 text-uppercase">Settings</h6>
+                                        <p class="menu-description x-small mb-0">App & Remote Config</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-
             <div class="row mb-4 animate-fade-up delay-600" data-terminal-section style="display: none;">
                 <div class="col-12" data-terminal-content>
                     <!-- Terminal panel will be rendered here by TerminalController -->
@@ -133,7 +166,7 @@
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <div>
-                                <span class="card-title"><img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-tone-purple" style="height: 18px; width: 18px; margin-right: 6px; vertical-align: text-bottom; opacity: 0.85;">Custom LLM Environments</span>
+                                <span class="card-title text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-tone-purple" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom; opacity: 0.85;">Custom LLM Environments</span>
                                 <p class="text-muted small mb-0 mt-1">Like Conda for LLMs - create isolated configs with
                                     custom args and prompts for each CLI</p>
                             </div>
@@ -167,7 +200,7 @@
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <div>
-                                <span class="card-title"><img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="" class="icon-tone-slate" style="height: 18px; width: 18px; margin-right: 6px; vertical-align: text-bottom; opacity: 0.85;">Code Sandboxes For Multi LLM Parallel Processing</span>
+                                <span class="card-title text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="" class="icon-tone-teal" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom; opacity: 0.85;">Code Sandboxes For Multi LLM Parallel Processing</span>
                                 <p class="text-muted small mb-0 mt-1">Isolated git repo for parallel AI workflows</p>
                             </div>
                             <div class="d-flex gap-2">
@@ -191,8 +224,8 @@
             <div class="row mb-4 animate-fade-up delay-800" data-local-file-tree-section style="display: none;">
                 <div class="col-12">
                     <div class="card">
-                        <div class="card-header">
-                            Select Agent File To Edit
+                        <div class="card-header text-uppercase fw-bold" style="letter-spacing: 0.05em;">
+                            <span class="card-title"><img src="assets/img/icons/handcuffs-solid-full.svg" alt="" class="icon-tone-slate" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom; opacity: 0.85;">Select Agent File To Edit</span>
                         </div>
                         <div class="card-body">
                             <div data-local-file-tree></div>
@@ -359,8 +392,8 @@
             <div class="row mb-4">
                 <div class="col-12">
                     <div class="card">
-                        <div class="card-header">
-                            Select Agent File To Edit
+                        <div class="card-header text-uppercase fw-bold" style="letter-spacing: 0.05em;">
+                            <img src="assets/img/icons/handcuffs-solid-full.svg" alt="" class="icon-tone-slate" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom; opacity: 0.85;">Select Agent File To Edit
                         </div>
                         <div class="card-body">
                             <div data-agent-file-tree></div>
@@ -398,10 +431,10 @@
             <div class="row mb-4">
                 <div class="col-12">
                     <div class="card agent-edit-card">
-                        <div class="card-header">
+                        <div class="card-header text-uppercase fw-bold" style="letter-spacing: 0.05em;">
                             <div class="d-flex align-items-center gap-2">
                                 <span>&#x1F4C2;</span>
-                                <span class="fw-bold">Files affected by this agent</span>
+                                <span>Files affected by this agent</span>
                                 <span class="badge bg-secondary" data-agent-file-count></span>
                             </div>
                         </div>
@@ -417,8 +450,8 @@
             <div class="row">
                 <div class="col-12">
                     <div class="card border-0 bg-transparent">
-                        <div class="card-header border-0 ps-0">
-                            <h4 class="mb-0 text-white">Current Rules</h4>
+                        <div class="card-header border-0 ps-0 text-uppercase fw-bold" style="letter-spacing: 0.05em;">
+                            <h4 class="mb-0 text-white"><img src="assets/img/icons/handcuffs-solid-full.svg" alt="" class="icon-tone-slate" style="height: 24px; width: 24px; margin-right: 10px; vertical-align: text-bottom; opacity: 0.85;">Current Rules</h4>
                         </div>
                         <div class="card-body px-0 pt-2">
                             <div data-agent-rules></div>
@@ -673,7 +706,7 @@
 
             <div class="row">
                 <div class="col-12 d-flex justify-content-between align-items-center mb-4">
-                    <h2>Environment Management</h2>
+                    <h2 class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-tone-purple" style="height: 32px; width: 32px; margin-right: 12px; vertical-align: text-bottom; opacity: 0.85;">Environment Management</h2>
                     <button class="btn btn-primary d-flex align-items-center gap-2" type="button" data-action="create-environment">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
@@ -686,7 +719,7 @@
             <div class="row">
                 <div class="col-12">
                     <div class="card">
-                        <div class="card-header">Environment Profiles</div>
+                        <div class="card-header text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-tone-purple" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom; opacity: 0.85;">Environment Profiles</div>
                         <div class="card-body">
                             <div data-environments-table></div>
                         </div>
