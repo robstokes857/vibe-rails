@@ -21,6 +21,11 @@
             </a>
             <div class="d-flex align-items-center gap-3 nav-actions">
                 <div class="breadcrumb-container" id="breadcrumb"></div>
+                <button class="nav-settings-btn" type="button" data-action="navigate-settings" title="Settings">
+                    <svg class="nav-settings-cog" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-1.905.928l-.34-.12c-1.353-.475-2.749.921-2.274 2.274l.12.34a1.464 1.464 0 0 1-.928 1.905l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .928 1.905l-.12.34c-.475 1.353.921 2.749 2.274 2.274l.34-.12a1.464 1.464 0 0 1 1.905.928l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 1.905-.928l.34.12c1.353.475 2.749-.921 2.274-2.274l-.12-.34a1.464 1.464 0 0 1 .928-1.905l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.928-1.905l.12-.34c.475-1.353-.921-2.749-2.274-2.274l-.34.12a1.464 1.464 0 0 1-1.905-.928zM8 10.466a2.466 2.466 0 1 1 0-4.932 2.466 2.466 0 0 1 0 4.932"/>
+                    </svg>
+                </button>
             </div>
         </div>
     </nav>
@@ -50,62 +55,8 @@
 
             <div class="row mb-4 animate-fade-up delay-400" data-local-quick-actions style="display: none;">
                 <div class="col-12">
-                    <!-- Launchers - Full Width Row -->
+                    <!-- Management Row - First -->
                     <div class="quick-action-group mb-4">
-                        <h6 class="text-uppercase fw-bold mb-3 px-1 d-flex align-items-center gap-2" style="letter-spacing: 0.1em; color: var(--color-text);">
-                            <img src="assets/img/icons/terminal-solid-full.svg" alt="" style="height: 18px; width: 18px; opacity: 0.85;">
-                            Launch Terminals
-                        </h6>
-                        <div class="row g-3">
-                            <div class="col-6 col-md-3">
-                                <div class="card menu-card-compact h-100" data-action="launch-vscode" title="Open this project in Visual Studio Code">
-                                    <div class="card-body p-3 d-flex align-items-center gap-3">
-                                        <img class="cli-logo-sm" src="assets/img/vscode.svg" alt="VS Code">
-                                        <div class="text-start">
-                                            <h6 class="mb-0 small fw-bold text-uppercase">VS Code</h6>
-                                            <p class="text-muted x-small mb-0">Editor</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-6 col-md-3">
-                                <div class="card menu-card-compact h-100" data-action="launch-cli" data-cli="claude" title="Launch Claude CLI">
-                                    <div class="card-body p-3 d-flex align-items-center gap-3">
-                                        <img class="cli-logo-sm" src="assets/img/claude-color.svg" alt="Claude">
-                                        <div class="text-start">
-                                            <h6 class="mb-0 small fw-bold text-uppercase">Claude</h6>
-                                            <p class="text-muted x-small mb-0">Anthropic</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-6 col-md-3">
-                                <div class="card menu-card-compact h-100" data-action="launch-cli" data-cli="gemini" title="Launch Gemini CLI">
-                                    <div class="card-body p-3 d-flex align-items-center gap-3">
-                                        <img class="cli-logo-sm" src="assets/img/gemini-color.svg" alt="Gemini">
-                                        <div class="text-start">
-                                            <h6 class="mb-0 small fw-bold text-uppercase">Gemini</h6>
-                                            <p class="text-muted x-small mb-0">Google</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-6 col-md-3">
-                                <div class="card menu-card-compact h-100" data-action="launch-cli" data-cli="codex" title="Launch Codex CLI">
-                                    <div class="card-body p-3 d-flex align-items-center gap-3">
-                                        <img class="cli-logo-sm" src="assets/img/openai.svg" alt="Codex">
-                                        <div class="text-start">
-                                            <h6 class="mb-0 small fw-bold text-uppercase">Codex</h6>
-                                            <p class="text-muted x-small mb-0">OpenAI</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Management Row -->
-                    <div class="quick-action-group">
                         <h6 class="text-uppercase fw-bold mb-3 px-1 d-flex align-items-center gap-2" style="letter-spacing: 0.1em; color: var(--color-text);">
                             <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-tone-purple" style="height: 18px; width: 18px; opacity: 0.85;">
                             Management
@@ -141,13 +92,73 @@
                             <div class="col-sm-6 col-md-3">
                                 <div class="card menu-card h-100" data-action="navigate" data-view="settings" title="Application settings and remote access">
                                     <div class="card-body text-center py-3">
-                                        <div class="cli-logo mb-2 text-muted" style="height: 32px; display: flex; align-items: center; justify-content: center;">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                                        <div class="cli-logo mb-2 text-muted settings-card-cog-wrapper" style="height: 32px; display: flex; align-items: center; justify-content: center;">
+                                            <svg class="settings-card-cog" xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
                                                 <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-1.905.928l-.34-.12c-1.353-.475-2.749.921-2.274 2.274l.12.34a1.464 1.464 0 0 1-.928 1.905l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .928 1.905l-.12.34c-.475 1.353.921 2.749 2.274 2.274l.34-.12a1.464 1.464 0 0 1 1.905.928l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 1.905-.928l.34.12c1.353.475 2.749-.921 2.274-2.274l-.12-.34a1.464 1.464 0 0 1 .928-1.905l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.928-1.905l.12-.34c.475-1.353-.921-2.749-2.274-2.274l-.34.12a1.464 1.464 0 0 1-1.905-.928zM8 10.466a2.466 2.466 0 1 1 0-4.932 2.466 2.466 0 0 1 0 4.932"/>
                                             </svg>
                                         </div>
                                         <h6 class="menu-title mb-1 text-uppercase">Settings</h6>
                                         <p class="menu-description x-small mb-0">App & Remote Config</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Launch Terminals - Second -->
+                    <div class="quick-action-group">
+                        <h6 class="text-uppercase fw-bold mb-3 px-1 d-flex align-items-center gap-2" style="letter-spacing: 0.1em; color: var(--color-text);">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16" style="opacity: 0.85;">
+                                <path d="M10.478 1.647a.5.5 0 1 0-.956-.294l-4 13a.5.5 0 0 0 .956.294zM4.854 4.146a.5.5 0 0 1 0 .708L1.707 8l3.147 3.146a.5.5 0 0 1-.708.708l-3.5-3.5a.5.5 0 0 1 0-.708l3.5-3.5a.5.5 0 0 1 .708 0m6.292 0a.5.5 0 0 0 0 .708L14.293 8l-3.147 3.146a.5.5 0 0 0 .708.708l3.5-3.5a.5.5 0 0 0 0-.708l-3.5-3.5a.5.5 0 0 0-.708 0"/>
+                            </svg>
+                            Launch Terminals
+                        </h6>
+                        <div class="row g-3">
+                            <div class="col-6 col-md-3">
+                                <div class="card menu-card-compact h-100" data-action="launch-vscode" title="Open this project in Visual Studio Code">
+                                    <div class="card-body p-3 d-flex align-items-center gap-3">
+                                        <img class="cli-logo-sm" src="assets/img/vscode.svg" alt="VS Code">
+                                        <div class="text-start">
+                                            <h6 class="mb-0 small fw-bold text-uppercase">VS Code</h6>
+                                            <p class="text-muted x-small mb-0">Editor</p>
+                                            <p class="text-accent x-small mb-0 fw-semibold" style="font-size: 0.65rem; letter-spacing: 0.05em;">OPEN EDITOR</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="card menu-card-compact h-100" data-action="launch-cli" data-cli="claude" title="Launch Claude CLI">
+                                    <div class="card-body p-3 d-flex align-items-center gap-3">
+                                        <img class="cli-logo-sm" src="assets/img/claude-color.svg" alt="Claude">
+                                        <div class="text-start">
+                                            <h6 class="mb-0 small fw-bold text-uppercase">Claude</h6>
+                                            <p class="text-muted x-small mb-0">Anthropic</p>
+                                            <p class="text-accent x-small mb-0 fw-semibold" style="font-size: 0.65rem; letter-spacing: 0.05em;">LAUNCH CLI</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="card menu-card-compact h-100" data-action="launch-cli" data-cli="gemini" title="Launch Gemini CLI">
+                                    <div class="card-body p-3 d-flex align-items-center gap-3">
+                                        <img class="cli-logo-sm" src="assets/img/gemini-color.svg" alt="Gemini">
+                                        <div class="text-start">
+                                            <h6 class="mb-0 small fw-bold text-uppercase">Gemini</h6>
+                                            <p class="text-muted x-small mb-0">Google</p>
+                                            <p class="text-accent x-small mb-0 fw-semibold" style="font-size: 0.65rem; letter-spacing: 0.05em;">LAUNCH CLI</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="card menu-card-compact h-100" data-action="launch-cli" data-cli="codex" title="Launch Codex CLI">
+                                    <div class="card-body p-3 d-flex align-items-center gap-3">
+                                        <img class="cli-logo-sm" src="assets/img/openai.svg" alt="Codex">
+                                        <div class="text-start">
+                                            <h6 class="mb-0 small fw-bold text-uppercase">Codex</h6>
+                                            <p class="text-muted x-small mb-0">OpenAI</p>
+                                            <p class="text-accent x-small mb-0 fw-semibold" style="font-size: 0.65rem; letter-spacing: 0.05em;">LAUNCH CLI</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

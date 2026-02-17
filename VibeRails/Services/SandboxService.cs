@@ -88,6 +88,9 @@ namespace VibeRails.Services
             // Delete the directory if it exists
             if (Directory.Exists(sandbox.Path))
             {
+                // Git marks objects as read-only; clear those flags so Directory.Delete works on Windows.
+                // On Linux this is a harmless no-op for most files.
+                ClearReadOnlyAttributes(sandbox.Path);
                 Directory.Delete(sandbox.Path, recursive: true);
             }
 
@@ -224,6 +227,16 @@ namespace VibeRails.Services
                     }
                     File.Copy(sourceFull, destFull, overwrite: true);
                 }
+            }
+        }
+
+        private static void ClearReadOnlyAttributes(string directory)
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+            {
+                var attrs = File.GetAttributes(file);
+                if ((attrs & FileAttributes.ReadOnly) != 0)
+                    File.SetAttributes(file, attrs & ~FileAttributes.ReadOnly);
             }
         }
 
