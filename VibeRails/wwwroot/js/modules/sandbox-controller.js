@@ -158,6 +158,18 @@ export class SandboxController {
         }
     }
 
+    // Launch a plain shell in sandbox directory
+    async launchShell(sandboxId, sandboxName) {
+        try {
+            const response = await this.app.apiCall(
+                `/api/v1/sandboxes/${sandboxId}/launch/shell`, 'POST');
+            this.app.showToast('Shell',
+                response.message || `Shell launched in sandbox "${sandboxName}"`, 'success');
+        } catch (error) {
+            this.app.showError('Failed to launch shell in sandbox');
+        }
+    }
+
     // Launch VS Code in sandbox
     async launchVSCode(sandboxId, sandboxName) {
         try {

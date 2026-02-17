@@ -71,6 +71,84 @@ public static class SandboxRoutes
             }
         }).WithName("DeleteSandbox");
 
+        // POST /api/v1/sandboxes/{id}/launch/shell - Launch a plain shell in sandbox directory
+        app.MapPost("/api/v1/sandboxes/{id:int}/launch/shell", async (
+            IRepository repository,
+            int id,
+            CancellationToken cancellationToken) =>
+        {
+            var sandbox = await repository.GetSandboxByIdAsync(id, cancellationToken);
+            if (sandbox == null)
+                return Results.NotFound(new ErrorResponse("Sandbox not found"));
+
+            try
+            {
+                System.Diagnostics.Process? process;
+
+                if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                        System.Runtime.InteropServices.OSPlatform.Windows))
+                {
+                    process = System.Diagnostics.Process.Start(
+                        new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "pwsh",
+                            Arguments = "-NoExit -NoProfile",
+                            WorkingDirectory = sandbox.Path,
+                            UseShellExecute = true
+                        });
+                }
+                else if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                             System.Runtime.InteropServices.OSPlatform.OSX))
+                {
+                    var script = $"tell application \"Terminal\" to do script \"cd '{sandbox.Path}'\"";
+                    process = System.Diagnostics.Process.Start(
+                        new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "osascript",
+                            Arguments = $"-e \"{script}\"",
+                            UseShellExecute = true
+                        });
+                }
+                else
+                {
+                    // Linux: try common terminal emulators
+                    process = null;
+                    var terminals = new[] { "gnome-terminal", "konsole", "xfce4-terminal", "xterm" };
+                    foreach (var term in terminals)
+                    {
+                        try
+                        {
+                            process = System.Diagnostics.Process.Start(
+                                new System.Diagnostics.ProcessStartInfo
+                                {
+                                    FileName = term,
+                                    Arguments = term == "gnome-terminal" ? $"--working-directory=\"{sandbox.Path}\"" : "",
+                                    WorkingDirectory = sandbox.Path,
+                                    UseShellExecute = true
+                                });
+                            break;
+                        }
+                        catch { /* try next */ }
+                    }
+                }
+
+                if (process == null)
+                    return Results.BadRequest(new ErrorResponse("Failed to launch shell. No supported terminal found."));
+
+                return Results.Ok(new LaunchCliResponse(
+                    Success: true,
+                    ExitCode: 0,
+                    Message: $"Shell launched in sandbox: {sandbox.Name}",
+                    StandardOutput: "",
+                    StandardError: ""
+                ));
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new ErrorResponse($"Failed to launch shell: {ex.Message}"));
+            }
+        }).WithName("LaunchShellInSandbox");
+
         // POST /api/v1/sandboxes/{id}/launch/vscode - Launch VS Code in sandbox directory
         app.MapPost("/api/v1/sandboxes/{id:int}/launch/vscode", async (
             IRepository repository,
