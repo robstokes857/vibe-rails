@@ -129,17 +129,15 @@ code {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
-    padding: 0 0.7rem;
-    width: auto;
-    height: 36px;
-    border-radius: 999px;
+    padding: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
     border: 1px solid var(--color-border);
     background: rgba(255, 255, 255, 0.03);
     color: var(--color-text-muted);
     cursor: pointer;
     transition: all var(--transition-speed);
-    white-space: nowrap;
 }
 
 .nav-settings-btn:hover {
@@ -152,15 +150,20 @@ code {
     transform: scale(0.95);
 }
 
-.nav-settings-btn svg {
-    transition: transform var(--transition-speed);
+.nav-settings-cog {
+    transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.nav-settings-btn:hover svg {
-    transform: rotate(45deg);
+.nav-settings-btn:hover .nav-settings-cog {
+    transform: rotate(90deg);
 }
 
-.nav-settings-btn:active svg {
+/* Settings card cog spin on hover */
+.settings-card-cog {
+    transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.menu-card:hover .settings-card-cog {
     transform: rotate(90deg);
 }
 
@@ -584,6 +587,20 @@ code {
     padding: 0.4em 0.8em;
     font-weight: 600;
     border-radius: 6px;
+}
+
+/* Connected badge glow effect */
+.badge.bg-success {
+    animation: badge-glow 2s ease-in-out infinite;
+}
+
+@keyframes badge-glow {
+    0%, 100% {
+        box-shadow: 0 0 4px rgba(76, 175, 80, 0.3), 0 0 8px rgba(76, 175, 80, 0.15);
+    }
+    50% {
+        box-shadow: 0 0 8px rgba(76, 175, 80, 0.5), 0 0 16px rgba(76, 175, 80, 0.3), 0 0 24px rgba(76, 175, 80, 0.1);
+    }
 }
 
 .badge-context-local {
