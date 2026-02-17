@@ -40,29 +40,44 @@ export class DashboardController {
                 const path = this.app.data.configs?.rootPath || 'Unknown Path';
 
                 const projectName = this._customProjectName || this.app.getProjectNameFromPath(path);
+                const sandboxCount = this.app.data.sandboxes.length;
+                const agentCount = this.app.data.agents.length;
 
                 headingContainer.innerHTML = `
-                    <div class="context-header-card">
-                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
-                            <div class="d-flex align-items-center gap-3">
-                                <div class="project-logo-wrapper" style="width: 48px; height: 48px;">
-                                    <span style="font-size: 1.5rem;">&#x1F4C2;</span>
+                    <div class="context-header-card position-relative overflow-hidden">
+                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 position-relative" style="z-index: 2;">
+                            <div class="d-flex align-items-center gap-4">
+                                <div class="project-logo-wrapper shadow-lg" style="width: 64px; height: 64px; background: linear-gradient(135deg, var(--color-primary), var(--color-secondary)); border: none;">
+                                    <span style="font-size: 2rem;">&#x1F4C2;</span>
                                 </div>
                                 <div>
-                                    <h4 class="mb-0 text-white fw-semibold">${projectName}</h4>
-                                    <div class="d-flex align-items-center gap-2 mt-1">
-                                        <span class="text-muted small">Running in:</span>
-                                        <span class="path-badge py-1 px-2" style="font-size: 0.85rem;">${path}</span>
+                                    <div class="d-flex align-items-center gap-3 mb-1">
+                                        <h3 class="mb-0 text-white fw-bold">${projectName}</h3>
+                                        <button class="btn btn-link btn-sm p-0 text-muted" type="button" data-action="set-custom-name" title="Rename project">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                                <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="path-badge py-1 px-2" style="font-size: 0.8rem; opacity: 0.8;">${path}</span>
                                     </div>
                                 </div>
                             </div>
-                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2" type="button" data-action="set-custom-name">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                    <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/>
-                                </svg>
-                                Edit name
-                            </button>
+                            
+                            <div class="d-flex gap-4 me-3">
+                                <div class="text-center">
+                                    <div class="h4 mb-0 fw-bold text-accent" style="color: var(--color-accent);">${agentCount}</div>
+                                    <div class="text-muted small text-uppercase" style="font-size: 0.65rem; letter-spacing: 0.1em;">Agents</div>
+                                </div>
+                                <div class="text-center border-start ps-4 border-secondary" style="border-opacity: 0.2;">
+                                    <div class="h4 mb-0 fw-bold text-info" style="color: #0dcaf0;">${sandboxCount}</div>
+                                    <div class="text-muted small text-uppercase" style="font-size: 0.65rem; letter-spacing: 0.1em;">Sandboxes</div>
+                                </div>
+                            </div>
                         </div>
+                        <!-- Background glow effect -->
+                        <div class="position-absolute" style="top: -50px; right: -50px; width: 200px; height: 200px; background: radial-gradient(circle, rgba(91, 42, 134, 0.15) 0%, transparent 70%); z-index: 1;"></div>
                     </div>
                 `;
 
@@ -148,6 +163,19 @@ export class DashboardController {
             const view = element.dataset.view;
             if (view) {
                 this.app.navigate(view);
+            }
+        });
+
+        // Add handler for navigate-to-sandboxes
+        this.app.bindAction(root, '[data-action="navigate-to-sandboxes"]', () => {
+            const sandboxSection = document.querySelector('[data-sandbox-section]');
+            if (sandboxSection) {
+                sandboxSection.scrollIntoView({ behavior: 'smooth' });
+                // Add a temporary highlight effect
+                sandboxSection.querySelector('.card')?.classList.add('border-primary');
+                setTimeout(() => {
+                    sandboxSection.querySelector('.card')?.classList.remove('border-primary');
+                }, 2000);
             }
         });
 
