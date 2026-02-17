@@ -350,6 +350,15 @@ export class DashboardController {
                 });
             }
 
+            // Shell button
+            const shellBtn = node.querySelector('[data-sandbox-launch-shell]');
+            if (shellBtn) {
+                shellBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.app.sandboxController.launchShell(sb.id, sb.name);
+                });
+            }
+
             // VS Code button
             const vscodeBtn = node.querySelector('[data-sandbox-vscode]');
             if (vscodeBtn) {

@@ -286,82 +286,112 @@
     </template>
 
     <template id="sandbox-item-template">
-        <div class="list-group-item project-item p-3" data-sandbox-item>
-            <div class="d-flex align-items-center gap-3">
-                <div class="project-logo-wrapper" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
-                    <img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="Sandbox" class="icon-tone-slate" style="height: 24px; width: 24px; opacity: 0.9;">
+        <div class="list-group-item sandbox-card" data-sandbox-item>
+            <!-- Header row: icon + info + delete -->
+            <div class="sandbox-card-header">
+                <div class="sandbox-card-icon">
+                    <img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="Sandbox" class="icon-tone-slate">
                 </div>
-                <div class="flex-grow-1 min-w-0">
-                    <div class="d-flex align-items-center mb-1">
-                        <h5 class="project-name mb-0 text-truncate me-2" data-sandbox-name></h5>
+                <div class="sandbox-card-info">
+                    <div class="sandbox-card-title">
+                        <h5 class="sandbox-card-name" data-sandbox-name></h5>
                         <span class="badge bg-secondary" data-sandbox-branch></span>
                     </div>
-                    <div class="d-flex align-items-center text-muted small">
+                    <div class="sandbox-card-meta">
                         <span data-sandbox-time></span>
-                        <span class="mx-2">&bull;</span>
-                        <span class="text-truncate" data-sandbox-path style="max-width: 300px;"></span>
+                        <span class="sandbox-card-separator">&bull;</span>
+                        <span class="sandbox-card-path" data-sandbox-path></span>
                     </div>
-                    <div class="text-muted small mt-1" data-sandbox-remote style="display: none;">
-                        <span style="opacity: 0.7;">Remote:</span>
-                        <span class="text-truncate" data-sandbox-remote-url style="max-width: 400px;"></span>
+                    <div class="sandbox-card-remote" data-sandbox-remote style="display: none;">
+                        <span class="sandbox-card-remote-label">Remote:</span>
+                        <span class="sandbox-card-path" data-sandbox-remote-url></span>
                     </div>
                 </div>
-                <div class="project-actions ms-3 d-flex gap-2 align-items-center">
-                    <select class="form-select form-select-sm" data-sandbox-cli-select style="width: auto;">
-                        <option value="base:claude">Claude</option>
-                        <option value="base:codex">Codex</option>
-                        <option value="base:gemini">Gemini</option>
-                    </select>
-                    <button class="btn btn-sm btn-outline-success d-flex align-items-center gap-1" type="button"
-                        data-sandbox-launch-webui title="Launch in Web Terminal">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/>
-                            <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"/>
-                        </svg>
-                        <span>Web Terminal</span>
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" type="button"
-                        data-sandbox-launch-terminal title="Launch in External Terminal">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
-                            <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
-                        </svg>
-                        <span>CLI Terminal</span>
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" type="button"
-                        data-sandbox-vscode title="Open in VS Code">
-                        <img src="assets/img/vscode.svg" alt="VS Code" style="height: 16px; width: 16px;">
-                        <span>VS Code</span>
-                    </button>
-                    <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1" type="button"
-                        data-sandbox-diff title="See code changes in sandbox">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
-                            <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H8V2z"/>
-                        </svg>
-                        <span>See Changes</span>
-                    </button>
-                    <button class="btn btn-sm btn-outline-info d-flex align-items-center gap-1" type="button"
-                        data-sandbox-push-remote title="Push branch to remote" style="display: none;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0M4.5 7.5a.5.5 0 0 0 0 1h5.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3a.5.5 0 0 0 0-.708l-3-3a.5.5 0 1 0-.708.708L10.293 7.5z"/>
-                        </svg>
-                        <span>Push to Remote</span>
-                    </button>
-                    <button class="btn btn-sm btn-outline-warning d-flex align-items-center gap-1" type="button"
-                        data-sandbox-merge-local title="Merge into source project" style="display: none;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M5 3a3 3 0 0 1 6 0v1h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3m1 1h4V3a2 2 0 0 0-4 0zM4 6v6h8V6z"/>
-                        </svg>
-                        <span data-sandbox-merge-label>Merge Local</span>
-                    </button>
-                    <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1" type="button"
-                        data-sandbox-delete title="Delete sandbox">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
-                        </svg>
-                        <span>Delete</span>
-                    </button>
+                <button class="btn btn-sm btn-outline-danger sandbox-card-delete" type="button"
+                    data-sandbox-delete title="Delete sandbox">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Action buttons row -->
+            <div class="sandbox-card-actions">
+                <!-- Launch group -->
+                <div class="sandbox-btn-group">
+                    <span class="sandbox-btn-group-label">Launch</span>
+                    <div class="sandbox-btn-group-buttons">
+                        <select class="form-select form-select-sm sandbox-cli-select" data-sandbox-cli-select>
+                            <option value="base:claude">Claude</option>
+                            <option value="base:codex">Codex</option>
+                            <option value="base:gemini">Gemini</option>
+                        </select>
+                        <button class="btn btn-sm btn-outline-success d-flex align-items-center gap-1" type="button"
+                            data-sandbox-launch-webui title="Launch in Web Terminal">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/>
+                                <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"/>
+                            </svg>
+                            <span>Web Terminal</span>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" type="button"
+                            data-sandbox-launch-terminal title="Launch in External Terminal">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
+                                <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
+                            </svg>
+                            <span>CLI Terminal</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Open group -->
+                <div class="sandbox-btn-group">
+                    <span class="sandbox-btn-group-label">Open</span>
+                    <div class="sandbox-btn-group-buttons">
+                        <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" type="button"
+                            data-sandbox-launch-shell title="Open shell in sandbox directory">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
+                                <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
+                            </svg>
+                            <span>Shell</span>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" type="button"
+                            data-sandbox-vscode title="Open in VS Code">
+                            <img src="assets/img/vscode.svg" alt="VS Code" style="height: 16px; width: 16px;">
+                            <span>VS Code</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Git group -->
+                <div class="sandbox-btn-group">
+                    <span class="sandbox-btn-group-label">Git</span>
+                    <div class="sandbox-btn-group-buttons">
+                        <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1" type="button"
+                            data-sandbox-diff title="See code changes in sandbox">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                                <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H8V2z"/>
+                            </svg>
+                            <span>See Changes</span>
+                        </button>
+                        <button class="btn btn-sm btn-outline-info d-flex align-items-center gap-1" type="button"
+                            data-sandbox-push-remote title="Push branch to remote" style="display: none;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0M4.5 7.5a.5.5 0 0 0 0 1h5.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3a.5.5 0 0 0 0-.708l-3-3a.5.5 0 1 0-.708.708L10.293 7.5z"/>
+                            </svg>
+                            <span>Push to Remote</span>
+                        </button>
+                        <button class="btn btn-sm btn-outline-warning d-flex align-items-center gap-1" type="button"
+                            data-sandbox-merge-local title="Merge into source project" style="display: none;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M5 3a3 3 0 0 1 6 0v1h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3m1 1h4V3a2 2 0 0 0-4 0zM4 6v6h8V6z"/>
+                            </svg>
+                            <span data-sandbox-merge-label>Merge Local</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

@@ -534,6 +534,153 @@ code {
     min-width: 0;
 }
 
+/* ============================================
+   Sandbox Card
+   ============================================ */
+
+.sandbox-card {
+    padding: 1.25rem 1.5rem !important;
+    transition: all var(--transition-speed);
+    border-left: 3px solid transparent;
+    position: relative;
+    overflow: hidden;
+}
+
+.sandbox-card:hover {
+    background-color: var(--color-bg-surface-hover);
+    border-left-color: var(--color-primary);
+}
+
+/* Header: icon + info + delete button */
+.sandbox-card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.sandbox-card-icon {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    flex-shrink: 0;
+}
+
+.sandbox-card-icon img {
+    height: 24px;
+    width: 24px;
+    opacity: 0.9;
+}
+
+.sandbox-card-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.sandbox-card-title {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.35rem;
+}
+
+.sandbox-card-name {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sandbox-card-meta {
+    display: flex;
+    align-items: center;
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+    gap: 0.15rem;
+}
+
+.sandbox-card-separator {
+    margin: 0 0.5rem;
+    opacity: 0.5;
+}
+
+.sandbox-card-path {
+    font-family: 'Consolas', monospace;
+    font-size: 0.82rem;
+    opacity: 0.8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 500px;
+}
+
+.sandbox-card-remote {
+    margin-top: 0.3rem;
+    font-size: 0.82rem;
+    color: var(--color-text-muted);
+}
+
+.sandbox-card-remote-label {
+    opacity: 0.6;
+    margin-right: 0.35rem;
+}
+
+.sandbox-card-delete {
+    flex-shrink: 0;
+    margin-left: auto;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+}
+
+.sandbox-card-delete:hover {
+    opacity: 1;
+}
+
+/* Action buttons row */
+.sandbox-card-actions {
+    display: flex;
+    align-items: flex-end;
+    gap: 1.5rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--color-border);
+    flex-wrap: wrap;
+}
+
+.sandbox-btn-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.sandbox-btn-group-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted);
+    opacity: 0.6;
+    padding-left: 2px;
+}
+
+.sandbox-btn-group-buttons {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.sandbox-cli-select {
+    width: auto !important;
+    min-width: 100px;
+}
+
 /* Agent Files Tree */
 
 .cli-logo {
