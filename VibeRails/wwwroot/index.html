@@ -172,7 +172,33 @@
                 </div>
             </div>
 
-            <div class="row mb-4 animate-fade-up delay-650" data-local-history-section style="display: none;">
+            <div class="row mb-4 animate-fade-up delay-650" data-sandbox-section style="display: none;">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="card-title text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="" class="icon-tone-teal" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom; opacity: 0.85;">Code Sandboxes For Multi LLM Parallel Processing</span>
+                                <p class="text-muted small mb-0 mt-1">Isolated git repo for parallel AI workflows</p>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button"
+                                    data-action="create-sandbox"
+                                    title="Create a new sandbox from the current branch">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                                    </svg>
+                                    New Sandbox
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="list-group project-history-list" data-sandbox-list></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mb-4 animate-fade-up delay-700" data-local-history-section style="display: none;">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
@@ -201,32 +227,6 @@
                         </div>
                         <div class="card-body">
                             <div class="list-group project-history-list" data-local-project-history></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="row mb-4 animate-fade-up delay-700" data-sandbox-section style="display: none;">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <div>
-                                <span class="card-title text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="" class="icon-tone-teal" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom; opacity: 0.85;">Code Sandboxes For Multi LLM Parallel Processing</span>
-                                <p class="text-muted small mb-0 mt-1">Isolated git repo for parallel AI workflows</p>
-                            </div>
-                            <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button"
-                                    data-action="create-sandbox"
-                                    title="Create a new sandbox from the current branch">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                        <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
-                                    </svg>
-                                    New Sandbox
-                                </button>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div class="list-group project-history-list" data-sandbox-list></div>
                         </div>
                     </div>
                 </div>

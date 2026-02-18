@@ -22,6 +22,45 @@ public readonly record struct TerminalIoEvent(
     TerminalIoDirection Direction,
     TerminalIoSource Source,
     string Text,
+    DateTimeOffset TimestampUtc)
+{
+    /// <summary>
+    /// Text normalized for analysis/logging (ANSI/control codes removed).
+    /// </summary>
+    public string PlainText => TerminalTextSanitizer.ToPlainText(Text);
+
+    /// <summary>
+    /// Raw text tokenized into plain/control segments.
+    /// </summary>
+    public IReadOnlyList<TerminalTextWithControlPart> TextWithControl =>
+        TerminalTextSanitizer.ToTextWithControl(Text);
+
+    /// <summary>
+    /// True when the raw terminal payload contains ANSI/control data.
+    /// </summary>
+    public bool HasControl => TerminalTextSanitizer.HasControl(Text);
+}
+
+public readonly record struct TerminalResizeEvent(
+    string SessionId,
+    TerminalIoSource Source,
+    int Cols,
+    int Rows,
+    DateTimeOffset TimestampUtc);
+
+public readonly record struct TerminalIdleEvent(
+    string SessionId,
+    TimeSpan IdleFor,
+    TimeSpan IdleThreshold,
+    DateTimeOffset LastInputUtc,
+    DateTimeOffset LastOutputUtc,
+    DateTimeOffset TimestampUtc);
+
+public readonly record struct TerminalRemoteCommandEvent(
+    string SessionId,
+    TerminalIoSource Source,
+    string Command,
+    string? Payload,
     DateTimeOffset TimestampUtc);
 
 /// <summary>

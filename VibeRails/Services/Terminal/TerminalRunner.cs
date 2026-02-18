@@ -1,74 +1,19 @@
 using Serilog;
 using VibeRails.DTOs;
-using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal.Consumers;
 using VibeRails.Utils;
-using static VibeRails.Utils.ShellArgSanitizer;
 
 namespace VibeRails.Services.Terminal;
 
 public class TerminalRunner
 {
     private readonly ITerminalStateService _stateService;
-    private readonly LlmCliEnvironmentService _envService;
-    private readonly McpSettings _mcpSettings;
+    private readonly ICommandService _commandService;
 
-    public TerminalRunner(ITerminalStateService stateService, LlmCliEnvironmentService envService, McpSettings mcpSettings)
+    public TerminalRunner(ITerminalStateService stateService, ICommandService commandService)
     {
         _stateService = stateService;
-        _envService = envService;
-        _mcpSettings = mcpSettings;
-    }
-
-    /// <summary>
-    /// Build the CLI command string and environment dictionary.
-    /// Shared by both CLI and Web paths.
-    /// </summary>
-    public (string command, Dictionary<string, string> environment) PrepareSession(
-        LLM llm, string? envName, string[]? extraArgs)
-    {
-        var cli = llm.ToString().ToLower();
-        var cliCommand = extraArgs?.Length > 0
-            ? $"{cli} {BuildSafeArgString(extraArgs)}"
-            : cli;
-
-        var builder = new ShellCommandBuilder()
-            .SetLaunchCommand(cliCommand);
-
-        // Register MCP server before launch
-        if (!string.IsNullOrEmpty(_mcpSettings.ServerPath) && File.Exists(_mcpSettings.ServerPath))
-        {
-            var mcpSetup = llm switch
-            {
-                LLM.Claude => $"claude mcp add viberails-mcp \"{_mcpSettings.ServerPath}\"",
-                LLM.Codex => $"codex mcp add viberails-mcp -- \"{_mcpSettings.ServerPath}\"",
-                LLM.Gemini => $"gemini mcp add --scope user viberails-mcp \"{_mcpSettings.ServerPath}\"",
-                _ => null
-            };
-
-            if (mcpSetup != null)
-            {
-                builder.AddSetup(mcpSetup);
-                // Clear screen to hide MCP setup messages (e.g., "already added" warnings)
-                builder.AddSetup("clear");
-            }
-        }
-
-        var environment = new Dictionary<string, string>
-        {
-            ["LANG"] = "en_US.UTF-8",
-            ["LC_ALL"] = "en_US.UTF-8",
-            ["PYTHONIOENCODING"] = "utf-8"
-        };
-
-        if (!string.IsNullOrEmpty(envName))
-        {
-            var envVars = _envService.GetEnvironmentVariables(envName, llm);
-            foreach (var kvp in envVars)
-                environment[kvp.Key] = kvp.Value;
-        }
-
-        return (builder.Build(), environment);
+        _commandService = commandService;
     }
 
     /// <summary>
@@ -78,17 +23,19 @@ public class TerminalRunner
     public async Task<(Terminal terminal, string sessionId, IRemoteTerminalConnection? remoteConnection)> CreateSessionAsync(
         LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct, string? title = null, bool makeRemote = false)
     {
-        var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, makeRemote, ct);
-        var (command, environment) = PrepareSession(llm, envName, extraArgs);
+        var shouldEnableRemote = ShouldEnableRemote(makeRemote);
+        var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct);
+        var (command, environment) = _commandService.PrepareSession(llm, envName, extraArgs);
 
         var terminal = await Terminal.CreateAsync(workDir, environment, title: title, ct: ct);
 
         // Always wire up DB logging
         terminal.Subscribe(new DbLoggingConsumer(_stateService, sessionId));
 
-        // Connect to remote server if remote access is enabled AND user wants remote
+        // For now, any configured instance defaults to remote-enabled sessions.
+        // Keep makeRemote in the signature so explicit per-session controls can be reintroduced later.
         IRemoteTerminalConnection? activeRemoteConn = null;
-        if (ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey()) && makeRemote)
+        if (shouldEnableRemote)
         {
             var remoteConn = new RemoteTerminalConnection();
             await remoteConn.ConnectAsync(sessionId, ct);
@@ -108,11 +55,28 @@ public class TerminalRunner
                 {
                     try
                     {
-                        terminal.Resize(cols, rows);
+                        TerminalResizeCoordinator.ApplyResize(
+                            terminal,
+                            _stateService,
+                            sessionId,
+                            cols,
+                            rows,
+                            TerminalIoSource.RemoteWebUi);
                     }
                     catch (Exception ex)
                     {
                         Log.Error(ex, "[Remote] Failed to resize PTY to {Cols}x{Rows}", cols, rows);
+                    }
+                };
+                remoteConn.OnCommandReceived += (command, payload) =>
+                {
+                    try
+                    {
+                        _stateService.RecordRemoteCommand(sessionId, command, payload, TerminalIoSource.RemoteWebUi);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "[Remote] Failed to handle custom command {Command}", command);
                     }
                 };
                 remoteConn.OnReplayRequested += () =>
@@ -137,6 +101,12 @@ public class TerminalRunner
         await terminal.SendCommandAsync(command, ct);
 
         return (terminal, sessionId, activeRemoteConn);
+    }
+
+    private static bool ShouldEnableRemote(bool makeRemoteRequested)
+    {
+        _ = makeRemoteRequested;
+        return ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey());
     }
 
     /// <summary>
@@ -170,6 +140,7 @@ public class TerminalRunner
             try { exitCode = terminal.ExitCode; } catch { }
         }
 
+        TerminalResizeCoordinator.ClearSession(sessionId);
         await _stateService.CompleteSessionAsync(sessionId, exitCode);
         return exitCode;
     }
@@ -228,6 +199,7 @@ public class TerminalRunner
             try { exitCode = terminal.ExitCode; } catch { }
         }
 
+        TerminalResizeCoordinator.ClearSession(sessionId);
         await _stateService.CompleteSessionAsync(sessionId, exitCode);
         return exitCode;
     }
