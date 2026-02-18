@@ -7,6 +7,19 @@ using VibeRails.Services.Terminal.Consumers;
 
 namespace VibeRails.Services.Terminal;
 
+public sealed record TerminalSnapshot(
+    string SessionId,
+    DateTimeOffset CapturedUtc,
+    int Cols,
+    int Rows,
+    byte[] ReplayBuffer,
+    string Utf8Text);
+
+public sealed record TerminalImageCaptureResult(
+    bool Success,
+    byte[]? PngBytes,
+    string Message);
+
 public interface ITerminalSessionService
 {
     bool HasActiveSession { get; }
@@ -18,6 +31,9 @@ public interface ITerminalSessionService
     void RegisterExternalTerminal(Terminal terminal, string sessionId);
     Task UnregisterTerminalAsync();
     Task DisconnectLocalViewerAsync(string reason);
+    Task<bool> SendRemoteCommandAsync(string command, string? payload = null, CancellationToken cancellationToken = default);
+    Task<TerminalSnapshot?> CaptureSnapshotAsync(CancellationToken cancellationToken = default);
+    Task<TerminalImageCaptureResult> CaptureImageSnapshotAsync(CancellationToken cancellationToken = default);
 }
 
 public class TerminalSessionService : ITerminalSessionService
@@ -44,7 +60,8 @@ public class TerminalSessionService : ITerminalSessionService
         ITerminalIoObserverService ioObserverService)
     {
         _stateService = new TerminalStateService(dbService, gitService, remoteStateService, ioObserverService);
-        _runner = new TerminalRunner(_stateService, envService, mcpSettings);
+        var commandService = new CommandService(envService, mcpSettings);
+        _runner = new TerminalRunner(_stateService, commandService);
     }
 
     public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false)
@@ -173,13 +190,20 @@ public class TerminalSessionService : ITerminalSessionService
     public async Task UnregisterTerminalAsync()
     {
         WebSocket? wsToClose;
+        string? sessionIdToClear;
         lock (s_lock)
         {
+            sessionIdToClear = s_sessionId;
             s_terminal = null;
             s_sessionId = null;
             s_externallyOwned = false;
             wsToClose = s_activeWebSocket;
             s_activeWebSocket = null;
+        }
+
+        if (!string.IsNullOrEmpty(sessionIdToClear))
+        {
+            TerminalResizeCoordinator.ClearSession(sessionIdToClear);
         }
 
         if (wsToClose?.State == WebSocketState.Open)
@@ -233,6 +257,54 @@ public class TerminalSessionService : ITerminalSessionService
                 Log.Error(ex, "[Terminal] Error disconnecting local viewer");
             }
         }
+    }
+
+    public async Task<bool> SendRemoteCommandAsync(string command, string? payload = null, CancellationToken cancellationToken = default)
+    {
+        string? sessionId;
+        lock (s_lock)
+        {
+            sessionId = s_sessionId;
+        }
+
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return false;
+
+        return await _stateService.SendRemoteCommandAsync(sessionId, command, payload, cancellationToken);
+    }
+
+    public Task<TerminalSnapshot?> CaptureSnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        Terminal? terminal;
+        string? sessionId;
+        lock (s_lock)
+        {
+            terminal = s_terminal;
+            sessionId = s_sessionId;
+        }
+
+        if (terminal == null || sessionId == null)
+            return Task.FromResult<TerminalSnapshot?>(null);
+
+        var replay = terminal.GetReplayBuffer();
+        var text = System.Text.Encoding.UTF8.GetString(replay);
+        var snapshot = new TerminalSnapshot(
+            sessionId,
+            DateTimeOffset.UtcNow,
+            terminal.Cols,
+            terminal.Rows,
+            replay,
+            text);
+
+        return Task.FromResult<TerminalSnapshot?>(snapshot);
+    }
+
+    public Task<TerminalImageCaptureResult> CaptureImageSnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(new TerminalImageCaptureResult(
+            Success: false,
+            PngBytes: null,
+            Message: "Server-side terminal image capture is not implemented yet. Use replay text/ANSI snapshot for now."));
     }
 
     private static async Task WebSocketInputLoopAsync(
@@ -289,7 +361,13 @@ public class TerminalSessionService : ITerminalSessionService
                 {
                     try
                     {
-                        terminal.Resize(cols, rows);
+                        TerminalResizeCoordinator.ApplyResize(
+                            terminal,
+                            stateService,
+                            sessionId,
+                            cols,
+                            rows,
+                            TerminalIoSource.LocalWebUi);
                     }
                     catch (Exception ex)
                     {
@@ -352,11 +430,18 @@ public class TerminalSessionService : ITerminalSessionService
     private static async Task CleanupAsync()
     {
         Terminal? terminalToDispose;
+        string? sessionIdToClear;
         lock (s_lock)
         {
+            sessionIdToClear = s_sessionId;
             terminalToDispose = s_externallyOwned ? null : s_terminal;
             s_terminal = null;
             s_sessionId = null;
+        }
+
+        if (!string.IsNullOrEmpty(sessionIdToClear))
+        {
+            TerminalResizeCoordinator.ClearSession(sessionIdToClear);
         }
 
         if (terminalToDispose != null)

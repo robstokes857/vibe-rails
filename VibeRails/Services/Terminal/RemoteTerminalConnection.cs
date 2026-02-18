@@ -24,6 +24,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
     public event Action? OnReplayRequested;
     public event Action? OnBrowserDisconnected;
     public event Action<int, int>? OnResizeRequested;
+    public event Action<string, string?>? OnCommandReceived;
     public bool IsConnected => _socket?.State == WebSocketState.Open;
 
     public async Task ConnectAsync(string sessionId, CancellationToken ct)
@@ -78,6 +79,12 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
 
         TryQueueFrame(WebSocketMessageType.Text, Encoding.UTF8.GetBytes(message));
         return Task.CompletedTask;
+    }
+
+    public Task SendCommandAsync(string command, string? payload = null)
+    {
+        var message = TerminalControlProtocol.BuildCommand(command, payload);
+        return SendControlAsync(message);
     }
 
     private async Task ReceiveLoopAsync(CancellationToken ct)
@@ -147,6 +154,11 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                         if (TerminalControlProtocol.TryParseResizeCommand(text, out var cols, out var rows))
                         {
                             OnResizeRequested?.Invoke(cols, rows);
+                            continue;
+                        }
+                        if (TerminalControlProtocol.TryParseCommand(text, out var command, out var payload))
+                        {
+                            OnCommandReceived?.Invoke(command, payload);
                             continue;
                         }
                     }

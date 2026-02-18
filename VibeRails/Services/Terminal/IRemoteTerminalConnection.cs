@@ -10,9 +10,11 @@ public interface IRemoteTerminalConnection : IAsyncDisposable
     Task ConnectAsync(string sessionId, CancellationToken ct);
     Task SendOutputAsync(ReadOnlyMemory<byte> data);
     Task SendControlAsync(string message);
+    Task SendCommandAsync(string command, string? payload = null);
     event Action<byte[]> OnInputReceived;
     event Action? OnReplayRequested;
     event Action? OnBrowserDisconnected;
     event Action<int, int>? OnResizeRequested;
+    event Action<string, string?>? OnCommandReceived;
     bool IsConnected { get; }
 }

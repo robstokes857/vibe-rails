@@ -28,12 +28,6 @@ export class TerminalController {
             if (cli) body.cli = cli;
             if (environmentName) body.environmentName = environmentName;
 
-            // Check if Make Remote toggle is checked
-            const makeRemoteCheckbox = document.querySelector('#terminal-make-remote');
-            if (makeRemoteCheckbox?.checked) {
-                body.makeRemote = true;
-            }
-
             const response = await this.app.apiCall('/api/v1/terminal/start', 'POST', body);
 
             if (response.hasActiveSession) {
@@ -279,23 +273,25 @@ export class TerminalController {
                             <option value="codex">Codex</option>
                             <option value="gemini">Gemini</option>
                         </select>
-                        <div class="form-check form-switch ms-2" id="terminal-make-remote-toggle" style="display: none;">
-                            <input class="form-check-input" type="checkbox" id="terminal-make-remote" title="Share this session with remote VibeRails-Front server">
-                            <label class="form-check-label small" for="terminal-make-remote">Make Remote</label>
-                        </div>
-                        <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1" id="terminal-start-btn">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                        <button class="btn btn-sm btn-outline-info d-inline-flex align-items-center gap-1" id="terminal-start-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814z"/>
                                 <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1z"/>
                             </svg>
                             <span>Start</span>
                         </button>
-                        <button class="btn btn-sm btn-outline-light d-none" id="terminal-reconnect-btn" title="Reconnect to active session">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
-                            Reconnect
+                        <button class="btn btn-sm btn-outline-light d-none d-inline-flex align-items-center gap-1" id="terminal-reconnect-btn" title="Reconnect to active session">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
+                                <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
+                            </svg>
+                            <span>Reconnect</span>
                         </button>
-                        <button class="btn btn-sm btn-danger d-none" id="terminal-stop-btn">
-                            Stop
+                        <button class="btn btn-sm btn-outline-warning d-none d-inline-flex align-items-center gap-1" id="terminal-stop-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M5 3.5h6A1.5 1.5 0 0 1 12.5 5v6a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 11V5A1.5 1.5 0 0 1 5 3.5"/>
+                            </svg>
+                            <span>Stop</span>
                         </button>
                     </div>
                 </div>
@@ -354,21 +350,6 @@ export class TerminalController {
     async bindTerminalActions(container, preselectedEnvId = null) {
         // Populate selector with environments
         await this.populateTerminalSelector(container, preselectedEnvId);
-
-        // Check if remote access is configured and show/hide Make Remote toggle
-        try {
-            const settings = await this.app.apiCall('/api/v1/settings', 'GET');
-            const makeRemoteToggle = container.querySelector('#terminal-make-remote-toggle');
-            if (makeRemoteToggle) {
-                if (settings.remoteAccess && settings.apiKey) {
-                    makeRemoteToggle.style.removeProperty('display');
-                } else {
-                    makeRemoteToggle.style.display = 'none';
-                }
-            }
-        } catch (error) {
-            console.error('Failed to fetch settings for Make Remote toggle:', error);
-        }
 
         const startBtn = container.querySelector('#terminal-start-btn');
         const reconnectBtn = container.querySelector('#terminal-reconnect-btn');
@@ -440,12 +421,6 @@ export class TerminalController {
         if (options.environmentName) body.environmentName = options.environmentName;
         if (options.workingDirectory) body.workingDirectory = options.workingDirectory;
         if (options.title) body.title = options.title;
-
-        // Check if Make Remote toggle is checked
-        const makeRemoteCheckbox = document.querySelector('#terminal-make-remote');
-        if (makeRemoteCheckbox?.checked) {
-            body.makeRemote = true;
-        }
 
         try {
             const response = await this.app.apiCall('/api/v1/terminal/start', 'POST', body);

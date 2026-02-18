@@ -431,6 +431,48 @@ code {
     box-shadow: 0 0 0 0.2rem rgba(229, 115, 115, 0.25);
 }
 
+.btn-outline-warning {
+    border: 1px solid #d4a03c;
+    color: #ffe0a3;
+    background: rgba(212, 160, 60, 0.08);
+    font-weight: 600;
+}
+
+.btn-outline-warning:hover {
+    color: #ffffff;
+    background: #b8882e;
+    border-color: #e0b45a;
+}
+
+.btn-outline-warning:focus,
+.btn-outline-warning:active {
+    color: #ffffff;
+    background: #9a7226;
+    border-color: #e0b45a;
+    box-shadow: 0 0 0 0.2rem rgba(212, 160, 60, 0.25);
+}
+
+.btn-outline-info {
+    border: 1px solid #5a9fb8;
+    color: #b3dff0;
+    background: rgba(90, 159, 184, 0.08);
+    font-weight: 600;
+}
+
+.btn-outline-info:hover {
+    color: #ffffff;
+    background: #4a8a9f;
+    border-color: #7bb8cf;
+}
+
+.btn-outline-info:focus,
+.btn-outline-info:active {
+    color: #ffffff;
+    background: #3d7385;
+    border-color: #7bb8cf;
+    box-shadow: 0 0 0 0.2rem rgba(90, 159, 184, 0.25);
+}
+
 /* Status Elements */
 .status-indicator {
     width: 12px;

@@ -67,7 +67,10 @@ namespace VibeRails.Services.LlmClis
                 },
                 LLM.Gemini => new Dictionary<string, string>
                 {
-                    ["GEMINI_CONFIG_DIR"] = Path.Combine(envPath, "gemini")
+                    ["XDG_CONFIG_HOME"] = Path.Combine(envPath, "gemini", "config"),
+                    ["XDG_DATA_HOME"] = Path.Combine(envPath, "gemini", "data"),
+                    ["XDG_CACHE_HOME"] = Path.Combine(envPath, "gemini", "cache"),
+                    ["XDG_STATE_HOME"] = Path.Combine(envPath, "gemini", "state")
                 },
                 _ => new Dictionary<string, string>()
             };

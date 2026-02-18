@@ -6,4 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Prevent stale generated code under artifacts/ from being compiled. -->
+    <Compile Remove="artifacts\**\*.cs" />
+  </ItemGroup>
+
 </Project>

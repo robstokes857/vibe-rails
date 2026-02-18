@@ -17,19 +17,25 @@ public sealed class Terminal : IAsyncDisposable
     private readonly List<ITerminalConsumer> _consumers = [];
     private Task? _readLoop;
     private bool _disposed;
+    private int _cols;
+    private int _rows;
 
     public int Pid => _pty.Pid;
     public int ExitCode => _pty.ExitCode;
+    public int Cols => _cols;
+    public int Rows => _rows;
 
     /// <summary>
     /// Event fired when the PTY process exits (naturally or via kill).
     /// </summary>
     public event EventHandler<int>? Exited;
 
-    private Terminal(IPtyConnection pty, int replayBufferSize)
+    private Terminal(IPtyConnection pty, int replayBufferSize, int cols, int rows)
     {
         _pty = pty;
         _outputBuffer = new CircularBuffer(replayBufferSize);
+        _cols = cols;
+        _rows = rows;
     }
 
     /// <summary>
@@ -57,7 +63,7 @@ public sealed class Terminal : IAsyncDisposable
         };
 
         var pty = await PtyProvider.SpawnAsync(options, ct);
-        var terminal = new Terminal(pty, replayBufferSize);
+        var terminal = new Terminal(pty, replayBufferSize, cols, rows);
 
         // Set terminal title via ANSI escape sequence if provided
         if (!string.IsNullOrEmpty(title))
@@ -143,7 +149,12 @@ public sealed class Terminal : IAsyncDisposable
     /// <summary>
     /// Resize the PTY dimensions.
     /// </summary>
-    public void Resize(int cols, int rows) => _pty.Resize(cols, rows);
+    public void Resize(int cols, int rows)
+    {
+        _pty.Resize(cols, rows);
+        _cols = cols;
+        _rows = rows;
+    }
 
     public async ValueTask DisposeAsync()
     {

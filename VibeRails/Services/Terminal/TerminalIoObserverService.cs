@@ -9,11 +9,23 @@ namespace VibeRails.Services.Terminal;
 public interface ITerminalIoObserver
 {
     ValueTask OnTerminalIoAsync(TerminalIoEvent ioEvent, CancellationToken cancellationToken = default);
+
+    ValueTask OnTerminalResizeAsync(TerminalResizeEvent resizeEvent, CancellationToken cancellationToken = default)
+        => ValueTask.CompletedTask;
+
+    ValueTask OnTerminalIdleAsync(TerminalIdleEvent idleEvent, CancellationToken cancellationToken = default)
+        => ValueTask.CompletedTask;
+
+    ValueTask OnTerminalRemoteCommandAsync(TerminalRemoteCommandEvent commandEvent, CancellationToken cancellationToken = default)
+        => ValueTask.CompletedTask;
 }
 
 public interface ITerminalIoObserverService
 {
     void Publish(TerminalIoEvent ioEvent);
+    void PublishResize(TerminalResizeEvent resizeEvent);
+    void PublishIdle(TerminalIdleEvent idleEvent);
+    void PublishRemoteCommand(TerminalRemoteCommandEvent commandEvent);
 }
 
 /// <summary>
@@ -40,6 +52,39 @@ public sealed class TerminalIoObserverService : ITerminalIoObserverService
         }
     }
 
+    public void PublishResize(TerminalResizeEvent resizeEvent)
+    {
+        if (_observers.Count == 0)
+            return;
+
+        foreach (var observer in _observers)
+        {
+            _ = NotifyResizeAsync(observer, resizeEvent);
+        }
+    }
+
+    public void PublishIdle(TerminalIdleEvent idleEvent)
+    {
+        if (_observers.Count == 0)
+            return;
+
+        foreach (var observer in _observers)
+        {
+            _ = NotifyIdleAsync(observer, idleEvent);
+        }
+    }
+
+    public void PublishRemoteCommand(TerminalRemoteCommandEvent commandEvent)
+    {
+        if (_observers.Count == 0)
+            return;
+
+        foreach (var observer in _observers)
+        {
+            _ = NotifyRemoteCommandAsync(observer, commandEvent);
+        }
+    }
+
     private static async Task NotifyAsync(ITerminalIoObserver observer, TerminalIoEvent ioEvent)
     {
         try
@@ -51,5 +96,40 @@ public sealed class TerminalIoObserverService : ITerminalIoObserverService
             Log.Error(ex, "[TerminalIoObserverService] Observer error");
         }
     }
-}
 
+    private static async Task NotifyResizeAsync(ITerminalIoObserver observer, TerminalResizeEvent resizeEvent)
+    {
+        try
+        {
+            await observer.OnTerminalResizeAsync(resizeEvent, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[TerminalIoObserverService] Resize observer error");
+        }
+    }
+
+    private static async Task NotifyIdleAsync(ITerminalIoObserver observer, TerminalIdleEvent idleEvent)
+    {
+        try
+        {
+            await observer.OnTerminalIdleAsync(idleEvent, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[TerminalIoObserverService] Idle observer error");
+        }
+    }
+
+    private static async Task NotifyRemoteCommandAsync(ITerminalIoObserver observer, TerminalRemoteCommandEvent commandEvent)
+    {
+        try
+        {
+            await observer.OnTerminalRemoteCommandAsync(commandEvent, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[TerminalIoObserverService] Remote command observer error");
+        }
+    }
+}
