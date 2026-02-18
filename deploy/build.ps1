@@ -76,17 +76,14 @@ function Publish-AotLinuxViaDocker([string]$projectPath, [string]$rid, [string]$
     $containerRepo = "/src"
     $containerOut  = "/out"
 
-    $dotnetArgs = @(
-        "publish", "$containerRepo/$projectRel",
-        "-c", $Configuration,
-        "-f", $Framework,
-        "-r", $rid,
-        "--self-contained", "true",
-        "-o", $containerOut,
-        "/p:PublishAot=true",
-        "/p:StripSymbols=true",
-        "/p:InvariantGlobalization=true"
-    )
+    # Run a shell command that cleans Windows-generated obj/ dirs before publishing.
+    # The mounted repo contains obj/ from the local Windows build which embeds
+    # Windows-only NuGet fallback paths that don't exist inside the Linux container.
+    $publishCmd = "dotnet publish $containerRepo/$projectRel" +
+        " -c $Configuration -f $Framework -r $rid --self-contained true -o $containerOut" +
+        " /p:PublishAot=true /p:StripSymbols=true /p:InvariantGlobalization=true"
+
+    $shellCmd = "find $containerRepo -name obj -type d -exec rm -rf {} + 2>/dev/null; $publishCmd"
 
     $dockerArgs = @(
         "run","--rm",
@@ -94,8 +91,8 @@ function Publish-AotLinuxViaDocker([string]$projectPath, [string]$rid, [string]$
         "-v","$((Resolve-Path $outDir).Path):${containerOut}",
         "-w",$containerRepo,
         $image,
-        "dotnet"
-    ) + $dotnetArgs
+        "bash","-c",$shellCmd
+    )
 
     Write-Host "`n==> docker $($dockerArgs -join ' ')" -ForegroundColor Cyan
     & docker @dockerArgs
