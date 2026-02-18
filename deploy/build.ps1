@@ -64,6 +64,7 @@ function Publish-AotLocal([string]$projectPath, [string]$rid, [string]$outDir) {
 
     Write-Host "`n==> dotnet $($args -join ' ')" -ForegroundColor Cyan
     & dotnet @args
+    if ($LASTEXITCODE -ne 0) { throw "dotnet publish ($rid) failed with exit code $LASTEXITCODE" }
 }
 
 function Publish-AotLinuxViaDocker([string]$projectPath, [string]$rid, [string]$outDir, [string]$image, [string]$repoRoot) {
@@ -98,6 +99,7 @@ function Publish-AotLinuxViaDocker([string]$projectPath, [string]$rid, [string]$
 
     Write-Host "`n==> docker $($dockerArgs -join ' ')" -ForegroundColor Cyan
     & docker @dockerArgs
+    if ($LASTEXITCODE -ne 0) { throw "Docker Linux AOT build failed with exit code $LASTEXITCODE" }
 
     # Fix any files with embedded carriage returns in their names (Windows line ending issue)
     $outDirResolved = (Resolve-Path $outDir).Path
