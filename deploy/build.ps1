@@ -76,26 +76,24 @@ function Publish-AotLinuxViaDocker([string]$projectPath, [string]$rid, [string]$
     $containerRepo = "/src"
     $containerOut  = "/out"
 
-    # Run a shell command that cleans Windows-generated obj/ dirs before publishing.
-    # The mounted repo contains obj/ from the local Windows build which embeds
-    # Windows-only NuGet fallback paths that don't exist inside the Linux container.
-    $publishCmd = "dotnet publish $containerRepo/$projectRel" +
+    # Copy source into the container (excluding obj/bin) so the Windows-generated
+    # obj/ dirs (which embed Windows-only NuGet fallback paths) are never seen.
+    $containerWork = "/work"
+    $publishCmd = "dotnet publish $containerWork/$projectRel" +
         " -c $Configuration -f $Framework -r $rid --self-contained true -o $containerOut" +
         " /p:PublishAot=true /p:StripSymbols=true /p:InvariantGlobalization=true"
 
-    $shellCmd = "find $containerRepo -name obj -type d -exec rm -rf {} + 2>/dev/null; $publishCmd"
+    $shellCmd = "cp -a $containerRepo/. $containerWork/ && find $containerWork \( -name obj -o -name bin \) -type d -exec rm -rf {} + 2>/dev/null; $publishCmd"
 
-    $dockerArgs = @(
-        "run","--rm",
-        "-v","${repoRoot}:${containerRepo}",
-        "-v","$((Resolve-Path $outDir).Path):${containerOut}",
-        "-w",$containerRepo,
-        $image,
-        "bash","-c",$shellCmd
-    )
+    $outDirAbs = (Resolve-Path $outDir).Path
 
-    Write-Host "`n==> docker $($dockerArgs -join ' ')" -ForegroundColor Cyan
-    & docker @dockerArgs
+    Write-Host "`n==> docker run --rm ... bash -c `"$shellCmd`"" -ForegroundColor Cyan
+    & docker run --rm `
+        -v "${repoRoot}:${containerRepo}:ro" `
+        -v "${outDirAbs}:${containerOut}" `
+        -w $containerWork `
+        $image `
+        bash -c "$shellCmd"
     if ($LASTEXITCODE -ne 0) { throw "Docker Linux AOT build failed with exit code $LASTEXITCODE" }
 
     # Fix any files with embedded carriage returns in their names (Windows line ending issue)
