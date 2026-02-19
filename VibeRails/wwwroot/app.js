@@ -27,6 +27,7 @@ export class VibeControlApp {
             isLocal: false,
             configs: null
         };
+        this.hostUnreachableToastShown = false;
         
         // Initialize Controllers
         this.agentController = new AgentController(this);
@@ -54,6 +55,16 @@ export class VibeControlApp {
     setupVSCodeIntegration() {
         // Apply VS Code-specific UI adjustments when in webview
         if (window.__viberails_VSCODE__) {
+            const exitBtn = document.getElementById('vscode-exit-btn');
+            if (exitBtn) {
+                exitBtn.style.display = 'block';
+                exitBtn.addEventListener('click', () => {
+                    if (window.__viberails_close__) {
+                        window.__viberails_close__();
+                    }
+                });
+            }
+
             // Hide "Edit in VS Code" button since we're already in VS Code
             const editVsCodeCard = document.querySelector('[data-agent-action="edit-vscode"]');
             if (editVsCodeCard) {
@@ -460,6 +471,28 @@ export class VibeControlApp {
         }
     }
 
+    getHostUnreachableMessage() {
+        return 'Cannot reach the VibeRails host. It may have stopped. Relaunch VibeRails, then refresh this page.';
+    }
+
+    isHostUnreachableError(error) {
+        if (!error) return false;
+        if (error.name === 'HostUnreachableError') return true;
+        if (!(error instanceof TypeError)) return false;
+
+        const message = (error.message || '').toLowerCase();
+        return message.includes('failed to fetch')
+            || message.includes('load failed')
+            || message.includes('networkerror')
+            || message.includes('network error');
+    }
+
+    notifyHostUnreachable() {
+        if (this.hostUnreachableToastShown) return;
+        this.hostUnreachableToastShown = true;
+        this.showToast('Host Unreachable', this.getHostUnreachableMessage(), 'error');
+    }
+
     // ============================================ 
     // API Calls
     // ============================================ 
@@ -475,6 +508,7 @@ export class VibeControlApp {
             if (data) options.body = JSON.stringify(data);
             const baseUrl = window.__viberails_API_BASE__ || '';
             const response = await fetch(baseUrl + endpoint, options);
+            this.hostUnreachableToastShown = false;
 
             if (response.status === 401) {
                 if (window.__viberails_VSCODE__) {
@@ -488,6 +522,12 @@ export class VibeControlApp {
             if (!response.ok) throw new Error(`API call failed: ${response.statusText}`);
             return await response.json();
         } catch (error) {
+            if (this.isHostUnreachableError(error)) {
+                this.notifyHostUnreachable();
+                const hostError = new Error(this.getHostUnreachableMessage());
+                hostError.name = 'HostUnreachableError';
+                throw hostError;
+            }
             console.error('API Error:', error);
             throw error;
         } finally {
