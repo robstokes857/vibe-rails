@@ -20,6 +20,8 @@ namespace VibeRails.Utils
         public const string CONFIG_FILENAME = "config.json";
         public const string STATE_FILENAME = "state.db";
         public const string SETTINGS_FILENAME = "settings.json";
+        public const string LOG_SUBDIR = "log";
+        public const string MCP_LOG_SUBDIR = "mcp";
         public const string MCP_LOG_FILENAME = "mcp-server.log";
 
         // Vector database file names

@@ -1,6 +1,7 @@
 # Development files
 .vscode/**
 .vscode-test/**
+.claude/**
 src/**
 node_modules/**
 .gitignore
@@ -21,10 +22,6 @@ AGENTS.md
 
 # Exclude all bin directories by default
 bin/**
-
-# Note: vsce doesn't support conditional includes based on --target
-# We need to manually package each platform separately
-# This is handled by the package-platforms.ps1 script
 
 # Git files
 .git
