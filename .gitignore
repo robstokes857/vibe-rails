@@ -370,3 +370,4 @@ FodyWeavers.xsd
 /vscode-viberails/nul
 /VibeRails/.claude/settings.local.json
 deploy/local_deploy.ps1
+/vscode-viberails/.claude/settings.local.json
