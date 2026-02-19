@@ -251,7 +251,7 @@ export class VibeControlApp {
     // Shared Logic (Used by multiple controllers)
     // ============================================ 
 
-    renderLocalFileTree() {
+    renderLocalFileTree(container) {
         if (this.data.agents.length === 0) {
             return `
                 <div class="agent-files-empty">
@@ -261,9 +261,9 @@ export class VibeControlApp {
             `;
         }
 
-        return `
+        const html = `
             <div class="agent-files-tree">
-                ${this.data.agents.map(agent => {
+                ${this.data.agents.map((agent, idx) => {
                     const parts = agent.path.split(/[\\/]/);
                     const fileName = parts.pop();
                     const dirPath = parts.length > 0 ? parts.join('/') + '/' : '';
@@ -274,7 +274,7 @@ export class VibeControlApp {
                         : `<span class="agent-file-tree-name agent-file-tree-name--path">${dirPath}${fileName}</span>`;
 
                     return `
-                    <div class="agent-file-tree-item" onclick="app.navigate('agent-edit', ${JSON.stringify(agent).replace(/"/g, '&quot;')})">
+                    <div class="agent-file-tree-item" data-agent-tree-index="${idx}" style="cursor:pointer;">
                         <div class="agent-file-tree-icon">&#x1F4DD;</div>
                         <div class="agent-file-tree-info">
                             ${infoHtml}
@@ -284,6 +284,21 @@ export class VibeControlApp {
                 `}).join('')}
             </div>
         `;
+
+        // If a container is provided, bind click handlers after setting innerHTML
+        if (container) {
+            setTimeout(() => {
+                container.querySelectorAll('[data-agent-tree-index]').forEach(el => {
+                    const idx = parseInt(el.dataset.agentTreeIndex);
+                    const agent = this.data.agents[idx];
+                    if (agent) {
+                        el.addEventListener('click', () => this.navigate('agent-edit', agent));
+                    }
+                });
+            }, 0);
+        }
+
+        return html;
     }
 
     async launchCliForProject(projectPath, cliName) {
@@ -347,7 +362,7 @@ export class VibeControlApp {
                     <small class="form-text text-muted">Enter a friendly name to identify this project in your history.</small>
                 </div>
                 <div class="d-flex gap-2 justify-content-end">
-                    <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save Custom Name</button>
                 </div>
             </form>
@@ -392,7 +407,7 @@ export class VibeControlApp {
                     <div class="modal-content">
                         <div class="modal-header">
                             <h5 class="modal-title">${escapedTitle}</h5>
-                            <button type="button" class="btn-close" onclick="app.closeModal()"></button>
+                            <button type="button" class="btn-close" data-action="close-modal"></button>
                         </div>
                         <div class="modal-body">
                             ${content}
@@ -402,6 +417,9 @@ export class VibeControlApp {
             </div>
             <div class="modal-backdrop fade show"></div>
         `;
+        // Bind all close buttons without inline handlers (CSP-safe)
+        modalContainer.querySelectorAll('[data-action="close-modal"]')
+            .forEach(btn => btn.addEventListener('click', () => this.closeModal()));
     }
 
     closeModal() {
@@ -411,9 +429,7 @@ export class VibeControlApp {
 
     showToast(title, message, type = 'info') {
         const toastContainer = document.getElementById('toast-container');
-        const toastId = 'toast-' + Date.now();
         const toast = document.createElement('div');
-        toast.id = toastId;
         toast.className = `toast ${type} show`;
         // Escape title and message to prevent XSS
         const escapedTitle = this.escapeHtml(title);
@@ -421,10 +437,12 @@ export class VibeControlApp {
         toast.innerHTML = `
             <div class="toast-header">
                 <strong class="me-auto">${escapedTitle}</strong>
-                <button type="button" class="btn-close" onclick="document.getElementById('${toastId}').remove()"></button>
+                <button type="button" class="btn-close" data-action="dismiss-toast"></button>
             </div>
             <div class="toast-body">${escapedMessage}</div>
         `;
+        toast.querySelector('[data-action="dismiss-toast"]')
+            .addEventListener('click', () => toast.remove());
         toastContainer.appendChild(toast);
         setTimeout(() => toast.remove(), 5000);
     }
@@ -459,6 +477,10 @@ export class VibeControlApp {
             const response = await fetch(baseUrl + endpoint, options);
 
             if (response.status === 401) {
+                if (window.__viberails_VSCODE__) {
+                    // In VS Code webview, can't redirect - show error
+                    throw new Error('Session expired. Close and reopen the VibeRails panel to re-authenticate.');
+                }
                 window.location.href = (baseUrl || '') + '/auth/bootstrap';
                 throw new Error('Unauthorized');
             }

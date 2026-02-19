@@ -29,8 +29,8 @@
         "command": "viberails.open",
         "title": "VibeRails: Open Dashboard",
         "icon": {
-          "light": "media/icon.svg",
-          "dark": "media/icon.svg"
+          "light": "media/vs-logo.png",
+          "dark": "media/vs-logo.png"
         }
       }
     ],
@@ -50,6 +50,11 @@
           "type": "string",
           "default": "",
           "description": "Path to the VibeRails executable. If empty, the extension will look for it in common locations."
+        },
+        "viberails.devWwwroot": {
+          "type": "string",
+          "default": "",
+          "description": "Override path to wwwroot for development. If set, this takes priority over bundled and repo-detected wwwroot."
         }
       }
     }

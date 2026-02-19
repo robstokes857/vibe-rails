@@ -103,8 +103,8 @@ _ = Task.Run(async () =>
 
 // Configure middleware and routes BEFORE CliLoop so the app is ready to serve in all modes
 app.UseCors("VSCodeWebview");
-app.UseMiddleware<CookieAuthMiddleware>();  // Auth checks happen FIRST
 app.UseWebSockets();
+app.UseMiddleware<CookieAuthMiddleware>();  // Auth checks happen FIRST
 
 // Static files middleware runs AFTER auth - if auth passes, files are served
 if (Directory.Exists(webRootPath))
@@ -156,6 +156,12 @@ Console.WriteLine();
 Console.WriteLine("(Link expires in 2 minutes and can only be used once)");
 Console.WriteLine("Press Ctrl+C to stop the server.");
 Console.WriteLine();
+
+if (args.Any(a => a.Contains( "--vs")))
+{
+    //add a switch later for versions
+    Console.WriteLine($"vs-code-v1={bootstrapUrl}");
+}
 
 // Launch browser if any browser flag is passed
 if (args.Any(a => a is "--open-browser" or "--launch-browser" or "--launch-web" or "--web"))

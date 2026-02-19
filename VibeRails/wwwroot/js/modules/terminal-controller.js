@@ -125,6 +125,8 @@ export class TerminalController {
             wsUrl = `${wsProtocol}//${window.location.host}/api/v1/terminal/ws`;
         }
 
+        // Auth is handled by cookie (browser) or monkey-patched WebSocket (VSCode webview).
+        // No need to put the session token in the URL.
         this.socket = new WebSocket(wsUrl);
         this.socket.binaryType = 'arraybuffer';
 
@@ -260,7 +262,9 @@ export class TerminalController {
                     <div class="terminal-header-main">
                         <div class="d-flex align-items-center gap-2 flex-wrap">
                             <span class="card-title d-inline-flex align-items-center gap-2">
-                                <img src="assets/img/icons/terminal-solid-full.svg" alt="Terminal" style="height: 18px; width: 18px; opacity: 0.85;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 576 512" style="opacity: 0.85;">
+                                    <path d="M9.4 86.6C-3.1 74.1-3.1 53.9 9.4 41.4s32.8-12.5 45.3 0l192 192c12.5 12.5 12.5 32.8 0 45.3l-192 192c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L178.7 256 9.4 86.6zM256 416l288 0c17.7 0 32 14.3 32 32s-14.3 32-32 32l-288 0c-17.7 0-32-14.3-32-32s14.3-32 32-32z"/>
+                                </svg>
                                 Web Terminal
                             </span>
                             <span class="badge bg-secondary" id="terminal-status-badge">Not Started</span>

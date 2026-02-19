@@ -41,7 +41,7 @@ export class SandboxController {
                     </small>
                 </div>
                 <div class="d-flex gap-2 justify-content-end">
-                    <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
                     <button type="submit" class="btn btn-primary d-flex align-items-center gap-2" id="create-sandbox-submit-btn">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
@@ -100,7 +100,7 @@ export class SandboxController {
                 <p class="text-muted small px-4">This will permanently delete the sandbox directory and all its contents. This action cannot be undone.</p>
             </div>
             <div class="d-flex gap-2 justify-content-end">
-                <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
                 <button type="button" class="btn btn-danger" id="confirm-delete-sandbox-btn">Delete Sandbox</button>
             </div>
         `);
@@ -260,7 +260,7 @@ export class SandboxController {
                     <div class="modal-content">
                         <div class="modal-header">
                             <h5 class="modal-title">Code Changes &mdash; ${escapedName}</h5>
-                            <button type="button" class="btn-close" onclick="app.closeModal()"></button>
+                            <button type="button" class="btn-close" data-action="close-modal"></button>
                         </div>
                         <div class="modal-body">
                             <div class="sandbox-diff-empty">Loading changes...</div>
@@ -270,6 +270,9 @@ export class SandboxController {
             </div>
             <div class="modal-backdrop fade show"></div>
         `;
+        // Bind close button (CSP-safe, this modal isn't created via showModal)
+        modalContainer.querySelectorAll('[data-action="close-modal"]')
+            .forEach(btn => btn.addEventListener('click', () => this.app.closeModal()));
 
         try {
             const [monacoInstance, diffData] = await Promise.all([
@@ -320,7 +323,7 @@ export class SandboxController {
                     <div class="modal-content">
                         <div class="modal-header">
                             <h5 class="modal-title">Code Changes &mdash; ${escapedName}</h5>
-                            <button type="button" class="btn-close" onclick="app.closeModal()"></button>
+                            <button type="button" class="btn-close" data-action="close-modal"></button>
                         </div>
                         <div class="modal-body">
                             <div class="sandbox-diff-sidebar">
@@ -354,6 +357,10 @@ export class SandboxController {
             </div>
             <div class="modal-backdrop fade show"></div>
         `;
+
+        // Bind close button (CSP-safe, this modal isn't created via showModal)
+        modalContainer.querySelectorAll('[data-action="close-modal"]')
+            .forEach(btn => btn.addEventListener('click', () => this.app.closeModal()));
 
         // Create diff editor
         const editorContainer = document.getElementById('sandbox-diff-editor');
@@ -465,7 +472,7 @@ export class SandboxController {
                 </p>
             </div>
             <div class="d-flex gap-2 justify-content-end">
-                <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
                 <button type="button" class="btn btn-info" id="confirm-push-btn">Push to Remote</button>
             </div>
         `);
@@ -510,7 +517,7 @@ export class SandboxController {
                 </p>
             </div>
             <div class="d-flex gap-2 justify-content-end">
-                <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
                 <button type="button" class="btn btn-warning" id="confirm-merge-btn">Merge</button>
             </div>
         `);

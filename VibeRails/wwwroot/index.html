@@ -296,6 +296,12 @@
                     <div class="sandbox-card-title">
                         <h5 class="sandbox-card-name" data-sandbox-name></h5>
                         <span class="badge bg-secondary" data-sandbox-branch></span>
+                        <span class="badge bg-dark text-muted" data-sandbox-source-branch style="display: none; font-weight: normal;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 3px;">
+                                <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/>
+                            </svg>
+                            <span data-sandbox-source-branch-text></span>
+                        </span>
                     </div>
                     <div class="sandbox-card-meta">
                         <span data-sandbox-time></span>
@@ -455,8 +461,17 @@
             <div class="row mb-4">
                 <div class="col-12">
                     <div class="card">
-                        <div class="card-header text-uppercase fw-bold" style="letter-spacing: 0.05em;">
-                            <img src="assets/img/icons/handcuffs-solid-full.svg" alt="" class="icon-tone-slate" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom; opacity: 0.85;">Select Agent File To Edit
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span class="text-uppercase fw-bold" style="letter-spacing: 0.05em;">
+                                <img src="assets/img/icons/handcuffs-solid-full.svg" alt="" class="icon-tone-slate" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom; opacity: 0.85;">Select Agent File To Edit
+                            </span>
+                            <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button"
+                                data-action="create-agent-file" title="Create a new AGENTS.md file">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                                </svg>
+                                Add
+                            </button>
                         </div>
                         <div class="card-body">
                             <div data-agent-file-tree></div>
@@ -933,7 +948,7 @@
     <script src="assets/bootstrap.bundle.min.js"></script>
     <script src="assets/xterm/xterm.min.js"></script>
     <script src="assets/monaco/vs/loader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11.0/lib/addon-fit.js"></script>
+    <script src="assets/xterm/addon-fit.js"></script>
     <script src="js/background-effect.js"></script>
     <script type="module" src="app.js"></script>
 </body>

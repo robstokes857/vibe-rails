@@ -95,29 +95,28 @@ export class RuleController {
             this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
             const container = root.querySelector('[data-active-rules]');
             if (container) {
-                container.innerHTML = this.renderActiveRulesTree();
+                container.innerHTML = this.renderActiveRulesTree(container);
             }
         }
 
         content.appendChild(fragment);
     }
 
-    renderActiveRulesTree() {
+    renderActiveRulesTree(container) {
         // Show actual rules from agents
         if (!this.app.data.agents || this.app.data.agents.length === 0) {
             return '<p class="text-muted text-center">No agent files found. Create an AGENTS.md to define rules.</p>';
         }
 
-        return this.app.data.agents.map(agent => {
+        const html = this.app.data.agents.map((agent, idx) => {
             const displayName = agent.customName || agent.name;
-            const agentJson = JSON.stringify(agent).replace(/"/g, '&quot;');
 
             return `
             <div class="card mb-3">
-                <div class="card-header" style="cursor: pointer;" onclick="app.navigate('agent-edit', ${agentJson})">
+                <div class="card-header" style="cursor: pointer;" data-active-rule-agent="${idx}">
                     <strong>${this.app.escapeHtml(displayName)}</strong>
                     <small class="text-muted ms-2">${agent.ruleCount} rule(s)</small>
-                    <span class="text-muted ms-2">→</span>
+                    <span class="text-muted ms-2">&rarr;</span>
                 </div>
                 <div class="card-body">
                     ${agent.rules && agent.rules.length > 0 ? `
@@ -139,5 +138,20 @@ export class RuleController {
             </div>
         `;
         }).join('');
+
+        // Bind click handlers after rendering (CSP-safe)
+        if (container) {
+            setTimeout(() => {
+                container.querySelectorAll('[data-active-rule-agent]').forEach(el => {
+                    const idx = parseInt(el.dataset.activeRuleAgent);
+                    const agent = this.app.data.agents[idx];
+                    if (agent) {
+                        el.addEventListener('click', () => this.app.navigate('agent-edit', agent));
+                    }
+                });
+            }, 0);
+        }
+
+        return html;
     }
 }

@@ -127,7 +127,7 @@ export class DashboardController {
 
             const fileTree = root.querySelector('[data-local-file-tree]');
             if (fileTree) {
-                fileTree.innerHTML = this.app.renderLocalFileTree();
+                fileTree.innerHTML = this.app.renderLocalFileTree(fileTree);
             }
         }
 
@@ -309,6 +309,13 @@ export class DashboardController {
 
             const branch = node.querySelector('[data-sandbox-branch]');
             if (branch) branch.textContent = sb.branch;
+
+            const sourceBranchContainer = node.querySelector('[data-sandbox-source-branch]');
+            const sourceBranchText = node.querySelector('[data-sandbox-source-branch-text]');
+            if (sourceBranchContainer && sourceBranchText && sb.sourceBranch) {
+                sourceBranchContainer.style.removeProperty('display');
+                sourceBranchText.textContent = `from ${sb.sourceBranch}`;
+            }
 
             const time = node.querySelector('[data-sandbox-time]');
             if (time) time.textContent = sb.created;
