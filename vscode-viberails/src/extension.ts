@@ -1,20 +1,20 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
+import * as cp from 'child_process';
+import * as http from 'http';
 import * as path from 'path';
+import * as fs from 'fs';
 import { BackendManager } from './backend-manager';
 import { WebviewPanelManager } from './webview-panel';
 
+const INSTALL_DIR = path.join(process.env.USERPROFILE || process.env.HOME || '', '.vibe_rails');
+
 let backendManager: BackendManager | null = null;
 let webviewManager: WebviewPanelManager | null = null;
-let lastUsedFolder: string | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('VibeRails extension activating...');
-
     backendManager = new BackendManager();
 
-    // Create status bar button (high priority = shows on the left side of status bar)
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
     statusBarItem.text = "$(circuit-board) VibeRails";
     statusBarItem.tooltip = "Open VibeRails Dashboard";
@@ -39,34 +39,26 @@ export function activate(context: vscode.ExtensionContext) {
             backendManager?.dispose();
         }
     });
-
-    console.log('VibeRails extension activated');
 }
 
 async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
-    // Get the current workspace folder (where we want to run in local context)
-    const targetProjectFolder = getCurrentWorkspaceFolder();
-
-    // Find the VibeRails installation (for executable and wwwroot)
-    const viberailsInstallFolder = await resolveVibeRailsInstallation();
-
-    // If webview already exists, just reveal it
     if (webviewManager?.isVisible()) {
         webviewManager.reveal();
         return;
     }
 
-    // Show progress while starting backend
+    const targetProjectFolder = getCurrentWorkspaceFolder();
+    await ensureInstalled(targetProjectFolder);
+    const webviewWwwrootPath = resolveWebviewWwwrootPath(targetProjectFolder);
+
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: 'Starting VibeRails...',
         cancellable: false
     }, async (progress) => {
-        // Start backend if not running
         if (!backendManager!.isRunning()) {
             progress.report({ message: 'Starting backend server...' });
-            // Pass both: installation folder (for finding exe) and target folder (for cwd/local context)
-            await backendManager!.start(viberailsInstallFolder, targetProjectFolder);
+            await backendManager!.start(targetProjectFolder);
         }
 
         const port = backendManager!.getPort();
@@ -76,17 +68,21 @@ async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
 
         progress.report({ message: 'Creating dashboard...' });
 
-        // Create webview panel (uses viberails install folder for wwwroot)
-        webviewManager = new WebviewPanelManager(context.extensionUri, viberailsInstallFolder);
+        const bootstrapUrl = backendManager!.getBootstrapUrl();
+        let sessionToken: string | null = null;
+        if (bootstrapUrl) {
+            sessionToken = await fetchSessionToken(bootstrapUrl);
+        }
 
-        // Handle close request from webview
+        webviewManager = new WebviewPanelManager(webviewWwwrootPath);
+
         webviewManager.onCloseRequested(async () => {
             webviewManager?.dispose();
             await backendManager?.stop();
             vscode.window.showInformationMessage('VibeRails closed');
         });
 
-        await webviewManager.create(port);
+        await webviewManager.create(port, sessionToken);
     });
 }
 
@@ -98,91 +94,176 @@ function getCurrentWorkspaceFolder(): string | null {
     return null;
 }
 
-async function resolveVibeRailsInstallation(): Promise<string> {
-    // Find where VibeRails is installed (for executable and wwwroot)
+async function ensureInstalled(targetProjectFolder: string | null): Promise<void> {
+    const exeName = process.platform === 'win32' ? 'vb.exe' : 'vb';
+    const exePath = path.join(INSTALL_DIR, exeName);
+    const installedWwwrootPath = path.join(INSTALL_DIR, 'wwwroot', 'index.html');
+    const overrideWwwrootPath = path.join(resolveWebviewWwwrootPath(targetProjectFolder, false), 'index.html');
+    const hasAnyWwwroot = fs.existsSync(installedWwwrootPath) || fs.existsSync(overrideWwwrootPath);
 
-    // 1. Check config setting for executable path and derive folder
-    const config = vscode.workspace.getConfiguration('viberails');
-    const execPath = config.get<string>('executablePath');
-    if (execPath && fs.existsSync(execPath)) {
-        const possibleRoot = findVibeRailsRoot(path.dirname(execPath));
-        if (possibleRoot) {
-            return possibleRoot;
-        }
+    if (fs.existsSync(exePath) && hasAnyWwwroot) {
+        return;
     }
 
-    // 2. Check if current workspace contains VibeRails
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (workspaceFolders && workspaceFolders.length > 0) {
-        for (const folder of workspaceFolders) {
-            if (hasVibeRailsStructure(folder.uri.fsPath)) {
-                return folder.uri.fsPath;
-            }
-        }
+    const choice = await vscode.window.showInformationMessage(
+        'VibeRails is not installed. Would you like to install it now?',
+        { modal: true },
+        'Install',
+        'Cancel'
+    );
+
+    if (choice !== 'Install') {
+        throw new Error('VibeRails is not installed.');
     }
 
-    // 3. Check last used folder
-    if (lastUsedFolder && fs.existsSync(lastUsedFolder) && hasVibeRailsStructure(lastUsedFolder)) {
-        return lastUsedFolder;
-    }
-
-    // 4. Check common development locations
-    const commonPaths = [
-        path.join(process.env.USERPROFILE || process.env.HOME || '', 'source', 'VibeControl2'),
-        path.join(process.env.USERPROFILE || process.env.HOME || '', 'repos', 'VibeControl2'),
-        path.join(process.env.USERPROFILE || process.env.HOME || '', 'projects', 'VibeControl2'),
-    ];
-
-    for (const p of commonPaths) {
-        if (hasVibeRailsStructure(p)) {
-            lastUsedFolder = p;
-            return p;
-        }
-    }
-
-    // 5. Prompt user to select folder
-    const selected = await vscode.window.showOpenDialog({
-        canSelectFiles: false,
-        canSelectFolders: true,
-        canSelectMany: false,
-        openLabel: 'Select VibeRails Installation Folder',
-        title: 'Select the folder containing VibeRails (where VibeRails.csproj or the executable is located)'
+    await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'Installing VibeRails...',
+        cancellable: false
+    }, async (progress) => {
+        progress.report({ message: 'Downloading from GitHub releases...' });
+        await runInstallCommand();
     });
 
-    if (!selected || selected.length === 0) {
-        throw new Error('No folder selected. Please select the VibeRails installation folder.');
-    }
-
-    lastUsedFolder = selected[0].fsPath;
-    return selected[0].fsPath;
-}
-
-function hasVibeRailsStructure(folderPath: string): boolean {
-    try {
-        // Check for VibeRails/wwwroot structure
-        const wwwrootPath = path.join(folderPath, 'VibeRails', 'wwwroot');
-        const indexPath = path.join(wwwrootPath, 'index.html');
-        return fs.existsSync(wwwrootPath) && fs.existsSync(indexPath);
-    } catch {
-        return false;
+    if (!fs.existsSync(exePath)) {
+        throw new Error(`Installation failed. Binary not found at ${exePath}. Check the "VibeRails Installer" output for details.`);
     }
 }
 
-function findVibeRailsRoot(startPath: string): string | null {
-    let current = startPath;
-    for (let i = 0; i < 5; i++) { // Look up to 5 levels
-        if (hasVibeRailsStructure(current)) {
-            return current;
+function resolveWebviewWwwrootPath(targetProjectFolder: string | null, showWarning: boolean = true): string {
+    const configured = vscode.workspace.getConfiguration('viberails').get<string>('devWwwroot', '').trim();
+    const installedPath = path.join(INSTALL_DIR, 'wwwroot');
+
+    if (!configured) {
+        return installedPath;
+    }
+
+    const expanded = expandHomeDirectory(configured);
+    const candidates: string[] = [];
+
+    if (path.isAbsolute(expanded)) {
+        candidates.push(expanded);
+    }
+
+    if (targetProjectFolder) {
+        candidates.push(path.resolve(targetProjectFolder, expanded));
+    }
+
+    candidates.push(path.resolve(expanded));
+
+    for (const candidate of new Set(candidates)) {
+        if (fs.existsSync(path.join(candidate, 'index.html'))) {
+            return candidate;
         }
-        const parent = path.dirname(current);
-        if (parent === current) break;
-        current = parent;
     }
-    return null;
+
+    if (showWarning) {
+        vscode.window.showWarningMessage(
+            `VibeRails: configured viberails.devWwwroot "${configured}" was not found. Falling back to installed wwwroot.`
+        );
+    }
+    return installedPath;
+}
+
+function expandHomeDirectory(inputPath: string): string {
+    if (!inputPath.startsWith('~')) {
+        return inputPath;
+    }
+
+    const home = process.env.USERPROFILE || process.env.HOME || '';
+    if (!home) {
+        return inputPath;
+    }
+
+    if (inputPath === '~') {
+        return home;
+    }
+
+    if (inputPath.startsWith('~/') || inputPath.startsWith('~\\')) {
+        return path.join(home, inputPath.slice(2));
+    }
+
+    return inputPath;
+}
+
+async function runInstallCommand(): Promise<void> {
+    return new Promise((resolve, reject) => {
+        let command: string;
+        let args: string[];
+
+        if (process.platform === 'win32') {
+            command = 'powershell.exe';
+            args = [
+                '-NoProfile',
+                '-ExecutionPolicy', 'Bypass',
+                '-Command',
+                'irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.ps1 | iex'
+            ];
+        } else {
+            command = '/bin/bash';
+            args = [
+                '-c',
+                'wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash'
+            ];
+        }
+
+        const outputChannel = vscode.window.createOutputChannel('VibeRails Installer');
+        outputChannel.show(true);
+
+        const proc = cp.spawn(command, args, {
+            cwd: process.env.USERPROFILE || process.env.HOME || undefined,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            shell: false
+        });
+
+        proc.stdout?.on('data', (data: Buffer) => outputChannel.append(data.toString()));
+        proc.stderr?.on('data', (data: Buffer) => outputChannel.append(data.toString()));
+        proc.on('error', (err) => reject(new Error(`Install process error: ${err.message}`)));
+        proc.on('exit', (code) => {
+            if (code === 0) {
+                resolve();
+            } else {
+                reject(new Error(`Install script exited with code ${code}`));
+            }
+        });
+
+        setTimeout(() => {
+            if (proc.exitCode === null) {
+                proc.kill();
+                reject(new Error('Installation timed out after 2 minutes.'));
+            }
+        }, 120000);
+    });
+}
+
+function fetchSessionToken(bootstrapUrl: string): Promise<string | null> {
+    return new Promise((resolve) => {
+        const req = http.get(bootstrapUrl, (res) => {
+            res.resume();
+            const setCookie = res.headers['set-cookie'];
+            if (!setCookie) { resolve(null); return; }
+            for (const cookie of setCookie) {
+                const match = cookie.match(/viberails_session=([^;]+)/);
+                if (!match) { continue; }
+
+                // Cookies URL-encode base64 characters (%2F, %2B, %3D).
+                // Backend header auth expects the raw token value.
+                const encodedToken = match[1].replace(/^"|"$/g, '');
+                try {
+                    resolve(decodeURIComponent(encodedToken));
+                } catch {
+                    resolve(encodedToken);
+                }
+                return;
+            }
+            resolve(null);
+        });
+        req.on('error', () => resolve(null));
+        req.setTimeout(5000, () => { req.destroy(); resolve(null); });
+    });
 }
 
 export function deactivate() {
-    console.log('VibeRails extension deactivating...');
     webviewManager?.dispose();
     backendManager?.dispose();
     webviewManager = null;

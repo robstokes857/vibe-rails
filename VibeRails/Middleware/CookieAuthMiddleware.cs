@@ -17,30 +17,32 @@ public class CookieAuthMiddleware
     public async Task InvokeAsync(HttpContext context)
     {
         var path = context.Request.Path.Value ?? "";
+        var isWebSocketRequest = IsWebSocketHandshake(context);
 
-        // Skip auth for bootstrap and health check endpoints
-        // Health check is used by VSCode extension to verify backend is running
-        if (path.StartsWith("/auth/bootstrap") || path.Equals("/api/v1/IsLocal", StringComparison.OrdinalIgnoreCase))
+        // Skip auth for bootstrap, health check, and CORS preflight requests
+        if (path.StartsWith("/auth/bootstrap") ||
+            path.Equals("/api/v1/IsLocal", StringComparison.OrdinalIgnoreCase) ||
+            context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
             return;
         }
 
-        // Skip auth for VSCode webview requests (different origin, can't use cookies)
-        var origin = context.Request.Headers.Origin.ToString();
-        if (!string.IsNullOrEmpty(origin) && origin.StartsWith("vscode-webview://", StringComparison.OrdinalIgnoreCase))
-        {
-            await _next(context);
-            return;
-        }
+        // Validate cookie or header (header used by VSCode webview which can't set cookies)
+        var token = context.Request.Cookies["viberails_session"]
+            ?? context.Request.Headers["viberails_session"].FirstOrDefault();
 
-        // Validate cookie for all other requests.
-        var token = context.Request.Cookies["viberails_session"];
+        // WebSocket requests from browser JS cannot set custom headers.
+        // Allow token in query string for terminal WS handshake.
+        if (string.IsNullOrEmpty(token) && isWebSocketRequest)
+        {
+            token = context.Request.Query["viberails_session"].FirstOrDefault();
+        }
 
         if (!_authService.ValidateToken(token))
         {
             // For WebSocket upgrades, reject with 403 (can't redirect)
-            if (context.WebSockets.IsWebSocketRequest)
+            if (isWebSocketRequest)
             {
                 context.Response.StatusCode = 403;
                 await context.Response.WriteAsync("Unauthorized. Visit /auth/bootstrap to authenticate.");
@@ -62,7 +64,29 @@ public class CookieAuthMiddleware
             return;
         }
 
-        // Cookie valid - continue to next middleware
+        // Authenticated - continue to next middleware
         await _next(context);
+    }
+
+    private static bool IsWebSocketHandshake(HttpContext context)
+    {
+        if (context.WebSockets.IsWebSocketRequest)
+        {
+            return true;
+        }
+
+        if (!HttpMethods.IsGet(context.Request.Method))
+        {
+            return false;
+        }
+
+        var upgrade = context.Request.Headers.Upgrade.ToString();
+        if (!upgrade.Equals("websocket", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var connection = context.Request.Headers.Connection.ToString();
+        return connection.Contains("Upgrade", StringComparison.OrdinalIgnoreCase);
     }
 }

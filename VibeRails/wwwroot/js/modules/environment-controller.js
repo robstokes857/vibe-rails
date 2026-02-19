@@ -442,7 +442,7 @@ export class EnvironmentController {
                 <p class="text-muted small px-4">This will permanently delete this environment profile. This action cannot be undone.</p>
             </div>
             <div class="d-flex gap-2 justify-content-end">
-                <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
                 <button type="button" class="btn btn-danger" id="confirm-delete-btn">Remove Environment</button>
             </div>
         `);

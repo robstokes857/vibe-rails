@@ -41,7 +41,7 @@ export class ConfigController {
                 </div>
                 <div class="d-flex gap-2">
                     <button type="submit" class="btn btn-primary">Save</button>
-                    <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
                 </div>
             </form>
         `);

@@ -40,12 +40,13 @@ export class AgentController {
             });
             this.app.bindAction(root, '[data-action="select-agent"]', () => this.showAgentSelector());
             this.app.bindAction(root, '[data-action="available-rules"]', () => this.showAvailableRules());
+            this.app.bindAction(root, '[data-action="create-agent-file"]', () => this.app.navigate('agent-create'));
 
             const fileTree = root.querySelector('[data-agent-file-tree]');
             if (fileTree) {
                 // Ensure we have data to render
                 if (this.app.data.agents && this.app.data.agents.length > 0) {
-                    fileTree.innerHTML = this.app.renderLocalFileTree();
+                    fileTree.innerHTML = this.app.renderLocalFileTree(fileTree);
                 } else if (this.app.data.isLocal) {
                     fileTree.innerHTML = '<p class="text-muted text-center">No agent files found in this project.</p>';
                 } else {
@@ -58,8 +59,8 @@ export class AgentController {
     }
 
     showAgentSelector() {
-        const agents = this.app.data.agents.map(agent => `
-            <div class="list-group-item" onclick="app.navigate('agent-edit', ${JSON.stringify(agent).replace(/"/g, '&quot;')})">
+        const agents = this.app.data.agents.map((agent, idx) => `
+            <div class="list-group-item" data-agent-select-index="${idx}" style="cursor:pointer;">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <strong>${agent.name}</strong>
@@ -76,6 +77,15 @@ export class AgentController {
                 ${agents || '<p class="text-muted text-center">No agents found</p>'}
             </div>
         `);
+
+        // Bind click handlers (CSP-safe, no inline onclick)
+        document.querySelectorAll('[data-agent-select-index]').forEach(el => {
+            const idx = parseInt(el.dataset.agentSelectIndex);
+            const agent = this.app.data.agents[idx];
+            if (agent) {
+                el.addEventListener('click', () => this.app.navigate('agent-edit', agent));
+            }
+        });
     }
 
     showAvailableRules() {
@@ -129,6 +139,11 @@ export class AgentController {
             const rules = root.querySelector('[data-agent-rules]');
             if (rules) {
                 rules.innerHTML = this.renderAgentRules(agent);
+                // Bind rule selection click handlers (CSP-safe, no inline onclick)
+                rules.querySelectorAll('[data-rule-select]').forEach(el => {
+                    const index = parseInt(el.dataset.ruleSelect);
+                    el.addEventListener('click', () => this.selectRule(el, index));
+                });
             }
 
             const fullContent = root.querySelector('[data-agent-full-content]');
@@ -209,7 +224,7 @@ export class AgentController {
         return `
             <div class="d-flex flex-column gap-3 mb-4">
                 ${agent.rules.map((rule, index) => `
-                    <div class="card rule-card border-0 shadow-sm" onclick="app.agentController.selectRule(this, ${index})" data-rule-index="${index}">
+                    <div class="card rule-card border-0 shadow-sm" data-rule-select="${index}" data-rule-index="${index}" style="cursor:pointer;">
                         <div class="card-body p-3 d-flex justify-content-between align-items-center">
                             <div class="pe-3 d-flex align-items-center flex-grow-1">
                                 <span class="rule-icon me-3 text-muted">📜</span>
@@ -555,7 +570,7 @@ export class AgentController {
                 <p class="text-muted small px-4">This rule will be removed from the agent file. You can add it back later if needed.</p>
             </div>
             <div class="d-flex gap-2 justify-content-end">
-                <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
                 <button type="button" class="btn btn-danger" id="confirm-delete-rule-btn">Remove Rule</button>
             </div>
         `);
@@ -602,7 +617,7 @@ export class AgentController {
                     <small class="form-text text-muted">Enter a friendly name to identify this agent file.</small>
                 </div>
                 <div class="d-flex gap-2 justify-content-end">
-                    <button type="button" class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
                     <button type="submit" class="btn btn-primary d-flex align-items-center gap-2">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M11 2H9v3h2z"/>

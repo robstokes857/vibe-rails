@@ -3,38 +3,17 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 
+const DEFAULT_WWWROOT = path.join(process.env.USERPROFILE || process.env.HOME || '', '.vibe_rails', 'wwwroot');
+
 export class WebviewPanelManager {
     private panel: vscode.WebviewPanel | null = null;
-    private wwwrootPath: string;
-    private extensionUri: vscode.Uri;
+    private readonly wwwrootPath: string;
+
     private _onCloseRequested: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
     public readonly onCloseRequested: vscode.Event<void> = this._onCloseRequested.event;
 
-    constructor(extensionUri: vscode.Uri, workspaceFolder: string) {
-        this.extensionUri = extensionUri;
-
-        // Check for bundled wwwroot first (production mode)
-        const platformTarget = this.getPlatformTarget();
-        const bundledWwwroot = path.join(extensionUri.fsPath, 'bin', platformTarget, 'wwwroot');
-
-        if (fs.existsSync(bundledWwwroot)) {
-            this.wwwrootPath = bundledWwwroot;
-        } else {
-            // Fallback to development mode (repo structure)
-            this.wwwrootPath = path.join(workspaceFolder, 'VibeRails', 'wwwroot');
-        }
-    }
-
-    private getPlatformTarget(): string {
-        const platform = process.platform;
-        const arch = process.arch;
-
-        if (platform === 'win32' && arch === 'x64') return 'win32-x64';
-        if (platform === 'linux' && arch === 'x64') return 'linux-x64';
-        if (platform === 'darwin' && arch === 'x64') return 'darwin-x64';
-        if (platform === 'darwin' && arch === 'arm64') return 'darwin-arm64';
-
-        return `${platform}-${arch}`;
+    constructor(wwwrootPath?: string) {
+        this.wwwrootPath = wwwrootPath || DEFAULT_WWWROOT;
     }
 
     public isVisible(): boolean {
@@ -42,12 +21,10 @@ export class WebviewPanelManager {
     }
 
     public reveal(): void {
-        if (this.panel) {
-            this.panel.reveal(vscode.ViewColumn.One);
-        }
+        this.panel?.reveal(vscode.ViewColumn.One);
     }
 
-    public async create(port: number): Promise<vscode.WebviewPanel> {
+    public async create(port: number, sessionToken: string | null = null): Promise<vscode.WebviewPanel> {
         if (this.panel) {
             this.panel.reveal(vscode.ViewColumn.One);
             return this.panel;
@@ -62,13 +39,13 @@ export class WebviewPanelManager {
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
-                localResourceRoots: [wwwrootUri]
+                localResourceRoots: [wwwrootUri],
+                portMapping: [{ webviewPort: port, extensionHostPort: port }]
             }
         );
 
-        this.panel.webview.html = await this.buildHtml(this.panel.webview, port);
+        this.panel.webview.html = this.buildHtml(this.panel.webview, port, sessionToken);
 
-        // Handle messages from webview
         this.panel.webview.onDidReceiveMessage(message => {
             if (message.command === 'close') {
                 this._onCloseRequested.fire();
@@ -83,91 +60,101 @@ export class WebviewPanelManager {
         return this.panel;
     }
 
-    private async buildHtml(webview: vscode.Webview, port: number): Promise<string> {
+    private buildHtml(webview: vscode.Webview, port: number, sessionToken: string | null): string {
         const indexPath = path.join(this.wwwrootPath, 'index.html');
         let html = fs.readFileSync(indexPath, 'utf8');
 
-        // Generate nonce for scripts
-        const nonce = this.getNonce();
+        const nonce = crypto.randomBytes(16).toString('hex');
+        const wwwrootUri = vscode.Uri.file(this.wwwrootPath);
 
-        // Extract template elements before any modifications
-        const templateMatches = html.match(/<template[\s\S]*?<\/template>/g) || [];
+        // Avoid external CDN dependency inside VS Code webview.
+        html = html.replace(
+            /https:\/\/cdn\.jsdelivr\.net\/npm\/@xterm\/addon-fit@0\.11\.0\/lib\/addon-fit\.js/g,
+            'assets/xterm/addon-fit.js'
+        );
 
-        // Rewrite asset paths to use webview URIs
-        html = this.rewriteAssetPaths(html, webview);
+        html = this.rewriteAssetPaths(html, webview, wwwrootUri);
 
-        // Build CSP policy
         const csp = [
             `default-src 'none'`,
+            // Note: 'unsafe-inline' is ignored when a nonce is present per CSP spec.
+            // All app event handlers use addEventListener (no inline onclick).
             `script-src 'nonce-${nonce}' ${webview.cspSource}`,
-            `style-src ${webview.cspSource} 'unsafe-inline' https://fonts.googleapis.com`, // Note: 'unsafe-inline' required for Bootstrap
-            `img-src ${webview.cspSource} https:`,
+            `style-src ${webview.cspSource} 'unsafe-inline' https://fonts.googleapis.com`,
+            `img-src ${webview.cspSource} https: data:`,
             `font-src ${webview.cspSource} https://fonts.gstatic.com`,
-            `connect-src http://localhost:${port}`,
-            `form-action 'none'`, // Prevent form submissions
-            `base-uri 'self'`, // Prevent base tag injection
-            `frame-ancestors 'none'`, // Prevent clickjacking
+            `connect-src http://localhost:${port} ws://localhost:${port} ${webview.cspSource}`,
+            `form-action 'none'`,
+            `base-uri 'self'`,
         ].join('; ');
 
-        // Get the base URI for assets
-        const wwwrootUri = vscode.Uri.file(this.wwwrootPath);
         const assetsBaseUri = webview.asWebviewUri(wwwrootUri).toString();
 
-        // Inject CSP meta tag, API base URL, and VS Code API script
+        const fetchPatch = sessionToken ? `
+        const __vb_token__ = '${sessionToken}';
+        window.__viberails_SESSION_TOKEN__ = __vb_token__;
+        const __vb_orig_fetch__ = window.fetch;
+        window.fetch = function(input, init) {
+            init = init || {};
+            const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+            headers.set('viberails_session', __vb_token__);
+            init.headers = headers;
+            return __vb_orig_fetch__.call(this, input, init);
+        };
+        const __vb_orig_ws__ = window.WebSocket;
+        window.WebSocket = function(url, protocols) {
+            let nextUrl = url;
+            try {
+                if (typeof nextUrl === 'string' && nextUrl.includes('/api/v1/terminal/ws')) {
+                    const parsed = new URL(nextUrl, window.location.href);
+                    parsed.searchParams.set('viberails_session', __vb_token__);
+                    nextUrl = parsed.toString();
+                }
+            } catch { /* use original URL */ }
+            return protocols !== undefined ? new __vb_orig_ws__(nextUrl, protocols) : new __vb_orig_ws__(nextUrl);
+        };
+        window.WebSocket.prototype = __vb_orig_ws__.prototype;
+        window.WebSocket.CONNECTING = __vb_orig_ws__.CONNECTING;
+        window.WebSocket.OPEN = __vb_orig_ws__.OPEN;
+        window.WebSocket.CLOSING = __vb_orig_ws__.CLOSING;
+        window.WebSocket.CLOSED = __vb_orig_ws__.CLOSED;
+        ` : `
+        window.__viberails_SESSION_TOKEN__ = null;
+        `;
+
         const headInjection = `
     <meta http-equiv="Content-Security-Policy" content="${csp}">
+    <base href="${assetsBaseUri}/">
     <script nonce="${nonce}">
         window.__viberails_API_BASE__ = 'http://localhost:${port}';
         window.__viberails_VSCODE__ = true;
         window.__viberails_ASSETS_BASE__ = '${assetsBaseUri}';
         const vscode = acquireVsCodeApi();
-        window.__viberails_close__ = function() {
-            vscode.postMessage({ command: 'close' });
-        };
+        window.__viberails_close__ = function() { vscode.postMessage({ command: 'close' }); };
+        ${fetchPatch}
     </script>`;
 
-        // Insert after opening <head> tag
         html = html.replace(/<head>/i, `<head>${headInjection}`);
-
-        // Add nonce to all script tags
-        html = html.replace(/<script/g, `<script nonce="${nonce}"`);
+        html = html.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`);
 
         return html;
     }
 
-    private rewriteAssetPaths(html: string, webview: vscode.Webview): string {
-        // Rewrite href and src attributes that point to local files
-        const wwwrootUri = vscode.Uri.file(this.wwwrootPath);
-
-        // Pattern to match src="..." or href="..." with relative paths
+    private rewriteAssetPaths(html: string, webview: vscode.Webview, wwwrootUri: vscode.Uri): string {
         const assetPattern = /(src|href)=["'](?!http|https|data:|#|javascript:)([^"']+)["']/g;
 
-        html = html.replace(assetPattern, (match, attr, relativePath) => {
-            // Skip if it's already an absolute URL or special protocol
+        return html.replace(assetPattern, (match, attr, relativePath) => {
             if (relativePath.startsWith('//') || relativePath.startsWith('data:')) {
                 return match;
             }
 
-            // Handle paths that start with / or ./
             let cleanPath = relativePath;
-            if (cleanPath.startsWith('/')) {
-                cleanPath = cleanPath.substring(1);
-            } else if (cleanPath.startsWith('./')) {
-                cleanPath = cleanPath.substring(2);
-            }
+            if (cleanPath.startsWith('/')) { cleanPath = cleanPath.substring(1); }
+            else if (cleanPath.startsWith('./')) { cleanPath = cleanPath.substring(2); }
 
             const fileUri = vscode.Uri.joinPath(wwwrootUri, cleanPath);
-            const webviewUri = webview.asWebviewUri(fileUri);
-
-            return `${attr}="${webviewUri}"`;
+            return `${attr}="${webview.asWebviewUri(fileUri)}"`;
         });
-
-        return html;
-    }
-
-    private getNonce(): string {
-        // Use cryptographically secure random bytes instead of Math.random()
-        return crypto.randomBytes(16).toString('hex'); // 32-character hex string
     }
 
     public dispose(): void {
