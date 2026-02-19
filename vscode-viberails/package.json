@@ -2,7 +2,7 @@
   "name": "vscode-viberails",
   "displayName": "VibeRails",
   "description": "Launch and control VibeRails dashboard inside VS Code",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "publisher": "viberails",
   "icon": "media/vs-logo.png",
   "license": "MIT",
@@ -65,10 +65,11 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
     "prepare-binaries": "pwsh -ExecutionPolicy Bypass -File ./scripts/prepare-binaries.ps1",
-    "package": "npm run prepare-binaries && npm run package:all",
+    "package": "npm run package:all",
     "package:all": "pwsh -ExecutionPolicy Bypass -File ./scripts/package-platforms.ps1",
-    "package:win32-x64": "vsce package --target win32-x64 -o dist/",
-    "package:linux-x64": "vsce package --target linux-x64 -o dist/"
+    "package:win32-x64": "npx vsce package --target win32-x64 -o dist/",
+    "package:linux-x64": "npx vsce package --target linux-x64 -o dist/",
+    "release": "pwsh -ExecutionPolicy Bypass -File ./scripts/buildAndDeployVSCodeExt.ps1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

@@ -6,7 +6,7 @@ Standalone Model Context Protocol (MCP) server for the VibeRails ecosystem. Prov
 
 ## Transport
 
-Uses **stdio** (stdin/stdout) for MCP communication. Spawned as a child process by `McpClientService` in the main VibeRails application. Because the MCP protocol runs over stdio, console logging is disabled — all logging goes to `~/.vibe_rails/mcp-server.log` via Serilog.
+Uses **stdio** (stdin/stdout) for MCP communication. Spawned as a child process by `McpClientService` in the main VibeRails application. Because the MCP protocol runs over stdio, console logging is disabled — all logging goes to `~/.vibe_rails/log/mcp/mcp-server.log` via Serilog.
 
 ## Build
 
@@ -31,7 +31,7 @@ Uses **stdio** (stdin/stdout) for MCP communication. Spawned as a child process 
 ## Data Storage
 
 - **Vector index**: `~/.vibe_rails/vector/` (JSONL files for user terms and conversation history)
-- **Logs**: `~/.vibe_rails/mcp-server.log` (daily rolling, 7-day retention, 10MB limit)
+- **Logs**: `~/.vibe_rails/log/mcp/mcp-server.log` (daily rolling, 7-day retention, 10MB limit)
 
 ## Building
 

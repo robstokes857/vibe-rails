@@ -13,7 +13,7 @@ MCP Client (VibeRails McpClientService)
 MCP_Server.exe (Native AOT)
   ├── Host.CreateApplicationBuilder()
   ├── AddMcpServer() + WithStdioServerTransport()
-  ├── Serilog → ~/.vibe_rails/mcp-server.log (Warning+ only)
+  ├── Serilog → ~/.vibe_rails/log/mcp/mcp-server.log (Warning+ only)
   └── Tool Registry
       ├── EchoTool          (connectivity test)
       ├── RulesTool          (VCA validation + content rules)
@@ -27,7 +27,7 @@ The server communicates exclusively via stdio (stdin/stdout JSON-RPC). All diagn
 ### Core Components
 
 **`Program.cs`** - Entry point and host configuration
-- Configures Serilog file logger (Warning+ to `~/.vibe_rails/mcp-server.log`)
+- Configures Serilog file logger (Warning+ to `~/.vibe_rails/log/mcp/mcp-server.log`)
 - Clears default logging providers to protect stdio channel
 - Registers MCP server with stdio transport via `ModelContextProtocol` NuGet package
 - Registers all tool classes with `WithTools<T>()`
@@ -84,7 +84,7 @@ Serilog Static Logger (Log.Logger)
   │ MinimumLevel: Warning
   ▼
 Serilog.Sinks.File
-  └── ~/.vibe_rails/mcp-server.log
+  └── ~/.vibe_rails/log/mcp/mcp-server.log
       ├── Rolling: Daily
       ├── Retention: 7 days
       └── Size limit: 10 MB per file

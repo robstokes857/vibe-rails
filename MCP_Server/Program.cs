@@ -6,9 +6,11 @@ using MCP_Server.Tools;
 using Serilog;
 
 // Configure Serilog file logger - must not write to stdout/stderr (stdio MCP transport)
-var logPath = Path.Combine(
+var logDir = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-    ".vibe_rails", "mcp-server.log");
+    ".vibe_rails", "log", "mcp");
+Directory.CreateDirectory(logDir);
+var logPath = Path.Combine(logDir, "mcp-server.log");
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Warning()
