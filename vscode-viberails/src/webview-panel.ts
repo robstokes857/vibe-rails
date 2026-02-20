@@ -122,6 +122,83 @@ export class WebviewPanelManager {
         window.__viberails_SESSION_TOKEN__ = null;
         `;
 
+        const vscodeExitButtonPatch = `
+        const __vb_bind_exit_button__ = function(button) {
+            if (!button || button.dataset.viberailsExitBound === 'true') { return; }
+            button.dataset.viberailsExitBound = 'true';
+            button.addEventListener('click', function(event) {
+                event.preventDefault();
+                if (typeof window.__viberails_close__ === 'function') {
+                    window.__viberails_close__();
+                }
+            });
+        };
+
+        const __vb_ensure_exit_button__ = function() {
+            const existing = document.getElementById('exit-btn');
+            if (existing) {
+                existing.style.removeProperty('display');
+                __vb_bind_exit_button__(existing);
+                return true;
+            }
+
+            const navActions = document.querySelector('.nav-actions');
+            if (!navActions) { return false; }
+
+            if (document.getElementById('viberails-vscode-exit-btn')) { return true; }
+
+            const button = document.createElement('button');
+            button.id = 'viberails-vscode-exit-btn';
+            button.type = 'button';
+            button.title = 'Close VibeRails and stop backend';
+            button.textContent = 'Exit';
+            button.style.cssText = [
+                'display:flex',
+                'align-items:center',
+                'justify-content:center',
+                'gap:0.4rem',
+                'padding:0 0.75rem',
+                'height:40px',
+                'border-radius:999px',
+                'border:1px solid #e57373',
+                'background:transparent',
+                'color:#e57373',
+                'font-size:0.8rem',
+                'font-weight:600',
+                'letter-spacing:0.03em',
+                'cursor:pointer'
+            ].join(';');
+            button.addEventListener('mouseenter', function() {
+                button.style.background = '#e57373';
+                button.style.color = '#ffffff';
+            });
+            button.addEventListener('mouseleave', function() {
+                button.style.background = 'transparent';
+                button.style.color = '#e57373';
+            });
+            __vb_bind_exit_button__(button);
+            navActions.appendChild(button);
+            return true;
+        };
+
+        const __vb_schedule_exit_button__ = function() {
+            if (__vb_ensure_exit_button__()) { return; }
+            let attempts = 0;
+            const timer = window.setInterval(function() {
+                attempts += 1;
+                if (__vb_ensure_exit_button__() || attempts >= 30) {
+                    window.clearInterval(timer);
+                }
+            }, 100);
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', __vb_schedule_exit_button__, { once: true });
+        } else {
+            __vb_schedule_exit_button__();
+        }
+        `;
+
         const headInjection = `
     <meta http-equiv="Content-Security-Policy" content="${csp}">
     <base href="${assetsBaseUri}/">
@@ -132,6 +209,7 @@ export class WebviewPanelManager {
         const vscode = acquireVsCodeApi();
         window.__viberails_close__ = function() { vscode.postMessage({ command: 'close' }); };
         ${fetchPatch}
+        ${vscodeExitButtonPatch}
     </script>`;
 
         html = html.replace(/<head>/i, `<head>${headInjection}`);

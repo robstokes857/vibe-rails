@@ -150,7 +150,82 @@ function Wait-ForReleaseWorkflow {
         throw "Release workflow failed. Check run: https://github.com/$GithubRepo/actions/runs/$runId"
     }
 
-    Write-Host "Release workflow completed successfully." -ForegroundColor Green
+    $runViewJson = gh run view $runId --repo $GithubRepo --json conclusion,jobs,url
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect workflow run details for run $runId."
+    }
+
+    $runView = $runViewJson | ConvertFrom-Json
+    $runConclusion = [string]$runView.conclusion
+    if ($runConclusion -ne "success") {
+        throw "Release workflow conclusion is '$runConclusion'. Run URL: $($runView.url)"
+    }
+
+    $requiredBuildJobs = @(
+        "Build win-x64",
+        "Build linux-x64",
+        "Build osx-x64",
+        "Build osx-arm64"
+    )
+
+    $jobs = @($runView.jobs)
+    foreach ($jobName in $requiredBuildJobs) {
+        $job = $jobs | Where-Object { $_.name -eq $jobName } | Select-Object -First 1
+        if (-not $job) {
+            throw "Required release job missing: '$jobName'. Run URL: $($runView.url)"
+        }
+
+        $jobConclusion = [string]$job.conclusion
+        if ($jobConclusion -ne "success") {
+            throw "Release job '$jobName' finished with '$jobConclusion'. Run URL: $($runView.url)"
+        }
+    }
+
+    $uploadJob = $jobs | Where-Object { $_.name -eq "Upload Assets To GitHub Release" } | Select-Object -First 1
+    if (-not $uploadJob) {
+        throw "Required release job missing: 'Upload Assets To GitHub Release'. Run URL: $($runView.url)"
+    }
+    if ([string]$uploadJob.conclusion -ne "success") {
+        throw "Release job 'Upload Assets To GitHub Release' finished with '$($uploadJob.conclusion)'. Run URL: $($runView.url)"
+    }
+
+    Write-Host "Release workflow completed successfully with all required jobs." -ForegroundColor Green
+}
+
+function Assert-ReleaseAssetsPresent {
+    param([Parameter(Mandatory = $true)][string]$Tag)
+
+    $releaseJson = gh release view $Tag --repo $GithubRepo --json assets,url
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect release assets for tag $Tag."
+    }
+
+    $release = $releaseJson | ConvertFrom-Json
+    $assetNames = @($release.assets | ForEach-Object { [string]$_.name })
+
+    $requiredAssets = @(
+        "vb-win-x64.zip",
+        "vb-win-x64.zip.sha256",
+        "vb-linux-x64.tar.gz",
+        "vb-linux-x64.tar.gz.sha256",
+        "vb-osx-x64.tar.gz",
+        "vb-osx-x64.tar.gz.sha256",
+        "vb-osx-arm64.tar.gz",
+        "vb-osx-arm64.tar.gz.sha256"
+    )
+
+    $missing = @()
+    foreach ($name in $requiredAssets) {
+        if ($assetNames -notcontains $name) {
+            $missing += $name
+        }
+    }
+
+    if ($missing.Count -gt 0) {
+        throw "Release '$Tag' is missing required assets: $($missing -join ', '). Release URL: $($release.url)"
+    }
+
+    Write-Host "Verified release assets for $Tag." -ForegroundColor Green
 }
 
 function Get-RequiredVsPat {
@@ -272,6 +347,7 @@ git push origin $tag
 
 $headSha = (git rev-parse HEAD).Trim()
 Wait-ForReleaseWorkflow -HeadSha $headSha -Tag $tag
+Assert-ReleaseAssetsPresent -Tag $tag
 
 Write-Host "`nPublishing VS Code extension..." -ForegroundColor Cyan
 $vsCodeReleaseScript = Join-Path $RepoRoot "deploy" "buildAndDeployVSCodeExt.ps1"
