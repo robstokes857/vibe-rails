@@ -8,7 +8,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/robstokes857/vibe-rails.git"
+    "url": "https://github.com/robstokes857/vibe-rails.git",
+    "directory": "vscode-viberails"
   },
   "bugs": {
     "url": "https://github.com/robstokes857/vibe-rails/issues"
@@ -46,21 +47,6 @@
           "when": "true"
         }
       ]
-    },
-    "configuration": {
-      "title": "VibeRails",
-      "properties": {
-        "viberails.executablePath": {
-          "type": "string",
-          "default": "",
-          "description": "Path to the VibeRails executable. If empty, the extension will look for it in common locations."
-        },
-        "viberails.devWwwroot": {
-          "type": "string",
-          "default": "",
-          "description": "Override path to wwwroot for development. If set, this takes priority over bundled and repo-detected wwwroot."
-        }
-      }
     }
   },
   "scripts": {
