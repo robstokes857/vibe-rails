@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # install.sh - Install VibeRails (vb) on Linux/macOS
-# Usage: wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash
+#   wget -qO-  https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash
 
 set -euo pipefail
 
 GITHUB_REPO="robstokes857/vibe-rails"
 INSTALL_DIR="$HOME/.vibe_rails"
-ASSET_NAME="vb-linux-x64.tar.gz"
 
 # Colors
 RED='\033[0;31m'
@@ -26,33 +27,108 @@ cat << 'EOF'
 EOF
 echo -e "${NC}"
 
+require_cmd() {
+    local cmd="$1"
+    if ! command -v "$cmd" &> /dev/null; then
+        echo -e "${RED}Error: Required command '$cmd' not found.${NC}"
+        exit 1
+    fi
+}
+
+download_to_file() {
+    local url="$1"
+    local output="$2"
+
+    if command -v curl &> /dev/null; then
+        curl -fsSL "$url" -o "$output"
+        return
+    fi
+
+    if command -v wget &> /dev/null; then
+        wget -q -O "$output" "$url"
+        return
+    fi
+
+    echo -e "${RED}Error: Neither 'curl' nor 'wget' is installed.${NC}"
+    exit 1
+}
+
+fetch_text() {
+    local url="$1"
+
+    if command -v curl &> /dev/null; then
+        curl -fsSL -H "User-Agent: VibeRails-Installer" "$url"
+        return
+    fi
+
+    if command -v wget &> /dev/null; then
+        wget -qO- --header="User-Agent: VibeRails-Installer" "$url"
+        return
+    fi
+
+    echo -e "${RED}Error: Neither 'curl' nor 'wget' is installed.${NC}"
+    exit 1
+}
+
+sha256_file() {
+    local file="$1"
+
+    if command -v sha256sum &> /dev/null; then
+        sha256sum "$file" | awk '{print tolower($1)}'
+        return
+    fi
+
+    if command -v shasum &> /dev/null; then
+        shasum -a 256 "$file" | awk '{print tolower($1)}'
+        return
+    fi
+
+    echo -e "${RED}Error: Neither 'sha256sum' nor 'shasum' is installed.${NC}"
+    exit 1
+}
+
 # Detect OS
 OS="$(uname -s)"
+ARCH="$(uname -m)"
 case "$OS" in
     Linux*)  OS_TYPE="linux" ;;
     Darwin*) OS_TYPE="macos" ;;
     *)       echo -e "${RED}Error: Unsupported operating system: $OS${NC}"; exit 1 ;;
 esac
 
-if [ "$OS_TYPE" = "macos" ]; then
-    echo -e "${YELLOW}Warning: macOS binary is not yet available. Only Linux x64 is supported.${NC}"
-    echo -e "${YELLOW}You can build from source or run in Docker.${NC}"
+# Resolve release asset name by OS + arch
+case "$OS_TYPE:$ARCH" in
+    linux:x86_64|linux:amd64)
+        ASSET_NAME="vb-linux-x64.tar.gz"
+        ;;
+    macos:x86_64|macos:amd64)
+        ASSET_NAME="vb-osx-x64.tar.gz"
+        ;;
+    macos:arm64|macos:aarch64)
+        ASSET_NAME="vb-osx-arm64.tar.gz"
+        ;;
+    *)
+        echo -e "${RED}Error: Unsupported platform: $OS_TYPE/$ARCH${NC}"
+        echo -e "${YELLOW}Supported targets: linux-x64, osx-x64, osx-arm64${NC}"
+        exit 1
+        ;;
+esac
+
+echo -e "${CYAN}Detected platform: $OS_TYPE/$ARCH${NC}"
+echo -e "${CYAN}Using asset: $ASSET_NAME${NC}"
+
+# Check required tools
+require_cmd tar
+if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+    echo -e "${RED}Error: Either 'curl' or 'wget' is required.${NC}"
     exit 1
 fi
-
-# Check for required tools
-for cmd in wget tar sha256sum; do
-    if ! command -v "$cmd" &> /dev/null; then
-        echo -e "${RED}Error: Required command '$cmd' not found.${NC}"
-        exit 1
-    fi
-done
 
 # Get latest release info
 echo -e "${CYAN}Fetching latest release...${NC}"
 RELEASE_URL="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
 
-RELEASE_JSON=$(wget -qO- --header="User-Agent: VibeRails-Installer" "$RELEASE_URL") || {
+RELEASE_JSON=$(fetch_text "$RELEASE_URL") || {
     echo -e "${RED}Error: Could not fetch release info. Check your internet connection.${NC}"
     exit 1
 }
@@ -78,16 +154,16 @@ TAR_PATH="$TEMP_DIR/$ASSET_NAME"
 CHECKSUM_PATH="$TEMP_DIR/$ASSET_NAME.sha256"
 
 echo -e "${CYAN}Downloading $ASSET_NAME...${NC}"
-wget -q -O "$TAR_PATH" "$TAR_URL"
+download_to_file "$TAR_URL" "$TAR_PATH"
 
 if [ -n "$CHECKSUM_URL" ]; then
     echo -e "${CYAN}Downloading checksum...${NC}"
-    wget -q -O "$CHECKSUM_PATH" "$CHECKSUM_URL"
+    download_to_file "$CHECKSUM_URL" "$CHECKSUM_PATH"
 
     # Verify checksum
     echo -e "${CYAN}Verifying checksum...${NC}"
     EXPECTED_HASH=$(cut -d' ' -f1 "$CHECKSUM_PATH")
-    ACTUAL_HASH=$(sha256sum "$TAR_PATH" | cut -d' ' -f1)
+    ACTUAL_HASH=$(sha256_file "$TAR_PATH")
 
     if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
         echo -e "${RED}Error: Checksum verification failed!${NC}"
@@ -130,6 +206,7 @@ echo -e "${CYAN}Configuring PATH...${NC}"
 # Add to common shell rc files
 add_to_path "$HOME/.bashrc"
 add_to_path "$HOME/.zshrc"
+add_to_path "$HOME/.zprofile"
 
 # Also try profile files for login shells
 if [ -f "$HOME/.profile" ] && ! grep -q ".vibe_rails" "$HOME/.profile" 2>/dev/null; then
@@ -143,7 +220,7 @@ echo -e "${CYAN}Installed to: $INSTALL_DIR${NC}"
 echo ""
 echo -e "${YELLOW}To get started, either:${NC}"
 echo -e "  1. Open a NEW terminal, or"
-echo -e "  2. Run: ${NC}source ~/.bashrc${YELLOW} (or ~/.zshrc)${NC}"
+echo -e "  2. Run: ${NC}source ~/.bashrc${YELLOW} (or ~/.zshrc / ~/.zprofile)${NC}"
 echo ""
 echo -e "${YELLOW}Then run:${NC}"
 echo -e "  vb --help"

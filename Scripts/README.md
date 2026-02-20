@@ -21,14 +21,21 @@ This will:
 Open terminal and run:
 
 ```bash
+# Using wget
 wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash
+
+# Or using curl
+curl -fsSL https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash
 ```
 
 This will:
-- Download the latest Linux release
+- Detect your platform/architecture and download the correct release asset:
+  - `vb-linux-x64.tar.gz`
+  - `vb-osx-x64.tar.gz`
+  - `vb-osx-arm64.tar.gz`
 - Verify SHA256 checksum
 - Extract to `~/.vibe_rails`
-- Update your shell configuration (`.bashrc`, `.zshrc`, or `.profile`)
+- Update your shell configuration (`.bashrc`, `.zshrc`, `.zprofile`, or `.profile`)
 
 ## After Installation
 
@@ -41,7 +48,7 @@ $env:Path = [System.Environment]::GetEnvironmentVariable("Path","User")
 
 **Linux/macOS:**
 ```bash
-source ~/.bashrc  # or ~/.zshrc depending on your shell
+source ~/.bashrc  # or ~/.zshrc / ~/.zprofile depending on your shell
 ```
 
 Then verify installation:

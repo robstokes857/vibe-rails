@@ -1,6 +1,13 @@
 #!/usr/bin/env pwsh
 # buildAndDeployVSCodeExt.ps1 - Interactive release script
-# Prompts for version + VSCE PAT, then always packages and publishes.
+# Prompts for version + VS PAT, then always packages and publishes.
+# Supports non-interactive execution via parameters.
+
+param(
+    [string]$Version,
+    [string]$Pat,
+    [switch]$SkipVersionUpdate
+)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -75,7 +82,7 @@ try {
     Write-Host "Current version: $currentVersion" -ForegroundColor Green
     Write-Host ""
 
-    $newVersion = (Read-Host "Enter version to publish (example: 1.4.0)").Trim()
+    $newVersion = if ($Version) { $Version.Trim() } else { (Read-Host "Enter version to publish (example: 1.4.0)").Trim() }
     if ([string]::IsNullOrWhiteSpace($newVersion)) {
         throw "Version is required."
     }
@@ -83,16 +90,34 @@ try {
         throw "Version must be semver-like (examples: 1.4.0, 1.4.0-beta.1)."
     }
 
-    $securePat = Read-Host -Prompt "Enter VSCE_PAT (input hidden)" -AsSecureString
-    $pat = ConvertTo-PlainText -SecureValue $securePat
+    if (-not $Pat) {
+        $Pat = [Environment]::GetEnvironmentVariable("VS_PAT")
+    }
+    if (-not $Pat) {
+        $Pat = [Environment]::GetEnvironmentVariable("VSCE_PAT")
+    }
+    if (-not $Pat) {
+        $securePat = Read-Host -Prompt "Enter VS_PAT (input hidden)" -AsSecureString
+        $Pat = ConvertTo-PlainText -SecureValue $securePat
+    }
+
+    $pat = $Pat
     if ([string]::IsNullOrWhiteSpace($pat)) {
-        throw "VSCE_PAT is required."
+        throw "VS_PAT (or VSCE_PAT) is required."
     }
 
     $env:VSCE_PAT = $pat
     try {
-        Write-Host "Updating version to $newVersion..." -ForegroundColor Cyan
-        Invoke-CheckedCommand -Command "npm" -Arguments @("version", $newVersion, "--no-git-tag-version")
+        if ($SkipVersionUpdate) {
+            Write-Host "Skipping version update (-SkipVersionUpdate)." -ForegroundColor Yellow
+        } elseif ($currentVersion -eq $newVersion) {
+            Write-Host "Version already set to $newVersion; skipping npm version." -ForegroundColor Yellow
+        } else {
+            Write-Host "Updating version to $newVersion..." -ForegroundColor Cyan
+            Invoke-CheckedCommand -Command "npm" -Arguments @("version", $newVersion, "--no-git-tag-version")
+            $currentVersion = Get-PackageVersion -PackageJsonPath $PackageJsonPath
+        }
+
         $currentVersion = Get-PackageVersion -PackageJsonPath $PackageJsonPath
 
         Write-Host "Packaging extension..." -ForegroundColor Cyan
@@ -108,7 +133,7 @@ try {
         }
 
         Write-Host "Publishing $($vsixFiles.Count) package(s)..." -ForegroundColor Cyan
-        $publishArgs = @("publish", "--packagePath") + ($vsixFiles | ForEach-Object { $_.FullName })
+        $publishArgs = @("publish", "--packagePath") + ($vsixFiles | ForEach-Object { $_.FullName }) + @("--skip-duplicate")
         Invoke-Vsce -Arguments $publishArgs
 
         Write-Host ""
