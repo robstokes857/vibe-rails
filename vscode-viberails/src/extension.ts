@@ -93,8 +93,8 @@ async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
     }
 
     const targetProjectFolder = getCurrentWorkspaceFolder();
-    await ensureInstalled(targetProjectFolder);
-    const webviewWwwrootPath = resolveWebviewWwwrootPath(targetProjectFolder);
+    await ensureInstalled();
+    const webviewWwwrootPath = resolveWebviewWwwrootPath();
 
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
@@ -136,14 +136,13 @@ function getCurrentWorkspaceFolder(): string | null {
     return null;
 }
 
-async function ensureInstalled(targetProjectFolder: string | null): Promise<void> {
+async function ensureInstalled(): Promise<void> {
     const exeName = process.platform === 'win32' ? 'vb.exe' : 'vb';
     const exePath = path.join(INSTALL_DIR, exeName);
     const installedWwwrootPath = path.join(INSTALL_DIR, 'wwwroot', 'index.html');
-    const overrideWwwrootPath = path.join(resolveWebviewWwwrootPath(targetProjectFolder, false), 'index.html');
-    const hasAnyWwwroot = fs.existsSync(installedWwwrootPath) || fs.existsSync(overrideWwwrootPath);
+    const hasInstalledWwwroot = fs.existsSync(installedWwwrootPath);
 
-    if (fs.existsSync(exePath) && hasAnyWwwroot) {
+    if (fs.existsSync(exePath) && hasInstalledWwwroot) {
         return;
     }
 
@@ -172,60 +171,8 @@ async function ensureInstalled(targetProjectFolder: string | null): Promise<void
     }
 }
 
-function resolveWebviewWwwrootPath(targetProjectFolder: string | null, showWarning: boolean = true): string {
-    const configured = vscode.workspace.getConfiguration('viberails').get<string>('devWwwroot', '').trim();
-    const installedPath = path.join(INSTALL_DIR, 'wwwroot');
-
-    if (!configured) {
-        return installedPath;
-    }
-
-    const expanded = expandHomeDirectory(configured);
-    const candidates: string[] = [];
-
-    if (path.isAbsolute(expanded)) {
-        candidates.push(expanded);
-    }
-
-    if (targetProjectFolder) {
-        candidates.push(path.resolve(targetProjectFolder, expanded));
-    }
-
-    candidates.push(path.resolve(expanded));
-
-    for (const candidate of new Set(candidates)) {
-        if (fs.existsSync(path.join(candidate, 'index.html'))) {
-            return candidate;
-        }
-    }
-
-    if (showWarning) {
-        vscode.window.showWarningMessage(
-            `VibeRails: configured viberails.devWwwroot "${configured}" was not found. Falling back to installed wwwroot.`
-        );
-    }
-    return installedPath;
-}
-
-function expandHomeDirectory(inputPath: string): string {
-    if (!inputPath.startsWith('~')) {
-        return inputPath;
-    }
-
-    const home = process.env.USERPROFILE || process.env.HOME || '';
-    if (!home) {
-        return inputPath;
-    }
-
-    if (inputPath === '~') {
-        return home;
-    }
-
-    if (inputPath.startsWith('~/') || inputPath.startsWith('~\\')) {
-        return path.join(home, inputPath.slice(2));
-    }
-
-    return inputPath;
+function resolveWebviewWwwrootPath(): string {
+    return path.join(INSTALL_DIR, 'wwwroot');
 }
 
 async function runInstallCommand(): Promise<void> {

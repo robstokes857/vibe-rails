@@ -189,16 +189,25 @@ export class SandboxController {
     _ensureMonaco() {
         if (this._monacoReady) return this._monacoReady;
 
+        const self = this;
         this._monacoReady = new Promise((resolve) => {
             if (typeof require === 'undefined' || !require.config) {
                 console.error('Monaco loader not found');
+                self._monacoReady = null; // Allow retry
                 resolve(null);
                 return;
             }
 
             require.config({ paths: { vs: 'assets/monaco/vs' } });
 
+            const timeout = setTimeout(() => {
+                console.error('Monaco editor load timed out');
+                self._monacoReady = null; // Allow retry
+                resolve(null);
+            }, 15000);
+
             require(['vs/editor/editor.main'], function () {
+                clearTimeout(timeout);
                 // Define custom theme once
                 monaco.editor.defineTheme('viberails-dark', {
                     base: 'vs-dark',
@@ -243,6 +252,11 @@ export class SandboxController {
                     }
                 });
                 resolve(monaco);
+            }, function (err) {
+                clearTimeout(timeout);
+                console.error('Monaco editor failed to load:', err);
+                self._monacoReady = null; // Allow retry
+                resolve(null);
             });
         });
 
@@ -275,21 +289,23 @@ export class SandboxController {
             .forEach(btn => btn.addEventListener('click', () => this.app.closeModal()));
 
         try {
-            const [monacoInstance, diffData] = await Promise.all([
-                this._ensureMonaco(),
-                this.app.apiCall(`/api/v1/sandboxes/${sandboxId}/diff`, 'GET')
-            ]);
+            // Start both in parallel, but check diff data before waiting for Monaco
+            const monacoPromise = this._ensureMonaco();
+            const diffData = await this.app.apiCall(`/api/v1/sandboxes/${sandboxId}/diff`, 'GET');
+
+            const files = (diffData && diffData.files) || [];
+
+            if (files.length === 0) {
+                modalContainer.querySelector('.sandbox-diff-empty').textContent = 'No changes detected in this sandbox.';
+                return;
+            }
+
+            // Only wait for Monaco if we have files to display
+            const monacoInstance = await monacoPromise;
 
             if (!monacoInstance) {
                 this.app.closeModal();
                 this.app.showError('Failed to load Monaco Editor');
-                return;
-            }
-
-            const files = diffData.files || [];
-
-            if (files.length === 0) {
-                modalContainer.querySelector('.sandbox-diff-empty').textContent = 'No changes detected in this sandbox.';
                 return;
             }
 
