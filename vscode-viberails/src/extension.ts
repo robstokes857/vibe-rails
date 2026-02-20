@@ -12,6 +12,7 @@ let backendManager: BackendManager | null = null;
 let webviewManager: WebviewPanelManager | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
 let stopBarItem: vscode.StatusBarItem | null = null;
+let closingPromise: Promise<void> | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
     backendManager = new BackendManager();
@@ -41,21 +42,48 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     const stopCommand = vscode.commands.registerCommand('viberails.stop', async () => {
-        webviewManager?.dispose();
-        await backendManager?.stop();
-        webviewManager = null;
-        stopBarItem?.hide();
-        vscode.window.showInformationMessage('VibeRails closed');
+        await closeDashboard(true, false);
     });
 
     context.subscriptions.push(openCommand);
     context.subscriptions.push(stopCommand);
     context.subscriptions.push({
         dispose: () => {
-            webviewManager?.dispose();
-            backendManager?.dispose();
+            void closeDashboard(false, true);
         }
     });
+}
+
+async function closeDashboard(showMessage: boolean, shutdownBackend: boolean): Promise<void> {
+    if (closingPromise) {
+        await closingPromise;
+        return;
+    }
+
+    closingPromise = (async () => {
+        webviewManager?.dispose();
+        webviewManager = null;
+        stopBarItem?.hide();
+
+        const manager = backendManager;
+        if (manager) {
+            if (shutdownBackend) {
+                await manager.shutdown();
+            } else {
+                await manager.stop();
+            }
+        }
+
+        if (showMessage) {
+            vscode.window.showInformationMessage('VibeRails closed');
+        }
+    })();
+
+    try {
+        await closingPromise;
+    } finally {
+        closingPromise = null;
+    }
 }
 
 async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
@@ -93,13 +121,7 @@ async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
 
         webviewManager = new WebviewPanelManager(webviewWwwrootPath);
 
-        webviewManager.onCloseRequested(async () => {
-            webviewManager?.dispose();
-            await backendManager?.stop();
-            webviewManager = null;
-            stopBarItem?.hide();
-            vscode.window.showInformationMessage('VibeRails closed');
-        });
+        webviewManager.onCloseRequested(() => { void closeDashboard(true, false); });
 
         await webviewManager.create(port, sessionToken);
         stopBarItem?.show();
@@ -283,9 +305,8 @@ function fetchSessionToken(bootstrapUrl: string): Promise<string | null> {
     });
 }
 
-export function deactivate() {
-    webviewManager?.dispose();
-    backendManager?.dispose();
+export async function deactivate(): Promise<void> {
+    await closeDashboard(false, true);
     webviewManager = null;
     backendManager = null;
 }

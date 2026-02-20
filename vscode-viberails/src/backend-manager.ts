@@ -11,6 +11,8 @@ export class BackendManager {
     private process: cp.ChildProcess | null = null;
     private port: number | null = null;
     private bootstrapUrl: string | null = null;
+    private stopPromise: Promise<void> | null = null;
+    private disposed = false;
     private outputChannel: vscode.OutputChannel;
     private _onPortDetected: vscode.EventEmitter<number> = new vscode.EventEmitter<number>();
     public readonly onPortDetected: vscode.Event<number> = this._onPortDetected.event;
@@ -32,6 +34,10 @@ export class BackendManager {
     }
 
     public async start(targetProjectFolder: string | null): Promise<number> {
+        if (this.stopPromise) {
+            await this.stopPromise;
+        }
+
         if (this.isRunning()) {
             return this.port!;
         }
@@ -46,12 +52,14 @@ export class BackendManager {
             this.process = cp.spawn(EXE_PATH, ['--vs-code-v1'], {
                 cwd,
                 stdio: ['pipe', 'pipe', 'pipe'],
-                shell: process.platform === 'win32'
+                shell: false,
+                windowsHide: true
             });
+            const child = this.process;
 
             let resolved = false;
 
-            this.process.stdout?.on('data', (data: Buffer) => {
+            child.stdout?.on('data', (data: Buffer) => {
                 const text = data.toString();
                 this.outputChannel.append(text);
 
@@ -70,18 +78,18 @@ export class BackendManager {
                 }
             });
 
-            this.process.stderr?.on('data', (data: Buffer) => {
+            child.stderr?.on('data', (data: Buffer) => {
                 this.outputChannel.append(`[stderr] ${data.toString()}`);
             });
 
-            this.process.on('error', (err) => {
-                this.cleanup();
+            child.on('error', (err) => {
+                this.cleanup(child);
                 if (!resolved) { reject(err); }
             });
 
-            this.process.on('exit', (code, signal) => {
+            child.on('exit', (code, signal) => {
                 this.outputChannel.appendLine(`[Extension] Process exited (code: ${code}, signal: ${signal})`);
-                this.cleanup();
+                this.cleanup(child);
                 if (!resolved) {
                     reject(new Error(`Backend exited before starting (code: ${code})`));
                 }
@@ -89,7 +97,7 @@ export class BackendManager {
 
             setTimeout(() => {
                 if (!resolved) {
-                    this.stop();
+                    void this.stop();
                     reject(new Error('Timeout waiting for backend to start'));
                 }
             }, 30000);
@@ -129,41 +137,121 @@ export class BackendManager {
     }
 
     public async stop(): Promise<void> {
-        if (!this.process) { return; }
-
-        try {
-            this.process.stdin?.write('\n');
-            this.process.stdin?.end();
-        } catch { /* stdin may already be closed */ }
-
-        const graceful = await Promise.race([
-            new Promise<boolean>(resolve => { this.process?.once('exit', () => resolve(true)); }),
-            this.delay(3000).then(() => false)
-        ]);
-
-        if (!graceful && this.process) {
-            this.process.kill('SIGTERM');
-            await Promise.race([
-                new Promise<void>(resolve => { this.process?.once('exit', () => resolve()); }),
-                this.delay(2000)
-            ]);
-            if (this.process && !this.process.killed) {
-                this.process.kill('SIGKILL');
-            }
+        if (this.stopPromise) {
+            await this.stopPromise;
+            return;
         }
 
-        this.cleanup();
+        const child = this.process;
+        if (!child) { return; }
+
+        this.stopPromise = (async () => {
+            try {
+                try {
+                    child.stdin?.write('\n');
+                    child.stdin?.end();
+                } catch { /* stdin may already be closed */ }
+
+                let exited = await this.waitForExit(child, 3000);
+                if (!exited) {
+                    exited = await this.forceTerminate(child);
+                }
+
+                if (!exited) {
+                    this.outputChannel.appendLine(
+                        `[Extension] Backend PID ${child.pid ?? 'unknown'} did not exit after termination attempts.`
+                    );
+                }
+            } finally {
+                this.cleanup(child);
+            }
+        })();
+
+        try {
+            await this.stopPromise;
+        } finally {
+            this.stopPromise = null;
+        }
     }
 
-    private cleanup(): void {
+    private waitForExit(child: cp.ChildProcess, timeoutMs: number): Promise<boolean> {
+        if (child.exitCode !== null || child.signalCode !== null) {
+            return Promise.resolve(true);
+        }
+
+        return new Promise((resolve) => {
+            let settled = false;
+
+            const onExit = () => {
+                if (settled) { return; }
+                settled = true;
+                clearTimeout(timer);
+                resolve(true);
+            };
+
+            const timer = setTimeout(() => {
+                if (settled) { return; }
+                settled = true;
+                child.off('exit', onExit);
+                resolve(false);
+            }, timeoutMs);
+
+            child.once('exit', onExit);
+        });
+    }
+
+    private async forceTerminate(child: cp.ChildProcess): Promise<boolean> {
+        if (process.platform === 'win32') {
+            const pid = child.pid;
+            if (pid) {
+                await this.killProcessTreeWindows(pid);
+            } else {
+                try { child.kill(); } catch { /* process may already be gone */ }
+            }
+            return this.waitForExit(child, 3000);
+        }
+
+        try { child.kill('SIGTERM'); } catch { /* process may already be gone */ }
+        let exited = await this.waitForExit(child, 2000);
+        if (exited) { return true; }
+
+        try { child.kill('SIGKILL'); } catch { /* process may already be gone */ }
+        exited = await this.waitForExit(child, 2000);
+        return exited;
+    }
+
+    private killProcessTreeWindows(pid: number): Promise<void> {
+        return new Promise((resolve) => {
+            const killer = cp.spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+                stdio: 'ignore',
+                shell: false,
+                windowsHide: true
+            });
+
+            killer.on('error', () => resolve());
+            killer.on('exit', () => resolve());
+        });
+    }
+
+    private cleanup(child?: cp.ChildProcess): void {
+        if (child && this.process !== child) {
+            return;
+        }
+
         this.process = null;
         this.port = null;
         this.bootstrapUrl = null;
     }
 
-    public dispose(): void {
-        this.stop();
+    public async shutdown(): Promise<void> {
+        await this.stop();
+        if (this.disposed) { return; }
+        this.disposed = true;
         this._onPortDetected.dispose();
         this.outputChannel.dispose();
+    }
+
+    public dispose(): void {
+        void this.shutdown();
     }
 }
