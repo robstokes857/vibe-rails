@@ -166,6 +166,40 @@ code {
     transform: rotate(90deg);
 }
 
+/* Exit button */
+.nav-exit-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0 0.75rem;
+    height: 40px;
+    border-radius: 999px;
+    border: 1px solid var(--color-danger);
+    background: transparent;
+    color: var(--color-danger);
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: all var(--transition-speed);
+}
+
+.nav-exit-btn:hover {
+    color: #fff;
+    background: var(--color-danger);
+    border-color: var(--color-danger);
+    box-shadow: 0 0 12px rgba(229, 115, 115, 0.35);
+}
+
+.nav-exit-icon {
+    transition: transform 0.3s ease;
+}
+
+.nav-exit-btn:hover .nav-exit-icon {
+    transform: translateX(3px);
+}
+
 /* Settings card cog spin on hover */
 .settings-card-cog {
     transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
