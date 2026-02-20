@@ -32,7 +32,7 @@
 **For End Users:**
 - Just install from VS Code Marketplace... That's it
 - One or more LLM CLIs: Claude CLI, OpenAI Codex, or Google Gemini CLI
-- **No other dependencies required** - binaries are bundled in the extension
+- **No other dependencies required** - backend binaries are installed automatically on first run
 
 **For Contributors (Working on the Project):**
 - [.NET 10.0 SDK](https://dotnet.microsoft.com/download) or later (required to build the backend)

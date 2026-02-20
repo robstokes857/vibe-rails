@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  PROJECT_PATH: ./VibeRails/VibeRails.csproj
+  CONFIGURATION: Release
+  FRAMEWORK: net10.0
+
+jobs:
+  build:
+    name: Build ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+          - rid: linux-x64
+            os: ubuntu-latest
+          - rid: osx-x64
+            os: macos-13
+          - rid: osx-arm64
+            os: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Linux NativeAOT dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      - name: Publish NativeAOT
+        shell: bash
+        run: |
+          set -euo pipefail
+          out_dir="artifacts/${{ matrix.rid }}"
+          dotnet publish "$PROJECT_PATH" \
+            -c "$CONFIGURATION" \
+            -f "$FRAMEWORK" \
+            -r "${{ matrix.rid }}" \
+            --self-contained true \
+            -o "$out_dir" \
+            /p:PublishAot=true \
+            /p:StripSymbols=true \
+            /p:InvariantGlobalization=true
+
+      - name: Package + checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $rid = "${{ matrix.rid }}"
+          $assetDir = "release-assets"
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+
+          $archive = Join-Path $assetDir "vb-$rid.zip"
+          Compress-Archive -Path "artifacts/$rid/*" -DestinationPath $archive -Force
+
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path -Leaf $archive)" | Set-Content -Path "$archive.sha256" -Encoding ascii
+
+      - name: Package + checksum (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rid="${{ matrix.rid }}"
+          mkdir -p release-assets
+
+          archive="release-assets/vb-${rid}.tar.gz"
+          tar -czf "$archive" -C "artifacts/${rid}" .
+
+          hash="$(shasum -a 256 "$archive" | awk '{print tolower($1)}')"
+          printf "%s  %s\n" "$hash" "$(basename "$archive")" > "${archive}.sha256"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.rid }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  upload:
+    name: Upload Assets To GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download workflow artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Ensure release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          repo="${GITHUB_REPOSITORY}"
+
+          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --repo "$repo" \
+              --title "VibeRails ${tag#v}" \
+              --draft=false
+          else
+            gh release create "$tag" \
+              --repo "$repo" \
+              --title "VibeRails ${tag#v}" \
+              --generate-notes
+          fi
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          repo="${GITHUB_REPOSITORY}"
+          gh release upload "$tag" release-assets/* --repo "$repo" --clobber

@@ -69,7 +69,9 @@
     "package:all": "pwsh -ExecutionPolicy Bypass -File ./scripts/package-platforms.ps1",
     "package:win32-x64": "npx vsce package --target win32-x64 -o dist/",
     "package:linux-x64": "npx vsce package --target linux-x64 -o dist/",
-    "release": "pwsh -ExecutionPolicy Bypass -File ./scripts/buildAndDeployVSCodeExt.ps1"
+    "release": "pwsh -ExecutionPolicy Bypass -File ./scripts/buildAndDeployVSCodeExt.ps1",
+    "marketplace:test": "pwsh -ExecutionPolicy Bypass -File ./scripts/test-vscode-marketplace.ps1",
+    "marketplace:publish-only": "pwsh -ExecutionPolicy Bypass -File ./scripts/test-vscode-marketplace.ps1 -Publish"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

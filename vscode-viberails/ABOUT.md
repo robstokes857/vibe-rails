@@ -33,6 +33,23 @@ npx vsce package
 
 This produces a `.vsix` file you can install via `Extensions: Install from VSIX...` in VS Code or `code --install-extension <file>.vsix` from the command line.
 
+## Backend Installer Commands
+
+VibeRails app install commands (for docs/site):
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.ps1 | iex
+```
+
+```bash
+# Linux
+wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash
+
+# macOS
+curl -fsSL https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash
+```
+
 ## Versioning and Release
 
 Use semantic versioning:
@@ -41,17 +58,25 @@ Use semantic versioning:
 - `minor`: new backward-compatible features
 - `major`: breaking changes
 
-Interactive release flow:
+Unified release flow (recommended):
+
+```bash
+# Run from repository root
+pwsh ./Scripts/deploy.ps1
+```
+
+The root release script requires:
+- extension version (for example `1.4.0`)
+- `VS_PAT` environment variable (Visual Studio Marketplace PAT)
+
+Then it always:
+1. syncs backend + extension version
+2. commits and tags `vX.Y.Z`
+3. triggers GitHub Actions release build for all platforms
+4. publishes the VS Code extension to Marketplace
+
+Extension-only release flow (legacy/manual):
 
 ```bash
 npm run release
 ```
-
-The script prompts for:
-- extension version (for example `1.4.0`)
-- `VSCE_PAT` (hidden input)
-
-Then it always:
-1. updates `package.json` version
-2. builds a VSIX package for the extension (no local .NET build required)
-3. publishes the generated VSIX package to Marketplace
