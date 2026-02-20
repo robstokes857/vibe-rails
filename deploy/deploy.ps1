@@ -96,12 +96,14 @@ function Sync-ExtensionVersion {
     Write-Host "Synced package.json version to $Version" -ForegroundColor Green
 
     if (Test-Path $PackageLockFile) {
-        $packageLockJson = Get-Content $PackageLockFile -Raw | ConvertFrom-Json
-        $packageLockJson.version = $Version
+        $packageLockJson = Get-Content $PackageLockFile -Raw | ConvertFrom-Json -AsHashtable
+        $packageLockJson["version"] = $Version
 
-        $rootPackageProp = $packageLockJson.packages.PSObject.Properties | Where-Object { $_.Name -eq "" } | Select-Object -First 1
-        if ($rootPackageProp) {
-            $rootPackageProp.Value.version = $Version
+        if ($packageLockJson.Contains("packages")) {
+            $packages = $packageLockJson["packages"]
+            if ($packages -is [System.Collections.IDictionary] -and $packages.Contains("")) {
+                $packages[""]["version"] = $Version
+            }
         }
 
         $packageLockJson | ConvertTo-Json -Depth 100 | Set-Content $PackageLockFile -Encoding utf8NoBOM
