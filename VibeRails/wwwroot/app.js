@@ -53,18 +53,20 @@ export class VibeControlApp {
     }
 
     setupVSCodeIntegration() {
+        const exitBtn = document.getElementById('exit-btn');
+        if (exitBtn) {
+            exitBtn.addEventListener('click', () => {
+                if (window.__viberails_VSCODE__ && window.__viberails_close__) {
+                    window.__viberails_close__();
+                } else {
+                    this.apiCall('/api/v1/shutdown', 'POST').catch(() => {});
+                    window.close();
+                }
+            });
+        }
+
         // Apply VS Code-specific UI adjustments when in webview
         if (window.__viberails_VSCODE__) {
-            const exitBtn = document.getElementById('vscode-exit-btn');
-            if (exitBtn) {
-                exitBtn.style.display = 'block';
-                exitBtn.addEventListener('click', () => {
-                    if (window.__viberails_close__) {
-                        window.__viberails_close__();
-                    }
-                });
-            }
-
             // Hide "Edit in VS Code" button since we're already in VS Code
             const editVsCodeCard = document.querySelector('[data-agent-action="edit-vscode"]');
             if (editVsCodeCard) {

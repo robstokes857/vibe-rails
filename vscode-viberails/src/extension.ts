@@ -11,17 +11,25 @@ const INSTALL_DIR = path.join(process.env.USERPROFILE || process.env.HOME || '',
 let backendManager: BackendManager | null = null;
 let webviewManager: WebviewPanelManager | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
+let stopBarItem: vscode.StatusBarItem | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
     backendManager = new BackendManager();
 
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
-    statusBarItem.text = "$(circuit-board) VibeRails";
+    statusBarItem.text = "$(rocket) VibeRails";
     statusBarItem.tooltip = "Open VibeRails Dashboard";
     statusBarItem.command = 'viberails.open';
-    statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    statusBarItem.color = '#c084fc';
     statusBarItem.show();
     context.subscriptions.push(statusBarItem);
+
+    stopBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 999);
+    stopBarItem.text = "$(close)";
+    stopBarItem.tooltip = "Stop VibeRails";
+    stopBarItem.command = 'viberails.stop';
+    stopBarItem.color = '#c084fc';
+    context.subscriptions.push(stopBarItem);
 
     const openCommand = vscode.commands.registerCommand('viberails.open', async () => {
         try {
@@ -32,7 +40,16 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    const stopCommand = vscode.commands.registerCommand('viberails.stop', async () => {
+        webviewManager?.dispose();
+        await backendManager?.stop();
+        webviewManager = null;
+        stopBarItem?.hide();
+        vscode.window.showInformationMessage('VibeRails closed');
+    });
+
     context.subscriptions.push(openCommand);
+    context.subscriptions.push(stopCommand);
     context.subscriptions.push({
         dispose: () => {
             webviewManager?.dispose();
@@ -79,10 +96,13 @@ async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
         webviewManager.onCloseRequested(async () => {
             webviewManager?.dispose();
             await backendManager?.stop();
+            webviewManager = null;
+            stopBarItem?.hide();
             vscode.window.showInformationMessage('VibeRails closed');
         });
 
         await webviewManager.create(port, sessionToken);
+        stopBarItem?.show();
     });
 }
 
