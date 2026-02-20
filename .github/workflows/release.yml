@@ -37,7 +37,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: "10.0.x"
 
       - name: Install Linux NativeAOT dependencies
         if: runner.os == 'Linux'
@@ -47,7 +47,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang zlib1g-dev
 
-      - name: Publish NativeAOT
+      - name: Publish NativeAOT (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $outDir = "artifacts/${{ matrix.rid }}"
+          dotnet publish "$env:PROJECT_PATH" `
+            -c "$env:CONFIGURATION" `
+            -f "$env:FRAMEWORK" `
+            -r "${{ matrix.rid }}" `
+            --self-contained true `
+            -o "$outDir" `
+            /p:PublishAot=true `
+            /p:StripSymbols=true `
+            /p:InvariantGlobalization=true
+
+      - name: Publish NativeAOT (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
@@ -103,6 +120,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      - name: Ensure GitHub CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v gh >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y gh
+          fi
+
       - name: Download workflow artifacts
         uses: actions/download-artifact@v4
         with:

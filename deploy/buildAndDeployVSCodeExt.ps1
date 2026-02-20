@@ -64,7 +64,8 @@ function Get-PackageVersion {
 }
 
 $ScriptDir = Split-Path -Parent $PSCommandPath
-$ExtensionRoot = Split-Path -Parent $ScriptDir
+$RepoRoot = Split-Path -Parent $ScriptDir
+$ExtensionRoot = Join-Path $RepoRoot "vscode-viberails"
 $PackageJsonPath = Join-Path $ExtensionRoot "package.json"
 $DistDir = Join-Path $ExtensionRoot "dist"
 

@@ -64,14 +64,14 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
-    "prepare-binaries": "pwsh -ExecutionPolicy Bypass -File ./scripts/prepare-binaries.ps1",
+    "prepare-binaries": "pwsh -ExecutionPolicy Bypass -File ../deploy/prepare-binaries.ps1",
     "package": "npm run package:all",
-    "package:all": "pwsh -ExecutionPolicy Bypass -File ./scripts/package-platforms.ps1",
+    "package:all": "pwsh -ExecutionPolicy Bypass -File ../deploy/package-platforms.ps1",
     "package:win32-x64": "npx vsce package --target win32-x64 -o dist/",
     "package:linux-x64": "npx vsce package --target linux-x64 -o dist/",
-    "release": "pwsh -ExecutionPolicy Bypass -File ./scripts/buildAndDeployVSCodeExt.ps1",
-    "marketplace:test": "pwsh -ExecutionPolicy Bypass -File ./scripts/test-vscode-marketplace.ps1",
-    "marketplace:publish-only": "pwsh -ExecutionPolicy Bypass -File ./scripts/test-vscode-marketplace.ps1 -Publish"
+    "release": "pwsh -ExecutionPolicy Bypass -File ../deploy/buildAndDeployVSCodeExt.ps1",
+    "marketplace:test": "pwsh -ExecutionPolicy Bypass -File ../deploy/test-vscode-marketplace.ps1",
+    "marketplace:publish-only": "pwsh -ExecutionPolicy Bypass -File ../deploy/test-vscode-marketplace.ps1 -Publish"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

@@ -6,8 +6,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $ScriptDir = Split-Path -Parent $PSCommandPath
-$ExtensionRoot = Split-Path -Parent $ScriptDir
-$RepoRoot = Split-Path -Parent $ExtensionRoot
+$RepoRoot = Split-Path -Parent $ScriptDir
+$ExtensionRoot = Join-Path $RepoRoot "vscode-viberails"
 $ArtifactsDir = Join-Path $RepoRoot "Scripts" "artifacts" "aot"
 $WwwrootSource = Join-Path $RepoRoot "VibeRails" "wwwroot"
 $BinDir = Join-Path $ExtensionRoot "bin"

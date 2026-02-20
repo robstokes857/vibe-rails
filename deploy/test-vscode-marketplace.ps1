@@ -43,7 +43,8 @@ function Invoke-Vsce {
 }
 
 $scriptDir = Split-Path -Parent $PSCommandPath
-$extensionRoot = Split-Path -Parent $scriptDir
+$repoRoot = Split-Path -Parent $scriptDir
+$extensionRoot = Join-Path $repoRoot "vscode-viberails"
 $packageJsonPath = Join-Path $extensionRoot "package.json"
 $distDir = Join-Path $extensionRoot "dist"
 
