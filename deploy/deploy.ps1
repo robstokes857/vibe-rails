@@ -243,7 +243,7 @@ if ($tagExistsLocal) {
 Write-Host "`nNew version will be: " -NoNewline
 Write-Host $tag -ForegroundColor Green
 
-$confirm = Read-Host "`nProceed with release $tag? (Y/n)"
+$confirm = Read-Host "`nProceed with release $($tag)? (Y/n)"
 if ($confirm -and $confirm.ToLower() -ne "y") {
     Write-Host "Aborted." -ForegroundColor Yellow
     exit 0
