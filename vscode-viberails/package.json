@@ -32,6 +32,10 @@
           "light": "media/vs-logo.png",
           "dark": "media/vs-logo.png"
         }
+      },
+      {
+        "command": "viberails.stop",
+        "title": "VibeRails: Stop Dashboard"
       }
     ],
     "menus": {
