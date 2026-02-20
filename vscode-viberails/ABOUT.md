@@ -62,7 +62,7 @@ Unified release flow (recommended):
 
 ```bash
 # Run from repository root
-pwsh ./Scripts/deploy.ps1
+pwsh ./deploy/deploy.ps1
 ```
 
 The root release script requires:

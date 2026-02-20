@@ -6,7 +6,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $ScriptDir = Split-Path -Parent $PSCommandPath
-$ExtensionRoot = Split-Path -Parent $ScriptDir
+$RepoRoot = Split-Path -Parent $ScriptDir
+$ExtensionRoot = Join-Path $RepoRoot "vscode-viberails"
 $DistDir = Join-Path $ExtensionRoot "dist"
 
 Write-Host "VibeRails Extension - Packaging" -ForegroundColor Cyan
