@@ -10,6 +10,7 @@ using System.Security.Cryptography.X509Certificates;
 using VibeRails.Services.Messaging;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.Tracing;
 using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Validators;
 using VibeRails.Utils;
@@ -75,6 +76,7 @@ namespace VibeRails
 
             // Terminal Session Service (scoped to work with other scoped services)
             serviceCollection.AddScoped<ITerminalIoObserver, MyTerminalObserver>();
+            serviceCollection.AddScoped<ITerminalIoObserver, TraceObserver>();
             serviceCollection.AddScoped<ITerminalIoObserverService, TerminalIoObserverService>();
             serviceCollection.AddScoped<ITerminalSessionService, TerminalSessionService>();
 

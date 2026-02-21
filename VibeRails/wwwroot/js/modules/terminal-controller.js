@@ -10,6 +10,10 @@ export class TerminalController {
         this.resizeDebounceId = null;
         this.resizeObserver = null;
         this.windowResizeHandler = null;
+        this.lockLayoutHandler = null;
+        this.lockedPanel = null;
+        this.lockScrollTop = 0;
+        this.isScrollLocked = false;
     }
 
     async checkStatus() {
@@ -71,13 +75,14 @@ export class TerminalController {
         this.terminal = new Terminal({
             cols: 120,
             rows: 30,
-            cursorBlink: true,
+            cursorBlink: false,
             fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
             fontSize: 14,
             allowProposedApi: true,
             unicodeVersion: '11',
             disableStdin: false,
             cursorStyle: 'block',
+            cursorInactiveStyle: 'none',
             theme: {
                 background: '#1e1e1e',
                 foreground: '#d4d4d4',
@@ -111,6 +116,7 @@ export class TerminalController {
         this.terminal.open(terminalElement);
         this.setupResizeHandling(terminalElement);
         this.fitAndSyncTerminal();
+        this.scheduleFitPasses();
         this.terminal.focus();
 
         // Connect to WebSocket
@@ -127,29 +133,30 @@ export class TerminalController {
 
         // Auth is handled by cookie (browser) or monkey-patched WebSocket (VSCode webview).
         // No need to put the session token in the URL.
-        this.socket = new WebSocket(wsUrl);
-        this.socket.binaryType = 'arraybuffer';
+        const socket = new WebSocket(wsUrl);
+        socket.binaryType = 'arraybuffer';
+        this.socket = socket;
 
-        this.socket.onopen = () => {
+        socket.onopen = () => {
+            if (this.socket !== socket) return;
             this.isConnected = true;
             this.fitAndSyncTerminal();
+            this.scheduleFitPasses();
             console.log('Terminal WebSocket connected - CLI is already running');
         };
 
-        this.socket.onmessage = (event) => {
-            if (typeof event.data === 'string') {
-                this.terminal.write(event.data);
-                return;
-            }
-            this.terminal.write(new Uint8Array(event.data));
+        socket.onmessage = (event) => {
+            if (this.socket !== socket) return;
+            this.writeTerminalData(event.data);
         };
 
-        this.socket.onclose = (event) => {
+        socket.onclose = (event) => {
+            if (this.socket !== socket) return;
             this.isConnected = false;
             if (this.terminal) {
                 const reason = event.reason || 'Terminal disconnected';
                 const color = reason.includes('taken over') ? '33' : '90';
-                this.terminal.write(`\r\n\x1b[${color}m[${reason}]\x1b[0m\r\n`);
+                this.writeTerminalData(`\r\n\x1b[${color}m[${reason}]\x1b[0m\r\n`);
             }
             console.log('Terminal WebSocket closed');
 
@@ -167,7 +174,8 @@ export class TerminalController {
             }
         };
 
-        this.socket.onerror = (error) => {
+        socket.onerror = (error) => {
+            if (this.socket !== socket) return;
             console.error('Terminal WebSocket error:', error);
             this.app.showError('Terminal connection error');
         };
@@ -196,6 +204,19 @@ export class TerminalController {
         });
     }
 
+    writeTerminalData(data) {
+        if (!this.terminal) return;
+
+        if (typeof data === 'string') {
+            this.terminal.write(data);
+        } else {
+            this.terminal.write(new Uint8Array(data));
+        }
+
+        // Keep the terminal pinned to latest output.
+        this.terminal.scrollToBottom();
+    }
+
     sendResizeToPty() {
         if (!this.terminal || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
         this.socket.send(`${this.resizePrefix}${this.terminal.cols},${this.terminal.rows}`);
@@ -207,6 +228,15 @@ export class TerminalController {
             this.fitAddon.fit();
         }
         this.sendResizeToPty();
+    }
+
+    scheduleFitPasses() {
+        if (!this.terminal) return;
+
+        requestAnimationFrame(() => {
+            this.fitAndSyncTerminal();
+            setTimeout(() => this.fitAndSyncTerminal(), 120);
+        });
     }
 
     setupResizeHandling(terminalElement) {
@@ -243,6 +273,7 @@ export class TerminalController {
 
     disconnect() {
         this.teardownResizeHandling();
+        this.disableLockedLayout(this.lockedPanel);
         if (this.socket) {
             this.socket.close();
             this.socket = null;
@@ -255,9 +286,319 @@ export class TerminalController {
         this.isConnected = false;
     }
 
-    renderTerminalPanel() {
+    removeLockLayoutHandler() {
+        if (this.lockLayoutHandler) {
+            window.removeEventListener('resize', this.lockLayoutHandler);
+            this.lockLayoutHandler = null;
+        }
+    }
+
+    cleanupStaleLockState() {
+        if (this.lockedPanel && !document.body.contains(this.lockedPanel)) {
+            this.removeLockLayoutHandler();
+            this.lockedPanel = null;
+            this.setPageScrollLock(false);
+        }
+    }
+
+    setPageScrollLock(isLocked) {
+        if (isLocked) {
+            if (this.isScrollLocked) return;
+            this.lockScrollTop = window.scrollY || window.pageYOffset || 0;
+            document.body.classList.add('terminal-scroll-locked');
+            document.body.style.top = `-${this.lockScrollTop}px`;
+            this.isScrollLocked = true;
+            return;
+        }
+
+        if (!this.isScrollLocked && !document.body.classList.contains('terminal-scroll-locked')) {
+            return;
+        }
+
+        document.body.classList.remove('terminal-scroll-locked');
+        document.body.style.removeProperty('top');
+        const restoreTop = Number.isFinite(this.lockScrollTop) ? this.lockScrollTop : 0;
+        this.lockScrollTop = 0;
+        this.isScrollLocked = false;
+        window.scrollTo(0, restoreTop);
+    }
+
+    resetLayoutStateForNavigation() {
+        this.disableLockedLayout(this.lockedPanel);
+        this.cleanupStaleLockState();
+    }
+
+    updateLockedPanelPosition(panel) {
+        if (!panel) return;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+        const panelRect = panel.getBoundingClientRect();
+        const cardHeader = panel.querySelector('.card-header');
+        const cardHeaderHeight = cardHeader
+            ? Math.round(cardHeader.getBoundingClientRect().height)
+            : 0;
+
+        const topOffset = Math.max(8, Math.round(panelRect.top));
+        const bottomPadding = 12;
+        const availableShellHeight = Math.max(
+            220,
+            Math.round(viewportHeight - topOffset - bottomPadding - cardHeaderHeight)
+        );
+
+        panel.style.setProperty('--terminal-lock-max-height', `${availableShellHeight}px`);
+    }
+
+    enableLockedLayout(panel) {
+        if (!panel) return;
+
+        panel.scrollIntoView({ block: 'center', inline: 'nearest' });
+        this.removeLockLayoutHandler();
+        panel.classList.remove('terminal-minimized');
+        panel.classList.add('terminal-locked');
+        this.lockedPanel = panel;
+
+        this.updateLockedPanelPosition(panel);
+        this.setPageScrollLock(true);
+
+        this.lockLayoutHandler = () => {
+            if (!this.lockedPanel || !document.body.contains(this.lockedPanel)) {
+                this.removeLockLayoutHandler();
+                this.lockedPanel = null;
+                this.setPageScrollLock(false);
+                return;
+            }
+            this.updateLockedPanelPosition(this.lockedPanel);
+            this.scheduleFitPasses();
+        };
+
+        window.addEventListener('resize', this.lockLayoutHandler);
+        this.updateLockedPanelPosition(panel);
+        this.scheduleFitPasses();
+    }
+
+    disableLockedLayout(panel) {
+        const targetPanel = panel || this.lockedPanel;
+
+        if (targetPanel) {
+            targetPanel.classList.remove('terminal-locked');
+            targetPanel.style.removeProperty('--terminal-lock-max-height');
+        }
+
+        if (this.lockedPanel === targetPanel) {
+            this.lockedPanel = null;
+        }
+
+        this.removeLockLayoutHandler();
+        this.setPageScrollLock(false);
+    }
+
+    getTerminalPanel(container) {
+        return container?.querySelector('#terminal-panel');
+    }
+
+    setWindowTitle(container, titleText) {
+        const title = container?.querySelector('#terminal-window-title');
+        if (title) {
+            title.textContent = titleText || 'Web Terminal';
+        }
+    }
+
+    updateWindowControlState(container) {
+        const panel = this.getTerminalPanel(container);
+        if (!panel) return;
+
+        const isMinimized = panel.classList.contains('terminal-minimized');
+        const isExpanded = panel.classList.contains('terminal-expanded');
+        const isLocked = panel.classList.contains('terminal-locked');
+        const isFocusView = !!container?.closest('[data-view="terminal-focus"]');
+
+        const closeBtn = container.querySelector('#terminal-close-dot');
+        const minimizeBtn = container.querySelector('#terminal-minimize-dot');
+        const maximizeBtn = container.querySelector('#terminal-maximize-dot');
+        const lockBtn = container.querySelector('#terminal-lock-btn');
+        const focusBtn = container.querySelector('#terminal-popout-btn');
+
+        const setControlLabel = (button, text) => {
+            const label = button?.querySelector('.terminal-control-text');
+            if (label) label.textContent = text;
+        };
+
+        if (closeBtn) {
+            closeBtn.setAttribute('aria-pressed', 'false');
+            closeBtn.title = 'Stop and close this terminal session';
+            setControlLabel(closeBtn, 'Close');
+        }
+
+        if (minimizeBtn) {
+            minimizeBtn.classList.toggle('active', isMinimized);
+            minimizeBtn.setAttribute('aria-pressed', String(isMinimized));
+            minimizeBtn.title = isMinimized
+                ? 'Restore terminal panel height'
+                : 'Minimize terminal panel';
+            setControlLabel(minimizeBtn, isMinimized ? 'Restore' : 'Minimize');
+        }
+
+        if (maximizeBtn) {
+            maximizeBtn.classList.toggle('active', isExpanded);
+            maximizeBtn.setAttribute('aria-pressed', String(isExpanded));
+            maximizeBtn.title = isExpanded
+                ? 'Restore terminal to default size'
+                : 'Expand terminal panel';
+            setControlLabel(maximizeBtn, isExpanded ? 'Normal Size' : 'Expand');
+        }
+
+        if (lockBtn) {
+            lockBtn.classList.toggle('active', isLocked);
+            lockBtn.setAttribute('aria-pressed', String(isLocked));
+            lockBtn.title = isLocked
+                ? 'Unlock terminal from sticky focus mode'
+                : 'Lock terminal in sticky focus mode while scrolling';
+            setControlLabel(lockBtn, isLocked ? 'Unlock Focus' : 'Lock Focus');
+        }
+
+        if (focusBtn) {
+            focusBtn.classList.remove('active');
+            focusBtn.setAttribute('aria-pressed', 'false');
+            focusBtn.title = isFocusView
+                ? 'Return to dashboard terminal section'
+                : 'Open terminal in focused page view';
+            setControlLabel(focusBtn, isFocusView ? 'Back to Dashboard' : 'Focus View');
+        }
+    }
+
+    resetWindowModes(container) {
+        const panel = this.getTerminalPanel(container);
+        if (!panel) return;
+
+        panel.classList.remove('terminal-minimized', 'terminal-expanded');
+        this.disableLockedLayout(panel);
+        this.updateWindowControlState(container);
+    }
+
+    toggleMinimize(container) {
+        const panel = this.getTerminalPanel(container);
+        if (!panel) return;
+
+        if (panel.classList.contains('terminal-minimized')) {
+            panel.classList.remove('terminal-minimized');
+        } else {
+            panel.classList.remove('terminal-expanded');
+            panel.classList.add('terminal-minimized');
+        }
+
+        this.updateWindowControlState(container);
+        this.scheduleFitPasses();
+    }
+
+    toggleExpand(container) {
+        const panel = this.getTerminalPanel(container);
+        if (!panel) return;
+
+        if (panel.classList.contains('terminal-expanded')) {
+            panel.classList.remove('terminal-expanded');
+        } else {
+            panel.classList.remove('terminal-minimized');
+            panel.classList.add('terminal-expanded');
+        }
+
+        this.updateWindowControlState(container);
+        this.scheduleFitPasses();
+    }
+
+    toggleLock(container) {
+        const panel = this.getTerminalPanel(container);
+        if (!panel) return;
+
+        if (panel.classList.contains('terminal-locked')) {
+            this.disableLockedLayout(panel);
+        } else {
+            this.enableLockedLayout(panel);
+        }
+
+        this.updateWindowControlState(container);
+        this.scheduleFitPasses();
+    }
+
+    parseSelectionMetadata(selection) {
+        if (!selection || !selection.startsWith('env:')) {
+            return { preselectedEnvId: null };
+        }
+
+        const parts = selection.split(':');
+        const envId = Number.parseInt(parts[1], 10);
+        return {
+            preselectedEnvId: Number.isFinite(envId) ? envId : null
+        };
+    }
+
+    openTerminalInNewWindow(container) {
+        if (container?.closest('[data-view="terminal-focus"]')) {
+            this.app.goBack();
+            return;
+        }
+
+        const cliSelect = container?.querySelector('#terminal-cli-select');
+        const selection = cliSelect?.value || 'base:claude';
+        const { preselectedEnvId } = this.parseSelectionMetadata(selection);
+        const focusData = {
+            preselectedEnvId,
+            preferredSelection: selection
+        };
+
+        this.app.navigate('terminal-focus', focusData);
+    }
+
+    async loadTerminalFocusView(data = {}) {
+        await this.app.refreshDashboardData();
+
+        const content = document.getElementById('app-content');
+        if (!content) return;
+
+        content.innerHTML = `
+            <div class="view terminal-focus-view" data-view="terminal-focus">
+                <div class="terminal-focus-topbar">
+                    <button class="btn btn-outline-primary d-inline-flex align-items-center gap-2" type="button" data-action="go-back">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
+                        </svg>
+                        Back
+                    </button>
+                    <div class="terminal-focus-heading">
+                        <h2 class="mb-1">Web Terminal Focus</h2>
+                        <p class="text-muted mb-0">Focused terminal workspace with only essential controls.</p>
+                    </div>
+                </div>
+                <div class="terminal-focus-body" data-terminal-focus-content></div>
+            </div>
+        `;
+
+        const root = content.querySelector('[data-view="terminal-focus"]');
+        const terminalContent = root?.querySelector('[data-terminal-focus-content]');
+        if (!terminalContent) return;
+
+        terminalContent.innerHTML = this.renderTerminalPanel({ focusView: true });
+        await this.bindTerminalActions(terminalContent, data.preselectedEnvId || null);
+
+        if (typeof data.preferredSelection === 'string' && data.preferredSelection.length > 0) {
+            const cliSelect = terminalContent.querySelector('#terminal-cli-select');
+            if (cliSelect && Array.from(cliSelect.options).some(opt => opt.value === data.preferredSelection)) {
+                cliSelect.value = data.preferredSelection;
+            }
+        }
+    }
+
+    renderTerminalPanel(options = {}) {
+        const isFocusView = options.focusView === true;
+        const lockButtonHtml = isFocusView ? '' : `
+                            <button type="button" class="terminal-control-btn icon-btn" id="terminal-lock-btn" title="Lock terminal in sticky focus mode" aria-label="Lock terminal focus mode">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M8 1a3 3 0 0 0-3 3v2H4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1V4a3 3 0 0 0-3-3m2 5H6V4a2 2 0 1 1 4 0z"/>
+                                </svg>
+                                <span class="terminal-control-text">Lock Focus</span>
+                            </button>
+        `;
+
         return `
-            <div class="card mb-4" id="terminal-panel">
+            <div class="card ${isFocusView ? 'terminal-page-mode terminal-expanded terminal-focus-card' : 'mb-4'}" id="terminal-panel">
                 <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
                     <div class="terminal-header-main">
                         <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -299,12 +640,32 @@ export class TerminalController {
                         </button>
                     </div>
                 </div>
-                <div class="card-body p-0" id="terminal-container" style="display: none; height: 520px; overflow: hidden;">
-                    <div id="terminal-element" style="width: 100%; height: 100%;"></div>
-                </div>
-                <div class="card-body text-center text-muted" id="terminal-placeholder">
-                    <p class="mb-3">Launch an embedded terminal session.</p>
-                    <p class="small">Select a CLI and click "Start" to begin.</p>
+                <div class="terminal-window-shell">
+                    <div class="terminal-window-header">
+                        <div class="terminal-window-controls terminal-window-controls-left">
+                            <button type="button" class="terminal-control-dot close" id="terminal-close-dot" title="Close terminal" aria-label="Close terminal"></button>
+                            <button type="button" class="terminal-control-dot minimize" id="terminal-minimize-dot" title="Minimize terminal" aria-label="Minimize terminal"></button>
+                            <button type="button" class="terminal-control-dot maximize" id="terminal-maximize-dot" title="Expand terminal" aria-label="Expand terminal"></button>
+                        </div>
+                        <div class="terminal-window-title" id="terminal-window-title">${isFocusView ? 'Web Terminal Focus View' : 'Web Terminal'}</div>
+                        <div class="terminal-window-controls terminal-window-controls-right">
+                            ${lockButtonHtml}
+                            <button type="button" class="terminal-control-btn icon-btn" id="terminal-popout-btn" title="${isFocusView ? 'Return to dashboard terminal section' : 'Open terminal in focused page view'}" aria-label="${isFocusView ? 'Back to dashboard terminal view' : 'Open terminal focus page'}">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M6 3a2 2 0 0 0-2 2v7a1 1 0 0 0 1 1h7a2 2 0 0 0 2-2V6h-1v5a1 1 0 0 1-1 1H5V5a1 1 0 0 1 1-1z"/>
+                                    <path d="M8.5 1a.5.5 0 0 0 0 1h4.793L6.146 9.146a.5.5 0 1 0 .708.708L14 2.707V7.5a.5.5 0 0 0 1 0V1z"/>
+                                </svg>
+                                <span class="terminal-control-text">${isFocusView ? 'Back to Dashboard' : 'Focus View'}</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-0" id="terminal-container" style="display: none; height: 520px; overflow: hidden;">
+                        <div id="terminal-element" style="width: 100%; height: 100%;"></div>
+                    </div>
+                    <div class="card-body text-center text-muted" id="terminal-placeholder">
+                        <p class="mb-3">Launch an embedded terminal session.</p>
+                        <p class="small">Select a CLI and click "Start" to begin.</p>
+                    </div>
                 </div>
             </div>
         `;
@@ -352,6 +713,8 @@ export class TerminalController {
     }
 
     async bindTerminalActions(container, preselectedEnvId = null) {
+        this.cleanupStaleLockState();
+
         // Populate selector with environments
         await this.populateTerminalSelector(container, preselectedEnvId);
 
@@ -359,6 +722,11 @@ export class TerminalController {
         const reconnectBtn = container.querySelector('#terminal-reconnect-btn');
         const stopBtn = container.querySelector('#terminal-stop-btn');
         const cliSelect = container.querySelector('#terminal-cli-select');
+        const closeDot = container.querySelector('#terminal-close-dot');
+        const minimizeDot = container.querySelector('#terminal-minimize-dot');
+        const maximizeDot = container.querySelector('#terminal-maximize-dot');
+        const lockBtn = container.querySelector('#terminal-lock-btn');
+        const popoutBtn = container.querySelector('#terminal-popout-btn');
 
         if (startBtn) {
             startBtn.addEventListener('click', async () => {
@@ -378,6 +746,38 @@ export class TerminalController {
                 await this.stopTerminal(container);
             });
         }
+
+        if (closeDot) {
+            closeDot.addEventListener('click', async () => {
+                await this.stopTerminal(container);
+            });
+        }
+
+        if (minimizeDot) {
+            minimizeDot.addEventListener('click', () => {
+                this.toggleMinimize(container);
+            });
+        }
+
+        if (maximizeDot) {
+            maximizeDot.addEventListener('click', () => {
+                this.toggleExpand(container);
+            });
+        }
+
+        if (lockBtn) {
+            lockBtn.addEventListener('click', () => {
+                this.toggleLock(container);
+            });
+        }
+
+        if (popoutBtn) {
+            popoutBtn.addEventListener('click', () => {
+                this.openTerminalInNewWindow(container);
+            });
+        }
+
+        this.updateWindowControlState(container);
 
         // Check if there's already an active session
         this.checkAndRestoreSession(container);
@@ -415,7 +815,7 @@ export class TerminalController {
         const success = await this.startSession(cli, environmentName);
         if (!success) return;
 
-        await this.showActiveTerminal(container);
+        await this.showActiveTerminal(container, `${displayName} Terminal`);
         this.app.showToast('Terminal Started', `Launching ${displayName}...`, 'success');
     }
 
@@ -437,12 +837,12 @@ export class TerminalController {
             return;
         }
 
-        await this.showActiveTerminal(container);
         const displayName = options.title || options.cli;
+        await this.showActiveTerminal(container, `${displayName} Terminal`);
         this.app.showToast('Terminal Started', `Launching ${displayName}...`, 'success');
     }
 
-    async showActiveTerminal(container) {
+    async showActiveTerminal(container, windowTitle = null) {
         const placeholder = container.querySelector('#terminal-placeholder');
         const terminalContainer = container.querySelector('#terminal-container');
         const terminalElement = container.querySelector('#terminal-element');
@@ -463,6 +863,9 @@ export class TerminalController {
             statusBadge.classList.remove('bg-secondary', 'bg-warning');
             statusBadge.classList.add('bg-success');
         }
+
+        this.setWindowTitle(container, windowTitle || 'Active Terminal');
+        this.updateWindowControlState(container);
 
         // Connect to the terminal - CLI is already running in the PTY
         await this.connect(terminalElement);
@@ -497,9 +900,7 @@ export class TerminalController {
         this.app.showToast('Terminal Reconnected', 'Successfully reconnected to terminal session', 'success');
     }
 
-    async stopTerminal(container) {
-        await this.stopSession();
-
+    setTerminalUiNotStarted(container) {
         const placeholder = container.querySelector('#terminal-placeholder');
         const terminalContainer = container.querySelector('#terminal-container');
         const startBtn = container.querySelector('#terminal-start-btn');
@@ -516,9 +917,17 @@ export class TerminalController {
         if (cliSelect) cliSelect.disabled = false;
         if (statusBadge) {
             statusBadge.textContent = 'Not Started';
-            statusBadge.classList.remove('bg-success');
+            statusBadge.classList.remove('bg-success', 'bg-warning');
             statusBadge.classList.add('bg-secondary');
         }
+
+        this.resetWindowModes(container);
+        this.setWindowTitle(container, 'Web Terminal');
+    }
+
+    async stopTerminal(container) {
+        await this.stopSession();
+        this.setTerminalUiNotStarted(container);
 
         this.app.showToast('Terminal Stopped', 'Terminal session ended', 'info');
     }

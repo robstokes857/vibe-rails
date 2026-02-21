@@ -1,6 +1,7 @@
 using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services.Terminal.Consumers;
+using VibeRails.Services.Tracing;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
@@ -9,11 +10,13 @@ public class TerminalRunner
 {
     private readonly ITerminalStateService _stateService;
     private readonly ICommandService _commandService;
+    private readonly TraceEventBuffer? _traceBuffer;
 
-    public TerminalRunner(ITerminalStateService stateService, ICommandService commandService)
+    public TerminalRunner(ITerminalStateService stateService, ICommandService commandService, TraceEventBuffer? traceBuffer = null)
     {
         _stateService = stateService;
         _commandService = commandService;
+        _traceBuffer = traceBuffer;
     }
 
     /// <summary>
@@ -26,6 +29,7 @@ public class TerminalRunner
         var shouldEnableRemote = ShouldEnableRemote(makeRemote);
         var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct);
         var (command, environment) = _commandService.PrepareSession(llm, envName, extraArgs);
+        EmitTerminalLaunchTrace(sessionId, llm, workDir, envName, extraArgs, title, shouldEnableRemote, command, environment);
 
         var terminal = await Terminal.CreateAsync(workDir, environment, title: title, ct: ct);
 
@@ -101,6 +105,78 @@ public class TerminalRunner
         await terminal.SendCommandAsync(command, ct);
 
         return (terminal, sessionId, activeRemoteConn);
+    }
+
+    private void EmitTerminalLaunchTrace(
+        string sessionId,
+        LLM llm,
+        string workDir,
+        string? envName,
+        string[]? extraArgs,
+        string? title,
+        bool remoteEnabled,
+        string command,
+        Dictionary<string, string> environment)
+    {
+        if (_traceBuffer == null)
+            return;
+
+        var launchDetail = BuildTerminalLaunchDetail(
+            sessionId,
+            llm,
+            workDir,
+            envName,
+            extraArgs,
+            title,
+            remoteEnabled,
+            command,
+            environment);
+
+        _traceBuffer.Add(TraceEvent.Create(
+            TraceEventType.TerminalLaunch,
+            "Terminal.Runner",
+            $"Terminal launch: {llm} ({sessionId[..8]})",
+            launchDetail));
+    }
+
+    private static string BuildTerminalLaunchDetail(
+        string sessionId,
+        LLM llm,
+        string workDir,
+        string? envName,
+        string[]? extraArgs,
+        string? title,
+        bool remoteEnabled,
+        string command,
+        Dictionary<string, string> environment)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"sessionId: {sessionId}");
+        sb.AppendLine($"llm: {llm}");
+        sb.AppendLine($"workDir: {workDir}");
+        sb.AppendLine($"environmentName: {envName ?? "(default)"}");
+        sb.AppendLine($"title: {title ?? "(none)"}");
+        sb.AppendLine($"remoteEnabled: {remoteEnabled}");
+        sb.AppendLine("cliArgs:");
+
+        if (extraArgs is { Length: > 0 })
+        {
+            foreach (var arg in extraArgs)
+                sb.AppendLine($"  - {arg}");
+        }
+        else
+        {
+            sb.AppendLine("  - (none)");
+        }
+
+        sb.AppendLine("command:");
+        sb.AppendLine($"  {command}");
+        sb.AppendLine("environment:");
+
+        foreach (var kvp in environment.OrderBy(k => k.Key, StringComparer.Ordinal))
+            sb.AppendLine($"  {kvp.Key}={kvp.Value}");
+
+        return sb.ToString();
     }
 
     private static bool ShouldEnableRemote(bool makeRemoteRequested)

@@ -231,12 +231,15 @@ export class VibeControlApp {
             'active-rules': 'Active Rules',
             'environments': 'Environments',
             'config': 'Configuration',
-            'settings': 'Settings'
+            'settings': 'Settings',
+            'terminal-focus': 'Terminal Focus'
         };
         return names[view] || view;
     }
 
     loadView(view, data = {}) {
+        this.terminalController?.resetLayoutStateForNavigation();
+        this.applyViewLayoutState(view);
         window.scrollTo(0, 0);
         const views = {
             'dashboard': () => this.dashboardController.loadDashboard(data),
@@ -249,7 +252,8 @@ export class VibeControlApp {
             'environments': () => this.environmentController.loadEnvironments(),
             'config': () => this.configController.loadConfiguration(),
             'sessions': () => this.sessionController.loadSessions(),
-            'settings': () => this.settingsController.loadSettings()
+            'settings': () => this.settingsController.loadSettings(),
+            'terminal-focus': () => this.terminalController.loadTerminalFocusView(data)
         };
 
         const loadFunc = views[view];
@@ -258,6 +262,11 @@ export class VibeControlApp {
         } else {
             this.showError('View not found: ' + view);
         }
+    }
+
+    applyViewLayoutState(view) {
+        const isTerminalFocus = view === 'terminal-focus';
+        document.body.classList.toggle('terminal-focus-active', isTerminalFocus);
     }
 
     // ============================================ 
