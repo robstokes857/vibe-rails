@@ -6,6 +6,7 @@ using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.Tracing;
 using VibeRails.Utils;
 
 namespace VibeRails;
@@ -92,6 +93,7 @@ public static class CliLoop
         var repository = scopedServices.GetRequiredService<IRepository>();
         var sessionService = scopedServices.GetRequiredService<ITerminalSessionService>();
         var ioObserverService = scopedServices.GetRequiredService<ITerminalIoObserverService>();
+        var traceBuffer = scopedServices.GetRequiredService<TraceEventBuffer>();
 
         // Resolve LLM type (smart resolution: LLM enum name → base CLI, otherwise → DB lookup)
         LLM llm;
@@ -137,7 +139,7 @@ public static class CliLoop
             ioObserverService);
         var mcpSettings = scopedServices.GetRequiredService<McpSettings>();
         var commandService = new CommandService(envService, mcpSettings);
-        var runner = new TerminalRunner(terminalStateService, commandService);
+        var runner = new TerminalRunner(terminalStateService, commandService, traceBuffer);
 
         var exitCode = await runner.RunCliWithWebAsync(llm, workingDirectory, environmentName, parsedArgs.ExtraArgs, sessionService, parsedArgs.MakeRemote, CancellationToken.None);
         Environment.ExitCode = exitCode;

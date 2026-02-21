@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VibeRails Terminal</title>
+    <link rel="stylesheet" href="assets/xterm/xterm.css">
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg-main: #0f1118;
+            --bg-panel: #171b24;
+            --bg-header: #232938;
+            --bg-accent: rgba(154, 198, 197, 0.16);
+            --border: #364055;
+            --text: #e8edf6;
+            --text-muted: #9ea8be;
+            --ok: #4caf50;
+            --warn: #ffbd2e;
+            --err: #e57373;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            height: 100%;
+            background: radial-gradient(circle at top, rgba(91, 42, 134, 0.26), transparent 45%), var(--bg-main);
+            color: var(--text);
+            font-family: "Consolas", "Cascadia Code", "Segoe UI", monospace;
+            overflow: hidden;
+        }
+
+        .terminal-popout {
+            height: 100%;
+            padding: 0.9rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+        }
+
+        .terminal-shell {
+            flex: 1;
+            min-height: 0;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            background: var(--bg-panel);
+            box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .terminal-head {
+            background: var(--bg-header);
+            border-bottom: 1px solid var(--border);
+            padding: 0.55rem 0.9rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.8rem;
+        }
+
+        .window-dots {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot.red { background: #ff5f56; }
+        .dot.yellow { background: #ffbd2e; }
+        .dot.green { background: #27c93f; }
+
+        .terminal-title {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+            text-align: center;
+            padding: 0 1rem;
+        }
+
+        .head-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .btn {
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text);
+            border-radius: 8px;
+            padding: 0.35rem 0.7rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+
+        .btn:hover {
+            background: var(--bg-accent);
+            border-color: #5e7f86;
+        }
+
+        .status-strip {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.45rem 0.8rem;
+            border-bottom: 1px solid var(--border);
+            background: rgba(0, 0, 0, 0.2);
+            font-size: 0.8rem;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.28rem 0.55rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+
+        .status-badge.connected {
+            color: #baf2c0;
+            border-color: rgba(76, 175, 80, 0.45);
+            background: rgba(76, 175, 80, 0.14);
+        }
+
+        .status-badge.connected .status-dot {
+            background: var(--ok);
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+        }
+
+        .status-badge.warning {
+            color: #ffe7b5;
+            border-color: rgba(255, 189, 46, 0.45);
+            background: rgba(255, 189, 46, 0.12);
+        }
+
+        .status-badge.warning .status-dot {
+            background: var(--warn);
+        }
+
+        .status-badge.error {
+            color: #ffd8d8;
+            border-color: rgba(229, 115, 115, 0.45);
+            background: rgba(229, 115, 115, 0.12);
+        }
+
+        .status-badge.error .status-dot {
+            background: var(--err);
+        }
+
+        #session-label {
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #terminal-wrap {
+            flex: 1;
+            min-height: 0;
+            display: none;
+        }
+
+        #terminal {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        #empty-state {
+            flex: 1;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 0.7rem;
+            color: var(--text-muted);
+            padding: 1.4rem;
+            text-align: center;
+        }
+
+        #empty-state .title {
+            color: var(--text);
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-popout">
+        <div class="terminal-shell">
+            <div class="terminal-head">
+                <div class="window-dots" aria-hidden="true">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                </div>
+                <div class="terminal-title">VibeRails Web Terminal - Popout</div>
+                <div class="head-actions">
+                    <button class="btn" id="reconnect-btn" type="button">Reconnect</button>
+                    <button class="btn" id="refresh-btn" type="button">Refresh</button>
+                    <button class="btn" id="close-btn" type="button">Close</button>
+                </div>
+            </div>
+            <div class="status-strip">
+                <div class="status-badge warning" id="status-badge">
+                    <span class="status-dot"></span>
+                    <span id="status-text">Checking terminal status...</span>
+                </div>
+                <div id="session-label">Waiting for active session</div>
+            </div>
+            <div id="terminal-wrap">
+                <div id="terminal"></div>
+            </div>
+            <div id="empty-state">
+                <div class="title">No active terminal session</div>
+                <div>Start a terminal from the dashboard, then click <strong>Reconnect</strong> here.</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="assets/xterm/xterm.min.js"></script>
+    <script src="assets/xterm/addon-fit.js"></script>
+    <script>
+        let terminal = null;
+        let fitAddon = null;
+        let socket = null;
+        let resizeDebounceId = null;
+        const resizePrefix = '__resize__:';
+
+        const query = new URLSearchParams(window.location.search);
+        const queryApiBase = query.get('apiBase') || '';
+        const querySessionToken = query.get('sessionToken') || '';
+
+        const terminalWrap = document.getElementById('terminal-wrap');
+        const terminalEl = document.getElementById('terminal');
+        const emptyState = document.getElementById('empty-state');
+        const statusBadge = document.getElementById('status-badge');
+        const statusText = document.getElementById('status-text');
+        const sessionLabel = document.getElementById('session-label');
+        const reconnectBtn = document.getElementById('reconnect-btn');
+        const refreshBtn = document.getElementById('refresh-btn');
+        const closeBtn = document.getElementById('close-btn');
+
+        if (!window.__viberails_API_BASE__ && queryApiBase) {
+            window.__viberails_API_BASE__ = queryApiBase;
+        }
+        if (!window.__viberails_SESSION_TOKEN__ && querySessionToken) {
+            window.__viberails_SESSION_TOKEN__ = querySessionToken;
+        }
+
+        function notifyMain(type, payload = {}) {
+            if (!window.opener || window.opener.closed) return;
+            try {
+                window.opener.postMessage({
+                    source: 'viberails-terminal-popout',
+                    type,
+                    ...payload
+                }, '*');
+            } catch {
+                // no-op
+            }
+        }
+
+        function scrubSensitiveQueryParams() {
+            try {
+                const url = new URL(window.location.href);
+                if (url.searchParams.has('sessionToken')) {
+                    url.searchParams.delete('sessionToken');
+                    window.history.replaceState({}, document.title, url.toString());
+                }
+            } catch {
+                // no-op
+            }
+        }
+
+        function patchAuthWithSessionToken() {
+            const token = window.__viberails_SESSION_TOKEN__;
+            if (!token || window.__viberails_PopoutAuthPatched__) return;
+
+            const originalFetch = window.fetch.bind(window);
+            window.fetch = (input, init = {}) => {
+                const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+                headers.set('viberails_session', token);
+                return originalFetch(input, { ...init, headers });
+            };
+
+            const OriginalWebSocket = window.WebSocket;
+            window.WebSocket = function patchedWebSocket(url, protocols) {
+                let nextUrl = url;
+                try {
+                    if (typeof nextUrl === 'string' && nextUrl.includes('/api/v1/terminal/ws')) {
+                        const parsed = new URL(nextUrl, window.location.href);
+                        parsed.searchParams.set('viberails_session', token);
+                        nextUrl = parsed.toString();
+                    }
+                } catch {
+                    // no-op
+                }
+
+                return protocols !== undefined
+                    ? new OriginalWebSocket(nextUrl, protocols)
+                    : new OriginalWebSocket(nextUrl);
+            };
+            window.WebSocket.prototype = OriginalWebSocket.prototype;
+            window.WebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
+            window.WebSocket.OPEN = OriginalWebSocket.OPEN;
+            window.WebSocket.CLOSING = OriginalWebSocket.CLOSING;
+            window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
+
+            window.__viberails_PopoutAuthPatched__ = true;
+            notifyMain('session-token', { sessionToken: token });
+        }
+
+        function getApiBase() {
+            return window.__viberails_API_BASE__ || '';
+        }
+
+        function getStatusUrl() {
+            return `${getApiBase()}/api/v1/terminal/status`;
+        }
+
+        function getWsUrl() {
+            const baseUrl = getApiBase();
+            if (baseUrl) {
+                return baseUrl.replace(/^http/, 'ws') + '/api/v1/terminal/ws';
+            }
+
+            const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return `${wsProto}//${window.location.host}/api/v1/terminal/ws`;
+        }
+
+        function setStatus(text, kind) {
+            statusText.textContent = text;
+            statusBadge.className = 'status-badge';
+            if (kind) {
+                statusBadge.classList.add(kind);
+            }
+        }
+
+        function showEmptyState() {
+            emptyState.style.display = 'flex';
+            terminalWrap.style.display = 'none';
+        }
+
+        function showTerminal() {
+            emptyState.style.display = 'none';
+            terminalWrap.style.display = 'block';
+        }
+
+        function sendResizeToPty() {
+            if (!terminal || !socket || socket.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            socket.send(`${resizePrefix}${terminal.cols},${terminal.rows}`);
+        }
+
+        function fitAndSyncTerminal() {
+            if (!terminal) return;
+            if (fitAddon) {
+                fitAddon.fit();
+            }
+            sendResizeToPty();
+        }
+
+        function writeTerminalData(data) {
+            if (!terminal) return;
+
+            if (typeof data === 'string') {
+                terminal.write(data);
+            } else {
+                terminal.write(new Uint8Array(data));
+            }
+
+            // Always follow latest output.
+            terminal.scrollToBottom();
+        }
+
+        function initTerminal() {
+            if (terminal) return;
+
+            terminal = new Terminal({
+                cols: 120,
+                rows: 30,
+                cursorBlink: true,
+                fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
+                fontSize: 14,
+                allowProposedApi: true,
+                unicodeVersion: '11',
+                cursorStyle: 'block',
+                theme: {
+                    background: '#1e1e1e',
+                    foreground: '#d4d4d4',
+                    cursor: '#d4d4d4',
+                    cursorAccent: '#1e1e1e',
+                    selection: '#264f78',
+                    black: '#1e1e1e',
+                    red: '#f44747',
+                    green: '#608b4e',
+                    yellow: '#dcdcaa',
+                    blue: '#569cd6',
+                    magenta: '#c586c0',
+                    cyan: '#4ec9b0',
+                    white: '#d4d4d4',
+                    brightBlack: '#808080',
+                    brightRed: '#f44747',
+                    brightGreen: '#608b4e',
+                    brightYellow: '#dcdcaa',
+                    brightBlue: '#569cd6',
+                    brightMagenta: '#c586c0',
+                    brightCyan: '#4ec9b0',
+                    brightWhite: '#ffffff'
+                }
+            });
+
+            if (window.FitAddon?.FitAddon) {
+                fitAddon = new window.FitAddon.FitAddon();
+                terminal.loadAddon(fitAddon);
+            }
+
+            terminal.open(terminalEl);
+            fitAndSyncTerminal();
+            terminal.focus();
+
+            terminal.onData((data) => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(data);
+                }
+            });
+
+            terminal.attachCustomKeyEventHandler((event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === 'v' && event.type === 'keydown') {
+                    navigator.clipboard.readText().then(text => {
+                        if (socket && socket.readyState === WebSocket.OPEN) {
+                            socket.send(text);
+                        }
+                    }).catch(() => { });
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        function closeSocket() {
+            if (!socket) return;
+            try { socket.close(); } catch (_) { }
+            socket = null;
+        }
+
+        async function getTerminalStatus() {
+            try {
+                const response = await fetch(getStatusUrl(), {
+                    credentials: 'include'
+                });
+
+                if (response.status === 401) {
+                    return { hasActiveSession: false, unauthorized: true };
+                }
+                if (!response.ok) {
+                    return { hasActiveSession: false };
+                }
+                return await response.json();
+            } catch {
+                return { hasActiveSession: false };
+            }
+        }
+
+        async function connectToActiveSession() {
+            closeSocket();
+            setStatus('Checking for active session...', 'warning');
+
+            const status = await getTerminalStatus();
+            if (status.unauthorized) {
+                setStatus('Authentication required', 'error');
+                sessionLabel.textContent = 'Auth session missing or expired';
+                showEmptyState();
+                reconnectBtn.textContent = 'Reconnect';
+                notifyMain('terminal-state', { state: 'auth-required' });
+                return;
+            }
+
+            if (!status.hasActiveSession) {
+                setStatus('No active session', 'warning');
+                sessionLabel.textContent = 'Start a terminal from dashboard';
+                showEmptyState();
+                reconnectBtn.textContent = 'Reconnect';
+                notifyMain('terminal-state', { state: 'no-active-session' });
+                return;
+            }
+
+            initTerminal();
+            showTerminal();
+            terminal.reset();
+            sessionLabel.textContent = `Session: ${status.sessionId || 'active'}`;
+            reconnectBtn.textContent = 'Disconnect';
+
+            socket = new WebSocket(getWsUrl());
+            socket.binaryType = 'arraybuffer';
+
+            socket.onopen = () => {
+                setStatus('Connected', 'connected');
+                fitAndSyncTerminal();
+                terminal.focus();
+                notifyMain('terminal-state', {
+                    state: 'connected',
+                    sessionId: status.sessionId || null
+                });
+            };
+
+            socket.onmessage = (event) => {
+                if (!terminal) return;
+                writeTerminalData(event.data);
+            };
+
+            socket.onclose = (event) => {
+                const reason = event.reason || 'Terminal disconnected';
+                const color = reason.includes('taken over') ? '33' : '90';
+
+                setStatus(`Disconnected: ${reason}`, 'warning');
+                reconnectBtn.textContent = 'Reconnect';
+                socket = null;
+                notifyMain('terminal-state', { state: 'disconnected', reason });
+
+                if (terminal) {
+                    writeTerminalData(`\r\n\x1b[${color}m[${reason}]\x1b[0m\r\n`);
+                }
+            };
+
+            socket.onerror = () => {
+                setStatus('Connection error', 'error');
+                notifyMain('terminal-state', { state: 'error' });
+            };
+        }
+
+        reconnectBtn.addEventListener('click', () => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                closeSocket();
+                setStatus('Disconnected', 'warning');
+                reconnectBtn.textContent = 'Reconnect';
+                notifyMain('terminal-state', { state: 'disconnected', reason: 'Manual disconnect' });
+                return;
+            }
+
+            connectToActiveSession();
+        });
+
+        refreshBtn.addEventListener('click', () => {
+            connectToActiveSession();
+        });
+
+        closeBtn.addEventListener('click', () => {
+            notifyMain('terminal-state', { state: 'closed' });
+            window.close();
+        });
+
+        window.addEventListener('resize', () => {
+            if (resizeDebounceId) {
+                clearTimeout(resizeDebounceId);
+            }
+            resizeDebounceId = setTimeout(() => fitAndSyncTerminal(), 100);
+        });
+
+        window.addEventListener('beforeunload', () => {
+            closeSocket();
+            notifyMain('terminal-state', { state: 'closed' });
+        });
+
+        patchAuthWithSessionToken();
+        scrubSensitiveQueryParams();
+        connectToActiveSession();
+    </script>
+</body>
+</html>

@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VibeRails Trace</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootswatch/5.3.8/slate/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+    <style>
+        html, body {
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+            font-size: 12px;
+        }
+
+        /* ── Top bar ── */
+        .topbar {
+            background: #1a1a2e;
+            border-bottom: 1px solid #333;
+            flex-shrink: 0;
+        }
+        .topbar-title { font-size: 13px; font-weight: 700; color: #569cd6; letter-spacing: 0.12em; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .status-dot.connected    { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+        .status-dot.disconnected { background: #d73a49; }
+        .status-dot.connecting   { background: #e3b341; }
+        .status-label { font-size: 11px; color: #888; }
+
+        /* ── Main grid fills remaining height ── */
+        .main-grid {
+            flex: 1;
+            min-height: 0;
+        }
+        .main-grid > .row {
+            height: 100%;
+        }
+
+        /* ── Left column: support panels ── */
+        .left-col {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            height: 100%;
+            padding: 8px;
+            min-height: 0;
+        }
+        .left-col .panel { flex: 1; min-height: 0; }
+        .left-col .panel.minimized { flex: 0 0 auto; }
+
+        /* ── Right column: one box with TERMINAL event stack ── */
+        .right-col {
+            height: 100%;
+            padding: 8px 8px 8px 0;
+            min-height: 0;
+        }
+        .io-stack-shell {
+            height: 100%;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #131324;
+            border: 1px solid #2a2a3e;
+        }
+        .io-stack-body {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            padding: 6px;
+        }
+        .pane-section {
+            min-height: 90px;
+            display: flex;
+            flex-direction: column;
+        }
+        .pane-section > .panel {
+            flex: 1;
+            min-height: 0;
+        }
+        .pane-resizer {
+            height: 8px;
+            margin: 2px 0;
+            cursor: row-resize;
+            position: relative;
+            flex: 0 0 auto;
+        }
+        .pane-resizer::before {
+            content: '';
+            position: absolute;
+            left: 20%;
+            right: 20%;
+            top: 3px;
+            height: 2px;
+            border-radius: 2px;
+            background: #2e2e3e;
+        }
+        .pane-resizer:hover::before {
+            background: #569cd6;
+        }
+        .collapsed-dock {
+            flex: 0 0 auto;
+            border-top: 1px solid #2b2b40;
+            background: #10101d;
+            min-height: 30px;
+            padding: 5px 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .collapsed-dock-label {
+            font-size: 10px;
+            color: #666;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .collapsed-pane-btn {
+            font-size: 10px;
+            padding: 2px 8px;
+            border: 1px solid #333;
+            border-radius: 3px;
+            background: transparent;
+            color: #8a8a9b;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .collapsed-pane-btn:hover {
+            color: #d4d4d4;
+            border-color: #569cd6;
+        }
+        .collapsed-dock.hidden {
+            display: none;
+        }
+
+        /* ── Panel card ── */
+        .panel {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #1a1a2e;
+            border: 1px solid #2a2a3e;
+        }
+
+        /* Accent borders */
+        .panel-launch   { border-color: #3f3310; }
+        .panel-input    { border-color: #1e3a5f; }
+        .panel-mcp      { border-color: #4a2800; }
+        .panel-logs     { border-color: #2d1a45; }
+        .panel-output   { border-color: #1a4038; }
+        .panel-console  { border-color: #2a2a3e; }
+        .panel-http     { border-color: #2d3a1a; }
+
+        /* ── Minimized panel (left support column only) ── */
+        .left-col .panel.minimized { flex: 0 0 auto !important; min-height: 0 !important; }
+        .left-col .panel.minimized .panel-body,
+        .left-col .panel.minimized .terminal-wrap { display: none !important; }
+
+        /* ── Panel header ── */
+        .panel-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: #16162a;
+            border-bottom: 1px solid;
+            flex-shrink: 0;
+        }
+        .panel-launch  .panel-header { border-color: #3f3310; }
+        .panel-input   .panel-header { border-color: #1e3a5f; }
+        .panel-mcp     .panel-header { border-color: #4a2800; }
+        .panel-logs    .panel-header { border-color: #2d1a45; }
+        .panel-output  .panel-header { border-color: #1a4038; }
+        .panel-console .panel-header { border-color: #333; }
+        .panel-http    .panel-header { border-color: #2d3a1a; }
+
+        .panel-label { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+        .panel-launch  .panel-label { color: #d7ba7d; }
+        .panel-input   .panel-label { color: #569cd6; }
+        .panel-mcp     .panel-label { color: #ce9178; }
+        .panel-logs    .panel-label { color: #c586c0; }
+        .panel-output  .panel-label { color: #4ec9b0; }
+        .panel-console .panel-label { color: #888; }
+        .panel-http    .panel-label { color: #8fbc45; }
+
+        .panel-count { font-size: 10px; color: #555; }
+
+        .panel-btn {
+            font-size: 10px;
+            padding: 2px 8px;
+            border: 1px solid #333;
+            border-radius: 3px;
+            background: transparent;
+            color: #666;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .panel-btn:hover { color: #d4d4d4; border-color: #569cd6; }
+        .panel-btn.locked { color: #d4d4d4; opacity: 1; }
+
+        /* ── Panel body ── */
+        .panel-body {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        .panel-body::-webkit-scrollbar { width: 6px; }
+        .panel-body::-webkit-scrollbar-track { background: transparent; }
+        .panel-body::-webkit-scrollbar-thumb { background: #2e2e3e; border-radius: 3px; }
+        .panel-body::-webkit-scrollbar-thumb:hover { background: #444; }
+
+        /* ── Terminal/console container ── */
+        .terminal-wrap {
+            flex: 1;
+            min-height: 0;
+            padding: 4px;
+            overflow: hidden;
+        }
+        .terminal-wrap .xterm { height: 100%; }
+        .terminal-wrap .xterm-viewport { border-radius: 3px; }
+        #terminal-status {
+            font-size: 10px;
+            color: #666;
+            padding: 2px 4px;
+        }
+
+        /* ── Event rows — always fully visible, no collapsing ── */
+        .event-row {
+            padding: 4px 12px;
+            font-size: 11px;
+            line-height: 1.6;
+            border-bottom: 1px solid #1e1e2e;
+        }
+        .event-row:hover { background: #20203a; }
+
+        .ev-meta {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+        .ev-time { color: #444; font-size: 10px; flex-shrink: 0; white-space: nowrap; }
+        .ev-duration { font-size: 10px; color: #555; flex-shrink: 0; margin-left: auto; }
+
+        /* Full text — wraps, nothing hidden */
+        .ev-text {
+            font-size: 11px;
+            line-height: 1.5;
+            word-break: break-word;
+            white-space: pre-wrap;
+            padding: 1px 0;
+        }
+        .panel-launch .ev-text { color: #d7ba7d; }
+        .panel-input  .ev-text { color: #7ab8e8; }
+        .panel-output .ev-text { color: #6ab9a0; }
+        .panel-mcp    .ev-text { color: #c99060; }
+        .panel-logs   .ev-text { color: #c0c0c0; }
+        .panel-http   .ev-text { color: #8fbc45; }
+
+        .ev-call   .ev-text { color: #ce9178; }
+        .ev-result .ev-text { color: #c8c060; }
+        .ev-err    .ev-text { color: #f48771 !important; }
+        .ev-wrn    .ev-text { color: #d4a020 !important; }
+        .ev-dbg    .ev-text { color: #555 !important; }
+
+        /* ── Detail block — always shown inline, never collapsed ── */
+        .event-detail {
+            margin: 2px 0 6px 0;
+            padding: 6px 10px;
+            background: #111122;
+            border-left: 2px solid #333;
+            font-size: 10.5px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: #888;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* ── Empty state ── */
+        .panel-empty { padding: 30px; text-align: center; color: #333; font-size: 11px; }
+
+        /* Override Bootstrap form-control for our search */
+        .global-search {
+            font-family: inherit;
+            font-size: 11px;
+            max-width: 200px;
+            background: #141428 !important;
+            border-color: #333 !important;
+            color: #d4d4d4 !important;
+        }
+        .global-search:focus {
+            border-color: #569cd6 !important;
+            box-shadow: 0 0 0 0.15rem rgba(86, 156, 214, 0.25) !important;
+        }
+    </style>
+</head>
+<body class="d-flex flex-column">
+
+<!-- ── Top bar ── -->
+<div class="topbar d-flex align-items-center gap-2 px-3 py-1">
+    <span class="topbar-title">TRACE</span>
+    <span class="status-dot connecting" id="status-dot"></span>
+    <span class="status-label" id="status-label">Connecting...</span>
+    <span class="flex-grow-1"></span>
+    <input class="form-control form-control-sm global-search" id="global-search" type="text" placeholder="Filter...">
+    <button class="btn btn-sm btn-outline-secondary" id="pause-btn">Pause</button>
+    <button class="btn btn-sm btn-outline-secondary" id="clear-all-btn">Clear All</button>
+</div>
+
+<!-- ── Main grid ── -->
+<div class="main-grid container-fluid p-0">
+    <div class="row g-0">
+
+        <!-- Left column: MCP, HTTP, LOGS -->
+        <div class="col-6 left-col">
+
+            <div class="panel panel-mcp" id="panel-mcp">
+                <div class="panel-header">
+                    <span class="panel-label">MCP</span>
+                    <span class="panel-count" id="count-mcp">0</span>
+                    <span class="flex-grow-1"></span>
+                    <button class="panel-btn locked" id="scroll-mcp">&#x2B07;</button>
+                    <button class="panel-btn" data-minimize="mcp">&#x2212;</button>
+                    <button class="panel-btn" data-panel="mcp">&times;</button>
+                </div>
+                <div class="panel-body" id="body-mcp">
+                    <div class="panel-empty">Waiting for MCP calls...</div>
+                </div>
+            </div>
+
+            <div class="panel panel-http" id="panel-http">
+                <div class="panel-header">
+                    <span class="panel-label">HTTP</span>
+                    <span class="panel-count" id="count-http">0</span>
+                    <span class="flex-grow-1"></span>
+                    <button class="panel-btn locked" id="scroll-http">&#x2B07;</button>
+                    <button class="panel-btn" data-minimize="http">&#x2212;</button>
+                    <button class="panel-btn" data-panel="http">&times;</button>
+                </div>
+                <div class="panel-body" id="body-http">
+                    <div class="panel-empty">Waiting for requests...</div>
+                </div>
+            </div>
+
+            <div class="panel panel-logs" id="panel-logs">
+                <div class="panel-header">
+                    <span class="panel-label">LOGS</span>
+                    <span class="panel-count" id="count-logs">0</span>
+                    <span class="flex-grow-1"></span>
+                    <button class="panel-btn locked" id="scroll-logs">&#x2B07;</button>
+                    <button class="panel-btn" data-minimize="logs">&#x2212;</button>
+                    <button class="panel-btn" data-panel="logs">&times;</button>
+                </div>
+                <div class="panel-body" id="body-logs">
+                    <div class="panel-empty">Waiting for log entries...</div>
+                </div>
+            </div>
+
+        </div><!-- /left-col -->
+
+        <!-- Right column: TERMINAL launch/input/output/console in one 50% box -->
+        <div class="col-6 right-col">
+            <div class="io-stack-shell">
+                <div class="io-stack-body" id="io-stack-body">
+                    <div class="pane-section" id="section-launch">
+                        <div class="panel panel-launch" id="panel-launch">
+                            <div class="panel-header">
+                                <span class="panel-label">LAUNCH</span>
+                                <span class="panel-count" id="count-launch">0</span>
+                                <span class="flex-grow-1"></span>
+                                <button class="panel-btn locked" id="scroll-launch">&#x2B07;</button>
+                                <button class="panel-btn" data-minimize="launch">&#x2212;</button>
+                                <button class="panel-btn" data-panel="launch">&times;</button>
+                            </div>
+                            <div class="panel-body" id="body-launch">
+                                <div class="panel-empty">Waiting for terminal launch...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pane-section" id="section-input">
+                        <div class="panel panel-input" id="panel-input">
+                            <div class="panel-header">
+                                <span class="panel-label">INPUT</span>
+                                <span class="panel-count" id="count-input">0</span>
+                                <span class="flex-grow-1"></span>
+                                <button class="panel-btn locked" id="scroll-input">&#x2B07;</button>
+                                <button class="panel-btn" data-minimize="input">&#x2212;</button>
+                                <button class="panel-btn" data-panel="input">&times;</button>
+                            </div>
+                            <div class="panel-body" id="body-input">
+                                <div class="panel-empty">Waiting for input...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pane-section" id="section-output">
+                        <div class="panel panel-output" id="panel-output">
+                            <div class="panel-header">
+                                <span class="panel-label">OUTPUT</span>
+                                <span class="panel-count" id="count-output">0</span>
+                                <span class="flex-grow-1"></span>
+                                <button class="panel-btn locked" id="scroll-output">&#x2B07;</button>
+                                <button class="panel-btn" data-minimize="output">&#x2212;</button>
+                                <button class="panel-btn" data-panel="output">&times;</button>
+                            </div>
+                            <div class="panel-body" id="body-output">
+                                <div class="panel-empty">Waiting for output...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pane-section" id="section-console">
+                        <div class="panel panel-console" id="panel-console">
+                            <div class="panel-header">
+                                <span class="panel-label">CONSOLE</span>
+                                <span id="terminal-status">waiting for output...</span>
+                                <span class="flex-grow-1"></span>
+                                <button class="panel-btn" data-minimize="console">&#x2212;</button>
+                                <button class="panel-btn" id="term-reconnect-btn">Clear</button>
+                            </div>
+                            <div class="terminal-wrap" id="terminal-wrap"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="collapsed-dock hidden" id="collapsed-dock">
+                    <span class="collapsed-dock-label">Minimized</span>
+                    <div id="collapsed-pane-buttons" class="d-flex align-items-center gap-1 flex-wrap"></div>
+                </div>
+            </div>
+        </div><!-- /right-col -->
+
+    </div><!-- /row -->
+</div><!-- /main-grid -->
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// Type mapping
+// ─────────────────────────────────────────────────────────────────────────────
+const TYPE_PANEL = {
+    TerminalLaunch:   'launch',
+    TerminalInput:    'input',
+    TerminalOutput:   'output',
+    McpToolCall:      'mcp',
+    McpToolResult:    'mcp',
+    RuleValidation:   'logs',
+    LogEntry:         'logs',
+    SessionLifecycle: 'logs',
+    Idle:             'logs',
+    Resize:           'logs',
+    HttpRequest:      'http',
+};
+const TYPE_NAMES = ['TerminalInput','TerminalOutput','McpToolCall','McpToolResult',
+                    'RuleValidation','LogEntry','SessionLifecycle','Idle','Resize','HttpRequest','TerminalLaunch'];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Panel state
+// ─────────────────────────────────────────────────────────────────────────────
+const panels = {
+    launch: { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
+    input:  { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
+    output: { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
+    mcp:    { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
+    logs:   { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
+    http:   { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
+};
+
+let paused = false;
+let pending = [];
+let globalSearch = '';
+const stackPanelKeys = ['launch', 'input', 'output', 'console'];
+const stackBody = document.getElementById('io-stack-body');
+const collapsedDock = document.getElementById('collapsed-dock');
+const collapsedPaneButtons = document.getElementById('collapsed-pane-buttons');
+const paneSections = {
+    launch: document.getElementById('section-launch'),
+    input: document.getElementById('section-input'),
+    output: document.getElementById('section-output'),
+    console: document.getElementById('section-console'),
+};
+const paneWeights = { launch: 1.1, input: 1.2, output: 1.9, console: 1.2 };
+const paneMinimized = { launch: false, input: false, output: false, console: false };
+const minimizeButtons = {};
+let resizeDragState = null;
+const groupedTerminalRows = {
+    input: createGroupedRowState(),
+    output: createGroupedRowState(),
+};
+
+for (const key of Object.keys(panels)) {
+    panels[key].body      = document.getElementById(`body-${key}`);
+    panels[key].countEl   = document.getElementById(`count-${key}`);
+    panels[key].scrollBtn = document.getElementById(`scroll-${key}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-scroll per panel
+// ─────────────────────────────────────────────────────────────────────────────
+for (const [, panel] of Object.entries(panels)) {
+    panel.scrollBtn.addEventListener('click', () => {
+        panel.autoScroll = !panel.autoScroll;
+        panel.scrollBtn.classList.toggle('locked', panel.autoScroll);
+        if (panel.autoScroll) panel.body.scrollTop = panel.body.scrollHeight;
+    });
+    panel.body.addEventListener('scroll', () => {
+        const atBottom = panel.body.scrollHeight - panel.body.scrollTop - panel.body.clientHeight < 40;
+        if (!atBottom && panel.autoScroll) {
+            panel.autoScroll = false;
+            panel.scrollBtn.classList.remove('locked');
+        }
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TERMINAL stack layout (right side single box)
+// ─────────────────────────────────────────────────────────────────────────────
+function visibleStackPanels() {
+    return stackPanelKeys.filter(k => !paneMinimized[k]);
+}
+
+function createPaneResizer(upperKey, lowerKey) {
+    const resizer = document.createElement('div');
+    resizer.className = 'pane-resizer';
+    resizer.title = `Resize ${upperKey.toUpperCase()} / ${lowerKey.toUpperCase()}`;
+    resizer.addEventListener('mousedown', (evt) => beginPaneResize(evt, upperKey, lowerKey));
+    return resizer;
+}
+
+function renderCollapsedDock() {
+    collapsedPaneButtons.innerHTML = '';
+    let minimizedCount = 0;
+
+    for (const key of stackPanelKeys) {
+        const btn = minimizeButtons[key];
+        if (!btn) continue;
+        btn.textContent = paneMinimized[key] ? '+' : '−';
+
+        if (!paneMinimized[key]) continue;
+        minimizedCount++;
+
+        const restoreBtn = document.createElement('button');
+        restoreBtn.className = 'collapsed-pane-btn';
+        restoreBtn.type = 'button';
+        restoreBtn.textContent = `${key.toUpperCase()} +`;
+        restoreBtn.addEventListener('click', () => setStackPaneMinimized(key, false));
+        collapsedPaneButtons.appendChild(restoreBtn);
+    }
+
+    collapsedDock.classList.toggle('hidden', minimizedCount === 0);
+}
+
+function renderStackLayout() {
+    if (!stackBody) return;
+
+    const visible = visibleStackPanels();
+    if (visible.length === 0) {
+        setStackPaneMinimized('console', false);
+        return;
+    }
+
+    stackBody.innerHTML = '';
+    let totalWeight = 0;
+    for (const key of visible) totalWeight += Math.max(0.35, paneWeights[key] || 1);
+
+    visible.forEach((key, idx) => {
+        const section = paneSections[key];
+        if (!section) return;
+
+        const weight = Math.max(0.35, paneWeights[key] || 1);
+        section.style.display = 'flex';
+        section.style.flex = `${weight / totalWeight} 1 0`;
+        stackBody.appendChild(section);
+
+        if (idx < visible.length - 1) {
+            stackBody.appendChild(createPaneResizer(key, visible[idx + 1]));
+        }
+    });
+
+    for (const key of stackPanelKeys) {
+        if (visible.includes(key)) continue;
+        const section = paneSections[key];
+        if (!section) continue;
+        section.style.display = 'none';
+    }
+
+    renderCollapsedDock();
+    try { fitAddon.fit(); } catch {}
+}
+
+function setStackPaneMinimized(key, minimized) {
+    if (!stackPanelKeys.includes(key)) return;
+    if (minimized && visibleStackPanels().length <= 1) return; // keep at least one pane visible
+
+    paneMinimized[key] = minimized;
+    renderStackLayout();
+}
+
+function beginPaneResize(evt, upperKey, lowerKey) {
+    evt.preventDefault();
+    const upper = paneSections[upperKey];
+    const lower = paneSections[lowerKey];
+    if (!upper || !lower) return;
+
+    resizeDragState = {
+        startY: evt.clientY,
+        upperKey,
+        lowerKey,
+        upperStart: upper.getBoundingClientRect().height,
+        lowerStart: lower.getBoundingClientRect().height,
+        minSize: 90,
+    };
+
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onPaneResizeMove);
+    document.addEventListener('mouseup', endPaneResize);
+}
+
+function onPaneResizeMove(evt) {
+    if (!resizeDragState) return;
+
+    const { startY, upperKey, lowerKey, upperStart, lowerStart, minSize } = resizeDragState;
+    let nextUpper = upperStart + (evt.clientY - startY);
+    let nextLower = lowerStart - (evt.clientY - startY);
+
+    if (nextUpper < minSize) {
+        nextLower -= (minSize - nextUpper);
+        nextUpper = minSize;
+    }
+    if (nextLower < minSize) {
+        nextUpper -= (minSize - nextLower);
+        nextLower = minSize;
+    }
+
+    paneWeights[upperKey] = Math.max(minSize, nextUpper);
+    paneWeights[lowerKey] = Math.max(minSize, nextLower);
+    renderStackLayout();
+}
+
+function endPaneResize() {
+    resizeDragState = null;
+    document.body.style.userSelect = '';
+    document.removeEventListener('mousemove', onPaneResizeMove);
+    document.removeEventListener('mouseup', endPaneResize);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Controls
+// ─────────────────────────────────────────────────────────────────────────────
+document.getElementById('pause-btn').addEventListener('click', function() {
+    paused = !paused;
+    this.textContent = paused ? 'Resume' : 'Pause';
+    this.classList.toggle('btn-warning', paused);
+    this.classList.toggle('btn-outline-secondary', !paused);
+    if (!paused && pending.length) { pending.forEach(dispatchEvt); pending = []; }
+});
+
+document.getElementById('clear-all-btn').addEventListener('click', () => {
+    for (const [key, panel] of Object.entries(panels)) clearPanel(key, panel);
+});
+
+document.querySelectorAll('[data-panel]').forEach(btn => {
+    btn.addEventListener('click', () => clearPanel(btn.dataset.panel, panels[btn.dataset.panel]));
+});
+
+document.querySelectorAll('[data-minimize]').forEach(btn => {
+    const key = btn.dataset.minimize;
+    if (stackPanelKeys.includes(key)) minimizeButtons[key] = btn;
+
+    btn.addEventListener('click', () => {
+        if (stackPanelKeys.includes(key)) {
+            setStackPaneMinimized(key, !paneMinimized[key]);
+            return;
+        }
+
+        const el = document.getElementById(`panel-${key}`);
+        if (!el) return;
+        const isMin = el.classList.toggle('minimized');
+        btn.textContent = isMin ? '+' : '−';
+    });
+});
+
+function clearPanel(key, panel) {
+    panel.body.innerHTML = `<div class="panel-empty">${emptyMsg(key)}</div>`;
+    panel.count = 0;
+    panel.countEl.textContent = '0';
+    if (key === 'input' || key === 'output') {
+        groupedTerminalRows[key] = createGroupedRowState();
+    }
+}
+function emptyMsg(k) {
+    return { launch:'Waiting for terminal launch...', input:'Waiting for input...', output:'Waiting for output...',
+             mcp:'Waiting for MCP calls...', logs:'Waiting for log entries...',
+             http:'Waiting for requests...' }[k] || '';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Search — filters visibility of existing rows
+// ─────────────────────────────────────────────────────────────────────────────
+document.getElementById('global-search').addEventListener('input', function() {
+    globalSearch = this.value.toLowerCase();
+    for (const panel of Object.values(panels)) {
+        panel.body.querySelectorAll('.event-row').forEach(row => {
+            applySearchVisibility(row);
+        });
+    }
+});
+
+function createGroupedRowState() {
+    return { row: null, textEl: null, text: '' };
+}
+
+function applySearchVisibility(row) {
+    const text = (row.dataset.summary || '') + (row.dataset.detail || '');
+    row.style.display = (!globalSearch || text.toLowerCase().includes(globalSearch)) ? '' : 'none';
+}
+
+function stripAnsi(text) {
+    if (!text) return '';
+
+    return text
+        // OSC sequences: ESC ] ... BEL or ESC \\
+        .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+        // CSI sequences: ESC [ ... command
+        .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+        // Remaining short ESC sequences
+        .replace(/\x1B[@-_]/g, '');
+}
+
+function normalizeOutputChunk(raw) {
+    if (!raw) return '';
+    return stripAnsi(raw).replace(/\r(?!\n)/g, '');
+}
+
+function appendInputChunk(current, chunk) {
+    if (!chunk) return current;
+
+    let next = current;
+    for (const ch of chunk) {
+        if (ch === '\b' || ch === '\x7f') {
+            next = next.slice(0, -1);
+            continue;
+        }
+        if (ch === '\r' || ch === '\n') {
+            continue;
+        }
+        next += ch;
+    }
+
+    return next;
+}
+
+function ensureGroupedTerminalRow(kind, typeName, panel, evt) {
+    const state = groupedTerminalRows[kind];
+    if (state.row) return state;
+
+    const row = buildRow(
+        { summary: '', detail: '', timestamp: evt.timestamp, durationMs: evt.durationMs },
+        typeName
+    );
+    const textEl = row.querySelector('.ev-text');
+    if (!textEl) return state;
+
+    textEl.textContent = '';
+    row.dataset.summary = '';
+    row.dataset.detail = '';
+    panel.body.appendChild(row);
+
+    panel.count++;
+    panel.countEl.textContent = panel.count;
+
+    state.row = row;
+    state.textEl = textEl;
+    return state;
+}
+
+function finalizeGroupedTerminalRow(kind) {
+    const panel = panels[kind];
+    const state = groupedTerminalRows[kind];
+    if (!panel || !state.row) {
+        groupedTerminalRows[kind] = createGroupedRowState();
+        return;
+    }
+
+    if (!state.text.trim()) {
+        state.row.remove();
+        panel.count = Math.max(0, panel.count - 1);
+        panel.countEl.textContent = panel.count;
+    }
+
+    groupedTerminalRows[kind] = createGroupedRowState();
+}
+
+function dispatchGroupedTerminalEvent(kind, evt) {
+    const panel = panels[kind];
+    if (!panel) return;
+
+    panel.body.querySelector('.panel-empty')?.remove();
+
+    const typeName = kind === 'input' ? 'TerminalInput' : 'TerminalOutput';
+    const raw = evt.detail || stripPrefix(evt.summary, typeName);
+    if (!raw) return;
+
+    const state = groupedTerminalRows[kind];
+    const hasNewline = kind === 'input' ? /[\r\n]/.test(raw) : raw.includes('\n');
+
+    if (kind === 'input') {
+        state.text = appendInputChunk(state.text, raw);
+    } else {
+        state.text += normalizeOutputChunk(raw);
+    }
+
+    if (state.text.length > 0) {
+        ensureGroupedTerminalRow(kind, typeName, panel, evt);
+    }
+
+    if (state.row && state.textEl) {
+        state.textEl.textContent = state.text;
+        state.row.dataset.summary = state.text;
+        state.row.dataset.detail = state.text;
+        applySearchVisibility(state.row);
+    }
+
+    if (panel.autoScroll) {
+        panel.body.scrollTop = panel.body.scrollHeight;
+    }
+
+    if (hasNewline || state.text.length >= 4000) {
+        finalizeGroupedTerminalRow(kind);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dispatch incoming trace event to the right panel
+// — Details are ALWAYS shown inline, never collapsed
+// ─────────────────────────────────────────────────────────────────────────────
+function dispatchEvt(evt) {
+    const typeName = mapType(evt.type);
+
+    if (typeName === 'TerminalOutput') {
+        feedTerminal(evt);
+        dispatchGroupedTerminalEvent('output', evt);
+        return;
+    }
+
+    if (typeName === 'TerminalInput') {
+        dispatchGroupedTerminalEvent('input', evt);
+        return;
+    }
+
+    const panelKey = TYPE_PANEL[typeName];
+    if (!panelKey) return;
+
+    const panel = panels[panelKey];
+    panel.body.querySelector('.panel-empty')?.remove();
+
+    const row = buildRow(evt, typeName);
+    applySearchVisibility(row);
+
+    panel.body.appendChild(row);
+
+    // Detail block: always visible inline — no click-to-expand
+    // TerminalOutput detail is raw ANSI — rendered in xterm console, not here.
+    if (evt.detail && typeName !== 'TerminalOutput') {
+        const detail = document.createElement('div');
+        detail.className = 'event-detail';
+        detail.textContent = tryFmtJson(evt.detail);
+        panel.body.appendChild(detail);
+    }
+
+    panel.count++;
+    panel.countEl.textContent = panel.count;
+
+    if (panel.autoScroll) panel.body.scrollTop = panel.body.scrollHeight;
+}
+
+function buildRow(evt, typeName) {
+    const row = document.createElement('div');
+    row.className = 'event-row';
+    if (typeName === 'McpToolCall')   row.classList.add('ev-call');
+    if (typeName === 'McpToolResult') row.classList.add('ev-result');
+    if (typeName === 'LogEntry') {
+        const s = evt.summary || '';
+        if (s.startsWith('[ERR]') || s.startsWith('[FTL]')) row.classList.add('ev-err');
+        else if (s.startsWith('[WRN]'))                      row.classList.add('ev-wrn');
+        else if (s.startsWith('[DBG]') || s.startsWith('[VRB]')) row.classList.add('ev-dbg');
+    }
+    if (typeName === 'HttpRequest') {
+        const m = (evt.summary || '').match(/→ (\d{3})/);
+        if (m) {
+            const code = parseInt(m[1]);
+            if (code >= 500) row.classList.add('ev-err');
+            else if (code >= 400) row.classList.add('ev-wrn');
+        }
+    }
+
+    row.dataset.summary = evt.summary || '';
+    row.dataset.detail  = evt.detail  || '';
+
+    const time = new Date(evt.timestamp).toLocaleTimeString('en-US', { hour12: false, fractionalSecondDigits: 3 });
+    const dur  = evt.durationMs != null ? `${Math.round(evt.durationMs)}ms` : '';
+
+    row.innerHTML = `
+        <div class="ev-meta">
+            <span class="ev-time">${time}</span>
+            ${dur ? `<span class="ev-duration">${dur}</span>` : ''}
+        </div>
+        <div class="ev-text">${esc(stripPrefix(evt.summary, typeName))}</div>
+    `;
+    return row;
+}
+
+function stripPrefix(text, typeName) {
+    if (!text) return '';
+    const prefixes = ['Terminal launch: ','Input (LocalWebUi): ','Input (LocalCli): ','Input (Pty): ',
+                      'Output: ','MCP call: ','MCP result: ','MCP error: '];
+    for (const p of prefixes) if (text.startsWith(p)) return text.slice(p.length);
+    return text;
+}
+
+function mapType(t) {
+    if (typeof t === 'string') return t;
+    return TYPE_NAMES[t] || 'LogEntry';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SSE — trace event stream
+// ─────────────────────────────────────────────────────────────────────────────
+function connectSSE() {
+    setStatus('connecting');
+    const es = new EventSource('/api/v1/trace/stream');
+    es.addEventListener('trace', e => {
+        try {
+            const evt = JSON.parse(e.data);
+            if (paused) pending.push(evt); else dispatchEvt(evt);
+        } catch {}
+    });
+    es.onopen  = () => setStatus('connected');
+    es.onerror = () => { setStatus('disconnected'); es.close(); setTimeout(connectSSE, 3000); };
+}
+
+function setStatus(state) {
+    document.getElementById('status-dot').className   = `status-dot ${state}`;
+    document.getElementById('status-label').textContent = { connected:'Connected', disconnected:'Disconnected', connecting:'Connecting...' }[state];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// xterm.js — read-only console mirror (bottom-right panel)
+// Fed from SSE TerminalOutput trace events — does NOT connect to the live
+// terminal WebSocket so it never takes over the active session.
+// ─────────────────────────────────────────────────────────────────────────────
+const termStatusEl = document.getElementById('terminal-status');
+const termWrap     = document.getElementById('terminal-wrap');
+
+const term = new Terminal({
+    theme: {
+        background:  '#0d0d1a',
+        foreground:  '#d4d4d4',
+        cursor:      '#569cd6',
+        black:       '#1e1e1e',
+        brightBlack: '#555',
+        white:       '#d4d4d4',
+        brightWhite: '#ffffff',
+    },
+    fontSize: 12,
+    fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
+    cursorBlink: false,
+    scrollback: 2000,
+    disableStdin: true,
+    convertEol: true,
+});
+
+const fitAddon = new FitAddon.FitAddon();
+term.loadAddon(fitAddon);
+term.open(termWrap);
+fitAddon.fit();
+
+// Build the right-side stack (LAUNCH / INPUT / OUTPUT / CONSOLE)
+renderStackLayout();
+
+// Resize observer to refit xterm when panel resizes
+new ResizeObserver(() => { try { fitAddon.fit(); } catch {} }).observe(termWrap);
+
+// Called by dispatchEvt for every TerminalOutput event
+function feedTerminal(evt) {
+    // Use raw ANSI detail if available, otherwise fall back to plain summary text
+    const raw = evt.detail || stripPrefix(evt.summary, 'TerminalOutput');
+    if (raw) {
+        term.write(raw);
+        term.scrollToBottom();
+    }
+    termStatusEl.textContent = 'receiving output';
+}
+
+document.getElementById('term-reconnect-btn').addEventListener('click', () => {
+    term.clear();
+    termStatusEl.textContent = 'cleared — waiting for output...';
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+function esc(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function tryFmtJson(s) {
+    try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Boot
+// ─────────────────────────────────────────────────────────────────────────────
+connectSSE();
+</script>
+</body>
+</html>

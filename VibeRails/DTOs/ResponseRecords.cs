@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using VibeRails.Services;
+using VibeRails.Services.Tracing;
 
 namespace VibeRails.DTOs
 {
@@ -408,6 +409,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SignedMessage))]
     [JsonSerializable(typeof(SignatureVerificationResponse))]
     [JsonSerializable(typeof(ProxyRelayMessage))]
+    // Trace DTOs
+    [JsonSerializable(typeof(TraceEvent))]
+    [JsonSerializable(typeof(List<TraceEvent>))]
     // App Configuration (for appsettings.json VibeRails section)
     [JsonSerializable(typeof(Services.VibeRailsConfiguration))]
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]

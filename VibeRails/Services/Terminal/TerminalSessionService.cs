@@ -4,6 +4,7 @@ using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal.Consumers;
+using VibeRails.Services.Tracing;
 
 namespace VibeRails.Services.Terminal;
 
@@ -57,11 +58,12 @@ public class TerminalSessionService : ITerminalSessionService
         IGitService gitService,
         McpSettings mcpSettings,
         IRemoteStateService remoteStateService,
-        ITerminalIoObserverService ioObserverService)
+        ITerminalIoObserverService ioObserverService,
+        TraceEventBuffer traceBuffer)
     {
         _stateService = new TerminalStateService(dbService, gitService, remoteStateService, ioObserverService);
         var commandService = new CommandService(envService, mcpSettings);
-        _runner = new TerminalRunner(_stateService, commandService);
+        _runner = new TerminalRunner(_stateService, commandService, traceBuffer);
     }
 
     public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false)

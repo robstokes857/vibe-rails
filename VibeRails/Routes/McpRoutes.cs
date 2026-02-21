@@ -1,6 +1,9 @@
+using System.Text.Json;
 using ModelContextProtocol.Client;
 using VibeRails.DTOs;
 using VibeRails.Services.Mcp;
+using VibeRails.Services.Tracing;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace VibeRails.Routes;
 
@@ -45,6 +48,7 @@ public static class McpRoutes
 
         app.MapPost("/api/v1/mcp/tools/{name}", async (
             McpSettings settings,
+            TraceEventBuffer traceBuffer,
             string name,
             McpToolCallRequest request,
             CancellationToken cancellationToken) =>
@@ -53,6 +57,10 @@ public static class McpRoutes
             {
                 return Results.BadRequest(new McpToolCallResponse(false, "", "MCP server executable not found."));
             }
+
+            traceBuffer.Add(TraceEvent.Create(TraceEventType.McpToolCall, "MCP", $"MCP call: {name}",
+                JsonSerializer.Serialize(request.Arguments, AppJsonSerializerContext.Default.DictionaryStringObject)));
+            var sw = Stopwatch.StartNew();
 
             try
             {
@@ -63,10 +71,17 @@ public static class McpRoutes
 
                 await using var client = await McpClientService.ConnectAsync(transport, cancellationToken: cancellationToken);
                 var result = await client.CallToolAsync(name, request.Arguments, cancellationToken);
+
+                traceBuffer.Add(TraceEvent.Create(TraceEventType.McpToolResult, "MCP",
+                    $"MCP result: {name} ({sw.ElapsedMilliseconds}ms)", result, sw.Elapsed.TotalMilliseconds));
+
                 return Results.Ok(new McpToolCallResponse(true, result));
             }
             catch (Exception ex)
             {
+                traceBuffer.Add(TraceEvent.Create(TraceEventType.McpToolResult, "MCP",
+                    $"MCP error: {name} ({sw.ElapsedMilliseconds}ms)", ex.Message, sw.Elapsed.TotalMilliseconds));
+
                 return Results.BadRequest(new McpToolCallResponse(false, "", ex.Message));
             }
         }).WithName("CallMcpTool");

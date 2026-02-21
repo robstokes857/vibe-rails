@@ -34,7 +34,7 @@ namespace VibeRails.Services.LlmClis
         /// Recursively copies all files and subdirectories from source to destination.
         /// Only copies if source exists and skips files that already exist in destination.
         /// </summary>
-        protected void CopyDirectoryRecursive(string sourceDir, string destDir)
+        protected void CopyDirectoryRecursive(string sourceDir, string destDir, HashSet<string>? excludedDirNames = null)
         {
             if (!_fileService.DirectoryExists(sourceDir))
             {
@@ -62,8 +62,12 @@ namespace VibeRails.Services.LlmClis
             foreach (var sourceSubDir in directories)
             {
                 var dirName = Path.GetFileName(sourceSubDir);
+                if (excludedDirNames != null && excludedDirNames.Contains(dirName))
+                {
+                    continue;
+                }
                 var destSubDir = Path.Combine(destDir, dirName);
-                CopyDirectoryRecursive(sourceSubDir, destSubDir);
+                CopyDirectoryRecursive(sourceSubDir, destSubDir, excludedDirNames);
             }
         }
     }

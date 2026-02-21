@@ -17,9 +17,10 @@ namespace VibeRails.Services.LlmClis
             var configPath = Path.Combine(environment.Path, GetConfigSubdirectory());
             EnsureDirectoryExists(configPath);
 
-            // Copy entire configuration from default Claude directory (~/.claude)
-            var defaultClaudePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
-            CopyDirectoryRecursive(defaultClaudePath, configPath);
+            // Copy entire configuration from default Claude directory (~/.claude), excluding backups
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var defaultClaudePath = Path.Combine(userProfile, ".claude");
+            CopyDirectoryRecursive(defaultClaudePath, configPath, excludedDirNames: ["backups"]);
 
             // Explicitly copy config.json (contains API key) if it wasn't copied
             var defaultConfigFile = Path.Combine(defaultClaudePath, "config.json");
@@ -27,6 +28,14 @@ namespace VibeRails.Services.LlmClis
             if (_fileService.FileExists(defaultConfigFile) && !_fileService.FileExists(envConfigFile))
             {
                 _fileService.CopyFile(defaultConfigFile, envConfigFile, overwrite: false);
+            }
+
+            // Copy ~/.claude.json (auth tokens) - lives in user profile root, not inside ~/.claude
+            var defaultClaudeJsonFile = Path.Combine(userProfile, ".claude.json");
+            var envClaudeJsonFile = Path.Combine(configPath, ".claude.json");
+            if (_fileService.FileExists(defaultClaudeJsonFile) && !_fileService.FileExists(envClaudeJsonFile))
+            {
+                _fileService.CopyFile(defaultClaudeJsonFile, envClaudeJsonFile, overwrite: false);
             }
 
             // If settings.json still doesn't exist (no default Claude config), create a basic one
