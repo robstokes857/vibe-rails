@@ -189,6 +189,37 @@ code {
     transform: rotate(90deg);
 }
 
+/* Card header settings cog button (matches nav-settings-btn style) */
+.card-nav-settings-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: all var(--transition-speed);
+}
+
+.card-nav-settings-btn:hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: rgba(154, 198, 197, 0.1);
+}
+
+.card-nav-cog {
+    transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.card-nav-settings-btn:hover .card-nav-cog,
+button:hover .card-nav-cog {
+    transform: rotate(90deg);
+}
+
 /* Exit button */
 .nav-exit-btn {
     display: flex;
@@ -1008,6 +1039,19 @@ code {
     font-size: 0.72rem;
 }
 
+/* Start button — green */
+#terminal-start-btn {
+    border-color: #a6e3a1;
+    color: #a6e3a1;
+    background: rgba(166, 227, 161, 0.08);
+}
+
+#terminal-start-btn:hover {
+    background: rgba(166, 227, 161, 0.18);
+    border-color: #a6e3a1;
+    color: #ffffff;
+}
+
 /* Tab bar header */
 #terminal-panel .terminal-window-header {
     background: var(--terminal-header-bg);
@@ -1076,7 +1120,6 @@ code {
 }
 
 #terminal-panel .terminal-tab-list {
-    flex: 1;
     display: flex;
     height: 100%;
     overflow-x: auto;
@@ -1128,43 +1171,44 @@ code {
 #terminal-panel .terminal-tab-item.is-connected::before,
 #terminal-panel .terminal-tab-item.is-disconnected::before {
     content: '';
-    display: inline-block;
     width: 6px;
     height: 6px;
     border-radius: 50%;
+    margin-left: 10px;
+    margin-right: 2px;
     flex-shrink: 0;
-    margin-right: 7px;
-    margin-left: 2px;
+    transition: background 0.3s ease;
 }
 
 #terminal-panel .terminal-tab-item.is-connected::before {
     background: #a6e3a1;
-    box-shadow: 0 0 4px rgba(166, 227, 161, 0.7);
+    box-shadow: 0 0 6px rgba(166, 227, 161, 0.4);
+    animation: tab-status-breath 3s infinite ease-in-out;
 }
 
 #terminal-panel .terminal-tab-item.is-disconnected::before {
     background: #f38ba8;
-    box-shadow: 0 0 4px rgba(243, 139, 168, 0.7);
+    box-shadow: 0 0 6px rgba(243, 139, 168, 0.4);
+    animation: tab-status-alert 1s infinite ease-in-out;
 }
 
-/* Bottom accent bar — green/red overrides default accent */
-#terminal-panel .terminal-tab-item.is-connected.active::after {
-    background: #a6e3a1;
-    box-shadow: 0 0 6px rgba(166, 227, 161, 0.5);
+@keyframes tab-status-breath {
+    0%, 100% { opacity: 0.5; transform: scale(0.9); }
+    50% { opacity: 1; transform: scale(1.1); }
 }
 
-#terminal-panel .terminal-tab-item.is-disconnected.active::after {
-    background: #f38ba8;
-    box-shadow: 0 0 6px rgba(243, 139, 168, 0.5);
+@keyframes tab-status-alert {
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.2); filter: brightness(1.2); }
 }
 
-/* Subtle tinted background on active connected/disconnected tabs */
+/* Subtle tint on the active tab */
 #terminal-panel .terminal-tab-item.is-connected.active {
-    background: rgba(166, 227, 161, 0.06);
+    background: rgba(166, 227, 161, 0.05);
 }
 
 #terminal-panel .terminal-tab-item.is-disconnected.active {
-    background: rgba(243, 139, 168, 0.06);
+    background: rgba(243, 139, 168, 0.05);
 }
 
 #terminal-panel .terminal-tab-button {
@@ -1191,7 +1235,6 @@ code {
     padding-left: 0;
 }
 
-#terminal-panel .terminal-tab-caret,
 #terminal-panel .terminal-tab-close {
     border: none;
     background: transparent;
@@ -1208,7 +1251,6 @@ code {
     cursor: pointer;
 }
 
-#terminal-panel .terminal-tab-caret:hover,
 #terminal-panel .terminal-tab-close:hover {
     background: rgba(255, 255, 255, 0.1);
     color: #cdd6f4;
@@ -1217,21 +1259,49 @@ code {
 #terminal-panel .terminal-tab-add {
     background: transparent;
     border: none;
-    color: #a6adc8;
-    padding: 0 12px;
+    border-left: 1px solid var(--terminal-border);
+    color: #6c7086;
+    padding: 0 11px;
     height: 100%;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
+    line-height: 1;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.2s, color 0.2s;
     flex-shrink: 0;
 }
 
 #terminal-panel .terminal-tab-add:hover {
     background: var(--terminal-tab-hover-bg);
+    color: #cdd6f4;
 }
 
 #terminal-panel .terminal-tab-add:disabled {
-    opacity: 0.35;
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+#terminal-panel .terminal-tab-select {
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--terminal-border);
+    color: #6c7086;
+    padding: 0 9px;
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+    flex-shrink: 0;
+}
+
+#terminal-panel .terminal-tab-select:hover {
+    background: var(--terminal-tab-hover-bg);
+    color: #cdd6f4;
+}
+
+#terminal-panel .terminal-tab-select:disabled {
+    opacity: 0.3;
     cursor: not-allowed;
 }
 
@@ -1270,6 +1340,19 @@ code {
     background: rgba(154, 198, 197, 0.1);
 }
 
+#terminal-keyboard-btn {
+    border-color: rgba(154, 198, 197, 0.45);
+    color: #cdd6f4;
+    background: rgba(154, 198, 197, 0.08);
+}
+
+#terminal-keyboard-btn:hover,
+#terminal-keyboard-btn:focus-visible {
+    border-color: var(--terminal-accent);
+    color: #ffffff;
+    background: rgba(154, 198, 197, 0.2);
+}
+
 #terminal-panel .terminal-control-text {
     font-weight: 600;
 }
@@ -1296,10 +1379,15 @@ code {
     width: 100%;
     height: 100%;
     overflow: hidden;
+    touch-action: manipulation;
 }
 
 .terminal-element .xterm {
     padding: 8px;
+}
+
+.terminal-element .xterm-helper-textarea {
+    font-size: 16px !important;
 }
 
 .terminal-element .xterm-viewport {
@@ -1461,24 +1549,71 @@ code {
 }
 
 @media (max-width: 768px) {
+    #terminal-panel .card-header {
+        padding: 10px 12px;
+        gap: 10px;
+    }
+    #terminal-panel .card-header .card-title {
+        font-size: 0.8rem;
+    }
+    #terminal-panel .card-header .text-muted {
+        font-size: 0.7rem;
+        line-height: 1.3;
+    }
+    #terminal-panel .terminal-window-header {
+        height: 46px;
+        padding: 0 8px;
+    }
     #terminal-panel .terminal-tab-item {
-        min-width: 80px;
+        min-width: 96px;
+        max-width: 156px;
+        font-size: 0.78rem;
+    }
+    #terminal-panel .terminal-tab-button {
+        padding-left: 8px;
     }
     #terminal-panel .terminal-window-controls-right {
         display: none;
     }
     #terminal-panel #terminal-container {
-        height: 500px !important;
+        height: min(62dvh, 560px) !important;
+    }
+    #terminal-panel.terminal-expanded #terminal-container {
+        height: min(72dvh, 680px) !important;
     }
     #terminal-panel.terminal-page-mode #terminal-container {
-        min-height: 300px;
+        min-height: min(56dvh, 420px);
+        height: min(72dvh, 680px) !important;
     }
     #terminal-panel.terminal-focus-card #terminal-container {
-        min-height: 300px;
+        min-height: min(56dvh, 420px);
+        height: min(72dvh, 680px) !important;
+    }
+    .terminal-element .xterm {
+        padding: 10px 8px;
     }
     .terminal-focus-view {
         height: 100%;
         min-height: 0;
+    }
+}
+
+@media (max-width: 480px) {
+    #terminal-panel .terminal-tab-item {
+        min-width: 84px;
+        max-width: 132px;
+    }
+    #terminal-panel .terminal-tab-add,
+    #terminal-panel .terminal-tab-select {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+    #terminal-panel .terminal-window-controls-left {
+        gap: 6px;
+        margin-right: 8px;
+    }
+    #terminal-panel .card-header .text-muted {
+        display: none;
     }
 }
 
