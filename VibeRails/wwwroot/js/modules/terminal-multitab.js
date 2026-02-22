@@ -1493,7 +1493,6 @@ export class TerminalController {
                     <div class="terminal-window-header">
                         <div class="terminal-window-controls terminal-window-controls-left">
                             <button type="button" class="terminal-control-dot close" id="terminal-close-dot" title="Stop active terminal" aria-label="Stop active terminal"></button>
-                            <button type="button" class="terminal-control-dot minimize" id="terminal-minimize-dot" title="Minimize terminal" aria-label="Minimize terminal"></button>
                             <button type="button" class="terminal-control-dot maximize" id="terminal-maximize-dot" title="Expand terminal" aria-label="Expand terminal"></button>
                         </div>
                         <div class="terminal-tab-strip" id="terminal-tab-strip">
@@ -1502,19 +1501,19 @@ export class TerminalController {
                         </div>
                         <div class="terminal-window-controls terminal-window-controls-right">
                             ${lockButtonHtml}
-                            <button type="button" class="terminal-control-btn icon-btn" id="terminal-popout-btn" title="${isFocusView ? 'Return to dashboard terminal section' : 'Open terminal in focused page view'}" aria-label="${isFocusView ? 'Back to dashboard terminal view' : 'Open terminal focus page'}">
+                            <button type="button" class="terminal-control-btn icon-btn" id="terminal-popout-btn" title="${isFocusView ? 'Return to dashboard' : 'Open in fullscreen'}" aria-label="${isFocusView ? 'Back to dashboard' : 'Open in fullscreen'}">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
                                     <path d="M6 3a2 2 0 0 0-2 2v7a1 1 0 0 0 1 1h7a2 2 0 0 0 2-2V6h-1v5a1 1 0 0 1-1 1H5V5a1 1 0 0 1 1-1z"/>
                                     <path d="M8.5 1a.5.5 0 0 0 0 1h4.793L6.146 9.146a.5.5 0 1 0 .708.708L14 2.707V7.5a.5.5 0 0 0 1 0V1z"/>
                                 </svg>
-                                <span class="terminal-control-text">${isFocusView ? 'Back to Dashboard' : 'Focus View'}</span>
+                                <span class="terminal-control-text">${isFocusView ? 'Back to Dashboard' : 'Open In Fullscreen'}</span>
                             </button>
                         </div>
                     </div>
                     <div class="terminal-window-title-bar">
                         <div class="terminal-window-title" id="terminal-window-title">Web Terminal</div>
                     </div>
-                    <div class="card-body p-0" id="terminal-container" style="display: none; height: 520px; overflow: hidden;">
+                    <div class="card-body p-0" id="terminal-container" style="display: none; height: 680px; overflow: hidden;">
                         <div id="terminal-tab-panels" class="terminal-tab-panels"></div>
                     </div>
                     <div class="card-body text-center text-muted" id="terminal-placeholder">

@@ -964,146 +964,353 @@ code {
     overflow-y: auto;
 }
 
+/* Modern Terminal Theme */
 #terminal-panel {
     --terminal-default-height: 520px;
+    --terminal-header-bg: #1e1e2e;
+    --terminal-body-bg: #11111b;
+    --terminal-tab-bg: #181825;
+    --terminal-tab-active-bg: #11111b;
+    --terminal-tab-hover-bg: #2b2b3f;
+    --terminal-border: rgba(255, 255, 255, 0.08);
+    --terminal-accent: #9ac6c5;
 }
 
-#terminal-panel .terminal-window-shell {
-    background-color: #0f0f1a;
-    border-top: 1px solid var(--color-border);
-    border-radius: 0 0 var(--border-radius) var(--border-radius);
+#terminal-panel.card {
+    border: 1px solid var(--terminal-border);
+    background: var(--terminal-body-bg);
     overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
 }
 
+/* Window shell */
+#terminal-panel .terminal-window-shell {
+    background: var(--terminal-body-bg);
+    overflow: hidden;
+    border-radius: 0 0 var(--border-radius) var(--border-radius);
+}
+
+/* Card header — restyle as a dark title bar */
+#terminal-panel .card-header {
+    background: var(--terminal-header-bg);
+    border-bottom: 1px solid var(--terminal-border);
+    padding: 8px 16px;
+}
+
+#terminal-panel .card-header .card-title {
+    color: #cdd6f4;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+#terminal-panel .card-header .text-muted {
+    color: #585b70 !important;
+    font-size: 0.72rem;
+}
+
+/* Tab bar header */
 #terminal-panel .terminal-window-header {
-    background-color: #252535;
-    padding: 10px 16px;
+    background: var(--terminal-header-bg);
+    padding: 0 12px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    border-bottom: 1px solid var(--color-border);
+    height: 42px;
+    border-bottom: 1px solid var(--terminal-border);
+    user-select: none;
 }
 
+/* Title strip below the tab bar */
 #terminal-panel .terminal-window-title-bar {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    background: #1b1b27;
-    padding: 6px 14px;
+    background: #181825;
+    border-bottom: 1px solid var(--terminal-border);
+    padding: 3px 14px;
 }
 
-#terminal-panel .terminal-tab-strip {
-    flex: 1 1 auto;
-    min-width: 0;
+#terminal-panel .terminal-window-title {
+    color: #585b70;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.76rem;
+    user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Traffic light dots */
+#terminal-panel .terminal-window-controls-left {
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-right: 14px;
+}
+
+#terminal-panel .terminal-control-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0;
+    transition: opacity 0.2s, transform 0.2s;
+    /* Larger invisible click target */
+    outline: 4px solid transparent;
+}
+
+#terminal-panel .terminal-control-dot:hover {
+    opacity: 0.8;
+    transform: scale(1.1);
+}
+
+#terminal-panel .terminal-control-dot.close    { background: #ff5f56; }
+#terminal-panel .terminal-control-dot.minimize { background: #ffbd2e; }
+#terminal-panel .terminal-control-dot.maximize { background: #27c93f; }
+
+/* Tab strip */
+#terminal-panel .terminal-tab-strip {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    height: 100%;
+    overflow: hidden;
 }
 
 #terminal-panel .terminal-tab-list {
-    flex: 1 1 auto;
-    min-width: 0;
+    flex: 1;
     display: flex;
-    align-items: center;
-    gap: 6px;
+    height: 100%;
     overflow-x: auto;
-    padding-bottom: 2px;
+    overflow-y: hidden;
+    gap: 1px;
+    background: var(--terminal-border);
 }
 
 #terminal-panel .terminal-tab-list::-webkit-scrollbar {
-    height: 6px;
-}
-
-#terminal-panel .terminal-tab-list::-webkit-scrollbar-thumb {
-    background: rgba(154, 198, 197, 0.26);
-    border-radius: 999px;
+    display: none;
 }
 
 #terminal-panel .terminal-tab-item {
     display: inline-flex;
     align-items: center;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
-    min-height: 30px;
+    padding: 0 6px 0 0;
+    height: 100%;
+    background: var(--terminal-tab-bg);
+    color: #a6adc8;
+    transition: background 0.2s, color 0.2s;
+    min-width: 100px;
+    max-width: 200px;
+    font-size: 0.75rem;
+    position: relative;
+    user-select: none;
+    border: none;
 }
 
 #terminal-panel .terminal-tab-item.active {
-    border-color: rgba(154, 198, 197, 0.65);
-    background: rgba(154, 198, 197, 0.24);
+    background: var(--terminal-tab-active-bg);
+    color: #cdd6f4;
 }
 
-#terminal-panel .terminal-tab-item.is-connected {
-    border-color: rgba(0, 188, 140, 0.72);
-    background: rgba(0, 188, 140, 0.2);
+#terminal-panel .terminal-tab-item.active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--terminal-accent);
 }
 
+#terminal-panel .terminal-tab-item:hover:not(.active) {
+    background: var(--terminal-tab-hover-bg);
+}
+
+/* Status dot — shown before the tab label via ::before */
+#terminal-panel .terminal-tab-item.is-connected::before,
+#terminal-panel .terminal-tab-item.is-disconnected::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-right: 7px;
+    margin-left: 2px;
+}
+
+#terminal-panel .terminal-tab-item.is-connected::before {
+    background: #a6e3a1;
+    box-shadow: 0 0 4px rgba(166, 227, 161, 0.7);
+}
+
+#terminal-panel .terminal-tab-item.is-disconnected::before {
+    background: #f38ba8;
+    box-shadow: 0 0 4px rgba(243, 139, 168, 0.7);
+}
+
+/* Bottom accent bar — green/red overrides default accent */
+#terminal-panel .terminal-tab-item.is-connected.active::after {
+    background: #a6e3a1;
+    box-shadow: 0 0 6px rgba(166, 227, 161, 0.5);
+}
+
+#terminal-panel .terminal-tab-item.is-disconnected.active::after {
+    background: #f38ba8;
+    box-shadow: 0 0 6px rgba(243, 139, 168, 0.5);
+}
+
+/* Subtle tinted background on active connected/disconnected tabs */
 #terminal-panel .terminal-tab-item.is-connected.active {
-    border-color: #00bc8c;
-    background: rgba(0, 188, 140, 0.34);
-}
-
-#terminal-panel .terminal-tab-item.is-disconnected {
-    border-color: rgba(231, 76, 60, 0.72);
-    background: rgba(231, 76, 60, 0.2);
+    background: rgba(166, 227, 161, 0.06);
 }
 
 #terminal-panel .terminal-tab-item.is-disconnected.active {
-    border-color: #e74c3c;
-    background: rgba(231, 76, 60, 0.34);
-}
-
-#terminal-panel .terminal-tab-button,
-#terminal-panel .terminal-tab-caret,
-#terminal-panel .terminal-tab-close,
-#terminal-panel .terminal-tab-add {
-    border: none;
-    background: transparent;
-    color: #d2d2df;
-    cursor: pointer;
-    line-height: 1;
+    background: rgba(243, 139, 168, 0.06);
 }
 
 #terminal-panel .terminal-tab-button {
-    padding: 6px 8px 6px 10px;
-    font-size: 0.76rem;
+    border: none;
+    background: transparent;
+    color: inherit;
     font-weight: 600;
+    padding: 0 4px 0 10px;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    text-align: left;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: inherit;
+    font-size: inherit;
+    cursor: pointer;
 }
 
-#terminal-panel .terminal-tab-caret {
-    font-size: 0.68rem;
-    opacity: 0.82;
-    padding: 6px 5px;
+/* When status dot is present, remove the button's left gap (dot provides the spacing) */
+#terminal-panel .terminal-tab-item.is-connected .terminal-tab-button,
+#terminal-panel .terminal-tab-item.is-disconnected .terminal-tab-button {
+    padding-left: 0;
 }
 
+#terminal-panel .terminal-tab-caret,
 #terminal-panel .terminal-tab-close {
-    font-size: 0.95rem;
-    color: #f2b3b3;
-    padding: 5px 8px 6px 4px;
+    border: none;
+    background: transparent;
+    color: #6c7086;
+    padding: 4px;
+    margin-left: 2px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    transition: background 0.2s, color 0.2s;
+    flex-shrink: 0;
+    cursor: pointer;
 }
 
 #terminal-panel .terminal-tab-caret:hover,
-#terminal-panel .terminal-tab-close:hover,
-#terminal-panel .terminal-tab-add:hover {
-    color: #ffffff;
+#terminal-panel .terminal-tab-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #cdd6f4;
 }
 
 #terminal-panel .terminal-tab-add {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(255, 255, 255, 0.04);
-    font-size: 1rem;
-    font-weight: 700;
-    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: #a6adc8;
+    padding: 0 12px;
+    height: 100%;
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+
+#terminal-panel .terminal-tab-add:hover {
+    background: var(--terminal-tab-hover-bg);
 }
 
 #terminal-panel .terminal-tab-add:disabled {
-    opacity: 0.4;
+    opacity: 0.35;
     cursor: not-allowed;
 }
 
+/* Right side controls */
+#terminal-panel .terminal-window-controls-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 10px;
+}
+
+#terminal-panel .terminal-control-btn {
+    border: 1px solid var(--terminal-border);
+    border-radius: 6px;
+    background: transparent;
+    color: #a6adc8;
+    cursor: pointer;
+    padding: 4px 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    transition: all 0.2s;
+}
+
+#terminal-panel .terminal-control-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(154, 198, 197, 0.45);
+    color: #cdd6f4;
+}
+
+#terminal-panel .terminal-control-btn.active {
+    border-color: var(--terminal-accent);
+    color: var(--terminal-accent);
+    background: rgba(154, 198, 197, 0.1);
+}
+
+#terminal-panel .terminal-control-text {
+    font-weight: 600;
+}
+
+/* Body */
+#terminal-panel #terminal-container {
+    background: var(--terminal-body-bg);
+    transition: height 0.28s ease;
+    overflow: hidden;
+    padding: 0;
+}
+
+#terminal-panel #terminal-placeholder {
+    background: var(--terminal-body-bg);
+    color: #585b70;
+    min-height: 220px;
+    padding: 2rem;
+}
+
+/* Tab panels fill their container */
+#terminal-panel .terminal-tab-panels,
+#terminal-panel .terminal-tab-panel,
+#terminal-panel .terminal-element {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.terminal-element .xterm {
+    padding: 8px;
+}
+
+.terminal-element .xterm-viewport {
+    overflow-y: scroll;
+}
+
+.terminal-element .xterm-screen {
+    overflow: hidden;
+}
+
+/* Selection menu */
 .terminal-selection-menu {
     position: fixed;
     z-index: 1200;
@@ -1111,19 +1318,19 @@ code {
     max-width: min(420px, calc(100vw - 16px));
     max-height: min(420px, calc(100vh - 24px));
     overflow: auto;
-    background: #1f2330;
-    border: 1px solid rgba(154, 198, 197, 0.35);
+    background: #1e1e2e;
+    border: 1px solid rgba(154, 198, 197, 0.25);
     border-radius: 10px;
-    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.46);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.5);
     padding: 8px;
 }
 
 .terminal-selection-menu-group {
-    font-size: 0.66rem;
+    font-size: 0.65rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: rgba(154, 198, 197, 0.86);
-    font-weight: 700;
+    color: #585b70;
+    font-weight: 800;
     margin: 8px 6px 4px;
 }
 
@@ -1131,269 +1338,47 @@ code {
     width: 100%;
     border: none;
     background: transparent;
-    color: #d2d2df;
+    color: #cdd6f4;
     text-align: left;
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 8px 10px;
     font-size: 0.79rem;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
 }
 
 .terminal-selection-menu-item:hover {
-    background: rgba(154, 198, 197, 0.2);
-    color: #ffffff;
+    background: #313244;
+    transform: translateX(4px);
 }
 
 .terminal-selection-menu-item.active {
-    background: rgba(154, 198, 197, 0.28);
-    color: #ffffff;
+    background: rgba(154, 198, 197, 0.1);
+    color: var(--terminal-accent);
     font-weight: 700;
 }
 
-#terminal-panel .terminal-window-controls {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    flex-wrap: wrap;
+/* Minimized: hide body only, keep header/tabs/title visible */
+#terminal-panel.terminal-minimized .card-body {
+    display: none;
 }
 
-#terminal-panel .terminal-window-controls-left {
-    justify-content: flex-start;
-    flex-wrap: nowrap;
-    margin-right: 6px;
-}
-
-#terminal-panel .terminal-window-controls-right {
-    margin-left: 10px;
-}
-
-#terminal-panel .terminal-control-btn {
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    color: #d2d2df;
-    cursor: pointer;
-    padding: 4px 8px;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.72rem;
-    letter-spacing: 0.01em;
-    line-height: 1;
-    white-space: nowrap;
-    transition: filter 0.15s ease, transform 0.15s ease, background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-}
-
-#terminal-panel .terminal-control-btn .terminal-control-swatch {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    flex: 0 0 auto;
-    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.28);
-}
-
-#terminal-panel .terminal-control-btn .terminal-control-text {
-    font-weight: 600;
-}
-
-#terminal-panel .terminal-control-btn.close .terminal-control-swatch {
-    background-color: #ff5f56;
-}
-
-#terminal-panel .terminal-control-btn.minimize .terminal-control-swatch {
-    background-color: #ffbd2e;
-}
-
-#terminal-panel .terminal-control-btn.maximize .terminal-control-swatch {
-    background-color: #27c93f;
-}
-
-#terminal-panel .terminal-control-btn.icon-btn svg {
-    opacity: 0.92;
-}
-
-#terminal-panel .terminal-control-btn:hover {
-    border-color: rgba(154, 198, 197, 0.45);
-    background: rgba(154, 198, 197, 0.16);
-    color: #f4fbfb;
-    transform: translateY(-1px);
-}
-
-#terminal-panel .terminal-control-btn:active {
-    transform: translateY(0);
-}
-
-#terminal-panel .terminal-control-btn.active {
-    border-color: rgba(154, 198, 197, 0.65);
-    background: rgba(154, 198, 197, 0.26);
-    color: #e9ffff;
-}
-
-#terminal-panel .terminal-control-btn.icon-btn.active {
-    background: rgba(154, 198, 197, 0.22);
-}
-
-#terminal-panel .terminal-window-title {
-    flex: 1 1 auto;
-    text-align: left;
-    color: #9b9bb1;
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 0.84rem;
-    user-select: none;
-    padding: 0 0.5rem 0 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* Legacy selectors kept for compatibility (old DOM style). */
-#terminal-panel .terminal-control-dot,
-#terminal-panel .terminal-control-icon {
-    border: none;
-    cursor: pointer;
-    padding: 0;
-    transition: filter 0.15s ease, transform 0.15s ease, background-color 0.2s ease, color 0.2s ease;
-}
-
-#terminal-panel .terminal-control-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-}
-
-#terminal-panel .terminal-control-dot.close {
-    background-color: #ff5f56;
-}
-
-#terminal-panel .terminal-control-dot.minimize {
-    background-color: #ffbd2e;
-}
-
-#terminal-panel .terminal-control-dot.maximize {
-    background-color: #27c93f;
-}
-
-#terminal-panel .terminal-control-dot:hover,
-#terminal-panel .terminal-control-icon:hover {
-    filter: brightness(1.25);
-    transform: scale(1.1);
-}
-
-#terminal-panel .terminal-control-dot:active,
-#terminal-panel .terminal-control-icon:active {
-    transform: scale(0.9);
-}
-
-#terminal-panel .terminal-control-dot.active {
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.16);
-}
-
-#terminal-panel .terminal-control-icon {
-    width: 24px;
-    height: 24px;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.05);
-    color: #8a8a9b;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-#terminal-panel .terminal-control-icon.active {
-    color: var(--color-accent);
-    background: rgba(154, 198, 197, 0.18);
-}
-
-/* Ensure xterm handles its own scrolling correctly and fills container */
-#terminal-element,
-.terminal-element {
-    padding: 0;
-    background: #1e1e1e;
-    border-radius: 0 0 var(--border-radius) var(--border-radius);
-    overflow: hidden;
-    position: relative;
-}
-
-#terminal-panel #terminal-container {
-    background: #1e1e1e;
-    transition: height 0.28s ease, min-height 0.28s ease;
-}
-
-#terminal-panel .terminal-tab-panels {
-    width: 100%;
-    height: 100%;
-}
-
-#terminal-panel .terminal-tab-panel {
-    width: 100%;
-    height: 100%;
-}
-
-#terminal-element .xterm,
-.terminal-element .xterm {
-    width: 100%;
-    height: 100%;
-}
-
-#terminal-element .xterm-viewport,
-.terminal-element .xterm-viewport {
-    background-color: #1e1e1e;
-    border-radius: 0 0 var(--border-radius) var(--border-radius);
-}
-
-/* Keep helper textarea caret invisible so only xterm's rendered cursor is seen. */
-#terminal-element .xterm-helper-textarea,
-.terminal-element .xterm-helper-textarea {
-    caret-color: transparent !important;
-    color: transparent !important;
-    background: transparent !important;
-    border: 0 !important;
-}
-
-#terminal-panel .terminal-header-main {
-    min-width: 280px;
-    flex: 1 1 420px;
-}
-
-#terminal-panel #terminal-actions {
-    flex: 1 1 320px;
-}
-
-#terminal-panel #terminal-cli-select {
-    min-width: 220px;
-}
-
-#terminal-panel.terminal-minimized #terminal-container {
-    display: block !important;
-    height: 0 !important;
-    min-height: 0;
-    overflow: hidden;
-}
-
-#terminal-panel.terminal-minimized #terminal-placeholder {
-    display: none !important;
-}
-
+/* Expanded */
 #terminal-panel.terminal-expanded #terminal-container {
-    height: min(82vh, 980px) !important;
+    height: min(80vh, 1000px) !important;
 }
 
+/* Locked — stays in-flow (JS uses scroll-lock to pin it in viewport) */
 #terminal-panel.terminal-locked {
     position: relative;
     z-index: 40;
-    border: 1px solid rgba(154, 198, 197, 0.45);
+    border-color: rgba(154, 198, 197, 0.45);
     box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
-    background: #1c1f29;
-    backdrop-filter: none;
     display: flex;
     flex-direction: column;
     margin-bottom: 0;
-}
-
-#terminal-panel.terminal-locked .card-header {
-    flex: 0 0 auto;
-    background: #1f2330;
-    backdrop-filter: none;
 }
 
 #terminal-panel.terminal-locked .terminal-window-shell {
@@ -1402,7 +1387,6 @@ code {
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: #141822;
 }
 
 #terminal-panel.terminal-locked #terminal-container {
@@ -1411,18 +1395,7 @@ code {
     height: auto !important;
 }
 
-#terminal-panel.terminal-locked #terminal-placeholder {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-}
-
-#terminal-panel.terminal-locked #terminal-element {
-    height: 100%;
-}
-
+/* Focus view */
 #terminal-panel.terminal-page-mode #terminal-container {
     min-height: 420px;
     height: min(88vh, 1080px) !important;
@@ -1481,10 +1454,6 @@ code {
 }
 
 @media (max-width: 992px) {
-    #terminal-panel #terminal-actions {
-        justify-content: flex-start !important;
-    }
-
     #terminal-panel .terminal-tab-strip {
         order: 3;
         width: 100%;
@@ -1492,45 +1461,27 @@ code {
 }
 
 @media (max-width: 768px) {
-    body.terminal-focus-active .main-container {
-        padding: 0.75rem;
-        height: calc(100dvh - 108px);
+    #terminal-panel .terminal-tab-item {
+        min-width: 80px;
     }
-
-    #terminal-panel .terminal-window-controls {
-        gap: 6px;
+    #terminal-panel .terminal-window-controls-right {
+        display: none;
     }
-
-    #terminal-panel .terminal-control-btn {
-        font-size: 0.66rem;
-        padding: 4px 7px;
-    }
-
-    #terminal-panel .terminal-tab-button {
-        max-width: 120px;
-    }
-
     #terminal-panel #terminal-container {
-        height: 460px !important;
+        height: 500px !important;
     }
-
-    #terminal-panel.terminal-locked .terminal-window-shell {
-        max-height: var(--terminal-lock-max-height, calc(100vh - 140px));
-    }
-
     #terminal-panel.terminal-page-mode #terminal-container {
         min-height: 300px;
     }
-
+    #terminal-panel.terminal-focus-card #terminal-container {
+        min-height: 300px;
+    }
     .terminal-focus-view {
         height: 100%;
         min-height: 0;
     }
-
-    #terminal-panel.terminal-focus-card #terminal-container {
-        min-height: 300px;
-    }
 }
+
 
 /* Wizard */
 .wizard-steps {
