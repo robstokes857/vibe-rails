@@ -105,10 +105,15 @@ export class WebviewPanelManager {
         window.WebSocket = function(url, protocols) {
             let nextUrl = url;
             try {
-                if (typeof nextUrl === 'string' && nextUrl.includes('/api/v1/terminal/ws')) {
+                if (typeof nextUrl === 'string') {
                     const parsed = new URL(nextUrl, window.location.href);
-                    parsed.searchParams.set('viberails_session', __vb_token__);
-                    nextUrl = parsed.toString();
+                    const path = parsed.pathname || '';
+                    const isLegacyTerminalWs = path === '/api/v1/terminal/ws';
+                    const isTabTerminalWs = path.startsWith('/api/v1/terminal/tabs/') && path.endsWith('/ws');
+                    if (isLegacyTerminalWs || isTabTerminalWs) {
+                        parsed.searchParams.set('viberails_session', __vb_token__);
+                        nextUrl = parsed.toString();
+                    }
                 }
             } catch { /* use original URL */ }
             return protocols !== undefined ? new __vb_orig_ws__(nextUrl, protocols) : new __vb_orig_ws__(nextUrl);

@@ -246,6 +246,18 @@ namespace VibeRails.DTOs
         string? SessionId = null
     );
 
+    public record TerminalTabStatusResponse(
+        string TabId,
+        DateTime CreatedUTC,
+        bool HasActiveSession,
+        string? SessionId = null
+    );
+
+    public record TerminalTabListResponse(
+        List<TerminalTabStatusResponse> Tabs,
+        int MaxTabs
+    );
+
     public record StartTerminalRequest(
         string? WorkingDirectory = null,
         string? Cli = null,
@@ -390,6 +402,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ClaudeSettingsDto))]
     // Terminal Session DTOs
     [JsonSerializable(typeof(TerminalStatusResponse))]
+    [JsonSerializable(typeof(TerminalTabStatusResponse))]
+    [JsonSerializable(typeof(List<TerminalTabStatusResponse>))]
+    [JsonSerializable(typeof(TerminalTabListResponse))]
     [JsonSerializable(typeof(StartTerminalRequest))]
     [JsonSerializable(typeof(BootstrapCommandResponse))]
     // Claude Plan DTOs

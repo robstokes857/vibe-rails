@@ -10,6 +10,7 @@ public static class RouteExtensions
         CliLaunchRoutes.Map(app, launchDirectory);
         SessionRoutes.Map(app);
         TerminalRoutes.Map(app, launchDirectory);
+        TerminalTabsRoutes.Map(app);
         SandboxRoutes.Map(app, launchDirectory);
         McpRoutes.Map(app);
         AgentRoutes.Map(app);

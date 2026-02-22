@@ -9,7 +9,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | File | Purpose |
 |------|---------|
 | [app.js](app.js) | Central controller, routing, API layer |
-| [js/modules/terminal-controller.js](js/modules/terminal-controller.js) | xterm.js terminal with environment-aware CLI selector |
+| [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
 | [js/modules/environment-controller.js](js/modules/environment-controller.js) | Environment CRUD + "Web UI" launch button |
 | [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Dashboard layout with state passing for preselection |
