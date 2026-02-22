@@ -10,7 +10,7 @@ import { EnvironmentController } from './js/modules/environment-controller.js';
 import { ConfigController } from './js/modules/config-controller.js';
 import { RuleController } from './js/modules/rule-controller.js';
 import { CliLauncher } from './js/modules/cli-launcher.js';
-import { TerminalController } from './js/modules/terminal-controller.js';
+import { TerminalController } from './js/modules/terminal-multitab.js';
 import { SandboxController } from './js/modules/sandbox-controller.js';
 import { SettingsController } from './js/modules/settings-controller.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';

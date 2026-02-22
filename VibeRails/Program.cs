@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.FileProviders;
 using Serilog;
 using VibeRails;
@@ -13,6 +14,7 @@ using VibeRails.Utils;
 
 // Capture launch directory FIRST (where the user ran the command from)
 string launchDirectory = Directory.GetCurrentDirectory();
+var parentPid = TryGetParentPid(args);
 
 // Get the executable's directory (where wwwroot lives)
 string exeDirectory = AppContext.BaseDirectory;
@@ -86,6 +88,9 @@ app.Lifetime.ApplicationStopping.Register(() =>
 {
     try
     {
+        var tabHost = app.Services.GetService<ITerminalTabHostService>();
+        tabHost?.StopAllAsync(CancellationToken.None).GetAwaiter().GetResult();
+
         using var scope = app.Services.CreateScope();
         var terminalService = scope.ServiceProvider.GetRequiredService<ITerminalSessionService>();
 
@@ -166,6 +171,7 @@ if (exit)
 
 // Start server in background (non-blocking)
 await app.StartAsync();
+StartParentProcessWatchdogIfNeeded(app, parentPid);
 string serverUrl = $"http://localhost:{port}";
 
 if (parsedArgs.IsLMBootstrap)
@@ -207,3 +213,86 @@ if (args.Any(a => a is "--open-browser" or "--launch-browser" or "--launch-web" 
 
 // Wait for shutdown signal (Ctrl+C)
 await app.WaitForShutdownAsync(app.Lifetime.ApplicationStopping);
+
+static int? TryGetParentPid(string[] args)
+{
+    for (var i = 0; i < args.Length; i++)
+    {
+        var arg = args[i];
+
+        if (arg.Equals("--parent-pid", StringComparison.OrdinalIgnoreCase))
+        {
+            if (i + 1 < args.Length && int.TryParse(args[i + 1], out var nextPid) && nextPid > 0)
+            {
+                return nextPid;
+            }
+            return null;
+        }
+
+        const string prefix = "--parent-pid=";
+        if (arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var value = arg[prefix.Length..];
+            if (int.TryParse(value, out var inlinePid) && inlinePid > 0)
+            {
+                return inlinePid;
+            }
+            return null;
+        }
+    }
+
+    return null;
+}
+
+static void StartParentProcessWatchdogIfNeeded(WebApplication app, int? parentPid)
+{
+    if (!parentPid.HasValue || parentPid.Value <= 0)
+    {
+        return;
+    }
+
+    var pid = parentPid.Value;
+
+    if (!IsProcessAlive(pid))
+    {
+        Log.Warning("[ParentWatchdog] Parent process {ParentPid} already exited. Stopping.", pid);
+        app.Lifetime.StopApplication();
+        return;
+    }
+
+    _ = Task.Run(async () =>
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(app.Lifetime.ApplicationStopping))
+            {
+                if (IsProcessAlive(pid))
+                {
+                    continue;
+                }
+
+                Log.Warning("[ParentWatchdog] Parent process {ParentPid} exited. Stopping process {ProcessId}.", pid, Environment.ProcessId);
+                app.Lifetime.StopApplication();
+                break;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown path.
+        }
+    });
+}
+
+static bool IsProcessAlive(int pid)
+{
+    try
+    {
+        using var process = Process.GetProcessById(pid);
+        return !process.HasExited;
+    }
+    catch
+    {
+        return false;
+    }
+}

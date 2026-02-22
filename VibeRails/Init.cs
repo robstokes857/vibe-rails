@@ -79,6 +79,7 @@ namespace VibeRails
             serviceCollection.AddScoped<ITerminalIoObserver, TraceObserver>();
             serviceCollection.AddScoped<ITerminalIoObserverService, TerminalIoObserverService>();
             serviceCollection.AddScoped<ITerminalSessionService, TerminalSessionService>();
+            serviceCollection.AddSingleton<ITerminalTabHostService, TerminalTabHostService>();
 
             // Remote State Service (for terminal session remote registration)
             serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>();
