@@ -129,6 +129,17 @@ export class DashboardController {
             if (fileTree) {
                 fileTree.innerHTML = this.app.renderLocalFileTree(fileTree);
             }
+
+            if (localFileTreeSection) {
+                // Bind Add button to create agent wizard
+                this.app.bindAction(localFileTreeSection, '[data-action="create-agent-file"]', () => {
+                    this.app.navigate('agent-create');
+                });
+                // Bind settings cog to navigate to agents list
+                this.app.bindAction(localFileTreeSection, '[data-action="navigate-agents"]', () => {
+                    this.app.navigate('agents');
+                });
+            }
         }
 
         // Environments section — show for both local and global contexts
