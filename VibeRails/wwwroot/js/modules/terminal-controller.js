@@ -1,15 +1,15 @@
+import { VibeTerminal } from './vibe-terminal.js';
+
 // Terminal Controller - Manages embedded xterm.js terminal
 export class TerminalController {
     constructor(app) {
         this.app = app;
+        this.vibeTerminal = null;
         this.terminal = null;
-        this.fitAddon = null;
+        this.onDataDispose = null;
         this.socket = null;
         this.isConnected = false;
         this.resizePrefix = '__resize__:';
-        this.resizeDebounceId = null;
-        this.resizeObserver = null;
-        this.windowResizeHandler = null;
         this.lockLayoutHandler = null;
         this.lockedPanel = null;
         this.lockScrollTop = 0;
@@ -59,11 +59,15 @@ export class TerminalController {
     async connect(terminalElement) {
         // Clean up any stale state from previous navigation
         // (DOM was destroyed but our references weren't cleared)
-        if (this.terminal) {
-            try { this.terminal.dispose(); } catch (e) { /* already disposed */ }
+        if (this.vibeTerminal) {
+            try { this.vibeTerminal.dispose(); } catch (e) { /* already disposed */ }
+            this.vibeTerminal = null;
             this.terminal = null;
         }
-        this.fitAddon = null;
+        if (this.onDataDispose) {
+            try { this.onDataDispose(); } catch (e) { /* no-op */ }
+            this.onDataDispose = null;
+        }
         this.teardownResizeHandling();
         if (this.socket) {
             try { this.socket.close(); } catch (e) { /* already closed */ }
@@ -71,53 +75,23 @@ export class TerminalController {
         }
         this.isConnected = false;
 
-        // Initialize xterm.js with Unicode support
-        this.terminal = new Terminal({
+        this.vibeTerminal = new VibeTerminal({
+            outputEl: terminalElement,
             cols: 120,
             rows: 30,
-            cursorBlink: false,
-            fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
-            fontSize: 14,
-            allowProposedApi: true,
-            unicodeVersion: '11',
             disableStdin: false,
-            cursorStyle: 'block',
-            cursorInactiveStyle: 'none',
-            theme: {
-                background: '#1e1e1e',
-                foreground: '#d4d4d4',
-                cursor: '#d4d4d4',
-                cursorAccent: '#1e1e1e',
-                selection: '#264f78',
-                black: '#1e1e1e',
-                red: '#f44747',
-                green: '#608b4e',
-                yellow: '#dcdcaa',
-                blue: '#569cd6',
-                magenta: '#c586c0',
-                cyan: '#4ec9b0',
-                white: '#d4d4d4',
-                brightBlack: '#808080',
-                brightRed: '#f44747',
-                brightGreen: '#608b4e',
-                brightYellow: '#dcdcaa',
-                brightBlue: '#569cd6',
-                brightMagenta: '#c586c0',
-                brightCyan: '#4ec9b0',
-                brightWhite: '#ffffff'
-            }
+            desktopFontSize: 14,
+            mobileFontSize: 14,
+            desktopLineHeight: 1.12,
+            mobileLineHeight: 1.2
         });
+        this.vibeTerminal.onFitChange = () => this.sendResizeToPty();
+        this.terminal = this.vibeTerminal.terminal;
 
-        if (window.FitAddon?.FitAddon) {
-            this.fitAddon = new window.FitAddon.FitAddon();
-            this.terminal.loadAddon(this.fitAddon);
-        }
-
-        this.terminal.open(terminalElement);
-        this.setupResizeHandling(terminalElement);
+        this.setupResizeHandling();
         this.fitAndSyncTerminal();
         this.scheduleFitPasses();
-        this.terminal.focus();
+        this.vibeTerminal.focus();
 
         // Connect to WebSocket
         const baseUrl = window.__viberails_API_BASE__ || '';
@@ -181,108 +155,69 @@ export class TerminalController {
         };
 
         // Send user input to WebSocket
-        this.terminal.onData((data) => {
+        this.onDataDispose = this.vibeTerminal.onData((data) => {
             if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                 this.socket.send(data);
             }
         });
 
         // Handle clipboard paste events explicitly
-        this.terminal.attachCustomKeyEventHandler((event) => {
-            // Ctrl+V or Cmd+V (paste)
-            if ((event.ctrlKey || event.metaKey) && event.key === 'v' && event.type === 'keydown') {
-                navigator.clipboard.readText().then(text => {
-                    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                        this.socket.send(text);
-                    }
-                }).catch(err => {
-                    console.error('Failed to read clipboard:', err);
-                });
-                return false; // Prevent default handling
+        this.vibeTerminal.attachClipboardPaste((text) => {
+            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                this.socket.send(text);
             }
-            return true; // Allow other keys to be handled normally
         });
     }
 
     writeTerminalData(data) {
-        if (!this.terminal) return;
-
-        if (typeof data === 'string') {
-            this.terminal.write(data);
-        } else {
-            this.terminal.write(new Uint8Array(data));
-        }
-
-        // Keep the terminal pinned to latest output.
-        this.terminal.scrollToBottom();
+        this.vibeTerminal?.write(data);
     }
 
     sendResizeToPty() {
-        if (!this.terminal || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
-        this.socket.send(`${this.resizePrefix}${this.terminal.cols},${this.terminal.rows}`);
+        if (!this.vibeTerminal || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+        this.socket.send(`${this.resizePrefix}${this.vibeTerminal.cols},${this.vibeTerminal.rows}`);
     }
 
     fitAndSyncTerminal() {
-        if (!this.terminal) return;
-        if (this.fitAddon) {
-            this.fitAddon.fit();
-        }
+        if (!this.vibeTerminal) return;
+        this.vibeTerminal.fit({ forceNotify: true });
         this.sendResizeToPty();
     }
 
     scheduleFitPasses() {
-        if (!this.terminal) return;
+        if (!this.vibeTerminal) return;
+        this.vibeTerminal.scheduleFitPasses();
+    }
 
-        requestAnimationFrame(() => {
-            this.fitAndSyncTerminal();
-            setTimeout(() => this.fitAndSyncTerminal(), 120);
+    setupResizeHandling() {
+        if (!this.vibeTerminal) return;
+        this.vibeTerminal.startResizeHandling({
+            debounceMs: 100,
+            includeVisualViewport: true,
+            includeVisualViewportScroll: false
         });
     }
 
-    setupResizeHandling(terminalElement) {
-        const debouncedFit = () => {
-            if (this.resizeDebounceId) clearTimeout(this.resizeDebounceId);
-            this.resizeDebounceId = setTimeout(() => this.fitAndSyncTerminal(), 100);
-        };
-
-        this.windowResizeHandler = debouncedFit;
-        window.addEventListener('resize', this.windowResizeHandler);
-
-        if (typeof ResizeObserver !== 'undefined') {
-            this.resizeObserver = new ResizeObserver(() => debouncedFit());
-            this.resizeObserver.observe(terminalElement);
-        }
-    }
-
     teardownResizeHandling() {
-        if (this.resizeDebounceId) {
-            clearTimeout(this.resizeDebounceId);
-            this.resizeDebounceId = null;
-        }
-
-        if (this.resizeObserver) {
-            try { this.resizeObserver.disconnect(); } catch (e) { /* no-op */ }
-            this.resizeObserver = null;
-        }
-
-        if (this.windowResizeHandler) {
-            window.removeEventListener('resize', this.windowResizeHandler);
-            this.windowResizeHandler = null;
-        }
+        this.vibeTerminal?.stopResizeHandling();
     }
 
     disconnect() {
         this.teardownResizeHandling();
         this.disableLockedLayout(this.lockedPanel);
+        if (this.onDataDispose) {
+            try { this.onDataDispose(); } catch (e) { /* no-op */ }
+            this.onDataDispose = null;
+        }
         if (this.socket) {
             this.socket.close();
             this.socket = null;
         }
-        if (this.terminal) {
-            this.terminal.dispose();
+        if (this.vibeTerminal) {
+            this.vibeTerminal.dispose();
+            this.vibeTerminal = null;
             this.terminal = null;
         }
-        this.fitAddon = null;
         this.isConnected = false;
     }
 

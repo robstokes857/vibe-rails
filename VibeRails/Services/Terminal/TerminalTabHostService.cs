@@ -652,6 +652,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 var result = await source.ReceiveAsync(buffer, cancellationToken);
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
+                    await ForwardCloseFrameAsync(destination, result, cancellationToken);
                     break;
                 }
 
@@ -670,6 +671,61 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         catch (OperationCanceledException) { }
         catch (WebSocketException) { }
         catch (ObjectDisposedException) { }
+    }
+
+    private static async Task ForwardCloseFrameAsync(
+        WebSocket destination,
+        WebSocketReceiveResult closeResult,
+        CancellationToken cancellationToken)
+    {
+        if (destination.State != WebSocketState.Open && destination.State != WebSocketState.CloseReceived)
+        {
+            return;
+        }
+
+        var closeStatus = closeResult.CloseStatus ?? WebSocketCloseStatus.NormalClosure;
+        var closeReason = SanitizeCloseReason(closeResult.CloseStatusDescription, "Peer disconnected");
+
+        try
+        {
+            await destination.CloseAsync(closeStatus, closeReason, cancellationToken);
+        }
+        catch
+        {
+            // Best-effort only.
+        }
+    }
+
+    private static string SanitizeCloseReason(string? reason, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return fallback;
+        }
+
+        var trimmed = reason.Trim();
+        var sb = new StringBuilder(trimmed.Length);
+        foreach (var ch in trimmed)
+        {
+            if (!char.IsControl(ch))
+            {
+                sb.Append(ch);
+            }
+        }
+
+        var sanitized = sb.ToString();
+        if (string.IsNullOrWhiteSpace(sanitized))
+        {
+            return fallback;
+        }
+
+        const int maxReasonLength = 120;
+        if (sanitized.Length > maxReasonLength)
+        {
+            sanitized = sanitized[..maxReasonLength];
+        }
+
+        return sanitized;
     }
 
     private static async Task CloseWebSocketAsync(WebSocket socket, CancellationToken cancellationToken)

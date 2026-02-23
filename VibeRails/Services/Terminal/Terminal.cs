@@ -147,6 +147,35 @@ public sealed class Terminal : IAsyncDisposable
     public byte[] GetReplayBuffer() => _outputBuffer.GetData();
 
     /// <summary>
+    /// Inject synthetic bytes directly into the output stream and replay buffer.
+    /// Use sparingly — this bypasses the PTY and writes directly to all consumers.
+    /// Capped at 4 KB to prevent buffer exhaustion; caller is responsible for content.
+    /// </summary>
+    internal void PublishSynthetic(ReadOnlyMemory<byte> data)
+    {
+        const int maxSyntheticBytes = 4096;
+        if (data.Length > maxSyntheticBytes)
+        {
+            Log.Warning("[Terminal] PublishSynthetic oversized payload ({Bytes} bytes) — truncating", data.Length);
+            data = data[..maxSyntheticBytes];
+        }
+
+        _outputBuffer.Append(data.Span);
+
+        ITerminalConsumer[] snapshot;
+        lock (_subscriberLock)
+        {
+            snapshot = [.. _consumers];
+        }
+
+        foreach (var consumer in snapshot)
+        {
+            try { consumer.OnOutput(data); }
+            catch { }
+        }
+    }
+
+    /// <summary>
     /// Resize the PTY dimensions.
     /// </summary>
     public void Resize(int cols, int rows)

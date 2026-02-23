@@ -92,6 +92,11 @@ public class TerminalRunner
                     // browser. Ctrl+L causes the shell to redraw the entire screen, and
                     // since the browser already got the replay, it would show doubled content.
                 };
+                remoteConn.OnBrowserDisconnected += () =>
+                {
+                    var msg = System.Text.Encoding.UTF8.GetBytes("\r\n\x1b[90m[Remote viewer disconnected]\x1b[0m\r\n");
+                    terminal.PublishSynthetic(msg);
+                };
                 _stateService.TrackRemoteConnection(sessionId, remoteConn);
                 activeRemoteConn = remoteConn;
             }
@@ -245,6 +250,12 @@ public class TerminalRunner
                 {
                     Log.Information("[Terminal] OnReplayRequested fired — disconnecting local viewer");
                     _ = sessionService.DisconnectLocalViewerAsync("Session taken over by remote viewer");
+                };
+                remoteConn.OnBrowserDisconnected += () =>
+                {
+                    Log.Information("[Terminal] Remote browser disconnected — notifying local terminal");
+                    var msg = System.Text.Encoding.UTF8.GetBytes("\r\n\x1b[90m[Remote viewer disconnected]\x1b[0m\r\n");
+                    terminal.PublishSynthetic(msg);
                 };
             }
             else

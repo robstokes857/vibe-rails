@@ -85,6 +85,11 @@ public class TerminalSessionService : ITerminalSessionService
                 {
                     _ = DisconnectLocalViewerAsync("Session taken over by remote viewer");
                 };
+                remoteConn.OnBrowserDisconnected += () =>
+                {
+                    var msg = System.Text.Encoding.UTF8.GetBytes("\r\n\x1b[90m[Remote viewer disconnected]\x1b[0m\r\n");
+                    terminal.PublishSynthetic(msg);
+                };
             }
 
             // Subscribe to terminal exit event
