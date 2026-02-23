@@ -1,3 +1,5 @@
+import { VibeTerminal } from './vibe-terminal.js';
+
 const RESIZE_PREFIX = '__resize__:';
 const DEFAULT_SELECTION = null;
 const ACTIVE_TAB_KEY = 'viberails_terminal_active_tab_id';
@@ -19,34 +21,14 @@ function shorten(text, max = 26) {
     return `${text.slice(0, max - 1)}\u2026`;
 }
 
-function isLikelyMobileViewport() {
-    try {
-        if (window.matchMedia?.('(hover: none) and (pointer: coarse)')?.matches) {
-            return true;
-        }
-
-        if (window.matchMedia?.('(max-width: 900px)')?.matches) {
-            return true;
-        }
-    } catch {
-        // no-op
-    }
-
-    return false;
-}
-
 class TerminalTab {
     constructor(manager, state) {
         this.manager = manager;
         this.state = state;
+        this.vibeTerminal = null;
         this.terminal = null;
-        this.fitAddon = null;
         this.socket = null;
-        this.resizeDebounceId = null;
-        this.resizeObserver = null;
-        this.windowResizeHandler = null;
-        this.visualViewportResizeHandler = null;
-        this.visualViewportScrollHandler = null;
+        this.onDataDispose = null;
         this.inputFocusHandler = null;
         this.isActive = false;
     }
@@ -56,75 +38,36 @@ class TerminalTab {
     }
 
     ensureTerminal() {
-        if (this.terminal || !this.state.ui?.terminalElement) {
+        if (this.vibeTerminal || !this.state.ui?.terminalElement) {
             return;
         }
 
-        const isMobile = isLikelyMobileViewport();
-        this.terminal = new Terminal({
+        this.vibeTerminal = new VibeTerminal({
+            outputEl: this.state.ui.terminalElement,
             cols: 120,
             rows: 40,
-            cursorBlink: false,
-            fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
-            fontSize: isMobile ? 15 : 14,
-            lineHeight: isMobile ? 1.2 : 1.12,
-            allowProposedApi: true,
-            unicodeVersion: '11',
             disableStdin: false,
-            cursorStyle: 'block',
-            cursorInactiveStyle: 'none',
-            theme: {
-                background: '#1e1e1e',
-                foreground: '#d4d4d4',
-                cursor: '#d4d4d4',
-                cursorAccent: '#1e1e1e',
-                selection: '#264f78',
-                black: '#1e1e1e',
-                red: '#f44747',
-                green: '#608b4e',
-                yellow: '#dcdcaa',
-                blue: '#569cd6',
-                magenta: '#c586c0',
-                cyan: '#4ec9b0',
-                white: '#d4d4d4',
-                brightBlack: '#808080',
-                brightRed: '#f44747',
-                brightGreen: '#608b4e',
-                brightYellow: '#dcdcaa',
-                brightBlue: '#569cd6',
-                brightMagenta: '#c586c0',
-                brightCyan: '#4ec9b0',
-                brightWhite: '#ffffff'
-            }
+            desktopFontSize: 14,
+            mobileFontSize: 15,
+            desktopLineHeight: 1.12,
+            mobileLineHeight: 1.2
         });
+        this.vibeTerminal.onFitChange = () => this.sendResizeToPty();
+        this.terminal = this.vibeTerminal.terminal;
 
-        if (window.FitAddon?.FitAddon) {
-            this.fitAddon = new window.FitAddon.FitAddon();
-            this.terminal.loadAddon(this.fitAddon);
-        }
-
-        this.terminal.open(this.state.ui.terminalElement);
         this.configureInputTarget();
         this.installInputFocusHandlers();
 
-        this.terminal.onData((data) => {
+        this.onDataDispose = this.vibeTerminal.onData((data) => {
             if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                 this.socket.send(data);
             }
         });
 
-        this.terminal.attachCustomKeyEventHandler((event) => {
-            if ((event.ctrlKey || event.metaKey) && event.key === 'v' && event.type === 'keydown') {
-                navigator.clipboard.readText().then((text) => {
-                    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                        this.socket.send(text);
-                    }
-                }).catch(() => {
-                    // Clipboard unavailable.
-                });
-                return false;
+        this.vibeTerminal.attachClipboardPaste((text) => {
+            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                this.socket.send(text);
             }
-            return true;
         });
 
         if (this.isActive) {
@@ -135,19 +78,13 @@ class TerminalTab {
     }
 
     writeData(data) {
-        if (!this.terminal) return;
-
-        if (typeof data === 'string') {
-            this.terminal.write(data);
-        } else {
-            this.terminal.write(new Uint8Array(data));
-        }
-
-        this.terminal.scrollToBottom();
+        this.vibeTerminal?.write(data);
     }
 
     getHelperTextarea() {
-        return this.state.ui?.terminalElement?.querySelector('.xterm-helper-textarea') || null;
+        return this.vibeTerminal?.textarea
+            || this.state.ui?.terminalElement?.querySelector('.xterm-helper-textarea')
+            || null;
     }
 
     configureInputTarget() {
@@ -166,11 +103,11 @@ class TerminalTab {
     }
 
     focusInput() {
-        if (!this.terminal) {
+        if (!this.vibeTerminal) {
             return;
         }
 
-        this.terminal.focus();
+        this.vibeTerminal.focus();
         this.configureInputTarget();
 
         const input = this.getHelperTextarea();
@@ -229,15 +166,14 @@ class TerminalTab {
         this.teardownResizeHandling();
         this.disconnectSocketOnly();
 
-        if (disposeTerminal && this.terminal) {
-            try {
-                this.terminal.dispose();
-            } catch (e) {
-                // no-op
-            }
-
+        if (disposeTerminal && this.vibeTerminal) {
+            this.vibeTerminal.dispose();
+            this.vibeTerminal = null;
             this.terminal = null;
-            this.fitAddon = null;
+            if (this.onDataDispose) {
+                try { this.onDataDispose(); } catch (e) { /* no-op */ }
+                this.onDataDispose = null;
+            }
         }
 
         if (!preserveStatus) {
@@ -253,7 +189,7 @@ class TerminalTab {
     setActive(active) {
         this.isActive = active;
 
-        if (!this.terminal) {
+        if (!this.vibeTerminal) {
             return;
         }
 
@@ -269,95 +205,44 @@ class TerminalTab {
     }
 
     sendResizeToPty() {
-        if (!this.isActive || !this.terminal || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
+        if (!this.isActive || !this.vibeTerminal || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
             return;
         }
 
-        this.socket.send(`${RESIZE_PREFIX}${this.terminal.cols},${this.terminal.rows}`);
+        this.socket.send(`${RESIZE_PREFIX}${this.vibeTerminal.cols},${this.vibeTerminal.rows}`);
     }
 
     fitAndSyncTerminal() {
-        if (!this.terminal || !this.isActive) {
+        if (!this.vibeTerminal || !this.isActive) {
             return;
         }
 
-        if (this.fitAddon) {
-            this.fitAddon.fit();
-        }
-
+        this.vibeTerminal.fit({ forceNotify: true });
         this.sendResizeToPty();
     }
 
     scheduleFitPasses() {
-        if (!this.terminal || !this.isActive) {
+        if (!this.vibeTerminal || !this.isActive) {
             return;
         }
 
-        requestAnimationFrame(() => {
-            this.fitAndSyncTerminal();
-            setTimeout(() => this.fitAndSyncTerminal(), 120);
-        });
+        this.vibeTerminal.scheduleFitPasses();
     }
 
     setupResizeHandling() {
-        if (this.windowResizeHandler || !this.state.ui?.terminalElement) {
+        if (!this.vibeTerminal) {
             return;
         }
 
-        const debouncedFit = () => {
-            if (this.resizeDebounceId) {
-                clearTimeout(this.resizeDebounceId);
-            }
-            this.resizeDebounceId = setTimeout(() => this.fitAndSyncTerminal(), 100);
-        };
-
-        this.windowResizeHandler = debouncedFit;
-        window.addEventListener('resize', this.windowResizeHandler);
-
-        if (window.visualViewport) {
-            this.visualViewportResizeHandler = debouncedFit;
-            this.visualViewportScrollHandler = debouncedFit;
-            window.visualViewport.addEventListener('resize', this.visualViewportResizeHandler);
-            window.visualViewport.addEventListener('scroll', this.visualViewportScrollHandler);
-        }
-
-        if (typeof ResizeObserver !== 'undefined') {
-            this.resizeObserver = new ResizeObserver(() => debouncedFit());
-            this.resizeObserver.observe(this.state.ui.terminalElement);
-        }
+        this.vibeTerminal.startResizeHandling({
+            debounceMs: 100,
+            includeVisualViewport: true,
+            includeVisualViewportScroll: true
+        });
     }
 
     teardownResizeHandling() {
-        if (this.resizeDebounceId) {
-            clearTimeout(this.resizeDebounceId);
-            this.resizeDebounceId = null;
-        }
-
-        if (this.resizeObserver) {
-            try {
-                this.resizeObserver.disconnect();
-            } catch (e) {
-                // no-op
-            }
-            this.resizeObserver = null;
-        }
-
-        if (this.windowResizeHandler) {
-            window.removeEventListener('resize', this.windowResizeHandler);
-            this.windowResizeHandler = null;
-        }
-
-        if (window.visualViewport) {
-            if (this.visualViewportResizeHandler) {
-                window.visualViewport.removeEventListener('resize', this.visualViewportResizeHandler);
-                this.visualViewportResizeHandler = null;
-            }
-
-            if (this.visualViewportScrollHandler) {
-                window.visualViewport.removeEventListener('scroll', this.visualViewportScrollHandler);
-                this.visualViewportScrollHandler = null;
-            }
-        }
+        this.vibeTerminal?.stopResizeHandling();
     }
 
     async connect() {

@@ -1374,16 +1374,24 @@ button:hover .card-nav-cog {
 
 /* Tab panels fill their container */
 #terminal-panel .terminal-tab-panels,
-#terminal-panel .terminal-tab-panel,
-#terminal-panel .terminal-element {
+#terminal-panel .terminal-tab-panel {
     width: 100%;
     height: 100%;
     overflow: hidden;
     touch-action: manipulation;
 }
 
-.terminal-element .xterm {
+#terminal-panel .terminal-element {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    touch-action: manipulation;
     padding: 8px;
+    box-sizing: border-box;
+}
+
+.terminal-element .xterm {
+    padding: 0;
 }
 
 .terminal-element .xterm-helper-textarea {
@@ -1589,7 +1597,7 @@ button:hover .card-nav-cog {
         min-height: min(56dvh, 420px);
         height: min(72dvh, 680px) !important;
     }
-    .terminal-element .xterm {
+    #terminal-panel .terminal-element {
         padding: 10px 8px;
     }
     .terminal-focus-view {
