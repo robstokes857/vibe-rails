@@ -14,8 +14,8 @@ public class Settings
     public string Version { get; set; } = "1.0.0";
     public string ApiKey { get; set; } = string.Empty;
     public bool RemoteAccess { get; set; } = false;
-    public string PasswordHash { get; set; } = string.Empty;
-    public string PasswordSalt { get; set; } = string.Empty;
+    public string PinHash { get; set; } = string.Empty;
+    public string PinSalt { get; set; } = string.Empty;
     public HookSettings Hooks { get; set; } = new();
 }
 
