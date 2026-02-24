@@ -1467,7 +1467,7 @@ export class TerminalController {
                         Back
                     </button>
                     <div class="terminal-focus-heading">
-                        <h2 class="mb-1">Web Terminal Focus</h2>
+                        <h2 class="mb-1">Terminals</h2>
                         <p class="text-muted mb-0">Focused terminal workspace with multi-tab controls.</p>
                     </div>
                 </div>

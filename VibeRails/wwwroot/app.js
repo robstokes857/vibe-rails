@@ -127,6 +127,14 @@ export class VibeControlApp {
                 e.preventDefault();
                 this.navigate('settings');
             }
+
+            const goNav = e.target.closest('.app-subnav [data-action="navigate"]');
+            if (goNav) {
+                e.preventDefault();
+                const view = goNav.dataset.view;
+                if (view) this.navigate(view);
+            }
+
         });
     }
 
@@ -232,7 +240,8 @@ export class VibeControlApp {
             'environments': 'Environments',
             'config': 'Configuration',
             'settings': 'Settings',
-            'terminal-focus': 'Terminal Focus'
+            'terminal-focus': 'Terminal Focus',
+            'sandboxes': 'Sandboxes'
         };
         return names[view] || view;
     }
@@ -253,7 +262,8 @@ export class VibeControlApp {
             'config': () => this.configController.loadConfiguration(),
             'sessions': () => this.sessionController.loadSessions(),
             'settings': () => this.settingsController.loadSettings(),
-            'terminal-focus': () => this.terminalController.loadTerminalFocusView(data)
+            'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
+            'sandboxes': () => this.sandboxController.loadSandboxes()
         };
 
         const loadFunc = views[view];

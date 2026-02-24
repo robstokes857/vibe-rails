@@ -172,6 +172,21 @@ export class DashboardController {
                 this.app.cliLauncher.launchCLI(cli);
             }
         });
+        this.app.bindActions(root, '[data-action="launch-web-terminal"]', (element) => {
+            const cli = element.dataset.cli;
+            if (cli) {
+                const terminalContent = document.querySelector('[data-terminal-content]');
+                if (terminalContent) {
+                    this.app.terminalController.startTerminal(terminalContent, `base:${cli}`);
+                }
+            }
+        });
+        this.app.bindActions(root, '[data-action="launch-native-terminal"]', (element) => {
+            const cli = element.dataset.cli;
+            if (cli) {
+                this.app.cliLauncher.launchCLI(cli);
+            }
+        });
         this.app.bindActions(root, '[data-action="navigate"]', (element) => {
             const view = element.dataset.view;
             if (view) {
