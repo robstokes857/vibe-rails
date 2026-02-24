@@ -62,16 +62,10 @@ body.terminal-scroll-locked {
 body.terminal-focus-active .main-container {
     max-width: none;
     padding: 1rem 1.25rem 1.25rem;
-    height: calc(100dvh - 126px);
-    overflow: hidden;
 }
 
 body.terminal-focus-active .app-footer {
     display: none;
-}
-
-body.terminal-focus-active {
-    overflow: hidden;
 }
 
 code {
@@ -81,6 +75,88 @@ code {
     border-radius: 6px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.85em;
+}
+
+/* VS Code launch button */
+.btn-vscode-launch {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1.5rem;
+    background: rgba(0, 122, 204, 0.12);
+    border: 1px solid rgba(0, 122, 204, 0.35);
+    border-radius: 10px;
+    color: #5fb3f0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    height: 100%;
+    min-height: 64px;
+    font-family: inherit;
+}
+
+.btn-vscode-launch:hover {
+    background: rgba(0, 122, 204, 0.22);
+    border-color: rgba(0, 122, 204, 0.7);
+    color: #7ec8f7;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 122, 204, 0.2);
+}
+
+/* App Sub Nav Bar (below main navbar) */
+.app-subnav {
+    display: flex;
+    align-items: center;
+    background: rgba(22, 22, 28, 0.97);
+    border-bottom: 1px solid var(--color-border);
+    backdrop-filter: blur(8px);
+    position: sticky;
+    top: 100px;
+    z-index: 1019;
+    padding: 0 1rem;
+    flex-wrap: wrap;
+}
+
+.app-subnav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.55rem 1rem;
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.app-subnav-link:hover {
+    color: var(--color-text);
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom-color: var(--color-accent);
+}
+
+.app-subnav-link svg {
+    opacity: 0.65;
+    transition: opacity 0.2s ease, transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+    flex-shrink: 0;
+}
+
+.app-subnav-link:hover svg {
+    opacity: 1;
+}
+
+.app-subnav-link:hover .settings-card-cog {
+    transform: rotate(90deg);
 }
 
 /* Navbar - REVERTED to original height and grid layout */
@@ -867,6 +943,64 @@ button:hover .card-nav-cog {
     filter: brightness(0) saturate(100%) invert(78%) sepia(14%) saturate(738%) hue-rotate(127deg) brightness(91%) contrast(88%) drop-shadow(0 6px 12px rgba(2, 6, 23, 0.2));
 }
 
+/* Dashboard Sub-Nav Bar */
+.dashboard-subnav {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    overflow: hidden;
+    flex-wrap: wrap;
+}
+
+.dashboard-subnav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.25rem;
+    color: var(--color-text-muted);
+    text-decoration: none;
+    font-size: 0.82rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border-right: 1px solid var(--color-border);
+    border-bottom: 2px solid transparent;
+    border-top: none;
+    border-left: none;
+    background: none;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.dashboard-subnav-link:last-child {
+    border-right: none;
+}
+
+.dashboard-subnav-link:hover {
+    color: var(--color-text);
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom-color: var(--color-accent);
+}
+
+.dashboard-subnav-link svg {
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+    flex-shrink: 0;
+}
+
+.dashboard-subnav-link:hover svg {
+    opacity: 1;
+}
+
+.dashboard-subnav-link:hover .settings-card-cog {
+    transform: rotate(90deg);
+}
+
 /* Compact Menu Cards */
 .menu-card-compact {
     cursor: pointer;
@@ -1498,12 +1632,9 @@ button:hover .card-nav-cog {
 }
 
 .terminal-focus-view {
-    height: 100%;
-    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 1rem;
-    overflow: hidden;
 }
 
 .terminal-focus-topbar {
@@ -1525,13 +1656,10 @@ button:hover .card-nav-cog {
 
 .terminal-focus-body {
     flex: 1 1 auto;
-    min-height: 0;
-    overflow: hidden;
 }
 
 #terminal-panel.terminal-focus-card {
     margin-bottom: 0;
-    height: 100%;
     display: flex;
     flex-direction: column;
 }
@@ -1544,8 +1672,8 @@ button:hover .card-nav-cog {
 }
 
 #terminal-panel.terminal-focus-card #terminal-container {
-    flex: 1 1 auto;
-    height: auto !important;
+    height: calc(100dvh - 280px) !important;
+    max-height: 800px;
     min-height: 420px;
 }
 
@@ -1594,14 +1722,14 @@ button:hover .card-nav-cog {
         height: min(72dvh, 680px) !important;
     }
     #terminal-panel.terminal-focus-card #terminal-container {
+        height: calc(100dvh - 240px) !important;
+        max-height: 680px;
         min-height: min(56dvh, 420px);
-        height: min(72dvh, 680px) !important;
     }
     #terminal-panel .terminal-element {
         padding: 10px 8px;
     }
     .terminal-focus-view {
-        height: 100%;
         min-height: 0;
     }
 }

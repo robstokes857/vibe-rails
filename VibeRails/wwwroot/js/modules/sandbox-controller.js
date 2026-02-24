@@ -74,7 +74,7 @@ export class SandboxController {
                     this.app.showToast('Sandbox Created',
                         `Sandbox "${name}" created successfully`, 'success');
                     await this.refreshSandboxes();
-                    this.app.dashboardController.loadDashboard();
+                    this._reloadCurrentView();
                 } catch (error) {
                     this.app.showError(`Failed to create sandbox: ${error.message}`);
                     if (submitBtn) {
@@ -84,6 +84,43 @@ export class SandboxController {
                 }
             });
         }
+    }
+
+    _reloadCurrentView() {
+        if (this.app.currentView === 'sandboxes') {
+            this.loadSandboxes();
+        } else {
+            this.app.dashboardController.loadDashboard();
+        }
+    }
+
+    async loadSandboxes() {
+        await this.app.refreshDashboardData();
+
+        const content = document.getElementById('app-content');
+        if (!content) return;
+
+        content.innerHTML = `
+            <div class="view" data-view="sandboxes">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <div>
+                        <h2 class="mb-1">Sandboxes</h2>
+                        <p class="text-muted mb-0">Isolated git repos for multi-LLM parallel processing.</p>
+                    </div>
+                    <button class="btn btn-primary d-inline-flex align-items-center gap-2" type="button" data-action="create-sandbox">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/></svg>
+                        New Sandbox
+                    </button>
+                </div>
+                <div class="list-group project-history-list" data-sandbox-list></div>
+            </div>
+        `;
+
+        const root = content.querySelector('[data-view="sandboxes"]');
+        this.app.bindAction(root, '[data-action="create-sandbox"]', () => this.createSandbox());
+
+        const list = root.querySelector('[data-sandbox-list]');
+        this.app.dashboardController.populateSandboxesList(list);
     }
 
     // Delete a sandbox with confirmation
@@ -113,7 +150,7 @@ export class SandboxController {
                     await this.app.apiCall(`/api/v1/sandboxes/${id}`, 'DELETE');
                     this.app.showToast('Sandbox Deleted', `Sandbox "${name}" deleted`, 'info');
                     await this.refreshSandboxes();
-                    this.app.dashboardController.loadDashboard();
+                    this._reloadCurrentView();
                 } catch (error) {
                     this.app.showError(`Failed to delete sandbox: ${error.message}`);
                 }
