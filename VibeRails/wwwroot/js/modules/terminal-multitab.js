@@ -81,6 +81,14 @@ class TerminalTab {
         this.vibeTerminal?.write(data);
     }
 
+    openSearch() {
+        if (!this.vibeTerminal) {
+            return false;
+        }
+
+        return this.vibeTerminal.openSearchPrompt();
+    }
+
     getHelperTextarea() {
         return this.vibeTerminal?.textarea
             || this.state.ui?.terminalElement?.querySelector('.xterm-helper-textarea')
@@ -379,6 +387,7 @@ class TerminalManager {
         this.windowTitle = null;
 
         this.startBtn = null;
+        this.searchBtn = null;
         this.reconnectBtn = null;
         this.stopBtn = null;
         this.closeDot = null;
@@ -409,6 +418,7 @@ class TerminalManager {
         this.windowTitle = this.container.querySelector('#terminal-window-title');
 
         this.startBtn = this.container.querySelector('#terminal-start-btn');
+        this.searchBtn = this.container.querySelector('#terminal-search-btn');
         this.reconnectBtn = this.container.querySelector('#terminal-reconnect-btn');
         this.stopBtn = this.container.querySelector('#terminal-stop-btn');
         this.closeDot = this.container.querySelector('#terminal-close-dot');
@@ -490,6 +500,10 @@ class TerminalManager {
 
         this.startBtn?.addEventListener('click', () => {
             void this.startActiveTab();
+        });
+
+        this.searchBtn?.addEventListener('click', () => {
+            this.searchActiveTab();
         });
 
         this.reconnectBtn?.addEventListener('click', () => {
@@ -1011,6 +1025,7 @@ class TerminalManager {
 
         if (!active) {
             this.keyboardBtn?.classList.add('d-none');
+            this.searchBtn?.classList.add('d-none');
             this.setBadge('Not Started', 'bg-secondary');
             this.updateActionButtons({ start: true, reconnect: false, stop: false });
             this.showPlaceholder();
@@ -1030,6 +1045,10 @@ class TerminalManager {
 
         if (this.keyboardBtn) {
             this.keyboardBtn.classList.toggle('d-none', !active.state.hasActiveSession);
+        }
+
+        if (this.searchBtn) {
+            this.searchBtn.classList.toggle('d-none', !active.state.hasActiveSession);
         }
 
         if (active.state.hasActiveSession) {
@@ -1113,6 +1132,17 @@ class TerminalManager {
         tab.instance.ensureTerminal();
         tab.instance.focusInput();
         tab.instance.scheduleFitPasses();
+    }
+
+    searchActiveTab() {
+        const tab = this.getActiveTab();
+        if (!tab || !tab.state.hasActiveSession) {
+            return;
+        }
+
+        tab.instance.ensureTerminal();
+        tab.instance.openSearch();
+        tab.instance.focusInput();
     }
 
     getWebSocketUrl(tabId) {
@@ -1520,6 +1550,12 @@ export class TerminalController {
                                 <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1z"/>
                             </svg>
                             <span>Start</span>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary d-none d-inline-flex align-items-center gap-1" id="terminal-search-btn" title="Find in terminal (Ctrl/Cmd+F)">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M11.742 10.344a6.5 6.5 0 1 0-1.398 1.398h-.001l3.85 3.85a1 1 0 0 0 1.414-1.414zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0"/>
+                            </svg>
+                            <span>Find</span>
                         </button>
                         <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1 d-none d-md-none" id="terminal-keyboard-btn" title="Focus terminal input keyboard">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">

@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VibeRails Terminal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=JetBrains+Mono:wght@400;600;700&display=swap">
     <link rel="stylesheet" href="assets/xterm/xterm.css">
     <style>
         :root {
@@ -30,7 +33,7 @@
             height: 100%;
             background: radial-gradient(circle at top, rgba(91, 42, 134, 0.26), transparent 45%), var(--bg-main);
             color: var(--text);
-            font-family: "Consolas", "Cascadia Code", "Segoe UI", monospace;
+            font-family: "Fira Code", "JetBrains Mono", "Cascadia Code", Consolas, "Segoe UI", monospace;
             overflow: hidden;
         }
 
@@ -220,6 +223,7 @@
                 </div>
                 <div class="terminal-title">VibeRails Web Terminal - Popout</div>
                 <div class="head-actions">
+                    <button class="btn" id="search-btn" type="button">Find</button>
                     <button class="btn" id="reconnect-btn" type="button">Reconnect</button>
                     <button class="btn" id="refresh-btn" type="button">Refresh</button>
                     <button class="btn" id="close-btn" type="button">Close</button>
@@ -244,12 +248,20 @@
 
     <script src="assets/xterm/xterm.min.js"></script>
     <script src="assets/xterm/addon-fit.js"></script>
+    <script src="assets/xterm/addon-search.js"></script>
+    <script src="assets/xterm/addon-web-links.js"></script>
+    <script src="assets/xterm/addon-web-fonts.js"></script>
     <script>
         let terminal = null;
         let fitAddon = null;
+        let searchAddon = null;
+        let webLinksAddon = null;
+        let webFontsAddon = null;
         let socket = null;
         let resizeDebounceId = null;
+        let searchTerm = '';
         const resizePrefix = '__resize__:';
+        const terminalFontFamily = '"Fira Code", "JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace';
 
         const query = new URLSearchParams(window.location.search);
         const queryApiBase = query.get('apiBase') || '';
@@ -261,6 +273,7 @@
         const statusBadge = document.getElementById('status-badge');
         const statusText = document.getElementById('status-text');
         const sessionLabel = document.getElementById('session-label');
+        const searchBtn = document.getElementById('search-btn');
         const reconnectBtn = document.getElementById('reconnect-btn');
         const refreshBtn = document.getElementById('refresh-btn');
         const closeBtn = document.getElementById('close-btn');
@@ -364,11 +377,17 @@
         function showEmptyState() {
             emptyState.style.display = 'flex';
             terminalWrap.style.display = 'none';
+            if (searchBtn) {
+                searchBtn.disabled = true;
+            }
         }
 
         function showTerminal() {
             emptyState.style.display = 'none';
             terminalWrap.style.display = 'block';
+            if (searchBtn) {
+                searchBtn.disabled = false;
+            }
         }
 
         function sendResizeToPty() {
@@ -400,6 +419,73 @@
             terminal.scrollToBottom();
         }
 
+        function findNextInTerminal(term = '') {
+            if (!searchAddon) {
+                return false;
+            }
+
+            if (typeof term === 'string' && term.trim().length > 0) {
+                searchTerm = term.trim();
+            }
+
+            if (!searchTerm) {
+                return false;
+            }
+
+            try {
+                return searchAddon.findNext(searchTerm, {
+                    caseSensitive: false,
+                    regex: false,
+                    wholeWord: false
+                });
+            } catch {
+                return false;
+            }
+        }
+
+        function findPreviousInTerminal(term = '') {
+            if (!searchAddon) {
+                return false;
+            }
+
+            if (typeof term === 'string' && term.trim().length > 0) {
+                searchTerm = term.trim();
+            }
+
+            if (!searchTerm) {
+                return false;
+            }
+
+            try {
+                return searchAddon.findPrevious(searchTerm, {
+                    caseSensitive: false,
+                    regex: false,
+                    wholeWord: false
+                });
+            } catch {
+                return false;
+            }
+        }
+
+        function openSearchPrompt() {
+            if (!searchAddon) {
+                return false;
+            }
+
+            const next = window.prompt('Find in terminal (Ctrl/Cmd+G next, Shift+Ctrl/Cmd+G previous):', searchTerm || '');
+            if (next === null) {
+                return false;
+            }
+
+            const normalized = next.trim();
+            if (!normalized) {
+                return false;
+            }
+
+            searchTerm = normalized;
+            return findNextInTerminal(normalized);
+        }
+
         function initTerminal() {
             if (terminal) return;
 
@@ -407,8 +493,9 @@
                 cols: 120,
                 rows: 30,
                 cursorBlink: true,
-                fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
+                fontFamily: terminalFontFamily,
                 fontSize: 14,
+                fontLigatures: true,
                 allowProposedApi: true,
                 unicodeVersion: '11',
                 cursorStyle: 'block',
@@ -442,9 +529,53 @@
                 terminal.loadAddon(fitAddon);
             }
 
+            if (window.SearchAddon?.SearchAddon) {
+                searchAddon = new window.SearchAddon.SearchAddon();
+                terminal.loadAddon(searchAddon);
+            }
+
+            if (window.WebLinksAddon?.WebLinksAddon) {
+                webLinksAddon = new window.WebLinksAddon.WebLinksAddon((event, uri) => {
+                    if (!uri) {
+                        return;
+                    }
+
+                    try {
+                        window.open(uri, '_blank', 'noopener,noreferrer');
+                    } catch {
+                        // no-op
+                    }
+                });
+                terminal.loadAddon(webLinksAddon);
+            }
+
+            if (window.WebFontsAddon?.WebFontsAddon) {
+                webFontsAddon = new window.WebFontsAddon.WebFontsAddon({
+                    onLoaded: () => fitAndSyncTerminal()
+                });
+                terminal.loadAddon(webFontsAddon);
+            }
+
+            import('./assets/xterm/addon-ligatures.js')
+                .then((module) => {
+                    const LigaturesAddon = module?.LigaturesAddon;
+                    if (typeof LigaturesAddon !== 'function' || !terminal) {
+                        return;
+                    }
+
+                    terminal.loadAddon(new LigaturesAddon());
+                    fitAndSyncTerminal();
+                })
+                .catch(() => {
+                    // no-op
+                });
+
             terminal.open(terminalEl);
             fitAndSyncTerminal();
             terminal.focus();
+            if (searchBtn) {
+                searchBtn.disabled = !searchAddon;
+            }
 
             terminal.onData((data) => {
                 if (socket && socket.readyState === WebSocket.OPEN) {
@@ -453,14 +584,43 @@
             });
 
             terminal.attachCustomKeyEventHandler((event) => {
-                if ((event.ctrlKey || event.metaKey) && event.key === 'v' && event.type === 'keydown') {
-                    navigator.clipboard.readText().then(text => {
+                if (event.type !== 'keydown') {
+                    return true;
+                }
+
+                const key = (event.key || '').toLowerCase();
+                const hasModifier = event.ctrlKey || event.metaKey;
+                if (!hasModifier || event.altKey) {
+                    return true;
+                }
+
+                if (key === 'v') {
+                    if (typeof navigator.clipboard?.readText !== 'function') {
+                        return false;
+                    }
+
+                    navigator.clipboard.readText().then((text) => {
                         if (socket && socket.readyState === WebSocket.OPEN) {
                             socket.send(text);
                         }
                     }).catch(() => { });
                     return false;
                 }
+
+                if (key === 'f' && searchAddon) {
+                    openSearchPrompt();
+                    return false;
+                }
+
+                if (key === 'g' && searchAddon) {
+                    if (event.shiftKey) {
+                        findPreviousInTerminal();
+                    } else {
+                        findNextInTerminal();
+                    }
+                    return false;
+                }
+
                 return true;
             });
         }
@@ -566,6 +726,11 @@
             }
 
             connectToActiveSession();
+        });
+
+        searchBtn.addEventListener('click', () => {
+            openSearchPrompt();
+            terminal?.focus();
         });
 
         refreshBtn.addEventListener('click', () => {
