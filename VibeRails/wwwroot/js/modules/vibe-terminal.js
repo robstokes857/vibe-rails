@@ -22,6 +22,9 @@ const DEFAULT_THEME = {
     brightWhite: '#ffffff'
 };
 
+const DEFAULT_TERMINAL_FONT_FAMILY = '"Fira Code", "JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace';
+const LIGATURES_ADDON_MODULE_PATH = '../../assets/xterm/addon-ligatures.js';
+
 function isLikelyMobileViewport() {
     try {
         if (window.matchMedia?.('(hover: none) and (pointer: coarse)')?.matches) {
@@ -47,6 +50,7 @@ export class VibeTerminal {
         outputEl,
         cols = 120,
         rows = 30,
+        fontFamily = DEFAULT_TERMINAL_FONT_FAMILY,
         disableStdin = false,
         desktopFontSize = 14,
         mobileFontSize = 14,
@@ -67,25 +71,29 @@ export class VibeTerminal {
         this._desktopLineHeight = desktopLineHeight;
         this._mobileLineHeight = mobileLineHeight;
         this._scrollOnWrite = scrollOnWrite;
+        this._fontFamily = fontFamily;
 
         this._onFitChange = null;
         this._lastCols = null;
         this._lastRows = null;
+        this._searchTerm = '';
 
         this._resizeDebounceId = null;
         this._resizeObserver = null;
         this._windowResizeHandler = null;
         this._visualViewportResizeHandler = null;
         this._visualViewportScrollHandler = null;
+        this._customKeyEventHandlers = [];
 
         const metrics = this._getResponsiveMetrics();
         this._terminal = new window.Terminal({
             cols,
             rows,
             cursorBlink: false,
-            fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
+            fontFamily: this._fontFamily,
             fontSize: metrics.fontSize,
             lineHeight: metrics.lineHeight,
+            fontLigatures: true,
             allowProposedApi: true,
             unicodeVersion: '11',
             disableStdin,
@@ -95,11 +103,49 @@ export class VibeTerminal {
             theme: DEFAULT_THEME
         });
 
+        this._searchAddon = null;
+        this._webLinksAddon = null;
+        this._ligaturesAddon = null;
+        this._webFontsAddon = null;
+        this._ligaturesLoadPromise = null;
+
+        this._terminal.attachCustomKeyEventHandler((event) => this._runCustomKeyEventHandlers(event));
+
         this._fitAddon = null;
         if (window.FitAddon?.FitAddon) {
             this._fitAddon = new window.FitAddon.FitAddon();
             this._terminal.loadAddon(this._fitAddon);
         }
+
+        if (window.SearchAddon?.SearchAddon) {
+            this._searchAddon = new window.SearchAddon.SearchAddon();
+            this._terminal.loadAddon(this._searchAddon);
+        }
+
+        if (window.WebLinksAddon?.WebLinksAddon) {
+            this._webLinksAddon = new window.WebLinksAddon.WebLinksAddon((event, uri) => {
+                if (!uri) {
+                    return;
+                }
+
+                try {
+                    window.open(uri, '_blank', 'noopener,noreferrer');
+                } catch {
+                    // no-op
+                }
+            });
+            this._terminal.loadAddon(this._webLinksAddon);
+        }
+
+        if (window.WebFontsAddon?.WebFontsAddon) {
+            this._webFontsAddon = new window.WebFontsAddon.WebFontsAddon({
+                onLoaded: () => this.scheduleFitPasses()
+            });
+            this._terminal.loadAddon(this._webFontsAddon);
+        }
+
+        this._bindSearchShortcuts();
+        this._loadLigaturesAddon();
 
         this._terminal.open(this._outputEl);
         this.patchTextarea();
@@ -136,6 +182,82 @@ export class VibeTerminal {
         this._resizeDebounceId = setTimeout(() => this.fit(), delayMs);
     }
 
+    _runCustomKeyEventHandlers(event) {
+        for (const handler of this._customKeyEventHandlers) {
+            try {
+                if (handler(event) === false) {
+                    return false;
+                }
+            } catch {
+                // no-op
+            }
+        }
+
+        return true;
+    }
+
+    _bindSearchShortcuts() {
+        this.addCustomKeyEventHandler((event) => {
+            if (event.type !== 'keydown') {
+                return true;
+            }
+
+            const key = (event.key || '').toLowerCase();
+            const hasModifier = event.ctrlKey || event.metaKey;
+            if (!hasModifier || event.altKey) {
+                return true;
+            }
+
+            if (key === 'f') {
+                if (!this._searchAddon) {
+                    return true;
+                }
+                this.openSearchPrompt();
+                return false;
+            }
+
+            if (key === 'g') {
+                if (!this._searchAddon) {
+                    return true;
+                }
+                if (event.shiftKey) {
+                    this.findPrevious();
+                } else {
+                    this.findNext();
+                }
+
+                return false;
+            }
+
+            return true;
+        });
+    }
+
+    _loadLigaturesAddon() {
+        if (this._ligaturesLoadPromise || !this._terminal) {
+            return;
+        }
+
+        this._ligaturesLoadPromise = import(LIGATURES_ADDON_MODULE_PATH)
+            .then((module) => {
+                if (!this._terminal) {
+                    return;
+                }
+
+                const LigaturesAddon = module?.LigaturesAddon;
+                if (typeof LigaturesAddon !== 'function') {
+                    return;
+                }
+
+                this._ligaturesAddon = new LigaturesAddon();
+                this._terminal.loadAddon(this._ligaturesAddon);
+                this.scheduleFitPasses();
+            })
+            .catch(() => {
+                // no-op
+            });
+    }
+
     get terminal() {
         return this._terminal;
     }
@@ -154,6 +276,17 @@ export class VibeTerminal {
 
     set onFitChange(callback) {
         this._onFitChange = typeof callback === 'function' ? callback : null;
+    }
+
+    addCustomKeyEventHandler(handler) {
+        if (typeof handler !== 'function') {
+            return () => {};
+        }
+
+        this._customKeyEventHandlers.push(handler);
+        return () => {
+            this._customKeyEventHandlers = this._customKeyEventHandlers.filter((item) => item !== handler);
+        };
     }
 
     patchTextarea() {
@@ -188,7 +321,7 @@ export class VibeTerminal {
     attachClipboardPaste(callback) {
         if (!this._terminal) return;
 
-        this._terminal.attachCustomKeyEventHandler((event) => {
+        this.addCustomKeyEventHandler((event) => {
             const isPaste = event.type === 'keydown'
                 && (event.ctrlKey || event.metaKey)
                 && !event.altKey
@@ -214,6 +347,80 @@ export class VibeTerminal {
 
             return false;
         });
+    }
+
+    openSearchPrompt(initialQuery = '') {
+        if (!this._searchAddon) {
+            return false;
+        }
+
+        const seed = typeof initialQuery === 'string' && initialQuery.trim().length > 0
+            ? initialQuery.trim()
+            : this._searchTerm;
+
+        const promptText = 'Find in terminal (Ctrl/Cmd+G next, Shift+Ctrl/Cmd+G previous):';
+        const nextSearchTerm = window.prompt(promptText, seed || '');
+        if (nextSearchTerm === null) {
+            return false;
+        }
+
+        const normalized = nextSearchTerm.trim();
+        if (!normalized) {
+            return false;
+        }
+
+        this._searchTerm = normalized;
+        return this.findNext(normalized, { incremental: false });
+    }
+
+    findNext(term = '', options = {}) {
+        if (!this._searchAddon) {
+            return false;
+        }
+
+        if (typeof term === 'string' && term.trim().length > 0) {
+            this._searchTerm = term.trim();
+        }
+
+        if (!this._searchTerm) {
+            return false;
+        }
+
+        try {
+            return this._searchAddon.findNext(this._searchTerm, {
+                caseSensitive: false,
+                regex: false,
+                wholeWord: false,
+                ...options
+            });
+        } catch {
+            return false;
+        }
+    }
+
+    findPrevious(term = '', options = {}) {
+        if (!this._searchAddon) {
+            return false;
+        }
+
+        if (typeof term === 'string' && term.trim().length > 0) {
+            this._searchTerm = term.trim();
+        }
+
+        if (!this._searchTerm) {
+            return false;
+        }
+
+        try {
+            return this._searchAddon.findPrevious(this._searchTerm, {
+                caseSensitive: false,
+                regex: false,
+                wholeWord: false,
+                ...options
+            });
+        } catch {
+            return false;
+        }
     }
 
     write(data) {
@@ -242,6 +449,7 @@ export class VibeTerminal {
         if (this._terminal) {
             this._terminal.reset();
         }
+        this._searchTerm = '';
     }
 
     setInteractive(active) {
@@ -355,9 +563,17 @@ export class VibeTerminal {
             this._terminal = null;
         }
 
+        this._customKeyEventHandlers = [];
+
         this._fitAddon = null;
+        this._searchAddon = null;
+        this._webLinksAddon = null;
+        this._ligaturesAddon = null;
+        this._webFontsAddon = null;
+        this._ligaturesLoadPromise = null;
         this._onFitChange = null;
         this._lastCols = null;
         this._lastRows = null;
+        this._searchTerm = '';
     }
 }
