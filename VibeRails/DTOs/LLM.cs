@@ -5,6 +5,7 @@ namespace VibeRails.Services
         NotSet,
         Codex,
         Claude,
-        Gemini
+        Gemini,
+        Copilot
     }
 }
