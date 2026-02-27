@@ -552,6 +552,7 @@ export class TerminalController {
                             <option value="claude" selected>Claude</option>
                             <option value="codex">Codex</option>
                             <option value="gemini">Gemini</option>
+                            <option value="copilot">Copilot</option>
                         </select>
                         <button class="btn btn-sm btn-outline-info d-inline-flex align-items-center gap-1" id="terminal-start-btn">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
@@ -623,6 +624,7 @@ export class TerminalController {
             <option value="base:claude">Claude (default)</option>
             <option value="base:codex">Codex (default)</option>
             <option value="base:gemini">Gemini (default)</option>
+            <option value="base:copilot">Copilot (default)</option>
         `;
         cliSelect.appendChild(baseGroup);
 

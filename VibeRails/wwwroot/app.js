@@ -72,6 +72,12 @@ export class VibeControlApp {
             if (editVsCodeCard) {
                 editVsCodeCard.closest('.col-md-4')?.remove();
             }
+
+            // Hide "Launch in VS Code" card from terminals section
+            const launchVsCodeBtn = document.querySelector('[data-action="launch-vscode"]');
+            if (launchVsCodeBtn) {
+                launchVsCodeBtn.closest('.col-6')?.remove();
+            }
         }
     }
 

@@ -57,6 +57,7 @@ namespace VibeRails
             serviceCollection.AddScoped<IClaudeLlmCliEnvironment, ClaudeLlmCliEnvironment>();
             serviceCollection.AddScoped<ICodexLlmCliEnvironment, CodexLlmCliEnvironment>();
             serviceCollection.AddScoped<IGeminiLlmCliEnvironment, GeminiLlmCliEnvironment>();
+            serviceCollection.AddScoped<ICopilotLlmCliEnvironment, CopilotLlmCliEnvironment>();
             serviceCollection.AddScoped<LlmCliEnvironmentService>();
 
             // Sandbox service
@@ -66,6 +67,7 @@ namespace VibeRails
             serviceCollection.AddScoped<IClaudeLlmCliLauncher, ClaudeLlmCliLauncher>();
             serviceCollection.AddScoped<ICodexLlmCliLauncher, CodexLlmCliLauncher>();
             serviceCollection.AddScoped<IGeminiLlmCliLauncher, GeminiLlmCliLauncher>();
+            serviceCollection.AddScoped<ICopilotLlmCliLauncher, CopilotLlmCliLauncher>();
             serviceCollection.AddScoped<ILaunchLLMService, LaunchLLMService>();
 
             // MCP Services
@@ -123,7 +125,7 @@ namespace VibeRails
             return new McpSettings(serverPath);
         }
 
-        public static async Task StartUpChecks(IServiceProvider serviceProvider)
+        public static Task StartUpChecks(IServiceProvider serviceProvider)
         {
             var configuration = serviceProvider.GetRequiredService<IConfiguration>();
 
@@ -146,40 +148,14 @@ namespace VibeRails
             //Launch for global context only
             if (!isLocal.inGet)
             {
-                return;
+                return Task.CompletedTask;
             }
 
             fileService.InitLocal(isLocal.projectRoot);
 
-            // Auto-install pre-commit hook (silent failure)
-            await TryInstallPreCommitHookAsync(scope.ServiceProvider, isLocal.projectRoot);
-        }
-
-        private static async Task TryInstallPreCommitHookAsync(IServiceProvider services, string projectRoot)
-        {
-            var configuration = services.GetRequiredService<IConfiguration>();
-            var installOnStartup = configuration.GetValue<bool>("VibeRails:Hooks:InstallOnStartup");
-
-            if (!installOnStartup)
-            {
-                return;
-            }
-
-            var hookService = services.GetRequiredService<IHookInstallationService>();
-
-            // Only install if not already installed
-            if (!hookService.IsHookInstalled(projectRoot))
-            {
-                var result = await hookService.InstallPreCommitHookAsync(projectRoot, CancellationToken.None);
-                if (result.Success)
-                {
-                    Console.WriteLine("VCA pre-commit hook installed automatically.");
-                }
-                else
-                {
-                    Console.WriteLine($"Note: Could not auto-install pre-commit hook: {result.ErrorMessage}");
-                }
-            }
+            // TODO: Re-enable hook auto-install once Windows security blocking is resolved (upcoming story)
+            // await TryInstallPreCommitHookAsync(scope.ServiceProvider, isLocal.projectRoot);
+            return Task.CompletedTask;
         }
 
         public static void InitAppSettings(IConfiguration configuration)

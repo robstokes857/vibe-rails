@@ -130,6 +130,7 @@ export class EnvironmentController {
                         <option value="codex">Codex</option>
                         <option value="claude">Claude</option>
                         <option value="gemini">Gemini</option>
+                        <option value="copilot">Copilot</option>
                     </select>
                 </div>
                 <div class="mb-3">

@@ -9,6 +9,7 @@ namespace VibeRails.Services.LlmClis
         private readonly IClaudeLlmCliEnvironment _claudeLlmCliEnvironment;
         private readonly ICodexLlmCliEnvironment _codexLlmCliEnvironment;
         private readonly IGeminiLlmCliEnvironment _geminiLlmCliEnvironment;
+        private readonly ICopilotLlmCliEnvironment _copilotLlmCliEnvironment;
         private readonly IDbService _dbService;
         private readonly IFileService _fileService;
 
@@ -16,12 +17,14 @@ namespace VibeRails.Services.LlmClis
             IClaudeLlmCliEnvironment claudeLlmCliEnvironment,
             ICodexLlmCliEnvironment codexLlmCliEnvironment,
             IGeminiLlmCliEnvironment geminiLlmCliEnvironment,
+            ICopilotLlmCliEnvironment copilotLlmCliEnvironment,
             IDbService dbService,
             IFileService fileService)
         {
             _claudeLlmCliEnvironment = claudeLlmCliEnvironment;
             _codexLlmCliEnvironment = codexLlmCliEnvironment;
             _geminiLlmCliEnvironment = geminiLlmCliEnvironment;
+            _copilotLlmCliEnvironment = copilotLlmCliEnvironment;
             _dbService = dbService;
             _fileService = fileService;
         }
@@ -43,6 +46,9 @@ namespace VibeRails.Services.LlmClis
                     break;
                 case LLM.Gemini:
                     await _geminiLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
+                    break;
+                case LLM.Copilot:
+                    await _copilotLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
                     break;
                 default:
                     throw new ArgumentException("Unsupported LLM type");
@@ -72,6 +78,7 @@ namespace VibeRails.Services.LlmClis
                     ["XDG_CACHE_HOME"] = Path.Combine(envPath, "gemini", "cache"),
                     ["XDG_STATE_HOME"] = Path.Combine(envPath, "gemini", "state")
                 },
+                LLM.Copilot => new Dictionary<string, string>(),
                 _ => new Dictionary<string, string>()
             };
         }
