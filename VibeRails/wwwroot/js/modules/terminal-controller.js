@@ -525,82 +525,74 @@ export class TerminalController {
         const isFocusView = options.focusView === true;
         const lockButtonHtml = isFocusView ? '' : `
                             <button type="button" class="terminal-control-btn icon-btn" id="terminal-lock-btn" title="Lock terminal in sticky focus mode" aria-label="Lock terminal focus mode">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                                     <path d="M8 1a3 3 0 0 0-3 3v2H4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1V4a3 3 0 0 0-3-3m2 5H6V4a2 2 0 1 1 4 0z"/>
                                 </svg>
-                                <span class="terminal-control-text">Lock Focus</span>
+                                <span class="terminal-control-text">Lock</span>
                             </button>
         `;
 
         return `
-            <div class="card ${isFocusView ? 'terminal-page-mode terminal-expanded terminal-focus-card' : 'mb-4'}" id="terminal-panel">
-                <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
-                    <div class="terminal-header-main">
-                        <div class="d-flex align-items-center gap-2 flex-wrap">
-                            <span class="card-title d-inline-flex align-items-center gap-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 576 512" style="opacity: 0.85;">
-                                    <path d="M9.4 86.6C-3.1 74.1-3.1 53.9 9.4 41.4s32.8-12.5 45.3 0l192 192c12.5 12.5 12.5 32.8 0 45.3l-192 192c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L178.7 256 9.4 86.6zM256 416l288 0c17.7 0 32 14.3 32 32s-14.3 32-32 32l-288 0c-17.7 0-32-14.3-32-32s14.3-32 32-32z"/>
-                                </svg>
-                                Web Terminal
-                            </span>
-                            <span class="badge bg-secondary" id="terminal-status-badge">Not Started</span>
-                        </div>
-                        <p class="text-muted small mb-0 mt-1">Launch a web-based terminal session for interacting with your selected CLI. Terminals run safely in the background even if you navigate away.</p>
+            <div class="card ${isFocusView ? 'terminal-page-mode terminal-expanded terminal-focus-card' : 'mb-4'} border-0 shadow-none bg-transparent" id="terminal-panel">
+                <div class="card-header border-0 ps-0 pe-0 d-flex justify-content-between align-items-center gap-3 flex-wrap">
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="text-uppercase fw-bold small text-muted" style="letter-spacing: 0.1em;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 576 512" class="me-2" style="vertical-align: text-bottom;">
+                                <path d="M9.4 86.6C-3.1 74.1-3.1 53.9 9.4 41.4s32.8-12.5 45.3 0l192 192c12.5 12.5 12.5 32.8 0 45.3l-192 192c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L178.7 256 9.4 86.6zM256 416l288 0c17.7 0 32 14.3 32 32s-14.3 32-32 32l-288 0c-17.7 0-32-14.3-32-32s14.3-32 32-32z"/>
+                            </svg>
+                            Terminals
+                        </span>
+                        <span class="badge bg-dark border border-secondary border-opacity-25 text-muted small fw-normal" id="terminal-status-badge">Not Started</span>
                     </div>
-                    <div class="d-flex gap-2 align-items-center flex-wrap justify-content-end" id="terminal-actions">
-                        <select class="form-select form-select-sm" id="terminal-cli-select" style="width: auto;">
+                    <div class="d-flex gap-2 align-items-center" id="terminal-actions">
+                        <select class="form-select form-select-sm bg-dark border-secondary border-opacity-25 text-white" id="terminal-cli-select" style="width: auto; min-width: 120px;">
                             <option value="claude" selected>Claude</option>
-                            <option value="codex">Codex</option>
-                            <option value="gemini">Gemini</option>
-                            <option value="copilot">Copilot</option>
                         </select>
-                        <button class="btn btn-sm btn-outline-info d-inline-flex align-items-center gap-1" id="terminal-start-btn">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                        <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-2" id="terminal-start-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814z"/>
-                                <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1z"/>
                             </svg>
                             <span>Start</span>
                         </button>
-                        <button class="btn btn-sm btn-outline-light d-none d-inline-flex align-items-center gap-1" id="terminal-reconnect-btn" title="Reconnect to active session">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
-                                <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
-                            </svg>
+                        <button class="btn btn-sm btn-outline-info d-none d-inline-flex align-items-center gap-2" id="terminal-reconnect-btn">
                             <span>Reconnect</span>
                         </button>
-                        <button class="btn btn-sm btn-outline-warning d-none d-inline-flex align-items-center gap-1" id="terminal-stop-btn">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                        <button class="btn btn-sm btn-outline-danger d-none d-inline-flex align-items-center gap-2" id="terminal-stop-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M5 3.5h6A1.5 1.5 0 0 1 12.5 5v6a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 11V5A1.5 1.5 0 0 1 5 3.5"/>
                             </svg>
                             <span>Stop</span>
                         </button>
                     </div>
                 </div>
-                <div class="terminal-window-shell">
-                    <div class="terminal-window-header">
-                        <div class="terminal-window-controls terminal-window-controls-left">
-                            <button type="button" class="terminal-control-dot close" id="terminal-close-dot" title="Close terminal" aria-label="Close terminal"></button>
-                            <button type="button" class="terminal-control-dot minimize" id="terminal-minimize-dot" title="Minimize terminal" aria-label="Minimize terminal"></button>
-                            <button type="button" class="terminal-control-dot maximize" id="terminal-maximize-dot" title="Expand terminal" aria-label="Expand terminal"></button>
+                <div class="terminal-window-shell border border-secondary border-opacity-10 rounded shadow-lg overflow-hidden">
+                    <div class="terminal-window-header px-3" style="height: 38px; background: var(--terminal-header-bg);">
+                        <div class="terminal-window-controls terminal-window-controls-left gap-2">
+                            <button type="button" class="terminal-control-dot close" id="terminal-close-dot" title="Close" style="width: 10px; height: 10px;"></button>
+                            <button type="button" class="terminal-control-dot minimize" id="terminal-minimize-dot" title="Minimize" style="width: 10px; height: 10px;"></button>
+                            <button type="button" class="terminal-control-dot maximize" id="terminal-maximize-dot" title="Expand" style="width: 10px; height: 10px;"></button>
                         </div>
-                        <div class="terminal-window-title" id="terminal-window-title">${isFocusView ? 'Web Terminal Focus View' : 'Web Terminal'}</div>
-                        <div class="terminal-window-controls terminal-window-controls-right">
+                        <div class="terminal-window-title flex-grow-1 text-center small opacity-50 font-monospace" id="terminal-window-title" style="font-size: 0.7rem; letter-spacing: 0.05em;">${isFocusView ? 'WEB TERMINAL FOCUS VIEW' : 'WEB TERMINAL'}</div>
+                        <div class="terminal-window-controls terminal-window-controls-right gap-2">
                             ${lockButtonHtml}
-                            <button type="button" class="terminal-control-btn icon-btn" id="terminal-popout-btn" title="${isFocusView ? 'Return to dashboard terminal section' : 'Open terminal in focused page view'}" aria-label="${isFocusView ? 'Back to dashboard terminal view' : 'Open terminal focus page'}">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
-                                    <path d="M6 3a2 2 0 0 0-2 2v7a1 1 0 0 0 1 1h7a2 2 0 0 0 2-2V6h-1v5a1 1 0 0 1-1 1H5V5a1 1 0 0 1 1-1z"/>
-                                    <path d="M8.5 1a.5.5 0 0 0 0 1h4.793L6.146 9.146a.5.5 0 1 0 .708.708L14 2.707V7.5a.5.5 0 0 0 1 0V1z"/>
+                            <button type="button" class="terminal-control-btn icon-btn" id="terminal-popout-btn" title="Toggle Focus">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M6 3a2 2 0 0 0-2 2v7a1 1 0 0 0 1 1h7a2 2 0 0 0 2-2V6h-1v5a1 1 0 0 1-1 1H5V5a1 1 0 0 1 1-1zM8.5 1a.5.5 0 0 0 0 1h4.793L6.146 9.146a.5.5 0 1 0 .708.708L14 2.707V7.5a.5.5 0 0 0 1 0V1z"/>
                                 </svg>
-                                <span class="terminal-control-text">${isFocusView ? 'Back to Dashboard' : 'Focus View'}</span>
+                                <span class="terminal-control-text">${isFocusView ? 'Back' : 'Focus'}</span>
                             </button>
                         </div>
                     </div>
-                    <div class="card-body p-0" id="terminal-container" style="display: none; height: 520px; overflow: hidden;">
+                    <div class="card-body p-0" id="terminal-container" style="display: none; height: 520px; background: var(--terminal-body-bg);">
                         <div id="terminal-element" style="width: 100%; height: 100%;"></div>
                     </div>
-                    <div class="card-body text-center text-muted" id="terminal-placeholder">
-                        <p class="mb-3">Launch an embedded terminal session.</p>
-                        <p class="small">Select a CLI and click "Start" to begin.</p>
+                    <div class="card-body text-center p-5" id="terminal-placeholder" style="background: var(--terminal-body-bg);">
+                        <div class="mb-3 opacity-25">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 576 512">
+                                <path d="M9.4 86.6C-3.1 74.1-3.1 53.9 9.4 41.4s32.8-12.5 45.3 0l192 192c12.5 12.5 12.5 32.8 0 45.3l-192 192c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L178.7 256 9.4 86.6zM256 416l288 0c17.7 0 32 14.3 32 32s-14.3 32-32 32l-288 0c-17.7 0-32-14.3-32-32s14.3-32 32-32z"/>
+                            </svg>
+                        </div>
+                        <p class="text-muted small mb-0">Select an environment and click Start to begin a new terminal session.</p>
                     </div>
                 </div>
             </div>

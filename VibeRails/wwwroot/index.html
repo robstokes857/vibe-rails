@@ -23,7 +23,6 @@
                 <span class="brand-text">Vibe Rails</span>
             </a>
             <div class="d-flex align-items-center gap-3 nav-actions">
-                <div class="breadcrumb-container" id="breadcrumb"></div>
                 <button class="nav-settings-btn" type="button" data-action="navigate-settings" title="Settings">
                     <svg class="nav-settings-cog" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                 </button>
@@ -39,27 +38,25 @@
     <!-- Sub Nav Bar -->
     <nav class="app-subnav">
         <button class="app-subnav-link" data-action="navigate-home" title="Dashboard">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="me-1 icon-light" viewBox="0 0 16 16">
+                <path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4.5a.5.5 0 0 0 .5-.5v-4h2v4a.5.5 0 0 0 .5.5H14a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L13 5.793V2.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.293L8.354 1.146ZM2.5 14V7.707l5.5-5.5 5.5 5.5V14H10v-4a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5v4H2.5Z"/>
+            </svg>
             Home
         </button>
-        <button class="app-subnav-link" data-action="navigate" data-view="environments" title="Manage custom LLM environments">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/></svg>
-            Environments
-        </button>
-        <button class="app-subnav-link" data-action="navigate" data-view="agents" title="Manage agent files and rules">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            Rules & Agents
-        </button>
-        <button class="app-subnav-link" data-action="navigate" data-view="terminal-focus" title="Open terminal workspace">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        <button class="app-subnav-link" data-action="navigate" data-view="terminal-focus" title="Full-screen Terminal Workspace">
+            <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="me-1 icon-light" style="width: 14px; height: 14px;">
             Terminals
         </button>
-        <button class="app-subnav-link" data-action="navigate" data-view="sandboxes" title="Manage parallel AI sandboxes">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-            Sandboxes
+        <button class="app-subnav-link" data-action="navigate" data-view="environments" title="Manage Custom Environments & Sandboxes">
+            <img src="assets/img/icons/layer-group-solid-full.svg" alt="" class="me-1 icon-light" style="width: 14px; height: 14px;">
+            ENVS & Sandboxes
         </button>
-        <button class="app-subnav-link" data-action="navigate-settings" title="Application settings and remote access">
-            <svg class="settings-card-cog" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        <button class="app-subnav-link" data-action="navigate" data-view="agents" title="Manage Agent Files and Rules">
+            <img src="assets/img/icons/agent.svg" alt="" class="me-1 icon-light" style="width: 14px; height: 14px;">
+            Rules & Agents
+        </button>
+        <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
+            <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="me-1 icon-light settings-card-cog" style="width: 14px; height: 14px;">
             Settings
         </button>
     </nav>
@@ -83,296 +80,163 @@
     <!-- Templates -->
     <template id="dashboard-template">
         <div class="dashboard" data-dashboard="unified">
-            <div class="row mb-4 animate-fade-up delay-200">
+            <!-- Project Header -->
+            <div class="row mb-4 animate-fade-up delay-100">
                 <div class="col-12" data-context-heading-container></div>
             </div>
 
-            <div class="row mb-4 animate-fade-up delay-400" data-local-quick-actions style="display: none;">
-                <div class="col-12">
-                    <!-- Launch Terminals (Compact Layout) -->
-                    <div class="card mb-4">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <div>
-                                <span class="card-title text-uppercase fw-bold" style="letter-spacing: 0.1em;">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16" class="text-accent me-2" style="vertical-align: text-bottom;">
-                                        <path d="M10.478 1.647a.5.5 0 1 0-.956-.294l-4 13a.5.5 0 0 0 .956.294zM4.854 4.146a.5.5 0 0 1 0 .708L1.707 8l3.147 3.146a.5.5 0 0 1-.708.708l-3.5-3.5a.5.5 0 0 1 0-.708l3.5-3.5a.5.5 0 0 1 .708 0m6.292 0a.5.5 0 0 0 0 .708L14.293 8l-3.147 3.146a.5.5 0 0 0 .708.708l3.5-3.5a.5.5 0 0 0 0-.708l-3.5-3.5a.5.5 0 0 0-.708 0"/>
-                                    </svg>
-                                    Launch Terminals
-                                </span>
-                                <p class="text-muted small mb-0 mt-1">Quickly open your project in preferred editors and AI environments</p>
-                            </div>
+            <div class="row g-4">
+                <!-- Left Column: Primary Workbench -->
+                <div class="col-lg-8 animate-fade-up delay-200">
+                    <!-- Terminal Workspace (Primary) -->
+                    <div class="card mb-4 border-0 bg-transparent shadow-none" data-terminal-section>
+                        <div class="card-header border-0 ps-0 pb-2 d-flex justify-content-between align-items-center">
+                            <span class="text-uppercase fw-bold small text-muted" style="letter-spacing: 0.1em;">
+                                <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="me-2 icon-light" style="width: 16px; height: 16px; vertical-align: text-bottom;">
+                                Terminal Workbench
+                            </span>
+                        </div>
+                        <div class="card-body p-0" data-terminal-content>
+                            <!-- Terminal panel rendered here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Tools & Context -->
+                <div class="col-lg-4 animate-fade-up delay-300">
+                    <!-- Quick Launch -->
+                    <div class="card mb-4 border-0 bg-transparent shadow-none" data-local-quick-actions style="display: none;">
+                        <div class="card-header border-0 ps-0 pb-2">
+                            <span class="text-uppercase fw-bold small text-muted" style="letter-spacing: 0.1em;">
+                                <img src="assets/img/icons/arrow-up-right-from-square-solid-full.svg" alt="" class="me-2 icon-light" style="width: 14px; height: 14px; vertical-align: text-bottom;">
+                                Quick Launch
+                            </span>
                         </div>
                         <div class="card-body p-0">
-                            <div class="list-group list-group-flush rounded-bottom">
-                                <!-- VS Code -->
-                                <div class="list-group-item project-item p-3 border-bottom border-secondary border-opacity-25 bg-transparent">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="project-logo-wrapper d-flex align-items-center justify-content-center bg-secondary bg-opacity-10 rounded p-2">
-                                            <img src="assets/img/vscode.svg" alt="VS Code" style="height: 24px; width: 24px;">
-                                        </div>
-                                        <div class="flex-grow-1 min-w-0">
-                                            <h5 class="mb-0 text-white" style="font-size: 1rem;">Visual Studio Code</h5>
-                                            <small class="text-muted">Launch standard editor</small>
-                                        </div>
-                                        <div class="project-actions ms-3">
-                                            <button class="btn btn-sm btn-outline-primary px-3 d-flex align-items-center gap-2" type="button" data-action="launch-vscode" title="Open in VS Code" data-cli-card>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
-                                                    <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
-                                                </svg>
-                                                <span>Launch IDE</span>
-                                            </button>
-                                        </div>
-                                    </div>
+                            <!-- VS Code (Special case) -->
+                            <div class="assistant-launch-row d-flex align-items-center gap-3">
+                                <img src="assets/img/vscode.svg" alt="VS Code" class="assistant-logo-lg">
+                                <div class="flex-grow-1">
+                                    <h6 class="mb-0 text-white x-small fw-bold">VS Code</h6>
+                                    <small class="text-muted xx-small">Standard Editor</small>
                                 </div>
+                                <button class="btn btn-sm btn-outline-primary px-3 py-1" type="button" data-action="launch-vscode" title="Launch VS Code">
+                                    <span class="x-small fw-bold">Open IDE</span>
+                                </button>
+                            </div>
 
-                                <!-- Claude -->
-                                <div class="list-group-item project-item p-3 border-bottom border-secondary border-opacity-25 bg-transparent" data-cli-card data-cli="claude">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="project-logo-wrapper d-flex align-items-center justify-content-center bg-secondary bg-opacity-10 rounded p-2">
-                                            <img src="assets/img/claude-color.svg" alt="Claude" style="height: 24px; width: 24px;">
-                                        </div>
-                                        <div class="flex-grow-1 min-w-0">
-                                            <h5 class="mb-0 text-white" style="font-size: 1rem;">Claude</h5>
-                                            <small class="text-muted">Anthropic's Claude Assistant</small>
-                                        </div>
-                                        <div class="project-actions ms-3 d-flex gap-2">
-                                            <button class="btn btn-sm btn-outline-secondary px-3 d-flex align-items-center gap-2" type="button" data-action="launch-native-terminal" data-cli="claude" title="Launch Native CLI">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
-                                                    <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
-                                                </svg>
-                                                <span>Native CLI</span>
-                                            </button>
-                                            <button class="btn btn-sm btn-outline-success px-3 d-flex align-items-center gap-2" type="button" data-action="launch-web-terminal" data-cli="claude" title="Launch Web Terminal">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/>
-                                                    <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"/>
-                                                </svg>
-                                                <span>Web UI</span>
-                                            </button>
-                                        </div>
-                                    </div>
+                            <!-- Claude -->
+                            <div class="assistant-launch-row d-flex align-items-center gap-3">
+                                <img src="assets/img/claude-color.svg" alt="Claude" class="assistant-logo-lg">
+                                <div class="flex-grow-1">
+                                    <h6 class="mb-0 text-white x-small fw-bold">Claude</h6>
+                                    <small class="text-muted xx-small">Anthropic Assistant</small>
                                 </div>
-                                
-                                <!-- Gemini -->
-                                <div class="list-group-item project-item p-3 border-bottom border-secondary border-opacity-25 bg-transparent" data-cli-card data-cli="gemini">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="project-logo-wrapper d-flex align-items-center justify-content-center bg-secondary bg-opacity-10 rounded p-2">
-                                            <img src="assets/img/gemini-color.svg" alt="Gemini" style="height: 24px; width: 24px;">
-                                        </div>
-                                        <div class="flex-grow-1 min-w-0">
-                                            <h5 class="mb-0 text-white" style="font-size: 1rem;">Gemini</h5>
-                                            <small class="text-muted">Google's Gemini Assistant</small>
-                                        </div>
-                                        <div class="project-actions ms-3 d-flex gap-2">
-                                            <button class="btn btn-sm btn-outline-secondary px-3 d-flex align-items-center gap-2" type="button" data-action="launch-native-terminal" data-cli="gemini" title="Launch Native CLI">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
-                                                    <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
-                                                </svg>
-                                                <span>Native CLI</span>
-                                            </button>
-                                            <button class="btn btn-sm btn-outline-success px-3 d-flex align-items-center gap-2" type="button" data-action="launch-web-terminal" data-cli="gemini" title="Launch Web Terminal">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/>
-                                                    <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"/>
-                                                </svg>
-                                                <span>Web UI</span>
-                                            </button>
-                                        </div>
-                                    </div>
+                                <div class="d-flex gap-1">
+                                    <button class="btn btn-xs btn-outline-secondary px-2 py-1" type="button" data-action="launch-native-terminal" data-cli="claude" title="Launch Claude CLI">
+                                        <span class="x-small">CLI</span>
+                                    </button>
+                                    <button class="btn btn-xs btn-outline-success px-2 py-1" type="button" data-action="launch-web-terminal" data-cli="claude" title="Launch Claude Web">
+                                        <span class="x-small">WEB</span>
+                                    </button>
                                 </div>
+                            </div>
 
-                                <!-- Codex -->
-                                <div class="list-group-item project-item p-3 border-bottom border-secondary border-opacity-25 bg-transparent" data-cli-card data-cli="codex">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="project-logo-wrapper d-flex align-items-center justify-content-center bg-secondary bg-opacity-10 rounded p-2">
-                                            <img src="assets/img/openai.svg" alt="Codex" style="height: 24px; width: 24px;">
-                                        </div>
-                                        <div class="flex-grow-1 min-w-0">
-                                            <h5 class="mb-0 text-white" style="font-size: 1rem;">Codex</h5>
-                                            <small class="text-muted">OpenAI's Assistant</small>
-                                        </div>
-                                        <div class="project-actions ms-3 d-flex gap-2">
-                                            <button class="btn btn-sm btn-outline-secondary px-3 d-flex align-items-center gap-2" type="button" data-action="launch-native-terminal" data-cli="codex" title="Launch Native CLI">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
-                                                    <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
-                                                </svg>
-                                                <span>Native CLI</span>
-                                            </button>
-                                            <button class="btn btn-sm btn-outline-success px-3 d-flex align-items-center gap-2" type="button" data-action="launch-web-terminal" data-cli="codex" title="Launch Web Terminal">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/>
-                                                    <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"/>
-                                                </svg>
-                                                <span>Web UI</span>
-                                            </button>
-                                        </div>
-                                    </div>
+                            <!-- Gemini -->
+                            <div class="assistant-launch-row d-flex align-items-center gap-3">
+                                <img src="assets/img/gemini-color.svg" alt="Gemini" class="assistant-logo-lg">
+                                <div class="flex-grow-1">
+                                    <h6 class="mb-0 text-white x-small fw-bold">Gemini</h6>
+                                    <small class="text-muted xx-small">Google Assistant</small>
                                 </div>
+                                <div class="d-flex gap-1">
+                                    <button class="btn btn-xs btn-outline-secondary px-2 py-1" type="button" data-action="launch-native-terminal" data-cli="gemini" title="Launch Gemini CLI">
+                                        <span class="x-small">CLI</span>
+                                    </button>
+                                    <button class="btn btn-xs btn-outline-success px-2 py-1" type="button" data-action="launch-web-terminal" data-cli="gemini" title="Launch Gemini Web">
+                                        <span class="x-small">WEB</span>
+                                    </button>
+                                </div>
+                            </div>
 
-                                <!-- Copilot -->
-                                <div class="list-group-item project-item p-3 border-0 bg-transparent" data-cli-card data-cli="copilot">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="project-logo-wrapper d-flex align-items-center justify-content-center bg-secondary bg-opacity-10 rounded p-2">
-                                            <img src="assets/img/copilot.svg" alt="Copilot" style="height: 24px; width: 24px;">
-                                        </div>
-                                        <div class="flex-grow-1 min-w-0">
-                                            <h5 class="mb-0 text-white" style="font-size: 1rem;">Copilot</h5>
-                                            <small class="text-muted">GitHub's Copilot Assistant</small>
-                                        </div>
-                                        <div class="project-actions ms-3 d-flex gap-2">
-                                            <button class="btn btn-sm btn-outline-secondary px-3 d-flex align-items-center gap-2" type="button" data-action="launch-native-terminal" data-cli="copilot" title="Launch Native CLI">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
-                                                    <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
-                                                </svg>
-                                                <span>Native CLI</span>
-                                            </button>
-                                            <button class="btn btn-sm btn-outline-success px-3 d-flex align-items-center gap-2" type="button" data-action="launch-web-terminal" data-cli="copilot" title="Launch Web Terminal">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/>
-                                                    <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"/>
-                                                </svg>
-                                                <span>Web UI</span>
-                                            </button>
-                                        </div>
-                                    </div>
+                            <!-- Codex (OpenAI) -->
+                            <div class="assistant-launch-row d-flex align-items-center gap-3">
+                                <img src="assets/img/openai.svg" alt="Codex" class="assistant-logo-lg icon-light">
+                                <div class="flex-grow-1">
+                                    <h6 class="mb-0 text-white x-small fw-bold">Codex</h6>
+                                    <small class="text-muted xx-small">OpenAI Assistant</small>
+                                </div>
+                                <div class="d-flex gap-1">
+                                    <button class="btn btn-xs btn-outline-secondary px-2 py-1" type="button" data-action="launch-native-terminal" data-cli="codex" title="Launch Codex CLI">
+                                        <span class="x-small">CLI</span>
+                                    </button>
+                                    <button class="btn btn-xs btn-outline-success px-2 py-1" type="button" data-action="launch-web-terminal" data-cli="codex" title="Launch Codex Web">
+                                        <span class="x-small">WEB</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Custom Environments List -->
+                            <div class="card border-secondary border-opacity-10 bg-dark bg-opacity-25 mb-4" data-local-history-section style="display: none;">
+                                <div class="card-header border-0 bg-transparent py-2 d-flex justify-content-between align-items-center">
+                                    <span class="x-small text-muted text-uppercase fw-bold">
+                                        <img src="assets/img/icons/layer-group-solid-full.svg" alt="" class="me-1 icon-light" style="width: 12px; height: 12px; vertical-align: middle;">
+                                        Custom Environments
+                                    </span>
+                                    <button class="btn btn-xs btn-outline-primary d-flex align-items-center gap-1 py-0 px-2" style="height: 20px; font-size: 0.65rem;" type="button" data-action="create-environment-quick" title="Add Environment">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/></svg>
+                                        <span>Add</span>
+                                    </button>
+                                </div>
+                                <div class="card-body p-0">
+                                    <div class="list-group list-group-flush project-history-list compact" data-local-project-history></div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                </div>
-            </div>
-            <div class="row mb-4 animate-fade-up delay-600" data-terminal-section style="display: none;">
-                <div class="col-12" data-terminal-content>
-                    <!-- Terminal panel will be rendered here by TerminalController -->
-                </div>
-            </div>
-
-            <div class="row mb-4 animate-fade-up delay-650" data-sandbox-section style="display: none;">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <div>
-                                <span class="card-title text-uppercase fw-bold" style="letter-spacing: 0.1em;"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent me-2" style="vertical-align: text-bottom;"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>SANDBOXES</span>
-                                <p class="text-muted small mb-0 mt-1">Isolated git repo and files For Multi LLM Parallel Processing</p>
-                            </div>
-                            <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button"
-                                    data-action="create-sandbox"
-                                    title="Create a new sandbox from the current branch">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                        <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
-                                    </svg>
-                                    Add
-                                </button>
-                            </div>
+                    <!-- Custom Sandboxes (Sidebar) -->
+                    <div class="card border-secondary border-opacity-10 bg-dark bg-opacity-25 mb-4" data-sandbox-section style="display: none;">
+                        <div class="card-header border-0 bg-transparent py-2 d-flex justify-content-between align-items-center">
+                            <span class="x-small text-muted text-uppercase fw-bold">
+                                <img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="" class="me-1 icon-light" style="width: 12px; height: 12px; vertical-align: middle;">
+                                Custom Sandboxes
+                            </span>
+                            <button class="btn btn-xs btn-outline-primary d-flex align-items-center gap-1 py-0 px-2" style="height: 20px; font-size: 0.65rem;" type="button" data-action="create-sandbox" title="Add Sandbox">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/></svg>
+                                <span>Add</span>
+                            </button>
                         </div>
-                        <div class="card-body">
-                            <div class="list-group project-history-list" data-sandbox-list></div>
+                        <div class="card-body p-0">
+                            <div class="list-group list-group-flush project-history-list compact" data-sandbox-list></div>
                         </div>
                     </div>
                 </div>
             </div>
-
-            <div class="row mb-4 animate-fade-up delay-700" data-local-history-section style="display: none;">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <div>
-                                <span class="card-title text-uppercase fw-bold" style="letter-spacing: 0.1em;"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent me-2" style="vertical-align: text-bottom;"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/></svg>Custom LLM Environments</span>
-                                <p class="text-muted small mb-0 mt-1">Like Conda for LLMs - create isolated configs with
-                                    custom args and prompts for each CLI</p>
-                            </div>
-                            <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button"
-                                    data-action="create-environment-quick"
-                                    title="Create a new environment with custom CLI arguments and prompts">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                        <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
-                                    </svg>
-                                    Add
-                                </button>
-                                <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2" type="button"
-                                    data-action="open-environments-settings" title="Manage all environments">
-                                    <svg class="card-nav-cog" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                    Settings
-                                </button>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div class="list-group project-history-list" data-local-project-history></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="row mb-4 animate-fade-up delay-800" data-local-file-tree-section style="display: none;">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <div>
-                                <span class="card-title text-uppercase fw-bold" style="letter-spacing: 0.1em;"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent me-2" style="vertical-align: text-bottom;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Manage Rules, Enforcements and AGENTS.md Files</span>
-                                <p class="text-muted small mb-0 mt-1">Select Agent File To Edit</p>
-                            </div>
-                            <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button" data-action="create-agent-file" title="Create a new agent file">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                        <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
-                                    </svg>
-                                    Add
-                                </button>
-                                <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2" type="button" data-action="navigate-agents" title="Manage all agent files and rules">
-                                    <svg class="card-nav-cog" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                    Settings
-                                </button>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div data-local-file-tree></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
         </div>
     </template>
 
     <template id="environment-history-item-template">
-        <div class="list-group-item project-item p-3" data-env-item>
+        <div class="list-group-item project-item p-2 px-3 border-secondary border-opacity-10 bg-transparent mb-1 rounded" data-env-item>
             <div class="d-flex align-items-center gap-3">
-                <div class="project-logo-wrapper">
-                    <img class="project-logo" data-env-logo alt="" loading="lazy">
+                <div class="project-logo-wrapper" style="width: 42px; height: 42px;">
+                    <img class="project-logo icon-light" data-env-logo alt="" loading="lazy" style="width: 24px; height: 24px;">
                 </div>
                 <div class="flex-grow-1 min-w-0">
-                    <div class="d-flex align-items-center mb-1">
-                        <h5 class="project-name mb-0 text-truncate me-2" data-env-name></h5>
-                        <span class="badge badge-cli" data-env-badge></span>
+                    <div class="d-flex align-items-center gap-2 mb-0">
+                        <h6 class="mb-0 text-white text-truncate fw-bold" data-env-name></h6>
+                        <span class="badge badge-cli x-small py-1" data-env-badge></span>
                     </div>
-                    <div class="d-flex align-items-center text-muted small">
-                        <span data-env-time></span>
-                    </div>
+                    <div class="text-muted small opacity-50" style="font-size: 0.7rem;" data-env-time></div>
                 </div>
-                <div class="project-actions ms-3 d-flex gap-2">
-                    <button class="btn btn-sm btn-outline-secondary px-3 d-flex align-items-center gap-2"
+                <div class="project-actions d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-secondary px-2 py-1"
                         type="button" data-env-launch title="Launch in External Terminal">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
-                            <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
-                        </svg>
-                        <span data-env-launch-text></span>
+                        <span class="small" data-env-launch-text>CLI</span>
                     </button>
-                    <button class="btn btn-sm btn-outline-success px-3 d-flex align-items-center gap-2" type="button"
-                        data-env-launch-webui title="Launch in Web Terminal">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/>
-                            <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"/>
-                        </svg>
-                        <span>Launch in Web</span>
+                    <button class="btn btn-sm btn-outline-success px-2 py-1"
+                        type="button" data-env-launch-webui title="Launch in Web Terminal">
+                        <span class="small">Web UI</span>
                     </button>
                 </div>
             </div>
@@ -380,119 +244,27 @@
     </template>
 
     <template id="sandbox-item-template">
-        <div class="list-group-item sandbox-card" data-sandbox-item>
-            <!-- Header row: icon + info + delete -->
-            <div class="sandbox-card-header">
-                <div class="sandbox-card-icon">
-                    <img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="Sandbox" class="icon-tone-slate">
+        <div class="list-group-item project-item p-2 px-3 border-secondary border-opacity-10 bg-transparent mb-1 rounded" data-sandbox-item>
+            <div class="d-flex align-items-center gap-3">
+                <div class="project-logo-wrapper" style="width: 42px; height: 42px;">
+                    <img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="Sandbox" class="project-logo icon-light" style="width: 24px; height: 24px;">
                 </div>
-                <div class="sandbox-card-info">
-                    <div class="sandbox-card-title">
-                        <h5 class="sandbox-card-name" data-sandbox-name></h5>
-                        <span class="badge bg-secondary" data-sandbox-branch></span>
-                        <span class="badge bg-dark text-muted" data-sandbox-source-branch style="display: none; font-weight: normal;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 3px;">
-                                <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/>
-                            </svg>
-                            <span data-sandbox-source-branch-text></span>
-                        </span>
+                <div class="flex-grow-1 min-w-0">
+                    <div class="d-flex align-items-center gap-2 mb-0">
+                        <h6 class="mb-0 text-white text-truncate fw-bold" data-sandbox-name></h6>
+                        <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 x-small" data-sandbox-branch></span>
                     </div>
-                    <div class="sandbox-card-meta">
-                        <span data-sandbox-time></span>
-                        <span class="sandbox-card-separator">&bull;</span>
-                        <span class="sandbox-card-path" data-sandbox-path></span>
-                    </div>
-                    <div class="sandbox-card-remote" data-sandbox-remote style="display: none;">
-                        <span class="sandbox-card-remote-label">Remote:</span>
-                        <span class="sandbox-card-path" data-sandbox-remote-url></span>
-                    </div>
+                    <div class="text-muted small opacity-50" style="font-size: 0.7rem;" data-sandbox-time></div>
                 </div>
-                <button class="btn btn-sm btn-outline-danger sandbox-card-delete" type="button"
-                    data-sandbox-delete title="Delete sandbox">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                        <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
-                    </svg>
-                </button>
-            </div>
-
-            <!-- Action buttons row -->
-            <div class="sandbox-card-actions">
-                <!-- Launch group -->
-                <div class="sandbox-btn-group">
-                    <span class="sandbox-btn-group-label">Launch</span>
-                    <div class="sandbox-btn-group-buttons">
-                        <select class="form-select form-select-sm sandbox-cli-select" data-sandbox-cli-select>
-                            <option value="base:claude">Claude</option>
-                            <option value="base:codex">Codex</option>
-                            <option value="base:gemini">Gemini</option>
-                            <option value="base:copilot">Copilot</option>
-                        </select>
-                        <button class="btn btn-sm btn-outline-success d-flex align-items-center gap-1" type="button"
-                            data-sandbox-launch-webui title="Launch in Web Terminal">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/>
-                                <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"/>
-                            </svg>
-                            <span>Web Terminal</span>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" type="button"
-                            data-sandbox-launch-terminal title="Launch in External Terminal">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
-                                <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
-                            </svg>
-                            <span>CLI Terminal</span>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Open group -->
-                <div class="sandbox-btn-group">
-                    <span class="sandbox-btn-group-label">Open</span>
-                    <div class="sandbox-btn-group-buttons">
-                        <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" type="button"
-                            data-sandbox-launch-shell title="Open shell in sandbox directory">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
-                                <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
-                            </svg>
-                            <span>Shell</span>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" type="button"
-                            data-sandbox-vscode title="Open in VS Code">
-                            <img src="assets/img/vscode.svg" alt="VS Code" style="height: 16px; width: 16px;">
-                            <span>VS Code</span>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Git group -->
-                <div class="sandbox-btn-group">
-                    <span class="sandbox-btn-group-label">Git</span>
-                    <div class="sandbox-btn-group-buttons">
-                        <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1" type="button"
-                            data-sandbox-diff title="See code changes in sandbox">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
-                                <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H8V2z"/>
-                            </svg>
-                            <span>See Changes</span>
-                        </button>
-                        <button class="btn btn-sm btn-outline-info d-flex align-items-center gap-1" type="button"
-                            data-sandbox-push-remote title="Push branch to remote" style="display: none;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0M4.5 7.5a.5.5 0 0 0 0 1h5.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3a.5.5 0 0 0 0-.708l-3-3a.5.5 0 1 0-.708.708L10.293 7.5z"/>
-                            </svg>
-                            <span>Push to Remote</span>
-                        </button>
-                        <button class="btn btn-sm btn-outline-warning d-flex align-items-center gap-1" type="button"
-                            data-sandbox-merge-local title="Merge into source project" style="display: none;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M5 3a3 3 0 0 1 6 0v1h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3m1 1h4V3a2 2 0 0 0-4 0zM4 6v6h8V6z"/>
-                            </svg>
-                            <span data-sandbox-merge-label>Merge Local</span>
-                        </button>
-                    </div>
+                <div class="project-actions d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-success px-2 py-1"
+                        type="button" data-sandbox-launch-webui title="Launch in Web Terminal">
+                        <span class="small">Web</span>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary px-2 py-1"
+                        type="button" data-sandbox-vscode title="Open in VS Code">
+                        <span class="small">IDE</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -519,33 +291,51 @@
 
             <div class="row mb-4">
                 <div class="col-12">
-                    <div class="row">
-                        <div class="col-md-6 col-lg-3 mb-4">
-                            <div class="card menu-card" data-action="navigate" data-view="check-violations">
-                                <div class="card-body text-center">
-                                    <span class="menu-icon">&#x2705;</span>
-                                    <h5 class="menu-title">Check Violations</h5>
-                                    <p class="menu-description">Run VCA validation</p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="card menu-card h-100" data-action="navigate" data-view="check-violations">
+                                <div class="card-body d-flex align-items-center gap-3 p-3">
+                                    <div class="bg-success bg-opacity-10 text-success rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; flex-shrink: 0;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                                            <path d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.757.757 0 0 1 0-1.06.733.733 0 0 1 1.047 0l2.352 2.525 5.49-5.59z"/>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h6 class="mb-0 text-white fw-bold">Check Violations</h6>
+                                        <p class="text-muted x-small mb-0 opacity-75">Run VCA validation</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="col-md-6 col-lg-3 mb-4">
-                            <div class="card menu-card" data-action="navigate" data-view="active-rules">
-                                <div class="card-body text-center">
-                                    <span class="menu-icon">&#x1F333;</span>
-                                    <h5 class="menu-title">Active Rules</h5>
-                                    <p class="menu-description">View rule hierarchy</p>
+                        <div class="col-md-4">
+                            <div class="card menu-card h-100" data-action="navigate" data-view="active-rules">
+                                <div class="card-body d-flex align-items-center gap-3 p-3">
+                                    <div class="bg-info bg-opacity-10 text-info rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; flex-shrink: 0;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                                            <path d="M8.416.223a.5.5 0 0 0-.832 0l-3 4.5A.5.5 0 0 0 5 5.5h.098L3.076 8.735A.5.5 0 0 0 3.5 9.5h.191l-1.638 3.276a.5.5 0 0 0 .447.724H7V15h2v-1.5h4.5a.5.5 0 0 0 .447-.724L12.31 9.5h.191a.5.5 0 0 0 .424-.765L10.902 5.5H11a.5.5 0 0 0 .416-.777l-3-4.5z"/>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h6 class="mb-0 text-white fw-bold">Active Rules</h6>
+                                        <p class="text-muted x-small mb-0 opacity-75">View rule hierarchy</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="col-md-6 col-lg-3 mb-4">
-                            <div class="card menu-card" data-action="navigate" data-view="agent-create">
-                                <div class="card-body text-center">
-                                    <span class="menu-icon">&#x2795;</span>
-                                    <h5 class="menu-title">Create New Agent</h5>
-                                    <p class="menu-description">Create with wizard</p>
+                        <div class="col-md-4">
+                            <div class="card menu-card h-100" data-action="navigate" data-view="agent-create">
+                                <div class="card-body d-flex align-items-center gap-3 p-3">
+                                    <div class="bg-primary bg-opacity-10 text-primary rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; flex-shrink: 0;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                                            <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h6 class="mb-0 text-white fw-bold">Create New Agent</h6>
+                                        <p class="text-muted x-small mb-0 opacity-75">Create with wizard</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -878,23 +668,42 @@
             </div>
 
             <div class="row">
-                <div class="col-12 d-flex justify-content-between align-items-center mb-4">
-                    <h2 class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-tone-purple" style="height: 32px; width: 32px; margin-right: 12px; vertical-align: text-bottom; opacity: 0.85;">Environment Management</h2>
-                    <button class="btn btn-primary d-flex align-items-center gap-2" type="button" data-action="create-environment">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
-                        </svg>
-                        Create New Environment
-                    </button>
+                <div class="col-12 mb-4">
+                    <h2 class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-light" style="height: 32px; width: 32px; margin-right: 12px; vertical-align: text-bottom;">Custom Environments</h2>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <div class="card mb-4">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-light" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom;">Environment Profiles</span>
+                            <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" type="button" data-action="create-environment">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                                </svg>
+                                <span>Add</span>
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div data-environments-table></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
             <div class="row">
                 <div class="col-12">
                     <div class="card">
-                        <div class="card-header text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-tone-purple" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom; opacity: 0.85;">Environment Profiles</div>
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/boxes-stacked-solid-full.svg" alt="" class="icon-light" style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom;">Custom Sandboxes</span>
+                            <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" type="button" data-action="create-sandbox">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/></svg>
+                                <span>Add</span>
+                            </button>
+                        </div>
                         <div class="card-body">
-                            <div data-environments-table></div>
+                            <div class="list-group" data-sandbox-list></div>
                         </div>
                     </div>
                 </div>
@@ -1042,11 +851,11 @@
 
     <script src="assets/bootstrap.bundle.min.js"></script>
     <script src="assets/xterm/xterm.min.js"></script>
-    <script src="assets/monaco/vs/loader.js"></script>
     <script src="assets/xterm/addon-fit.js"></script>
     <script src="assets/xterm/addon-search.js"></script>
     <script src="assets/xterm/addon-web-links.js"></script>
     <script src="assets/xterm/addon-web-fonts.js"></script>
+    <script src="assets/monaco/vs/loader.js"></script>
     <script src="js/background-effect.js"></script>
     <script type="module" src="app.js"></script>
 </body>
