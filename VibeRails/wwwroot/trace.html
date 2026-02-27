@@ -155,6 +155,7 @@
         .panel-output   { border-color: #1a4038; }
         .panel-console  { border-color: #2a2a3e; }
         .panel-http     { border-color: #2d3a1a; }
+        .panel-proc     { border-color: #1a3040; }
 
         /* ── Minimized panel (left support column only) ── */
         .left-col .panel.minimized { flex: 0 0 auto !important; min-height: 0 !important; }
@@ -178,6 +179,7 @@
         .panel-output  .panel-header { border-color: #1a4038; }
         .panel-console .panel-header { border-color: #333; }
         .panel-http    .panel-header { border-color: #2d3a1a; }
+        .panel-proc    .panel-header { border-color: #1a3040; }
 
         .panel-label { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
         .panel-launch  .panel-label { color: #d7ba7d; }
@@ -187,6 +189,7 @@
         .panel-output  .panel-label { color: #4ec9b0; }
         .panel-console .panel-label { color: #888; }
         .panel-http    .panel-label { color: #8fbc45; }
+        .panel-proc    .panel-label { color: #56a8d6; }
 
         .panel-count { font-size: 10px; color: #555; }
 
@@ -298,6 +301,148 @@
             border-color: #569cd6 !important;
             box-shadow: 0 0 0 0.15rem rgba(86, 156, 214, 0.25) !important;
         }
+
+        /* ── Settings popover ── */
+        .settings-popover {
+            position: absolute;
+            top: calc(100% + 6px);
+            right: 0;
+            z-index: 1000;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 10px 14px 12px;
+            min-width: 220px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        .settings-popover.hidden { display: none; }
+        .settings-group-label {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #555;
+            margin: 8px 0 4px;
+        }
+        .settings-group-label:first-child { margin-top: 0; }
+        .settings-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 2px 0;
+        }
+        .settings-row label {
+            font-size: 11px;
+            color: #aaa;
+            cursor: pointer;
+            flex: 1;
+            user-select: none;
+        }
+        .settings-row input[type=checkbox] {
+            accent-color: #569cd6;
+            width: 13px;
+            height: 13px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .settings-row label:hover { color: #d4d4d4; }
+        .settings-divider {
+            border: none;
+            border-top: 1px solid #2a2a3e;
+            margin: 8px 0;
+        }
+        .settings-btn-row {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
+        }
+        .settings-mini-btn {
+            font-size: 10px;
+            padding: 2px 8px;
+            border: 1px solid #333;
+            border-radius: 3px;
+            background: transparent;
+            color: #666;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .settings-mini-btn:hover { color: #d4d4d4; border-color: #569cd6; }
+        .topbar-settings-wrap { position: relative; }
+
+        /* ── Panel visibility — hide entire panel card ── */
+        .panel-hidden { display: none !important; }
+
+        /* ── Process table ── */
+        .proc-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        .proc-table th {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: #555;
+            padding: 4px 10px;
+            text-align: left;
+            border-bottom: 1px solid #1e1e2e;
+            position: sticky;
+            top: 0;
+            background: #1a1a2e;
+        }
+        .proc-table td {
+            padding: 3px 10px;
+            color: #aaa;
+            border-bottom: 1px solid #1a1a2a;
+            white-space: nowrap;
+        }
+        .proc-table tr:hover td { background: #20203a; }
+        .proc-table .col-pid    { color: #569cd6; font-size: 10px; width: 60px; }
+        .proc-table .col-uptime { color: #888; font-size: 10px; width: 70px; }
+        .proc-table .col-title  { color: #666; font-size: 10px; }
+        .proc-age { font-size: 10px; color: #444; margin-left: auto; }
+
+        /* ── Connect bar ── */
+        .connect-bar {
+            background: #111120;
+            border-bottom: 1px solid #2a2a3e;
+            padding: 5px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+        .connect-bar.hidden { display: none; }
+        .connect-bar-label { color: #555; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+        .connect-input {
+            font-family: inherit;
+            font-size: 11px;
+            background: #141428;
+            border: 1px solid #333;
+            border-radius: 3px;
+            color: #d4d4d4;
+            padding: 2px 8px;
+            outline: none;
+        }
+        .connect-input:focus { border-color: #569cd6; }
+        .connect-input.port-input { width: 70px; }
+        .connect-input.code-input { flex: 1; max-width: 340px; font-family: monospace; }
+        .connect-btn {
+            font-size: 10px;
+            padding: 2px 10px;
+            border: 1px solid #569cd6;
+            border-radius: 3px;
+            background: transparent;
+            color: #569cd6;
+            cursor: pointer;
+            font-family: inherit;
+            white-space: nowrap;
+        }
+        .connect-btn:hover { background: #569cd6; color: #fff; }
+        .connect-hint { font-size: 10px; color: #444; margin-left: 4px; }
+        .connect-error { font-size: 10px; color: #f48771; margin-left: 4px; }
     </style>
 </head>
 <body class="d-flex flex-column">
@@ -309,8 +454,56 @@
     <span class="status-label" id="status-label">Connecting...</span>
     <span class="flex-grow-1"></span>
     <input class="form-control form-control-sm global-search" id="global-search" type="text" placeholder="Filter...">
+    <button class="btn btn-sm btn-outline-secondary" id="connect-toggle-btn" title="Connect to a different instance">&#x2B67; Connect</button>
     <button class="btn btn-sm btn-outline-secondary" id="pause-btn">Pause</button>
     <button class="btn btn-sm btn-outline-secondary" id="clear-all-btn">Clear All</button>
+    <div class="topbar-settings-wrap">
+        <button class="btn btn-sm btn-outline-secondary" id="settings-btn" title="Trace filters">&#9881; Filters</button>
+        <div class="settings-popover hidden" id="settings-popover">
+            <div class="settings-group-label">Terminal</div>
+            <div class="settings-row"><input type="checkbox" id="filter-TerminalLaunch" checked><label for="filter-TerminalLaunch">Launch</label></div>
+            <div class="settings-row"><input type="checkbox" id="filter-TerminalInput" checked><label for="filter-TerminalInput">Input</label></div>
+            <div class="settings-row"><input type="checkbox" id="filter-TerminalOutput" checked><label for="filter-TerminalOutput">Output</label></div>
+            <hr class="settings-divider">
+            <div class="settings-group-label">MCP</div>
+            <div class="settings-row"><input type="checkbox" id="filter-McpToolCall" checked><label for="filter-McpToolCall">Tool Call</label></div>
+            <div class="settings-row"><input type="checkbox" id="filter-McpToolResult" checked><label for="filter-McpToolResult">Tool Result</label></div>
+            <hr class="settings-divider">
+            <div class="settings-group-label">HTTP</div>
+            <div class="settings-row"><input type="checkbox" id="filter-HttpRequest" checked><label for="filter-HttpRequest">HTTP Request</label></div>
+            <hr class="settings-divider">
+            <div class="settings-group-label">Logs</div>
+            <div class="settings-row"><input type="checkbox" id="filter-LogEntry" checked><label for="filter-LogEntry">Log Entry</label></div>
+            <div class="settings-row"><input type="checkbox" id="filter-RuleValidation" checked><label for="filter-RuleValidation">Rule Validation</label></div>
+            <div class="settings-row"><input type="checkbox" id="filter-SessionLifecycle" checked><label for="filter-SessionLifecycle">Session Lifecycle</label></div>
+            <div class="settings-row"><input type="checkbox" id="filter-Idle" checked><label for="filter-Idle">Idle</label></div>
+            <div class="settings-row"><input type="checkbox" id="filter-Resize" checked><label for="filter-Resize">Resize</label></div>
+            <div class="settings-btn-row">
+                <button class="settings-mini-btn" id="filter-all-btn">All</button>
+                <button class="settings-mini-btn" id="filter-none-btn">None</button>
+            </div>
+            <hr class="settings-divider">
+            <div class="settings-group-label">Panels</div>
+            <div class="settings-row"><input type="checkbox" id="panel-show-mcp" checked><label for="panel-show-mcp">MCP</label></div>
+            <div class="settings-row"><input type="checkbox" id="panel-show-http" checked><label for="panel-show-http">HTTP</label></div>
+            <div class="settings-row"><input type="checkbox" id="panel-show-logs" checked><label for="panel-show-logs">Logs</label></div>
+            <div class="settings-row"><input type="checkbox" id="panel-show-proc" checked><label for="panel-show-proc">Processes</label></div>
+            <div class="settings-row"><input type="checkbox" id="panel-show-launch" checked><label for="panel-show-launch">Launch</label></div>
+            <div class="settings-row"><input type="checkbox" id="panel-show-input" checked><label for="panel-show-input">Input</label></div>
+            <div class="settings-row"><input type="checkbox" id="panel-show-output" checked><label for="panel-show-output">Output</label></div>
+            <div class="settings-row"><input type="checkbox" id="panel-show-console" checked><label for="panel-show-console">Console</label></div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Connect bar ── -->
+<div class="connect-bar hidden" id="connect-bar">
+    <span class="connect-bar-label">Instance</span>
+    <input class="connect-input port-input" id="connect-port" type="number" placeholder="Port" min="1" max="65535">
+    <span class="connect-bar-label">Bootstrap code</span>
+    <input class="connect-input code-input" id="connect-code" type="text" placeholder="Paste bootstrap code or full URL">
+    <button class="connect-btn" id="connect-go-btn">Connect</button>
+    <span class="connect-hint" id="connect-hint">Paste the bootstrap URL from the instance's console, or enter port + code separately.</span>
 </div>
 
 <!-- ── Main grid ── -->
@@ -359,6 +552,19 @@
                 </div>
                 <div class="panel-body" id="body-logs">
                     <div class="panel-empty">Waiting for log entries...</div>
+                </div>
+            </div>
+
+            <div class="panel panel-proc" id="panel-proc">
+                <div class="panel-header">
+                    <span class="panel-label">PROCESSES</span>
+                    <span class="panel-count" id="count-proc">0</span>
+                    <span class="flex-grow-1"></span>
+                    <span class="proc-age" id="proc-age"></span>
+                    <button class="panel-btn" data-minimize="proc">&#x2212;</button>
+                </div>
+                <div class="panel-body" id="body-proc">
+                    <div class="panel-empty">Polling for vb processes...</div>
                 </div>
             </div>
 
@@ -460,6 +666,35 @@ const TYPE_PANEL = {
 };
 const TYPE_NAMES = ['TerminalInput','TerminalOutput','McpToolCall','McpToolResult',
                     'RuleValidation','LogEntry','SessionLifecycle','Idle','Resize','HttpRequest','TerminalLaunch'];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trace type filters — persisted to localStorage
+// ─────────────────────────────────────────────────────────────────────────────
+const FILTER_STORAGE_KEY = 'trace-filters-v1';
+const ALL_FILTER_TYPES = [
+    'TerminalLaunch','TerminalInput','TerminalOutput',
+    'McpToolCall','McpToolResult',
+    'HttpRequest',
+    'LogEntry','RuleValidation','SessionLifecycle','Idle','Resize',
+];
+const typeFilters = loadFilters();
+
+function loadFilters() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(FILTER_STORAGE_KEY) || '{}');
+        const result = {};
+        for (const t of ALL_FILTER_TYPES) result[t] = saved[t] !== false;
+        return result;
+    } catch { return Object.fromEntries(ALL_FILTER_TYPES.map(t => [t, true])); }
+}
+
+function saveFilters() {
+    try { localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(typeFilters)); } catch {}
+}
+
+function isTypeEnabled(typeName) {
+    return typeFilters[typeName] !== false;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel state
@@ -844,6 +1079,8 @@ function dispatchGroupedTerminalEvent(kind, evt) {
 function dispatchEvt(evt) {
     const typeName = mapType(evt.type);
 
+    if (!isTypeEnabled(typeName)) return;
+
     if (typeName === 'TerminalOutput') {
         feedTerminal(evt);
         dispatchGroupedTerminalEvent('output', evt);
@@ -1015,8 +1252,241 @@ function tryFmtJson(s) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Panel visibility — persisted to localStorage
+// ─────────────────────────────────────────────────────────────────────────────
+const PANEL_VIS_KEY = 'trace-panel-vis-v1';
+// Panels controllable via settings; 'console' always stays in stack logic
+const ALL_PANEL_IDS = ['mcp', 'http', 'logs', 'proc', 'launch', 'input', 'output', 'console'];
+const panelVisible = loadPanelVisibility();
+
+function loadPanelVisibility() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(PANEL_VIS_KEY) || '{}');
+        const result = {};
+        for (const id of ALL_PANEL_IDS) result[id] = saved[id] !== false;
+        return result;
+    } catch { return Object.fromEntries(ALL_PANEL_IDS.map(id => [id, true])); }
+}
+
+function savePanelVisibility() {
+    try { localStorage.setItem(PANEL_VIS_KEY, JSON.stringify(panelVisible)); } catch {}
+}
+
+function applyPanelVisibility(id) {
+    const visible = panelVisible[id];
+    // Stack panels (right column) use the existing minimize system
+    if (stackPanelKeys.includes(id)) {
+        setStackPaneMinimized(id, !visible);
+        return;
+    }
+    // Left-column panels
+    const el = document.getElementById(`panel-${id}`);
+    if (el) el.classList.toggle('panel-hidden', !visible);
+}
+
+function applyAllPanelVisibility() {
+    for (const id of ALL_PANEL_IDS) applyPanelVisibility(id);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Process monitor — polls /api/v1/trace/processes every 3 s
+// ─────────────────────────────────────────────────────────────────────────────
+const procBody  = document.getElementById('body-proc');
+const procCount = document.getElementById('count-proc');
+const procAge   = document.getElementById('proc-age');
+let procLastFetch = null;
+let procAgeTimer  = null;
+
+function startProcAgeTimer() {
+    if (procAgeTimer) return;
+    procAgeTimer = setInterval(() => {
+        if (!procLastFetch) return;
+        const secs = Math.round((Date.now() - procLastFetch) / 1000);
+        if (procAge) procAge.textContent = `${secs}s ago`;
+    }, 1000);
+}
+
+async function fetchProcesses() {
+    try {
+        const res = await fetch('/api/v1/trace/processes');
+        if (!res.ok) { renderProcError(`HTTP ${res.status}`); return; }
+        const data = await res.json();
+        procLastFetch = Date.now();
+        renderProcTable(data.processes || []);
+    } catch (e) {
+        renderProcError(e.message || 'fetch failed');
+    }
+}
+
+function fmtUptime(isoStart) {
+    if (!isoStart) return '?';
+    const secs = Math.floor((Date.now() - new Date(isoStart).getTime()) / 1000);
+    if (secs < 60)   return `${secs}s`;
+    if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
+    const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60);
+    return `${h}h ${m}m`;
+}
+
+function renderProcTable(procs) {
+    if (procCount) procCount.textContent = procs.length;
+    if (!procBody) return;
+
+    if (procs.length === 0) {
+        procBody.innerHTML = '<div class="panel-empty">No vb processes running</div>';
+        return;
+    }
+
+    const rows = procs.map(p => `<tr>
+        <td class="col-pid">${p.pid}</td>
+        <td class="col-uptime">${fmtUptime(p.startTime)}</td>
+        ${p.title ? `<td class="col-title">${esc(p.title)}</td>` : '<td class="col-title" style="color:#333">—</td>'}
+    </tr>`).join('');
+
+    procBody.innerHTML = `<table class="proc-table">
+        <thead><tr><th>PID</th><th>Uptime</th><th>Title</th></tr></thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderProcError(msg) {
+    if (procBody) procBody.innerHTML = `<div class="panel-empty" style="color:#f48771">${esc(msg)}</div>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings popover — filter toggles
+// ─────────────────────────────────────────────────────────────────────────────
+(function initSettingsPopover() {
+    const settingsBtn = document.getElementById('settings-btn');
+    const popover     = document.getElementById('settings-popover');
+
+    // Apply saved state to checkboxes
+    for (const t of ALL_FILTER_TYPES) {
+        const cb = document.getElementById(`filter-${t}`);
+        if (cb) cb.checked = typeFilters[t];
+    }
+
+    // Toggle popover
+    settingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        popover.classList.toggle('hidden');
+    });
+
+    // Close on outside click
+    document.addEventListener('click', (e) => {
+        if (!popover.contains(e.target) && e.target !== settingsBtn) {
+            popover.classList.add('hidden');
+        }
+    });
+
+    // Checkbox changes
+    for (const t of ALL_FILTER_TYPES) {
+        const cb = document.getElementById(`filter-${t}`);
+        if (!cb) continue;
+        cb.addEventListener('change', () => {
+            typeFilters[t] = cb.checked;
+            saveFilters();
+        });
+    }
+
+    // All / None buttons
+    document.getElementById('filter-all-btn').addEventListener('click', () => {
+        for (const t of ALL_FILTER_TYPES) {
+            typeFilters[t] = true;
+            const cb = document.getElementById(`filter-${t}`);
+            if (cb) cb.checked = true;
+        }
+        saveFilters();
+    });
+    document.getElementById('filter-none-btn').addEventListener('click', () => {
+        for (const t of ALL_FILTER_TYPES) {
+            typeFilters[t] = false;
+            const cb = document.getElementById(`filter-${t}`);
+            if (cb) cb.checked = false;
+        }
+        saveFilters();
+    });
+
+    // Panel visibility checkboxes
+    for (const id of ALL_PANEL_IDS) {
+        const cb = document.getElementById(`panel-show-${id}`);
+        if (!cb) continue;
+        cb.checked = panelVisible[id];
+        cb.addEventListener('change', () => {
+            panelVisible[id] = cb.checked;
+            savePanelVisibility();
+            applyPanelVisibility(id);
+        });
+    }
+})();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Connect bar — navigate to another instance via bootstrap URL
+// ─────────────────────────────────────────────────────────────────────────────
+(function initConnectBar() {
+    const toggleBtn  = document.getElementById('connect-toggle-btn');
+    const bar        = document.getElementById('connect-bar');
+    const portInput  = document.getElementById('connect-port');
+    const codeInput  = document.getElementById('connect-code');
+    const goBtn      = document.getElementById('connect-go-btn');
+    const hint       = document.getElementById('connect-hint');
+
+    toggleBtn.addEventListener('click', () => {
+        bar.classList.toggle('hidden');
+        if (!bar.classList.contains('hidden')) portInput.focus();
+    });
+
+    // If user pastes a full URL, auto-parse port + code from it
+    codeInput.addEventListener('input', () => {
+        const val = codeInput.value.trim();
+        try {
+            const url = new URL(val);
+            const code = url.searchParams.get('code');
+            const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+            if (code && port) {
+                portInput.value = port;
+                codeInput.value = code;
+                hint.textContent = `Parsed port ${port} from URL.`;
+                hint.className = 'connect-hint';
+            }
+        } catch { /* not a URL, that's fine */ }
+    });
+
+    goBtn.addEventListener('click', doConnect);
+    codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') doConnect(); });
+    portInput.addEventListener('keydown', e => { if (e.key === 'Enter') codeInput.focus(); });
+
+    function doConnect() {
+        const port = parseInt(portInput.value, 10);
+        const code = codeInput.value.trim();
+
+        if (!port || port < 1 || port > 65535) {
+            showError('Enter a valid port number.');
+            return;
+        }
+        if (!code) {
+            showError('Paste the bootstrap code or URL.');
+            return;
+        }
+
+        // Navigate to the target instance's bootstrap endpoint.
+        // It will set the cookie for that origin and redirect back to /trace.html.
+        const url = `http://localhost:${port}/auth/bootstrap?code=${encodeURIComponent(code)}&redirect=/trace.html`;
+        window.location.href = url;
+    }
+
+    function showError(msg) {
+        hint.textContent = msg;
+        hint.className = 'connect-error';
+    }
+})();
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Boot
 // ─────────────────────────────────────────────────────────────────────────────
+applyAllPanelVisibility();
+fetchProcesses();
+setInterval(fetchProcesses, 3000);
+startProcAgeTimer();
 connectSSE();
 </script>
 </body>

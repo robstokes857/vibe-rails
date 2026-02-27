@@ -40,6 +40,8 @@ export class VibeControlApp {
         this.terminalController = new TerminalController(this);
         this.sandboxController = new SandboxController(this);
         this.settingsController = new SettingsController(this);
+        this.lifecycleHeartbeatTimer = null;
+        this.lifecycleClientId = this.getOrCreateLifecycleClientId();
 
         this.init();
     }
@@ -50,6 +52,7 @@ export class VibeControlApp {
         this.bindGlobalActions();
         this.setupKeyboardShortcuts();
         this.setupVSCodeIntegration();
+        this.startLifecycleHeartbeat();
     }
 
     setupVSCodeIntegration() {
@@ -518,6 +521,98 @@ export class VibeControlApp {
         if (this.hostUnreachableToastShown) return;
         this.hostUnreachableToastShown = true;
         this.showToast('Host Unreachable', this.getHostUnreachableMessage(), 'error');
+    }
+
+    // ============================================
+    // Lifecycle Heartbeat
+    // ============================================
+
+    getApiBaseUrl() {
+        return window.__viberails_API_BASE__ || '';
+    }
+
+    getOrCreateLifecycleClientId() {
+        const storageKey = 'viberails_client_id';
+        try {
+            const existing = window.sessionStorage.getItem(storageKey);
+            if (existing && existing.length > 0) {
+                return existing;
+            }
+        } catch (error) {
+            // Fall through and generate a transient ID.
+        }
+
+        const generated = (window.crypto && typeof window.crypto.randomUUID === 'function')
+            ? window.crypto.randomUUID()
+            : `client-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+        try {
+            window.sessionStorage.setItem(storageKey, generated);
+        } catch (error) {
+            // Ignore storage failures and keep generated value in-memory.
+        }
+
+        return generated;
+    }
+
+    getLifecycleUrl(path) {
+        const baseUrl = this.getApiBaseUrl();
+        const clientId = encodeURIComponent(this.lifecycleClientId);
+        return `${baseUrl}${path}?clientId=${clientId}`;
+    }
+
+    async sendLifecyclePing() {
+        const url = this.getLifecycleUrl('/api/v1/lifecycle/ping');
+        try {
+            await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                cache: 'no-store'
+            });
+        } catch (error) {
+            // Best-effort only.
+        }
+    }
+
+    sendLifecycleDisconnect() {
+        const url = this.getLifecycleUrl('/api/v1/lifecycle/disconnect');
+
+        if (!window.__viberails_VSCODE__ && typeof navigator.sendBeacon === 'function') {
+            try {
+                navigator.sendBeacon(url);
+                return;
+            } catch (error) {
+                // Fallback to fetch below.
+            }
+        }
+
+        fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            keepalive: true
+        }).catch(() => {
+            // Best-effort only.
+        });
+    }
+
+    startLifecycleHeartbeat() {
+        if (this.lifecycleHeartbeatTimer) {
+            return;
+        }
+
+        this.sendLifecyclePing();
+        this.lifecycleHeartbeatTimer = setInterval(() => {
+            this.sendLifecyclePing();
+        }, 15000);
+
+        const onDisconnect = () => this.sendLifecycleDisconnect();
+        window.addEventListener('beforeunload', onDisconnect);
+        window.addEventListener('pagehide', onDisconnect);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                this.sendLifecyclePing();
+            }
+        });
     }
 
     // ============================================ 
