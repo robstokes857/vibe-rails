@@ -397,9 +397,6 @@ class TerminalManager {
         this.focusBtn = null;
         this.keyboardBtn = null;
 
-        this.selectionMenu = null;
-        this.selectionMenuCloser = null;
-
         this.lockLayoutHandler = null;
         this.lockedPanel = null;
         this.lockScrollTop = 0;
@@ -428,6 +425,7 @@ class TerminalManager {
         this.focusBtn = this.container.querySelector('#terminal-popout-btn');
         this.keyboardBtn = this.container.querySelector('#terminal-keyboard-btn');
 
+        this.populateSelect();
         this.bindActions();
         await this.restoreTabs();
 
@@ -453,7 +451,6 @@ class TerminalManager {
     }
 
     destroy() {
-        this.closeSelectionMenu();
         this.disableLockedLayout(this.lockedPanel);
 
         this.tabs.forEach((tab) => tab.instance.dispose());
@@ -487,14 +484,10 @@ class TerminalManager {
             void this.createAndActivateTab({ selection: DEFAULT_SELECTION });
         });
 
-        this.tabSelect?.addEventListener('click', () => {
-            if (this.selectionMenu) {
-                this.closeSelectionMenu();
-                return;
-            }
+        this.tabSelect?.addEventListener('change', (e) => {
             const active = this.getActiveTab();
-            if (active && !active.state.hasActiveSession && this.tabSelect) {
-                this.openSelectionMenu(active.state.id, this.tabSelect);
+            if (active && !active.state.hasActiveSession) {
+                this.applySelection(active, e.target.value);
             }
         });
 
@@ -574,7 +567,7 @@ class TerminalManager {
         button.addEventListener('click', () => {
             if (!state.selection && !state.hasActiveSession) {
                 void this.activateTab(state.id, { connectIfNeeded: false });
-                if (this.tabSelect) this.openSelectionMenu(state.id, this.tabSelect);
+                if (this.tabSelect) this.tabSelect.focus();
                 return;
             }
             void this.activateTab(state.id, { connectIfNeeded: true });
@@ -810,7 +803,7 @@ class TerminalManager {
         }
 
         if (!tab?.state.selection) {
-            if (this.tabSelect) this.openSelectionMenu(tab?.state.id, this.tabSelect);
+            if (this.tabSelect) this.tabSelect.focus();
             return;
         }
 
@@ -923,7 +916,8 @@ class TerminalManager {
         const options = [
             { group: 'Base CLIs', value: 'base:claude', label: 'Claude (default)' },
             { group: 'Base CLIs', value: 'base:codex', label: 'Codex (default)' },
-            { group: 'Base CLIs', value: 'base:gemini', label: 'Gemini (default)' }
+            { group: 'Base CLIs', value: 'base:gemini', label: 'Gemini (default)' },
+            { group: 'Base CLIs', value: 'base:copilot', label: 'Copilot (default)' }
         ];
 
         (this.app.data.environments || []).forEach((env) => {
@@ -937,16 +931,10 @@ class TerminalManager {
         return options;
     }
 
-    openSelectionMenu(tabId, anchor) {
-        const tab = this.tabs.get(tabId);
-        if (!tab) return;
-        if (tab.state.hasActiveSession) return;
+    populateSelect() {
+        if (!this.tabSelect || this.tabSelect.tagName !== 'SELECT') return;
 
-        this.closeSelectionMenu();
-
-        const menu = document.createElement('div');
-        menu.className = 'terminal-selection-menu';
-        menu.dataset.tabId = tabId;
+        this.tabSelect.innerHTML = '<option value="" disabled>Select LLM...</option>';
 
         const groups = {};
         this.getSelectionOptions().forEach((option) => {
@@ -954,55 +942,17 @@ class TerminalManager {
             groups[option.group].push(option);
         });
 
-        Object.keys(groups).forEach((groupName) => {
-            const title = document.createElement('div');
-            title.className = 'terminal-selection-menu-group';
-            title.textContent = groupName;
-            menu.appendChild(title);
-
-            groups[groupName].forEach((option) => {
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'terminal-selection-menu-item';
-                if (option.value === tab.state.selection) {
-                    button.classList.add('active');
-                }
-                button.textContent = option.label;
-                button.addEventListener('click', () => {
-                    this.applySelection(tab, option.value);
-                    this.closeSelectionMenu();
-                });
-                menu.appendChild(button);
+        Object.keys(groups).forEach(groupName => {
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = groupName;
+            groups[groupName].forEach(option => {
+                const opt = document.createElement('option');
+                opt.value = option.value;
+                opt.textContent = option.label;
+                optgroup.appendChild(opt);
             });
+            this.tabSelect.appendChild(optgroup);
         });
-
-        document.body.appendChild(menu);
-        const rect = anchor.getBoundingClientRect();
-        menu.style.left = `${Math.max(8, rect.left)}px`;
-        menu.style.top = `${rect.bottom + 6}px`;
-
-        this.selectionMenu = menu;
-        this.selectionMenuCloser = (event) => {
-            if (!this.selectionMenu) return;
-            if (event.target === anchor || this.selectionMenu.contains(event.target)) {
-                return;
-            }
-            this.closeSelectionMenu();
-        };
-
-        document.addEventListener('mousedown', this.selectionMenuCloser, true);
-    }
-
-    closeSelectionMenu() {
-        if (this.selectionMenuCloser) {
-            document.removeEventListener('mousedown', this.selectionMenuCloser, true);
-            this.selectionMenuCloser = null;
-        }
-
-        if (this.selectionMenu) {
-            this.selectionMenu.remove();
-            this.selectionMenu = null;
-        }
     }
 
     updateUi() {
@@ -1017,10 +967,6 @@ class TerminalManager {
             const isDisconnected = tab.state.hasActiveSession && tab.state.status === 'disconnected';
             tab.state.ui.item.classList.toggle('is-connected', isConnected);
             tab.state.ui.item.classList.toggle('is-disconnected', isDisconnected);
-
-            if (tab.state.hasActiveSession && this.selectionMenu?.dataset?.tabId === tab.state.id) {
-                this.closeSelectionMenu();
-            }
         });
 
         if (!active) {
@@ -1120,6 +1066,11 @@ class TerminalManager {
             this.tabSelect.title = canSelect
                 ? 'Select CLI/environment for active tab'
                 : 'Stop terminal to change CLI/environment';
+            if (active) {
+                this.tabSelect.value = active.state.selection || '';
+            } else {
+                this.tabSelect.value = '';
+            }
         }
     }
 
@@ -1541,9 +1492,12 @@ export class TerminalController {
                             </span>
                             <span class="badge bg-secondary" id="terminal-status-badge">Not Started</span>
                         </div>
-                        <p class="text-muted small mb-0 mt-1">Each tab is isolated. Use + to open up to 8 tabs and the dropdown to pick CLI/environment.</p>
+                        <p class="text-muted small mb-0 mt-1">Each tab is isolated. Use 'Select LLM' to pick CLI/environment and + to open up to 8 tabs. Terminals run safely in the background even if you navigate away.</p>
                     </div>
                     <div class="d-flex gap-2 align-items-center flex-wrap justify-content-end" id="terminal-actions">
+                        <select class="form-select form-select-sm" id="terminal-tab-select-btn" style="width: auto;">
+                            <option value="" disabled selected>Select LLM...</option>
+                        </select>
                         <button class="btn btn-sm btn-outline-info d-inline-flex align-items-center gap-1" id="terminal-start-btn">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814z"/>
@@ -1590,9 +1544,6 @@ export class TerminalController {
                             <div class="terminal-tab-action-group">
                                 <button type="button" class="terminal-tab-add" id="terminal-tab-add-btn" title="Open a new terminal tab" aria-label="Open a new terminal tab">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>
-                                </button>
-                                <button type="button" class="terminal-tab-select" id="terminal-tab-select-btn" title="Select CLI/environment for active tab" aria-label="Select CLI/environment">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708"/></svg>
                                 </button>
                             </div>
                         </div>

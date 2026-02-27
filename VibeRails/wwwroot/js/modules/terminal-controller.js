@@ -545,7 +545,7 @@ export class TerminalController {
                             </span>
                             <span class="badge bg-secondary" id="terminal-status-badge">Not Started</span>
                         </div>
-                        <p class="text-muted small mb-0 mt-1">Launch a web-based terminal session for interacting with your selected CLI and connect to it remotely.</p>
+                        <p class="text-muted small mb-0 mt-1">Launch a web-based terminal session for interacting with your selected CLI. Terminals run safely in the background even if you navigate away.</p>
                     </div>
                     <div class="d-flex gap-2 align-items-center flex-wrap justify-content-end" id="terminal-actions">
                         <select class="form-select form-select-sm" id="terminal-cli-select" style="width: auto;">
