@@ -23,7 +23,7 @@ namespace VibeRails.Services.LlmClis.Launchers
         public abstract string ConfigEnvVarName { get; }
         protected abstract string ConfigSubdirectory { get; }
 
-        public Dictionary<string, string> GetEnvironmentVariables(string envName)
+        public virtual Dictionary<string, string> GetEnvironmentVariables(string envName)
         {
             var envBasePath = ParserConfigs.GetEnvPath();
             var configPath = Path.Combine(envBasePath, envName, ConfigSubdirectory);

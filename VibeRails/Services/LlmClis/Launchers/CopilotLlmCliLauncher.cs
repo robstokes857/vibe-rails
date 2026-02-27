@@ -11,7 +11,7 @@ namespace VibeRails.Services.LlmClis.Launchers
         public override string ConfigEnvVarName => "";
         protected override string ConfigSubdirectory => "copilot";
 
-        public new Dictionary<string, string> GetEnvironmentVariables(string envName)
+        public override Dictionary<string, string> GetEnvironmentVariables(string envName)
             => new Dictionary<string, string>();
     }
 }

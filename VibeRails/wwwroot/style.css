@@ -197,7 +197,7 @@ code {
 }
 
 .brand-logo {
-    height: 36px; /* Fully restored height */
+    height: 36px; /* Logo height set to 36px to fit navbar */
     width: auto;
     filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
     transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.5s;

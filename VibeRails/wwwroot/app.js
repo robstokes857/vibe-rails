@@ -76,7 +76,7 @@ export class VibeControlApp {
             // Hide "Launch in VS Code" card from terminals section
             const launchVsCodeBtn = document.querySelector('[data-action="launch-vscode"]');
             if (launchVsCodeBtn) {
-                launchVsCodeBtn.closest('.col-6')?.remove();
+                launchVsCodeBtn.closest('.project-item, .list-group-item')?.remove();
             }
         }
     }

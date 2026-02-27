@@ -487,13 +487,8 @@ class TerminalManager {
         });
 
         this.tabSelect?.addEventListener('click', () => {
-            if (this.selectionMenu) {
-                this.closeSelectionMenu();
-                return;
-            }
-            const active = this.getActiveTab();
-            if (active && !active.state.hasActiveSession && this.tabSelect) {
-                this.openSelectionMenu(active.state.id, this.tabSelect);
+            if (this.headerSelect) {
+                this.headerSelect.focus();
             }
         });
 
@@ -576,7 +571,11 @@ class TerminalManager {
         button.addEventListener('click', () => {
             if (!state.selection && !state.hasActiveSession) {
                 void this.activateTab(state.id, { connectIfNeeded: false });
-                if (this.tabSelect) this.tabSelect.focus();
+                if (this.headerSelect) {
+                    this.headerSelect.focus();
+                } else if (this.tabSelect) {
+                    this.tabSelect.focus();
+                }
                 return;
             }
             void this.activateTab(state.id, { connectIfNeeded: true });
@@ -744,7 +743,11 @@ class TerminalManager {
 
         const meta = this.getSelectionMeta(tab.state.selection);
         if (!meta.cli) {
-            if (this.tabSelect) this.openSelectionMenu(tab.state.id, this.tabSelect);
+            if (this.headerSelect) {
+                this.headerSelect.focus();
+            } else if (this.tabSelect) {
+                this.tabSelect.focus();
+            }
             return;
         }
 
@@ -812,7 +815,11 @@ class TerminalManager {
         }
 
         if (!tab?.state.selection) {
-            if (this.tabSelect) this.tabSelect.focus();
+            if (this.headerSelect) {
+                this.headerSelect.focus();
+            } else if (this.tabSelect) {
+                this.tabSelect.focus();
+            }
             return;
         }
 
