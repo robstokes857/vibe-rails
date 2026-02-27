@@ -9,6 +9,8 @@ export class EnvironmentController {
 
         // Fetch environments from API
         await this.refreshEnvironments();
+        // Also refresh sandboxes data
+        await this.app.refreshDashboardData();
 
         content.innerHTML = '';
         const fragment = this.app.cloneTemplate('environments-template');
@@ -47,6 +49,14 @@ export class EnvironmentController {
                     if (envId && envName && envCli) {
                         this.launchInWebUI(envId, envName, envCli);
                     }
+                });
+            }
+
+            const sandboxSlot = root.querySelector('[data-sandbox-list]');
+            if (sandboxSlot) {
+                this.app.dashboardController.populateSandboxesList(sandboxSlot);
+                this.app.bindAction(root, '[data-action="create-sandbox"]', () => {
+                    this.app.sandboxController.createSandbox();
                 });
             }
         }
@@ -532,7 +542,7 @@ export class EnvironmentController {
     }
 
     async launchInWebUI(envId, envName, cli) {
-        // Go back to dashboard instead of pushing a duplicate breadcrumb entry
+        // Go back to dashboard to show the launched terminal
         this.app.goBack();
 
         this.app.showToast('Web Terminal',
