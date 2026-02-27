@@ -41,6 +41,7 @@ public class TerminalSessionService : ITerminalSessionService
 {
     private readonly TerminalRunner _runner;
     private readonly ITerminalStateService _stateService;
+    private readonly ILocalClientTracker _localClientTracker;
 
     private static readonly Lock s_lock = new();
     private static Terminal? s_terminal;
@@ -59,11 +60,13 @@ public class TerminalSessionService : ITerminalSessionService
         McpSettings mcpSettings,
         IRemoteStateService remoteStateService,
         ITerminalIoObserverService ioObserverService,
-        TraceEventBuffer traceBuffer)
+        TraceEventBuffer traceBuffer,
+        ILocalClientTracker localClientTracker)
     {
         _stateService = new TerminalStateService(dbService, gitService, remoteStateService, ioObserverService);
         var commandService = new CommandService(envService, mcpSettings);
         _runner = new TerminalRunner(_stateService, commandService, traceBuffer);
+        _localClientTracker = localClientTracker;
     }
 
     public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false)
@@ -123,6 +126,7 @@ public class TerminalSessionService : ITerminalSessionService
     {
         Terminal? terminal;
         string? sessionId;
+        string? ownerId = null;
 
         lock (s_lock)
         {
@@ -168,6 +172,8 @@ public class TerminalSessionService : ITerminalSessionService
         // Subscribe WebSocket as output consumer
         using var wsConsumer = new WebSocketConsumer(webSocket, cancellationToken);
         using var subscription = terminal.Subscribe(wsConsumer);
+        ownerId = $"terminal-ws:{sessionId}:{Guid.NewGuid():N}";
+        _localClientTracker.AcquireOwner(ownerId);
 
         // Run WebSocket input loop (blocks until WebSocket closes or cancellation)
         try
@@ -178,6 +184,10 @@ public class TerminalSessionService : ITerminalSessionService
         {
             // subscription.Dispose() auto-unsubscribes the WebSocketConsumer
             lock (s_lock) { s_activeWebSocket = null; }
+            if (!string.IsNullOrEmpty(ownerId))
+            {
+                _localClientTracker.ReleaseOwner(ownerId);
+            }
             // Don't call CleanupAsync() here - PTY should survive WebSocket disconnects
         }
     }

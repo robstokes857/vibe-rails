@@ -297,6 +297,18 @@ namespace VibeRails.DTOs
     // Proxy relay DTOs (sent from proxy WS to browser)
     public record ProxyRelayMessage(string Type, string Message, string? Signature = null, bool? Verified = null);
 
+    // Process monitor DTOs
+    public record ProcessInfoItem(
+        int Pid,
+        string Title,
+        DateTime StartTime
+    );
+
+    public record ProcessListResponse(
+        List<ProcessInfoItem> Processes,
+        DateTime Timestamp
+    );
+
     // Claude Plan DTOs
     public record ClaudePlanRecord(
         long Id,
@@ -424,6 +436,10 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SignedMessage))]
     [JsonSerializable(typeof(SignatureVerificationResponse))]
     [JsonSerializable(typeof(ProxyRelayMessage))]
+    // Process monitor DTOs
+    [JsonSerializable(typeof(ProcessInfoItem))]
+    [JsonSerializable(typeof(List<ProcessInfoItem>))]
+    [JsonSerializable(typeof(ProcessListResponse))]
     // Trace DTOs
     [JsonSerializable(typeof(TraceEvent))]
     [JsonSerializable(typeof(List<TraceEvent>))]

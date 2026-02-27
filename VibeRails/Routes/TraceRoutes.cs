@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using VibeRails.DTOs;
 using VibeRails.Services.Tracing;
@@ -67,6 +68,35 @@ public static class TraceRoutes
             var events = buffer.GetRecent(count ?? 100);
             return Results.Ok(events);
         }).WithName("GetTraceEvents");
+
+        // Process monitor — returns current vb.exe processes
+        app.MapGet("/api/v1/trace/processes", () =>
+        {
+            var procs = Process.GetProcessesByName("vb")
+                .Select(p =>
+                {
+                    try
+                    {
+                        return new ProcessInfoItem(
+                            Pid: p.Id,
+                            Title: p.MainWindowTitle,
+                            StartTime: p.StartTime.ToUniversalTime()
+                        );
+                    }
+                    catch
+                    {
+                        return new ProcessInfoItem(p.Id, "", DateTime.MinValue);
+                    }
+                    finally
+                    {
+                        p.Dispose();
+                    }
+                })
+                .OrderBy(p => p.StartTime)
+                .ToList();
+
+            return Results.Ok(new ProcessListResponse(procs, DateTime.UtcNow));
+        }).WithName("GetTraceProcesses").ExcludeFromDescription();
     }
 
     private static async Task WriteEvent(HttpResponse response, TraceEvent evt, CancellationToken ct)

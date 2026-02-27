@@ -8,7 +8,7 @@ public static class AuthRoutes
     public static void Map(WebApplication app)
     {
         // Bootstrap endpoint - validates one-time code and sets auth cookie
-        app.MapGet("/auth/bootstrap", (HttpContext context, IAuthService authService, string? code) =>
+        app.MapGet("/auth/bootstrap", (HttpContext context, IAuthService authService, string? code, string? redirect) =>
         {
             // Validate the bootstrap code
             if (!authService.ValidateAndConsumeBootstrapCode(code))
@@ -30,8 +30,13 @@ public static class AuthRoutes
                 IsEssential = true            // Exempt from GDPR consent requirements
             });
 
-            // Show the redirect page
-            return Results.Content(STRINGS.AUTH_BOOTSTRAP_HTML, "text/html");
+            // Redirect to the requested page, or default to /
+            var destination = (!string.IsNullOrWhiteSpace(redirect) && redirect.StartsWith('/'))
+                ? redirect
+                : "/";
+
+            var html = STRINGS.AUTH_BOOTSTRAP_HTML.Replace("window.location.replace('/')", $"window.location.replace('{destination}')");
+            return Results.Content(html, "text/html");
         }).WithName("AuthBootstrap");
     }
 }
