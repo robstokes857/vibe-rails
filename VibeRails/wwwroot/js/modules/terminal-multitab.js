@@ -1573,7 +1573,7 @@ export class TerminalController {
                     <div class="terminal-window-title-bar">
                         <div class="terminal-window-title" id="terminal-window-title">Terminals run safely in the background even if you navigate away.</div>
                     </div>
-                    <div class="card-body p-0" id="terminal-container" style="display: none; height: 680px; overflow: hidden;">
+                    <div class="card-body p-0" id="terminal-container" style="display: none; height: ${isFocusView ? '680px' : '500px'}; overflow: hidden;">
                         <div id="terminal-tab-panels" class="terminal-tab-panels"></div>
                     </div>
                     <div class="card-body text-center text-muted" id="terminal-placeholder">
