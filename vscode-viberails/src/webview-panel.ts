@@ -211,6 +211,7 @@ export class WebviewPanelManager {
         window.__viberails_API_BASE__ = 'http://localhost:${port}';
         window.__viberails_VSCODE__ = true;
         window.__viberails_ASSETS_BASE__ = '${assetsBaseUri}';
+        window.__viberails_NONCE__ = '${nonce}';
         const vscode = acquireVsCodeApi();
         window.__viberails_close__ = function() { vscode.postMessage({ command: 'close' }); };
         ${fetchPatch}

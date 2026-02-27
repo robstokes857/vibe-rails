@@ -232,10 +232,14 @@ namespace VibeRails.Services
             if (!Directory.Exists(sandbox.ProjectPath))
                 throw new InvalidOperationException("Source project directory no longer exists.");
 
-            // Check sandbox has committed changes
+            // Auto-commit any uncommitted changes in the sandbox before merging
             var sandboxStatus = await RunGitCommandAsync(sandbox.Path, "status --porcelain", ct);
             if (!string.IsNullOrWhiteSpace(sandboxStatus))
-                throw new InvalidOperationException("Sandbox has uncommitted changes. Please commit or stash them before merging.");
+            {
+                await RunGitCommandAsync(sandbox.Path, "add -A", throwOnError: true, ct);
+                await RunGitCommandAsync(sandbox.Path,
+                    "commit -m \"Auto-commit before merge\"", throwOnError: true, ct);
+            }
 
             // Check source project is clean
             var sourceStatus = await RunGitCommandAsync(sandbox.ProjectPath, "status --porcelain", ct);
