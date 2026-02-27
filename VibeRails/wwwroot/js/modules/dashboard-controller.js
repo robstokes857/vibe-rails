@@ -463,6 +463,7 @@ export class DashboardController {
             <option value="base:claude">Claude</option>
             <option value="base:codex">Codex</option>
             <option value="base:gemini">Gemini</option>
+            <option value="base:copilot">Copilot</option>
         `;
         selectEl.appendChild(baseGroup);
 

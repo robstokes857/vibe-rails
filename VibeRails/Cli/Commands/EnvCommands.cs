@@ -44,7 +44,7 @@ namespace VibeRails.Cli.Commands
                 },
                 new Dictionary<string, string>
                 {
-                    ["--cli <type>"] = "CLI type: claude, codex, or gemini (required for create)",
+                    ["--cli <type>"] = "CLI type: claude, codex, gemini, or copilot (required for create)",
                     ["--args <args>"] = "Custom CLI arguments",
                     ["--prompt <text>"] = "Custom system prompt"
                 }
@@ -96,19 +96,19 @@ namespace VibeRails.Cli.Commands
             if (string.IsNullOrEmpty(name))
             {
                 CliOutput.Error("Environment name is required.");
-                Console.WriteLine("Usage: vb env create <name> --cli <claude|codex|gemini>");
+                Console.WriteLine("Usage: vb env create <name> --cli <claude|codex|gemini|copilot>");
                 return 1;
             }
 
             if (string.IsNullOrEmpty(args.Cli))
             {
-                CliOutput.Error("CLI type is required. Use --cli claude, --cli codex, or --cli gemini.");
+                CliOutput.Error("CLI type is required. Use --cli claude, --cli codex, --cli gemini, or --cli copilot.");
                 return 1;
             }
 
             if (!TryParseLlm(args.Cli, out var llm))
             {
-                CliOutput.Error($"Invalid CLI type: {args.Cli}. Must be claude, codex, or gemini.");
+                CliOutput.Error($"Invalid CLI type: {args.Cli}. Must be claude, codex, gemini, or copilot.");
                 return 1;
             }
 
@@ -157,7 +157,7 @@ namespace VibeRails.Cli.Commands
 
             // Find environment - we need to check all LLM types since name might match multiple
             LLM_Environment? environment = null;
-            foreach (var llm in new[] { LLM.Claude, LLM.Codex, LLM.Gemini })
+            foreach (var llm in new[] { LLM.Claude, LLM.Codex, LLM.Gemini, LLM.Copilot })
             {
                 environment = await repository.GetEnvironmentByNameAndLlmAsync(name, llm, cancellationToken);
                 if (environment != null) break;
@@ -211,7 +211,7 @@ namespace VibeRails.Cli.Commands
 
             // Find environment
             LLM_Environment? environment = null;
-            foreach (var llm in new[] { LLM.Claude, LLM.Codex, LLM.Gemini })
+            foreach (var llm in new[] { LLM.Claude, LLM.Codex, LLM.Gemini, LLM.Copilot })
             {
                 environment = await repository.GetEnvironmentByNameAndLlmAsync(name, llm, cancellationToken);
                 if (environment != null) break;
@@ -241,7 +241,7 @@ namespace VibeRails.Cli.Commands
 
             // Find environment
             LLM_Environment? environment = null;
-            foreach (var llm in new[] { LLM.Claude, LLM.Codex, LLM.Gemini })
+            foreach (var llm in new[] { LLM.Claude, LLM.Codex, LLM.Gemini, LLM.Copilot })
             {
                 environment = await repository.GetEnvironmentByNameAndLlmAsync(name, llm, cancellationToken);
                 if (environment != null) break;
@@ -279,6 +279,7 @@ namespace VibeRails.Cli.Commands
                 "claude" => LLM.Claude,
                 "codex" => LLM.Codex,
                 "gemini" => LLM.Gemini,
+                "copilot" => LLM.Copilot,
                 _ => LLM.NotSet
             };
             return llm != LLM.NotSet;

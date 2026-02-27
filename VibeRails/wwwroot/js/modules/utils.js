@@ -3,7 +3,8 @@ export function getLlmName(llmEnum) {
         0: 'Unknown',
         1: 'Codex',
         2: 'Claude',
-        3: 'Gemini'
+        3: 'Gemini',
+        4: 'Copilot'
     };
     return names[llmEnum] || 'Unknown';
 }
@@ -67,6 +68,11 @@ export function getCliBrand(cli) {
             label: 'Gemini',
             logo: getAssetPath('assets/img/gemini-color.svg'),
             className: 'badge-cli-gemini'
+        },
+        copilot: {
+            label: 'Copilot',
+            logo: getAssetPath('assets/img/copilot.svg'),
+            className: 'badge-cli-copilot'
         }
     };
 

@@ -54,6 +54,7 @@ public static class EnvironmentRoutes
                 "claude" => LLM.Claude,
                 "codex" => LLM.Codex,
                 "gemini" => LLM.Gemini,
+                "copilot" => LLM.Copilot,
                 _ => LLM.NotSet
             };
 

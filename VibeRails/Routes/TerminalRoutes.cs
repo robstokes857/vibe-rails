@@ -40,6 +40,7 @@ public static class TerminalRoutes
                 "claude" => LLM.Claude,
                 "codex" => LLM.Codex,
                 "gemini" => LLM.Gemini,
+                "copilot" => LLM.Copilot,
                 _ => LLM.NotSet
             };
 
@@ -134,6 +135,7 @@ public static class TerminalRoutes
                 "claude" => LLM.Claude,
                 "codex" => LLM.Codex,
                 "gemini" => LLM.Gemini,
+                "copilot" => LLM.Copilot,
                 _ => LLM.NotSet
             };
 

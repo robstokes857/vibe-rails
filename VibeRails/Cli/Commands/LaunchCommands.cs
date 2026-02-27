@@ -21,6 +21,7 @@ namespace VibeRails.Cli.Commands
                 "claude" => await LaunchLlmAsync(LLM.Claude, args, services),
                 "codex" => await LaunchLlmAsync(LLM.Codex, args, services),
                 "gemini" => await LaunchLlmAsync(LLM.Gemini, args, services),
+                "copilot" => await LaunchLlmAsync(LLM.Copilot, args, services),
                 "vscode" => LaunchVsCode(args),
                 "help" or "--help" => ShowHelp(),
                 _ => ShowUnknownSubcommand(args.SubCommand)
@@ -37,6 +38,7 @@ namespace VibeRails.Cli.Commands
                     ["claude"] = "Launch Claude CLI",
                     ["codex"] = "Launch Codex CLI",
                     ["gemini"] = "Launch Gemini CLI",
+                    ["copilot"] = "Launch Copilot CLI",
                     ["vscode"] = "Launch VS Code in current directory"
                 },
                 new Dictionary<string, string>
@@ -66,7 +68,7 @@ namespace VibeRails.Cli.Commands
         private static int ShowUnknownSubcommand(string subcommand)
         {
             CliOutput.Error($"Unknown CLI: {subcommand}");
-            Console.WriteLine("Supported CLIs: claude, codex, gemini, vscode");
+            Console.WriteLine("Supported CLIs: claude, codex, gemini, copilot, vscode");
             Console.WriteLine("Run 'vb launch --help' for more information.");
             return 1;
         }

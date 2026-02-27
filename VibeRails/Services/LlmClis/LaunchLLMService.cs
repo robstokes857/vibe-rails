@@ -15,15 +15,18 @@ namespace VibeRails.Services.LlmClis
         private readonly IClaudeLlmCliLauncher _claudeLauncher;
         private readonly ICodexLlmCliLauncher _codexLauncher;
         private readonly IGeminiLlmCliLauncher _geminiLauncher;
+        private readonly ICopilotLlmCliLauncher _copilotLauncher;
 
         public LaunchLLMService(
             IClaudeLlmCliLauncher claudeLauncher,
             ICodexLlmCliLauncher codexLauncher,
-            IGeminiLlmCliLauncher geminiLauncher)
+            IGeminiLlmCliLauncher geminiLauncher,
+            ICopilotLlmCliLauncher copilotLauncher)
         {
             _claudeLauncher = claudeLauncher;
             _codexLauncher = codexLauncher;
             _geminiLauncher = geminiLauncher;
+            _copilotLauncher = copilotLauncher;
         }
 
         public IBaseLlmCliLauncher GetLauncher(LLM llm)
@@ -33,6 +36,7 @@ namespace VibeRails.Services.LlmClis
                 LLM.Claude => _claudeLauncher,
                 LLM.Codex => _codexLauncher,
                 LLM.Gemini => _geminiLauncher,
+                LLM.Copilot => _copilotLauncher,
                 _ => throw new ArgumentException($"Unsupported LLM type: {llm}")
             };
         }
