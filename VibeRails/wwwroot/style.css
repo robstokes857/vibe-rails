@@ -114,7 +114,7 @@ code {
     border-bottom: 1px solid var(--color-border);
     backdrop-filter: blur(8px);
     position: sticky;
-    top: 100px;
+    top: 64px;
     z-index: 1019;
     padding: 0 1rem;
     flex-wrap: wrap;
@@ -163,10 +163,10 @@ code {
 .navbar {
     background: rgba(30, 30, 36, 0.95);
     border-bottom: 1px solid var(--color-border);
-    padding: 0.75rem 1.5rem;
+    padding: 0.5rem 1.5rem;
     backdrop-filter: blur(12px);
     box-shadow: 0 2px 15px rgba(0, 0, 0, 0.3);
-    min-height: 100px;
+    height: 64px;
 }
 
 .navbar .container-fluid {
@@ -178,13 +178,13 @@ code {
 
 .navbar-brand {
     grid-column: 2;
-    font-size: 1.8rem;
+    font-size: 1.5rem;
     font-weight: 800;
     color: var(--color-text) !important;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.75rem;
     transition: all var(--transition-speed);
 }
 
@@ -197,7 +197,7 @@ code {
 }
 
 .brand-logo {
-    height: 80px; /* Fully restored height */
+    height: 36px; /* Fully restored height */
     width: auto;
     filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
     transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.5s;
@@ -218,7 +218,7 @@ code {
     font-weight: 800;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    font-size: 1.8rem; /* Corrected to match viberails.ai */
+    font-size: 1.4rem; /* Adjusted for shorter navbar */
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
 }
 
