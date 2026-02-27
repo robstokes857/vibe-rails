@@ -45,41 +45,37 @@ export class DashboardController {
 
                 headingContainer.innerHTML = `
                     <div class="context-header-card position-relative overflow-hidden">
-                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 position-relative" style="z-index: 2;">
-                            <div class="d-flex align-items-center gap-4">
-                                <div class="project-logo-wrapper shadow-lg" style="width: 64px; height: 64px; background: linear-gradient(135deg, rgba(91, 42, 134, 0.4), rgba(119, 133, 172, 0.3)); border: 1px solid rgba(154, 198, 197, 0.15);">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="currentColor" viewBox="0 0 16 16" style="color: var(--color-accent); opacity: 0.8;">
+                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="project-logo-wrapper" style="width: 48px; height: 48px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2);">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" style="color: var(--color-primary);">
                                         <path d="M9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.825a2 2 0 0 1-1.991-1.819l-.637-7a2 2 0 0 1 .342-1.31L.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3m-8.322.12C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 1z"/>
                                     </svg>
                                 </div>
                                 <div>
-                                    <div class="d-flex align-items-center gap-3 mb-1">
-                                        <h3 class="mb-0 text-white fw-bold">${projectName}</h3>
-                                        <button class="btn btn-link btn-sm p-0 text-muted" type="button" data-action="set-custom-name" title="Rename project">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                    <div class="d-flex align-items-center gap-2 mb-0">
+                                        <h4 class="mb-0 text-white fw-bold">${projectName}</h4>
+                                        <button class="btn btn-link btn-sm p-0 text-muted hover-accent" type="button" data-action="set-custom-name" title="Rename project">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                                                 <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/>
                                             </svg>
                                         </button>
                                     </div>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <span class="path-badge py-1 px-2" style="font-size: 0.8rem; opacity: 0.8;">${path}</span>
-                                    </div>
+                                    <div class="text-muted small font-monospace opacity-75">${path}</div>
                                 </div>
                             </div>
                             
-                            <div class="d-flex gap-4 me-3">
-                                <div class="text-center">
-                                    <div class="h4 mb-0 fw-bold text-accent" style="color: var(--color-accent);">${agentCount}</div>
-                                    <div class="text-muted small text-uppercase" style="font-size: 0.65rem; letter-spacing: 0.1em;">Agents</div>
+                            <div class="d-flex gap-3">
+                                <div class="d-flex align-items-center gap-2 px-3 py-1 rounded-pill bg-dark bg-opacity-25 border border-secondary border-opacity-10">
+                                    <span class="text-muted small text-uppercase fw-bold" style="font-size: 0.65rem; letter-spacing: 0.05em;">Agents</span>
+                                    <span class="fw-bold text-accent" style="color: var(--color-accent);">${agentCount}</span>
                                 </div>
-                                <div class="text-center border-start ps-4 border-secondary" style="border-opacity: 0.2;">
-                                    <div class="h4 mb-0 fw-bold text-info" style="color: #0dcaf0;">${sandboxCount}</div>
-                                    <div class="text-muted small text-uppercase" style="font-size: 0.65rem; letter-spacing: 0.1em;">Sandboxes</div>
+                                <div class="d-flex align-items-center gap-2 px-3 py-1 rounded-pill bg-dark bg-opacity-25 border border-secondary border-opacity-10">
+                                    <span class="text-muted small text-uppercase fw-bold" style="font-size: 0.65rem; letter-spacing: 0.05em;">Sandboxes</span>
+                                    <span class="fw-bold text-primary" style="color: var(--color-primary);">${sandboxCount}</span>
                                 </div>
                             </div>
                         </div>
-                        <!-- Background glow effect -->
-                        <div class="position-absolute" style="top: -50px; right: -50px; width: 200px; height: 200px; background: radial-gradient(circle, rgba(91, 42, 134, 0.15) 0%, transparent 70%); z-index: 1;"></div>
                     </div>
                 `;
 
@@ -123,22 +119,6 @@ export class DashboardController {
             const envCountLocal = root.querySelector('[data-env-count-local]');
             if (envCountLocal) {
                 envCountLocal.textContent = this.app.data.environments.length;
-            }
-
-            const fileTree = root.querySelector('[data-local-file-tree]');
-            if (fileTree) {
-                fileTree.innerHTML = this.app.renderLocalFileTree(fileTree);
-            }
-
-            if (localFileTreeSection) {
-                // Bind Add button to create agent wizard
-                this.app.bindAction(localFileTreeSection, '[data-action="create-agent-file"]', () => {
-                    this.app.navigate('agent-create');
-                });
-                // Bind settings cog to navigate to agents list
-                this.app.bindAction(localFileTreeSection, '[data-action="navigate-agents"]', () => {
-                    this.app.navigate('agents');
-                });
             }
         }
 
@@ -222,17 +202,14 @@ export class DashboardController {
 
         // Terminal section
         const terminalSection = root.querySelector('[data-terminal-section]');
-        if (terminalSection) {
-            terminalSection.style.removeProperty('display');
-            const terminalContent = terminalSection.querySelector('[data-terminal-content]');
-            if (terminalContent) {
-                terminalContent.innerHTML = this.app.terminalController.renderTerminalPanel();
-                // Pass preselected environment ID if navigating from environments page
-                this.app.terminalController.bindTerminalActions(
-                    terminalContent,
-                    data.preselectedEnvId || null
-                );
-            }
+        const terminalContent = root.querySelector('[data-terminal-content]');
+        if (terminalContent) {
+            terminalContent.innerHTML = this.app.terminalController.renderTerminalPanel();
+            // Pass preselected environment ID if navigating from environments page
+            this.app.terminalController.bindTerminalActions(
+                terminalContent,
+                data.preselectedEnvId || null
+            );
         }
 
         return fragment;
@@ -315,13 +292,13 @@ export class DashboardController {
         const sandboxes = this.app.data.sandboxes || [];
 
         if (sandboxes.length === 0) {
-            container.innerHTML = '<p class="text-muted text-center">No sandboxes yet. Create one to work in an isolated copy of your project.</p>';
+            container.innerHTML = '<p class="text-muted text-center py-3">No sandboxes yet. Create one to work in an isolated copy of your project.</p>';
             return;
         }
 
         const template = document.getElementById('sandbox-item-template');
         if (!template) {
-            container.innerHTML = '<p class="text-muted text-center">Template not found.</p>';
+            container.innerHTML = '<p class="text-muted text-center py-3">Template not found.</p>';
             return;
         }
 
@@ -336,59 +313,15 @@ export class DashboardController {
             const branch = node.querySelector('[data-sandbox-branch]');
             if (branch) branch.textContent = sb.branch;
 
-            const sourceBranchContainer = node.querySelector('[data-sandbox-source-branch]');
-            const sourceBranchText = node.querySelector('[data-sandbox-source-branch-text]');
-            if (sourceBranchContainer && sourceBranchText && sb.sourceBranch) {
-                sourceBranchContainer.style.removeProperty('display');
-                sourceBranchText.textContent = `from ${sb.sourceBranch}`;
-            }
-
             const time = node.querySelector('[data-sandbox-time]');
             if (time) time.textContent = sb.created;
-
-            const path = node.querySelector('[data-sandbox-path]');
-            if (path) path.textContent = sb.path;
-
-            // Show remote URL if available
-            const remoteContainer = node.querySelector('[data-sandbox-remote]');
-            const remoteUrlEl = node.querySelector('[data-sandbox-remote-url]');
-            if (remoteContainer && remoteUrlEl && sb.remoteUrl) {
-                remoteContainer.style.removeProperty('display');
-                remoteUrlEl.textContent = sb.remoteUrl;
-            }
-
-            // Populate CLI select with environments
-            const cliSelect = node.querySelector('[data-sandbox-cli-select]');
-            if (cliSelect) {
-                this.populateSandboxCliSelect(cliSelect);
-            }
 
             // Web Terminal launch button
             const webUiBtn = node.querySelector('[data-sandbox-launch-webui]');
             if (webUiBtn) {
                 webUiBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const { cli, environmentName } = this.parseSandboxCliSelection(cliSelect);
-                    this.app.sandboxController.launchInWebUI(sb.id, sb.name, cli, environmentName);
-                });
-            }
-
-            // External Terminal launch button
-            const terminalBtn = node.querySelector('[data-sandbox-launch-terminal]');
-            if (terminalBtn) {
-                terminalBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const { cli, environmentName } = this.parseSandboxCliSelection(cliSelect);
-                    this.app.sandboxController.launchInExternalTerminal(sb.id, sb.name, cli, environmentName);
-                });
-            }
-
-            // Shell button
-            const shellBtn = node.querySelector('[data-sandbox-launch-shell]');
-            if (shellBtn) {
-                shellBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.app.sandboxController.launchShell(sb.id, sb.name);
+                    this.app.sandboxController.launchInWebUI(sb.id, sb.name);
                 });
             }
 
@@ -398,50 +331,6 @@ export class DashboardController {
                 vscodeBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     this.app.sandboxController.launchVSCode(sb.id, sb.name);
-                });
-            }
-
-            // See Changes (diff) button
-            const diffBtn = node.querySelector('[data-sandbox-diff]');
-            if (diffBtn) {
-                diffBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.app.sandboxController.showDiff(sb.id, sb.name);
-                });
-            }
-
-            // Push to Remote button (only visible when remoteUrl is set)
-            const pushBtn = node.querySelector('[data-sandbox-push-remote]');
-            if (pushBtn) {
-                if (sb.remoteUrl) {
-                    pushBtn.style.removeProperty('display');
-                    pushBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        this.app.sandboxController.pushToRemote(sb.id, sb.name);
-                    });
-                }
-            }
-
-            // Merge Local button (only visible when sourceBranch is set)
-            const mergeBtn = node.querySelector('[data-sandbox-merge-local]');
-            if (mergeBtn) {
-                if (sb.sourceBranch) {
-                    mergeBtn.style.removeProperty('display');
-                    const mergeLabel = mergeBtn.querySelector('[data-sandbox-merge-label]');
-                    if (mergeLabel) mergeLabel.textContent = `Merge \u2192 ${sb.sourceBranch}`;
-                    mergeBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        this.app.sandboxController.mergeLocally(sb.id, sb.name, sb.sourceBranch);
-                    });
-                }
-            }
-
-            // Delete button
-            const deleteBtn = node.querySelector('[data-sandbox-delete]');
-            if (deleteBtn) {
-                deleteBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.app.sandboxController.deleteSandbox(sb.id, sb.name);
                 });
             }
 

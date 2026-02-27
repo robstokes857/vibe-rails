@@ -127,7 +127,6 @@ export class VibeControlApp {
                 e.preventDefault();
                 this.navigationStack = ['dashboard'];
                 this.currentView = 'dashboard';
-                this.updateBreadcrumb();
                 this.loadView('dashboard');
             }
 
@@ -180,8 +179,19 @@ export class VibeControlApp {
         }
 
         this.currentView = view;
-        this.updateBreadcrumb();
         this.loadView(view, data);
+    }
+
+    updateActiveSubNav(view) {
+        document.querySelectorAll('.app-subnav-link').forEach(link => {
+            const linkView = link.getAttribute('data-view') || (link.getAttribute('data-action') === 'navigate-home' ? 'dashboard' : (link.getAttribute('data-action') === 'navigate-settings' ? 'settings' : ''));
+            
+            if (linkView === view) {
+                link.classList.add('active');
+            } else {
+                link.classList.remove('active');
+            }
+        });
     }
 
     goBack() {
@@ -189,73 +199,12 @@ export class VibeControlApp {
             this.navigationStack.pop();
             const previous = this.navigationStack[this.navigationStack.length - 1];
             this.currentView = previous.view || previous;
-            this.updateBreadcrumb();
             this.loadView(this.currentView, previous.data);
         }
     }
 
-    updateBreadcrumb() {
-        const breadcrumb = document.getElementById('breadcrumb');
-
-        // Use DOM methods instead of innerHTML to prevent XSS
-        const breadcrumbList = document.createElement('ol');
-        breadcrumbList.className = 'breadcrumb mb-0';
-
-        this.navigationStack.forEach((item, index) => {
-            const viewName = typeof item === 'string' ? item : item.view;
-            const displayName = this.getViewDisplayName(viewName);
-            const isLast = index === this.navigationStack.length - 1;
-
-            const li = document.createElement('li');
-            li.className = `breadcrumb-item${isLast ? ' active' : ''}`;
-
-            if (isLast) {
-                li.textContent = displayName;
-            } else {
-                const link = document.createElement('a');
-                link.href = '#';
-                link.textContent = displayName;
-                link.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    this.navigateToIndex(index);
-                });
-                li.appendChild(link);
-            }
-
-            breadcrumbList.appendChild(li);
-        });
-
-        breadcrumb.innerHTML = ''; // Clear existing content
-        breadcrumb.appendChild(breadcrumbList);
-    }
-
-    navigateToIndex(index) {
-        this.navigationStack = this.navigationStack.slice(0, index + 1);
-        const current = this.navigationStack[index];
-        this.currentView = typeof current === 'string' ? current : current.view;
-        this.updateBreadcrumb();
-        this.loadView(this.currentView, current.data);
-    }
-
-    getViewDisplayName(view) {
-        const names = {
-            'dashboard': 'Dashboard',
-            'launch-cli': 'Launch CLI',
-            'agents': 'Agent Files & Rules',
-            'agent-edit': 'Edit Agent',
-            'agent-create': 'Create Agent',
-            'check-violations': 'Check Violations',
-            'active-rules': 'Active Rules',
-            'environments': 'Environments',
-            'config': 'Configuration',
-            'settings': 'Settings',
-            'terminal-focus': 'Terminal Focus',
-            'sandboxes': 'Sandboxes'
-        };
-        return names[view] || view;
-    }
-
     loadView(view, data = {}) {
+        this.updateActiveSubNav(view);
         this.terminalController?.resetLayoutStateForNavigation();
         this.applyViewLayoutState(view);
         window.scrollTo(0, 0);
@@ -295,32 +244,37 @@ export class VibeControlApp {
     renderLocalFileTree(container) {
         if (this.data.agents.length === 0) {
             return `
-                <div class="agent-files-empty">
-                    <div class="agent-files-empty-icon">&#x1F4C4;</div>
-                    <p>No agent files found in this project.</p>
+                <div class="agent-files-empty py-4">
+                    <div class="mb-3 opacity-25">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5zm-3 0V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5z"/>
+                        </svg>
+                    </div>
+                    <p class="text-muted small">No agent files found in this project.</p>
                 </div>
             `;
         }
 
         const html = `
-            <div class="agent-files-tree">
+            <div class="agent-files-tree d-flex flex-column gap-2">
                 ${this.data.agents.map((agent, idx) => {
                     const parts = agent.path.split(/[\\/]/);
                     const fileName = parts.pop();
                     const dirPath = parts.length > 0 ? parts.join('/') + '/' : '';
 
-                    const infoHtml = agent.customName
-                        ? `<span class="agent-file-tree-name">${agent.customName}</span>
-                           <span class="agent-file-tree-path">${dirPath}${fileName}</span>`
-                        : `<span class="agent-file-tree-name agent-file-tree-name--path">${dirPath}${fileName}</span>`;
-
                     return `
-                    <div class="agent-file-tree-item" data-agent-tree-index="${idx}" style="cursor:pointer;">
-                        <div class="agent-file-tree-icon">&#x1F4DD;</div>
-                        <div class="agent-file-tree-info">
-                            ${infoHtml}
+                    <div class="agent-file-tree-item p-2 px-3 d-flex align-items-center gap-3 border border-secondary border-opacity-10 rounded bg-dark bg-opacity-25" data-agent-tree-index="${idx}" style="cursor:pointer;">
+                        <div class="agent-file-tree-icon bg-primary bg-opacity-10 text-primary rounded d-flex align-items-center justify-content-center" style="width: 32px; height: 32px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M12 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM4 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
+                                <path d="M4 4.5V5h8v-.5zm0 2V7h8v-.5zm0 2V9h8v-.5zm0 2v.5h5v-.5z"/>
+                            </svg>
                         </div>
-                        <span class="agent-file-tree-badge">${agent.ruleCount || 0} rules</span>
+                        <div class="agent-file-tree-info flex-grow-1 min-w-0">
+                            <div class="fw-bold text-white text-truncate" style="font-size: 0.9rem;">${agent.customName || fileName}</div>
+                            <div class="text-muted small opacity-50 font-monospace text-truncate" style="font-size: 0.7rem;">${dirPath}${fileName}</div>
+                        </div>
+                        <span class="badge bg-dark border border-secondary border-opacity-25 text-muted x-small fw-normal">${agent.ruleCount || 0} rules</span>
                     </div>
                 `}).join('')}
             </div>

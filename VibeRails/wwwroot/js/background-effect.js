@@ -1,15 +1,13 @@
 (function () {
-    // 1. Inject Canvas
     const canvas = document.createElement('canvas');
     canvas.id = 'bg-canvas';
-    // Style properties to ensure it sits in the background but over the body-color
     Object.assign(canvas.style, {
         position: 'fixed',
         top: '0',
         left: '0',
         width: '100%',
         height: '100%',
-        zIndex: '0', // Content should be z-index 1 or higher
+        zIndex: '-1',
         pointerEvents: 'none'
     });
     document.body.prepend(canvas);
@@ -17,38 +15,40 @@
     const ctx = canvas.getContext('2d');
     let width, height;
     let particles = [];
-    let mouse = { x: null, y: null };
+    const mouse = { x: null, y: null };
 
-    // Vibe Rails Palette
-    const colors = [
-        'rgba(91, 42, 134, 0.6)',   // #5b2a86 (Primary Purple)
-        'rgba(154, 198, 197, 0.6)', // #9ac6c5 (Accent Teal)
-        'rgba(119, 133, 172, 0.6)', // #7785ac (Secondary Blue)
-        'rgba(255, 255, 255, 0.3)'  // Subtle White
-    ];
-
-    const config = {
-        particleCount: 80, // Slightly less dense for a dashboard
-        connectDistance: 120,
-        mouseRepel: 150,
-        speed: 0.4
-    };
-
-    function resize() {
-        width = canvas.width = window.innerWidth;
-        height = canvas.height = window.innerHeight;
+    // Get theme colors but keep them very subtle
+    function getColors() {
+        const style = getComputedStyle(document.documentElement);
+        const primary = style.getPropertyValue('--color-primary').trim() || '#3b82f6';
+        const secondary = style.getPropertyValue('--color-secondary').trim() || '#64748b';
+        
+        // Return colors with low opacity for the "little balls"
+        return [
+            primary + '44', // 0.27 opacity
+            secondary + '33', // 0.2 opacity
+            'rgba(255, 255, 255, 0.1)'
+        ];
     }
 
-    window.addEventListener('resize', resize);
-    resize();
+    const config = {
+        count: 100,
+        speed: 0.3,
+        connectDist: 100
+    };
 
     class Particle {
         constructor() {
+            this.init();
+        }
+
+        init() {
             this.x = Math.random() * width;
             this.y = Math.random() * height;
             this.vx = (Math.random() - 0.5) * config.speed;
             this.vy = (Math.random() - 0.5) * config.speed;
-            this.size = Math.random() * 2 + 0.5;
+            this.radius = Math.random() * 1.5 + 1;
+            const colors = getColors();
             this.color = colors[Math.floor(Math.random() * colors.length)];
         }
 
@@ -56,88 +56,64 @@
             this.x += this.vx;
             this.y += this.vy;
 
-            // Mouse interaction
-            if (mouse.x != null) {
+            if (this.x < 0 || this.x > width) this.vx *= -1;
+            if (this.y < 0 || this.y > height) this.vy *= -1;
+
+            if (mouse.x !== null) {
                 let dx = mouse.x - this.x;
                 let dy = mouse.y - this.y;
-                let distance = Math.sqrt(dx * dx + dy * dy);
-
-                if (distance < config.mouseRepel) {
-                    const forceDirectionX = dx / distance;
-                    const forceDirectionY = dy / distance;
-                    const force = (config.mouseRepel - distance) / config.mouseRepel;
-                    const directionX = forceDirectionX * force * 0.6;
-                    const directionY = forceDirectionY * force * 0.6;
-
-                    this.vx -= directionX;
-                    this.vy -= directionY;
+                let dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 150) {
+                    this.vx -= dx * 0.001;
+                    this.vy -= dy * 0.001;
                 }
             }
-
-            // Friction
-            this.vx *= 0.98;
-            this.vy *= 0.98;
-
-            // Min speed
-            if (Math.abs(this.vx) < 0.1) this.vx += (Math.random() - 0.5) * 0.05;
-            if (Math.abs(this.vy) < 0.1) this.vy += (Math.random() - 0.5) * 0.05;
-
-            // Wrap
-            if (this.x < 0) this.x = width;
-            if (this.x > width) this.x = 0;
-            if (this.y < 0) this.y = height;
-            if (this.y > height) this.y = 0;
         }
 
         draw() {
             ctx.beginPath();
-            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
             ctx.fillStyle = this.color;
             ctx.fill();
         }
     }
 
-    function initParticles() {
-        particles = [];
-        for (let i = 0; i < config.particleCount; i++) {
-            particles.push(new Particle());
-        }
+    function resize() {
+        width = canvas.width = window.innerWidth;
+        height = canvas.height = window.innerHeight;
     }
-
-    initParticles();
 
     function animate() {
         ctx.clearRect(0, 0, width, height);
+        
+        for (let i = 0; i < particles.length; i++) {
+            const p1 = particles[i];
+            p1.update();
+            p1.draw();
 
-        particles.forEach(p => {
-            p.update();
-            p.draw();
-        });
+            for (let j = i + 1; j < particles.length; j++) {
+                const p2 = particles[j];
+                const dx = p1.x - p2.x;
+                const dy = p1.y - p2.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
 
-        // Connections
-        ctx.lineWidth = 0.5;
-        for (let a = 0; a < particles.length; a++) {
-            for (let b = a; b < particles.length; b++) {
-                let dx = particles[a].x - particles[b].x;
-                let dy = particles[a].y - particles[b].y;
-                let distance = Math.sqrt(dx * dx + dy * dy);
-
-                if (distance < config.connectDistance) {
-                    // Gradient line opacity based on distance
-                    const opacity = 1 - (distance / config.connectDistance);
-                    ctx.strokeStyle = `rgba(154, 198, 197, ${opacity * 0.15})`; // Use accent color low opacity
+                if (dist < config.connectDist) {
                     ctx.beginPath();
-                    ctx.moveTo(particles[a].x, particles[a].y);
-                    ctx.lineTo(particles[b].x, particles[b].y);
+                    ctx.strokeStyle = `rgba(148, 163, 184, ${0.1 * (1 - dist / config.connectDist)})`;
+                    ctx.lineWidth = 0.5;
+                    ctx.moveTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
                     ctx.stroke();
                 }
             }
         }
-
         requestAnimationFrame(animate);
     }
 
-    animate();
+    window.addEventListener('resize', () => {
+        resize();
+        particles = Array.from({ length: config.count }, () => new Particle());
+    });
 
     window.addEventListener('mousemove', (e) => {
         mouse.x = e.clientX;
@@ -149,4 +125,7 @@
         mouse.y = null;
     });
 
+    resize();
+    particles = Array.from({ length: config.count }, () => new Particle());
+    animate();
 })();
