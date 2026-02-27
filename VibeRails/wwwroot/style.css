@@ -1186,6 +1186,84 @@ button:hover .card-nav-cog {
     color: #ffffff;
 }
 
+/* Controls bar — dark background matching card header */
+#terminal-panel .terminal-controls-bar {
+    background: var(--terminal-header-bg);
+    border-bottom: 1px solid var(--terminal-border);
+}
+
+#terminal-panel .terminal-controls-bar .form-select {
+    background-color: #11111b;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%239ac6c5' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+    border: 1px solid var(--terminal-accent);
+    border-radius: 6px;
+    color: #cdd6f4;
+    font-size: 0.8rem;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    min-width: 160px;
+}
+
+#terminal-panel .terminal-controls-bar .form-select:hover {
+    border-color: #cdd6f4;
+    background-color: rgba(154, 198, 197, 0.06);
+}
+
+#terminal-panel .terminal-controls-bar .form-select:focus {
+    background-color: #11111b;
+    border-color: var(--terminal-accent);
+    box-shadow: 0 0 0 0.15rem rgba(154, 198, 197, 0.25);
+    color: #cdd6f4;
+}
+
+#terminal-panel .terminal-controls-bar .form-select:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    border-color: var(--terminal-border);
+}
+
+/* Tab strip synced select */
+#terminal-tab-strip-select {
+    background-color: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    color: #6c7086;
+    font-size: 0.72rem;
+    padding: 2px 6px;
+    height: calc(100% - 10px);
+    margin-top: 5px;
+    margin-bottom: 5px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+    flex-shrink: 0;
+    max-width: 160px;
+}
+
+#terminal-tab-strip-select:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #cdd6f4;
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+#terminal-tab-strip-select:focus {
+    background: rgba(255, 255, 255, 0.1);
+    color: #cdd6f4;
+    border-color: var(--terminal-accent);
+    box-shadow: 0 0 0 0.15rem rgba(154, 198, 197, 0.2);
+    outline: none;
+}
+
+#terminal-tab-strip-select:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+#terminal-tab-strip-select option,
+#terminal-tab-strip-select optgroup {
+    background: #1e1e2e;
+    color: #cdd6f4;
+}
+
 /* Tab bar header */
 #terminal-panel .terminal-window-header {
     background: var(--terminal-header-bg);

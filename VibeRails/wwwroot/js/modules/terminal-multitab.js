@@ -387,9 +387,10 @@ class TerminalManager {
         this.windowTitle = null;
 
         this.startBtn = null;
-        this.searchBtn = null;
         this.reconnectBtn = null;
         this.stopBtn = null;
+        this.controlsBar = null;
+        this.headerSelect = null;
         this.closeDot = null;
         this.minimizeDot = null;
         this.maximizeDot = null;
@@ -415,9 +416,10 @@ class TerminalManager {
         this.windowTitle = this.container.querySelector('#terminal-window-title');
 
         this.startBtn = this.container.querySelector('#terminal-start-btn');
-        this.searchBtn = this.container.querySelector('#terminal-search-btn');
         this.reconnectBtn = this.container.querySelector('#terminal-reconnect-btn');
         this.stopBtn = this.container.querySelector('#terminal-stop-btn');
+        this.controlsBar = this.container.querySelector('#terminal-controls-bar');
+        this.headerSelect = this.container.querySelector('#terminal-header-select');
         this.closeDot = this.container.querySelector('#terminal-close-dot');
         this.minimizeDot = this.container.querySelector('#terminal-minimize-dot');
         this.maximizeDot = this.container.querySelector('#terminal-maximize-dot');
@@ -484,7 +486,18 @@ class TerminalManager {
             void this.createAndActivateTab({ selection: DEFAULT_SELECTION });
         });
 
-        this.tabSelect?.addEventListener('change', (e) => {
+        this.tabSelect?.addEventListener('click', () => {
+            if (this.selectionMenu) {
+                this.closeSelectionMenu();
+                return;
+            }
+            const active = this.getActiveTab();
+            if (active && !active.state.hasActiveSession && this.tabSelect) {
+                this.openSelectionMenu(active.state.id, this.tabSelect);
+            }
+        });
+
+        this.headerSelect?.addEventListener('change', (e) => {
             const active = this.getActiveTab();
             if (active && !active.state.hasActiveSession) {
                 this.applySelection(active, e.target.value);
@@ -493,10 +506,6 @@ class TerminalManager {
 
         this.startBtn?.addEventListener('click', () => {
             void this.startActiveTab();
-        });
-
-        this.searchBtn?.addEventListener('click', () => {
-            this.searchActiveTab();
         });
 
         this.reconnectBtn?.addEventListener('click', () => {
@@ -861,7 +870,7 @@ class TerminalManager {
                 cli: null,
                 envId: null,
                 environmentName: null,
-                displayName: 'Select LLM to launch'
+                displayName: 'Select LLM to launch Terminal. Terminals run safely in the background even if you navigate away.'
             };
         }
         if (!selection.startsWith('env:')) {
@@ -932,9 +941,9 @@ class TerminalManager {
     }
 
     populateSelect() {
-        if (!this.tabSelect || this.tabSelect.tagName !== 'SELECT') return;
+        if (!this.headerSelect || this.headerSelect.tagName !== 'SELECT') return;
 
-        this.tabSelect.innerHTML = '<option value="" disabled>Select LLM...</option>';
+        this.headerSelect.innerHTML = '<option value="" disabled>Select LLM...</option>';
 
         const groups = {};
         this.getSelectionOptions().forEach((option) => {
@@ -951,7 +960,7 @@ class TerminalManager {
                 opt.textContent = option.label;
                 optgroup.appendChild(opt);
             });
-            this.tabSelect.appendChild(optgroup);
+            this.headerSelect.appendChild(optgroup);
         });
     }
 
@@ -971,11 +980,9 @@ class TerminalManager {
 
         if (!active) {
             this.keyboardBtn?.classList.add('d-none');
-            this.searchBtn?.classList.add('d-none');
             this.setBadge('Not Started', 'bg-secondary');
             this.updateActionButtons({ start: true, reconnect: false, stop: false });
             this.showPlaceholder();
-            if (this.windowTitle) this.windowTitle.textContent = 'Web Terminal';
             this.updateAddButtonState();
             return;
         }
@@ -993,18 +1000,10 @@ class TerminalManager {
             this.keyboardBtn.classList.toggle('d-none', !active.state.hasActiveSession);
         }
 
-        if (this.searchBtn) {
-            this.searchBtn.classList.toggle('d-none', !active.state.hasActiveSession);
-        }
-
         if (active.state.hasActiveSession) {
             this.showTerminal();
         } else {
             this.showPlaceholder();
-        }
-
-        if (this.windowTitle) {
-            this.windowTitle.textContent = active.state.title || `${active.state.label} Terminal`;
         }
 
         this.updateWindowControlState();
@@ -1027,15 +1026,23 @@ class TerminalManager {
     setBadge(text, className) {
         if (!this.statusBadge) return;
 
-        this.statusBadge.textContent = text;
-        this.statusBadge.classList.remove('bg-secondary', 'bg-success', 'bg-warning', 'bg-danger', 'bg-info');
-        this.statusBadge.classList.add(className);
+        const hide = className === 'bg-secondary';
+        this.statusBadge.classList.toggle('d-none', hide);
+        if (!hide) {
+            this.statusBadge.textContent = text;
+            this.statusBadge.classList.remove('bg-secondary', 'bg-success', 'bg-warning', 'bg-danger', 'bg-info');
+            this.statusBadge.classList.add(className);
+        }
     }
 
     updateActionButtons({ start, reconnect, stop }) {
         this.startBtn?.classList.toggle('d-none', !start);
         this.reconnectBtn?.classList.toggle('d-none', !reconnect);
         this.stopBtn?.classList.toggle('d-none', !stop);
+
+        // connected = has active session AND not in disconnected state
+        const connected = stop && !reconnect;
+        this.controlsBar?.classList.toggle('d-none', connected);
     }
 
     showPlaceholder() {
@@ -1061,15 +1068,21 @@ class TerminalManager {
 
         if (this.tabSelect) {
             const active = this.getActiveTab();
+            const isBlocked = active && active.state.hasActiveSession;
+            this.tabSelect.disabled = !!isBlocked;
+            this.tabSelect.title = isBlocked
+                ? 'Stop terminal to change CLI/environment'
+                : 'Select CLI/environment for active tab';
+        }
+
+        if (this.headerSelect) {
+            const active = this.getActiveTab();
             const canSelect = active && !active.state.hasActiveSession;
-            this.tabSelect.disabled = !canSelect;
-            this.tabSelect.title = canSelect
-                ? 'Select CLI/environment for active tab'
-                : 'Stop terminal to change CLI/environment';
+            this.headerSelect.disabled = !canSelect;
             if (active) {
-                this.tabSelect.value = active.state.selection || '';
+                this.headerSelect.value = active.state.selection || '';
             } else {
-                this.tabSelect.value = '';
+                this.headerSelect.value = '';
             }
         }
     }
@@ -1482,56 +1495,49 @@ export class TerminalController {
         return `
             <div class="card ${isFocusView ? 'terminal-page-mode terminal-expanded terminal-focus-card' : 'mb-4'}" id="terminal-panel">
                 <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
-                    <div class="terminal-header-main">
-                        <div class="d-flex align-items-center gap-2 flex-wrap">
-                            <span class="card-title d-inline-flex align-items-center gap-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 576 512" style="opacity: 0.85;">
-                                    <path d="M9.4 86.6C-3.1 74.1-3.1 53.9 9.4 41.4s32.8-12.5 45.3 0l192 192c12.5 12.5 12.5 32.8 0 45.3l-192 192c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L178.7 256 9.4 86.6zM256 416l288 0c17.7 0 32 14.3 32 32s-14.3 32-32 32l-288 0c-17.7 0-32-14.3-32-32s14.3-32 32-32z"/>
-                                </svg>
-                                Web Terminal
-                            </span>
-                            <span class="badge bg-secondary" id="terminal-status-badge">Not Started</span>
-                        </div>
-                        <p class="text-muted small mb-0 mt-1">Each tab is isolated. Use 'Select LLM' to pick CLI/environment and + to open up to 8 tabs. Terminals run safely in the background even if you navigate away.</p>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <span class="card-title d-inline-flex align-items-center gap-2 mb-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 576 512" style="opacity: 0.85;">
+                                <path d="M9.4 86.6C-3.1 74.1-3.1 53.9 9.4 41.4s32.8-12.5 45.3 0l192 192c12.5 12.5 12.5 32.8 0 45.3l-192 192c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L178.7 256 9.4 86.6zM256 416l288 0c17.7 0 32 14.3 32 32s-14.3 32-32 32l-288 0c-17.7 0-32-14.3-32-32s14.3-32 32-32z"/>
+                            </svg>
+                            Web Terminal
+                        </span>
+                        <span class="badge bg-secondary d-none" id="terminal-status-badge"></span>
                     </div>
-                    <div class="d-flex gap-2 align-items-center flex-wrap justify-content-end" id="terminal-actions">
-                        <select class="form-select form-select-sm" id="terminal-tab-select-btn" style="width: auto;">
-                            <option value="" disabled selected>Select LLM...</option>
-                        </select>
-                        <button class="btn btn-sm btn-outline-info d-inline-flex align-items-center gap-1" id="terminal-start-btn">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814z"/>
-                                <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1z"/>
-                            </svg>
-                            <span>Start</span>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary d-none d-inline-flex align-items-center gap-1" id="terminal-search-btn" title="Find in terminal (Ctrl/Cmd+F)">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M11.742 10.344a6.5 6.5 0 1 0-1.398 1.398h-.001l3.85 3.85a1 1 0 0 0 1.414-1.414zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0"/>
-                            </svg>
-                            <span>Find</span>
-                        </button>
+                    <div class="d-flex gap-2 align-items-center" id="terminal-actions">
                         <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1 d-none d-md-none" id="terminal-keyboard-btn" title="Focus terminal input keyboard">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M14 5H2a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1M2 4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/>
                                 <path d="M2 7h1v1H2zm2 0h1v1H4zm2 0h1v1H6zm2 0h1v1H8zm2 0h1v1h-1zm2 0h1v1h-1zM2 9h8v1H2z"/>
                             </svg>
                             <span>Keyboard</span>
                         </button>
-                        <button class="btn btn-sm btn-outline-light d-none d-inline-flex align-items-center gap-1" id="terminal-reconnect-btn" title="Reconnect to active session">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
-                                <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
-                            </svg>
-                            <span>Reconnect</span>
-                        </button>
-                        <button class="btn btn-sm btn-outline-warning d-none d-inline-flex align-items-center gap-1" id="terminal-stop-btn">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                        <button class="btn btn-sm btn-outline-warning d-none d-inline-flex align-items-center gap-1" id="terminal-stop-btn" title="Stop and shut down terminal session">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M5 3.5h6A1.5 1.5 0 0 1 12.5 5v6a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 11V5A1.5 1.5 0 0 1 5 3.5"/>
                             </svg>
                             <span>Stop</span>
                         </button>
                     </div>
+                </div>
+                <div class="d-flex gap-2 align-items-center flex-wrap px-3 py-2 border-bottom terminal-controls-bar" id="terminal-controls-bar">
+                    <select class="form-select form-select-sm" id="terminal-header-select" style="width: auto;">
+                        <option value="" disabled selected>Select LLM...</option>
+                    </select>
+                    <button class="btn btn-sm btn-outline-info d-inline-flex align-items-center gap-1" id="terminal-start-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814z"/>
+                            <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1z"/>
+                        </svg>
+                        <span>Start</span>
+                    </button>
+                    <button class="btn btn-sm btn-outline-light d-none d-inline-flex align-items-center gap-1" id="terminal-reconnect-btn" title="Reconnect to active session">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
+                            <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
+                        </svg>
+                        <span>Reconnect</span>
+                    </button>
                 </div>
                 <div class="terminal-window-shell">
                     <div class="terminal-window-header">
@@ -1541,11 +1547,10 @@ export class TerminalController {
                         </div>
                         <div class="terminal-tab-strip" id="terminal-tab-strip">
                             <div class="terminal-tab-list" id="terminal-tab-list"></div>
-                            <div class="terminal-tab-action-group">
-                                <button type="button" class="terminal-tab-add" id="terminal-tab-add-btn" title="Open a new terminal tab" aria-label="Open a new terminal tab">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>
-                                </button>
-                            </div>
+                            <button type="button" class="terminal-tab-add" id="terminal-tab-add-btn" title="Open a new terminal tab" aria-label="Open a new terminal tab">+</button>
+                            <button type="button" class="terminal-tab-select" id="terminal-tab-select-btn" title="Select CLI/environment for active tab" aria-label="Select CLI/environment">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708"/></svg>
+                            </button>
                         </div>
                         <div class="terminal-window-controls terminal-window-controls-right">
                             ${lockButtonHtml}
@@ -1559,7 +1564,7 @@ export class TerminalController {
                         </div>
                     </div>
                     <div class="terminal-window-title-bar">
-                        <div class="terminal-window-title" id="terminal-window-title">Web Terminal</div>
+                        <div class="terminal-window-title" id="terminal-window-title">Terminals run safely in the background even if you navigate away.</div>
                     </div>
                     <div class="card-body p-0" id="terminal-container" style="display: none; height: 680px; overflow: hidden;">
                         <div id="terminal-tab-panels" class="terminal-tab-panels"></div>
