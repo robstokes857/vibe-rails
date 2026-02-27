@@ -235,7 +235,10 @@ export class SandboxController {
                 return;
             }
 
-            require.config({ paths: { vs: 'assets/monaco/vs' } });
+            const assetsBase = (window.__viberails_ASSETS_BASE__ || '').replace(/\/$/, '');
+            const vsPath = assetsBase ? `${assetsBase}/assets/monaco/vs` : 'assets/monaco/vs';
+            const cspNonce = window.__viberails_NONCE__ || undefined;
+            require.config({ paths: { vs: vsPath }, cspNonce });
 
             const timeout = setTimeout(() => {
                 console.error('Monaco editor load timed out');
