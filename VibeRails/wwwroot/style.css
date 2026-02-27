@@ -1390,14 +1390,26 @@ button:hover .card-nav-cog {
     color: #cdd6f4;
 }
 
+#terminal-panel .terminal-tab-action-group {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    margin-left: 2px;
+}
+
 #terminal-panel .terminal-tab-add {
     background: transparent;
     border: none;
-    border-left: 1px solid var(--terminal-border);
     color: #6c7086;
-    padding: 0 11px;
-    height: 100%;
-    font-size: 1.1rem;
+    padding: 0 10px;
+    height: calc(100% - 8px);
+    margin-top: 4px;
+    margin-bottom: 4px;
+    border-radius: 4px 0 0 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
     line-height: 1;
     cursor: pointer;
     transition: background 0.2s, color 0.2s;
@@ -1405,7 +1417,7 @@ button:hover .card-nav-cog {
 }
 
 #terminal-panel .terminal-tab-add:hover {
-    background: var(--terminal-tab-hover-bg);
+    background: rgba(255, 255, 255, 0.1);
     color: #cdd6f4;
 }
 
@@ -1417,10 +1429,12 @@ button:hover .card-nav-cog {
 #terminal-panel .terminal-tab-select {
     background: transparent;
     border: none;
-    border-left: 1px solid var(--terminal-border);
     color: #6c7086;
-    padding: 0 9px;
-    height: 100%;
+    padding: 0 8px;
+    height: calc(100% - 8px);
+    margin-top: 4px;
+    margin-bottom: 4px;
+    border-radius: 0 4px 4px 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1430,7 +1444,7 @@ button:hover .card-nav-cog {
 }
 
 #terminal-panel .terminal-tab-select:hover {
-    background: var(--terminal-tab-hover-bg);
+    background: rgba(255, 255, 255, 0.1);
     color: #cdd6f4;
 }
 

@@ -1587,10 +1587,14 @@ export class TerminalController {
                         </div>
                         <div class="terminal-tab-strip" id="terminal-tab-strip">
                             <div class="terminal-tab-list" id="terminal-tab-list"></div>
-                            <button type="button" class="terminal-tab-add" id="terminal-tab-add-btn" title="Open a new terminal tab" aria-label="Open a new terminal tab">+</button>
-                            <button type="button" class="terminal-tab-select" id="terminal-tab-select-btn" title="Select CLI/environment for active tab" aria-label="Select CLI/environment">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708"/></svg>
-                            </button>
+                            <div class="terminal-tab-action-group">
+                                <button type="button" class="terminal-tab-add" id="terminal-tab-add-btn" title="Open a new terminal tab" aria-label="Open a new terminal tab">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>
+                                </button>
+                                <button type="button" class="terminal-tab-select" id="terminal-tab-select-btn" title="Select CLI/environment for active tab" aria-label="Select CLI/environment">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708"/></svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="terminal-window-controls terminal-window-controls-right">
                             ${lockButtonHtml}
