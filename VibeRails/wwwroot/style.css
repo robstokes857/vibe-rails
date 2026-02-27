@@ -114,7 +114,7 @@ code {
     border-bottom: 1px solid var(--color-border);
     backdrop-filter: blur(8px);
     position: sticky;
-    top: 100px;
+    top: 64px;
     z-index: 1019;
     padding: 0 1rem;
     flex-wrap: wrap;
@@ -163,10 +163,10 @@ code {
 .navbar {
     background: rgba(30, 30, 36, 0.95);
     border-bottom: 1px solid var(--color-border);
-    padding: 0.75rem 1.5rem;
+    padding: 0.5rem 1.5rem;
     backdrop-filter: blur(12px);
     box-shadow: 0 2px 15px rgba(0, 0, 0, 0.3);
-    min-height: 100px;
+    height: 64px;
 }
 
 .navbar .container-fluid {
@@ -178,13 +178,13 @@ code {
 
 .navbar-brand {
     grid-column: 2;
-    font-size: 1.8rem;
+    font-size: 1.5rem;
     font-weight: 800;
     color: var(--color-text) !important;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.75rem;
     transition: all var(--transition-speed);
 }
 
@@ -197,7 +197,7 @@ code {
 }
 
 .brand-logo {
-    height: 80px; /* Fully restored height */
+    height: 36px; /* Logo height set to 36px to fit navbar */
     width: auto;
     filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
     transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.5s;
@@ -218,7 +218,7 @@ code {
     font-weight: 800;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    font-size: 1.8rem; /* Corrected to match viberails.ai */
+    font-size: 1.4rem; /* Adjusted for shorter navbar */
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
 }
 
@@ -1186,6 +1186,84 @@ button:hover .card-nav-cog {
     color: #ffffff;
 }
 
+/* Controls bar — dark background matching card header */
+#terminal-panel .terminal-controls-bar {
+    background: var(--terminal-header-bg);
+    border-bottom: 1px solid var(--terminal-border);
+}
+
+#terminal-panel .terminal-controls-bar .form-select {
+    background-color: #11111b;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%239ac6c5' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+    border: 1px solid var(--terminal-accent);
+    border-radius: 6px;
+    color: #cdd6f4;
+    font-size: 0.8rem;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    min-width: 160px;
+}
+
+#terminal-panel .terminal-controls-bar .form-select:hover {
+    border-color: #cdd6f4;
+    background-color: rgba(154, 198, 197, 0.06);
+}
+
+#terminal-panel .terminal-controls-bar .form-select:focus {
+    background-color: #11111b;
+    border-color: var(--terminal-accent);
+    box-shadow: 0 0 0 0.15rem rgba(154, 198, 197, 0.25);
+    color: #cdd6f4;
+}
+
+#terminal-panel .terminal-controls-bar .form-select:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    border-color: var(--terminal-border);
+}
+
+/* Tab strip synced select */
+#terminal-tab-strip-select {
+    background-color: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    color: #6c7086;
+    font-size: 0.72rem;
+    padding: 2px 6px;
+    height: calc(100% - 10px);
+    margin-top: 5px;
+    margin-bottom: 5px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+    flex-shrink: 0;
+    max-width: 160px;
+}
+
+#terminal-tab-strip-select:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #cdd6f4;
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+#terminal-tab-strip-select:focus {
+    background: rgba(255, 255, 255, 0.1);
+    color: #cdd6f4;
+    border-color: var(--terminal-accent);
+    box-shadow: 0 0 0 0.15rem rgba(154, 198, 197, 0.2);
+    outline: none;
+}
+
+#terminal-tab-strip-select:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+#terminal-tab-strip-select option,
+#terminal-tab-strip-select optgroup {
+    background: #1e1e2e;
+    color: #cdd6f4;
+}
+
 /* Tab bar header */
 #terminal-panel .terminal-window-header {
     background: var(--terminal-header-bg);
@@ -1390,14 +1468,26 @@ button:hover .card-nav-cog {
     color: #cdd6f4;
 }
 
+#terminal-panel .terminal-tab-action-group {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    margin-left: 2px;
+}
+
 #terminal-panel .terminal-tab-add {
     background: transparent;
     border: none;
-    border-left: 1px solid var(--terminal-border);
     color: #6c7086;
-    padding: 0 11px;
-    height: 100%;
-    font-size: 1.1rem;
+    padding: 0 10px;
+    height: calc(100% - 8px);
+    margin-top: 4px;
+    margin-bottom: 4px;
+    border-radius: 4px 0 0 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
     line-height: 1;
     cursor: pointer;
     transition: background 0.2s, color 0.2s;
@@ -1405,7 +1495,7 @@ button:hover .card-nav-cog {
 }
 
 #terminal-panel .terminal-tab-add:hover {
-    background: var(--terminal-tab-hover-bg);
+    background: rgba(255, 255, 255, 0.1);
     color: #cdd6f4;
 }
 
@@ -1417,10 +1507,12 @@ button:hover .card-nav-cog {
 #terminal-panel .terminal-tab-select {
     background: transparent;
     border: none;
-    border-left: 1px solid var(--terminal-border);
     color: #6c7086;
-    padding: 0 9px;
-    height: 100%;
+    padding: 0 8px;
+    height: calc(100% - 8px);
+    margin-top: 4px;
+    margin-bottom: 4px;
+    border-radius: 0 4px 4px 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1430,7 +1522,7 @@ button:hover .card-nav-cog {
 }
 
 #terminal-panel .terminal-tab-select:hover {
-    background: var(--terminal-tab-hover-bg);
+    background: rgba(255, 255, 255, 0.1);
     color: #cdd6f4;
 }
 
