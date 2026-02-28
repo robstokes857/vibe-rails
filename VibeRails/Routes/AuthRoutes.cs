@@ -31,11 +31,14 @@ public static class AuthRoutes
             });
 
             // Redirect to the requested page, or default to /
-            var destination = (!string.IsNullOrWhiteSpace(redirect) && redirect.StartsWith('/'))
+            // Validate: must start with '/' but not '//' (protocol-relative URLs like //evil.com)
+            var destination = (!string.IsNullOrWhiteSpace(redirect) && redirect.StartsWith('/') && !redirect.StartsWith("//"))
                 ? redirect
                 : "/";
 
-            var html = STRINGS.AUTH_BOOTSTRAP_HTML.Replace("window.location.replace('/')", $"window.location.replace('{destination}')");
+            // Encode for safe JS string embedding without relying on reflection-based JSON serialization.
+            var destinationEscaped = System.Text.Json.JsonEncodedText.Encode(destination).ToString();
+            var html = STRINGS.AUTH_BOOTSTRAP_HTML.Replace("window.location.replace('/')", $"window.location.replace(\"{destinationEscaped}\")");
             return Results.Content(html, "text/html");
         }).WithName("AuthBootstrap");
     }

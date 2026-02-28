@@ -20,6 +20,7 @@ public static class RouteExtensions
         ClaudePlanRoutes.Map(app);
         UpdateRoutes.Map(app);
         AppSettingsRoutes.Map(app);
+        PinRoutes.Map(app);
         LifecycleRoutes.Map(app);
         TraceRoutes.Map(app);
         //ProxyRoutes.Map(app);

@@ -290,6 +290,10 @@ namespace VibeRails.DTOs
         string ApiKey
     );
 
+    // Remote PIN DTOs
+    public record SetPinRequest(string Pin);
+    public record PinStatusResponse(bool IsSet);
+
     // Signed Message DTOs (matches VibeRails-Front TerminalSignedMessage shape)
     public record SignedMessage(string Message, string Signature);
     public record SignatureVerificationResponse(bool Verified, string Message);
@@ -432,6 +436,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateInfo))]
     // App Settings DTOs
     [JsonSerializable(typeof(AppSettingsDto))]
+    // Remote PIN DTOs
+    [JsonSerializable(typeof(SetPinRequest))]
+    [JsonSerializable(typeof(PinStatusResponse))]
     // Signed Message DTOs
     [JsonSerializable(typeof(SignedMessage))]
     [JsonSerializable(typeof(SignatureVerificationResponse))]
