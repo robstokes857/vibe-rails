@@ -5,8 +5,7 @@
 
     public static class Hasher
     {
-        // Per your request
-        public const int Iterations = 200_000;
+        public const int Iterations = 300_000;
         public const int SaltSizeBytes = 32; // 256-bit salt
         public const int HashSizeBytes = 64; // 512-bit derived key
 

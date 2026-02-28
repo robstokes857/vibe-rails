@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 
 test('has title', async ({ page }) => {
   await page.goto('/');
-  await expect(page).toHaveTitle(/VibeControl/);
+  await expect(page).toHaveTitle(/Vibe Rails/);
 });
 
 test('can navigate to Agent Files', async ({ page }) => {
@@ -11,11 +11,8 @@ test('can navigate to Agent Files', async ({ page }) => {
   // Wait for the dashboard to load (checking for a visible element unique to dashboard)
   await expect(page.getByText('Global Context')).toBeVisible();
 
-  // Click the 'Agent Files & Rules' card in the main menu
-  // Using filter to select the one that has the specific title text
-  await page.locator('.menu-card')
-            .filter({ hasText: 'Agent Files & Rules' })
-            .click();
+  // Open Agents view from sub-navigation.
+  await page.locator('.app-subnav-link[data-view="agents"]').click();
 
   // Expect the header to be visible
   await expect(page.getByRole('heading', { name: 'Agent Files & Rules' })).toBeVisible();
