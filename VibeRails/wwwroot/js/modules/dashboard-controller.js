@@ -316,6 +316,15 @@ export class DashboardController {
             const time = node.querySelector('[data-sandbox-time]');
             if (time) time.textContent = sb.created;
 
+            // Diff button
+            const diffBtn = node.querySelector('[data-sandbox-diff]');
+            if (diffBtn) {
+                diffBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.app.sandboxController.showDiff(sb.id, sb.name);
+                });
+            }
+
             // Web Terminal launch button
             const webUiBtn = node.querySelector('[data-sandbox-launch-webui]');
             if (webUiBtn) {
