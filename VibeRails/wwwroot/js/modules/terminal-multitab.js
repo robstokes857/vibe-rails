@@ -336,6 +336,7 @@ class TerminalTab {
 
             this.state.status = 'connecting';
             this.manager.updateUi();
+            this.vibeTerminal?.reset();
             await this.connect();
             return true;
         } catch (error) {
@@ -427,8 +428,16 @@ class TerminalManager {
         this.focusBtn = this.container.querySelector('#terminal-popout-btn');
         this.keyboardBtn = this.container.querySelector('#terminal-keyboard-btn');
 
+        this.zoomInBtn     = this.container.querySelector('#terminal-zoom-in-btn');
+        this.zoomOutBtn    = this.container.querySelector('#terminal-zoom-out-btn');
+        this.fontSizeLabel = this.container.querySelector('#terminal-font-size-label');
+        this.settingsBtn   = this.container.querySelector('#terminal-settings-btn');
+        this.settingsPanel = this.container.querySelector('#terminal-settings-panel');
+        this.settingsClose = this.container.querySelector('#terminal-settings-close');
+
         this.populateSelect();
         this.bindActions();
+        this._initSettingsPanel();
         await this.restoreTabs();
 
         if (this.tabOrder.length === 0) {
@@ -520,6 +529,19 @@ class TerminalManager {
         this.lockBtn?.addEventListener('click', () => this.toggleLock());
         this.focusBtn?.addEventListener('click', () => this.openFocusView());
         this.keyboardBtn?.addEventListener('click', () => this.focusActiveTerminalInput());
+
+        this.zoomInBtn?.addEventListener('click',  () => this.adjustFontSize(1));
+        this.zoomOutBtn?.addEventListener('click', () => this.adjustFontSize(-1));
+        this.settingsBtn?.addEventListener('click',   () => this.toggleSettingsPanel());
+        this.settingsClose?.addEventListener('click', () => this.toggleSettingsPanel(false));
+        this.container.querySelector('#terminal-settings-font-size')
+            ?.addEventListener('change', (e) => this.adjustFontSize(0, parseInt(e.target.value, 10)));
+        this.container.querySelector('#terminal-settings-font-family')
+            ?.addEventListener('change', (e) => this.applyFontFamily(e.target.value));
+        this.container.querySelector('#terminal-settings-cursor-style')
+            ?.addEventListener('change', (e) => this.applyCursorStyle(e.target.value));
+        this.container.querySelector('#terminal-settings-cursor-blink')
+            ?.addEventListener('change', (e) => this.applyCursorBlink(e.target.value === 'true'));
     }
 
     async restoreTabs() {
@@ -549,6 +571,7 @@ class TerminalManager {
             selection,
             label: meta.displayName,
             title: options.title || null,
+            icon: options.icon || null,
             hasActiveSession: tabInfo.hasActiveSession === true,
             sessionId: tabInfo.sessionId || null,
             status: tabInfo.hasActiveSession ? 'disconnected' : 'not-started',
@@ -568,6 +591,12 @@ class TerminalManager {
         button.className = 'terminal-tab-button';
         button.textContent = shorten(state.label);
         button.title = state.label;
+        if (state.icon) {
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'terminal-tab-icon';
+            iconSpan.textContent = state.icon + ' ';
+            button.prepend(iconSpan);
+        }
         button.addEventListener('click', () => {
             if (!state.selection && !state.hasActiveSession) {
                 void this.activateTab(state.id, { connectIfNeeded: false });
@@ -672,7 +701,8 @@ class TerminalManager {
             const tabInfo = await this.app.apiCall('/api/v1/terminal/tabs', 'POST');
             const tab = this.addLocalTab(tabInfo, {
                 selection: options.selection || DEFAULT_SELECTION,
-                title: options.title || null
+                title: options.title || null,
+                icon: options.icon || null,
             });
             await this.activateTab(tab.state.id, { connectIfNeeded: false });
             this.updateUi();
@@ -1400,6 +1430,122 @@ class TerminalManager {
     getActiveTabIdFromStorage() {
         try { return window.sessionStorage.getItem(ACTIVE_TAB_KEY); } catch { return null; }
     }
+
+    // -------------------------------------------------------------------------
+    // Font size
+    // -------------------------------------------------------------------------
+
+    _loadFontSize() {
+        try { return parseInt(localStorage.getItem('viberails_terminal_fontSize'), 10) || 14; } catch { return 14; }
+    }
+
+    _saveFontSize(size) {
+        try { localStorage.setItem('viberails_terminal_fontSize', size); } catch {}
+    }
+
+    adjustFontSize(delta, absolute) {
+        const current = this._loadFontSize();
+        const next = Math.max(6, Math.min(72, absolute != null ? absolute : current + delta));
+        this._saveFontSize(next);
+        if (this.fontSizeLabel) this.fontSizeLabel.textContent = next;
+        const sizeInput = this.container.querySelector('#terminal-settings-font-size');
+        if (sizeInput) sizeInput.value = next;
+        this.tabs.forEach((tab) => tab.instance.vibeTerminal?.setFontSize(next));
+    }
+
+    // -------------------------------------------------------------------------
+    // Settings panel
+    // -------------------------------------------------------------------------
+
+    _initSettingsPanel() {
+        const size = this._loadFontSize();
+        if (this.fontSizeLabel) this.fontSizeLabel.textContent = size;
+        const sizeInput = this.container.querySelector('#terminal-settings-font-size');
+        if (sizeInput) sizeInput.value = size;
+
+        const themeList = this.container.querySelector('#terminal-settings-theme-list');
+        if (themeList && window.CXL_THEMES) {
+            for (const [key, theme] of Object.entries(window.CXL_THEMES)) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'terminal-settings-theme-swatch';
+                btn.dataset.theme = key;
+                btn.title = theme.name;
+                btn.style.background = `linear-gradient(135deg, ${theme.background} 50%, ${theme.foreground} 50%)`;
+                btn.addEventListener('click', () => this.applyTheme(key));
+                themeList.appendChild(btn);
+            }
+        }
+
+        const familySelect = this.container.querySelector('#terminal-settings-font-family');
+        if (familySelect && window.CXL_FONTS) {
+            for (const [, font] of Object.entries(window.CXL_FONTS)) {
+                const opt = document.createElement('option');
+                opt.value = font.value;
+                opt.textContent = font.name;
+                familySelect.appendChild(opt);
+            }
+            const saved = localStorage.getItem('viberails_terminal_fontFamily');
+            if (saved) familySelect.value = saved;
+        }
+
+        const cursorStyleSelect = this.container.querySelector('#terminal-settings-cursor-style');
+        const savedCursorStyle = localStorage.getItem('viberails_terminal_cursorStyle');
+        if (cursorStyleSelect && savedCursorStyle) cursorStyleSelect.value = savedCursorStyle;
+
+        const cursorBlinkSelect = this.container.querySelector('#terminal-settings-cursor-blink');
+        const savedCursorBlink = localStorage.getItem('viberails_terminal_cursorBlink');
+        if (cursorBlinkSelect && savedCursorBlink) cursorBlinkSelect.value = savedCursorBlink;
+    }
+
+    toggleSettingsPanel(forceOpen) {
+        const open = forceOpen ?? !this.settingsPanel?.classList.contains('open');
+        this.settingsPanel?.classList.toggle('open', open);
+        this.settingsBtn?.classList.toggle('active', open);
+        if (!open) this.focusActiveTerminalInput();
+    }
+
+    applyTheme(key) {
+        if (!window.CXL_THEMES?.[key]) return;
+        try { localStorage.setItem('viberails_terminal_theme', key); } catch {}
+        const theme = window.CXL_THEMES[key];
+        this.tabs.forEach((tab) => {
+            if (tab.instance.vibeTerminal?._terminal) {
+                tab.instance.vibeTerminal._terminal.options.theme = theme;
+            }
+        });
+        this.container.querySelectorAll('.terminal-settings-theme-swatch').forEach(s => {
+            s.classList.toggle('active', s.dataset.theme === key);
+        });
+    }
+
+    applyFontFamily(family) {
+        try { localStorage.setItem('viberails_terminal_fontFamily', family); } catch {}
+        this.tabs.forEach((tab) => {
+            if (tab.instance.vibeTerminal?._terminal) {
+                tab.instance.vibeTerminal._terminal.options.fontFamily = family;
+                tab.instance.vibeTerminal._fitAddon?.fit();
+            }
+        });
+    }
+
+    applyCursorStyle(style) {
+        try { localStorage.setItem('viberails_terminal_cursorStyle', style); } catch {}
+        this.tabs.forEach((tab) => {
+            if (tab.instance.vibeTerminal?._terminal) {
+                tab.instance.vibeTerminal._terminal.options.cursorStyle = style;
+            }
+        });
+    }
+
+    applyCursorBlink(blink) {
+        try { localStorage.setItem('viberails_terminal_cursorBlink', blink); } catch {}
+        this.tabs.forEach((tab) => {
+            if (tab.instance.vibeTerminal?._terminal) {
+                tab.instance.vibeTerminal._terminal.options.cursorBlink = blink;
+            }
+        });
+    }
 }
 
 export class TerminalController {
@@ -1460,18 +1606,6 @@ export class TerminalController {
 
         content.innerHTML = `
             <div class="view terminal-focus-view" data-view="terminal-focus">
-                <div class="terminal-focus-topbar">
-                    <button class="btn btn-outline-primary d-inline-flex align-items-center gap-2" type="button" data-action="go-back">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
-                        </svg>
-                        Back
-                    </button>
-                    <div class="terminal-focus-heading">
-                        <h2 class="mb-1">Terminals</h2>
-                        <p class="text-muted mb-0">Focused terminal workspace with multi-tab controls.</p>
-                    </div>
-                </div>
                 <div class="terminal-focus-body" data-terminal-focus-content></div>
             </div>
         `;
@@ -1560,6 +1694,10 @@ export class TerminalController {
                             </button>
                         </div>
                         <div class="terminal-window-controls terminal-window-controls-right">
+                            <button type="button" class="terminal-control-btn icon-btn terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
+                            <span class="terminal-font-size-label" id="terminal-font-size-label">14</span>
+                            <button type="button" class="terminal-control-btn icon-btn terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
+                            <button type="button" class="terminal-control-btn icon-btn" id="terminal-settings-btn" title="Terminal settings" aria-label="Terminal settings">&#x2699;</button>
                             ${lockButtonHtml}
                             <button type="button" class="terminal-control-btn icon-btn" id="terminal-popout-btn" title="${isFocusView ? 'Return to dashboard' : 'Open in fullscreen'}" aria-label="${isFocusView ? 'Back to dashboard' : 'Open in fullscreen'}">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
@@ -1579,6 +1717,47 @@ export class TerminalController {
                     <div class="card-body text-center text-muted" id="terminal-placeholder">
                         <p class="mb-3">Select a LLM to continue</p>
                         <p class="small mb-0">Use the <strong>+</strong> button to open a tab, then pick a CLI/environment.</p>
+                    </div>
+                    <div class="terminal-settings-panel" id="terminal-settings-panel">
+                        <div class="terminal-settings-header">
+                            <span>Terminal Settings</span>
+                            <button type="button" id="terminal-settings-close">&#x2715;</button>
+                        </div>
+                        <div class="terminal-settings-body">
+                            <div class="terminal-settings-section">
+                                <div class="terminal-settings-section-title">Theme</div>
+                                <div class="terminal-settings-theme-list" id="terminal-settings-theme-list"></div>
+                            </div>
+                            <div class="terminal-settings-section">
+                                <div class="terminal-settings-section-title">Font</div>
+                                <div class="terminal-settings-row">
+                                    <label>Family</label>
+                                    <select id="terminal-settings-font-family"></select>
+                                </div>
+                                <div class="terminal-settings-row">
+                                    <label>Size</label>
+                                    <input type="number" id="terminal-settings-font-size" min="6" max="72">
+                                </div>
+                            </div>
+                            <div class="terminal-settings-section">
+                                <div class="terminal-settings-section-title">Cursor</div>
+                                <div class="terminal-settings-row">
+                                    <label>Style</label>
+                                    <select id="terminal-settings-cursor-style">
+                                        <option value="block">Block</option>
+                                        <option value="bar">Bar</option>
+                                        <option value="underline">Underline</option>
+                                    </select>
+                                </div>
+                                <div class="terminal-settings-row">
+                                    <label>Blink</label>
+                                    <select id="terminal-settings-cursor-blink">
+                                        <option value="true">On</option>
+                                        <option value="false">Off</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

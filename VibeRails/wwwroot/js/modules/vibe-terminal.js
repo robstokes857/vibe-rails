@@ -79,6 +79,7 @@ export class VibeTerminal {
         this._searchTerm = '';
 
         this._resizeDebounceId = null;
+        this._scrollRafId = null;
         this._resizeObserver = null;
         this._windowResizeHandler = null;
         this._visualViewportResizeHandler = null;
@@ -148,6 +149,15 @@ export class VibeTerminal {
         this._loadLigaturesAddon();
 
         this._terminal.open(this._outputEl);
+
+        if (window.WebglAddon?.WebglAddon) {
+            try {
+                this._terminal.loadAddon(new window.WebglAddon.WebglAddon());
+            } catch (e) {
+                console.warn('WebGL addon failed, falling back to canvas renderer:', e);
+            }
+        }
+
         this.patchTextarea();
     }
 
@@ -434,9 +444,27 @@ export class VibeTerminal {
             this._terminal.write(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
         }
 
-        if (this._scrollOnWrite) {
-            this._terminal.scrollToBottom();
+        if (this._scrollOnWrite && !this._scrollRafId) {
+            this._scrollRafId = requestAnimationFrame(() => {
+                this._scrollRafId = null;
+                this._terminal?.scrollToBottom();
+            });
         }
+    }
+
+    setFontSize(size) {
+        const clamped = Math.max(6, Math.min(72, size));
+        this._desktopFontSize = clamped;
+        this._mobileFontSize = clamped;
+        if (this._terminal) {
+            this._terminal.options.fontSize = clamped;
+            this._fitAddon?.fit();
+            this._notifyFitChange(true);
+        }
+    }
+
+    getFontSize() {
+        return this._terminal?.options.fontSize ?? this._desktopFontSize;
     }
 
     focus() {
