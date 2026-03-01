@@ -68,11 +68,15 @@ namespace VibeRails.DTOs
     );
 
     //
-    public record IsLocalResponse(
-        bool IsLocalContext,
+    public record ContextResponse(
+        bool IsInGit,
         string? LaunchDirectory = null,
         string? RootPath = null
     );
+
+    public record GitOpenDirectoryRequest(string Directory);
+
+    public record GitOpenDirectoryResponse(string Url);
 
     // Agent File DTOs
     public record RuleWithEnforcementResponse(
@@ -370,7 +374,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(McpToolCallResponse))]
     [JsonSerializable(typeof(McpStatusResponse))]
     [JsonSerializable(typeof(Dictionary<string, object?>))]
-    [JsonSerializable(typeof(IsLocalResponse))]
+    [JsonSerializable(typeof(ContextResponse))]
+    [JsonSerializable(typeof(GitOpenDirectoryRequest))]
+    [JsonSerializable(typeof(GitOpenDirectoryResponse))]
     // Agent File DTOs
     [JsonSerializable(typeof(RuleWithEnforcementResponse))]
     [JsonSerializable(typeof(List<RuleWithEnforcementResponse>))]

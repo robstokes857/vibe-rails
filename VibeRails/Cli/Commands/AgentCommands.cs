@@ -59,7 +59,7 @@ namespace VibeRails.Cli.Commands
 
         private static async Task<int> ListAsync(IAgentFileService agentService, IRepository repository, CancellationToken cancellationToken)
         {
-            if (!ParserConfigs.IsLocalContext())
+            if (string.IsNullOrEmpty(ParserConfigs.GetRootPath()))
             {
                 CliOutput.Error("Not in a local project context. Run from within a git repository.");
                 return 1;

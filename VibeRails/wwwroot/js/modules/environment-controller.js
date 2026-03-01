@@ -472,11 +472,11 @@ export class EnvironmentController {
     }
 
     launchEnvironment(name, cli) {
-        if (this.app.data.isLocal) {
-            // Local scope - launch in current working directory
+        if (this.app.data.isInGit) {
+            // In git repo - launch in current working directory
             this.doLaunchEnvironment(name, cli, this.app.data.configs.launchDirectory);
         } else {
-            // Global scope - prompt user for directory
+            // Not in git - prompt user for directory
             this.showDirectorySelectModal(name, cli);
         }
     }

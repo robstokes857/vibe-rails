@@ -160,6 +160,11 @@ export class SandboxController {
 
     // Launch terminal into sandbox directory
     async launchInWebUI(sandboxId, sandboxName, cli, environmentName) {
+        if (!cli) {
+            this.app.showError('Please select a CLI to launch');
+            return;
+        }
+
         this.app.showToast('Web Terminal',
             `Launching ${cli} in sandbox "${sandboxName}"...`, 'info');
 

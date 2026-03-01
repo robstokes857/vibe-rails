@@ -72,7 +72,6 @@ namespace VibeRails.Utils
 
     public static class ParserConfigs
     {
-        private static bool _localContext = false;
         private static string _rootPath = string.Empty;
         private static string _historyPath = string.Empty;
         private static string _envPath = string.Empty;
@@ -137,14 +136,6 @@ namespace VibeRails.Utils
             _statePath = path;
         }
 
-        public static bool IsLocalContext()
-        {
-            return _localContext;
-        }
-        public static void SetLocalContext(bool value)
-        {
-            _localContext = value;
-        }
         public static string GetRootPath()
         {
             return _rootPath;
