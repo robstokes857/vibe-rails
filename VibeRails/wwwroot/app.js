@@ -24,7 +24,7 @@ export class VibeControlApp {
             environments: [],
             sandboxes: [],
             availableRulesWithDescriptions: [],
-            isLocal: false,
+            isInGit: false,
             configs: null
         };
         this.hostUnreachableToastShown = false;
@@ -48,11 +48,133 @@ export class VibeControlApp {
 
     async init() {
         await this.fetchConfigs();
+        if (!this.data.isInGit) {
+            this.showNotInGitBanner();
+            this.bindGlobalActions();
+            this.setupKeyboardShortcuts();
+            this.setupVSCodeIntegration();
+            this.startLifecycleHeartbeat();
+            return;
+        }
         this.loadView('dashboard'); // Start with dashboard
         this.bindGlobalActions();
         this.setupKeyboardShortcuts();
         this.setupVSCodeIntegration();
         this.startLifecycleHeartbeat();
+    }
+
+    showNotInGitBanner() {
+        const launchDir = this.data.configs?.launchDirectory || 'Unknown directory';
+        const isDangerousDir = this._isDangerousDirectory(launchDir);
+
+        // Read redirect args from URL query string
+        const urlParams = new URLSearchParams(window.location.search);
+        const rawRedirectArgs = urlParams.get('redirectArgs');
+        const redirectArgs = rawRedirectArgs ? decodeURIComponent(rawRedirectArgs) : null;
+
+        const redirectArgsHtml = redirectArgs
+            ? `<p class="mb-0 small text-muted mt-2">Your launch arguments will be preserved: <code>${escapeHtml(redirectArgs)}</code></p>`
+            : '';
+
+        const initButtonHtml = isDangerousDir ? '' : `
+            <button class="btn btn-warning btn-lg" id="git-init-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16" class="me-2">
+                    <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+                    <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                </svg>
+                Initialize Git Here
+            </button>`;
+
+        const content = document.getElementById('app-content');
+        if (!content) return;
+
+        content.innerHTML = `
+            <div class="row justify-content-center mt-5">
+                <div class="col-12 col-md-8 col-lg-6">
+                    <div class="card border-danger bg-dark text-white shadow-lg">
+                        <div class="card-body p-4 p-md-5 text-center">
+                            <div class="mb-4" style="color: #f87171;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5m.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2"/>
+                                </svg>
+                            </div>
+                            <h2 class="fw-bold mb-2" style="color: #f87171;">Not in a Git Repository</h2>
+                            <p class="text-muted mb-1">VibeControl needs a git repository to work.</p>
+                            <p class="mb-4"><code class="text-warning" style="word-break: break-all;">${escapeHtml(launchDir)}</code></p>
+                            ${redirectArgsHtml}
+                            <div id="git-banner-error" class="alert alert-danger d-none mt-3" role="alert"></div>
+                            <div class="d-flex flex-column flex-sm-row gap-3 justify-content-center mt-4">
+                                <button class="btn btn-outline-light btn-lg" id="git-open-dir-btn">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16" class="me-2">
+                                        <path d="M9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.825a2 2 0 0 1-1.991-1.819l-.637-7a2 2 0 0 1 .342-1.31L.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3m-8.322.12C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 1z"/>
+                                    </svg>
+                                    Open a Different Directory
+                                </button>
+                                ${initButtonHtml}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+
+        const errorEl = document.getElementById('git-banner-error');
+        const showError = (msg) => {
+            errorEl.textContent = msg;
+            errorEl.classList.remove('d-none');
+        };
+
+        document.getElementById('git-open-dir-btn')?.addEventListener('click', () => {
+            const fullPath = prompt('Enter the full path to the directory you want to open:');
+            if (!fullPath) return;
+            this._openDirectory(fullPath, showError);
+        });
+
+        document.getElementById('git-init-btn')?.addEventListener('click', async () => {
+            const btn = document.getElementById('git-init-btn');
+            if (!btn) return;
+            btn.disabled = true;
+            btn.textContent = 'Initializing...';
+            errorEl.classList.add('d-none');
+            try {
+                await this.apiCall('/api/v1/git/init', 'POST');
+                await this.fetchConfigs();
+                if (this.data.isInGit) {
+                    this.loadView('dashboard');
+                } else {
+                    showError('Git was initialized but the repository could not be detected. Please refresh.');
+                }
+            } catch (err) {
+                const msg = err?.message || 'Failed to initialize git.';
+                showError(msg);
+                btn.disabled = false;
+                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16" class="me-2"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/></svg>Initialize Git Here`;
+            }
+        });
+    }
+
+    async _openDirectory(directory, showError) {
+        try {
+            const result = await this.apiCall('/api/v1/git/open-directory', 'POST', { directory });
+            if (result?.url) {
+                window.open(result.url, '_blank');
+            }
+        } catch (err) {
+            const msg = err?.message || 'Failed to open directory.';
+            if (showError) showError(msg);
+        }
+    }
+
+    _isDangerousDirectory(path) {
+        if (!path) return true;
+        const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+        // Unix roots
+        if (['/', '/home', '/root', '/usr', '/etc', '/bin', '/sbin', '/var', '/tmp'].includes(normalized)) return true;
+        // Windows drive roots like C:, C:/ or C:\
+        if (/^[A-Za-z]:[\\/]?$/.test(normalized)) return true;
+        // Windows system dirs
+        const lower = normalized.toLowerCase();
+        if (lower.includes('/program files') || lower.includes('/windows') || lower === 'c:/users') return true;
+        return false;
     }
 
     setupVSCodeIntegration() {
@@ -86,12 +208,12 @@ export class VibeControlApp {
 
     async fetchConfigs() {
         try {
-            const configs = await this.apiCall('/api/v1/IsLocal', 'GET');
+            const configs = await this.apiCall('/api/v1/context', 'GET');
             this.data.configs = configs;
-            this.data.isLocal = configs.isLocalContext;
+            this.data.isInGit = configs.isInGit;
         } catch (error) {
             console.error('Failed to fetch configs:', error);
-            this.data.isLocal = false;
+            this.data.isInGit = false;
         }
     }
 
@@ -634,7 +756,7 @@ export class VibeControlApp {
                 this.data.environments = [];
             }
 
-            if (this.data.isLocal) {
+            if (this.data.isInGit) {
                 try {
                     const agentsResponse = await this.apiCall('/api/v1/agents', 'GET');
                     this.data.agents = (agentsResponse.agents || []).map((agent, index) => ({

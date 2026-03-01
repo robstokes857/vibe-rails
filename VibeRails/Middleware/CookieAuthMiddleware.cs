@@ -21,7 +21,7 @@ public class CookieAuthMiddleware
 
         // Skip auth for bootstrap, health check, and CORS preflight requests
         if (path.StartsWith("/auth/bootstrap") ||
-            path.Equals("/api/v1/IsLocal", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/api/v1/context", StringComparison.OrdinalIgnoreCase) ||
             context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);

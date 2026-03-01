@@ -255,18 +255,18 @@
                     </div>
                     <div class="text-muted small opacity-50" style="font-size: 0.7rem;" data-env-time></div>
                 </div>
-                <div class="project-actions d-flex gap-1">
-                    <button class="btn btn-xs btn-outline-secondary px-2 py-1 d-flex align-items-center gap-1"
-                        type="button" data-env-launch title="Launch in External Terminal">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path d="m11.596 8.697-6.363 3.692c-.54.313-1.233-.066-1.233-.697V4.308c0-.63.692-1.01 1.233-.696l6.363 3.692a.802.802 0 0 1 0 1.393"/></svg>
-                        <span class="x-small" data-env-launch-text>Launch in CLI</span>
-                    </button>
-                    <button class="btn btn-xs btn-outline-success px-2 py-1 d-flex align-items-center gap-1"
-                        type="button" data-env-launch-webui title="Launch in Web Terminal">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/></svg>
-                        <span class="x-small">Web UI</span>
-                    </button>
-                </div>
+            </div>
+            <div class="d-flex gap-1 mt-2 ps-5 ms-2">
+                <button class="btn btn-xs btn-outline-secondary px-2 py-1 d-flex align-items-center gap-1"
+                    type="button" data-env-launch title="Launch in External Terminal">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path d="m11.596 8.697-6.363 3.692c-.54.313-1.233-.066-1.233-.697V4.308c0-.63.692-1.01 1.233-.696l6.363 3.692a.802.802 0 0 1 0 1.393"/></svg>
+                    <span class="x-small" data-env-launch-text>Launch in CLI</span>
+                </button>
+                <button class="btn btn-xs btn-outline-success px-2 py-1 d-flex align-items-center gap-1"
+                    type="button" data-env-launch-webui title="Launch in Web Terminal">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/></svg>
+                    <span class="x-small">Web UI</span>
+                </button>
             </div>
         </div>
     </template>
@@ -284,25 +284,26 @@
                     </div>
                     <div class="text-muted small opacity-50" style="font-size: 0.7rem;" data-sandbox-time></div>
                 </div>
-                <div class="project-actions d-flex gap-1">
-                    <button class="btn btn-xs btn-outline-info px-2 py-1 d-flex align-items-center gap-1"
-                        type="button" data-sandbox-diff title="View Changes">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M10.478 1.647a.5.5 0 1 0-.956-.294l-4 13a.5.5 0 0 0 .956.294zM4.854 4.146a.5.5 0 0 1 0 .708L1.707 8l3.147 3.146a.5.5 0 0 1-.708.708l-3.5-3.5a.5.5 0 0 1 0-.708l3.5-3.5a.5.5 0 0 1 .708 0m6.292 0a.5.5 0 0 0 0 .708L14.293 8l-3.147 3.146a.5.5 0 0 0 .708.708l3.5-3.5a.5.5 0 0 0 0-.708l-3.5-3.5a.5.5 0 0 0-.708 0"/>
-                        </svg>
-                        <span class="x-small">Diff</span>
-                    </button>
-                    <button class="btn btn-xs btn-outline-success px-2 py-1 d-flex align-items-center gap-1"
-                        type="button" data-sandbox-launch-webui title="Launch in Web Terminal">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/></svg>
-                        <span class="x-small">Web UI</span>
-                    </button>
-                    <button class="btn btn-xs btn-outline-secondary px-2 py-1 d-flex align-items-center gap-1"
-                        type="button" data-sandbox-vscode title="Open in VS Code">
-                        <img src="assets/img/vscode.svg" alt="" style="width: 11px; height: 11px;">
-                        <span class="x-small">IDE</span>
-                    </button>
-                </div>
+            </div>
+            <div class="d-flex gap-1 mt-2 ps-5 ms-2 align-items-center flex-wrap">
+                <button class="btn btn-xs btn-outline-info px-2 py-1 d-flex align-items-center gap-1"
+                    type="button" data-sandbox-diff title="View Changes">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M10.478 1.647a.5.5 0 1 0-.956-.294l-4 13a.5.5 0 0 0 .956.294zM4.854 4.146a.5.5 0 0 1 0 .708L1.707 8l3.147 3.146a.5.5 0 0 1-.708.708l-3.5-3.5a.5.5 0 0 1 0-.708l3.5-3.5a.5.5 0 0 1 .708 0m6.292 0a.5.5 0 0 0 0 .708L14.293 8l-3.147 3.146a.5.5 0 0 0 .708.708l3.5-3.5a.5.5 0 0 0 0-.708l-3.5-3.5a.5.5 0 0 0-.708 0"/>
+                    </svg>
+                    <span class="x-small">Diff</span>
+                </button>
+                <select class="form-select form-select-sm bg-dark border-secondary border-opacity-25 text-white x-small" data-sandbox-cli-select style="width: auto; min-width: 90px; height: 26px; padding-top: 2px; padding-bottom: 2px; font-size: 0.65rem;"></select>
+                <button class="btn btn-xs btn-outline-success px-2 py-1 d-flex align-items-center gap-1"
+                    type="button" data-sandbox-launch-webui title="Launch in Web Terminal">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/></svg>
+                    <span class="x-small">Web UI</span>
+                </button>
+                <button class="btn btn-xs btn-outline-secondary px-2 py-1 d-flex align-items-center gap-1"
+                    type="button" data-sandbox-vscode title="Open in VS Code">
+                    <img src="assets/img/vscode.svg" alt="" style="width: 11px; height: 11px;">
+                    <span class="x-small">IDE</span>
+                </button>
             </div>
         </div>
     </template>

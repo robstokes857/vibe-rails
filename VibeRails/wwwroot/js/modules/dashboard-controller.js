@@ -7,7 +7,7 @@ export class DashboardController {
         await this.app.refreshDashboardData();
 
         // Fetch custom project name if in local context
-        if (this.app.data.isLocal) {
+        if (this.app.data.isInGit) {
             const path = this.app.data.configs?.rootPath;
             if (path) {
                 try {
@@ -31,12 +31,12 @@ export class DashboardController {
         const root = fragment.querySelector('[data-dashboard]');
         if (!root) return fragment;
 
-        const isLocal = this.app.data.isLocal;
+        const isInGit = this.app.data.isInGit;
 
         // Context Heading
         const headingContainer = root.querySelector('[data-context-heading-container]');
         if (headingContainer) {
-            if (isLocal) {
+            if (isInGit) {
                 const path = this.app.data.configs?.rootPath || 'Unknown Path';
 
                 const projectName = this._customProjectName || this.app.getProjectNameFromPath(path);
@@ -104,7 +104,7 @@ export class DashboardController {
         const localAgentCountCol = root.querySelector('[data-local-agent-count-col]');
         const localEnvCountCol = root.querySelector('[data-local-env-count-col]');
 
-        if (isLocal) {
+        if (isInGit) {
             if (localQuickActions) localQuickActions.style.removeProperty('display');
             if (localFileTreeSection) localFileTreeSection.style.removeProperty('display');
             if (localAgentCountCol) localAgentCountCol.style.removeProperty('display');
@@ -189,7 +189,7 @@ export class DashboardController {
 
         // Sandboxes section - only show in local context
         const sandboxSection = root.querySelector('[data-sandbox-section]');
-        if (sandboxSection && isLocal) {
+        if (sandboxSection && isInGit) {
             sandboxSection.style.removeProperty('display');
             const sandboxList = root.querySelector('[data-sandbox-list]');
             if (sandboxList) {
@@ -325,12 +325,29 @@ export class DashboardController {
                 });
             }
 
+            // CLI select for web terminal launch
+            const cliSelect = node.querySelector('[data-sandbox-cli-select]');
+            if (cliSelect) {
+                this.populateSandboxCliSelect(cliSelect);
+            }
+
             // Web Terminal launch button
             const webUiBtn = node.querySelector('[data-sandbox-launch-webui]');
             if (webUiBtn) {
                 webUiBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    this.app.sandboxController.launchInWebUI(sb.id, sb.name);
+                    const selection = cliSelect?.value || 'base:claude';
+                    let cli, environmentName;
+                    if (selection.startsWith('base:')) {
+                        cli = selection.replace('base:', '');
+                    } else if (selection.startsWith('env:')) {
+                        const parts = selection.split(':');
+                        const envId = parseInt(parts[1]);
+                        cli = parts[2];
+                        const env = (this.app.data.environments || []).find(e => e.id === envId);
+                        environmentName = env?.name;
+                    }
+                    this.app.sandboxController.launchInWebUI(sb.id, sb.name, cli, environmentName);
                 });
             }
 

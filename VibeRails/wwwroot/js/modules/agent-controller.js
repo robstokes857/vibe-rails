@@ -47,7 +47,7 @@ export class AgentController {
                 // Ensure we have data to render
                 if (this.app.data.agents && this.app.data.agents.length > 0) {
                     fileTree.innerHTML = this.app.renderLocalFileTree(fileTree);
-                } else if (this.app.data.isLocal) {
+                } else if (this.app.data.isInGit) {
                     fileTree.innerHTML = '<p class="text-muted text-center">No agent files found in this project.</p>';
                 } else {
                     fileTree.innerHTML = '<p class="text-muted text-center">Agent files are only available in local project context.</p>';

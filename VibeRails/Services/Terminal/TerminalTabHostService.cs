@@ -377,7 +377,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         var http = _httpClientFactory.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(2);
 
-        var healthUrl = $"http://127.0.0.1:{port}/api/v1/IsLocal";
+        var healthUrl = $"http://127.0.0.1:{port}/api/v1/context";
         for (var attempt = 0; attempt < HealthAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();

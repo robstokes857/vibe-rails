@@ -62,7 +62,8 @@ builder.WebHost.ConfigureKestrel(options =>
 builder.Services.AddSingleton(traceBuffer);
 
 // Register DI services
-Init.RegisterServices(builder.Services);
+MapRegisterServices.Register(builder.Services);
+
 
 // Add CORS support for localhost and VSCode webview
 builder.Services.AddCors(options =>
@@ -114,7 +115,7 @@ app.Lifetime.ApplicationStopping.Register(() =>
 });
 
 // Run startup checks
-await Init.StartUpChecks(app.Services);
+StartUpStatus status = await Init.StartUpChecks(app.Services);
 
 // Check for updates (async, non-blocking)
 _ = Task.Run(async () =>
@@ -185,9 +186,43 @@ if (parsedArgs.IsLMBootstrap)
 
 // Standard web-only mode
 // Generate one-time bootstrap code for authentication
-var authService = app.Services.GetRequiredService<IAuthService>();
-var bootstrapCode = authService.GenerateBootstrapCode();
-var bootstrapUrl = $"{serverUrl}/auth/bootstrap?code={bootstrapCode}";
+IAuthService authService = app.Services.GetRequiredService<IAuthService>();
+string bootstrapCode = authService.GenerateBootstrapCode();
+string bootstrapUrl = $"{serverUrl}/auth/bootstrap?code={bootstrapCode}";
+string vsCodeV1Url = $"vs-code-v1={bootstrapUrl}";
+
+// Encode user-supplied args (strip internal flags) for pass-through to new instances
+var redirectArgs = args
+    .Where(a => !a.StartsWith("--parent-pid", StringComparison.OrdinalIgnoreCase)
+             && !a.StartsWith("--vs", StringComparison.OrdinalIgnoreCase)
+             && a is not ("--open-browser" or "--launch-browser" or "--launch-web" or "--web"))
+    .ToArray();
+
+if (redirectArgs.Length > 0)
+{
+    var encodedArgs = Uri.EscapeDataString(string.Join(" ", redirectArgs));
+    bootstrapUrl = $"{bootstrapUrl}&redirectArgs={encodedArgs}";
+}
+
+if (status == StartUpStatus.RequirementsNotMet_NotInGIT)
+{
+    // Not in a git repo — always open the browser so the user can fix it via the UI
+    Console.WriteLine($"[VibeRails] Not in a git repository. Opening browser to fix...");
+    LaunchBrowser.Launch(bootstrapUrl);
+
+    if (args.Any(a => a.Contains("--vs")))
+        Console.WriteLine($"vs-code-v1={bootstrapUrl}");
+}
+else
+{
+    // Standard web-only mode
+    if (args.Any(a => a.Contains("--vs")))
+        Console.WriteLine($"vs-code-v1={bootstrapUrl}");
+
+    // Launch browser if any browser flag is passed
+    if (args.Any(a => a is "--open-browser" or "--launch-browser" or "--launch-web" or "--web"))
+        LaunchBrowser.Launch(bootstrapUrl);
+}
 
 Console.WriteLine($"Vibe Rails server running on {serverUrl}");
 Console.WriteLine($"Launch directory: {launchDirectory}");
@@ -198,18 +233,6 @@ Console.WriteLine();
 Console.WriteLine("(Link expires in 2 minutes and can only be used once)");
 Console.WriteLine("Press Ctrl+C to stop the server.");
 Console.WriteLine();
-
-if (args.Any(a => a.Contains( "--vs")))
-{
-    //add a switch later for versions
-    Console.WriteLine($"vs-code-v1={bootstrapUrl}");
-}
-
-// Launch browser if any browser flag is passed
-if (args.Any(a => a is "--open-browser" or "--launch-browser" or "--launch-web" or "--web"))
-{
-    LaunchBrowser.Launch(bootstrapUrl);
-}
 
 // Wait for shutdown signal (Ctrl+C)
 await app.WaitForShutdownAsync(app.Lifetime.ApplicationStopping);
