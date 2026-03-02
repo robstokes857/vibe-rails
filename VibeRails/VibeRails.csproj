@@ -10,6 +10,9 @@
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <Version>1.2.2</Version>
     <NoWarn>$(NoWarn);IL2104;IL2026;IL2057;IL2070;IL2075;IL2080;IL3050</NoWarn>
+    <!-- sqlite-vec native binaries exist for all our target RIDs (including arm64) but its
+         .targets file only allows x64/x86 PlatformTarget. Disable the check. -->
+    <EnableUnsupportedPlatformTargetCheck>false</EnableUnsupportedPlatformTargetCheck>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
