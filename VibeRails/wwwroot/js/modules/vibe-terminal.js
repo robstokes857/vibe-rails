@@ -77,15 +77,21 @@ export class VibeTerminal {
         this._onProgress = null;
         this._lastCols = null;
         this._lastRows = null;
+        this._lastFitWidth = null;
+        this._lastFitHeight = null;
         this._searchTerm = '';
 
         this._resizeDebounceId = null;
         this._scrollRafId = null;
+        this._fitRafId = null;
+        this._fitTimeoutId = null;
         this._resizeObserver = null;
         this._windowResizeHandler = null;
         this._visualViewportResizeHandler = null;
         this._visualViewportScrollHandler = null;
         this._customKeyEventHandlers = [];
+        this._followOutput = true;
+        this._onScrollDispose = null;
 
         const metrics = this._getResponsiveMetrics();
         this._terminal = new window.Terminal({
@@ -100,6 +106,7 @@ export class VibeTerminal {
             unicodeVersion: '11',
             disableStdin,
             convertEol: false,
+            minimumContrastRatio: 3,
             cursorStyle: 'block',
             cursorInactiveStyle: 'none',
             theme: DEFAULT_THEME
@@ -173,13 +180,26 @@ export class VibeTerminal {
 
         this._terminal.open(this._outputEl);
 
-        if (window.WebglAddon?.WebglAddon) {
+        const useWebgl = (() => {
+            try {
+                // WebGL has shown paint artifacts for some users; keep it opt-in.
+                return localStorage.getItem('viberails_terminal_webgl') === 'true';
+            } catch {
+                return false;
+            }
+        })();
+
+        if (useWebgl && window.WebglAddon?.WebglAddon) {
             try {
                 this._terminal.loadAddon(new window.WebglAddon.WebglAddon());
             } catch (e) {
                 console.warn('WebGL addon failed, falling back to canvas renderer:', e);
             }
         }
+
+        this._onScrollDispose = this._terminal.onScroll(() => {
+            this._followOutput = this._isNearBottom(1);
+        });
 
         this.patchTextarea();
     }
@@ -463,6 +483,8 @@ export class VibeTerminal {
     write(data) {
         if (!this._terminal || data == null) return;
 
+        const shouldFollow = this._scrollOnWrite && this._followOutput && this._isNearBottom(1);
+
         if (typeof data === 'string') {
             this._terminal.write(data);
         } else if (data instanceof ArrayBuffer) {
@@ -471,12 +493,22 @@ export class VibeTerminal {
             this._terminal.write(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
         }
 
-        if (this._scrollOnWrite && !this._scrollRafId) {
+        if (shouldFollow && !this._scrollRafId) {
             this._scrollRafId = requestAnimationFrame(() => {
                 this._scrollRafId = null;
                 this._terminal?.scrollToBottom();
             });
         }
+    }
+
+    _isNearBottom(threshold = 1) {
+        if (!this._terminal?.buffer?.active) {
+            return true;
+        }
+
+        const buffer = this._terminal.buffer.active;
+        const gap = buffer.baseY - buffer.viewportY;
+        return gap <= threshold;
     }
 
     setFontSize(size) {
@@ -485,8 +517,7 @@ export class VibeTerminal {
         this._mobileFontSize = clamped;
         if (this._terminal) {
             this._terminal.options.fontSize = clamped;
-            this._fitAddon?.fit();
-            this._notifyFitChange(true);
+            this.fit({ force: true, forceNotify: true });
         }
     }
 
@@ -512,19 +543,31 @@ export class VibeTerminal {
         this._terminal.options.cursorBlink = !!active;
     }
 
-    fit({ notify = true, forceNotify = false } = {}) {
+    fit({ notify = true, forceNotify = false, force = false } = {}) {
         if (!this._terminal) return false;
 
         if (this._fitAddon) {
             const rect = this._outputEl.getBoundingClientRect();
             if (rect.width > 0 && rect.height > 0) {
                 const metrics = this._getResponsiveMetrics();
+                const metricsChanged = this._terminal.options.fontSize !== metrics.fontSize
+                    || this._terminal.options.lineHeight !== metrics.lineHeight;
                 if (this._terminal.options.fontSize !== metrics.fontSize) {
                     this._terminal.options.fontSize = metrics.fontSize;
                 }
                 if (this._terminal.options.lineHeight !== metrics.lineHeight) {
                     this._terminal.options.lineHeight = metrics.lineHeight;
                 }
+
+                const width = Math.round(rect.width);
+                const height = Math.round(rect.height);
+                const sizeChanged = this._lastFitWidth !== width || this._lastFitHeight !== height;
+                if (!force && !metricsChanged && !sizeChanged) {
+                    return false;
+                }
+
+                this._lastFitWidth = width;
+                this._lastFitHeight = height;
 
                 try {
                     this._fitAddon.fit();
@@ -545,9 +588,17 @@ export class VibeTerminal {
     scheduleFitPasses() {
         if (!this._terminal) return;
 
-        requestAnimationFrame(() => {
+        if (this._fitRafId || this._fitTimeoutId) {
+            return;
+        }
+
+        this._fitRafId = requestAnimationFrame(() => {
+            this._fitRafId = null;
             this.fit();
-            setTimeout(() => this.fit(), 120);
+            this._fitTimeoutId = setTimeout(() => {
+                this._fitTimeoutId = null;
+                this.fit();
+            }, 120);
         });
     }
 
@@ -618,9 +669,28 @@ export class VibeTerminal {
             this._scrollRafId = null;
         }
 
+        if (this._fitRafId) {
+            cancelAnimationFrame(this._fitRafId);
+            this._fitRafId = null;
+        }
+
+        if (this._fitTimeoutId) {
+            clearTimeout(this._fitTimeoutId);
+            this._fitTimeoutId = null;
+        }
+
         if (this._terminal) {
             this._terminal.dispose();
             this._terminal = null;
+        }
+
+        if (this._onScrollDispose) {
+            try {
+                this._onScrollDispose.dispose?.();
+            } catch {
+                // no-op
+            }
+            this._onScrollDispose = null;
         }
 
         this._customKeyEventHandlers = [];
@@ -637,6 +707,8 @@ export class VibeTerminal {
         this._onProgress = null;
         this._lastCols = null;
         this._lastRows = null;
+        this._lastFitWidth = null;
+        this._lastFitHeight = null;
         this._searchTerm = '';
     }
 }

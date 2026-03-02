@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as path from 'path';
-import * as http from 'http';
 
 const INSTALL_DIR = path.join(process.env.USERPROFILE || process.env.HOME || '', '.vibe_rails');
 const EXE_NAME = process.platform === 'win32' ? 'vb.exe' : 'vb';
@@ -73,7 +72,7 @@ export class BackendManager {
                     this.port = parseInt(new URL(bootstrapUrl).port, 10);
                     resolved = true;
                     this._onPortDetected.fire(this.port);
-                    this.waitForHealthy().then(() => resolve(this.port!)).catch(reject);
+                    resolve(this.port!);
                     break;
                 }
             });
@@ -101,34 +100,6 @@ export class BackendManager {
                     reject(new Error('Timeout waiting for backend to start'));
                 }
             }, 30000);
-        });
-    }
-
-    private async waitForHealthy(): Promise<void> {
-        for (let i = 0; i < 30; i++) {
-            if (await this.checkHealth()) {
-                return;
-            }
-            await this.delay(500);
-        }
-        throw new Error('Backend health check failed');
-    }
-
-    private checkHealth(): Promise<boolean> {
-        return new Promise((resolve) => {
-            if (!this.port) { resolve(false); return; }
-            const req = http.request({
-                hostname: 'localhost',
-                port: this.port,
-                path: '/api/v1/IsLocal',
-                method: 'GET',
-                timeout: 2000
-            }, (res) => {
-                resolve(res.statusCode === 200);
-            });
-            req.on('error', () => resolve(false));
-            req.on('timeout', () => { req.destroy(); resolve(false); });
-            req.end();
         });
     }
 

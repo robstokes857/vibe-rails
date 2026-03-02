@@ -360,6 +360,15 @@ export class DashboardController {
                 });
             }
 
+            // Delete button
+            const deleteBtn = node.querySelector('[data-sandbox-delete]');
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.app.sandboxController.deleteSandbox(sb.id, sb.name);
+                });
+            }
+
             fragment.appendChild(node);
         });
 

@@ -1,5 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
-
+<Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -10,8 +9,8 @@
     <RootNamespace>VibeRails</RootNamespace>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <Version>1.2.2</Version>
+    <NoWarn>$(NoWarn);IL2104;IL2026;IL2057;IL2070;IL2075;IL2080;IL3050</NoWarn>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.3" />
@@ -22,12 +21,13 @@
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
     <PackageReference Include="ModelContextProtocol" Version="0.5.0-preview.1" />
     <PackageReference Include="System.CommandLine" Version="2.0.3" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.21.0" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="1.0.0" />
+    <PackageReference Include="sqlite-vec" Version="0.1.7-alpha.2.1" />
   </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\Pty.Net\Pty.Net.csproj" />
   </ItemGroup>
-
   <!-- Copy wwwroot to output directory -->
   <ItemGroup>
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
@@ -35,15 +35,26 @@
   <ItemGroup>
     <Folder Include="wwwroot\assets\" />
   </ItemGroup>
-
+  <!-- Copy bundled BERT model assets to output directory -->
+  <ItemGroup>
+    <Content Include="Models\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
   <!-- Copy public cert to output directory -->
   <ItemGroup>
     <Content Include="Certs\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-
+  <!-- Copy root download scripts to output directory for post-deploy setup -->
+  <ItemGroup>
+    <Content Include="..\Scripts\download-bert-model.ps1" Link="Scripts\download-bert-model.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Scripts\download-bert-model.sh" Link="Scripts\download-bert-model.sh" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
   <!-- Copy hook scripts to output directory -->
   <ItemGroup>
     <Content Include="scripts\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Microsoft.ML.OnnxRuntime" />
+  </ItemGroup>
 </Project>
+
+
