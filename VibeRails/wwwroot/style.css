@@ -33,7 +33,7 @@
     /* Clearer borders */
 
     /* Layout */
-    --border-radius: 8px; /* Squarer, cleaner look */
+    --border-radius: 4px; /* Squarer, cleaner look */
     --transition-speed: 0.15s; /* Snappier interactions */
     --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.5);
     --shadow-hover: 0 4px 6px rgba(0, 0, 0, 0.5);
@@ -71,7 +71,7 @@ code {
     color: var(--color-accent);
     background: rgba(154, 198, 197, 0.1);
     padding: 0.2em 0.4em;
-    border-radius: 6px;
+    border-radius: 4px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.85em;
 }
@@ -84,8 +84,8 @@ code {
     gap: 0.75rem;
     padding: 0.85rem 1.5rem;
     background: rgba(0, 122, 204, 0.12);
-    border: 1px solid rgba(0, 122, 204, 0.35);
-    border-radius: 10px;
+    border: 2px solid rgba(0, 122, 204, 0.35);
+    border-radius: 4px;
     color: #5fb3f0;
     font-size: 0.95rem;
     font-weight: 600;
@@ -165,9 +165,7 @@ code {
     opacity: 1;
 }
 
-.app-subnav-link:hover .settings-card-cog {
-    transform: rotate(90deg);
-}
+/* Removed settings-card-cog spin rules */
 
 /* Navbar - REVERTED to original height and grid layout */
 .navbar {
@@ -238,14 +236,26 @@ code {
     }
 }
 
-/* Project History List (Compact version for sidebar) */
+/* Project History List (Compact version for sidebar and new horizontal header) */
+.project-history-list.compact {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
 .project-history-list.compact .project-item {
-    padding: 0.5rem 0.75rem;
+    padding: 0.25rem 0.6rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 2px solid var(--color-border);
+    border-radius: 4px;
+    margin-bottom: 0;
+    width: 100%;
 }
 
 .project-history-list.compact .project-logo-wrapper {
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
+    border-radius: 4px;
 }
 
 .project-history-list.compact .project-logo {
@@ -255,7 +265,105 @@ code {
 
 .project-history-list.compact h6 {
     font-size: 0.85rem;
+    margin-bottom: 0;
 }
+
+.project-history-list.compact .text-muted.small {
+    font-size: 0.7rem !important;
+}
+
+.project-history-list.compact .btn-xs {
+    padding: 0.1rem 0.35rem;
+    font-size: 0.6rem;
+}
+
+.project-history-list.compact .ps-5 {
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+    justify-content: flex-end;
+}
+
+.project-history-list.compact .mt-2 {
+    margin-top: 0.2rem !important;
+}
+
+/* Quick Launch Cards */
+.quick-launch-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(255, 255, 255, 0.02);
+    border: 2px solid rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    padding: 0.4rem 0.5rem;
+    min-width: 140px;
+    max-width: none;
+    flex: 1 1 0;
+    transition: all 0.2s ease;
+}
+
+.quick-launch-card:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(59, 130, 246, 0.3);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.ql-logo-container {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.25rem;
+}
+
+.ql-logo {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    transition: transform 0.2s ease;
+}
+
+.quick-launch-card:hover .ql-logo {
+    transform: scale(1.05);
+}
+
+.ql-name {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--color-text);
+    margin-bottom: 0.45rem;
+    text-align: center;
+}
+
+/* Dashboard Section Headers */
+.dashboard .card-header span.x-small {
+    letter-spacing: 0.08em;
+    opacity: 0.8;
+}
+
+/* Show More Link Polish */
+[data-action="navigate"].btn-link {
+    transition: all 0.2s ease;
+    border-radius: 4px;
+}
+
+[data-action="navigate"].btn-link:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--color-accent) !important;
+}
+
+/* Terminal Workbench Header Polish */
+[data-terminal-section] .card-header span {
+    letter-spacing: 0.12em !important;
+}
+
+
+.ql-actions {
+    width: 100%;
+}
+
 
 /* Terminal Hub on Dashboard */
 [data-terminal-section] .terminal-panel {
@@ -396,8 +504,8 @@ code {
     padding: 0;
     width: 40px;
     height: 40px;
-    border-radius: 50%;
-    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    border: 2px solid var(--color-border);
     background: rgba(255, 255, 255, 0.03);
     color: var(--color-text-muted);
     cursor: pointer;
@@ -426,8 +534,8 @@ code {
     padding: 0;
     width: 34px;
     height: 34px;
-    border-radius: 50%;
-    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    border: 2px solid var(--color-border);
     background: rgba(255, 255, 255, 0.03);
     color: var(--color-text-muted);
     cursor: pointer;
@@ -457,8 +565,8 @@ button:hover .card-nav-cog {
     gap: 0.4rem;
     padding: 0 0.75rem;
     height: 40px;
-    border-radius: 999px;
-    border: 1px solid var(--color-danger);
+    border-radius: var(--border-radius);
+    border: 2px solid var(--color-danger);
     background: transparent;
     color: var(--color-danger);
     font-size: 0.8rem;
@@ -483,15 +591,7 @@ button:hover .card-nav-cog {
     transform: translateX(3px);
 }
 
-/* Settings card cog spin on hover */
-.settings-card-cog {
-    transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.menu-card:hover .settings-card-cog,
-.menu-card-compact:hover .settings-card-cog {
-    transform: rotate(90deg);
-}
+/* Removed settings-card-cog spin rules */
 
 /* Enhanced Top Card (context-header-card) */
 .context-header-card {
@@ -638,27 +738,29 @@ button:hover .card-nav-cog {
 
 /* Buttons */
 .btn {
-    border-radius: 8px;
-    padding: 0.5rem 1.25rem;
-    font-weight: 500;
+    border-radius: var(--border-radius);
+    padding: 0.65rem 1.5rem;
+    font-weight: 600;
     transition: all var(--transition-speed);
-    border: none;
+    border: 2px solid transparent;
 }
 
 .btn-primary {
     background-color: var(--color-primary);
     color: #fff;
+    border-color: var(--color-primary);
 }
 
 .btn-primary:hover,
 .btn-primary:focus {
     background-color: var(--color-primary-dark);
+    border-color: var(--color-primary-dark);
     box-shadow: 0 4px 12px rgba(91, 42, 134, 0.4);
 }
 
 .btn-secondary {
     background-color: var(--color-bg-surface);
-    border: 1px solid var(--color-border);
+    border: 2px solid var(--color-border);
     color: var(--color-text);
 }
 
@@ -669,7 +771,7 @@ button:hover .card-nav-cog {
 }
 
 .btn-outline-secondary {
-    border: 1px solid var(--color-border);
+    border: 2px solid var(--color-border);
     color: var(--color-text-muted);
     background: transparent;
 }
@@ -681,7 +783,7 @@ button:hover .card-nav-cog {
 }
 
 .btn-outline-primary {
-    border: 1px solid var(--color-primary);
+    border: 2px solid var(--color-primary);
     color: var(--color-primary);
     background: transparent;
     font-weight: 600;
@@ -702,7 +804,7 @@ button:hover .card-nav-cog {
 }
 
 .btn-outline-success {
-    border: 1px solid var(--color-success);
+    border: 2px solid var(--color-success);
     color: var(--color-success);
     background: transparent;
     font-weight: 600;
@@ -723,7 +825,7 @@ button:hover .card-nav-cog {
 }
 
 .btn-outline-danger {
-    border: 1px solid var(--color-danger);
+    border: 2px solid var(--color-danger);
     color: var(--color-danger);
     background: transparent;
     font-weight: 600;
@@ -746,7 +848,7 @@ button:hover .card-nav-cog {
 
 .btn-danger {
     background-color: #ef4444;
-    border: 1px solid #ef4444;
+    border: 2px solid #ef4444;
     color: #ffffff;
 }
 
@@ -758,7 +860,7 @@ button:hover .card-nav-cog {
 }
 
 .btn-outline-warning {
-    border: 1px solid var(--color-warning);
+    border: 2px solid var(--color-warning);
     color: var(--color-warning);
     background: transparent;
     font-weight: 600;
@@ -781,7 +883,7 @@ button:hover .card-nav-cog {
 
 .btn-warning {
     background-color: var(--color-warning);
-    border: 1px solid var(--color-warning);
+    border: 2px solid var(--color-warning);
     color: #ffffff;
 }
 
@@ -794,7 +896,7 @@ button:hover .card-nav-cog {
 }
 
 .btn-outline-info {
-    border: 1px solid var(--color-secondary);
+    border: 2px solid var(--color-secondary);
     color: var(--color-text);
     background: transparent;
     font-weight: 600;
@@ -1138,9 +1240,7 @@ button:hover .card-nav-cog {
     opacity: 1;
 }
 
-.dashboard-subnav-link:hover .settings-card-cog {
-    transform: rotate(90deg);
-}
+/* Removed settings-card-cog spin rules */
 
 /* Compact Menu Cards */
 .menu-card-compact {
@@ -1313,17 +1413,12 @@ button:hover .card-nav-cog {
     font-size: 0.72rem;
 }
 
-/* Start button — green */
-#terminal-start-btn {
-    border-color: #a6e3a1;
-    color: #a6e3a1;
-    background: rgba(166, 227, 161, 0.08);
-}
-
-#terminal-start-btn:hover {
-    background: rgba(166, 227, 161, 0.18);
-    border-color: #a6e3a1;
-    color: #ffffff;
+/* Keep terminal heading controls compact like other UI action buttons */
+#terminal-panel .card-header .btn.btn-sm,
+#terminal-panel .terminal-controls-bar .btn.btn-sm {
+    padding: 0.2rem 0.55rem;
+    font-size: 0.72rem;
+    line-height: 1.2;
 }
 
 /* Controls bar — dark background matching card header */
@@ -2944,4 +3039,193 @@ input.form-control:disabled {
 #terminal-panel .terminal-window-shell {
     position: relative;
     overflow: hidden;
+}
+
+/* ── Terminal PIN Overlay ─────────────────────────────────────────────────── */
+/* Sits inside .terminal-window-shell (position:relative) and covers the PTY */
+.terminal-pin-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 10, 16, 0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.terminal-pin-box {
+    background: rgba(28, 28, 40, 0.95);
+    border: 1px solid rgba(91, 42, 134, 0.5);
+    border-radius: 16px;
+    padding: 2rem 2.25rem 1.75rem;
+    width: 340px;
+    max-width: calc(100vw - 2rem);
+    box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(91, 42, 134, 0.2);
+    text-align: center;
+    animation: pin-overlay-in 0.18s ease;
+}
+
+@keyframes pin-overlay-in {
+    from { opacity: 0; transform: scale(0.94) translateY(6px); }
+    to   { opacity: 1; transform: scale(1)    translateY(0);   }
+}
+
+.terminal-pin-box-icon {
+    width: 44px;
+    height: 44px;
+    margin: 0 auto 1rem;
+    background: rgba(91, 42, 134, 0.18);
+    border: 1px solid rgba(91, 42, 134, 0.4);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(160, 100, 220, 1);
+    filter: drop-shadow(0 0 8px rgba(120, 60, 170, 0.5));
+}
+
+.terminal-pin-box h6 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 0.3rem;
+}
+
+.terminal-pin-box p {
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+    margin-bottom: 1.4rem;
+}
+
+.terminal-pin-attempts {
+    font-size: 0.72rem;
+    color: #ef9a9a;
+    min-height: 1em;
+    margin-bottom: 0.75rem;
+    transition: opacity 0.15s;
+}
+
+/* ── PIN Entry Modal ──────────────────────────────────────────────────────── */
+.pin-modal-dialog {
+    max-width: 420px;
+}
+
+.pin-modal-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.pin-modal-title svg {
+    color: var(--color-primary);
+    filter: drop-shadow(0 0 6px rgba(120, 60, 170, 0.6));
+}
+
+.pin-modal-subtitle {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    margin-bottom: 1.75rem;
+    text-align: center;
+}
+
+.pin-digit-row {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 1.5rem;
+}
+
+.pin-digit {
+    width: 52px;
+    height: 64px;
+    background: rgba(20, 20, 30, 0.7);
+    border: 2px solid var(--color-border);
+    border-radius: 10px;
+    text-align: center;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--color-text);
+    caret-color: var(--color-primary);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+    -webkit-text-security: disc;
+    /* Firefox fallback — hide value with type=password handled in JS */
+}
+
+.pin-digit:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(91, 42, 134, 0.35);
+    transform: scale(1.06);
+}
+
+.pin-digit.filled {
+    border-color: rgba(120, 60, 180, 0.7);
+    background: rgba(91, 42, 134, 0.15);
+}
+
+.pin-digit.error {
+    border-color: #ef5350;
+    box-shadow: 0 0 0 3px rgba(239, 83, 80, 0.3);
+    animation: pin-shake 0.35s ease;
+}
+
+@keyframes pin-shake {
+    0%, 100% { transform: translateX(0); }
+    20%       { transform: translateX(-5px); }
+    40%       { transform: translateX(5px); }
+    60%       { transform: translateX(-4px); }
+    80%       { transform: translateX(4px); }
+}
+
+.pin-length-hint {
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+    margin-bottom: 1.25rem;
+    letter-spacing: 0.03em;
+}
+
+.pin-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.pin-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
+.pin-status-badge.set {
+    background: rgba(76, 175, 80, 0.15);
+    color: #81c784;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.pin-status-badge.not-set {
+    background: rgba(120, 60, 180, 0.12);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+}
+
+.pin-section-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.pin-section-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }

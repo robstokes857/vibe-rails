@@ -127,7 +127,7 @@ export class VibeTerminal {
         }
 
         if (window.WebLinksAddon?.WebLinksAddon) {
-            this._webLinksAddon = new window.WebLinksAddon.WebLinksAddon((event, uri) => {
+            this._webLinksAddon = new window.WebLinksAddon.WebLinksAddon((_event, uri) => {
                 if (!uri) {
                     return;
                 }
@@ -612,6 +612,11 @@ export class VibeTerminal {
 
     dispose() {
         this.stopResizeHandling();
+
+        if (this._scrollRafId) {
+            cancelAnimationFrame(this._scrollRafId);
+            this._scrollRafId = null;
+        }
 
         if (this._terminal) {
             this._terminal.dispose();

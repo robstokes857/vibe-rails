@@ -44,35 +44,35 @@ export class DashboardController {
                 const agentCount = this.app.data.agents.length;
 
                 headingContainer.innerHTML = `
-                    <div class="context-header-card position-relative overflow-hidden">
-                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
-                            <div class="d-flex align-items-center gap-3">
-                                <div class="project-logo-wrapper" style="width: 48px; height: 48px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2);">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" style="color: var(--color-primary);">
+                    <div class="context-header-card position-relative overflow-hidden py-2 px-3">
+                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="project-logo-wrapper" style="width: 36px; height: 36px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2);">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="color: var(--color-primary);">
                                         <path d="M9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.825a2 2 0 0 1-1.991-1.819l-.637-7a2 2 0 0 1 .342-1.31L.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3m-8.322.12C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 1z"/>
                                     </svg>
                                 </div>
                                 <div>
                                     <div class="d-flex align-items-center gap-2 mb-0">
-                                        <h4 class="mb-0 text-white fw-bold">${projectName}</h4>
+                                        <h5 class="mb-0 text-white fw-bold">${projectName}</h5>
                                         <button class="btn btn-link btn-sm p-0 text-muted hover-accent" type="button" data-action="set-custom-name" title="Rename project">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16">
                                                 <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/>
                                             </svg>
                                         </button>
                                     </div>
-                                    <div class="text-muted small font-monospace opacity-75">${path}</div>
+                                    <div class="text-muted xx-small font-monospace opacity-75">${path}</div>
                                 </div>
                             </div>
                             
-                            <div class="d-flex gap-3">
-                                <div class="d-flex align-items-center gap-2 px-3 py-1 rounded-pill bg-dark bg-opacity-25 border border-secondary border-opacity-10">
-                                    <span class="text-muted small text-uppercase fw-bold" style="font-size: 0.65rem; letter-spacing: 0.05em;">Agents</span>
-                                    <span class="fw-bold text-accent" style="color: var(--color-accent);">${agentCount}</span>
+                            <div class="d-flex gap-2">
+                                <div class="d-flex align-items-center gap-2 px-2 py-1 rounded-pill bg-dark bg-opacity-25 border border-secondary border-opacity-10">
+                                    <span class="text-muted x-small text-uppercase fw-bold" style="letter-spacing: 0.05em;">Agents</span>
+                                    <span class="fw-bold text-accent small" style="color: var(--color-accent);">${agentCount}</span>
                                 </div>
-                                <div class="d-flex align-items-center gap-2 px-3 py-1 rounded-pill bg-dark bg-opacity-25 border border-secondary border-opacity-10">
-                                    <span class="text-muted small text-uppercase fw-bold" style="font-size: 0.65rem; letter-spacing: 0.05em;">Sandboxes</span>
-                                    <span class="fw-bold text-primary" style="color: var(--color-primary);">${sandboxCount}</span>
+                                <div class="d-flex align-items-center gap-2 px-2 py-1 rounded-pill bg-dark bg-opacity-25 border border-secondary border-opacity-10">
+                                    <span class="text-muted x-small text-uppercase fw-bold" style="letter-spacing: 0.05em;">Sandboxes</span>
+                                    <span class="fw-bold text-primary small" style="color: var(--color-primary);">${sandboxCount}</span>
                                 </div>
                             </div>
                         </div>
