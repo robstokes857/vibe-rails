@@ -1,6 +1,8 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
+using VibeRails.Services.Bert;
 using VibeRails.Utils;
 
 namespace VibeRails.Services
@@ -11,10 +13,14 @@ namespace VibeRails.Services
     public class DbService : IDbService
     {
         private readonly string _connectionString;
+        private readonly IBertInputCaptureService? _bertInputCaptureService;
+        private readonly ILogger<DbService>? _logger;
 
-        public DbService()
+        public DbService(IBertInputCaptureService? bertInputCaptureService = null, ILogger<DbService>? logger = null)
         {
             _connectionString = $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
+            _bertInputCaptureService = bertInputCaptureService;
+            _logger = logger;
         }
 
         public void InitializeDatabase()
@@ -386,11 +392,29 @@ namespace VibeRails.Services
                 {
                     await InsertFileChangesAsync(userInputId, lastInput?.Id, fileChanges);
                 }
+
+                if (_bertInputCaptureService != null)
+                {
+                    await _bertInputCaptureService.CaptureAsync(
+                        sessionId,
+                        userInputId,
+                        inputText,
+                        currentCommitHash,
+                        fileChanges,
+                        cancellationToken);
+                }
             }
             catch (Exception ex)
             {
                 // Log but don't fail the user's session
-                Console.Error.WriteLine($"[VibeRails] Error recording user input: {ex.Message}");
+                if (_logger != null)
+                {
+                    _logger.LogWarning(ex, "[VibeRails] Error recording user input for session {SessionId}", sessionId);
+                }
+                else
+                {
+                    Console.Error.WriteLine($"[VibeRails] Error recording user input: {ex.Message}");
+                }
             }
         }
 
@@ -540,3 +564,4 @@ namespace VibeRails.Services
         }
     }
 }
+

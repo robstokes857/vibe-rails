@@ -1,4 +1,5 @@
 using VibeRails.Auth;
+using VibeRails.Services.Bert;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
@@ -19,6 +20,7 @@ namespace VibeRails
         public static void Register(IServiceCollection serviceCollection)
         {
             serviceCollection.AddScoped<IFileService, FileService>();
+            serviceCollection.AddSingleton<IBertInputCaptureService, BertInputCaptureService>();
             serviceCollection.AddScoped<IDbService, DbService>();
             serviceCollection.AddScoped<IRepository>(sp =>
             {
@@ -124,3 +126,4 @@ namespace VibeRails
         }
     }
 }
+

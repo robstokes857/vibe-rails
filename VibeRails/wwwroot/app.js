@@ -50,6 +50,11 @@ export class VibeControlApp {
         await this.fetchConfigs();
         if (!this.data.isInGit) {
             this.showNotInGitBanner();
+            document.querySelectorAll('.app-subnav .app-subnav-link, .nav-settings-btn').forEach(btn => {
+                btn.disabled = true;
+                btn.style.opacity = '0.35';
+                btn.style.pointerEvents = 'none';
+            });
             this.bindGlobalActions();
             this.setupKeyboardShortcuts();
             this.setupVSCodeIntegration();
@@ -110,7 +115,15 @@ export class VibeControlApp {
                                     </svg>
                                     Open a Different Directory
                                 </button>
+                                <input type="file" id="git-dir-picker" webkitdirectory style="display:none">
                                 ${initButtonHtml}
+                            </div>
+                            <div id="git-confirm-row" class="d-none mt-3">
+                                <div class="input-group">
+                                    <input type="text" id="git-confirm-path" class="form-control bg-dark text-white border-secondary" placeholder="Resolved path">
+                                    <button class="btn btn-success" id="git-confirm-go">Open</button>
+                                </div>
+                                <div class="form-text text-muted mt-1">Edit the path if needed, then click Open.</div>
                             </div>
                         </div>
                     </div>
@@ -124,9 +137,24 @@ export class VibeControlApp {
         };
 
         document.getElementById('git-open-dir-btn')?.addEventListener('click', () => {
-            const fullPath = prompt('Enter the full path to the directory you want to open:');
-            if (!fullPath) return;
-            this._openDirectory(fullPath, showError);
+            document.getElementById('git-dir-picker').click();
+        });
+
+        document.getElementById('git-dir-picker')?.addEventListener('change', (e) => {
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+            const topFolder = files[0].webkitRelativePath.split('/')[0];
+            const launchDir = this.data.configs?.launchDirectory || '';
+            const fullPath = launchDir.replace(/[\\/]+$/, '') + '/../' + topFolder;
+            document.getElementById('git-confirm-path').value = fullPath;
+            document.getElementById('git-confirm-row').classList.remove('d-none');
+            errorEl.classList.add('d-none');
+        });
+
+        document.getElementById('git-confirm-go')?.addEventListener('click', () => {
+            const path = document.getElementById('git-confirm-path').value.trim();
+            if (!path) return;
+            this._openDirectory(path, showError);
         });
 
         document.getElementById('git-init-btn')?.addEventListener('click', async () => {

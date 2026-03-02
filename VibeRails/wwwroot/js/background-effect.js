@@ -83,7 +83,16 @@
         height = canvas.height = window.innerHeight;
     }
 
-    function animate() {
+    function shouldPause() {
+        return document.body.classList.contains('terminal-focus-active')
+            || document.body.classList.contains('terminal-active-session');
+    }
+
+    let rafId = null;
+    let isAnimating = false;
+    let bodyClassObserver = null;
+
+    function renderFrame() {
         ctx.clearRect(0, 0, width, height);
         
         for (let i = 0; i < particles.length; i++) {
@@ -107,12 +116,48 @@
                 }
             }
         }
-        requestAnimationFrame(animate);
+    }
+
+    function animate() {
+        if (!isAnimating) {
+            return;
+        }
+
+        renderFrame();
+        rafId = requestAnimationFrame(animate);
+    }
+
+    function startAnimation() {
+        if (isAnimating || shouldPause() || document.hidden) {
+            return;
+        }
+
+        isAnimating = true;
+        rafId = requestAnimationFrame(animate);
+    }
+
+    function stopAnimation() {
+        if (rafId !== null) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+        }
+        isAnimating = false;
+    }
+
+    function updateAnimationState() {
+        if (shouldPause() || document.hidden) {
+            stopAnimation();
+        } else {
+            startAnimation();
+        }
     }
 
     window.addEventListener('resize', () => {
         resize();
         particles = Array.from({ length: config.count }, () => new Particle());
+        if (!shouldPause()) {
+            renderFrame();
+        }
     });
 
     window.addEventListener('mousemove', (e) => {
@@ -125,7 +170,18 @@
         mouse.y = null;
     });
 
+    document.addEventListener('visibilitychange', updateAnimationState);
+
     resize();
     particles = Array.from({ length: config.count }, () => new Particle());
-    animate();
+
+    if (document.body) {
+        bodyClassObserver = new MutationObserver(updateAnimationState);
+        bodyClassObserver.observe(document.body, {
+            attributes: true,
+            attributeFilter: ['class']
+        });
+    }
+
+    updateAnimationState();
 })();

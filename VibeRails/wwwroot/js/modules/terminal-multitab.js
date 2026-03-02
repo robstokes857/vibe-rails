@@ -55,6 +55,7 @@ class TerminalTab {
         this.vibeTerminal.onFitChange = () => this.sendResizeToPty();
         this.vibeTerminal.onProgress = (progress) => this.manager.updateTabProgress(this.state.id, progress);
         this.terminal = this.vibeTerminal.terminal;
+        this.manager.applySavedTerminalSettingsForTab(this.state.id);
 
         this.configureInputTarget();
         this.installInputFocusHandlers();
@@ -246,7 +247,7 @@ class TerminalTab {
         this.vibeTerminal.startResizeHandling({
             debounceMs: 100,
             includeVisualViewport: true,
-            includeVisualViewportScroll: true
+            includeVisualViewportScroll: false
         });
     }
 
@@ -404,7 +405,61 @@ class TerminalManager {
         this.lockedPanel = null;
         this.lockScrollTop = 0;
         this.isScrollLocked = false;
+        this.focusLayoutHandler = null;
+        this.focusLayoutRaf = null;
         this._themeSwatches = [];
+    }
+
+    _loadCursorBlink() {
+        try {
+            return localStorage.getItem('viberails_terminal_cursorBlink') === 'true';
+        } catch {
+            return false;
+        }
+    }
+
+    _loadRendererPreference() {
+        try {
+            return localStorage.getItem('viberails_terminal_webgl') === 'true' ? 'webgl' : 'canvas';
+        } catch {
+            return 'canvas';
+        }
+    }
+
+    _loadThemePreference() {
+        try {
+            return localStorage.getItem('viberails_terminal_theme') || null;
+        } catch {
+            return null;
+        }
+    }
+
+    _loadCursorStyle() {
+        try {
+            return localStorage.getItem('viberails_terminal_cursorStyle') || 'block';
+        } catch {
+            return 'block';
+        }
+    }
+
+    _applySavedTerminalSettings(tab) {
+        const vibe = tab?.instance?.vibeTerminal;
+        const terminal = vibe?._terminal;
+        if (!terminal) return;
+
+        const themeKey = this._loadThemePreference();
+        if (themeKey && window.CXL_THEMES?.[themeKey]) {
+            terminal.options.theme = window.CXL_THEMES[themeKey];
+        }
+
+        const cursorStyle = this._loadCursorStyle();
+        const cursorBlink = this._loadCursorBlink();
+        terminal.options.cursorStyle = cursorStyle;
+        terminal.options.cursorBlink = cursorBlink;
+    }
+
+    applySavedTerminalSettingsForTab(tabId) {
+        this._applySavedTerminalSettings(this.tabs.get(tabId));
     }
 
     async initialize() {
@@ -460,11 +515,15 @@ class TerminalManager {
             }
         }
 
+        this.setupFocusLayoutHandling();
+        this.updateFocusContainerHeight();
         this.updateUi();
     }
 
     destroy() {
+        this.removeFocusLayoutHandler();
         this.disableLockedLayout(this.lockedPanel);
+        document.body.classList.remove('terminal-active-session');
 
         this.tabs.forEach((tab) => tab.instance.dispose());
         this.tabs.clear();
@@ -473,6 +532,7 @@ class TerminalManager {
     }
 
     resetLayoutStateForNavigation() {
+        this.removeFocusLayoutHandler();
         this.disableLockedLayout(this.lockedPanel);
         this.cleanupStaleLockState();
     }
@@ -544,6 +604,8 @@ class TerminalManager {
             ?.addEventListener('change', (e) => this.applyCursorStyle(e.target.value));
         this.container.querySelector('#terminal-settings-cursor-blink')
             ?.addEventListener('change', (e) => this.applyCursorBlink(e.target.value === 'true'));
+        this.container.querySelector('#terminal-settings-renderer')
+            ?.addEventListener('change', (e) => this.applyRendererPreference(e.target.value));
     }
 
     async restoreTabs() {
@@ -1019,6 +1081,8 @@ class TerminalManager {
 
     updateUi() {
         const active = this.getActiveTab();
+        const hasActiveSession = this.tabOrder.some((id) => this.tabs.get(id)?.state?.hasActiveSession === true);
+        document.body.classList.toggle('terminal-active-session', hasActiveSession);
 
         this.tabs.forEach((tab) => {
             tab.state.ui.button.textContent = shorten(tab.state.label || 'Terminal');
@@ -1106,6 +1170,7 @@ class TerminalManager {
     showTerminal() {
         if (this.placeholder) this.placeholder.style.display = 'none';
         if (this.terminalContainer) this.terminalContainer.style.display = 'block';
+        this.updateFocusContainerHeight();
         // Re-fit now that the container is visible and has real dimensions
         this.getActiveTab()?.instance.scheduleFitPasses();
     }
@@ -1263,7 +1328,62 @@ class TerminalManager {
             this.disableLockedLayout(this.panel);
         }
 
+        this.updateFocusContainerHeight();
         tab?.instance.scheduleFitPasses();
+    }
+
+    setupFocusLayoutHandling() {
+        if (this.options.focusView !== true || !this.panel || !this.terminalContainer || this.focusLayoutHandler) {
+            return;
+        }
+
+        const viewport = window.visualViewport;
+        this.focusLayoutHandler = () => {
+            if (this.focusLayoutRaf) {
+                window.cancelAnimationFrame(this.focusLayoutRaf);
+            }
+
+            this.focusLayoutRaf = window.requestAnimationFrame(() => {
+                this.focusLayoutRaf = null;
+                this.updateFocusContainerHeight();
+                this.getActiveTab()?.instance.scheduleFitPasses();
+            });
+        };
+
+        window.addEventListener('resize', this.focusLayoutHandler);
+        viewport?.addEventListener('resize', this.focusLayoutHandler);
+
+        this.focusLayoutHandler();
+    }
+
+    removeFocusLayoutHandler() {
+        if (this.focusLayoutRaf) {
+            window.cancelAnimationFrame(this.focusLayoutRaf);
+            this.focusLayoutRaf = null;
+        }
+
+        if (this.focusLayoutHandler) {
+            const viewport = window.visualViewport;
+            window.removeEventListener('resize', this.focusLayoutHandler);
+            viewport?.removeEventListener('resize', this.focusLayoutHandler);
+            this.focusLayoutHandler = null;
+        }
+
+        this.panel?.style.removeProperty('--terminal-available-height');
+    }
+
+    updateFocusContainerHeight() {
+        if (this.options.focusView !== true || !this.panel || !this.terminalContainer) {
+            return;
+        }
+
+        const viewportHeight = window.visualViewport?.height
+            || window.innerHeight
+            || document.documentElement.clientHeight
+            || 0;
+        const containerRect = this.terminalContainer.getBoundingClientRect();
+        const availableHeight = Math.max(0, Math.round(viewportHeight - containerRect.top - 12));
+        this.panel.style.setProperty('--terminal-available-height', `${availableHeight}px`);
     }
 
     updateWindowControlState() {
@@ -1514,6 +1634,16 @@ class TerminalManager {
         const cursorBlinkSelect = this.container.querySelector('#terminal-settings-cursor-blink');
         const savedCursorBlink = localStorage.getItem('viberails_terminal_cursorBlink');
         if (cursorBlinkSelect && savedCursorBlink) cursorBlinkSelect.value = savedCursorBlink;
+
+        const rendererSelect = this.container.querySelector('#terminal-settings-renderer');
+        if (rendererSelect) rendererSelect.value = this._loadRendererPreference();
+
+        const savedTheme = this._loadThemePreference();
+        if (savedTheme) {
+            this._themeSwatches?.forEach((swatch) => {
+                swatch.classList.toggle('active', swatch.dataset.theme === savedTheme);
+            });
+        }
     }
 
     toggleSettingsPanel(forceOpen) {
@@ -1561,6 +1691,16 @@ class TerminalManager {
                 tab.instance.vibeTerminal._terminal.options.cursorBlink = blink;
             }
         });
+    }
+
+    applyRendererPreference(renderer) {
+        const useWebgl = renderer === 'webgl';
+        try { localStorage.setItem('viberails_terminal_webgl', String(useWebgl)); } catch {}
+        this.app.showToast(
+            'Renderer Updated',
+            'Renderer preference saved. Restart active terminal tabs to apply.',
+            'info'
+        );
     }
 }
 
@@ -1725,7 +1865,7 @@ export class TerminalController {
                     <div class="terminal-window-title-bar">
                         <div class="terminal-window-title" id="terminal-window-title">Terminals run safely in the background even if you navigate away.</div>
                     </div>
-                    <div class="card-body p-0" id="terminal-container" style="display: none; height: ${isFocusView ? '680px' : '500px'}; overflow: hidden;">
+                    <div class="card-body p-0" id="terminal-container" style="display: none; overflow: hidden;">
                         <div id="terminal-tab-panels" class="terminal-tab-panels"></div>
                     </div>
                     <div class="card-body text-center text-muted" id="terminal-placeholder">
@@ -1741,6 +1881,16 @@ export class TerminalController {
                             <div class="terminal-settings-section">
                                 <div class="terminal-settings-section-title">Theme</div>
                                 <div class="terminal-settings-theme-list" id="terminal-settings-theme-list"></div>
+                            </div>
+                            <div class="terminal-settings-section">
+                                <div class="terminal-settings-section-title">Rendering</div>
+                                <div class="terminal-settings-row">
+                                    <label>Renderer</label>
+                                    <select id="terminal-settings-renderer">
+                                        <option value="canvas">Canvas (Recommended)</option>
+                                        <option value="webgl">WebGL (GPU)</option>
+                                    </select>
+                                </div>
                             </div>
                             <div class="terminal-settings-section">
                                 <div class="terminal-settings-section-title">Font</div>
