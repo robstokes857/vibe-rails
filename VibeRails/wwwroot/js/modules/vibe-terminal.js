@@ -74,6 +74,7 @@ export class VibeTerminal {
         this._fontFamily = fontFamily;
 
         this._onFitChange = null;
+        this._onProgress = null;
         this._lastCols = null;
         this._lastRows = null;
         this._searchTerm = '';
@@ -108,6 +109,8 @@ export class VibeTerminal {
         this._webLinksAddon = null;
         this._ligaturesAddon = null;
         this._webFontsAddon = null;
+        this._imageAddon = null;
+        this._progressAddon = null;
         this._ligaturesLoadPromise = null;
 
         this._terminal.attachCustomKeyEventHandler((event) => this._runCustomKeyEventHandlers(event));
@@ -143,6 +146,26 @@ export class VibeTerminal {
                 onLoaded: () => this.scheduleFitPasses()
             });
             this._terminal.loadAddon(this._webFontsAddon);
+        }
+
+        if (window.UnicodeGraphemesAddon?.UnicodeGraphemesAddon) {
+            this._terminal.loadAddon(new window.UnicodeGraphemesAddon.UnicodeGraphemesAddon());
+            this._terminal.unicode.activeVersion = '15-graphemes';
+        }
+
+        if (window.ImageAddon?.ImageAddon) {
+            this._imageAddon = new window.ImageAddon.ImageAddon();
+            this._terminal.loadAddon(this._imageAddon);
+        }
+
+        if (window.ProgressAddon?.ProgressAddon) {
+            this._progressAddon = new window.ProgressAddon.ProgressAddon();
+            this._terminal.loadAddon(this._progressAddon);
+            this._progressAddon.onChange((progress) => {
+                if (typeof this._onProgress === 'function') {
+                    this._onProgress(progress);
+                }
+            });
         }
 
         this._bindSearchShortcuts();
@@ -286,6 +309,10 @@ export class VibeTerminal {
 
     set onFitChange(callback) {
         this._onFitChange = typeof callback === 'function' ? callback : null;
+    }
+
+    set onProgress(callback) {
+        this._onProgress = typeof callback === 'function' ? callback : null;
     }
 
     addCustomKeyEventHandler(handler) {
@@ -598,8 +625,11 @@ export class VibeTerminal {
         this._webLinksAddon = null;
         this._ligaturesAddon = null;
         this._webFontsAddon = null;
+        this._imageAddon = null;
+        this._progressAddon = null;
         this._ligaturesLoadPromise = null;
         this._onFitChange = null;
+        this._onProgress = null;
         this._lastCols = null;
         this._lastRows = null;
         this._searchTerm = '';

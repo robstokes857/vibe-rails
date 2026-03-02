@@ -53,6 +53,7 @@ class TerminalTab {
             mobileLineHeight: 1.2
         });
         this.vibeTerminal.onFitChange = () => this.sendResizeToPty();
+        this.vibeTerminal.onProgress = (progress) => this.manager.updateTabProgress(this.state.id, progress);
         this.terminal = this.vibeTerminal.terminal;
 
         this.configureInputTarget();
@@ -403,6 +404,7 @@ class TerminalManager {
         this.lockedPanel = null;
         this.lockScrollTop = 0;
         this.isScrollLocked = false;
+        this._themeSwatches = [];
     }
 
     async initialize() {
@@ -1001,6 +1003,20 @@ class TerminalManager {
         });
     }
 
+    // progress: { state: 0-4, value: 0-100 }
+    // states: 0=none, 1=normal, 2=error, 3=indeterminate, 4=paused
+    updateTabProgress(tabId, progress) {
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+        const item = tab.state.ui.item;
+        item.removeAttribute('data-progress');
+        item.style.removeProperty('--tab-progress');
+        if (progress.state === 0) return;
+        const stateNames = ['', 'normal', 'error', 'indeterminate', 'paused'];
+        item.dataset.progress = stateNames[progress.state] || 'normal';
+        item.style.setProperty('--tab-progress', `${progress.value}%`);
+    }
+
     updateUi() {
         const active = this.getActiveTab();
 
@@ -1463,6 +1479,7 @@ class TerminalManager {
         const sizeInput = this.container.querySelector('#terminal-settings-font-size');
         if (sizeInput) sizeInput.value = size;
 
+        this._themeSwatches = [];
         const themeList = this.container.querySelector('#terminal-settings-theme-list');
         if (themeList && window.CXL_THEMES) {
             for (const [key, theme] of Object.entries(window.CXL_THEMES)) {
@@ -1474,6 +1491,7 @@ class TerminalManager {
                 btn.style.background = `linear-gradient(135deg, ${theme.background} 50%, ${theme.foreground} 50%)`;
                 btn.addEventListener('click', () => this.applyTheme(key));
                 themeList.appendChild(btn);
+                this._themeSwatches.push(btn);
             }
         }
 
@@ -1514,9 +1532,7 @@ class TerminalManager {
                 tab.instance.vibeTerminal._terminal.options.theme = theme;
             }
         });
-        this.container.querySelectorAll('.terminal-settings-theme-swatch').forEach(s => {
-            s.classList.toggle('active', s.dataset.theme === key);
-        });
+        this._themeSwatches?.forEach(s => s.classList.toggle('active', s.dataset.theme === key));
     }
 
     applyFontFamily(family) {

@@ -1496,6 +1496,7 @@ button:hover .card-nav-cog {
     max-width: 200px;
     font-size: 0.75rem;
     position: relative;
+    overflow: hidden;
     user-select: none;
     border: none;
 }
@@ -1552,6 +1553,30 @@ button:hover .card-nav-cog {
 @keyframes tab-status-alert {
     0%, 100% { opacity: 0.4; transform: scale(1); }
     50% { opacity: 1; transform: scale(1.2); filter: brightness(1.2); }
+}
+
+/* Progress bar — thin strip at top of tab, driven by OSC 9;4 */
+#terminal-panel .terminal-tab-item[data-progress]::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--tab-progress, 0%);
+    height: 2px;
+    border-radius: 0 1px 1px 0;
+    transition: width 0.3s ease;
+}
+#terminal-panel .terminal-tab-item[data-progress="normal"]::before    { background: var(--color-primary); }
+#terminal-panel .terminal-tab-item[data-progress="error"]::before     { background: var(--color-danger); }
+#terminal-panel .terminal-tab-item[data-progress="paused"]::before    { background: var(--color-warning); }
+#terminal-panel .terminal-tab-item[data-progress="indeterminate"]::before {
+    width: 40%;
+    background: var(--color-primary);
+    animation: tab-progress-indeterminate 1.4s infinite ease-in-out;
+}
+@keyframes tab-progress-indeterminate {
+    0%   { left: -40%; width: 40%; }
+    100% { left: 100%; width: 40%; }
 }
 
 /* Subtle tint on the active tab */
