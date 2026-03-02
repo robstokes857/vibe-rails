@@ -412,6 +412,80 @@ public class TerminalSessionService : ITerminalSessionService
         }
     }
 
+    /// <summary>
+    /// Sends __LOCKED__ to the connecting viewer and waits for them to respond with
+    /// __PIN__:&lt;digits&gt;. Allows up to 3 attempts before closing the socket.
+    /// Returns true if PIN was verified, false if the connection should be dropped.
+    /// </summary>
+    private static async Task<bool> PinChallengeAsync(WebSocket webSocket, CancellationToken ct)
+    {
+        const int maxAttempts = 3;
+        var lockedBytes = System.Text.Encoding.UTF8.GetBytes(TerminalControlProtocol.Locked);
+        var buffer = new byte[256];
+
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            // Send __LOCKED__
+            try
+            {
+                await webSocket.SendAsync(lockedBytes, WebSocketMessageType.Text, true, ct);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[PIN] Failed to send LOCKED challenge");
+                return false;
+            }
+
+            // Wait for __PIN__:<digits>
+            string response;
+            try
+            {
+                var result = await webSocket.ReceiveAsync(buffer, ct);
+                if (result.MessageType == WebSocketMessageType.Close)
+                    return false;
+
+                response = System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count).Trim();
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[PIN] Failed to receive PIN response");
+                return false;
+            }
+
+            // Validate format: __PIN__:<4-6 digits>
+            if (!response.StartsWith(TerminalControlProtocol.PinResponse, StringComparison.Ordinal))
+            {
+                Log.Warning("[PIN] Bad PIN message format, attempt {Attempt}/{Max}", attempt + 1, maxAttempts);
+                continue;
+            }
+
+            var pin = response[TerminalControlProtocol.PinResponse.Length..].Trim();
+            if (pin.Length < 4 || pin.Length > 6 || !pin.All(char.IsDigit))
+            {
+                Log.Warning("[PIN] PIN out of range ({Len} chars), attempt {Attempt}/{Max}", pin.Length, attempt + 1, maxAttempts);
+                continue;
+            }
+
+            if (RemoteConfig.VerifyPin(pin))
+            {
+                Log.Information("[PIN] PIN verified successfully");
+                return true;
+            }
+
+            Log.Warning("[PIN] Incorrect PIN, attempt {Attempt}/{Max}", attempt + 1, maxAttempts);
+        }
+
+        // Exhausted attempts — disconnect
+        Log.Warning("[PIN] Too many failed PIN attempts, closing connection");
+        try
+        {
+            await webSocket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Too many failed PIN attempts", CancellationToken.None);
+        }
+        catch { }
+
+        return false;
+    }
+
     private static async Task HandleTakeoverAsync(WebSocket newWebSocket)
     {
         WebSocket? oldWebSocket;
