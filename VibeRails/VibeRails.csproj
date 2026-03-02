@@ -40,20 +40,26 @@
   </ItemGroup>
   <!-- Copy bundled BERT model assets to output directory -->
   <ItemGroup>
-    <Content Include="Models\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Models\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest">
+      <Link>Models\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
   </ItemGroup>
   <!-- Copy public cert to output directory -->
   <ItemGroup>
-    <Content Include="Certs\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Certs\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest">
+      <Link>Certs\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
   </ItemGroup>
   <!-- Copy root download scripts to output directory for post-deploy setup -->
   <ItemGroup>
-    <Content Include="..\Scripts\download-bert-model.ps1" Link="Scripts\download-bert-model.ps1" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\Scripts\download-bert-model.sh" Link="Scripts\download-bert-model.sh" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Scripts\download-bert-model.ps1" Link="Scripts\download-bert-model.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\Scripts\download-bert-model.sh" Link="Scripts\download-bert-model.sh" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <!-- Copy hook scripts to output directory -->
   <ItemGroup>
-    <Content Include="scripts\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="scripts\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest">
+      <Link>scripts\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <TrimmerRootAssembly Include="Microsoft.ML.OnnxRuntime" />
