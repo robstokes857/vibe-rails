@@ -18,6 +18,7 @@ public static class RouteExtensions
         HookRoutes.Map(app);
         LlmSettingsRoutes.Map(app);
         ClaudePlanRoutes.Map(app);
+        SwarmRoutes.Map(app);
         UpdateRoutes.Map(app);
         AppSettingsRoutes.Map(app);
         PinRoutes.Map(app);

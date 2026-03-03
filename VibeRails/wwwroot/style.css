@@ -3243,3 +3243,600 @@ input.form-control:disabled {
     align-items: center;
     gap: 8px;
 }
+
+/* ============================================
+   Swarm Planner
+   ============================================ */
+
+.swarm-view .card {
+    border-color: rgba(59, 130, 246, 0.25);
+}
+
+.swarm-input-label {
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+}
+
+.swarm-task-input {
+    min-height: 170px;
+    background: rgba(0, 0, 0, 0.2);
+    border-color: var(--color-border);
+    color: var(--color-text);
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    font-size: 0.85rem;
+}
+
+.swarm-task-input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.2);
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--color-text);
+}
+
+.swarm-init-card {
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 10px;
+    background: rgba(16, 185, 129, 0.06);
+    padding: 0.85rem;
+}
+
+.swarm-init-message {
+    min-height: 210px;
+    background: rgba(0, 0, 0, 0.25);
+    border-color: var(--color-border);
+    color: var(--color-text);
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    font-size: 0.8rem;
+    line-height: 1.45;
+}
+
+.swarm-init-message:focus {
+    border-color: var(--color-success);
+    box-shadow: 0 0 0 0.2rem rgba(16, 185, 129, 0.18);
+    background: rgba(0, 0, 0, 0.35);
+    color: var(--color-text);
+}
+
+.swarm-input-actions {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.swarm-input-actions .btn {
+    flex: 1;
+}
+
+.swarm-error {
+    border: 1px solid rgba(239, 68, 68, 0.7);
+    background: rgba(239, 68, 68, 0.12);
+    color: #fda4af;
+    border-radius: 8px;
+    padding: 0.75rem 0.85rem;
+    font-size: 0.85rem;
+}
+
+.swarm-preview {
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 1rem;
+}
+
+.swarm-preview-steps {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.swarm-preview-step {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 0.65rem 0.75rem;
+}
+
+.swarm-preview-step-num {
+    color: var(--color-primary);
+    font-weight: 800;
+    min-width: 16px;
+    font-size: 0.8rem;
+}
+
+.swarm-preview-step-name {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.swarm-preview-step-meta {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.swarm-raw-json {
+    margin: 0;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: #9dd6ff;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    padding: 1rem;
+    max-height: 340px;
+    overflow: auto;
+}
+
+.swarm-plan-container {
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.swarm-plan-title {
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    margin-bottom: 0.35rem;
+}
+
+.swarm-plan-description {
+    color: var(--color-text-muted);
+    margin-bottom: 1.5rem;
+}
+
+.swarm-progress-card {
+    border: 1px solid var(--color-border);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.swarm-progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 0.6rem;
+}
+
+.swarm-progress-label {
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+}
+
+.swarm-progress-value {
+    color: var(--color-primary);
+    font-size: 1.2rem;
+    font-weight: 800;
+}
+
+.swarm-progress-track {
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+}
+
+.swarm-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--color-primary), var(--color-success));
+    transition: width 0.35s ease;
+}
+
+.swarm-steps-container {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+}
+
+.swarm-steps-container::before {
+    content: '';
+    position: absolute;
+    left: 16px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.swarm-step {
+    position: relative;
+    padding-left: 44px;
+}
+
+.swarm-step-marker {
+    position: absolute;
+    left: 0;
+    top: 14px;
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    border: 2px solid var(--color-border);
+    background: var(--color-bg-surface);
+    color: var(--color-text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 800;
+    z-index: 2;
+}
+
+.swarm-step.completed .swarm-step-marker {
+    color: #fff;
+    border-color: var(--color-success);
+    background: var(--color-success);
+}
+
+.swarm-step-card {
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    overflow: hidden;
+    transition: all 0.2s ease;
+}
+
+
+
+.swarm-step-header {
+    padding: 1rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.swarm-step-title {
+    font-weight: 700;
+    margin-bottom: 0.2rem;
+}
+
+.swarm-step-desc {
+    color: var(--color-text-muted);
+    font-size: 0.82rem;
+}
+
+
+.swarm-step-body {
+    display: block;
+}
+
+.swarm-step-body-inner {
+    padding: 0 1rem 1rem;
+}
+
+.swarm-groups-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+}
+
+.swarm-group {
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 0.85rem;
+}
+
+.swarm-group-header {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.swarm-group-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+}
+
+.swarm-group-name {
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.swarm-group-desc {
+    font-size: 0.76rem;
+    color: var(--color-text-muted);
+    margin: 0.35rem 0 0.75rem 0;
+}
+
+.swarm-task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.swarm-task {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 0.55rem 0.65rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.swarm-task.started {
+    border-color: rgba(59, 130, 246, 0.65);
+    background: rgba(59, 130, 246, 0.12);
+}
+
+.swarm-task-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.swarm-task-name {
+    font-size: 0.82rem;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+
+.swarm-task-info {
+    padding: 4px 2px;
+}
+
+.swarm-task-desc {
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    background: var(--color-bg-subtle, rgba(255,255,255,0.04));
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    outline: none;
+    resize: vertical;
+    width: 100%;
+    padding: 6px 8px;
+    font-family: inherit;
+    line-height: 1.4;
+    transition: border-color 0.15s, background 0.15s;
+    cursor: text;
+}
+
+.swarm-task-desc:hover {
+    border-color: var(--color-accent, #6366f1);
+}
+
+.swarm-task-desc:focus {
+    border-color: var(--color-accent, #6366f1);
+    background: var(--color-bg-input, rgba(255,255,255,0.07));
+    color: var(--color-text);
+}
+
+.swarm-task-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.swarm-task-select {
+    background: rgba(0, 0, 0, 0.35);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    padding: 0.35rem 0.45rem;
+    min-width: 135px;
+}
+
+.swarm-task-start {
+    border: 1px solid var(--color-border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--color-text-muted);
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.33rem 0.6rem;
+    white-space: nowrap;
+}
+
+.swarm-task-start:hover:not(:disabled) {
+    border-color: var(--color-primary);
+    color: #9dd6ff;
+}
+
+.swarm-task-start.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: #fff;
+}
+
+.swarm-step-actions {
+    margin-top: 1rem;
+    display: flex;
+    gap: 0.65rem;
+}
+
+.swarm-step-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.swarm-group-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.swarm-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: 0.72rem;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    background: transparent;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    line-height: 1;
+}
+
+.swarm-icon-btn-add {
+    color: var(--color-accent, #6366f1);
+    border-color: rgba(99, 102, 241, 0.3);
+}
+
+.swarm-icon-btn-add:hover {
+    background: rgba(99, 102, 241, 0.12);
+    border-color: var(--color-accent, #6366f1);
+}
+
+.swarm-icon-btn-delete {
+    color: var(--color-text-muted);
+    border-color: transparent;
+}
+
+.swarm-icon-btn-delete:hover {
+    color: #f87171;
+    border-color: rgba(248, 113, 113, 0.3);
+    background: rgba(248, 113, 113, 0.08);
+}
+
+.swarm-add-step-row {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0 4px;
+}
+
+.swarm-add-step-btn {
+    padding: 6px 16px;
+    font-size: 0.8rem;
+}
+
+.swarm-add-task-btn {
+    margin-top: 6px;
+    width: 100%;
+    justify-content: center;
+}
+
+.swarm-drag-handle,
+.swarm-drag-handle-group {
+    cursor: grab;
+    color: var(--color-text-muted);
+    opacity: 0.35;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 4px;
+    flex-shrink: 0;
+    transition: opacity 0.15s;
+    user-select: none;
+}
+
+.swarm-drag-handle:hover,
+.swarm-drag-handle-group:hover {
+    opacity: 0.8;
+}
+
+.swarm-drag-handle:active,
+.swarm-drag-handle-group:active {
+    cursor: grabbing;
+}
+
+.swarm-drag-ghost {
+    opacity: 0.4;
+    border: 1px dashed var(--color-accent, #6366f1) !important;
+}
+
+.swarm-drag-chosen {
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+
+.swarm-dragging {
+    opacity: 0.9;
+}
+
+.swarm-task-list .sortable-drag {
+    background: var(--color-bg-surface);
+}
+
+.swarm-btn {
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid transparent;
+}
+
+.swarm-btn-back {
+    color: var(--color-text-muted);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--color-border);
+}
+
+.swarm-btn-start-all {
+    color: #9dd6ff;
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.35);
+    flex: 1;
+}
+
+.swarm-btn-next {
+    color: #fff;
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    flex: 1.25;
+}
+
+.swarm-btn-next:hover {
+    background: var(--color-primary-dark);
+    border-color: var(--color-primary-dark);
+}
+
+.swarm-complete-banner {
+    margin-top: 1rem;
+    border: 1px solid rgba(16, 185, 129, 0.6);
+    background: rgba(16, 185, 129, 0.13);
+    border-radius: 10px;
+    padding: 0.8rem 0.9rem;
+    display: none;
+}
+
+.swarm-complete-banner.show {
+    display: block;
+}
+
+.swarm-success-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #6ee7b7;
+}
+
+
+@media (max-width: 767.98px) {
+    .swarm-task {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .swarm-task-controls {
+        justify-content: space-between;
+    }
+
+    .swarm-step-actions {
+        flex-direction: column;
+    }
+
+    .swarm-input-actions {
+        flex-direction: column;
+    }
+}
