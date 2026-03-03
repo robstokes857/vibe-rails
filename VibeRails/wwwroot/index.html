@@ -55,6 +55,12 @@
             <img src="assets/img/icons/agent.svg" alt="" class="me-1 icon-light" style="width: 14px; height: 14px;">
             Rules & Agents
         </button>
+        <button class="app-subnav-link" data-action="navigate" data-view="swarm" title="Swarm Planner">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="me-1 icon-light" viewBox="0 0 16 16">
+                <path d="M5.52.359A.5.5 0 0 1 6 0h4a.5.5 0 0 1 .443.706L8.753 4H11a.5.5 0 0 1 .374.832l-6 7a.5.5 0 0 1-.844-.469L6.127 8H4a.5.5 0 0 1-.374-.832l2-2.5z"/>
+            </svg>
+            Swarm
+        </button>
         <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
             <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="me-1 icon-light settings-card-cog" style="width: 14px; height: 14px;">
             Settings
@@ -321,18 +327,7 @@
         <div class="view" data-view="agents">
             <div class="row">
                 <div class="col-12">
-                    <button class="btn btn-outline-primary mb-4 d-flex align-items-center gap-2" type="button" data-action="go-back">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
-                        </svg>
-                        Back
-                    </button>
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="col-12">
-                    <h2 class="mb-4">Agent Files &amp; Rules</h2>
+                    <h2 class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><span class="text-gradient">Agent Files &amp; Rules</span></h2>
                 </div>
             </div>
 
@@ -704,19 +699,8 @@
     <template id="environments-template">
         <div class="view" data-view="environments">
             <div class="row">
-                <div class="col-12">
-                    <button class="btn btn-outline-primary mb-4 d-flex align-items-center gap-2" type="button" data-action="go-back">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/>
-                        </svg>
-                        Back
-                    </button>
-                </div>
-            </div>
-
-            <div class="row">
                 <div class="col-12 mb-4">
-                    <h2 class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-light" style="height: 32px; width: 32px; margin-right: 12px; vertical-align: text-bottom;">Custom Environments</h2>
+                    <h2 class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><span class="text-gradient">Custom Environments</span></h2>
                 </div>
             </div>
 
@@ -754,6 +738,61 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="swarm-template">
+        <div class="view swarm-view" data-view="swarm">
+            <div class="row mb-4">
+                <div class="col-12">
+                    <h2 class="text-uppercase fw-bold" style="letter-spacing: 0.05em;">
+                        <span class="text-gradient">Swarm Planner</span>
+                    </h2>
+                    <p class="text-muted mb-0">Submit a coding task and immediately start working the generated plan.</p>
+                </div>
+            </div>
+
+            <div data-swarm-input-screen>
+                <div class="card">
+                    <div class="card-header text-uppercase fw-bold" style="letter-spacing: 0.05em;">Task Prompt</div>
+                    <div class="card-body">
+                        <form data-swarm-form>
+                            <label class="form-label swarm-input-label" for="swarm-task-input">Describe the coding task</label>
+                            <textarea id="swarm-task-input" class="form-control swarm-task-input" data-swarm-input placeholder="Example: Build a Swarm planning feature with a new view, API route, and mocked response JSON." required></textarea>
+                            <div class="swarm-error d-none mt-3" data-swarm-error></div>
+
+                            <div class="swarm-input-actions mt-3">
+                                <button type="submit" class="btn btn-outline-primary" data-action="swarm-submit">Submit</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-none" data-swarm-plan-screen>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="mb-0 text-uppercase text-muted" style="letter-spacing: 0.08em;">Plan Workspace</h5>
+                </div>
+                <div class="card mb-3">
+                    <div class="card-header text-uppercase fw-bold" style="letter-spacing: 0.05em;">Prompt (Resubmit to Regenerate)</div>
+                    <div class="card-body">
+                        <form data-swarm-resubmit-form>
+                            <textarea class="form-control swarm-task-input" data-swarm-resubmit-input placeholder="Describe the coding task and resubmit to generate a new plan..." required></textarea>
+                            <div class="swarm-error d-none mt-3" data-swarm-error></div>
+                            <div class="swarm-input-actions mt-3">
+                                <button type="submit" class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" data-action="swarm-resubmit">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
+                                        <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
+                                        <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
+                                    </svg>
+                                    Resubmit Plan
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div data-swarm-plan-container></div>
             </div>
         </div>
     </template>
@@ -940,6 +979,7 @@
     <script src="assets/xterm/addon-progress.js"></script>
     <script src="assets/xterm/addon-unicode-graphemes.js"></script>
     <script src="assets/xterm/terminal-themes.js"></script>
+    <script src="assets/sortable.min.js"></script>
     <script src="assets/monaco/vs/loader.js"></script>
     <script src="js/background-effect.js"></script>
     <script type="module" src="app.js"></script>

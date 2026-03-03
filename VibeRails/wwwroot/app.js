@@ -13,6 +13,7 @@ import { CliLauncher } from './js/modules/cli-launcher.js';
 import { TerminalController } from './js/modules/terminal-multitab.js';
 import { SandboxController } from './js/modules/sandbox-controller.js';
 import { SettingsController } from './js/modules/settings-controller.js';
+import { SwarmController } from './js/modules/swarm-controller.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
 export class VibeControlApp {
@@ -40,6 +41,7 @@ export class VibeControlApp {
         this.terminalController = new TerminalController(this);
         this.sandboxController = new SandboxController(this);
         this.settingsController = new SettingsController(this);
+        this.swarmController = new SwarmController(this);
         this.lifecycleHeartbeatTimer = null;
         this.lifecycleClientId = this.getOrCreateLifecycleClientId();
 
@@ -371,7 +373,8 @@ export class VibeControlApp {
             'sessions': () => this.sessionController.loadSessions(),
             'settings': () => this.settingsController.loadSettings(),
             'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
-            'sandboxes': () => this.sandboxController.loadSandboxes()
+            'sandboxes': () => this.sandboxController.loadSandboxes(),
+            'swarm': () => this.swarmController.loadSwarm()
         };
 
         const loadFunc = views[view];

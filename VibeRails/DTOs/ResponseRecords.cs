@@ -347,6 +347,37 @@ namespace VibeRails.DTOs
         int TotalCount
     );
 
+    // Swarm planning DTOs (mock API for UI integration)
+    public record SwarmPlanRequest(
+        string Message
+    );
+
+    public record SwarmTaskResponse(
+        string Name,
+        string Description,
+        string Selected = ""
+    );
+
+    public record SwarmGroupResponse(
+        string Name,
+        string Description,
+        string Color,
+        List<SwarmTaskResponse> Tasks
+    );
+
+    public record SwarmStepResponse(
+        string Name,
+        string Description,
+        List<SwarmGroupResponse> Groups,
+        bool Completed = false
+    );
+
+    public record SwarmPlanResponse(
+        string Name,
+        string Description,
+        List<SwarmStepResponse> Steps
+    );
+
     [JsonSerializable(typeof(HealthResponse))]
     [JsonSerializable(typeof(FileResponse))]
     [JsonSerializable(typeof(ErrorResponse))]
@@ -435,6 +466,15 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(CreateClaudePlanRequest))]
     [JsonSerializable(typeof(UpdateClaudePlanStatusRequest))]
     [JsonSerializable(typeof(ClaudePlanListResponse))]
+    // Swarm plan DTOs
+    [JsonSerializable(typeof(SwarmPlanRequest))]
+    [JsonSerializable(typeof(SwarmTaskResponse))]
+    [JsonSerializable(typeof(List<SwarmTaskResponse>))]
+    [JsonSerializable(typeof(SwarmGroupResponse))]
+    [JsonSerializable(typeof(List<SwarmGroupResponse>))]
+    [JsonSerializable(typeof(SwarmStepResponse))]
+    [JsonSerializable(typeof(List<SwarmStepResponse>))]
+    [JsonSerializable(typeof(SwarmPlanResponse))]
     // Version/Update DTOs
     [JsonSerializable(typeof(VersionResponse))]
     [JsonSerializable(typeof(ApiVersionResponse))]
