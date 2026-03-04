@@ -262,7 +262,7 @@ export class DashboardController {
             if (launchButton) {
                 const launchText = launchButton.querySelector('[data-env-launch-text]');
                 if (launchText) {
-                    launchText.textContent = 'Launch in CLI';
+                    launchText.textContent = 'Launch In Terminal';
                 }
 
                 launchButton.addEventListener('click', (event) => {
@@ -325,10 +325,54 @@ export class DashboardController {
                 });
             }
 
-            // CLI select for web terminal launch
+            // Merge local button
+            const mergeLocalBtn = node.querySelector('[data-sandbox-merge-local]');
+            if (mergeLocalBtn) {
+                mergeLocalBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.app.sandboxController.mergeLocally(sb.id, sb.name, sb.branch);
+                });
+            }
+
+            // Push to remote button
+            const pushRemoteBtn = node.querySelector('[data-sandbox-push-remote]');
+            if (pushRemoteBtn) {
+                pushRemoteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.app.sandboxController.pushToRemote(sb.id, sb.name);
+                });
+            }
+
+            // CLI select
             const cliSelect = node.querySelector('[data-sandbox-cli-select]');
             if (cliSelect) {
                 this.populateSandboxCliSelect(cliSelect);
+            }
+
+            // Helper to resolve CLI selection
+            const resolveCli = () => {
+                const selection = cliSelect?.value || 'base:claude';
+                let cli, environmentName;
+                if (selection.startsWith('base:')) {
+                    cli = selection.replace('base:', '');
+                } else if (selection.startsWith('env:')) {
+                    const parts = selection.split(':');
+                    const envId = parseInt(parts[1]);
+                    cli = parts[2];
+                    const env = (this.app.data.environments || []).find(e => e.id === envId);
+                    environmentName = env?.name;
+                }
+                return { cli, environmentName };
+            };
+
+            // CLI launch button
+            const cliBtn = node.querySelector('[data-sandbox-launch-cli]');
+            if (cliBtn) {
+                cliBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const { cli, environmentName } = resolveCli();
+                    this.app.sandboxController.launchInExternalTerminal(sb.id, sb.name, cli, environmentName);
+                });
             }
 
             // Web Terminal launch button
@@ -336,17 +380,7 @@ export class DashboardController {
             if (webUiBtn) {
                 webUiBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const selection = cliSelect?.value || 'base:claude';
-                    let cli, environmentName;
-                    if (selection.startsWith('base:')) {
-                        cli = selection.replace('base:', '');
-                    } else if (selection.startsWith('env:')) {
-                        const parts = selection.split(':');
-                        const envId = parseInt(parts[1]);
-                        cli = parts[2];
-                        const env = (this.app.data.environments || []).find(e => e.id === envId);
-                        environmentName = env?.name;
-                    }
+                    const { cli, environmentName } = resolveCli();
                     this.app.sandboxController.launchInWebUI(sb.id, sb.name, cli, environmentName);
                 });
             }

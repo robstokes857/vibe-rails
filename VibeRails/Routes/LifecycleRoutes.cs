@@ -5,7 +5,7 @@ namespace VibeRails.Routes;
 
 public static class LifecycleRoutes
 {
-    private static readonly TimeSpan BrowserPulseTtl = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan BrowserPulseTtl = TimeSpan.FromSeconds(75);
 
     public static void Map(WebApplication app)
     {

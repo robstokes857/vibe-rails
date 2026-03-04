@@ -4,8 +4,24 @@ export class SwarmController {
     constructor(app) {
         this.app = app;
         this.planData = null;
-        this.cliOptions = ['Claude', 'Codex', 'Gemini'];
         this.initMessage = '';
+        this._root = null;
+    }
+
+    get cliOptions() {
+        const options = [
+            { value: 'base:claude',  label: 'Claude (default)' },
+            { value: 'base:codex',   label: 'Codex (default)' },
+            { value: 'base:gemini',  label: 'Gemini (default)' },
+            { value: 'base:copilot', label: 'Copilot (default)' },
+        ];
+        (this.app.data.environments || []).forEach((env) => {
+            options.push({
+                value: `env:${env.id}:${env.cli.toLowerCase()}`,
+                label: `${env.name} (${env.cli.toLowerCase()})`
+            });
+        });
+        return options;
     }
 
     loadSwarm() {
@@ -17,6 +33,7 @@ export class SwarmController {
         const root = fragment.querySelector('[data-view="swarm"]');
         if (!root) return;
 
+        this._root = root;
         this.bindEvents(root);
         content.appendChild(fragment);
     }
@@ -28,6 +45,11 @@ export class SwarmController {
         initialForm?.addEventListener('submit', (event) => this.handleInitialSubmit(event, root));
         resubmitForm?.addEventListener('submit', (event) => this.handleResubmit(event, root));
         this.bindInitMessageEditors(root);
+
+        root.querySelector('[data-action="swarm-back-to-plan"]')?.addEventListener('click', () => {
+            root.querySelector('[data-swarm-terminal-screen]')?.classList.add('d-none');
+            root.querySelector('[data-swarm-plan-screen]')?.classList.remove('d-none');
+        });
     }
 
     async handleInitialSubmit(event, root) {
@@ -62,12 +84,10 @@ export class SwarmController {
         }
 
         this.clearError(root);
-        submitBtn.disabled = true;
-        submitBtn.dataset.originalHtml = submitBtn.innerHTML;
-        submitBtn.textContent = 'Submitting...';
+        this.showLoadingScreen(root);
 
         try {
-            const response = await this.app.apiCall('/api/v1/swarm/plan', 'POST', { message });
+            const response = await this.app.apiCall('/api/v1/swarm/plan', 'POST', { taskDescription: message });
             const plan = this.normalizePlan(response);
 
             this.planData = plan;
@@ -77,20 +97,26 @@ export class SwarmController {
             this.showPlanScreen(root);
             this.renderPlan(root);
         } catch (error) {
+            this.hideLoadingScreen(root);
             this.showError(root, `Failed to generate plan: ${error.message}`);
-        } finally {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = submitBtn.dataset.originalHtml || defaultButtonText;
         }
     }
 
-    showPlanScreen(root) {
-        const inputScreen = root.querySelector('[data-swarm-input-screen]');
-        const planScreen = root.querySelector('[data-swarm-plan-screen]');
-        if (!inputScreen || !planScreen) return;
+    showLoadingScreen(root) {
+        root.querySelector('[data-swarm-input-screen]')?.classList.add('d-none');
+        root.querySelector('[data-swarm-loading-screen]')?.classList.remove('d-none');
+    }
 
-        inputScreen.classList.add('d-none');
-        planScreen.classList.remove('d-none');
+    hideLoadingScreen(root) {
+        root.querySelector('[data-swarm-loading-screen]')?.classList.add('d-none');
+        root.querySelector('[data-swarm-input-screen]')?.classList.remove('d-none');
+    }
+
+    showPlanScreen(root) {
+        root.querySelector('[data-swarm-input-screen]')?.classList.add('d-none');
+        root.querySelector('[data-swarm-loading-screen]')?.classList.add('d-none');
+        root.querySelector('[data-swarm-terminal-screen]')?.classList.add('d-none');
+        root.querySelector('[data-swarm-plan-screen]')?.classList.remove('d-none');
     }
 
     renderPlan(root) {
@@ -99,7 +125,45 @@ export class SwarmController {
         const planContainer = root.querySelector('[data-swarm-plan-container]');
         if (!planContainer) return;
 
-        new SwarmPlanView(this.planData, planContainer, this.cliOptions);
+        new SwarmPlanView(this.planData, planContainer, this.cliOptions, (tasks) => {
+            this.launchSwarmTerminals(tasks, root);
+        });
+    }
+
+    async launchSwarmTerminals(tasks, root) {
+        const planScreen = root.querySelector('[data-swarm-plan-screen]');
+        const terminalScreen = root.querySelector('[data-swarm-terminal-screen]');
+        const terminalContainer = root.querySelector('[data-swarm-terminal-container]');
+
+        if (!terminalContainer) return;
+
+        if (!terminalContainer.hasChildNodes()) {
+            terminalContainer.innerHTML = this.app.terminalController.renderTerminalPanel();
+        }
+
+        planScreen?.classList.add('d-none');
+        terminalScreen?.classList.remove('d-none');
+
+        for (const task of tasks) {
+            const { cli, environmentName } = this.parseSelection(task.selected);
+            await this.app.terminalController.startTerminalWithOptions(
+                { cli, environmentName, title: task.tabTitle || task.groupName || task.name },
+                terminalContainer
+            );
+        }
+    }
+
+    parseSelection(selected) {
+        if (!selected) return { cli: null, environmentName: null };
+        if (selected.startsWith('base:')) return { cli: selected.slice(5), environmentName: null };
+        if (selected.startsWith('env:')) {
+            const parts = selected.split(':');
+            const envId = parseInt(parts[1]);
+            const cli = parts[2];
+            const env = (this.app.data.environments || []).find(e => e.id === envId);
+            return { cli, environmentName: env?.name || null };
+        }
+        return { cli: selected, environmentName: null };
     }
 
     bindInitMessageEditors(root) {
@@ -137,27 +201,16 @@ export class SwarmController {
         }
 
         const steps = Array.isArray(response.steps) ? response.steps : [];
-        const normalizedSteps = steps.map((step) => ({
-            name: step.name || '',
-            description: step.description || '',
-            completed: !!step.completed,
-            groups: (Array.isArray(step.groups) ? step.groups : []).map((group) => ({
-                name: group.name || '',
-                description: group.description || '',
-                color: group.color || '#3b82f6',
-                tasks: (Array.isArray(group.tasks) ? group.tasks : []).map((task) => ({
-                    name: task.name || '',
-                    description: task.description || '',
-                    selected: typeof task.selected === 'string' ? task.selected : '',
-                    started: !!task.started
-                }))
-            }))
-        }));
-
         return {
             name: response.name || 'Swarm Plan',
             description: response.description || '',
-            steps: normalizedSteps
+            steps: steps.map((step) => ({
+                name: step.name || '',
+                description: step.description || '',
+                completed: !!step.completed,
+                selected: typeof step.selected === 'string' ? step.selected : '',
+                started: !!step.started
+            }))
         };
     }
 

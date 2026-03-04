@@ -566,9 +566,10 @@ export class SandboxController {
 
         this.app.showModal('Merge to Local', `
             <div class="text-center py-3">
-                <div class="mb-3 text-warning">
+                <div class="mb-3 text-info">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
-                        <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5m.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2"/>
+                        <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+                        <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 .877-.252 1.02-.598l.088-.416c.066-.316.168-.45.469-.5l.451-.083.082-.381-2.29-.287zM8 5.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2"/>
                     </svg>
                 </div>
                 <h5>Merge "${escapedName}" into local project?</h5>
@@ -579,7 +580,7 @@ export class SandboxController {
             </div>
             <div class="d-flex gap-2 justify-content-end">
                 <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
-                <button type="button" class="btn btn-warning" id="confirm-merge-btn">Merge</button>
+                <button type="button" class="btn btn-primary" id="confirm-merge-btn">Merge</button>
             </div>
         `);
 

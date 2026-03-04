@@ -349,26 +349,16 @@ namespace VibeRails.DTOs
 
     // Swarm planning DTOs (mock API for UI integration)
     public record SwarmPlanRequest(
-        string Message
+        string TaskDescription
     );
 
-    public record SwarmTaskResponse(
-        string Name,
-        string Description,
-        string Selected = ""
-    );
-
-    public record SwarmGroupResponse(
-        string Name,
-        string Description,
-        string Color,
-        List<SwarmTaskResponse> Tasks
+    public record SwarmPlanWrapper(
+        string Plan
     );
 
     public record SwarmStepResponse(
         string Name,
         string Description,
-        List<SwarmGroupResponse> Groups,
         bool Completed = false
     );
 
@@ -468,10 +458,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ClaudePlanListResponse))]
     // Swarm plan DTOs
     [JsonSerializable(typeof(SwarmPlanRequest))]
-    [JsonSerializable(typeof(SwarmTaskResponse))]
-    [JsonSerializable(typeof(List<SwarmTaskResponse>))]
-    [JsonSerializable(typeof(SwarmGroupResponse))]
-    [JsonSerializable(typeof(List<SwarmGroupResponse>))]
+    [JsonSerializable(typeof(SwarmPlanWrapper))]
     [JsonSerializable(typeof(SwarmStepResponse))]
     [JsonSerializable(typeof(List<SwarmStepResponse>))]
     [JsonSerializable(typeof(SwarmPlanResponse))]

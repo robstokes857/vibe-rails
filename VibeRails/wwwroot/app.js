@@ -169,6 +169,11 @@ export class VibeControlApp {
                 await this.apiCall('/api/v1/git/init', 'POST');
                 await this.fetchConfigs();
                 if (this.data.isInGit) {
+                    document.querySelectorAll('.app-subnav .app-subnav-link, .nav-settings-btn').forEach(btn => {
+                        btn.disabled = false;
+                        btn.style.opacity = '';
+                        btn.style.pointerEvents = '';
+                    });
                     this.loadView('dashboard');
                 } else {
                     showError('Git was initialized but the repository could not be detected. Please refresh.');
@@ -710,7 +715,7 @@ export class VibeControlApp {
         this.sendLifecyclePing();
         this.lifecycleHeartbeatTimer = setInterval(() => {
             this.sendLifecyclePing();
-        }, 15000);
+        }, 30000);
 
         const onDisconnect = () => this.sendLifecycleDisconnect();
         window.addEventListener('beforeunload', onDisconnect);

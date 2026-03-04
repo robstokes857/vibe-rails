@@ -78,7 +78,7 @@ namespace VibeRails.Services
             var remoteUrl = await SetupSandboxRemoteAsync(projectPath, sandboxPath, ct);
 
             // Create and checkout a sandbox-specific branch
-            var sandboxBranch = $"sandbox/{name}";
+            var sandboxBranch = name;
             await RunGitCommandAsync(sandboxPath, $"checkout -b \"{sandboxBranch}\"", ct);
 
             // Save to DB

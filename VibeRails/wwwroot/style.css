@@ -303,8 +303,8 @@ code {
     background: rgba(255, 255, 255, 0.02);
     border: 2px solid rgba(255, 255, 255, 0.05);
     border-radius: 4px;
-    padding: 0.4rem 0.5rem;
-    min-width: 140px;
+    padding: 0.55rem 0.6rem;
+    min-width: 150px;
     max-width: none;
     flex: 1 1 0;
     transition: all 0.2s ease;
@@ -340,7 +340,7 @@ code {
     font-size: 0.8rem;
     font-weight: 700;
     color: var(--color-text);
-    margin-bottom: 0.45rem;
+    margin-bottom: 0.5rem;
     text-align: center;
 }
 
@@ -369,6 +369,11 @@ code {
 
 .ql-actions {
     width: 100%;
+}
+
+.quick-launch-card .btn.btn-sm {
+    font-size: 0.72rem;
+    min-height: 31px;
 }
 
 
@@ -988,6 +993,88 @@ button:hover .card-nav-cog {
     background-color: var(--color-bg-surface-hover);
     border-left-color: var(--color-primary);
     transform: translateX(2px);
+}
+
+/* Sandbox item card - 3-section layout */
+.sandbox-item-card {
+    background: linear-gradient(180deg, rgba(30, 41, 59, 0.26) 0%, rgba(15, 23, 42, 0.2) 100%);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-left: 3px solid rgba(59, 130, 246, 0.85);
+    border-radius: var(--border-radius);
+    margin-bottom: 0.4rem;
+    overflow: hidden;
+    transition: border-color var(--transition-speed), background var(--transition-speed);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.sandbox-item-card:hover {
+    background: linear-gradient(180deg, rgba(30, 41, 59, 0.36) 0%, rgba(15, 23, 42, 0.28) 100%);
+    border-color: rgba(56, 189, 248, 0.45);
+    border-left-color: var(--color-accent);
+    box-shadow: 0 8px 18px rgba(2, 6, 23, 0.32);
+}
+
+.sandbox-item-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.7rem;
+}
+
+.sandbox-item-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.sandbox-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.sandbox-item-name {
+    font-weight: 600;
+    font-size: 0.8rem;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+
+.sandbox-item-time {
+    font-size: 0.65rem;
+    color: var(--color-text-muted);
+    opacity: 0.6;
+}
+
+.sandbox-item-section {
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+    padding: 0.45rem 0.7rem;
+}
+
+.sandbox-item-section-label {
+    display: block;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--color-text-muted);
+    margin-bottom: 0.35rem;
+    opacity: 0.75;
+}
+
+.sandbox-item-card .btn.btn-sm {
+    font-size: 0.72rem;
+    min-height: 30px;
+}
+
+.sandbox-item-card .form-select-sm {
+    min-height: 30px;
+    font-size: 0.72rem;
+    background-color: rgba(2, 6, 23, 0.45);
+    border-color: rgba(148, 163, 184, 0.25);
+    color: var(--color-text);
 }
 
 .project-logo-wrapper {
@@ -3379,16 +3466,6 @@ input.form-control:disabled {
     margin: 0 auto;
 }
 
-.swarm-plan-title {
-    font-weight: 800;
-    letter-spacing: 0.02em;
-    margin-bottom: 0.35rem;
-}
-
-.swarm-plan-description {
-    color: var(--color-text-muted);
-    margin-bottom: 1.5rem;
-}
 
 .swarm-progress-card {
     border: 1px solid var(--color-border);
