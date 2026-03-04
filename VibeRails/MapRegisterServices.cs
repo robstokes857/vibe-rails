@@ -90,6 +90,12 @@ namespace VibeRails
             // Update Service (singleton with HttpClient)
             serviceCollection.AddHttpClient<UpdateService>();
 
+            // Swarm Service
+            serviceCollection.AddHttpClient<SwarmService>(client =>
+            {
+                client.BaseAddress = new Uri("https://viberails.ai");
+            });
+
             // WebSocket Messaging Client (singleton - auto-reconnects, URL from appsettings.json)
             serviceCollection.AddSingleton<MessagingClient>(sp =>
             {
