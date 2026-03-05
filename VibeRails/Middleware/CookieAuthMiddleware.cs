@@ -64,42 +64,59 @@ public class CookieAuthMiddleware
             return;
         }
 
-        if(isWebSocketRequest)
+        // Tab token required on API routes and WebSocket connections only.
+        // Static files and page loads are exempt — the token lives in sessionStorage
+        // which is populated after bootstrap, before any API calls are made.
+        if (isWebSocketRequest || path.Contains("/api/", StringComparison.OrdinalIgnoreCase))
         {
-            var tabToken = context.WebSockets.WebSocketRequestedProtocols
-                .Where(x=> x.Equals(_authService.GetInstanceTabToken()))
-                .FirstOrDefault();
-            if(tabToken == default)
+            if (isWebSocketRequest)
             {
-                context.Response.StatusCode = 403;
-                await context.Response.WriteAsync("Unauthorized. Invalid tab token.");
-                return;
-            }
-        }
-        else
-        {
-            var tabToken = context.Request.Headers["viberails_tab"].FirstOrDefault();
-            if (!_authService.ValidateTabToken(tabToken))
-            {
-                // API calls should not be redirected (fetch/XHR expects JSON/status codes).
-                if (path.StartsWith("/api/"))
+                var tabToken = context.WebSockets.WebSocketRequestedProtocols
+                    .Select(x => NormalizeTabToken(x))
+                    .FirstOrDefault(x => _authService.ValidateTabToken(x));
+                if (tabToken == default)
                 {
-                    context.Response.StatusCode = 401;
-                    await context.Response.WriteAsync("Unauthorized");
+                    context.Response.StatusCode = 403;
+                    await context.Response.WriteAsync("Unauthorized. Invalid tab token.");
                     return;
                 }
+                // Stash the accepted subprotocol so route handlers can echo it back in AcceptWebSocketAsync.
+                // The browser's WS handshake requires the server to acknowledge the requested subprotocol.
+                context.Items["viberails_accepted_subprotocol"] = tabToken;
+            }
+            else
+            {
+                var tabToken = context.Request.Headers["viberails_tab"].FirstOrDefault();
+                if (!_authService.ValidateTabToken(tabToken))
+                {
+                    if (path.StartsWith("/api/"))
+                    {
+                        context.Response.StatusCode = 401;
+                        await context.Response.WriteAsync("Unauthorized");
+                        return;
+                    }
 
-                // Browser page/static requests - show error page (can't auto-redirect without code)
-                context.Response.StatusCode = 403;
-                context.Response.ContentType = "text/html";
-                await context.Response.WriteAsync(STRINGS.AUTH_REQUIRED_HTML);
-                return;
+                    context.Response.StatusCode = 403;
+                    context.Response.ContentType = "text/html";
+                    await context.Response.WriteAsync(STRINGS.AUTH_REQUIRED_HTML);
+                    return;
+                }
             }
         }
 
 
         // Authenticated - continue to next middleware
         await _next(context);
+    }
+
+    private static string NormalizeTabToken(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return string.Empty;
+        }
+
+        return token.Replace("+", "-").Replace("/", "_").Replace("=", "");
     }
 
     private static bool IsWebSocketHandshake(HttpContext context)

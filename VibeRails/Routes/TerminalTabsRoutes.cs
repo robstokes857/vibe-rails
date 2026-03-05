@@ -147,7 +147,8 @@ public static class TerminalTabsRoutes
                 return;
             }
 
-            using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+            var acceptedSubprotocol = context.Items["viberails_accepted_subprotocol"] as string;
+            using var webSocket = await context.WebSockets.AcceptWebSocketAsync(acceptedSubprotocol);
             try
             {
                 await tabHost.HandleWebSocketProxyAsync(tabId, webSocket, context.RequestAborted);

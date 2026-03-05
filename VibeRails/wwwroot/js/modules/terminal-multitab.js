@@ -29,6 +29,17 @@ function shorten(text, max = 26) {
 }
 
 class TerminalTab {
+    getSafeTabTokenForWebSocket(tabToken) {
+        if (!tabToken || typeof tabToken !== 'string') {
+            return '';
+        }
+
+        return tabToken
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
+    }
+
     constructor(manager, state) {
         this.manager = manager;
         this.state = state;
@@ -273,8 +284,10 @@ class TerminalTab {
         this.state.status = 'connecting';
         this.manager.updateUi();
 
+        const tabToken = this.getSafeTabTokenForWebSocket(
+            sessionStorage.getItem('viberails_tab')
+        );
         const wsUrl = this.manager.getWebSocketUrl(this.state.id);
-        const tabToken = sessionStorage.getItem('viberails_tab');
         const socket = new WebSocket(wsUrl, tabToken ? [tabToken] : []);
         socket.binaryType = 'arraybuffer';
         this.socket = socket;
@@ -2178,3 +2191,4 @@ export class TerminalController {
         `;
     }
 }
+

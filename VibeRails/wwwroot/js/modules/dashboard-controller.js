@@ -251,6 +251,9 @@ export class DashboardController {
             if (logo && brand.logo) {
                 logo.src = brand.logo;
                 logo.alt = `${brand.label} logo`;
+                if ((env.cli || '').toLowerCase() === 'codex' || (env.cli || '').toLowerCase() === 'chatgpt' || (env.cli || '').toLowerCase() === 'openai') {
+                    logo.classList.add('icon-light');
+                }
             } else if (logo) {
                 logo.remove();
             }
@@ -262,7 +265,7 @@ export class DashboardController {
             if (launchButton) {
                 const launchText = launchButton.querySelector('[data-env-launch-text]');
                 if (launchText) {
-                    launchText.textContent = 'Launch In Terminal';
+                    launchText.textContent = 'Native Terminal';
                 }
 
                 launchButton.addEventListener('click', (event) => {
@@ -276,6 +279,14 @@ export class DashboardController {
                 webUIButton.addEventListener('click', (event) => {
                     event.stopPropagation();
                     this.launchEnvInWebUI(env.id, env.name, env.cli);
+                });
+            }
+
+            const deleteButton = node.querySelector('[data-env-delete]');
+            if (deleteButton) {
+                deleteButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    this.app.environmentController.removeEnvironment(env.name);
                 });
             }
 

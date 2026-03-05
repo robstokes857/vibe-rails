@@ -5,6 +5,7 @@ const STEP_COLORS = [
     '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
     '#8b5cf6', '#06b6d4', '#f97316', '#ec4899'
 ];
+const MAX_PLAN_HISTORY = 20;
 
 function createStepId() {
     if (window.crypto && typeof window.crypto.randomUUID === 'function') {
@@ -28,6 +29,7 @@ export class SwarmController {
         this.initMessage = '';
         this.pendingPlan = null;
         this.hasSpawnedTerminals = false;
+        this.planHistory = [];
         this._root = null;
     }
 
@@ -67,9 +69,17 @@ export class SwarmController {
     bindEvents(root) {
         const initialForm = root.querySelector('[data-swarm-form]');
         const resubmitForm = root.querySelector('[data-swarm-resubmit-form]');
+        const newPlanButtons = root.querySelectorAll('[data-action="swarm-new-plan"]');
+        const historySelectors = root.querySelectorAll('[data-swarm-plan-history]');
 
         initialForm?.addEventListener('submit', (event) => this.handleInitialSubmit(event, root));
         resubmitForm?.addEventListener('submit', (event) => this.handleResubmit(event, root));
+        newPlanButtons.forEach((button) => {
+            button.addEventListener('click', () => this.startNewPlan(root));
+        });
+        historySelectors.forEach((selector) => {
+            selector.addEventListener('change', (event) => this.handleHistorySelection(event, root));
+        });
         this.bindInitMessageEditors(root);
     }
 
@@ -101,6 +111,7 @@ export class SwarmController {
             return;
         }
 
+        this.clearHistorySelection(root);
         if (this.pendingPlan) {
             this.showLoadingScreen(root, this.pendingPlan.message, true);
             this.app.showToast('Plan Already Running', 'A Swarm plan is already generating. You can safely navigate away and come back.', 'info');
@@ -141,6 +152,7 @@ export class SwarmController {
             this.initMessage = this.buildInitMessage(plan);
             this.hasSpawnedTerminals = false;
             this.pendingPlan = null;
+            this.addPlanToHistory(plan, message, this.initMessage);
 
             const activeRoot = this.getActiveRoot();
             if (activeRoot) {
@@ -242,6 +254,106 @@ export class SwarmController {
             (tasks) => this.launchSwarmTerminals(tasks, root),
             () => this.persistState(root)
         );
+    }
+
+    startNewPlan(root = this._root) {
+        const activeRoot = root && document.body.contains(root) ? root : this.getActiveRoot();
+        if (!activeRoot) return;
+
+        this.planData = null;
+        this.pendingPlan = null;
+        this.initMessage = '';
+        this.hasSpawnedTerminals = false;
+
+        this.setPromptMessage(activeRoot, '');
+        this.setInitMessage(activeRoot, '');
+        const input = activeRoot.querySelector('[data-swarm-input]');
+        if (input) {
+            input.value = '';
+        }
+        const resubmitInput = activeRoot.querySelector('[data-swarm-resubmit-input]');
+        if (resubmitInput) {
+            resubmitInput.value = '';
+        }
+
+        const planContainer = activeRoot.querySelector('[data-swarm-plan-container]');
+        planContainer && (planContainer.innerHTML = '');
+
+        const terminalScreen = activeRoot.querySelector('[data-swarm-terminal-screen]');
+        terminalScreen?.classList.add('d-none');
+
+        const terminalContainer = activeRoot.querySelector('[data-swarm-terminal-container]');
+        if (terminalContainer) {
+            terminalContainer.innerHTML = '';
+        }
+
+        this.showInputScreen(activeRoot);
+        this.clearError(activeRoot);
+        this.persistState(activeRoot);
+        this.renderPlanHistoryOptions(activeRoot);
+        this.app.showToast('Swarm Reset', 'Started a fresh Swarm plan.', 'info');
+    }
+
+    handleHistorySelection(event, root) {
+        const target = event?.target;
+        if (!target || target.tagName !== 'SELECT') {
+            return;
+        }
+
+        const index = Number.parseInt(target.value, 10);
+        if (!Number.isInteger(index) || index < 0 || index >= this.planHistory.length) {
+            return;
+        }
+
+        const entry = this.planHistory[index];
+        if (!entry) return;
+
+        target.value = '';
+        this.loadPlanFromHistory(entry, root);
+    }
+
+    loadPlanFromHistory(entry, root) {
+        if (!entry || typeof entry !== 'object' || !entry.planData) {
+            return;
+        }
+
+        const loadedPlan = this.normalizePlan(entry.planData);
+        this.planData = loadedPlan;
+        this.pendingPlan = null;
+        this.hasSpawnedTerminals = false;
+        this.initMessage = typeof entry.initMessage === 'string' && entry.initMessage
+            ? entry.initMessage
+            : this.buildInitMessage(loadedPlan);
+
+        const promptMessage = typeof entry.promptMessage === 'string' ? entry.promptMessage : '';
+        this.setPromptMessage(root, promptMessage);
+        this.setInitMessage(root, this.initMessage);
+
+        const terminalScreen = root.querySelector('[data-swarm-terminal-screen]');
+        const terminalContainer = root.querySelector('[data-swarm-terminal-container]');
+        terminalScreen?.classList.add('d-none');
+        if (terminalContainer) {
+            terminalContainer.innerHTML = '';
+        }
+
+        const planContainer = root.querySelector('[data-swarm-plan-container]');
+        if (planContainer) {
+            planContainer.innerHTML = '';
+        }
+
+        this.showPlanScreen(root);
+        this.renderPlan(root);
+        this.renderPlanHistoryOptions(root);
+        this.clearError(root);
+        this.persistState(root);
+    }
+
+    showInputScreen(root) {
+        root.querySelector('[data-swarm-loading-screen]')?.classList.add('d-none');
+        root.querySelector('[data-swarm-plan-screen]')?.classList.add('d-none');
+        root.querySelector('[data-swarm-input-screen]')?.classList.remove('d-none');
+        this.updateSubmitBusyState(root, this.pendingPlan !== null);
+        this.updateWorkspaceLayout(root);
     }
 
     async launchSwarmTerminals(tasks, root) {
@@ -408,6 +520,108 @@ export class SwarmController {
         terminalScreen?.classList.add('d-none');
     }
 
+    addPlanToHistory(plan, promptMessage, initMessage) {
+        const normalized = this.normalizePlan(plan);
+        const sanitizedPlan = {
+            ...normalized,
+            steps: normalized.steps.map((step) => ({
+                ...step,
+                started: false,
+                terminalTabId: null
+            }))
+        };
+
+        const entry = {
+            id: createRequestId(),
+            createdUtc: new Date().toISOString(),
+            promptMessage: typeof promptMessage === 'string' ? promptMessage : '',
+            initMessage: typeof initMessage === 'string' ? initMessage : '',
+            planData: sanitizedPlan
+        };
+
+        this.planHistory = this.planHistory.filter((item) => item.id !== entry.id);
+        this.planHistory.unshift(entry);
+        this.planHistory = this.planHistory.slice(0, MAX_PLAN_HISTORY);
+        this.renderPlanHistoryOptions(this.getActiveRoot() || this._root);
+        return entry;
+    }
+
+    normalizePlanHistory(rawHistory) {
+        if (!Array.isArray(rawHistory)) {
+            return [];
+        }
+
+        return rawHistory
+            .filter((entry) => entry && typeof entry === 'object')
+            .slice(0, MAX_PLAN_HISTORY)
+            .map((entry) => ({
+                id: entry.id,
+                createdUtc: typeof entry.createdUtc === 'string' ? entry.createdUtc : new Date().toISOString(),
+                promptMessage: typeof entry.promptMessage === 'string' ? entry.promptMessage : '',
+                initMessage: typeof entry.initMessage === 'string' ? entry.initMessage : '',
+                planData: entry.planData
+            }))
+            .filter((entry) => entry.planData && typeof entry.planData === 'object');
+    }
+
+    formatHistoryLabel(entry, index) {
+        const name = (entry?.planData?.name && String(entry.planData.name).trim()) || 'Swarm Plan';
+        const created = typeof entry?.createdUtc === 'string' ? new Date(entry.createdUtc) : null;
+        const dateText = created && !Number.isNaN(created.getTime())
+            ? created.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+            : `Item ${index + 1}`;
+        const promptText = typeof entry?.promptMessage === 'string' && entry.promptMessage.trim()
+            ? entry.promptMessage.trim()
+            : 'No prompt';
+        const shortPrompt = promptText.length > 48 ? `${promptText.slice(0, 48)}...` : promptText;
+        return `${name} · ${dateText} · ${shortPrompt}`;
+    }
+
+    renderPlanHistoryOptions(root) {
+        if (!root) return;
+        const cards = Array.from(root.querySelectorAll('[data-swarm-history-card]'));
+        const hasHistory = Array.isArray(this.planHistory) && this.planHistory.length > 0;
+
+        cards.forEach((card) => {
+            if (hasHistory) {
+                card.classList.remove('d-none');
+            } else {
+                card.classList.add('d-none');
+                return;
+            }
+
+            const selector = card.querySelector('[data-swarm-plan-history]');
+            if (!selector) return;
+
+            const existingValue = selector.value;
+            selector.innerHTML = '';
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = 'Load a previous Swarm plan...';
+            selector.appendChild(placeholder);
+
+            this.planHistory.forEach((entry, index) => {
+                const option = document.createElement('option');
+                option.value = String(index);
+                option.textContent = this.formatHistoryLabel(entry, index);
+                selector.appendChild(option);
+            });
+
+            if (existingValue && Number.parseInt(existingValue, 10) < this.planHistory.length) {
+                selector.value = existingValue;
+            } else {
+                selector.value = '';
+            }
+        });
+    }
+
+    clearHistorySelection(root) {
+        if (!root) return;
+        root.querySelectorAll('[data-swarm-plan-history]').forEach((selector) => {
+            selector.value = '';
+        });
+    }
+
     async ensureTerminalPanel(root) {
         const terminalContainer = root.querySelector('[data-swarm-terminal-container]');
         if (!terminalContainer) return;
@@ -428,14 +642,16 @@ export class SwarmController {
         const promptInput = activeRoot?.querySelector('[data-swarm-resubmit-input]') || activeRoot?.querySelector('[data-swarm-input]');
         const promptMessage = promptInput?.value?.trim() || this.pendingPlan?.message || '';
         const pendingPlan = this.pendingPlan
-            ? {
+                ? {
                 requestId: this.pendingPlan.requestId,
                 message: this.pendingPlan.message,
                 startedUtc: this.pendingPlan.startedUtc
             }
             : null;
 
-        if (!this.planData && !pendingPlan && !promptMessage) {
+        const hasHistory = Array.isArray(this.planHistory) && this.planHistory.length > 0;
+
+        if (!this.planData && !pendingPlan && !promptMessage && !hasHistory) {
             this.stateStore.clear();
             return;
         }
@@ -445,12 +661,17 @@ export class SwarmController {
             initMessage: this.initMessage,
             hasSpawnedTerminals: this.hasSpawnedTerminals,
             pendingPlan,
-            planData: this.planData
+            planData: this.planData,
+            planHistory: this.planHistory
         });
     }
 
     restoreState(root) {
         const saved = this.stateStore.load();
+        this.planHistory = this.normalizePlanHistory(saved?.planHistory);
+
+        this.renderPlanHistoryOptions(root);
+
         if (!saved) {
             this.hideLoadingScreen(root);
             return;
@@ -500,6 +721,8 @@ export class SwarmController {
         } else {
             this.hideLoadingScreen(root);
         }
+
+        this.renderPlanHistoryOptions(root);
 
         if (droppedStalePending) {
             this.persistState(root);
