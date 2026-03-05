@@ -743,9 +743,13 @@ export class VibeControlApp {
             this.showLoading(true);
         }
         try {
+            const tabToken = sessionStorage.getItem('viberails_tab');
             const options = {
                 method,
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(tabToken ? { 'viberails_tab': tabToken } : {})
+                },
                 credentials: 'include'  // Send cookies with requests
             };
             if (data) options.body = JSON.stringify(data);

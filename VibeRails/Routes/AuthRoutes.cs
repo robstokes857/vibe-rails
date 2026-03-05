@@ -36,9 +36,16 @@ public static class AuthRoutes
                 ? redirect
                 : "/";
 
+            // Expose tab token as a response header so the VSCode extension can read it
+            // without parsing the HTML body.
+            context.Response.Headers["viberails_tab"] = authService.GetInstanceTabToken();
+
             // Encode for safe JS string embedding without relying on reflection-based JSON serialization.
             var destinationEscaped = System.Text.Json.JsonEncodedText.Encode(destination).ToString();
-            var html = STRINGS.AUTH_BOOTSTRAP_HTML.Replace("window.location.replace('/')", $"window.location.replace(\"{destinationEscaped}\")");
+            var tabTokenEscaped = System.Text.Json.JsonEncodedText.Encode(authService.GetInstanceTabToken()).ToString();
+            var html = STRINGS.AUTH_BOOTSTRAP_HTML
+                .Replace("window.location.replace('/')", $"window.location.replace(\"{destinationEscaped}\")")
+                .Replace("'__VIBERAILS_TAB_TOKEN__'", $"'{tabTokenEscaped}'");
             return Results.Content(html, "text/html");
         }).WithName("AuthBootstrap");
     }
