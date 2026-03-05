@@ -402,59 +402,6 @@ code {
     }
 }
 
-/* Compact Sandbox Cards for Dashboard Sidebar */
-[data-dashboard="unified"] .sandbox-card {
-    padding: 0.6rem 0.85rem;
-    margin-bottom: 0.75rem;
-    background: rgba(30, 30, 36, 0.4);
-    border-radius: 8px;
-}
-
-[data-dashboard="unified"] .sandbox-card-header {
-    margin-bottom: 0.4rem;
-    gap: 0.75rem;
-}
-
-[data-dashboard="unified"] .sandbox-card-icon {
-    width: 28px;
-    height: 28px;
-}
-
-[data-dashboard="unified"] .sandbox-card-icon img {
-    width: 14px;
-    height: 14px;
-}
-
-[data-dashboard="unified"] .sandbox-card-info h6 {
-    font-size: 0.85rem;
-    margin-bottom: 0.1rem;
-}
-
-[data-dashboard="unified"] .sandbox-card-meta {
-    font-size: 0.65rem;
-}
-
-[data-dashboard="unified"] .sandbox-card-actions {
-    padding-top: 0.4rem;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    border-top-style: dashed;
-}
-
-[data-dashboard="unified"] .sandbox-card-actions .btn-sm {
-    padding: 0.15rem 0.4rem;
-    font-size: 0.65rem;
-}
-
-[data-dashboard="unified"] .sandbox-card-actions select {
-    font-size: 0.65rem;
-    padding: 0.15rem 1.5rem 0.15rem 0.4rem;
-}
-
-[data-dashboard="unified"] .sandbox-card-actions .border-start {
-    padding-left: 0.5rem !important;
-    margin-left: 0;
-}
 
 /* Quick Launch Buttons */
 .btn-outline-secondary.d-flex.align-items-center.gap-2.p-2 {
@@ -757,6 +704,19 @@ button:hover .card-nav-cog {
     border: 2px solid transparent;
 }
 
+/* Make button icons visibly larger without affecting surrounding text */
+.btn svg,
+.app-subnav-link svg,
+.btn .icon-light,
+.app-subnav-link .icon-light,
+.btn .menu-icon,
+.app-subnav-link .menu-icon {
+    width: 1rem !important;
+    height: 1rem !important;
+    font-size: 1rem !important;
+    flex-shrink: 0;
+}
+
 .btn-primary {
     background-color: var(--color-primary);
     color: #fff;
@@ -995,86 +955,176 @@ button:hover .card-nav-cog {
     transform: translateX(2px);
 }
 
-/* Sandbox item card - 3-section layout */
+/* Sandbox item card */
 .sandbox-item-card {
-    background: linear-gradient(180deg, rgba(30, 41, 59, 0.26) 0%, rgba(15, 23, 42, 0.2) 100%);
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    border-left: 3px solid rgba(59, 130, 246, 0.85);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: var(--border-radius);
-    margin-bottom: 0.4rem;
-    overflow: hidden;
-    transition: border-color var(--transition-speed), background var(--transition-speed);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    margin-bottom: 0.35rem;
+    padding: 0.5rem 0.6rem;
+    transition: all var(--transition-speed);
 }
 
 .sandbox-item-card:hover {
-    background: linear-gradient(180deg, rgba(30, 41, 59, 0.36) 0%, rgba(15, 23, 42, 0.28) 100%);
-    border-color: rgba(56, 189, 248, 0.45);
-    border-left-color: var(--color-accent);
-    box-shadow: 0 8px 18px rgba(2, 6, 23, 0.32);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(59, 130, 246, 0.3);
 }
 
 .sandbox-item-header {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.5rem 0.7rem;
-}
-
-.sandbox-item-icon {
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
-    opacity: 0.7;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
 }
 
 .sandbox-item-info {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
     flex: 1;
     min-width: 0;
 }
 
 .sandbox-item-name {
     font-weight: 600;
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     color: var(--color-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    display: block;
+}
+
+.sandbox-item-branch {
+    font-size: 0.6rem;
+    color: var(--color-primary);
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 3px;
+    padding: 0.05rem 0.35rem;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .sandbox-item-time {
-    font-size: 0.65rem;
-    color: var(--color-text-muted);
-    opacity: 0.6;
-}
-
-.sandbox-item-section {
-    border-top: 1px solid rgba(148, 163, 184, 0.16);
-    padding: 0.45rem 0.7rem;
-}
-
-.sandbox-item-section-label {
-    display: block;
     font-size: 0.6rem;
-    text-transform: uppercase;
-    letter-spacing: 0.11em;
     color: var(--color-text-muted);
-    margin-bottom: 0.35rem;
-    opacity: 0.75;
+    opacity: 0.5;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
-.sandbox-item-card .btn.btn-sm {
-    font-size: 0.72rem;
-    min-height: 30px;
+.sandbox-item-delete {
+    background: none;
+    border: none;
+    color: var(--color-text-muted);
+    opacity: 0;
+    padding: 0.2rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+    line-height: 1;
 }
 
-.sandbox-item-card .form-select-sm {
-    min-height: 30px;
-    font-size: 0.72rem;
-    background-color: rgba(2, 6, 23, 0.45);
-    border-color: rgba(148, 163, 184, 0.25);
+.sandbox-item-card:hover .sandbox-item-delete {
+    opacity: 0.4;
+}
+
+.sandbox-item-delete:hover {
+    opacity: 1 !important;
+    color: var(--color-danger);
+}
+
+/* Actions row */
+.sandbox-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.sandbox-item-git-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+.sandbox-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    color: var(--color-text-muted);
+    font-size: 0.65rem;
+    padding: 0.2rem 0.4rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.sandbox-action-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.15);
     color: var(--color-text);
+}
+
+/* Launch group */
+.sandbox-item-launch {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: auto;
+}
+
+.sandbox-item-cli-select {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    color: var(--color-text);
+    font-size: 0.65rem;
+    padding: 0.2rem 1.2rem 0.2rem 0.35rem;
+    height: auto;
+    cursor: pointer;
+    appearance: auto;
+}
+
+.sandbox-launch-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    border: 1px solid;
+    border-radius: 3px;
+    font-size: 0.62rem;
+    font-weight: 600;
+    padding: 0.2rem 0.4rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.sandbox-launch-btn--native {
+    background: rgba(100, 116, 139, 0.1);
+    border-color: rgba(100, 116, 139, 0.25);
+    color: var(--color-secondary);
+}
+
+.sandbox-launch-btn--native:hover {
+    background: rgba(100, 116, 139, 0.2);
+    border-color: rgba(100, 116, 139, 0.4);
+    color: var(--color-text);
+}
+
+.sandbox-launch-btn--web {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: rgba(16, 185, 129, 0.25);
+    color: var(--color-success);
+}
+
+.sandbox-launch-btn--web:hover {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: rgba(16, 185, 129, 0.4);
+    color: #34d399;
 }
 
 .project-logo-wrapper {
@@ -1110,148 +1160,6 @@ button:hover .card-nav-cog {
 
 .min-w-0 {
     min-width: 0;
-}
-
-/* ============================================
-   Sandbox Card
-   ============================================ */
-
-.sandbox-card {
-    padding: 1rem 1.25rem !important;
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    margin-bottom: 0.75rem;
-    transition: all var(--transition-speed);
-}
-
-.sandbox-card:hover {
-    border-color: var(--color-primary);
-    box-shadow: var(--shadow-hover);
-}
-
-/* Header: icon + info + delete button */
-.sandbox-card-header {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
-}
-
-.sandbox-card-icon {
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
-    border: 1px solid var(--color-border);
-    flex-shrink: 0;
-}
-
-.sandbox-card-icon img {
-    height: 20px;
-    width: 20px;
-    opacity: 0.8;
-}
-
-.sandbox-card-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.sandbox-card-title {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.15rem;
-}
-
-.sandbox-card-name {
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--color-text);
-    margin: 0;
-}
-
-.sandbox-card-meta {
-    display: flex;
-    align-items: center;
-    color: var(--color-text-muted);
-    font-size: 0.75rem;
-    gap: 0.15rem;
-}
-
-.sandbox-card-separator {
-    margin: 0 0.4rem;
-    opacity: 0.3;
-}
-
-.sandbox-card-path {
-    font-family: 'Consolas', monospace;
-    opacity: 0.6;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 400px;
-}
-
-.sandbox-card-remote {
-    margin-top: 0.2rem;
-    font-size: 0.75rem;
-    color: var(--color-text-muted);
-    opacity: 0.6;
-}
-
-.sandbox-card-delete {
-    opacity: 0.4;
-    transition: opacity 0.2s;
-    padding: 0.25rem;
-}
-
-.sandbox-card-delete:hover {
-    opacity: 1;
-    color: var(--color-danger);
-}
-
-/* Action buttons row */
-.sandbox-card-actions {
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.03);
-    flex-wrap: wrap;
-}
-
-.sandbox-btn-group {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.sandbox-btn-group-label {
-    font-size: 0.65rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--color-text-muted);
-    opacity: 0.4;
-    min-width: 40px;
-}
-
-.sandbox-btn-group-buttons {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-}
-
-.sandbox-cli-select {
-    width: auto !important;
-    min-width: 100px;
-    background-color: rgba(0, 0, 0, 0.2) !important;
-    border-color: rgba(255, 255, 255, 0.05) !important;
 }
 
 /* Agent Files Tree */
@@ -3792,20 +3700,37 @@ input.form-control:disabled {
 }
 
 .swarm-task-select {
-    background: rgba(0, 0, 0, 0.35);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 8px;
+    background-color: #11111b;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%239ac6c5' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    background-size: 16px 12px;
+    appearance: none;
+    color: #cdd6f4;
+    border: 1px solid var(--terminal-accent);
+    border-radius: 6px;
     font-size: 0.84rem;
-    padding: 0.45rem 0.6rem;
+    padding: 0.45rem 2rem 0.45rem 0.6rem;
     min-width: 230px;
     min-height: 38px;
 }
 
+.swarm-task-select:hover {
+    border-color: #cdd6f4;
+    background-color: rgba(154, 198, 197, 0.06);
+}
+
 .swarm-task-select:focus {
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 0.16rem rgba(59, 130, 246, 0.15);
+    background-color: #11111b;
+    border-color: var(--terminal-accent);
+    box-shadow: 0 0 0 0.15rem rgba(154, 198, 197, 0.25);
+    color: #cdd6f4;
     outline: none;
+}
+
+.swarm-task-select option {
+    background-color: #11111b;
+    color: #cdd6f4;
 }
 
 .swarm-step-action-btn {

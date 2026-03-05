@@ -29,7 +29,7 @@ public interface ITerminalSessionService
     Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null);
     Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken);
     Task StopSessionAsync();
-    void RegisterExternalTerminal(Terminal terminal, string sessionId);
+    void RegisterExternalTerminal(Terminal terminal, string sessionId, string? cliName = null);
     Task UnregisterTerminalAsync();
     Task DisconnectLocalViewerAsync(string reason);
     Task<bool> SendRemoteCommandAsync(string command, string? payload = null, CancellationToken cancellationToken = default);
@@ -47,6 +47,8 @@ public class TerminalSessionService : ITerminalSessionService
     private static Terminal? s_terminal;
     private static string? s_sessionId;
     private static WebSocket? s_activeWebSocket;
+    private static string? s_sessionOwnerId;
+    private static string? s_activeCli;
     private static bool s_externallyOwned;
 
     public bool HasActiveSession => s_terminal != null;
@@ -84,14 +86,31 @@ public class TerminalSessionService : ITerminalSessionService
             // When a remote browser connects, disconnect the local WebUI viewer
             if (remoteConn != null)
             {
+                var remoteViewerActive = 0;
+                void DisconnectLocalViewerOnRemoteActivity(string trigger)
+                {
+                    if (Interlocked.Exchange(ref remoteViewerActive, 1) == 1)
+                        return;
+
+                    Log.Information(
+                        "[Terminal] Remote viewer activity via {Trigger} - disconnecting local viewer",
+                        trigger);
+                    _ = DisconnectLocalViewerAsync("Session taken over by remote viewer");
+                }
+
                 remoteConn.OnReplayRequested += () =>
                 {
-                    _ = DisconnectLocalViewerAsync("Session taken over by remote viewer");
+                    DisconnectLocalViewerOnRemoteActivity("replay");
+                };
+                // Some relay paths (for example Codex remote attach) send Ctrl+L
+                // instead of __replay__ when the browser connects.
+                remoteConn.OnInputReceived += _ =>
+                {
+                    DisconnectLocalViewerOnRemoteActivity("input");
                 };
                 remoteConn.OnBrowserDisconnected += () =>
                 {
-                    var msg = System.Text.Encoding.UTF8.GetBytes("\r\n\x1b[90m[Remote viewer disconnected]\x1b[0m\r\n");
-                    terminal.PublishSynthetic(msg);
+                    Interlocked.Exchange(ref remoteViewerActive, 0);
                 };
             }
 
@@ -110,7 +129,10 @@ public class TerminalSessionService : ITerminalSessionService
             {
                 s_terminal = terminal;
                 s_sessionId = sessionId;
+                s_sessionOwnerId = BuildSessionOwnerId(sessionId);
+                s_activeCli = llm.ToString();
             }
+            _localClientTracker.AcquireOwner(BuildSessionOwnerId(sessionId));
 
             return true;
         }
@@ -154,18 +176,23 @@ public class TerminalSessionService : ITerminalSessionService
             Log.Error(ex, "[Terminal] Failed to disconnect remote viewer");
         }
 
-        // Replay buffered output so new viewer sees current screen state
-        var replay = terminal.GetReplayBuffer();
-        if (replay.Length > 0)
+        var shouldUseReplay = ShouldUseReplayBuffer();
+        // Replay buffered output so new viewer sees current screen state.
+        // Codex rendering is more stable with a redraw instead of partial replay.
+        if (shouldUseReplay)
         {
-            try
+            var replay = terminal.GetReplayBuffer();
+            if (replay.Length > 0)
             {
-                await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
-                Log.Information("[Terminal] Replayed {Bytes} bytes of buffered output to new viewer", replay.Length);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[Terminal] Failed to replay buffer");
+                try
+                {
+                    await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
+                    Log.Information("[Terminal] Replayed {Bytes} bytes of buffered output to new viewer", replay.Length);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "[Terminal] Failed to replay buffer");
+                }
             }
         }
 
@@ -175,6 +202,18 @@ public class TerminalSessionService : ITerminalSessionService
         ownerId = $"terminal-ws:{sessionId}:{Guid.NewGuid():N}";
         _localClientTracker.AcquireOwner(ownerId);
 
+        if (!shouldUseReplay)
+        {
+            try
+            {
+                await terminal.WriteBytesAsync(new byte[] { 0x0C }, cancellationToken); // Ctrl+L
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Terminal] Failed to request redraw for reconnecting viewer");
+            }
+        }
+
         // Run WebSocket input loop (blocks until WebSocket closes or cancellation)
         try
         {
@@ -183,7 +222,13 @@ public class TerminalSessionService : ITerminalSessionService
         finally
         {
             // subscription.Dispose() auto-unsubscribes the WebSocketConsumer
-            lock (s_lock) { s_activeWebSocket = null; }
+            lock (s_lock)
+            {
+                if (ReferenceEquals(s_activeWebSocket, webSocket))
+                {
+                    s_activeWebSocket = null;
+                }
+            }
             if (!string.IsNullOrEmpty(ownerId))
             {
                 _localClientTracker.ReleaseOwner(ownerId);
@@ -192,7 +237,7 @@ public class TerminalSessionService : ITerminalSessionService
         }
     }
 
-    public void RegisterExternalTerminal(Terminal terminal, string sessionId)
+    public void RegisterExternalTerminal(Terminal terminal, string sessionId, string? cliName = null)
     {
         lock (s_lock)
         {
@@ -200,22 +245,34 @@ public class TerminalSessionService : ITerminalSessionService
                 throw new InvalidOperationException("A terminal session is already active");
             s_terminal = terminal;
             s_sessionId = sessionId;
+            s_sessionOwnerId = BuildSessionOwnerId(sessionId);
+            s_activeCli = cliName;
             s_externallyOwned = true;
         }
+        _localClientTracker.AcquireOwner(BuildSessionOwnerId(sessionId));
     }
 
     public async Task UnregisterTerminalAsync()
     {
         WebSocket? wsToClose;
         string? sessionIdToClear;
+        string? ownerIdToRelease;
         lock (s_lock)
         {
             sessionIdToClear = s_sessionId;
+            ownerIdToRelease = s_sessionOwnerId;
             s_terminal = null;
             s_sessionId = null;
+            s_sessionOwnerId = null;
+            s_activeCli = null;
             s_externallyOwned = false;
             wsToClose = s_activeWebSocket;
             s_activeWebSocket = null;
+        }
+
+        if (!string.IsNullOrEmpty(ownerIdToRelease))
+        {
+            _localClientTracker.ReleaseOwner(ownerIdToRelease);
         }
 
         if (!string.IsNullOrEmpty(sessionIdToClear))
@@ -518,16 +575,25 @@ public class TerminalSessionService : ITerminalSessionService
         }
     }
 
-    private static async Task CleanupAsync()
+    private async Task CleanupAsync()
     {
         Terminal? terminalToDispose;
         string? sessionIdToClear;
+        string? ownerIdToRelease;
         lock (s_lock)
         {
             sessionIdToClear = s_sessionId;
+            ownerIdToRelease = s_sessionOwnerId;
             terminalToDispose = s_externallyOwned ? null : s_terminal;
             s_terminal = null;
             s_sessionId = null;
+            s_sessionOwnerId = null;
+            s_activeCli = null;
+        }
+
+        if (!string.IsNullOrEmpty(ownerIdToRelease))
+        {
+            _localClientTracker.ReleaseOwner(ownerIdToRelease);
         }
 
         if (!string.IsNullOrEmpty(sessionIdToClear))
@@ -538,6 +604,20 @@ public class TerminalSessionService : ITerminalSessionService
         if (terminalToDispose != null)
         {
             await terminalToDispose.DisposeAsync();
+        }
+    }
+
+    private static string BuildSessionOwnerId(string sessionId)
+        => $"terminal-session:{sessionId}";
+
+    private static bool ShouldUseReplayBuffer()
+    {
+        lock (s_lock)
+        {
+            if (string.IsNullOrWhiteSpace(s_activeCli))
+                return true;
+
+            return !s_activeCli.Contains("codex", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
