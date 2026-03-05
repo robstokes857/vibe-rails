@@ -5,6 +5,7 @@ export class SwarmController {
         this.app = app;
         this.planData = null;
         this.initMessage = '';
+        this.hasSpawnedTerminals = false;
         this._root = null;
     }
 
@@ -45,11 +46,6 @@ export class SwarmController {
         initialForm?.addEventListener('submit', (event) => this.handleInitialSubmit(event, root));
         resubmitForm?.addEventListener('submit', (event) => this.handleResubmit(event, root));
         this.bindInitMessageEditors(root);
-
-        root.querySelector('[data-action="swarm-back-to-plan"]')?.addEventListener('click', () => {
-            root.querySelector('[data-swarm-terminal-screen]')?.classList.add('d-none');
-            root.querySelector('[data-swarm-plan-screen]')?.classList.remove('d-none');
-        });
     }
 
     async handleInitialSubmit(event, root) {
@@ -61,7 +57,7 @@ export class SwarmController {
         if (!inputEl || !submitBtn) return;
 
         const message = inputEl.value.trim();
-        await this.submitPlan(root, message, submitBtn, 'Submit');
+        await this.submitPlan(root, message, submitBtn);
     }
 
     async handleResubmit(event, root) {
@@ -73,10 +69,10 @@ export class SwarmController {
         if (!inputEl || !submitBtn) return;
 
         const message = inputEl.value.trim();
-        await this.submitPlan(root, message, submitBtn, 'Resubmit Plan');
+        await this.submitPlan(root, message, submitBtn);
     }
 
-    async submitPlan(root, message, submitBtn, defaultButtonText) {
+    async submitPlan(root, message, submitBtn) {
         if (!submitBtn) return;
         if (!message) {
             this.showError(root, 'Enter a task description before submitting.');
@@ -92,6 +88,7 @@ export class SwarmController {
 
             this.planData = plan;
             this.initMessage = this.buildInitMessage(plan);
+            this.hasSpawnedTerminals = false;
             this.setInitMessage(root, this.initMessage);
             this.setPromptMessage(root, message);
             this.showPlanScreen(root);
@@ -104,19 +101,24 @@ export class SwarmController {
 
     showLoadingScreen(root) {
         root.querySelector('[data-swarm-input-screen]')?.classList.add('d-none');
+        root.querySelector('[data-swarm-plan-screen]')?.classList.add('d-none');
         root.querySelector('[data-swarm-loading-screen]')?.classList.remove('d-none');
     }
 
     hideLoadingScreen(root) {
         root.querySelector('[data-swarm-loading-screen]')?.classList.add('d-none');
+        if (this.planData) {
+            this.showPlanScreen(root);
+            return;
+        }
         root.querySelector('[data-swarm-input-screen]')?.classList.remove('d-none');
     }
 
     showPlanScreen(root) {
         root.querySelector('[data-swarm-input-screen]')?.classList.add('d-none');
         root.querySelector('[data-swarm-loading-screen]')?.classList.add('d-none');
-        root.querySelector('[data-swarm-terminal-screen]')?.classList.add('d-none');
         root.querySelector('[data-swarm-plan-screen]')?.classList.remove('d-none');
+        this.updateWorkspaceLayout(root);
     }
 
     renderPlan(root) {
@@ -131,21 +133,23 @@ export class SwarmController {
     }
 
     async launchSwarmTerminals(tasks, root) {
-        const planScreen = root.querySelector('[data-swarm-plan-screen]');
         const terminalScreen = root.querySelector('[data-swarm-terminal-screen]');
         const terminalContainer = root.querySelector('[data-swarm-terminal-container]');
 
-        if (!terminalContainer) return;
+        if (!terminalContainer || !Array.isArray(tasks) || tasks.length === 0) return;
 
         if (!terminalContainer.hasChildNodes()) {
             terminalContainer.innerHTML = this.app.terminalController.renderTerminalPanel();
         }
 
-        planScreen?.classList.add('d-none');
+        this.hasSpawnedTerminals = true;
+        root.querySelector('[data-swarm-plan-screen]')?.classList.remove('d-none');
         terminalScreen?.classList.remove('d-none');
+        this.updateWorkspaceLayout(root);
 
         for (const task of tasks) {
             const { cli, environmentName } = this.parseSelection(task.selected);
+            if (!cli) continue;
             await this.app.terminalController.startTerminalWithOptions(
                 { cli, environmentName, title: task.tabTitle || task.groupName || task.name },
                 terminalContainer
@@ -249,5 +253,21 @@ export class SwarmController {
             errorEl.textContent = '';
             errorEl.classList.add('d-none');
         });
+    }
+
+    updateWorkspaceLayout(root) {
+        const resubmitCard = root.querySelector('[data-swarm-resubmit-card]');
+        const terminalScreen = root.querySelector('[data-swarm-terminal-screen]');
+
+        if (this.hasSpawnedTerminals) {
+            root.classList.add('swarm-terminals-active');
+            resubmitCard?.classList.add('d-none');
+            terminalScreen?.classList.remove('d-none');
+            return;
+        }
+
+        root.classList.remove('swarm-terminals-active');
+        resubmitCard?.classList.remove('d-none');
+        terminalScreen?.classList.add('d-none');
     }
 }

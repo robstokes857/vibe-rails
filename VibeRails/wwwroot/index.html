@@ -780,58 +780,64 @@
                 </div>
             </div>
 
-            <div data-swarm-input-screen>
-                <div class="card">                    
-                    <div class="card-body">
-                        <form data-swarm-form>
-                            <label class="form-label swarm-input-label" for="swarm-task-input">Describe the task or feature to break it up and assign multiple LLMs to work on it.</label>
-                            <textarea id="swarm-task-input" class="form-control swarm-task-input" data-swarm-input placeholder="Example: Refactor the auth module to support OAuth, add unit tests, and update the docs." required></textarea>
-                            <div class="swarm-error d-none mt-3" data-swarm-error></div>
+            <div class="swarm-content-shell">
+                <div data-swarm-input-screen>
+                    <div class="card">
+                        <div class="card-body">
+                            <form data-swarm-form>
+                                <label class="form-label swarm-input-label" for="swarm-task-input">Describe the task or feature to break it up and assign multiple LLMs to work on it.</label>
+                                <textarea id="swarm-task-input" class="form-control swarm-task-input" data-swarm-input rows="8" placeholder="Example: Refactor the auth module to support OAuth, add unit tests, and update the docs." required></textarea>
+                                <div class="swarm-error d-none mt-3" data-swarm-error></div>
 
-                            <div class="swarm-input-actions mt-3">
-                                <button type="submit" class="btn btn-outline-primary" data-action="swarm-submit">Submit</button>
-                            </div>
-                        </form>
+                                <div class="swarm-input-actions mt-3">
+                                    <button type="submit" class="btn btn-primary swarm-submit-btn" data-action="swarm-submit">Generate Plan</button>
+                                </div>
+                            </form>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="d-none" data-swarm-loading-screen>
-                <div class="card">
-                    <div class="card-body d-flex align-items-center gap-3 py-4">
-                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                        <span class="text-muted">Generating plan, this may take a moment...</span>
+                <div class="d-none" data-swarm-loading-screen>
+                    <div class="card">
+                        <div class="card-body d-flex align-items-center gap-3 py-4">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                            <span class="text-muted">Generating plan, this may take a moment...</span>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="d-none" data-swarm-terminal-screen>
-                <div class="mb-2">
-                    <button class="btn btn-sm btn-outline-secondary" data-action="swarm-back-to-plan">&#8592; Back to Plan</button>
-                </div>
-                <div data-swarm-terminal-container style="height: 600px;"></div>
-            </div>
-
-            <div class="d-none" data-swarm-plan-screen>
-                <div class="card mb-3">
-                    <div class="card-header text-uppercase fw-bold" style="letter-spacing: 0.05em;">Regenerate Plan</div>
-                    <div class="card-body">
-                        <form data-swarm-resubmit-form>
-                            <textarea class="form-control swarm-task-input" data-swarm-resubmit-input placeholder="Describe the coding task and resubmit to generate a new plan..." required></textarea>
-                            <div class="swarm-error d-none mt-3" data-swarm-error></div>
-                            <div class="swarm-input-actions mt-3">
-                                <button type="submit" class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" data-action="swarm-resubmit">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
-                                        <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
-                                        <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
-                                    </svg>
-                                    Resubmit Plan
-                                </button>
-                            </div>
-                        </form>
+                <div class="d-none" data-swarm-plan-screen>
+                    <div class="card mb-3 swarm-resubmit-card" data-swarm-resubmit-card>
+                        <div class="card-header text-uppercase fw-bold" style="letter-spacing: 0.05em;">Regenerate Plan</div>
+                        <div class="card-body">
+                            <form data-swarm-resubmit-form>
+                                <textarea class="form-control swarm-task-input" data-swarm-resubmit-input rows="6" placeholder="Describe the coding task and resubmit to generate a new plan..." required></textarea>
+                                <div class="swarm-error d-none mt-3" data-swarm-error></div>
+                                <div class="swarm-input-actions mt-3">
+                                    <button type="submit" class="btn btn-outline-primary swarm-submit-btn d-inline-flex align-items-center gap-2" data-action="swarm-resubmit">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
+                                            <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
+                                            <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
+                                        </svg>
+                                        Regenerate Plan
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
                     </div>
+
+                    <div class="card mb-3 d-none swarm-terminal-card" data-swarm-terminal-screen>
+                        <div class="card-header text-uppercase fw-bold d-flex align-items-center justify-content-between" style="letter-spacing: 0.05em;">
+                            <span>Active Terminals</span>
+                            <span class="badge text-bg-dark">In-Page</span>
+                        </div>
+                        <div class="card-body p-0">
+                            <div data-swarm-terminal-container style="min-height: 560px;"></div>
+                        </div>
+                    </div>
+
+                    <div data-swarm-plan-container></div>
                 </div>
-                <div data-swarm-plan-container></div>
             </div>
         </div>
     </template>
