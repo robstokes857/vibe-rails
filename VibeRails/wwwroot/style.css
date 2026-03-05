@@ -1706,6 +1706,16 @@ button:hover .card-nav-cog {
     background: var(--terminal-accent);
 }
 
+#terminal-panel .terminal-tab-item.has-custom-accent::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--terminal-tab-accent);
+}
+
 #terminal-panel .terminal-tab-item:hover:not(.active) {
     background: var(--terminal-tab-hover-bg);
 }
@@ -1794,6 +1804,23 @@ button:hover .card-nav-cog {
     font-family: inherit;
     font-size: inherit;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+#terminal-panel .terminal-tab-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+#terminal-panel .terminal-tab-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* When status dot is present, remove the button's left gap (dot provides the spacing) */
@@ -3344,6 +3371,11 @@ input.form-control:disabled {
     margin: 0 auto;
 }
 
+.swarm-header-shell {
+    max-width: 1120px;
+    margin: 0 auto 1.5rem;
+}
+
 .swarm-input-label {
     color: var(--color-text-muted);
     text-transform: uppercase;
@@ -3574,6 +3606,7 @@ input.form-control:disabled {
     font-size: 0.75rem;
     font-weight: 800;
     z-index: 2;
+    cursor: grab;
 }
 
 .swarm-step.completed .swarm-step-marker {
@@ -3604,6 +3637,29 @@ input.form-control:disabled {
     margin-bottom: 0.2rem;
 }
 
+.swarm-step-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    color: var(--color-text-muted);
+    opacity: 0.75;
+    cursor: grab;
+    transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.swarm-step-drag-handle:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--color-text);
+    opacity: 1;
+}
+
+.swarm-step-drag-handle:active {
+    cursor: grabbing;
+}
+
 .swarm-step-desc {
     color: var(--color-text-muted);
     font-size: 0.82rem;
@@ -3612,6 +3668,15 @@ input.form-control:disabled {
 
 .swarm-step-body {
     display: block;
+}
+
+.swarm-step.collapsed .swarm-task-desc {
+    display: none;
+}
+
+.swarm-step.collapsed .swarm-task-select,
+.swarm-step.collapsed .swarm-task-start {
+    display: none;
 }
 
 .swarm-step-body-inner {
@@ -3747,6 +3812,7 @@ input.form-control:disabled {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 0.45rem;
     min-height: 38px;
     padding: 0.5rem 0.88rem;
     border-radius: 8px;
@@ -3776,6 +3842,19 @@ input.form-control:disabled {
     background: var(--color-primary);
     border-color: var(--color-primary);
     color: #fff;
+}
+
+.swarm-shake {
+    animation: swarm-shake 280ms ease;
+}
+
+@keyframes swarm-shake {
+    0% { transform: translateX(0); }
+    20% { transform: translateX(-4px); }
+    40% { transform: translateX(4px); }
+    60% { transform: translateX(-3px); }
+    80% { transform: translateX(3px); }
+    100% { transform: translateX(0); }
 }
 
 .swarm-step-actions {

@@ -52,28 +52,41 @@ public sealed class TraceObserver : ITerminalIoObserver
         _buffer.Add(TraceEvent.Create(
             TraceEventType.Resize,
             $"Terminal.{resizeEvent.Source}",
-            $"Resize: {resizeEvent.Cols}x{resizeEvent.Rows}"));
+            $"Resize: {resizeEvent.Cols}x{resizeEvent.Rows}",
+            $"sessionId: {resizeEvent.SessionId}\nsource: {resizeEvent.Source}\ncols: {resizeEvent.Cols}\nrows: {resizeEvent.Rows}"));
 
         return ValueTask.CompletedTask;
     }
 
     public ValueTask OnTerminalIdleAsync(TerminalIdleEvent idleEvent, CancellationToken cancellationToken = default)
     {
+        var detail = $"sessionId: {idleEvent.SessionId}\n" +
+                     $"idleFor: {idleEvent.IdleFor.TotalSeconds:F1}s\n" +
+                     $"threshold: {idleEvent.IdleThreshold.TotalSeconds:F0}s\n" +
+                     $"lastInput: {idleEvent.LastInputUtc:HH:mm:ss.fff}\n" +
+                     $"lastOutput: {idleEvent.LastOutputUtc:HH:mm:ss.fff}";
+
         _buffer.Add(TraceEvent.Create(
             TraceEventType.Idle,
             "Terminal",
-            $"Idle for {idleEvent.IdleFor.TotalSeconds:F0}s (threshold: {idleEvent.IdleThreshold.TotalSeconds:F0}s)"));
+            $"Idle for {idleEvent.IdleFor.TotalSeconds:F0}s (waiting for input)",
+            detail));
 
         return ValueTask.CompletedTask;
     }
 
     public ValueTask OnTerminalRemoteCommandAsync(TerminalRemoteCommandEvent commandEvent, CancellationToken cancellationToken = default)
     {
+        var detail = $"sessionId: {commandEvent.SessionId}\n" +
+                     $"source: {commandEvent.Source}\n" +
+                     $"command: {commandEvent.Command}\n" +
+                     $"payload: {commandEvent.Payload ?? "(none)"}";
+
         _buffer.Add(TraceEvent.Create(
             TraceEventType.SessionLifecycle,
             $"Terminal.{commandEvent.Source}",
             $"Remote command: {commandEvent.Command}",
-            commandEvent.Payload));
+            detail));
 
         return ValueTask.CompletedTask;
     }

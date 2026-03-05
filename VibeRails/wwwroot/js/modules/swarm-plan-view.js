@@ -20,13 +20,25 @@ const COLOR_EMOJIS = {
 
 const ICON_PLUS = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>`;
 const ICON_TRASH = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg>`;
+const ICON_TERMINAL = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M.146 2.146a.5.5 0 0 1 .708 0L4.707 6 .854 9.854a.5.5 0 1 1-.708-.708L3.293 6 .146 2.854a.5.5 0 0 1 0-.708"/><path d="M5.5 9.5a.5.5 0 0 1 .5-.5H15a.5.5 0 0 1 0 1H6a.5.5 0 0 1-.5-.5"/></svg>`;
+const ICON_CHECK = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M13.485 1.929a.75.75 0 0 1 .086 1.056l-7.25 8.5a.75.75 0 0 1-1.102.04l-3.25-3.25a.75.75 0 1 1 1.06-1.06l2.677 2.677 6.72-7.877a.75.75 0 0 1 1.059-.086"/></svg>`;
+const ICON_UNDO = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 1 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966a.25.25 0 0 1 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/></svg>`;
+const ICON_DRAG = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0M6 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0m-1 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2m7-12a1 1 0 1 1-2 0 1 1 0 0 1 2 0M11 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2m1 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/></svg>`;
+
+function createStepId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+    return `swarm-step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 export class SwarmPlanView {
-    constructor(data, container, cliOptions = [], onLaunch = null) {
+    constructor(data, container, cliOptions = [], onLaunch = null, onChange = null) {
         this.planData = data;
         this.container = container;
         this.cliOptions = cliOptions;
         this.onLaunch = onLaunch;
+        this.onChange = onChange;
         this.render();
     }
 
@@ -57,20 +69,24 @@ export class SwarmPlanView {
         `;
 
         steps.forEach((step, stepIndex) => {
-            const color = STEP_COLORS[stepIndex % STEP_COLORS.length];
+            const color = step.color || STEP_COLORS[stepIndex % STEP_COLORS.length];
+            if (!step.color) {
+                step.color = color;
+            }
             const selected = typeof step.selected === 'string' ? step.selected : '';
             const marker = step.completed
                 ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>'
                 : `${stepIndex + 1}`;
 
             html += `
-                <div class="swarm-step ${step.completed ? 'completed' : ''}" data-step-index="${stepIndex}">
+                <div class="swarm-step ${step.completed ? 'completed' : ''} ${step.collapsed ? 'collapsed' : ''}" data-step-index="${stepIndex}" data-step-id="${escapeHtml(step.id || '')}">
                     <div class="swarm-step-marker">${marker}</div>
                     <div class="swarm-step-card">
                         <div class="swarm-step-header">
                             <div class="swarm-step-title-wrap">
                                 <div class="swarm-step-title d-flex align-items-center gap-2">
                                     <div class="swarm-group-dot" style="background:${color}; box-shadow: 0 0 10px ${color}66; width:10px; height:10px; border-radius:50%; flex-shrink:0;"></div>
+                                    <span class="swarm-step-drag-handle" title="Drag to reorder">${ICON_DRAG}</span>
                                     ${escapeHtml(step.name || '')}
                                 </div>
                             </div>
@@ -100,10 +116,12 @@ export class SwarmPlanView {
                                 <button class="swarm-task-start swarm-step-action-btn ${step.started ? 'active' : ''}"
                                     data-action="swarm-start-step"
                                     data-step-index="${stepIndex}">
-                                    ${step.started ? 'Open Terminal' : 'Start Terminal'}
+                                    ${ICON_TERMINAL}
+                                    <span>${step.started ? 'Open Terminal' : 'Start Terminal'}</span>
                                 </button>
                                 <button class="swarm-btn swarm-btn-next swarm-step-action-btn" data-action="swarm-toggle-complete" data-step-index="${stepIndex}">
-                                    ${step.completed ? 'Undo Complete' : 'Mark Complete'}
+                                    ${step.completed ? ICON_UNDO : ICON_CHECK}
+                                    <span>${step.completed ? 'Undo Complete' : 'Mark Complete'}</span>
                                 </button>
                             </div>
                         </div>
@@ -139,6 +157,7 @@ export class SwarmPlanView {
                 const step = this.planData.steps?.[stepIndex];
                 if (!step) return;
                 step.description = event.target.value;
+                this.emitChange();
             });
         });
 
@@ -147,7 +166,13 @@ export class SwarmPlanView {
                 const stepIndex = Number(event.target.dataset.stepIndex);
                 const step = this.planData.steps?.[stepIndex];
                 if (!step) return;
-                step.selected = event.target.value;
+                const nextSelection = event.target.value;
+                if (step.selected !== nextSelection) {
+                    step.selected = nextSelection;
+                    step.terminalTabId = null;
+                    step.started = false;
+                }
+                this.emitChange();
             });
         });
 
@@ -155,12 +180,20 @@ export class SwarmPlanView {
             button.addEventListener('click', (event) => {
                 const stepIndex = Number(event.currentTarget.dataset.stepIndex);
                 const step = this.planData.steps?.[stepIndex];
-                if (!step || !step.selected) return;
-                const color = STEP_COLORS[stepIndex % STEP_COLORS.length];
+                if (!step) return;
+                if (!step.selected) {
+                    this.showSelectionRequiredFeedback(event.currentTarget);
+                    return;
+                }
+                const color = step.color || STEP_COLORS[stepIndex % STEP_COLORS.length];
                 const emoji = COLOR_EMOJIS[color] || '🔵';
-                step.started = true;
-                this.render();
-                if (this.onLaunch) this.onLaunch([{ ...step, tabTitle: `${emoji} ${step.name}` }]);
+                if (this.onLaunch) {
+                    this.onLaunch([{
+                        ...step,
+                        color: step.color || color,
+                        tabTitle: `${emoji} ${step.name}`
+                    }]);
+                }
             });
         });
 
@@ -169,14 +202,29 @@ export class SwarmPlanView {
                 const stepIndex = Number(event.currentTarget.dataset.stepIndex);
                 const step = this.planData.steps?.[stepIndex];
                 if (!step) return;
-                step.completed = !step.completed;
+                const markComplete = !step.completed;
+                step.completed = markComplete;
+                step.collapsed = markComplete;
+                this.emitChange();
                 this.render();
             });
         });
 
         this.container.querySelector('[data-action="swarm-add-step"]')?.addEventListener('click', () => {
             if (!this.planData.steps) this.planData.steps = [];
-            this.planData.steps.push({ name: 'New Step', description: '', completed: false, selected: '', started: false });
+            const nextIndex = this.planData.steps.length;
+            this.planData.steps.push({
+                id: createStepId(),
+                name: 'New Step',
+                description: '',
+                completed: false,
+                collapsed: false,
+                selected: '',
+                started: false,
+                color: STEP_COLORS[nextIndex % STEP_COLORS.length],
+                terminalTabId: null
+            });
+            this.emitChange();
             this.render();
         });
 
@@ -184,6 +232,7 @@ export class SwarmPlanView {
             button.addEventListener('click', (event) => {
                 const stepIndex = Number(event.currentTarget.dataset.stepIndex);
                 this.planData.steps.splice(stepIndex, 1);
+                this.emitChange();
                 this.render();
             });
         });
@@ -193,14 +242,14 @@ export class SwarmPlanView {
 
     attachSortable() {
         const Sortable = window.Sortable;
-        if (!Sortable) throw new Error('SortableJS is not loaded.');
+        if (!Sortable) return;
 
         const stepsContainer = this.container.querySelector('.swarm-steps-container');
         if (!stepsContainer) return;
 
         Sortable.create(stepsContainer, {
             animation: 150,
-            handle: '.swarm-step-marker',
+            handle: '.swarm-step-marker, .swarm-step-drag-handle',
             ghostClass: 'swarm-drag-ghost',
             chosenClass: 'swarm-drag-chosen',
             dragClass: 'swarm-dragging',
@@ -210,9 +259,46 @@ export class SwarmPlanView {
                 if (oldIndex === newIndex) return;
                 const [moved] = this.planData.steps.splice(oldIndex, 1);
                 this.planData.steps.splice(newIndex, 0, moved);
+                this.emitChange();
                 this.render();
             }
         });
+    }
+
+    emitChange() {
+        if (typeof this.onChange === 'function') {
+            this.onChange(this.planData);
+        }
+    }
+
+    showSelectionRequiredFeedback(startButton) {
+        const controls = startButton?.closest('.swarm-task-controls');
+        const selectEl = controls?.querySelector('.swarm-task-select');
+        if (!selectEl) return;
+
+        [startButton, selectEl].forEach((el) => {
+            el.classList.remove('swarm-shake');
+            // Force reflow so repeated clicks replay animation.
+            void el.offsetWidth;
+            el.classList.add('swarm-shake');
+        });
+
+        selectEl.focus();
+        if (typeof selectEl.showPicker === 'function') {
+            try {
+                selectEl.showPicker();
+                return;
+            } catch {
+                // Fallback below.
+            }
+        }
+
+        try {
+            selectEl.click();
+            selectEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+        } catch {
+            // no-op
+        }
     }
 
     getData() {

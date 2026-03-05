@@ -324,6 +324,9 @@ export class VibeControlApp {
     // ============================================ 
 
     navigate(view, data = {}) {
+        if (this.currentView === 'swarm' && view !== 'swarm') {
+            this.swarmController?.persistState?.();
+        }
         this.closeModal();
 
         const currentStackItem = this.navigationStack[this.navigationStack.length - 1];
@@ -353,6 +356,9 @@ export class VibeControlApp {
 
     goBack() {
         if (this.navigationStack.length > 1) {
+            if (this.currentView === 'swarm') {
+                this.swarmController?.persistState?.();
+            }
             this.navigationStack.pop();
             const previous = this.navigationStack[this.navigationStack.length - 1];
             this.currentView = previous.view || previous;
@@ -731,8 +737,11 @@ export class VibeControlApp {
     // API Calls
     // ============================================ 
 
-    async apiCall(endpoint, method = 'GET', data = null) {
-        this.showLoading(true);
+    async apiCall(endpoint, method = 'GET', data = null, requestOptions = {}) {
+        const showLoadingOverlay = requestOptions?.showLoading !== false;
+        if (showLoadingOverlay) {
+            this.showLoading(true);
+        }
         try {
             const options = {
                 method,
@@ -765,7 +774,9 @@ export class VibeControlApp {
             console.error('API Error:', error);
             throw error;
         } finally {
-            this.showLoading(false);
+            if (showLoadingOverlay) {
+                this.showLoading(false);
+            }
         }
     }
 

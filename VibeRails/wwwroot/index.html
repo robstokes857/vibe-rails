@@ -771,13 +771,11 @@
 
     <template id="swarm-template">
         <div class="view swarm-view" data-view="swarm">
-            <div class="row mb-4">
-                <div class="col-12">
-                    <h4 class="text-uppercase fw-bold mb-1" style="letter-spacing: 0.05em;">
-                        <span class="text-gradient">Swarm Planner</span>
-                    </h4>
-                    <p class="text-muted mb-0">Submit a coding task and immediately start working the generated plan.</p>
-                </div>
+            <div class="swarm-header-shell">
+                <h4 class="text-uppercase fw-bold mb-1" style="letter-spacing: 0.05em;">
+                    <span class="text-gradient">Swarm Planner</span>
+                </h4>
+                <p class="text-muted mb-0">Submit a coding task and immediately start working the generated plan.</p>
             </div>
 
             <div class="swarm-content-shell">
@@ -790,7 +788,12 @@
                                 <div class="swarm-error d-none mt-3" data-swarm-error></div>
 
                                 <div class="swarm-input-actions mt-3">
-                                    <button type="submit" class="btn btn-primary swarm-submit-btn" data-action="swarm-submit">Generate Plan</button>
+                                    <button type="submit" class="btn btn-primary swarm-submit-btn d-inline-flex align-items-center gap-2" data-action="swarm-submit">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
+                                            <path d="M15.854.146a.5.5 0 0 0-.53-.11l-15 5a.5.5 0 0 0 .006.948l6.662 2.022 2.023 6.662a.5.5 0 0 0 .948.006l5-15a.5.5 0 0 0-.11-.53M6.69 7.274 1.846 5.804 13.449 1.936zm.555 1.414 4.868 4.868 3.868-11.603z"/>
+                                        </svg>
+                                        <span>Generate Plan</span>
+                                    </button>
                                 </div>
                             </form>
                         </div>
@@ -801,7 +804,7 @@
                     <div class="card">
                         <div class="card-body d-flex align-items-center gap-3 py-4">
                             <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                            <span class="text-muted">Generating plan, this may take a moment...</span>
+                            <span class="text-muted" data-swarm-loading-message>Generating plan. This can take a while. You can safely navigate away and come back.</span>
                         </div>
                     </div>
                 </div>
