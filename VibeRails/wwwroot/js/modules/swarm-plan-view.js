@@ -82,12 +82,12 @@ export class SwarmPlanView {
                             </div>
                         </div>
                         <div class="swarm-step-body">
-                            <textarea class="swarm-task-desc form-control mb-2"
+                            <textarea class="swarm-task-desc form-control mb-3"
                                 data-step-index="${stepIndex}"
-                                rows="3">${escapeHtml(step.description || '')}</textarea>
-                            <div class="swarm-task-controls d-flex gap-2 align-items-center">
+                                rows="5">${escapeHtml(step.description || '')}</textarea>
+                            <div class="swarm-task-controls">
                                 <select class="swarm-task-select" data-step-index="${stepIndex}">
-                                    <option value="">-- Select CLI --</option>
+                                    <option value="">Select CLI / Environment</option>
             `;
 
             this.cliOptions.forEach(({ value, label }) => {
@@ -97,13 +97,13 @@ export class SwarmPlanView {
 
             html += `
                                 </select>
-                                <button class="swarm-task-start ${step.started ? 'active' : ''}"
+                                <button class="swarm-task-start swarm-step-action-btn ${step.started ? 'active' : ''}"
                                     data-action="swarm-start-step"
                                     data-step-index="${stepIndex}">
-                                    ${step.started ? 'Started' : 'Start'}
+                                    ${step.started ? 'Open Terminal' : 'Start Terminal'}
                                 </button>
-                                <button class="swarm-btn swarm-btn-next" data-action="swarm-toggle-complete" data-step-index="${stepIndex}">
-                                    ${step.completed ? 'Undo' : 'Mark Complete'}
+                                <button class="swarm-btn swarm-btn-next swarm-step-action-btn" data-action="swarm-toggle-complete" data-step-index="${stepIndex}">
+                                    ${step.completed ? 'Undo Complete' : 'Mark Complete'}
                                 </button>
                             </div>
                         </div>
@@ -153,11 +153,13 @@ export class SwarmPlanView {
 
         this.container.querySelectorAll('[data-action="swarm-start-step"]').forEach((button) => {
             button.addEventListener('click', (event) => {
-                const stepIndex = Number(event.target.dataset.stepIndex);
+                const stepIndex = Number(event.currentTarget.dataset.stepIndex);
                 const step = this.planData.steps?.[stepIndex];
                 if (!step || !step.selected) return;
                 const color = STEP_COLORS[stepIndex % STEP_COLORS.length];
                 const emoji = COLOR_EMOJIS[color] || '🔵';
+                step.started = true;
+                this.render();
                 if (this.onLaunch) this.onLaunch([{ ...step, tabTitle: `${emoji} ${step.name}` }]);
             });
         });

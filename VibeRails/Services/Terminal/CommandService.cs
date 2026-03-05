@@ -51,7 +51,7 @@ public class CommandService : ICommandService
             {
                 builder.AddSetup(mcpSetup);
                 // Clear screen to hide MCP setup messages (e.g., "already added" warnings)
-                builder.AddSetup("clear");
+                //builder.AddSetup("clear");
             }
         }
 

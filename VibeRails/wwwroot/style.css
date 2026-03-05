@@ -3339,6 +3339,11 @@ input.form-control:disabled {
     border-color: rgba(59, 130, 246, 0.25);
 }
 
+.swarm-content-shell {
+    max-width: 1120px;
+    margin: 0 auto;
+}
+
 .swarm-input-label {
     color: var(--color-text-muted);
     text-transform: uppercase;
@@ -3348,12 +3353,14 @@ input.form-control:disabled {
 }
 
 .swarm-task-input {
-    min-height: 170px;
+    min-height: 220px;
     background: rgba(0, 0, 0, 0.2);
     border-color: var(--color-border);
     color: var(--color-text);
     font-family: 'JetBrains Mono', Consolas, monospace;
-    font-size: 0.85rem;
+    font-size: 0.92rem;
+    line-height: 1.55;
+    padding: 0.85rem 0.95rem;
 }
 
 .swarm-task-input:focus {
@@ -3389,11 +3396,19 @@ input.form-control:disabled {
 
 .swarm-input-actions {
     display: flex;
+    justify-content: flex-end;
     gap: 0.75rem;
 }
 
 .swarm-input-actions .btn {
-    flex: 1;
+    flex: 0 0 auto;
+    min-width: 170px;
+}
+
+.swarm-submit-btn {
+    min-height: 40px;
+    padding: 0.5rem 1.05rem;
+    font-weight: 700;
 }
 
 .swarm-error {
@@ -3462,8 +3477,18 @@ input.form-control:disabled {
 }
 
 .swarm-plan-container {
-    max-width: 1000px;
-    margin: 0 auto;
+    width: 100%;
+}
+
+.swarm-terminal-card {
+    border-color: rgba(59, 130, 246, 0.35);
+    overflow: hidden;
+}
+
+.swarm-terminal-card #terminal-panel {
+    border: 0;
+    margin: 0 !important;
+    border-radius: 0;
 }
 
 
@@ -3667,61 +3692,84 @@ input.form-control:disabled {
 }
 
 .swarm-task-desc {
-    font-size: 0.8rem;
+    font-size: 0.88rem;
     color: var(--color-text-muted);
     background: var(--color-bg-subtle, rgba(255,255,255,0.04));
     border: 1px solid var(--color-border);
-    border-radius: 4px;
+    border-radius: 8px;
     outline: none;
     resize: vertical;
     width: 100%;
-    padding: 6px 8px;
+    min-height: 116px;
+    padding: 0.7rem 0.8rem;
     font-family: inherit;
-    line-height: 1.4;
+    line-height: 1.5;
     transition: border-color 0.15s, background 0.15s;
     cursor: text;
 }
 
 .swarm-task-desc:hover {
-    border-color: var(--color-accent, #6366f1);
+    border-color: var(--color-primary);
 }
 
 .swarm-task-desc:focus {
-    border-color: var(--color-accent, #6366f1);
+    border-color: var(--color-primary);
     background: var(--color-bg-input, rgba(255,255,255,0.07));
     color: var(--color-text);
+    box-shadow: 0 0 0 0.18rem rgba(59, 130, 246, 0.15);
 }
 
 .swarm-task-controls {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    flex-wrap: wrap;
+    gap: 0.6rem;
 }
 
 .swarm-task-select {
     background: rgba(0, 0, 0, 0.35);
     color: var(--color-text);
     border: 1px solid var(--color-border);
-    border-radius: 6px;
-    font-size: 0.75rem;
-    padding: 0.35rem 0.45rem;
-    min-width: 135px;
+    border-radius: 8px;
+    font-size: 0.84rem;
+    padding: 0.45rem 0.6rem;
+    min-width: 230px;
+    min-height: 38px;
+}
+
+.swarm-task-select:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 0.16rem rgba(59, 130, 246, 0.15);
+    outline: none;
+}
+
+.swarm-step-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 38px;
+    padding: 0.5rem 0.88rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1;
 }
 
 .swarm-task-start {
     border: 1px solid var(--color-border);
     background: rgba(255, 255, 255, 0.04);
-    color: var(--color-text-muted);
-    border-radius: 6px;
-    font-size: 0.72rem;
-    font-weight: 700;
-    padding: 0.33rem 0.6rem;
+    color: var(--color-text);
     white-space: nowrap;
 }
 
 .swarm-task-start:hover:not(:disabled) {
     border-color: var(--color-primary);
     color: #9dd6ff;
+}
+
+.swarm-task-start:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .swarm-task-start.active {
@@ -3867,7 +3915,6 @@ input.form-control:disabled {
     color: #fff;
     background: var(--color-primary);
     border-color: var(--color-primary);
-    flex: 1.25;
 }
 
 .swarm-btn-next:hover {
@@ -3906,7 +3953,14 @@ input.form-control:disabled {
     }
 
     .swarm-task-controls {
-        justify-content: space-between;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .swarm-task-select,
+    .swarm-step-action-btn {
+        width: 100%;
+        min-width: 100%;
     }
 
     .swarm-step-actions {
@@ -3914,6 +3968,10 @@ input.form-control:disabled {
     }
 
     .swarm-input-actions {
-        flex-direction: column;
+        justify-content: stretch;
+    }
+
+    .swarm-input-actions .btn {
+        width: 100%;
     }
 }
