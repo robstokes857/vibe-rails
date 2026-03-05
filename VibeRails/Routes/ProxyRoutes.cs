@@ -39,8 +39,9 @@ public static class ProxyRoutes
                 return;
             }
 
-            // Accept browser WebSocket
-            using var browserSocket = await context.WebSockets.AcceptWebSocketAsync();
+            // Accept browser WebSocket, echoing back the subprotocol (tab token) if one was validated.
+            var acceptedSubprotocol = context.Items["viberails_accepted_subprotocol"] as string;
+            using var browserSocket = await context.WebSockets.AcceptWebSocketAsync(acceptedSubprotocol);
 
             // Connect upstream to VibeRails-Front
             using var upstreamClient = new ClientWebSocket();

@@ -15,7 +15,15 @@ public class AuthService : IAuthService
     {
         // Generate one random token per app instance (64 bytes = 512 bits)
         _instanceToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
-        _tabToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+        _tabToken = GenerateSafeToken(64);
+    }
+
+    private static string GenerateSafeToken(int byteCount)
+    {
+        return Convert.ToBase64String(RandomNumberGenerator.GetBytes(byteCount))
+            .Replace("+", "-")
+            .Replace("/", "_")
+            .Replace("=", "");
     }
 
     public string GetInstanceToken() => _instanceToken;

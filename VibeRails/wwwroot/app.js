@@ -679,11 +679,19 @@ export class VibeControlApp {
         return `${baseUrl}${path}?clientId=${clientId}`;
     }
 
+    getLifecycleHeaders() {
+        const tabToken = sessionStorage.getItem('viberails_tab');
+        return {
+            ...(tabToken ? { 'viberails_tab': tabToken } : {})
+        };
+    }
+
     async sendLifecyclePing() {
         const url = this.getLifecycleUrl('/api/v1/lifecycle/ping');
         try {
             await fetch(url, {
                 method: 'POST',
+                headers: this.getLifecycleHeaders(),
                 credentials: 'include',
                 cache: 'no-store'
             });
@@ -695,7 +703,8 @@ export class VibeControlApp {
     sendLifecycleDisconnect() {
         const url = this.getLifecycleUrl('/api/v1/lifecycle/disconnect');
 
-        if (!window.__viberails_VSCODE__ && typeof navigator.sendBeacon === 'function') {
+        const headers = this.getLifecycleHeaders();
+        if (!window.__viberails_VSCODE__ && typeof navigator.sendBeacon === 'function' && Object.keys(headers).length === 0) {
             try {
                 navigator.sendBeacon(url);
                 return;
@@ -706,6 +715,7 @@ export class VibeControlApp {
 
         fetch(url, {
             method: 'POST',
+            headers,
             credentials: 'include',
             keepalive: true
         }).catch(() => {

@@ -33,6 +33,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         int Port,
         string BootstrapUrl,
         string SessionToken,
+        string TabToken,
         DateTime CreatedUtc);
 
     private readonly IHttpClientFactory _httpClientFactory;
@@ -170,6 +171,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         var child = GetChildOrThrow(tabId);
         using var upstream = new ClientWebSocket();
         upstream.Options.SetRequestHeader("viberails_session", child.SessionToken);
+        upstream.Options.AddSubProtocol(child.TabToken);
 
         var upstreamUri = new Uri($"ws://127.0.0.1:{child.Port}/api/v1/terminal/ws");
         await upstream.ConnectAsync(upstreamUri, cancellationToken);
@@ -352,7 +354,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
             tabId = Guid.NewGuid().ToString("N");
             await WaitForHealthyChildAsync(bootstrapUri.Port, cancellationToken);
-            var sessionToken = await BootstrapChildAndGetTokenAsync(bootstrapUrl, cancellationToken);
+            var (sessionToken, tabToken) = await BootstrapChildAndGetTokenAsync(bootstrapUrl, cancellationToken);
 
             return new TerminalChildProcess(
                 tabId,
@@ -360,6 +362,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 bootstrapUri.Port,
                 bootstrapUrl,
                 sessionToken,
+                tabToken,
                 DateTime.UtcNow);
         }
         catch
@@ -399,7 +402,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         throw new TimeoutException($"Child terminal server on port {port} did not become healthy.");
     }
 
-    private static async Task<string> BootstrapChildAndGetTokenAsync(string bootstrapUrl, CancellationToken cancellationToken)
+    private static async Task<(string SessionToken, string TabToken)> BootstrapChildAndGetTokenAsync(string bootstrapUrl, CancellationToken cancellationToken)
     {
         using var handler = new HttpClientHandler { AllowAutoRedirect = false };
         using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
@@ -416,6 +419,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             throw new InvalidOperationException("Child bootstrap response did not set a session cookie.");
         }
 
+        string? sessionToken = null;
         foreach (var cookieHeader in cookieHeaders)
         {
             if (!cookieHeader.StartsWith("viberails_session=", StringComparison.OrdinalIgnoreCase))
@@ -431,16 +435,27 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 // Header-based auth expects the raw token value.
                 try
                 {
-                    return Uri.UnescapeDataString(token);
+                    sessionToken = Uri.UnescapeDataString(token);
                 }
                 catch
                 {
-                    return token;
+                    sessionToken = token;
                 }
+                break;
             }
         }
 
-        throw new InvalidOperationException("Unable to parse child session token from bootstrap response.");
+        if (sessionToken == null)
+            throw new InvalidOperationException("Unable to parse child session token from bootstrap response.");
+
+        var tabToken = response.Headers.TryGetValues("viberails_tab", out var tabTokenValues)
+            ? tabTokenValues.FirstOrDefault()
+            : null;
+
+        if (string.IsNullOrWhiteSpace(tabToken))
+            throw new InvalidOperationException("Child bootstrap response did not include a tab token.");
+
+        return (sessionToken, tabToken);
     }
 
     private async Task<TerminalStatusResponse> SendTerminalStatusRequestAsync(
@@ -504,6 +519,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     {
         var request = new HttpRequestMessage(method, $"http://127.0.0.1:{child.Port}{path}");
         request.Headers.TryAddWithoutValidation("viberails_session", child.SessionToken);
+        request.Headers.TryAddWithoutValidation("viberails_tab", child.TabToken);
 
         if (payload != null)
         {
