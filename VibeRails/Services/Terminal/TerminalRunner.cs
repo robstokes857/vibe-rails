@@ -246,16 +246,29 @@ public class TerminalRunner
             if (remoteConn != null)
             {
                 Log.Information("[Terminal] Remote connection established — wiring disconnect handler");
+                var remoteViewerActive = 0;
+                void DisconnectLocalViewerOnRemoteActivity(string trigger)
+                {
+                    if (Interlocked.Exchange(ref remoteViewerActive, 1) == 1)
+                        return;
+
+                    Log.Information("[Terminal] Remote viewer activity via {Trigger} — disconnecting local viewer", trigger);
+                    _ = sessionService.DisconnectLocalViewerAsync("Session taken over by remote viewer");
+                }
+
                 remoteConn.OnReplayRequested += () =>
                 {
-                    Log.Information("[Terminal] OnReplayRequested fired — disconnecting local viewer");
-                    _ = sessionService.DisconnectLocalViewerAsync("Session taken over by remote viewer");
+                    DisconnectLocalViewerOnRemoteActivity("replay");
+                };
+                // Some relay paths (for example Codex remote attach) send Ctrl+L
+                // instead of __replay__ when the browser connects.
+                remoteConn.OnInputReceived += _ =>
+                {
+                    DisconnectLocalViewerOnRemoteActivity("input");
                 };
                 remoteConn.OnBrowserDisconnected += () =>
                 {
-                    Log.Information("[Terminal] Remote browser disconnected — notifying local terminal");
-                    var msg = System.Text.Encoding.UTF8.GetBytes("\r\n\x1b[90m[Remote viewer disconnected]\x1b[0m\r\n");
-                    terminal.PublishSynthetic(msg);
+                    Interlocked.Exchange(ref remoteViewerActive, 0);
                 };
             }
             else
@@ -266,7 +279,7 @@ public class TerminalRunner
             terminal.StartReadLoop();
 
             // Register so web UI can find this terminal
-            sessionService.RegisterExternalTerminal(terminal, sessionId);
+            sessionService.RegisterExternalTerminal(terminal, sessionId, llm.ToString());
 
             try
             {

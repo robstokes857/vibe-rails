@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Serilog;
 using VibeRails.DTOs;
+using VibeRails.Services;
 
 namespace VibeRails.Services.Terminal;
 
@@ -37,17 +38,22 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         DateTime CreatedUtc);
 
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILocalClientTracker _localClientTracker;
     private readonly SemaphoreSlim _createGate = new(1, 1);
     private readonly Lock _lock = new();
     private readonly Dictionary<string, TerminalChildProcess> _tabs = new(StringComparer.Ordinal);
     private readonly string _launchDirectory;
+    private readonly string _tabsOwnerId;
+    private bool _tabsOwnerAcquired;
 
     public int MaxTabs => 8;
 
-    public TerminalTabHostService(IHttpClientFactory httpClientFactory)
+    public TerminalTabHostService(IHttpClientFactory httpClientFactory, ILocalClientTracker localClientTracker)
     {
         _httpClientFactory = httpClientFactory;
+        _localClientTracker = localClientTracker;
         _launchDirectory = Directory.GetCurrentDirectory();
+        _tabsOwnerId = $"terminal-tabs:{Environment.ProcessId}";
     }
 
     public async Task<IReadOnlyList<TerminalTabStatusResponse>> ListTabsAsync(CancellationToken cancellationToken = default)
@@ -88,6 +94,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             lock (_lock)
             {
                 _tabs[child.TabId] = child;
+                EnsureTabsOwnerLocked();
             }
 
             return await BuildTabStatusAsync(child, cancellationToken);
@@ -116,6 +123,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 return false;
             }
             _tabs.Remove(tabId);
+            ReleaseTabsOwnerIfNeededLocked();
         }
 
         await TerminateChildAsync(child, cancellationToken, stopSessionFirst: true);
@@ -192,6 +200,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         {
             snapshot = _tabs.Values.ToArray();
             _tabs.Clear();
+            ReleaseTabsOwnerIfNeededLocked();
         }
 
         if (snapshot.Length == 0)
@@ -211,6 +220,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
         finally
         {
+            ReleaseTabsOwner();
             _createGate.Dispose();
         }
     }
@@ -766,7 +776,44 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             if (_tabs.TryGetValue(tabId, out var child) && child.Process.Id == processId)
             {
                 _tabs.Remove(tabId);
+                ReleaseTabsOwnerIfNeededLocked();
             }
+        }
+    }
+
+    private void EnsureTabsOwnerLocked()
+    {
+        if (_tabsOwnerAcquired)
+            return;
+
+        _tabsOwnerAcquired = true;
+        _localClientTracker.AcquireOwner(_tabsOwnerId);
+    }
+
+    private void ReleaseTabsOwnerIfNeededLocked()
+    {
+        if (!_tabsOwnerAcquired || _tabs.Count > 0)
+            return;
+
+        _tabsOwnerAcquired = false;
+        _localClientTracker.ReleaseOwner(_tabsOwnerId);
+    }
+
+    private void ReleaseTabsOwner()
+    {
+        var shouldRelease = false;
+        lock (_lock)
+        {
+            if (_tabsOwnerAcquired)
+            {
+                _tabsOwnerAcquired = false;
+                shouldRelease = true;
+            }
+        }
+
+        if (shouldRelease)
+        {
+            _localClientTracker.ReleaseOwner(_tabsOwnerId);
         }
     }
 }

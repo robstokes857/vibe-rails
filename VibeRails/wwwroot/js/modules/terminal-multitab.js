@@ -49,6 +49,7 @@ class TerminalTab {
         this.onDataDispose = null;
         this.inputFocusHandler = null;
         this.isActive = false;
+        this.lastResizeSignature = null;
     }
 
     hasOpenSocket() {
@@ -188,6 +189,7 @@ class TerminalTab {
         }
 
         this.socket = null;
+        this.lastResizeSignature = null;
     }
 
     disconnect({ disposeTerminal = false, preserveStatus = false } = {}) {
@@ -232,12 +234,20 @@ class TerminalTab {
         this.teardownResizeHandling();
     }
 
-    sendResizeToPty() {
+    sendResizeToPty({ force = false } = {}) {
         if (!this.isActive || !this.vibeTerminal || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
             return;
         }
 
-        this.socket.send(`${RESIZE_PREFIX}${this.vibeTerminal.cols},${this.vibeTerminal.rows}`);
+        const cols = this.vibeTerminal.cols;
+        const rows = this.vibeTerminal.rows;
+        const signature = `${cols}x${rows}`;
+        if (!force && this.lastResizeSignature === signature) {
+            return;
+        }
+
+        this.lastResizeSignature = signature;
+        this.socket.send(`${RESIZE_PREFIX}${cols},${rows}`);
     }
 
     fitAndSyncTerminal() {
@@ -245,8 +255,10 @@ class TerminalTab {
             return;
         }
 
-        this.vibeTerminal.fit({ forceNotify: true });
-        this.sendResizeToPty();
+        // Keep connect/activation deterministic: force a fit pass but emit
+        // exactly one resize control frame to avoid redraw churn in TUIs.
+        this.vibeTerminal.fit({ force: true, notify: false });
+        this.sendResizeToPty({ force: true });
     }
 
     scheduleFitPasses() {
@@ -280,6 +292,7 @@ class TerminalTab {
 
         this.ensureTerminal();
         this.disconnectSocketOnly();
+        this.lastResizeSignature = null;
 
         this.state.status = 'connecting';
         this.manager.updateUi();
@@ -325,6 +338,7 @@ class TerminalTab {
 
                 this.teardownResizeHandling();
                 this.socket = null;
+                this.lastResizeSignature = null;
 
                 this.state.status = this.state.hasActiveSession ? 'disconnected' : 'not-started';
                 if (this.terminal && this.state.hasActiveSession) {
