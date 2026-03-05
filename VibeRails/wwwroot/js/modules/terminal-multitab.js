@@ -5,6 +5,7 @@ const DEFAULT_SELECTION = null;
 const ACTIVE_TAB_KEY = 'viberails_terminal_active_tab_id';
 const TAB_SELECTION_PREFIX = 'viberails_terminal_tab_selection_';
 const TAB_TITLE_PREFIX = 'viberails_terminal_tab_title_';
+const TAB_META_PREFIX = 'viberails_terminal_tab_meta_';
 
 function lower(value) {
     return (value || '').toString().trim().toLowerCase();
@@ -13,6 +14,12 @@ function lower(value) {
 function capitalize(value) {
     if (!value) return '';
     return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function cleanString(value) {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
 }
 
 function shorten(text, max = 26) {
@@ -622,7 +629,15 @@ class TerminalManager {
         tabs.forEach((tabInfo) => {
             const selection = this.getTabSelectionFromStorage(tabInfo.tabId) || DEFAULT_SELECTION;
             const title = this.getTabTitleFromStorage(tabInfo.tabId);
-            this.addLocalTab(tabInfo, { selection, title });
+            const metadata = this.getTabMetaFromStorage(tabInfo.tabId);
+            this.addLocalTab(tabInfo, {
+                selection,
+                title,
+                label: metadata?.label || null,
+                icon: metadata?.icon || null,
+                accentColor: metadata?.accentColor || null,
+                taskKey: metadata?.taskKey || null
+            });
         });
     }
 
@@ -633,9 +648,11 @@ class TerminalManager {
         const state = {
             id: tabInfo.tabId,
             selection,
-            label: meta.displayName,
+            label: cleanString(options.label) || meta.displayName,
             title: options.title || null,
             icon: options.icon || null,
+            accentColor: this.normalizeAccentColor(options.accentColor),
+            taskKey: cleanString(options.taskKey),
             hasActiveSession: tabInfo.hasActiveSession === true,
             sessionId: tabInfo.sessionId || null,
             status: tabInfo.hasActiveSession ? 'disconnected' : 'not-started',
@@ -655,12 +672,6 @@ class TerminalManager {
         button.className = 'terminal-tab-button';
         button.textContent = shorten(state.label);
         button.title = state.label;
-        if (state.icon) {
-            const iconSpan = document.createElement('span');
-            iconSpan.className = 'terminal-tab-icon';
-            iconSpan.textContent = state.icon + ' ';
-            button.prepend(iconSpan);
-        }
         button.addEventListener('click', () => {
             if (!state.selection && !state.hasActiveSession) {
                 void this.activateTab(state.id, { connectIfNeeded: false });
@@ -713,6 +724,14 @@ class TerminalManager {
         if (state.title) {
             this.saveTabTitle(state.id, state.title);
         }
+        this.saveTabMeta(state.id, {
+            label: state.label,
+            icon: state.icon,
+            accentColor: state.accentColor,
+            taskKey: state.taskKey
+        });
+        this.renderTabButton(tab);
+        this.applyTabAccent(tab);
 
         this.updateAddButtonState();
         return tab;
@@ -767,6 +786,9 @@ class TerminalManager {
                 selection: options.selection || DEFAULT_SELECTION,
                 title: options.title || null,
                 icon: options.icon || null,
+                label: options.label || null,
+                accentColor: options.accentColor || null,
+                taskKey: options.taskKey || null
             });
             await this.activateTab(tab.state.id, { connectIfNeeded: false });
             this.updateUi();
@@ -803,6 +825,7 @@ class TerminalManager {
         this.tabOrder = this.tabOrder.filter((id) => id !== tabId);
         this.clearTabSelection(tabId);
         this.clearTabTitle(tabId);
+        this.clearTabMeta(tabId);
 
         if (this.activeTabId === tabId) {
             this.activeTabId = null;
@@ -864,20 +887,80 @@ class TerminalManager {
     }
 
     async startWithOptions(options) {
-        let tab = this.getActiveTab();
         const selection = this.resolveSelectionFromOptions(options);
+        const meta = this.getSelectionMeta(selection);
+        const requestedLabel = cleanString(options?.tabLabel)
+            || cleanString(options?.title)
+            || meta.displayName;
+        const requestedTitle = cleanString(options?.title)
+            ? `${cleanString(options.title)} Terminal`
+            : `${requestedLabel || meta.displayName} Terminal`;
+        const requestedIcon = cleanString(options?.icon);
+        const requestedColor = this.normalizeAccentColor(options?.color || options?.accentColor);
+        const requestedTaskKey = cleanString(options?.taskKey);
 
-        if (!tab || tab.state.hasActiveSession) {
-            tab = await this.createAndActivateTab({
-                selection,
-                title: options.title || null
-            });
-        } else {
+        let tab = null;
+        let reusedExisting = false;
+
+        if (cleanString(options?.reuseTabId)) {
+            const existing = this.tabs.get(cleanString(options.reuseTabId));
+            if (existing) {
+                tab = existing;
+                reusedExisting = true;
+                await this.activateTab(tab.state.id, { connectIfNeeded: true });
+            }
+        }
+
+        if (!tab && requestedTaskKey) {
+            const existingByTask = this.findTabByTaskKey(requestedTaskKey);
+            if (existingByTask) {
+                tab = existingByTask;
+                reusedExisting = true;
+                await this.activateTab(tab.state.id, { connectIfNeeded: true });
+            }
+        }
+
+        if (!tab) {
+            tab = this.getActiveTab();
+            if (!tab || tab.state.hasActiveSession) {
+                tab = await this.createAndActivateTab({
+                    selection,
+                    title: requestedTitle,
+                    label: requestedLabel,
+                    icon: requestedIcon,
+                    accentColor: requestedColor,
+                    taskKey: requestedTaskKey
+                });
+            } else {
+                this.applySelection(tab, selection);
+            }
+        } else if (!tab.state.hasActiveSession) {
             this.applySelection(tab, selection);
         }
 
         if (!tab) {
-            return;
+            return { tabId: null, started: false, reusedExisting: false };
+        }
+
+        this.updateTabMetadata(tab, {
+            label: requestedLabel,
+            title: requestedTitle,
+            icon: requestedIcon,
+            accentColor: requestedColor,
+            taskKey: requestedTaskKey
+        });
+
+        if (tab.state.hasActiveSession) {
+            if (!tab.instance.hasOpenSocket()) {
+                await tab.instance.connect();
+            }
+            this.updateUi();
+            this.focusActiveTerminalInput();
+            return {
+                tabId: tab.state.id,
+                started: false,
+                reusedExisting: true
+            };
         }
 
         const body = {
@@ -887,18 +970,31 @@ class TerminalManager {
             title: options.title || null
         };
 
-        const meta = this.getSelectionMeta(selection);
         const started = await tab.instance.startSession(body);
         if (!started) {
-            return;
+            return {
+                tabId: tab.state.id,
+                started: false,
+                reusedExisting
+            };
         }
 
         tab.state.hasActiveSession = true;
-        tab.state.title = `${(options.title || meta.displayName)} Terminal`;
-        this.saveTabTitle(tab.state.id, tab.state.title);
+        this.updateTabMetadata(tab, {
+            label: requestedLabel,
+            title: requestedTitle,
+            icon: requestedIcon,
+            accentColor: requestedColor,
+            taskKey: requestedTaskKey
+        });
         this.updateUi();
 
-        this.app.showToast('Terminal Started', `Launching ${options.title || meta.displayName}...`, 'success');
+        this.app.showToast('Terminal Started', `Launching ${requestedLabel || meta.displayName}...`, 'success');
+        return {
+            tabId: tab.state.id,
+            started: true,
+            reusedExisting
+        };
     }
 
     async startActiveTab() {
@@ -1019,7 +1115,123 @@ class TerminalManager {
         tab.state.selection = selection;
         tab.state.label = meta.displayName;
         this.saveTabSelection(tab.state.id, selection);
+        this.saveTabMeta(tab.state.id, {
+            label: tab.state.label,
+            icon: tab.state.icon,
+            accentColor: tab.state.accentColor,
+            taskKey: tab.state.taskKey
+        });
         this.updateUi();
+    }
+
+    normalizeAccentColor(value) {
+        const color = cleanString(value);
+        if (!color) return null;
+
+        const colorPattern = /^(#[0-9a-fA-F]{3,8}|rgb\(\s*[\d\s.,%]+\)|rgba\(\s*[\d\s.,%]+\)|hsl\(\s*[\d\s.,%]+\)|hsla\(\s*[\d\s.,%]+\)|[a-zA-Z]+)$/;
+        return colorPattern.test(color) ? color : null;
+    }
+
+    renderTabButton(tab) {
+        const button = tab?.state?.ui?.button;
+        if (!button) return;
+
+        button.innerHTML = '';
+        if (tab.state.icon) {
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'terminal-tab-icon';
+            iconSpan.textContent = `${tab.state.icon} `;
+            button.appendChild(iconSpan);
+        }
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'terminal-tab-label';
+        labelSpan.textContent = shorten(tab.state.label || 'Terminal');
+        button.appendChild(labelSpan);
+        button.title = tab.state.label || 'Terminal';
+    }
+
+    applyTabAccent(tab) {
+        const item = tab?.state?.ui?.item;
+        if (!item) return;
+
+        const accent = this.normalizeAccentColor(tab.state.accentColor);
+        if (!accent) {
+            item.classList.remove('has-custom-accent');
+            item.style.removeProperty('--terminal-tab-accent');
+            return;
+        }
+
+        item.classList.add('has-custom-accent');
+        item.style.setProperty('--terminal-tab-accent', accent);
+    }
+
+    findTabByTaskKey(taskKey) {
+        const key = cleanString(taskKey);
+        if (!key) return null;
+
+        for (const id of this.tabOrder) {
+            const tab = this.tabs.get(id);
+            if (tab?.state?.taskKey === key) {
+                return tab;
+            }
+        }
+
+        return null;
+    }
+
+    async focusTab(tabId, options = {}) {
+        const tab = this.tabs.get(tabId);
+        if (!tab) return false;
+
+        await this.activateTab(tab.state.id, {
+            connectIfNeeded: options.connectIfNeeded !== false
+        });
+        this.focusActiveTerminalInput();
+        return true;
+    }
+
+    updateTabMetadata(tab, metadata = {}) {
+        if (!tab) return;
+
+        const label = cleanString(metadata.label);
+        const title = cleanString(metadata.title);
+        const icon = Object.prototype.hasOwnProperty.call(metadata, 'icon')
+            ? cleanString(metadata.icon)
+            : undefined;
+        const accentColor = Object.prototype.hasOwnProperty.call(metadata, 'accentColor')
+            ? this.normalizeAccentColor(metadata.accentColor)
+            : undefined;
+        const taskKey = Object.prototype.hasOwnProperty.call(metadata, 'taskKey')
+            ? cleanString(metadata.taskKey)
+            : undefined;
+
+        if (label) {
+            tab.state.label = label;
+        }
+        if (title) {
+            tab.state.title = title;
+            this.saveTabTitle(tab.state.id, tab.state.title);
+        }
+        if (icon !== undefined) {
+            tab.state.icon = icon;
+        }
+        if (accentColor !== undefined) {
+            tab.state.accentColor = accentColor;
+        }
+        if (taskKey !== undefined) {
+            tab.state.taskKey = taskKey;
+        }
+
+        this.saveTabMeta(tab.state.id, {
+            label: tab.state.label,
+            icon: tab.state.icon,
+            accentColor: tab.state.accentColor,
+            taskKey: tab.state.taskKey
+        });
+
+        this.applyTabAccent(tab);
+        this.renderTabButton(tab);
     }
 
     getSelectionOptions() {
@@ -1085,8 +1297,8 @@ class TerminalManager {
         document.body.classList.toggle('terminal-active-session', hasActiveSession);
 
         this.tabs.forEach((tab) => {
-            tab.state.ui.button.textContent = shorten(tab.state.label || 'Terminal');
-            tab.state.ui.button.title = tab.state.label || 'Terminal';
+            this.renderTabButton(tab);
+            this.applyTabAccent(tab);
             tab.state.ui.item.classList.toggle('active', !!active && active.state.id === tab.state.id);
 
             const isConnected = tab.state.hasActiveSession && tab.state.status === 'connected';
@@ -1559,6 +1771,38 @@ class TerminalManager {
         try { window.sessionStorage.removeItem(`${TAB_TITLE_PREFIX}${tabId}`); } catch {}
     }
 
+    saveTabMeta(tabId, metadata = {}) {
+        try {
+            const payload = {
+                label: cleanString(metadata.label) || null,
+                icon: cleanString(metadata.icon) || null,
+                accentColor: this.normalizeAccentColor(metadata.accentColor),
+                taskKey: cleanString(metadata.taskKey) || null
+            };
+            window.sessionStorage.setItem(`${TAB_META_PREFIX}${tabId}`, JSON.stringify(payload));
+        } catch {}
+    }
+
+    getTabMetaFromStorage(tabId) {
+        try {
+            const raw = window.sessionStorage.getItem(`${TAB_META_PREFIX}${tabId}`);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return {
+                label: cleanString(parsed?.label) || null,
+                icon: cleanString(parsed?.icon) || null,
+                accentColor: this.normalizeAccentColor(parsed?.accentColor),
+                taskKey: cleanString(parsed?.taskKey) || null
+            };
+        } catch {
+            return null;
+        }
+    }
+
+    clearTabMeta(tabId) {
+        try { window.sessionStorage.removeItem(`${TAB_META_PREFIX}${tabId}`); } catch {}
+    }
+
     saveActiveTabId(tabId) {
         try { window.sessionStorage.setItem(ACTIVE_TAB_KEY, tabId || ''); } catch {}
     }
@@ -1751,7 +1995,12 @@ export class TerminalController {
 
     async startTerminalWithOptions(options, container) {
         const manager = await this.ensureManager(container);
-        await manager.startWithOptions(options);
+        return await manager.startWithOptions(options);
+    }
+
+    async focusTerminalTab(container, tabId) {
+        const manager = await this.ensureManager(container);
+        return await manager.focusTab(tabId, { connectIfNeeded: true });
     }
 
     async loadTerminalFocusView(data = {}) {

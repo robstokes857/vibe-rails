@@ -24,11 +24,11 @@ public class TerminalRunner
     /// Used by both CLI and Web paths. Returns the remote connection if one was established.
     /// </summary>
     public async Task<(Terminal terminal, string sessionId, IRemoteTerminalConnection? remoteConnection)> CreateSessionAsync(
-        LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct, string? title = null, bool makeRemote = false)
+        LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct, string? title = null, bool makeRemote = false, string? initialPrompt = null)
     {
         var shouldEnableRemote = ShouldEnableRemote(makeRemote);
         var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct);
-        var (command, environment) = _commandService.PrepareSession(llm, envName, extraArgs);
+        var (command, environment) = _commandService.PrepareSession(llm, envName, extraArgs, initialPrompt);
         EmitTerminalLaunchTrace(sessionId, llm, workDir, envName, extraArgs, title, shouldEnableRemote, command, environment);
 
         var terminal = await Terminal.CreateAsync(workDir, environment, title: title, ct: ct);

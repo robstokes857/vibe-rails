@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using VibeRails.DTOs;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.Tracing;
 
 namespace VibeRails.Routes;
 
@@ -18,11 +19,17 @@ public static class TerminalTabsRoutes
 
         app.MapPost("/api/v1/terminal/tabs", async (
             ITerminalTabHostService tabHost,
+            TraceEventBuffer traceBuffer,
             CancellationToken cancellationToken) =>
         {
             try
             {
                 var tab = await tabHost.CreateTabAsync(cancellationToken);
+                traceBuffer.Add(TraceEvent.Create(
+                    TraceEventType.SessionLifecycle,
+                    "Terminal.Tab",
+                    $"Tab created: {tab.TabId[..Math.Min(8, tab.TabId.Length)]}",
+                    $"tabId: {tab.TabId}"));
                 return Results.Ok(tab);
             }
             catch (InvalidOperationException ex)
@@ -62,6 +69,7 @@ public static class TerminalTabsRoutes
         app.MapPost("/api/v1/terminal/tabs/{tabId}/start", async (
             string tabId,
             ITerminalTabHostService tabHost,
+            TraceEventBuffer traceBuffer,
             StartTerminalRequest? request,
             CancellationToken cancellationToken) =>
         {
@@ -73,6 +81,13 @@ public static class TerminalTabsRoutes
             try
             {
                 var status = await tabHost.StartSessionAsync(tabId, request, cancellationToken);
+
+                traceBuffer.Add(TraceEvent.Create(
+                    TraceEventType.TerminalLaunch,
+                    "Terminal.Tab",
+                    $"Terminal launch: {request.Cli} (tab {tabId[..Math.Min(8, tabId.Length)]})",
+                    BuildTabLaunchDetail(tabId, request)));
+
                 return Results.Ok(status);
             }
             catch (KeyNotFoundException)
@@ -155,5 +170,18 @@ public static class TerminalTabsRoutes
                 }
             }
         });
+    }
+
+    private static string BuildTabLaunchDetail(string tabId, StartTerminalRequest request)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"tabId: {tabId}");
+        sb.AppendLine($"cli: {request.Cli}");
+        sb.AppendLine($"environmentName: {request.EnvironmentName ?? "(default)"}");
+        sb.AppendLine($"workingDirectory: {request.WorkingDirectory ?? "(default)"}");
+        sb.AppendLine($"title: {request.Title ?? "(none)"}");
+        sb.AppendLine($"makeRemote: {request.MakeRemote}");
+        sb.AppendLine($"initialPrompt: {request.InitialPrompt ?? "(none)"}");
+        return sb.ToString();
     }
 }

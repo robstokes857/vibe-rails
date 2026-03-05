@@ -11,7 +11,7 @@ public interface ICommandService
     /// Shared by both CLI and Web paths.
     /// </summary>
     (string command, Dictionary<string, string> environment) PrepareSession(
-        LLM llm, string? envName, string[]? extraArgs);
+        LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null);
 }
 
 public class CommandService : ICommandService
@@ -26,9 +26,11 @@ public class CommandService : ICommandService
     }
 
     public (string command, Dictionary<string, string> environment) PrepareSession(
-        LLM llm, string? envName, string[]? extraArgs)
+        LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null)
     {
         var cli = llm.ToString().ToLower();
+        var safePrompt = string.IsNullOrWhiteSpace(initialPrompt) ? null : EscapeArg(initialPrompt);
+
         var cliCommand = extraArgs?.Length > 0
             ? $"{cli} {BuildSafeArgString(extraArgs)}"
             : cli;

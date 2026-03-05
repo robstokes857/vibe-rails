@@ -267,7 +267,8 @@ namespace VibeRails.DTOs
         string? Cli = null,
         string? EnvironmentName = null,
         string? Title = null,
-        bool MakeRemote = false
+        bool MakeRemote = false,
+        string? InitialPrompt = null
     );
 
     public record BootstrapCommandResponse(

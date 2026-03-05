@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Net;
 using System.Net.WebSockets;
 using System.Text;
@@ -315,12 +314,12 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             Log.Information("[TerminalTabs:{TabId}][stderr] {Line}", tabId, args.Data.Trim());
         };
 
-        process.Exited += (_, _) =>
-        {
-            RemoveChild(tabId, process.Id);
-            if (!bootstrapTcs.Task.IsCompleted)
+            process.Exited += (_, _) =>
             {
-                bootstrapTcs.TrySetException(new InvalidOperationException($"Terminal tab process exited before startup handshake ({tabId})."));
+                RemoveChild(tabId, process.Id);
+                if (!bootstrapTcs.Task.IsCompleted)
+                {
+                    bootstrapTcs.TrySetException(new InvalidOperationException($"Terminal tab process exited before startup handshake ({tabId})."));
             }
         };
 
@@ -351,10 +350,9 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 throw new InvalidOperationException($"Invalid bootstrap URL from child process: {bootstrapUrl}");
             }
 
+            tabId = Guid.NewGuid().ToString("N");
             await WaitForHealthyChildAsync(bootstrapUri.Port, cancellationToken);
             var sessionToken = await BootstrapChildAndGetTokenAsync(bootstrapUrl, cancellationToken);
-
-            tabId = bootstrapUri.Port.ToString(CultureInfo.InvariantCulture);
 
             return new TerminalChildProcess(
                 tabId,

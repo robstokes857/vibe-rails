@@ -26,7 +26,7 @@ public interface ITerminalSessionService
     bool HasActiveSession { get; }
     string? ActiveSessionId { get; }
     bool IsExternallyOwned { get; }
-    Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false);
+    Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null);
     Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken);
     Task StopSessionAsync();
     void RegisterExternalTerminal(Terminal terminal, string sessionId);
@@ -69,7 +69,7 @@ public class TerminalSessionService : ITerminalSessionService
         _localClientTracker = localClientTracker;
     }
 
-    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false)
+    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null)
     {
         lock (s_lock)
         {
@@ -79,7 +79,7 @@ public class TerminalSessionService : ITerminalSessionService
         try
         {
             var (terminal, sessionId, remoteConn) = await _runner.CreateSessionAsync(
-                llm, workingDirectory, environmentName, extraArgs, CancellationToken.None, title, makeRemote);
+                llm, workingDirectory, environmentName, extraArgs, CancellationToken.None, title, makeRemote, initialPrompt);
 
             // When a remote browser connects, disconnect the local WebUI viewer
             if (remoteConn != null)
