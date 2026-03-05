@@ -115,15 +115,16 @@ async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
 
         const bootstrapUrl = backendManager!.getBootstrapUrl();
         let sessionToken: string | null = null;
+        let tabToken: string | null = null;
         if (bootstrapUrl) {
-            sessionToken = await fetchSessionToken(bootstrapUrl);
+            ({ sessionToken, tabToken } = await fetchTokens(bootstrapUrl));
         }
 
         webviewManager = new WebviewPanelManager(webviewWwwrootPath);
 
         webviewManager.onCloseRequested(() => { void closeDashboard(true, false); });
 
-        await webviewManager.create(port, sessionToken);
+        await webviewManager.create(port, sessionToken, tabToken);
         stopBarItem?.show();
     });
 }
@@ -225,30 +226,34 @@ async function runInstallCommand(): Promise<void> {
     });
 }
 
-function fetchSessionToken(bootstrapUrl: string): Promise<string | null> {
+function fetchTokens(bootstrapUrl: string): Promise<{ sessionToken: string | null, tabToken: string | null }> {
     return new Promise((resolve) => {
         const req = http.get(bootstrapUrl, (res) => {
             res.resume();
-            const setCookie = res.headers['set-cookie'];
-            if (!setCookie) { resolve(null); return; }
-            for (const cookie of setCookie) {
-                const match = cookie.match(/viberails_session=([^;]+)/);
-                if (!match) { continue; }
 
-                // Cookies URL-encode base64 characters (%2F, %2B, %3D).
-                // Backend header auth expects the raw token value.
-                const encodedToken = match[1].replace(/^"|"$/g, '');
-                try {
-                    resolve(decodeURIComponent(encodedToken));
-                } catch {
-                    resolve(encodedToken);
+            let sessionToken: string | null = null;
+            const setCookie = res.headers['set-cookie'];
+            if (setCookie) {
+                for (const cookie of setCookie) {
+                    const match = cookie.match(/viberails_session=([^;]+)/);
+                    if (!match) { continue; }
+                    // Cookies URL-encode base64 characters (%2F, %2B, %3D).
+                    // Backend header auth expects the raw token value.
+                    const encodedToken = match[1].replace(/^"|"$/g, '');
+                    try {
+                        sessionToken = decodeURIComponent(encodedToken);
+                    } catch {
+                        sessionToken = encodedToken;
+                    }
+                    break;
                 }
-                return;
             }
-            resolve(null);
+
+            const tabToken = (res.headers['viberails_tab'] as string) || null;
+            resolve({ sessionToken, tabToken });
         });
-        req.on('error', () => resolve(null));
-        req.setTimeout(5000, () => { req.destroy(); resolve(null); });
+        req.on('error', () => resolve({ sessionToken: null, tabToken: null }));
+        req.setTimeout(5000, () => { req.destroy(); resolve({ sessionToken: null, tabToken: null }); });
     });
 }
 

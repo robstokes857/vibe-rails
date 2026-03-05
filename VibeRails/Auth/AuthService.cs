@@ -5,6 +5,7 @@ namespace VibeRails.Auth;
 public class AuthService : IAuthService
 {
     private readonly string _instanceToken;
+    private readonly string _tabToken;
     private string? _bootstrapCode;
     private DateTime? _bootstrapCodeExpiry;
     private bool _bootstrapCodeUsed;
@@ -14,6 +15,7 @@ public class AuthService : IAuthService
     {
         // Generate one random token per app instance (64 bytes = 512 bits)
         _instanceToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+        _tabToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     }
 
     public string GetInstanceToken() => _instanceToken;
@@ -25,6 +27,18 @@ public class AuthService : IAuthService
         return CryptographicOperations.FixedTimeEquals(
             System.Text.Encoding.UTF8.GetBytes(token),
             System.Text.Encoding.UTF8.GetBytes(_instanceToken)
+        );
+    }
+
+    public string GetInstanceTabToken() => _tabToken;
+
+    public bool ValidateTabToken(string? token)
+    {
+        if (string.IsNullOrEmpty(token)) return false;
+        // Use constant-time comparison to prevent timing attacks
+        return CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(token),
+            System.Text.Encoding.UTF8.GetBytes(_tabToken)
         );
     }
 

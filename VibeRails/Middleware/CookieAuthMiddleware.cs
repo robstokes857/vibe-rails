@@ -64,6 +64,40 @@ public class CookieAuthMiddleware
             return;
         }
 
+        if(isWebSocketRequest)
+        {
+            var tabToken = context.WebSockets.WebSocketRequestedProtocols
+                .Where(x=> x.Equals(_authService.GetInstanceTabToken()))
+                .FirstOrDefault();
+            if(tabToken == default)
+            {
+                context.Response.StatusCode = 403;
+                await context.Response.WriteAsync("Unauthorized. Invalid tab token.");
+                return;
+            }
+        }
+        else
+        {
+            var tabToken = context.Request.Headers["viberails_tab"].FirstOrDefault();
+            if (!_authService.ValidateTabToken(tabToken))
+            {
+                // API calls should not be redirected (fetch/XHR expects JSON/status codes).
+                if (path.StartsWith("/api/"))
+                {
+                    context.Response.StatusCode = 401;
+                    await context.Response.WriteAsync("Unauthorized");
+                    return;
+                }
+
+                // Browser page/static requests - show error page (can't auto-redirect without code)
+                context.Response.StatusCode = 403;
+                context.Response.ContentType = "text/html";
+                await context.Response.WriteAsync(STRINGS.AUTH_REQUIRED_HTML);
+                return;
+            }
+        }
+
+
         // Authenticated - continue to next middleware
         await _next(context);
     }

@@ -274,7 +274,8 @@ class TerminalTab {
         this.manager.updateUi();
 
         const wsUrl = this.manager.getWebSocketUrl(this.state.id);
-        const socket = new WebSocket(wsUrl);
+        const tabToken = sessionStorage.getItem('viberails_tab');
+        const socket = new WebSocket(wsUrl, tabToken ? [tabToken] : []);
         socket.binaryType = 'arraybuffer';
         this.socket = socket;
 

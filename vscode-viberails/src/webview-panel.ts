@@ -24,7 +24,7 @@ export class WebviewPanelManager {
         this.panel?.reveal(vscode.ViewColumn.One);
     }
 
-    public async create(port: number, sessionToken: string | null = null): Promise<vscode.WebviewPanel> {
+    public async create(port: number, sessionToken: string | null = null, tabToken: string | null = null): Promise<vscode.WebviewPanel> {
         if (this.panel) {
             this.panel.reveal(vscode.ViewColumn.One);
             return this.panel;
@@ -44,7 +44,7 @@ export class WebviewPanelManager {
             }
         );
 
-        this.panel.webview.html = this.buildHtml(this.panel.webview, port, sessionToken);
+        this.panel.webview.html = this.buildHtml(this.panel.webview, port, sessionToken, tabToken);
 
         this.panel.webview.onDidReceiveMessage(message => {
             if (message.command === 'close') {
@@ -60,7 +60,7 @@ export class WebviewPanelManager {
         return this.panel;
     }
 
-    private buildHtml(webview: vscode.Webview, port: number, sessionToken: string | null): string {
+    private buildHtml(webview: vscode.Webview, port: number, sessionToken: string | null, tabToken: string | null): string {
         const indexPath = path.join(this.wwwrootPath, 'index.html');
         let html = fs.readFileSync(indexPath, 'utf8');
 
@@ -92,12 +92,14 @@ export class WebviewPanelManager {
 
         const fetchPatch = sessionToken ? `
         const __vb_token__ = '${sessionToken}';
+        const __vb_tab_token__ = ${tabToken ? `'${tabToken}'` : 'null'};
         window.__viberails_SESSION_TOKEN__ = __vb_token__;
         const __vb_orig_fetch__ = window.fetch;
         window.fetch = function(input, init) {
             init = init || {};
             const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
             headers.set('viberails_session', __vb_token__);
+            if (__vb_tab_token__) { headers.set('viberails_tab', __vb_tab_token__); }
             init.headers = headers;
             return __vb_orig_fetch__.call(this, input, init);
         };
@@ -116,7 +118,11 @@ export class WebviewPanelManager {
                     }
                 }
             } catch { /* use original URL */ }
-            return protocols !== undefined ? new __vb_orig_ws__(nextUrl, protocols) : new __vb_orig_ws__(nextUrl);
+            // Merge the tab token into subprotocols so the server can validate it.
+            const mergedProtocols = __vb_tab_token__
+                ? (protocols ? [...(Array.isArray(protocols) ? protocols : [protocols]), __vb_tab_token__] : [__vb_tab_token__])
+                : protocols;
+            return mergedProtocols !== undefined ? new __vb_orig_ws__(nextUrl, mergedProtocols) : new __vb_orig_ws__(nextUrl);
         };
         window.WebSocket.prototype = __vb_orig_ws__.prototype;
         window.WebSocket.CONNECTING = __vb_orig_ws__.CONNECTING;

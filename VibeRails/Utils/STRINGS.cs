@@ -89,6 +89,8 @@ This file provides instructions and context for humans and AI coding assistants 
         <p>Redirecting...</p>
     </div>
     <script>
+        // Store the tab token in sessionStorage (per-tab only, never shared, dies when tab closes)
+        sessionStorage.setItem('viberails_tab', '__VIBERAILS_TAB_TOKEN__');
         // Wait 1 second to show the auth screen, then redirect
         setTimeout(() => {
             window.location.replace('/');
