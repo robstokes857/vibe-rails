@@ -242,12 +242,23 @@ class TerminalTab {
         const cols = this.vibeTerminal.cols;
         const rows = this.vibeTerminal.rows;
         const signature = `${cols}x${rows}`;
-        if (!force && this.lastResizeSignature === signature) {
+        const signatureChanged = this.lastResizeSignature !== signature;
+        if (!force && !signatureChanged) {
             return;
+        }
+
+        if (signatureChanged && this.shouldResetDisplayBeforeResize()) {
+            // AI TUIs do not always erase stale right-edge cells when their layout
+            // shrinks. Clear the local viewport before the PTY redraws at the new size.
+            this.vibeTerminal.resetDisplayOnly();
         }
 
         this.lastResizeSignature = signature;
         this.socket.send(`${RESIZE_PREFIX}${cols},${rows}`);
+    }
+
+    shouldResetDisplayBeforeResize() {
+        return this.isActive && this.state.hasActiveSession && this.hasOpenSocket();
     }
 
     fitAndSyncTerminal() {

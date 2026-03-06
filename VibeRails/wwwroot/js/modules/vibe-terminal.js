@@ -378,6 +378,13 @@ export class VibeTerminal {
     attachClipboardPaste(callback) {
         if (!this._terminal) return;
 
+        // Prevent xterm.js from handling the native paste event (which would fire
+        // onData and double-send when our custom Ctrl+V handler also fires).
+        const ta = this._terminal.textarea;
+        if (ta) {
+            ta.addEventListener('paste', (e) => e.preventDefault(), true);
+        }
+
         this.addCustomKeyEventHandler((event) => {
             const isPaste = event.type === 'keydown'
                 && (event.ctrlKey || event.metaKey)

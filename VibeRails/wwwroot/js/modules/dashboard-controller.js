@@ -265,7 +265,7 @@ export class DashboardController {
             if (launchButton) {
                 const launchText = launchButton.querySelector('[data-env-launch-text]');
                 if (launchText) {
-                    launchText.textContent = 'Native Terminal';
+                    launchText.textContent = 'Native';
                 }
 
                 launchButton.addEventListener('click', (event) => {
