@@ -511,13 +511,38 @@ export class VibeTerminal {
         return gap <= threshold;
     }
 
-    setFontSize(size) {
+    setFontSize(size, { fit = true, notify = true, forceNotify = false } = {}) {
         const clamped = Math.max(6, Math.min(72, size));
         this._desktopFontSize = clamped;
         this._mobileFontSize = clamped;
+        this._lastFitWidth = null;
+        this._lastFitHeight = null;
+        this._lastCols = null;
+        this._lastRows = null;
         if (this._terminal) {
             this._terminal.options.fontSize = clamped;
-            this.fit({ force: true, forceNotify: true });
+            if (fit) {
+                this.fit({ force: true, notify, forceNotify });
+            }
+        }
+    }
+
+    setFontFamily(family, { fit = true, notify = true, forceNotify = false } = {}) {
+        if (typeof family !== 'string' || family.trim().length === 0) {
+            return;
+        }
+
+        this._fontFamily = family;
+        this._lastFitWidth = null;
+        this._lastFitHeight = null;
+        this._lastCols = null;
+        this._lastRows = null;
+
+        if (this._terminal) {
+            this._terminal.options.fontFamily = family;
+            if (fit) {
+                this.fit({ force: true, notify, forceNotify });
+            }
         }
     }
 
@@ -536,6 +561,17 @@ export class VibeTerminal {
             this._terminal.reset();
         }
         this._searchTerm = '';
+    }
+
+    resetDisplayOnly() {
+        if (!this._terminal) {
+            return;
+        }
+
+        this._terminal.reset();
+        this._searchTerm = '';
+        this._lastCols = null;
+        this._lastRows = null;
     }
 
     setInteractive(active) {

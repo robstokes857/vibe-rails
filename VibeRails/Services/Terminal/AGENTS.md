@@ -139,16 +139,15 @@ Key behavior:
   2. local takeover: closes previous local viewer socket
   3. requests remote viewer disconnect (`RequestRemoteViewerDisconnectAsync`)
   4. reconnect bootstrap:
-     - non-Codex: sends replay buffer to new local viewer
-     - Codex: skips replay and requests PTY redraw (`Ctrl+L`)
+     - all current managed AI CLIs: skip replay and request PTY redraw (`Ctrl+L`)
+     - replay should only be re-enabled for future plain shell / line-oriented sessions
   5. subscribes `WebSocketConsumer`
   6. runs input loop (supports fragmentation, size guard, resize control) and routes user input through `TerminalIoRouter`
 - `DisconnectLocalViewerAsync(reason)` closes local viewer with provided reason.
 - `StopSessionAsync` is blocked for externally owned sessions.
 
 Important current behavior:
-- No forced Ctrl+L redraw after replay in non-Codex reconnect paths.
-- Codex local reconnect intentionally uses redraw instead of replay to avoid duplicated/garbled TUI state.
+- All current managed AI CLIs use redraw-first reconnect instead of replay.
 - Local reconnect/takeover does not dispose PTY.
 - Session activity acquires a lifecycle owner so idle local-browser watchdog does not terminate active remote sessions.
 
@@ -274,7 +273,7 @@ From `Routes/TerminalRoutes.cs`:
 ## Common Failure Points
 1. Concurrent `SendAsync` on same WebSocket (avoided by channel-backed send loops).
 2. Shared buffer reuse corruption (avoided by copying before async send queueing).
-3. Codex reconnect duplication from replaying partial TUI state (mitigated by redraw-first local reconnect path).
+3. Reconnect duplication from replaying partial AI CLI terminal history (mitigated by redraw-first reconnect policy for all current managed AI CLIs).
 4. Oversized control/input payloads (guarded at 256KB).
 
 ## Regression Notes (2026-03)
@@ -290,13 +289,21 @@ These issues regressed in production-like usage and should be treated as guardra
   - `[Lifecycle] No active local browser/terminal owner for 120s. Stopping process ...`
   - `[ParentWatchdog] Parent process ... exited. Stopping process ...`
 
-2. **Codex showed doubled/duplicated UI blocks**
-- Symptom: repeated Codex welcome card/prompt after reconnect/takeover sequences.
-- Root cause: replaying partial Codex TUI state can conflict with redraw-based attach behavior.
+2. **LLM terminals showed doubled/duplicated UI blocks**
+- Symptom: repeated welcome cards/prompts after reconnect/takeover sequences.
+- Root cause: replaying partial full-screen TUI state can conflict with redraw-based attach behavior.
 - Fix:
-  - local reconnect path skips replay for Codex and requests redraw (`Ctrl+L`) after WebSocket consumer subscription.
+  - local reconnect path skips replay for all current managed AI CLIs and requests redraw (`Ctrl+L`) after WebSocket consumer subscription.
 - Guardrail:
-  - if reconnect policy changes, re-test Codex with local reconnect + remote takeover sequences.
+  - if replay is ever reintroduced, limit it to plain shell / line-oriented sessions and re-test every AI CLI separately.
+
+3. **Font size / font family changes duplicated full-screen UI blocks**
+- Symptom: changing terminal text size or font could leave several historical full-screen redraws visible in the browser.
+- Root cause: local xterm display kept old screen content while the PTY redrew into the resized geometry.
+- Fix:
+  - display-metric changes reset the local xterm view first, then perform one geometry sync to the PTY.
+- Guardrail:
+  - re-test active Claude/Codex/Gemini/Copilot sessions while changing font size and font family.
 
 ## If You Modify This Area
 1. Update both control protocol helpers if command names or parsing rules change:
@@ -310,4 +317,5 @@ These issues regressed in production-like usage and should be treated as guardra
    - remote takeover from local
    - resize sync in both viewers
    - remote-only session survives beyond 120s with no local browser connected
-   - Codex local reconnect does not show duplicated welcome/prompt blocks
+   - Claude/Codex/Gemini/Copilot local reconnect do not show duplicated welcome/prompt blocks
+   - Claude/Codex/Gemini/Copilot font size and font family changes do not leave duplicated full-screen UI blocks

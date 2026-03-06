@@ -617,7 +617,12 @@ public class TerminalSessionService : ITerminalSessionService
             if (string.IsNullOrWhiteSpace(s_activeCli))
                 return true;
 
-            return !s_activeCli.Contains("codex", StringComparison.OrdinalIgnoreCase);
+            // All current managed terminal sessions are AI CLIs with structured or
+            // full-screen terminal UIs. Replaying raw PTY history into a fresh xterm
+            // has proven visually unstable across providers, so reconnects use a
+            // redraw-first policy instead of buffer replay.
+            _ = s_activeCli;
+            return false;
         }
     }
 }
