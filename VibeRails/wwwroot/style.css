@@ -41,6 +41,10 @@
     --navbar-height: 64px;
 }
 
+body.navbars-collapsed {
+    --navbar-height: 0px;
+}
+
 /* Global Reset & Base */
 body {
     background-color: var(--color-bg-base);
@@ -61,6 +65,10 @@ body.terminal-scroll-locked {
 body.terminal-focus-active .main-container {
     max-width: none;
     padding: 0.5rem 0.75rem 0.75rem;
+}
+
+body.navbars-collapsed.terminal-focus-active .main-container {
+    padding-left: 3.75rem;
 }
 
 body.terminal-focus-active #app-content,
@@ -209,6 +217,42 @@ code {
     display: flex;
     align-items: center;
     gap: 0.75rem;
+}
+
+.nav-global-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 0.75rem;
+    left: 0.6rem;
+    z-index: 1060;
+    padding: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--border-radius);
+    border: 2px solid var(--color-border);
+    background: rgba(30, 30, 36, 0.9);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: all var(--transition-speed);
+    backdrop-filter: blur(10px);
+}
+
+.nav-global-toggle-btn:hover {
+    color: var(--color-text);
+    border-color: var(--color-primary);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.nav-global-toggle-btn .nav-icon {
+    width: 18px;
+    height: 18px;
+}
+
+body.navbars-collapsed .navbar,
+body.navbars-collapsed .app-subnav {
+    display: none;
 }
 
 .brand-logo {

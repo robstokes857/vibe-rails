@@ -44,12 +44,14 @@ export class VibeControlApp {
         this.swarmController = new SwarmController(this);
         this.lifecycleHeartbeatTimer = null;
         this.lifecycleClientId = this.getOrCreateLifecycleClientId();
+        this.navbarsCollapsed = false;
 
         this.init();
     }
 
     async init() {
         await this.fetchConfigs();
+        this.applyNavbarsCollapsedState(false);
         if (!this.data.isInGit) {
             this.showNotInGitBanner();
             document.querySelectorAll('.app-subnav .app-subnav-link, .nav-settings-btn').forEach(btn => {
@@ -300,7 +302,26 @@ export class VibeControlApp {
                 if (view) this.navigate(view);
             }
 
+            const toggleNav = e.target.closest('[data-action="toggle-nav"]');
+            if (toggleNav) {
+                e.preventDefault();
+                this.toggleNavbars();
+            }
         });
+    }
+
+    applyNavbarsCollapsedState(collapsed) {
+        const next = !!collapsed;
+        this.navbarsCollapsed = next;
+        document.body.classList.toggle('navbars-collapsed', next);
+
+        // Focused terminal layout listens to resize events to recalc available height.
+        window.dispatchEvent(new Event('resize'));
+        this.terminalController?.refreshLayout?.();
+    }
+
+    toggleNavbars() {
+        this.applyNavbarsCollapsedState(!this.navbarsCollapsed);
     }
 
     bindActions(container, selector, handler) {
@@ -399,6 +420,9 @@ export class VibeControlApp {
     applyViewLayoutState(view) {
         const isTerminalFocus = view === 'terminal-focus';
         document.body.classList.toggle('terminal-focus-active', isTerminalFocus);
+        if (isTerminalFocus && !this.navbarsCollapsed) {
+            this.applyNavbarsCollapsedState(true);
+        }
     }
 
     // ============================================ 
