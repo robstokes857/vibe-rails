@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting;
 using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services.Terminal.Consumers;
@@ -8,15 +9,22 @@ namespace VibeRails.Services.Terminal;
 
 public class TerminalRunner
 {
+    private static int s_emergencyShutdownRequested;
     private readonly ITerminalStateService _stateService;
     private readonly ICommandService _commandService;
     private readonly TraceEventBuffer? _traceBuffer;
+    private readonly IHostApplicationLifetime? _appLifetime;
 
-    public TerminalRunner(ITerminalStateService stateService, ICommandService commandService, TraceEventBuffer? traceBuffer = null)
+    public TerminalRunner(
+        ITerminalStateService stateService,
+        ICommandService commandService,
+        TraceEventBuffer? traceBuffer = null,
+        IHostApplicationLifetime? appLifetime = null)
     {
         _stateService = stateService;
         _commandService = commandService;
         _traceBuffer = traceBuffer;
+        _appLifetime = appLifetime;
     }
 
     /// <summary>
@@ -24,7 +32,15 @@ public class TerminalRunner
     /// Used by both CLI and Web paths. Returns the remote connection if one was established.
     /// </summary>
     public async Task<(Terminal terminal, string sessionId, IRemoteTerminalConnection? remoteConnection)> CreateSessionAsync(
-        LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct, string? title = null, bool makeRemote = false, string? initialPrompt = null)
+        LLM llm,
+        string workDir,
+        string? envName,
+        string[]? extraArgs,
+        CancellationToken ct,
+        string? title = null,
+        bool makeRemote = false,
+        string? initialPrompt = null,
+        Func<string, Task>? onRemoteTakeoverAuthorized = null)
     {
         var shouldEnableRemote = ShouldEnableRemote(makeRemote);
         var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct);
@@ -46,15 +62,187 @@ public class TerminalRunner
 
             if (remoteConn.IsConnected)
             {
-                terminal.Subscribe(new RemoteOutputConsumer(remoteConn));
+                var takeoverGate = new SemaphoreSlim(1, 1);
+                var remoteViewerAuthorized = RemoteConfig.IsPinConfigured ? 0 : 1;
+                var remoteTakeoverNotified = false;
+                var lockPromptSent = false;
+                var failedPinAttempts = 0;
+                terminal.Subscribe(new RemoteOutputConsumer(
+                    remoteConn,
+                    canForward: () => System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 1));
+
+                async Task NotifyRemoteTakeoverAsync(string trigger)
+                {
+                    if (remoteTakeoverNotified)
+                        return;
+
+                    remoteTakeoverNotified = true;
+                    if (onRemoteTakeoverAuthorized == null)
+                        return;
+
+                    try
+                    {
+                        await onRemoteTakeoverAuthorized(trigger);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "[Terminal] Remote takeover callback failed");
+                    }
+                }
+
+                async Task SendLockedAsync(bool force = false)
+                {
+                    if (!force && lockPromptSent)
+                        return;
+
+                    lockPromptSent = true;
+                    await remoteConn.SendControlAsync(TerminalControlProtocol.Locked);
+                }
+
+                async Task HandleLockoutAsync()
+                {
+                    await remoteConn.SendControlAsync(
+                        TerminalControlProtocol.BuildDisconnectBrowserCommand("Too many failed PIN attempts"));
+
+                    RequestEmergencyShutdown("3 failed pins.. Killing app.");
+                }
+
+                async Task HandleRemoteInputAsync(byte[] bytes)
+                {
+                    try
+                    {
+                        await takeoverGate.WaitAsync(CancellationToken.None);
+                        try
+                        {
+                            var pinRequired = RemoteConfig.IsPinConfigured;
+                            if (!pinRequired)
+                                System.Threading.Volatile.Write(ref remoteViewerAuthorized, 1);
+
+                            if (pinRequired && System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 0)
+                            {
+                                var text = System.Text.Encoding.UTF8.GetString(bytes).Trim();
+                                if (text.StartsWith(TerminalControlProtocol.PinResponse, StringComparison.Ordinal))
+                                {
+                                    var pin = text[TerminalControlProtocol.PinResponse.Length..].Trim();
+                                    var isPinFormatValid = pin.Length is >= 4 and <= 6 && pin.All(char.IsDigit);
+                                    var verified = isPinFormatValid && RemoteConfig.VerifyPin(pin);
+
+                                    if (verified)
+                                    {
+                                        System.Threading.Volatile.Write(ref remoteViewerAuthorized, 1);
+                                        failedPinAttempts = 0;
+                                        lockPromptSent = false;
+                                        Log.Information("[PIN] Remote PIN verified successfully");
+
+                                        await remoteConn.SendControlAsync(TerminalControlProtocol.Unlocked);
+                                        await NotifyRemoteTakeoverAsync("pin");
+                                        await terminal.WriteBytesAsync(new byte[] { 0x0C }, CancellationToken.None); // Ctrl+L
+                                        return;
+                                    }
+
+                                    failedPinAttempts++;
+                                    Log.Warning(
+                                        "[PIN] Remote PIN rejected, attempt {Attempt}/{Max}",
+                                        failedPinAttempts,
+                                        3);
+
+                                    if (failedPinAttempts >= 3)
+                                    {
+                                        await HandleLockoutAsync();
+                                        return;
+                                    }
+
+                                    await SendLockedAsync(force: true);
+                                    return;
+                                }
+
+                                await SendLockedAsync();
+                                return;
+                            }
+
+                            await NotifyRemoteTakeoverAsync("input");
+                            await TerminalIoRouter.RouteInputAsync(
+                                _stateService,
+                                terminal,
+                                sessionId,
+                                bytes,
+                                TerminalIoSource.RemoteWebUi,
+                                CancellationToken.None);
+                        }
+                        finally
+                        {
+                            takeoverGate.Release();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "[Remote] Failed to handle remote input");
+                    }
+                }
+
+                async Task HandleRemoteReplayRequestAsync()
+                {
+                    try
+                    {
+                        await takeoverGate.WaitAsync(CancellationToken.None);
+                        try
+                        {
+                            var pinRequired = RemoteConfig.IsPinConfigured;
+                            if (!pinRequired)
+                                System.Threading.Volatile.Write(ref remoteViewerAuthorized, 1);
+
+                            if (pinRequired && System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 0)
+                            {
+                                await SendLockedAsync();
+                                return;
+                            }
+
+                            await NotifyRemoteTakeoverAsync("replay");
+                            var replay = terminal.GetReplayBuffer();
+                            if (replay.Length > 0)
+                                await remoteConn.SendOutputAsync(replay);
+                        }
+                        finally
+                        {
+                            takeoverGate.Release();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "[Remote] Failed to handle replay request");
+                    }
+                }
+
+                async Task HandleRemoteBrowserDisconnectedAsync()
+                {
+                    try
+                    {
+                        await takeoverGate.WaitAsync(CancellationToken.None);
+                        try
+                        {
+                            System.Threading.Volatile.Write(
+                                ref remoteViewerAuthorized,
+                                RemoteConfig.IsPinConfigured ? 0 : 1);
+                            remoteTakeoverNotified = false;
+                            lockPromptSent = false;
+                            failedPinAttempts = 0;
+                        }
+                        finally
+                        {
+                            takeoverGate.Release();
+                        }
+
+                        var msg = System.Text.Encoding.UTF8.GetBytes("\r\n\x1b[90m[Remote viewer disconnected]\x1b[0m\r\n");
+                        terminal.PublishSynthetic(msg);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "[Remote] Failed to process remote browser disconnect");
+                    }
+                }
+
                 remoteConn.OnInputReceived += bytes =>
-                    _ = TerminalIoRouter.RouteInputAsync(
-                        _stateService,
-                        terminal,
-                        sessionId,
-                        bytes,
-                        TerminalIoSource.RemoteWebUi,
-                        CancellationToken.None);
+                    _ = HandleRemoteInputAsync(bytes);
                 remoteConn.OnResizeRequested += (cols, rows) =>
                 {
                     try
@@ -85,17 +273,11 @@ public class TerminalRunner
                 };
                 remoteConn.OnReplayRequested += () =>
                 {
-                    var replay = terminal.GetReplayBuffer();
-                    if (replay.Length > 0)
-                        _ = remoteConn.SendOutputAsync(replay);
-                    // Don't send Ctrl+L — the replay buffer is sufficient for the remote
-                    // browser. Ctrl+L causes the shell to redraw the entire screen, and
-                    // since the browser already got the replay, it would show doubled content.
+                    _ = HandleRemoteReplayRequestAsync();
                 };
                 remoteConn.OnBrowserDisconnected += () =>
                 {
-                    var msg = System.Text.Encoding.UTF8.GetBytes("\r\n\x1b[90m[Remote viewer disconnected]\x1b[0m\r\n");
-                    terminal.PublishSynthetic(msg);
+                    _ = HandleRemoteBrowserDisconnectedAsync();
                 };
                 _stateService.TrackRemoteConnection(sessionId, remoteConn);
                 activeRemoteConn = remoteConn;
@@ -190,6 +372,47 @@ public class TerminalRunner
         return ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey());
     }
 
+    private void RequestEmergencyShutdown(string message)
+    {
+        if (Interlocked.Exchange(ref s_emergencyShutdownRequested, 1) == 1)
+            return;
+
+        Console.WriteLine(message);
+        Log.Error("[PIN] {Message}", message);
+
+        if (_appLifetime != null)
+        {
+            _appLifetime.StopApplication();
+        }
+        else
+        {
+            Log.Error("[PIN] IHostApplicationLifetime unavailable; app shutdown could not be requested.");
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Give graceful shutdown a brief chance, then force-kill process tree.
+                await Task.Delay(TimeSpan.FromSeconds(1.5));
+                using var currentProcess = System.Diagnostics.Process.GetCurrentProcess();
+                try
+                {
+                    currentProcess.Kill(entireProcessTree: true);
+                }
+                catch (PlatformNotSupportedException)
+                {
+                    currentProcess.Kill();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Fatal(ex, "[PIN] Failed to force-kill process tree after lockout");
+                Environment.FailFast("Emergency shutdown failed after repeated PIN lockout.", ex);
+            }
+        });
+    }
+
     /// <summary>
     /// CLI path: creates terminal, wires Console I/O, blocks until exit.
     /// </summary>
@@ -234,42 +457,29 @@ public class TerminalRunner
         LLM llm, string workDir, string? envName, string[]? extraArgs,
         ITerminalSessionService sessionService, bool makeRemote = false, CancellationToken ct = default)
     {
-        var (terminal, sessionId, remoteConn) = await CreateSessionAsync(llm, workDir, envName, extraArgs, ct, makeRemote: makeRemote);
+        var (terminal, sessionId, remoteConn) = await CreateSessionAsync(
+            llm,
+            workDir,
+            envName,
+            extraArgs,
+            ct,
+            makeRemote: makeRemote,
+            onRemoteTakeoverAuthorized: trigger =>
+            {
+                Log.Information(
+                    "[Terminal] Remote viewer authorized via {Trigger} — disconnecting local viewer",
+                    trigger);
+                return sessionService.DisconnectLocalViewerAsync("Session taken over by remote viewer");
+            });
         var exitCode = 0;
 
         await using (terminal)
         {
             terminal.Subscribe(new ConsoleOutputConsumer());
 
-            // When a remote browser connects, disconnect the local WebUI viewer
-            // so only one viewer is active at a time.
             if (remoteConn != null)
             {
-                Log.Information("[Terminal] Remote connection established — wiring disconnect handler");
-                var remoteViewerActive = 0;
-                void DisconnectLocalViewerOnRemoteActivity(string trigger)
-                {
-                    if (Interlocked.Exchange(ref remoteViewerActive, 1) == 1)
-                        return;
-
-                    Log.Information("[Terminal] Remote viewer activity via {Trigger} — disconnecting local viewer", trigger);
-                    _ = sessionService.DisconnectLocalViewerAsync("Session taken over by remote viewer");
-                }
-
-                remoteConn.OnReplayRequested += () =>
-                {
-                    DisconnectLocalViewerOnRemoteActivity("replay");
-                };
-                // Some relay paths (for example Codex remote attach) send Ctrl+L
-                // instead of __replay__ when the browser connects.
-                remoteConn.OnInputReceived += _ =>
-                {
-                    DisconnectLocalViewerOnRemoteActivity("input");
-                };
-                remoteConn.OnBrowserDisconnected += () =>
-                {
-                    Interlocked.Exchange(ref remoteViewerActive, 0);
-                };
+                Log.Information("[Terminal] Remote connection established — takeover guard active");
             }
             else
             {

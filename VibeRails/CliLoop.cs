@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using VibeRails.Cli;
 using VibeRails.DB;
 using VibeRails.DTOs;
@@ -94,6 +95,7 @@ public static class CliLoop
         var sessionService = scopedServices.GetRequiredService<ITerminalSessionService>();
         var ioObserverService = scopedServices.GetRequiredService<ITerminalIoObserverService>();
         var traceBuffer = scopedServices.GetRequiredService<TraceEventBuffer>();
+        var appLifetime = scopedServices.GetRequiredService<IHostApplicationLifetime>();
 
         // Resolve LLM type (smart resolution: LLM enum name → base CLI, otherwise → DB lookup)
         LLM llm;
@@ -139,7 +141,7 @@ public static class CliLoop
             ioObserverService);
         var mcpSettings = scopedServices.GetRequiredService<McpSettings>();
         var commandService = new CommandService(envService, mcpSettings);
-        var runner = new TerminalRunner(terminalStateService, commandService, traceBuffer);
+        var runner = new TerminalRunner(terminalStateService, commandService, traceBuffer, appLifetime);
 
         var exitCode = await runner.RunCliWithWebAsync(llm, workingDirectory, environmentName, parsedArgs.ExtraArgs, sessionService, parsedArgs.MakeRemote, CancellationToken.None);
         Environment.ExitCode = exitCode;

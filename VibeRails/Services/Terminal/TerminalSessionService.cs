@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using Microsoft.Extensions.Hosting;
 using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
@@ -63,11 +64,12 @@ public class TerminalSessionService : ITerminalSessionService
         IRemoteStateService remoteStateService,
         ITerminalIoObserverService ioObserverService,
         TraceEventBuffer traceBuffer,
+        IHostApplicationLifetime appLifetime,
         ILocalClientTracker localClientTracker)
     {
         _stateService = new TerminalStateService(dbService, gitService, remoteStateService, ioObserverService);
         var commandService = new CommandService(envService, mcpSettings);
-        _runner = new TerminalRunner(_stateService, commandService, traceBuffer);
+        _runner = new TerminalRunner(_stateService, commandService, traceBuffer, appLifetime);
         _localClientTracker = localClientTracker;
     }
 
@@ -80,39 +82,22 @@ public class TerminalSessionService : ITerminalSessionService
 
         try
         {
-            var (terminal, sessionId, remoteConn) = await _runner.CreateSessionAsync(
-                llm, workingDirectory, environmentName, extraArgs, CancellationToken.None, title, makeRemote, initialPrompt);
-
-            // When a remote browser connects, disconnect the local WebUI viewer
-            if (remoteConn != null)
-            {
-                var remoteViewerActive = 0;
-                void DisconnectLocalViewerOnRemoteActivity(string trigger)
+            var (terminal, sessionId, _) = await _runner.CreateSessionAsync(
+                llm,
+                workingDirectory,
+                environmentName,
+                extraArgs,
+                CancellationToken.None,
+                title,
+                makeRemote,
+                initialPrompt,
+                onRemoteTakeoverAuthorized: trigger =>
                 {
-                    if (Interlocked.Exchange(ref remoteViewerActive, 1) == 1)
-                        return;
-
                     Log.Information(
-                        "[Terminal] Remote viewer activity via {Trigger} - disconnecting local viewer",
+                        "[Terminal] Remote viewer authorized via {Trigger} - disconnecting local viewer",
                         trigger);
-                    _ = DisconnectLocalViewerAsync("Session taken over by remote viewer");
-                }
-
-                remoteConn.OnReplayRequested += () =>
-                {
-                    DisconnectLocalViewerOnRemoteActivity("replay");
-                };
-                // Some relay paths (for example Codex remote attach) send Ctrl+L
-                // instead of __replay__ when the browser connects.
-                remoteConn.OnInputReceived += _ =>
-                {
-                    DisconnectLocalViewerOnRemoteActivity("input");
-                };
-                remoteConn.OnBrowserDisconnected += () =>
-                {
-                    Interlocked.Exchange(ref remoteViewerActive, 0);
-                };
-            }
+                    return DisconnectLocalViewerAsync("Session taken over by remote viewer");
+                });
 
             // Subscribe to terminal exit event
             terminal.Exited += async (sender, exitCode) =>
