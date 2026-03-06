@@ -261,6 +261,44 @@ class TerminalTab {
         this.sendResizeToPty({ force: true });
     }
 
+    applyFontSize(size) {
+        if (!this.vibeTerminal) {
+            return;
+        }
+
+        const shouldReseedDisplay = this.isActive && this.hasOpenSocket();
+        if (shouldReseedDisplay) {
+            this.vibeTerminal.resetDisplayOnly();
+            this.lastResizeSignature = null;
+        }
+
+        this.vibeTerminal.setFontSize(size, { fit: false });
+
+        if (this.isActive) {
+            this.fitAndSyncTerminal();
+            this.scheduleFitPasses();
+        }
+    }
+
+    applyFontFamily(family) {
+        if (!this.vibeTerminal) {
+            return;
+        }
+
+        const shouldReseedDisplay = this.isActive && this.hasOpenSocket();
+        if (shouldReseedDisplay) {
+            this.vibeTerminal.resetDisplayOnly();
+            this.lastResizeSignature = null;
+        }
+
+        this.vibeTerminal.setFontFamily(family, { fit: false });
+
+        if (this.isActive) {
+            this.fitAndSyncTerminal();
+            this.scheduleFitPasses();
+        }
+    }
+
     scheduleFitPasses() {
         if (!this.vibeTerminal || !this.isActive) {
             return;
@@ -1858,7 +1896,7 @@ class TerminalManager {
         if (this.fontSizeLabel) this.fontSizeLabel.textContent = next;
         const sizeInput = this.container.querySelector('#terminal-settings-font-size');
         if (sizeInput) sizeInput.value = next;
-        this.tabs.forEach((tab) => tab.instance.vibeTerminal?.setFontSize(next));
+        this.tabs.forEach((tab) => tab.instance.applyFontSize(next));
     }
 
     // -------------------------------------------------------------------------
@@ -1940,10 +1978,7 @@ class TerminalManager {
     applyFontFamily(family) {
         try { localStorage.setItem('viberails_terminal_fontFamily', family); } catch {}
         this.tabs.forEach((tab) => {
-            if (tab.instance.vibeTerminal?._terminal) {
-                tab.instance.vibeTerminal._terminal.options.fontFamily = family;
-                tab.instance.vibeTerminal._fitAddon?.fit();
-            }
+            tab.instance.applyFontFamily(family);
         });
     }
 
