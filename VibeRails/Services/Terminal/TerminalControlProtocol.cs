@@ -18,6 +18,7 @@ internal static class TerminalControlProtocol
     // PIN challenge protocol — sent as plain text (not __cmd__:) to keep it simple
     // and match the remote app's expected message format.
     public const string Locked = "__LOCKED__";
+    public const string Unlocked = "__UNLOCKED__";
     public const string PinResponse = "__PIN__:";
 
     public static string BuildDisconnectBrowserCommand(string reason)
