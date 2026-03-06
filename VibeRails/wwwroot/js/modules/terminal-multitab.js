@@ -631,9 +631,11 @@ class TerminalManager {
         });
 
         this.tabSelect?.addEventListener('click', () => {
-            if (this.headerSelect) {
-                this.headerSelect.focus();
-            }
+            const active = this.getActiveTab();
+            this.openSelectionPicker({
+                triggerElement: !active?.state?.selection ? this.tabSelect : null,
+                animate: !active?.state?.selection
+            });
         });
 
         this.headerSelect?.addEventListener('change', (e) => {
@@ -740,12 +742,9 @@ class TerminalManager {
         button.title = state.label;
         button.addEventListener('click', () => {
             if (!state.selection && !state.hasActiveSession) {
-                void this.activateTab(state.id, { connectIfNeeded: false });
-                if (this.headerSelect) {
-                    this.headerSelect.focus();
-                } else if (this.tabSelect) {
-                    this.tabSelect.focus();
-                }
+                void this.activateTab(state.id, { connectIfNeeded: false }).then(() => {
+                    this.showSelectionRequiredFeedback(this.tabSelect || this.startBtn || button);
+                });
                 return;
             }
             void this.activateTab(state.id, { connectIfNeeded: true });
@@ -926,11 +925,7 @@ class TerminalManager {
 
         const meta = this.getSelectionMeta(tab.state.selection);
         if (!meta.cli) {
-            if (this.headerSelect) {
-                this.headerSelect.focus();
-            } else if (this.tabSelect) {
-                this.tabSelect.focus();
-            }
+            this.showSelectionRequiredFeedback(this.startBtn || this.tabSelect);
             return;
         }
 
@@ -1071,11 +1066,7 @@ class TerminalManager {
         }
 
         if (!tab?.state.selection) {
-            if (this.headerSelect) {
-                this.headerSelect.focus();
-            } else if (this.tabSelect) {
-                this.tabSelect.focus();
-            }
+            this.showSelectionRequiredFeedback(this.startBtn || this.tabSelect);
             return;
         }
 
@@ -1340,6 +1331,50 @@ class TerminalManager {
                 optgroup.appendChild(opt);
             });
             this.headerSelect.appendChild(optgroup);
+        });
+    }
+
+    openSelectionPicker(options = {}) {
+        const selectEl = this.headerSelect;
+        if (!selectEl || selectEl.disabled) {
+            return;
+        }
+
+        const triggerElement = options.triggerElement || null;
+        if (options.animate === true) {
+            [triggerElement, selectEl].filter(Boolean).forEach((el) => {
+                el.classList.remove('terminal-selection-shake');
+                // Force reflow so repeated clicks replay the animation.
+                void el.offsetWidth;
+                el.classList.add('terminal-selection-shake');
+            });
+        }
+
+        selectEl.focus();
+        if (typeof selectEl.showPicker === 'function') {
+            try {
+                selectEl.showPicker();
+                return;
+            } catch {
+                // Fallback below.
+            }
+        }
+
+        try {
+            selectEl.click();
+            selectEl.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'ArrowDown',
+                bubbles: true
+            }));
+        } catch {
+            // no-op
+        }
+    }
+
+    showSelectionRequiredFeedback(triggerElement = null) {
+        this.openSelectionPicker({
+            triggerElement,
+            animate: true
         });
     }
 
