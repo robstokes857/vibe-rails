@@ -310,6 +310,12 @@ code {
     transition: all 0.2s ease;
 }
 
+.quick-launch-card.quick-launch-card-vscode {
+    flex: 0.78 1 128px;
+    min-width: 128px;
+    max-width: 136px;
+}
+
 .quick-launch-card:hover {
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(59, 130, 246, 0.3);
