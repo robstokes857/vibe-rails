@@ -1,7 +1,7 @@
 # Terminal Service
 
 Current implementation reference for `VibeRails/Services/Terminal`.
-Verified against source on 2026-02-14.
+Verified against source on 2026-03-05.
 
 ## Scope
 This folder owns PTY lifecycle, session tracking hooks, local WebSocket viewer handling, and remote relay integration.
@@ -19,7 +19,7 @@ Primary files:
 
 Related routes/UI:
 - `Routes/TerminalRoutes.cs`
-- `wwwroot/js/modules/terminal-controller.js`
+- `wwwroot/js/modules/terminal-multitab.js`
 
 Remote relay server (other repo):
 - `C:\source\VibeRailsFrontEnd\VibeRails-Front\VibeRails-Front`
@@ -118,7 +118,7 @@ Session orchestrator.
 
 `RunCliWithWebAsync(...)`
 - Same as `RunCliAsync` plus external registration for local web viewer access.
-- If remote connection exists, `OnReplayRequested` disconnects local viewer.
+- If remote connection exists, remote takeover disconnects local viewer on replay or remote input activity.
 
 ### `TerminalSessionService.cs`
 Owns active local terminal session state for `/api/v1/terminal/*`.
@@ -127,6 +127,8 @@ Shared static fields (single active session model):
 - `s_terminal`
 - `s_sessionId`
 - `s_activeWebSocket` (current local viewer)
+- `s_sessionOwnerId` (lifecycle owner while session is active)
+- `s_activeCli` (used for reconnect behavior decisions, e.g. Codex replay)
 - `s_externallyOwned` (CLI-owned session flag)
 
 Key behavior:
@@ -136,15 +138,19 @@ Key behavior:
   1. validates active terminal
   2. local takeover: closes previous local viewer socket
   3. requests remote viewer disconnect (`RequestRemoteViewerDisconnectAsync`)
-  4. sends replay buffer to new local viewer
+  4. reconnect bootstrap:
+     - non-Codex: sends replay buffer to new local viewer
+     - Codex: skips replay and requests PTY redraw (`Ctrl+L`)
   5. subscribes `WebSocketConsumer`
   6. runs input loop (supports fragmentation, size guard, resize control) and routes user input through `TerminalIoRouter`
 - `DisconnectLocalViewerAsync(reason)` closes local viewer with provided reason.
 - `StopSessionAsync` is blocked for externally owned sessions.
 
 Important current behavior:
-- No forced Ctrl+L redraw after replay.
+- No forced Ctrl+L redraw after replay in non-Codex reconnect paths.
+- Codex local reconnect intentionally uses redraw instead of replay to avoid duplicated/garbled TUI state.
 - Local reconnect/takeover does not dispose PTY.
+- Session activity acquires a lifecycle owner so idle local-browser watchdog does not terminate active remote sessions.
 
 ### `TerminalStateService.cs`
 DB/session state + remote connection bookkeeping.
@@ -244,17 +250,18 @@ From `Routes/TerminalRoutes.cs`:
 - relay closes remote browser WebSocket.
 
 3. Remote viewer connects while local viewer is active:
-- relay sends `__replay__` to CLI.
-- replay handler disconnects local viewer with reason `Session taken over by remote viewer`.
+- relay may send `__replay__` OR input activity (for example Codex attach path using `Ctrl+L`).
+- local side disconnects local viewer on first remote takeover signal with reason `Session taken over by remote viewer`.
 
 4. Remote viewer A -> remote viewer B:
 - relay service enforces one browser per session and closes old browser.
 
 ## Frontend Notes (local web UI)
-`wwwroot/js/modules/terminal-controller.js`:
+`wwwroot/js/modules/terminal-multitab.js`:
 - xterm.js with FitAddon
 - WebSocket binary mode (`arraybuffer`)
 - sends resize control `__resize__:{cols},{rows}` after fit and on resize
+- de-dupes identical resize frames to reduce redraw churn/cursor jitter
 - displays close reason in terminal
 
 ## Known Constraints
@@ -267,8 +274,29 @@ From `Routes/TerminalRoutes.cs`:
 ## Common Failure Points
 1. Concurrent `SendAsync` on same WebSocket (avoided by channel-backed send loops).
 2. Shared buffer reuse corruption (avoided by copying before async send queueing).
-3. Reconnect duplication if replay + redraw are both forced (current code avoids redraw force).
+3. Codex reconnect duplication from replaying partial TUI state (mitigated by redraw-first local reconnect path).
 4. Oversized control/input payloads (guarded at 256KB).
+
+## Regression Notes (2026-03)
+These issues regressed in production-like usage and should be treated as guardrails:
+
+1. **Remote session looked random/disconnected**
+- Symptom: remote terminal would drop after a while, often around idle periods.
+- Root cause: local-owner lifecycle watchdog could stop the parent process when no local browser owners existed; tab child processes then exited via parent watchdog.
+- Fixes:
+  - `TerminalTabHostService` acquires a lifecycle owner while at least one tab child exists.
+  - `TerminalSessionService` acquires a lifecycle owner while an active terminal session exists.
+- Log signatures:
+  - `[Lifecycle] No active local browser/terminal owner for 120s. Stopping process ...`
+  - `[ParentWatchdog] Parent process ... exited. Stopping process ...`
+
+2. **Codex showed doubled/duplicated UI blocks**
+- Symptom: repeated Codex welcome card/prompt after reconnect/takeover sequences.
+- Root cause: replaying partial Codex TUI state can conflict with redraw-based attach behavior.
+- Fix:
+  - local reconnect path skips replay for Codex and requests redraw (`Ctrl+L`) after WebSocket consumer subscription.
+- Guardrail:
+  - if reconnect policy changes, re-test Codex with local reconnect + remote takeover sequences.
 
 ## If You Modify This Area
 1. Update both control protocol helpers if command names or parsing rules change:
@@ -281,3 +309,5 @@ From `Routes/TerminalRoutes.cs`:
    - local takeover from remote
    - remote takeover from local
    - resize sync in both viewers
+   - remote-only session survives beyond 120s with no local browser connected
+   - Codex local reconnect does not show duplicated welcome/prompt blocks
