@@ -705,9 +705,16 @@ button:hover .card-nav-cog {
 .btn {
     border-radius: var(--border-radius);
     padding: 0.65rem 1.5rem;
-    font-weight: 600;
+    font-weight: 500; /* Slightly lighter weight for 'toned down' look */
     transition: all var(--transition-speed);
-    border: 2px solid transparent;
+    border: 1px solid transparent; /* Changed from 2px to 1px for cleaner look */
+    letter-spacing: 0.02em;
+}
+
+.btn-sm {
+    padding: 0.45rem 1rem; /* Slightly larger than standard bootstrap sm for 'bigger' feel */
+    font-size: 0.8rem;
+    border-radius: 4px;
 }
 
 /* Make button icons visibly larger without affecting surrounding text */
@@ -717,9 +724,9 @@ button:hover .card-nav-cog {
 .app-subnav-link .icon-light,
 .btn .menu-icon,
 .app-subnav-link .menu-icon {
-    width: 1rem !important;
-    height: 1rem !important;
-    font-size: 1rem !important;
+    width: 0.95rem !important; /* Slightly smaller icon for cleaner look */
+    height: 0.95rem !important;
+    font-size: 0.95rem !important;
     flex-shrink: 0;
 }
 
@@ -733,12 +740,12 @@ button:hover .card-nav-cog {
 .btn-primary:focus {
     background-color: var(--color-primary-dark);
     border-color: var(--color-primary-dark);
-    box-shadow: 0 4px 12px rgba(91, 42, 134, 0.4);
+    box-shadow: 0 4px 10px rgba(59, 130, 246, 0.25);
 }
 
 .btn-secondary {
     background-color: var(--color-bg-surface);
-    border: 2px solid var(--color-border);
+    border: 1px solid var(--color-border);
     color: var(--color-text);
 }
 
@@ -749,28 +756,28 @@ button:hover .card-nav-cog {
 }
 
 .btn-outline-secondary {
-    border: 2px solid var(--color-border);
+    border: 1px solid var(--color-border);
     color: var(--color-text-muted);
     background: transparent;
 }
 
 .btn-outline-secondary:hover {
-    background: var(--color-bg-surface);
+    background: rgba(255, 255, 255, 0.05);
     color: var(--color-text);
     border-color: var(--color-text-muted);
 }
 
 .btn-outline-primary {
-    border: 2px solid var(--color-primary);
+    border: 1px solid var(--color-primary);
     color: var(--color-primary);
     background: transparent;
-    font-weight: 600;
+    font-weight: 500;
 }
 
 .btn-outline-primary:hover {
-    background: var(--color-primary);
-    color: #fff;
-    border-color: var(--color-primary-dark);
+    background: rgba(59, 130, 246, 0.1); /* Subtle background instead of full color */
+    color: var(--color-primary);
+    border-color: var(--color-primary);
 }
 
 .btn-outline-primary:focus,
@@ -778,19 +785,18 @@ button:hover .card-nav-cog {
     color: #fff;
     border-color: var(--color-primary-dark);
     background: var(--color-primary-dark);
-    box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.25);
 }
 
 .btn-outline-success {
-    border: 2px solid var(--color-success);
+    border: 1px solid var(--color-success);
     color: var(--color-success);
     background: transparent;
-    font-weight: 600;
+    font-weight: 500;
 }
 
 .btn-outline-success:hover {
-    color: #ffffff;
-    background: var(--color-success);
+    color: var(--color-success);
+    background: rgba(16, 185, 129, 0.1); /* Subtle background */
     border-color: var(--color-success);
 }
 
@@ -799,21 +805,19 @@ button:hover .card-nav-cog {
     color: #ffffff;
     background: #059669;
     border-color: #059669;
-    box-shadow: 0 0 0 0.2rem rgba(16, 185, 129, 0.25);
 }
 
 .btn-outline-danger {
-    border: 2px solid var(--color-danger);
+    border: 1px solid var(--color-danger);
     color: var(--color-danger);
     background: transparent;
-    font-weight: 600;
+    font-weight: 500;
 }
 
 .btn-outline-danger:hover {
-    color: #ffffff;
-    background: var(--color-danger);
+    color: var(--color-danger);
+    background: rgba(239, 68, 68, 0.1); /* Subtle background */
     border-color: var(--color-danger);
-    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
 }
 
 .btn-outline-danger:focus,
@@ -821,12 +825,11 @@ button:hover .card-nav-cog {
     color: #ffffff;
     background: #dc2626;
     border-color: #dc2626;
-    box-shadow: 0 0 0 0.2rem rgba(239, 68, 68, 0.25);
 }
 
 .btn-danger {
     background-color: #ef4444;
-    border: 2px solid #ef4444;
+    border: 1px solid #ef4444;
     color: #ffffff;
 }
 
@@ -834,19 +837,18 @@ button:hover .card-nav-cog {
 .btn-danger:focus {
     background-color: #dc2626;
     border-color: #dc2626;
-    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
 }
 
 .btn-outline-warning {
-    border: 2px solid var(--color-warning);
+    border: 1px solid var(--color-warning);
     color: var(--color-warning);
     background: transparent;
-    font-weight: 600;
+    font-weight: 500;
 }
 
 .btn-outline-warning:hover {
-    color: #fff;
-    background: var(--color-warning);
+    color: var(--color-warning);
+    background: rgba(245, 158, 11, 0.1);
     border-color: var(--color-warning);
     box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
 }
@@ -966,34 +968,34 @@ button:hover .card-nav-cog {
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: var(--border-radius);
-    margin-bottom: 0.35rem;
-    padding: 0.5rem 0.6rem;
+    margin-bottom: 0.4rem;
+    padding: 0.75rem 0.85rem;
     transition: all var(--transition-speed);
 }
 
 .sandbox-item-card:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(59, 130, 246, 0.3);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(59, 130, 246, 0.2);
 }
 
 .sandbox-item-header {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.4rem;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
 }
 
 .sandbox-item-info {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.5rem;
     flex: 1;
     min-width: 0;
 }
 
 .sandbox-item-name {
-    font-weight: 600;
-    font-size: 0.78rem;
+    font-weight: 700;
+    font-size: 0.85rem;
     color: var(--color-text);
     white-space: nowrap;
     overflow: hidden;
@@ -1001,20 +1003,21 @@ button:hover .card-nav-cog {
 }
 
 .sandbox-item-branch {
-    font-size: 0.6rem;
+    font-size: 0.65rem;
     color: var(--color-primary);
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid rgba(59, 130, 246, 0.2);
-    border-radius: 3px;
-    padding: 0.05rem 0.35rem;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.15);
+    border-radius: 4px;
+    padding: 0.1rem 0.45rem;
     white-space: nowrap;
     flex-shrink: 0;
+    font-weight: 500;
 }
 
 .sandbox-item-time {
-    font-size: 0.6rem;
+    font-size: 0.65rem;
     color: var(--color-text-muted);
-    opacity: 0.5;
+    opacity: 0.6;
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -1023,28 +1026,29 @@ button:hover .card-nav-cog {
     background: none;
     border: none;
     color: var(--color-text-muted);
-    opacity: 0;
-    padding: 0.2rem;
+    opacity: 0.3;
+    padding: 0.25rem;
     cursor: pointer;
     transition: all 0.15s;
     flex-shrink: 0;
     line-height: 1;
-}
-
-.sandbox-item-card:hover .sandbox-item-delete {
-    opacity: 0.4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .sandbox-item-delete:hover {
     opacity: 1 !important;
     color: var(--color-danger);
+    background: rgba(239, 68, 68, 0.1);
+    border-radius: 4px;
 }
 
 /* Actions row */
 .sandbox-item-actions {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.5rem;
     flex-wrap: wrap;
 }
 
@@ -1055,83 +1059,31 @@ button:hover .card-nav-cog {
 }
 
 .sandbox-action-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    background: none;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 3px;
-    color: var(--color-text-muted);
-    font-size: 0.65rem;
-    padding: 0.2rem 0.4rem;
-    cursor: pointer;
-    transition: all 0.15s;
-    white-space: nowrap;
-}
-
-.sandbox-action-btn:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: var(--color-text);
+    display: none; /* Removed in favor of standard btn classes */
 }
 
 /* Launch group */
 .sandbox-item-launch {
     display: flex;
     align-items: center;
-    gap: 0.25rem;
-    margin-left: auto;
+    gap: 0.5rem;
 }
 
 .sandbox-item-cli-select {
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 3px;
+    background-color: var(--color-bg-base);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
     color: var(--color-text);
-    font-size: 0.65rem;
-    padding: 0.2rem 1.2rem 0.2rem 0.35rem;
+    font-size: 0.75rem;
+    padding: 0.35rem 0.5rem;
     height: auto;
     cursor: pointer;
-    appearance: auto;
 }
 
 .sandbox-launch-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.2rem;
-    border: 1px solid;
-    border-radius: 3px;
-    font-size: 0.62rem;
-    font-weight: 600;
-    padding: 0.2rem 0.4rem;
-    cursor: pointer;
-    transition: all 0.15s;
-    white-space: nowrap;
+    display: none; /* Removed in favor of standard btn classes */
 }
 
-.sandbox-launch-btn--native {
-    background: rgba(100, 116, 139, 0.1);
-    border-color: rgba(100, 116, 139, 0.25);
-    color: var(--color-secondary);
-}
-
-.sandbox-launch-btn--native:hover {
-    background: rgba(100, 116, 139, 0.2);
-    border-color: rgba(100, 116, 139, 0.4);
-    color: var(--color-text);
-}
-
-.sandbox-launch-btn--web {
-    background: rgba(16, 185, 129, 0.1);
-    border-color: rgba(16, 185, 129, 0.25);
-    color: var(--color-success);
-}
-
-.sandbox-launch-btn--web:hover {
-    background: rgba(16, 185, 129, 0.2);
-    border-color: rgba(16, 185, 129, 0.4);
-    color: #34d399;
-}
 
 .project-logo-wrapper {
     width: 56px;
@@ -3354,22 +3306,22 @@ input.form-control:disabled {
 .swarm-submit-btn {
     min-height: 40px;
     padding: 0.5rem 1.05rem;
-    font-weight: 700;
+    font-weight: 600;
 }
 
 .swarm-error {
-    border: 1px solid rgba(239, 68, 68, 0.7);
-    background: rgba(239, 68, 68, 0.12);
-    color: #fda4af;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: rgba(239, 68, 68, 0.05);
+    color: #fca5a5;
     border-radius: 8px;
-    padding: 0.75rem 0.85rem;
-    font-size: 0.85rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.8rem;
 }
 
 .swarm-preview {
     border: 1px solid var(--color-border);
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.01);
     padding: 1rem;
 }
 
@@ -3385,7 +3337,7 @@ input.form-control:disabled {
     display: flex;
     gap: 0.75rem;
     align-items: flex-start;
-    background: rgba(0, 0, 0, 0.2);
+    background: rgba(0, 0, 0, 0.15);
     border: 1px solid var(--color-border);
     border-radius: 8px;
     padding: 0.65rem 0.75rem;
@@ -3393,14 +3345,14 @@ input.form-control:disabled {
 
 .swarm-preview-step-num {
     color: var(--color-primary);
-    font-weight: 800;
+    font-weight: 700;
     min-width: 16px;
     font-size: 0.8rem;
 }
 
 .swarm-preview-step-name {
     font-size: 0.88rem;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--color-text);
 }
 
@@ -3411,7 +3363,7 @@ input.form-control:disabled {
 
 .swarm-raw-json {
     margin: 0;
-    background: rgba(0, 0, 0, 0.28);
+    background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--color-border);
     border-radius: 8px;
     color: #9dd6ff;
@@ -3427,7 +3379,7 @@ input.form-control:disabled {
 }
 
 .swarm-terminal-card {
-    border-color: rgba(59, 130, 246, 0.35);
+    border-color: rgba(59, 130, 246, 0.2);
     overflow: hidden;
 }
 
@@ -3440,10 +3392,10 @@ input.form-control:disabled {
 
 .swarm-progress-card {
     border: 1px solid var(--color-border);
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.01);
     border-radius: 12px;
-    padding: 1rem;
-    margin-bottom: 1.5rem;
+    padding: 1.25rem;
+    margin-bottom: 2rem;
 }
 
 .swarm-progress-header {
@@ -3458,28 +3410,28 @@ input.form-control:disabled {
     text-transform: uppercase;
     font-size: 0.7rem;
     letter-spacing: 0.08em;
-    font-weight: 700;
+    font-weight: 600;
 }
 
 .swarm-progress-value {
     color: var(--color-primary);
     font-size: 1.2rem;
-    font-weight: 800;
+    font-weight: 700;
 }
 
 .swarm-progress-track {
     width: 100%;
-    height: 8px;
+    height: 6px;
     border-radius: 999px;
-    background: rgba(0, 0, 0, 0.35);
+    background: rgba(255, 255, 255, 0.05);
     overflow: hidden;
 }
 
 .swarm-progress-fill {
     height: 100%;
     border-radius: 999px;
-    background: linear-gradient(90deg, var(--color-primary), var(--color-success));
-    transition: width 0.35s ease;
+    background: var(--color-primary);
+    transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .swarm-steps-container {
@@ -3495,8 +3447,8 @@ input.form-control:disabled {
     left: 16px;
     top: 0;
     bottom: 0;
-    width: 2px;
-    background: rgba(255, 255, 255, 0.1);
+    width: 1px;
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .swarm-step {
@@ -3508,47 +3460,52 @@ input.form-control:disabled {
     position: absolute;
     left: 0;
     top: 14px;
-    width: 34px;
-    height: 34px;
-    border-radius: 999px;
-    border: 2px solid var(--color-border);
-    background: var(--color-bg-surface);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-base);
     color: var(--color-text-muted);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.75rem;
-    font-weight: 800;
+    font-size: 0.7rem;
+    font-weight: 700;
     z-index: 2;
     cursor: grab;
 }
 
 .swarm-step.completed .swarm-step-marker {
-    color: #fff;
-    border-color: var(--color-success);
-    background: var(--color-success);
+    color: var(--color-success);
+    border-color: rgba(16, 185, 129, 0.3);
+    background: rgba(16, 185, 129, 0.05);
 }
 
 .swarm-step-card {
     border: 1px solid var(--color-border);
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
     overflow: hidden;
     transition: all 0.2s ease;
 }
 
-
+.swarm-step-card:hover {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+}
 
 .swarm-step-header {
-    padding: 1rem;
+    padding: 0.85rem 1rem;
     display: flex;
     justify-content: space-between;
     gap: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .swarm-step-title {
-    font-weight: 700;
-    margin-bottom: 0.2rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 0.1rem;
 }
 
 .swarm-step-drag-handle {
@@ -3559,13 +3516,13 @@ input.form-control:disabled {
     height: 18px;
     border-radius: 4px;
     color: var(--color-text-muted);
-    opacity: 0.75;
+    opacity: 0.5;
     cursor: grab;
-    transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+    transition: all 0.15s ease;
 }
 
 .swarm-step-drag-handle:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.05);
     color: var(--color-text);
     opacity: 1;
 }
@@ -3576,7 +3533,8 @@ input.form-control:disabled {
 
 .swarm-step-desc {
     color: var(--color-text-muted);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
+    opacity: 0.8;
 }
 
 
@@ -3594,7 +3552,7 @@ input.form-control:disabled {
 }
 
 .swarm-step-body-inner {
-    padding: 0 1rem 1rem;
+    padding: 1rem;
 }
 
 .swarm-groups-grid {
@@ -3604,10 +3562,10 @@ input.form-control:disabled {
 }
 
 .swarm-group {
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.2);
-    padding: 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.1);
+    padding: 1rem;
 }
 
 .swarm-group-header {
@@ -3617,20 +3575,21 @@ input.form-control:disabled {
 }
 
 .swarm-group-dot {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     border-radius: 999px;
 }
 
 .swarm-group-name {
-    font-size: 0.9rem;
-    font-weight: 700;
+    font-size: 0.85rem;
+    font-weight: 600;
 }
 
 .swarm-group-desc {
-    font-size: 0.76rem;
+    font-size: 0.75rem;
     color: var(--color-text-muted);
-    margin: 0.35rem 0 0.75rem 0;
+    margin: 0.25rem 0 0.75rem 0;
+    opacity: 0.8;
 }
 
 .swarm-task-list {
@@ -3640,19 +3599,19 @@ input.form-control:disabled {
 }
 
 .swarm-task {
-    border: 1px solid var(--color-border);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    padding: 0.55rem 0.65rem;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.01);
+    padding: 0.75rem 1rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 0.6rem;
+    gap: 1rem;
 }
 
 .swarm-task.started {
-    border-color: rgba(59, 130, 246, 0.65);
-    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.25);
+    background: rgba(59, 130, 246, 0.03);
 }
 
 .swarm-task-info {
@@ -3662,40 +3621,40 @@ input.form-control:disabled {
 
 .swarm-task-name {
     font-size: 0.82rem;
-    font-weight: 700;
-    margin-bottom: 5px;
+    font-weight: 600;
+    margin-bottom: 4px;
 }
 
 .swarm-task-info {
-    padding: 4px 2px;
+    padding: 2px 0;
 }
 
 .swarm-task-desc {
-    font-size: 0.88rem;
+    font-size: 0.82rem;
     color: var(--color-text-muted);
-    background: var(--color-bg-subtle, rgba(255,255,255,0.04));
+    background: rgba(0, 0, 0, 0.1);
     border: 1px solid var(--color-border);
-    border-radius: 8px;
+    border-radius: 6px;
     outline: none;
     resize: vertical;
     width: 100%;
-    min-height: 116px;
-    padding: 0.7rem 0.8rem;
+    min-height: 100px;
+    padding: 0.75rem;
     font-family: inherit;
     line-height: 1.5;
-    transition: border-color 0.15s, background 0.15s;
+    transition: all 0.2s;
     cursor: text;
 }
 
 .swarm-task-desc:hover {
-    border-color: var(--color-primary);
+    border-color: rgba(255, 255, 255, 0.15);
 }
 
 .swarm-task-desc:focus {
     border-color: var(--color-primary);
-    background: var(--color-bg-input, rgba(255,255,255,0.07));
+    background: rgba(0, 0, 0, 0.15);
     color: var(--color-text);
-    box-shadow: 0 0 0 0.18rem rgba(59, 130, 246, 0.15);
+    box-shadow: 0 0 0 1px var(--color-primary);
 }
 
 .swarm-task-controls {
@@ -3706,37 +3665,27 @@ input.form-control:disabled {
 }
 
 .swarm-task-select {
-    background-color: #11111b;
-    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%239ac6c5' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
-    background-repeat: no-repeat;
-    background-position: right 0.6rem center;
-    background-size: 16px 12px;
-    appearance: none;
-    color: #cdd6f4;
-    border: 1px solid var(--terminal-accent);
+    background-color: var(--color-bg-base);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
     border-radius: 6px;
-    font-size: 0.84rem;
-    padding: 0.45rem 2rem 0.45rem 0.6rem;
-    min-width: 230px;
-    min-height: 38px;
+    font-size: 0.8rem;
+    padding: 0.45rem 0.75rem;
+    min-width: 200px;
 }
 
 .swarm-task-select:hover {
-    border-color: #cdd6f4;
-    background-color: rgba(154, 198, 197, 0.06);
+    border-color: rgba(255, 255, 255, 0.15);
 }
 
 .swarm-task-select:focus {
-    background-color: #11111b;
-    border-color: var(--terminal-accent);
-    box-shadow: 0 0 0 0.15rem rgba(154, 198, 197, 0.25);
-    color: #cdd6f4;
+    border-color: var(--color-primary);
     outline: none;
 }
 
 .swarm-task-select option {
-    background-color: #11111b;
-    color: #cdd6f4;
+    background-color: var(--color-bg-base);
+    color: var(--color-text);
 }
 
 .swarm-step-action-btn {
@@ -3744,28 +3693,28 @@ input.form-control:disabled {
     align-items: center;
     justify-content: center;
     gap: 0.45rem;
-    min-height: 38px;
-    padding: 0.5rem 0.88rem;
-    border-radius: 8px;
+    min-height: 36px;
+    padding: 0.45rem 1rem;
+    border-radius: 6px;
     font-size: 0.8rem;
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1;
 }
 
 .swarm-task-start {
     border: 1px solid var(--color-border);
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--color-text);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--color-text-muted);
     white-space: nowrap;
 }
 
 .swarm-task-start:hover:not(:disabled) {
     border-color: var(--color-primary);
-    color: #9dd6ff;
+    color: var(--color-primary);
 }
 
 .swarm-task-start:disabled {
-    opacity: 0.55;
+    opacity: 0.5;
     cursor: not-allowed;
 }
 
@@ -3814,39 +3763,39 @@ input.form-control:disabled {
     gap: 4px;
     padding: 3px 8px;
     font-size: 0.72rem;
-    border-radius: 5px;
+    border-radius: 4px;
     border: 1px solid transparent;
     cursor: pointer;
     background: transparent;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    transition: all 0.15s;
     line-height: 1;
 }
 
 .swarm-icon-btn-add {
-    color: var(--color-accent, #6366f1);
-    border-color: rgba(99, 102, 241, 0.3);
+    color: var(--color-primary);
+    border-color: rgba(59, 130, 246, 0.2);
 }
 
 .swarm-icon-btn-add:hover {
-    background: rgba(99, 102, 241, 0.12);
-    border-color: var(--color-accent, #6366f1);
+    background: rgba(59, 130, 246, 0.05);
+    border-color: var(--color-primary);
 }
 
 .swarm-icon-btn-delete {
     color: var(--color-text-muted);
-    border-color: transparent;
+    opacity: 0.6;
 }
 
 .swarm-icon-btn-delete:hover {
-    color: #f87171;
-    border-color: rgba(248, 113, 113, 0.3);
-    background: rgba(248, 113, 113, 0.08);
+    color: var(--color-danger);
+    opacity: 1;
+    background: rgba(239, 68, 68, 0.05);
 }
 
 .swarm-add-step-row {
     display: flex;
     justify-content: center;
-    padding: 12px 0 4px;
+    padding: 12px 0;
 }
 
 .swarm-add-step-btn {
@@ -3864,7 +3813,7 @@ input.form-control:disabled {
 .swarm-drag-handle-group {
     cursor: grab;
     color: var(--color-text-muted);
-    opacity: 0.35;
+    opacity: 0.3;
     font-size: 1rem;
     line-height: 1;
     padding: 0 4px;
@@ -3875,7 +3824,7 @@ input.form-control:disabled {
 
 .swarm-drag-handle:hover,
 .swarm-drag-handle-group:hover {
-    opacity: 0.8;
+    opacity: 0.6;
 }
 
 .swarm-drag-handle:active,
@@ -3884,12 +3833,12 @@ input.form-control:disabled {
 }
 
 .swarm-drag-ghost {
-    opacity: 0.4;
-    border: 1px dashed var(--color-accent, #6366f1) !important;
+    opacity: 0.3;
+    border: 1px dashed var(--color-primary) !important;
 }
 
 .swarm-drag-chosen {
-    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 
 .swarm-dragging {
@@ -3901,24 +3850,30 @@ input.form-control:disabled {
 }
 
 .swarm-btn {
-    border-radius: 8px;
-    font-size: 0.82rem;
-    font-weight: 700;
-    padding: 0.55rem 0.9rem;
-    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.5rem 1.25rem;
+    letter-spacing: 0.02em;
 }
 
 .swarm-btn-back {
     color: var(--color-text-muted);
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(255, 255, 255, 0.02);
     border-color: var(--color-border);
 }
 
 .swarm-btn-start-all {
-    color: #9dd6ff;
-    background: rgba(59, 130, 246, 0.15);
-    border-color: rgba(59, 130, 246, 0.35);
+    color: var(--color-primary);
+    background: rgba(59, 130, 246, 0.08);
+    border-color: rgba(59, 130, 246, 0.2);
     flex: 1;
+}
+
+.swarm-btn-start-all:hover {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: var(--color-primary);
+    color: #fff;
 }
 
 .swarm-btn-next {
@@ -3934,10 +3889,10 @@ input.form-control:disabled {
 
 .swarm-complete-banner {
     margin-top: 1rem;
-    border: 1px solid rgba(16, 185, 129, 0.6);
-    background: rgba(16, 185, 129, 0.13);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    background: rgba(16, 185, 129, 0.05);
     border-radius: 10px;
-    padding: 0.8rem 0.9rem;
+    padding: 0.8rem 1rem;
     display: none;
 }
 
@@ -3951,8 +3906,8 @@ input.form-control:disabled {
     justify-content: center;
     gap: 0.5rem;
     font-size: 0.85rem;
-    font-weight: 700;
-    color: #6ee7b7;
+    font-weight: 600;
+    color: var(--color-success);
 }
 
 
@@ -3985,3 +3940,4 @@ input.form-control:disabled {
         width: 100%;
     }
 }
+
