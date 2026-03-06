@@ -84,17 +84,33 @@ export class EnvironmentController {
                 const resolveCli = (el) => {
                     const row = el.closest('tr');
                     const select = row.querySelector('[data-sb-cli-select]');
-                    return this.app.dashboardController.parseSandboxCliSelection(select);
+                    const selection = this.app.dashboardController.parseSandboxCliSelection(select);
+                    
+                    if (!selection) {
+                        select.classList.remove('terminal-selection-shake');
+                        void select.offsetWidth;
+                        select.classList.add('terminal-selection-shake');
+                        select.focus();
+                        if (typeof select.showPicker === 'function') {
+                            try { select.showPicker(); } catch {}
+                        }
+                        return null;
+                    }
+                    return selection;
                 };
 
                 this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-launch-cli"]', (el) => {
-                    const { cli, environmentName } = resolveCli(el);
-                    this.app.sandboxController.launchInExternalTerminal(el.dataset.sbId, el.dataset.sbName, cli, environmentName);
+                    const selection = resolveCli(el);
+                    if (selection) {
+                        this.app.sandboxController.launchInExternalTerminal(el.dataset.sbId, el.dataset.sbName, selection.cli, selection.environmentName);
+                    }
                 });
 
                 this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-launch-web"]', (el) => {
-                    const { cli, environmentName } = resolveCli(el);
-                    this.app.sandboxController.launchInWebUI(el.dataset.sbId, el.dataset.sbName, cli, environmentName);
+                    const selection = resolveCli(el);
+                    if (selection) {
+                        this.app.sandboxController.launchInWebUI(el.dataset.sbId, el.dataset.sbName, selection.cli, selection.environmentName);
+                    }
                 });
             }
         }
