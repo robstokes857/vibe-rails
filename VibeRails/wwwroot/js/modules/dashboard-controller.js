@@ -424,7 +424,7 @@ export class DashboardController {
         const environments = this.app.data.environments || [];
 
         // Clear and re-add base CLIs
-        selectEl.innerHTML = '';
+        selectEl.innerHTML = '<option value="" disabled selected>Select CLI...</option>';
 
         const baseGroup = document.createElement('optgroup');
         baseGroup.label = 'Base CLIs';
@@ -450,7 +450,8 @@ export class DashboardController {
     }
 
     parseSandboxCliSelection(selectEl) {
-        const value = selectEl?.value || 'base:claude';
+        const value = selectEl?.value;
+        if (!value) return null;
         if (value.startsWith('base:')) {
             return { cli: value.replace('base:', ''), environmentName: null };
         }

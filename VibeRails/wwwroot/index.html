@@ -300,27 +300,27 @@
             <div class="sandbox-item-actions mt-3 d-flex flex-column gap-2">
                 <!-- Row 1: Git & Code Actions -->
                 <div class="sandbox-item-git-actions d-flex gap-2">
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1 flex-grow-1" type="button" data-sandbox-diff title="View Diff">
+                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 flex-grow-1" type="button" data-sandbox-diff title="View Diff">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M10.478 1.647a.5.5 0 1 0-.956-.294l-4 13a.5.5 0 0 0 .956.294zM4.854 4.146a.5.5 0 0 1 0 .708L1.707 8l3.147 3.146a.5.5 0 0 1-.708.708l-3.5-3.5a.5.5 0 0 1 0-.708l3.5-3.5a.5.5 0 0 1 .708 0m6.292 0a.5.5 0 0 0 0 .708L14.293 8l-3.147 3.146a.5.5 0 0 0 .708.708l3.5-3.5a.5.5 0 0 0 0-.708l-3.5-3.5a.5.5 0 0 0-.708 0"/>
                         </svg>
                         <span>Diff</span>
                     </button>
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1 flex-grow-1" type="button" data-sandbox-merge-local title="Merge into local branch">
+                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 flex-grow-1" type="button" data-sandbox-merge-local title="Merge into local branch">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M8 5.5a.5.5 0 0 1 .5.5v2.793l1.146-1.147a.5.5 0 0 1 .708.708l-2 2a.5.5 0 0 1-.708 0l-2-2a.5.5 0 1 1 .708-.708L7.5 8.793V6a.5.5 0 0 1 .5-.5"/>
                             <path fill-rule="evenodd" d="M1 3.5A1.5 1.5 0 0 1 2.5 2h11A1.5 1.5 0 0 1 15 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5zm1.5-.5a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5z"/>
                         </svg>
                         <span>Merge</span>
                     </button>
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1 flex-grow-1" type="button" data-sandbox-push-remote title="Push to remote">
+                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 flex-grow-1" type="button" data-sandbox-push-remote title="Push to remote">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
                             <path fill-rule="evenodd" d="M8 10.5a.5.5 0 0 1-.5-.5V3.707L6.354 4.854a.5.5 0 1 1-.708-.708l2-2a.5.5 0 0 1 .708 0l2 2a.5.5 0 0 1-.708.708L8.5 3.707V10a.5.5 0 0 1-.5.5"/>
                             <path d="M4.5 13a.5.5 0 0 1 0-1h7a.5.5 0 0 1 0 1z"/>
                         </svg>
                         <span>Push</span>
                     </button>
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1 flex-grow-1" type="button" data-sandbox-vscode title="Open in VS Code">
+                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 flex-grow-1" type="button" data-sandbox-vscode title="Open in VS Code">
                         <img src="assets/img/vscode.svg" alt="" class="icon-light" style="width: 13px; height: 13px;">
                         <span>Code</span>
                     </button>
@@ -331,15 +331,15 @@
                     <select class="form-select form-select-sm sandbox-item-cli-select flex-grow-1" data-sandbox-cli-select style="width: auto; min-width: 140px;">
                         <option value="" disabled selected>Select LLM...</option>
                     </select>
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1 flex-grow-1" type="button" data-sandbox-launch-cli title="Native Terminal">
+                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 flex-grow-1" type="button" data-sandbox-launch-cli title="Native Terminal">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="m11.596 8.697-6.363 3.692c-.54.313-1.233-.066-1.233-.697V4.308c0-.63.692-1.01 1.233-.696l6.363 3.692a.802.802 0 0 1 0 1.393"/></svg>
                         <span>Native</span>
                     </button>
-                    <button class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1 flex-grow-1" type="button" data-sandbox-launch-webui title="Web Terminal">
+                    <button class="btn btn-sm btn-outline-success d-flex align-items-center gap-1 flex-grow-1" type="button" data-sandbox-launch-webui title="Web Terminal">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/></svg>
                         <span>Web</span>
                     </button>
-                    <button class="btn btn-sm btn-outline-danger d-flex align-items-center justify-content-center gap-1 flex-grow-1" type="button" data-sandbox-delete title="Delete sandbox">
+                    <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1 flex-grow-1" type="button" data-sandbox-delete title="Delete sandbox">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
                         </svg>
@@ -793,12 +793,9 @@
                                 </div>
 
                                 <div class="swarm-input-actions mt-3">
-                                    <button type="button" class="btn btn-outline-secondary swarm-submit-btn me-2" data-action="swarm-new-plan">
-                                        Start New Plan
-                                    </button>
-                                    <button type="submit" class="btn btn-primary swarm-submit-btn d-inline-flex align-items-center gap-2" data-action="swarm-submit">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
-                                            <path d="M15.854.146a.5.5 0 0 0-.53-.11l-15 5a.5.5 0 0 0 .006.948l6.662 2.022 2.023 6.662a.5.5 0 0 0 .948.006l5-15a.5.5 0 0 0-.11-.53M6.69 7.274 1.846 5.804 13.449 1.936zm.555 1.414 4.868 4.868 3.868-11.603z"/>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" data-action="swarm-submit">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                            <path d="M5.52.359A.5.5 0 0 1 6 0h4a.5.5 0 0 1 .443.706L8.753 4H11a.5.5 0 0 1 .374.832l-6 7a.5.5 0 0 1-.844-.469L6.127 8H4a.5.5 0 0 1-.374-.832l2-2.5z"/>
                                         </svg>
                                         <span>Generate Plan</span>
                                     </button>
@@ -822,8 +819,11 @@
                         <div class="card-header text-uppercase fw-bold" style="letter-spacing: 0.05em;">Plan Controls</div>
                         <div class="card-body">
                             <div class="d-flex flex-column gap-2">
-                                <button type="button" class="btn btn-outline-secondary" data-action="swarm-new-plan">
-                                    Start New Plan
+                                <button type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2" data-action="swarm-new-plan">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                                    </svg>
+                                    <span>New Plan</span>
                                 </button>
                                 <div class="swarm-history-card d-none" data-swarm-history-card>
                                     <label class="form-label swarm-input-label mb-2">Previous Swarm Plans</label>
@@ -841,12 +841,12 @@
                                 <div class="swarm-error d-none mt-3" data-swarm-error></div>
 
                                 <div class="swarm-input-actions mt-3">
-                                    <button type="submit" class="btn btn-outline-primary swarm-submit-btn d-inline-flex align-items-center gap-2" data-action="swarm-resubmit">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
+                                    <button type="submit" class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" data-action="swarm-resubmit">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                                             <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
                                             <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
                                         </svg>
-                                        Regenerate Plan
+                                        <span>Regenerate Plan</span>
                                     </button>
                                 </div>
                             </form>
