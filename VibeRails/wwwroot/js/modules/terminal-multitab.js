@@ -2091,6 +2091,16 @@ export class TerminalController {
         await manager.startFromSelection(selection || DEFAULT_SELECTION);
     }
 
+    refreshLayout() {
+        if (!this.manager) {
+            return;
+        }
+
+        this.manager.updateFocusContainerHeight();
+        const activeTab = this.manager.getActiveTab?.();
+        activeTab?.instance?.scheduleFitPasses?.();
+    }
+
     async startTerminalWithOptions(options, container) {
         const manager = await this.ensureManager(container);
         return await manager.startWithOptions(options);
