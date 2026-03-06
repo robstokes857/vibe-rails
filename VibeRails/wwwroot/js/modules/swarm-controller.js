@@ -680,25 +680,7 @@ export class SwarmController {
         const promptMessage = typeof saved.promptMessage === 'string' ? saved.promptMessage : '';
         this.setPromptMessage(root, promptMessage);
 
-        if (saved.planData) {
-            try {
-                this.planData = this.normalizePlan(saved.planData);
-                this.initMessage = typeof saved.initMessage === 'string'
-                    ? saved.initMessage
-                    : this.buildInitMessage(this.planData);
-                this.hasSpawnedTerminals = saved.hasSpawnedTerminals === true;
-                this.showPlanScreen(root);
-                this.renderPlan(root);
-                if (this.hasSpawnedTerminals) {
-                    void this.ensureTerminalPanel(root);
-                }
-            } catch {
-                this.stateStore.clear();
-                this.planData = null;
-                this.initMessage = '';
-                this.hasSpawnedTerminals = false;
-            }
-        }
+        // Do not auto-restore the last plan — user must explicitly open one from history.
 
         const savedPending = saved.pendingPlan && typeof saved.pendingPlan === 'object'
             ? {

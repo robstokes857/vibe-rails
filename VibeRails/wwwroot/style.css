@@ -994,32 +994,38 @@ button:hover .card-nav-cog {
     gap: 0.5rem;
 }
 
+/* Project item (Environment History) */
 .project-item {
     transition: all var(--transition-speed);
-    border-left: 3px solid transparent;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+    background: rgba(255, 255, 255, 0.02) !important;
     position: relative;
     overflow: hidden;
+    margin-bottom: 0.5rem;
 }
 
 .project-item:hover {
-    background-color: var(--color-bg-surface-hover);
-    border-left-color: var(--color-primary);
-    transform: translateX(2px);
+    background: rgba(255, 255, 255, 0.04) !important;
+    border-color: rgba(59, 130, 246, 0.3) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 /* Sandbox item card */
 .sandbox-item-card {
     background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: var(--border-radius);
-    margin-bottom: 0.4rem;
-    padding: 0.75rem 0.85rem;
+    margin-bottom: 0.5rem;
+    padding: 0.85rem;
     transition: all var(--transition-speed);
 }
 
 .sandbox-item-card:hover {
     background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.3);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .sandbox-item-header {

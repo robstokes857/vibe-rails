@@ -19,6 +19,9 @@ export class EnvironmentController {
         if (root) {
             this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
             this.app.bindAction(root, '[data-action="create-environment"]', () => this.createEnvironment());
+            this.app.bindAction(root, '[data-action="create-sandbox"]', () => {
+                this.app.sandboxController.createSandbox();
+            });
 
             const tableSlot = root.querySelector('[data-environments-table]');
             if (tableSlot) {
@@ -52,11 +55,46 @@ export class EnvironmentController {
                 });
             }
 
-            const sandboxSlot = root.querySelector('[data-sandbox-list]');
-            if (sandboxSlot) {
-                this.app.dashboardController.populateSandboxesList(sandboxSlot);
-                this.app.bindAction(root, '[data-action="create-sandbox"]', () => {
-                    this.app.sandboxController.createSandbox();
+            const sandboxesTableSlot = root.querySelector('[data-sandboxes-table]');
+            if (sandboxesTableSlot) {
+                sandboxesTableSlot.innerHTML = this.renderSandboxesTable();
+
+                // Populate selects
+                sandboxesTableSlot.querySelectorAll('[data-sb-cli-select]').forEach(select => {
+                    this.app.dashboardController.populateSandboxCliSelect(select);
+                });
+
+                // Bind actions
+                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-diff"]', (el) => {
+                    this.app.sandboxController.showDiff(el.dataset.sbId, el.dataset.sbName);
+                });
+                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-merge"]', (el) => {
+                    this.app.sandboxController.mergeLocally(el.dataset.sbId, el.dataset.sbName, el.dataset.sbBranch);
+                });
+                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-push"]', (el) => {
+                    this.app.sandboxController.pushToRemote(el.dataset.sbId, el.dataset.sbName);
+                });
+                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-vscode"]', (el) => {
+                    this.app.sandboxController.launchVSCode(el.dataset.sbId, el.dataset.sbName);
+                });
+                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-delete"]', (el) => {
+                    this.app.sandboxController.deleteSandbox(el.dataset.sbId, el.dataset.sbName);
+                });
+
+                const resolveCli = (el) => {
+                    const row = el.closest('tr');
+                    const select = row.querySelector('[data-sb-cli-select]');
+                    return this.app.dashboardController.parseSandboxCliSelection(select);
+                };
+
+                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-launch-cli"]', (el) => {
+                    const { cli, environmentName } = resolveCli(el);
+                    this.app.sandboxController.launchInExternalTerminal(el.dataset.sbId, el.dataset.sbName, cli, environmentName);
+                });
+
+                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-launch-web"]', (el) => {
+                    const { cli, environmentName } = resolveCli(el);
+                    this.app.sandboxController.launchInWebUI(el.dataset.sbId, el.dataset.sbName, cli, environmentName);
                 });
             }
         }
@@ -66,12 +104,12 @@ export class EnvironmentController {
 
     renderEnvironmentsTable() {
         if (this.app.data.environments.length === 0) {
-            return '<p class="text-muted text-center">No environments configured. Create your first environment to get started.</p>';
+            return '<p class="text-muted text-center py-3">No environments configured. Create your first environment to get started.</p>';
         }
 
         return `
             <div class="table-responsive">
-                <table class="table table-hover">
+                <table class="table table-hover align-middle">
                     <thead>
                         <tr>
                             <th>Name</th>
@@ -88,7 +126,7 @@ export class EnvironmentController {
                                 <td><strong>${env.name}</strong></td>
                                 <td>${env.cli}</td>
                                 <td><code>${env.customArgs || '-'}</code></td>
-                                <td>${env.lastUsed || 'Never'}</td>
+                                <td class="small text-muted">${env.lastUsed || 'Never'}</td>
                                 <td>
                                     <div class="d-flex gap-2">
                                         <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" type="button" data-action="launch-environment" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in external terminal">
@@ -121,6 +159,80 @@ export class EnvironmentController {
                                 </td>
                             </tr>
                         `}).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    renderSandboxesTable() {
+        const sandboxes = this.app.data.sandboxes || [];
+        if (sandboxes.length === 0) {
+            return '<p class="text-muted text-center py-3">No sandboxes yet. Create one to work in an isolated copy of your project.</p>';
+        }
+
+        return `
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Branch</th>
+                            <th>Created</th>
+                            <th>Git Actions</th>
+                            <th>Launch Tools</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${sandboxes.map(sb => `
+                            <tr>
+                                <td>
+                                    <div class="fw-bold text-white">${this.app.escapeHtml(sb.name)}</div>
+                                </td>
+                                <td>
+                                    <div class="x-small text-muted"><code class="text-accent">${this.app.escapeHtml(sb.branch)}</code></div>
+                                </td>
+                                <td class="small text-muted">${sb.created}</td>
+                                <td>
+                                    <div class="d-flex gap-1">
+                                        <button class="btn btn-xs btn-outline-secondary" data-action="sandbox-diff" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="View Diff">Diff</button>
+                                        <button class="btn btn-xs btn-outline-secondary" data-action="sandbox-merge" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" data-sb-branch="${this.app.escapeHtml(sb.branch)}" title="Merge into local branch">Merge</button>
+                                        <button class="btn btn-xs btn-outline-secondary" data-action="sandbox-push" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="Push to remote">Push</button>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="d-flex gap-1 align-items-center">
+                                        <select class="form-select form-select-xs" style="width: 140px;" data-sb-cli-select data-sb-id="${sb.id}">
+                                            <!-- To be populated -->
+                                        </select>
+                                        <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" type="button" data-action="sandbox-launch-cli" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="Launch in external terminal">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                                <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"></path>
+                                                <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"></path>
+                                            </svg>
+                                            <span>Launch in CLI</span>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-1" type="button" data-action="sandbox-launch-web" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="Launch in Web Terminal">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                                <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"></path>
+                                                <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"></path>
+                                            </svg>
+                                            <span>Launch in Web</span>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" type="button" data-action="sandbox-vscode" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="Open in VS Code">
+                                            <img src="assets/img/vscode.svg" alt="" class="icon-light" style="width: 13px; height: 13px;">
+                                            <span>Open In VS Code</span>
+                                        </button>
+                                    </div>
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-xs btn-outline-danger" data-action="sandbox-delete" data-sb-id="${sb.id}" data-sb-name="${this.app.escapeHtml(sb.name)}" title="Delete Sandbox">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/></svg>
+                                    </button>
+                                </td>
+                            </tr>
+                        `).join('')}
                     </tbody>
                 </table>
             </div>
