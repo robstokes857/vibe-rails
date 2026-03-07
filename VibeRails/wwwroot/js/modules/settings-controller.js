@@ -23,12 +23,20 @@ export class SettingsController {
 
             const remoteAccessToggle = root.querySelector('#setting-remote-access');
             const apiKeyInput = root.querySelector('#setting-api-key');
+            const performanceModeToggle = root.querySelector('#setting-performance-mode');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
             }
             if (apiKeyInput) {
                 apiKeyInput.value = settings.apiKey || '';
+            }
+            if (performanceModeToggle) {
+                performanceModeToggle.checked = localStorage.getItem('performanceMode') === 'true';
+                performanceModeToggle.addEventListener('change', () => {
+                    localStorage.setItem('performanceMode', performanceModeToggle.checked);
+                    window.dispatchEvent(new CustomEvent('performanceModeChanged', { detail: { enabled: performanceModeToggle.checked } }));
+                });
             }
 
             const form = root.querySelector('#app-settings-form');

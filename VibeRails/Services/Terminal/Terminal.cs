@@ -46,7 +46,7 @@ public sealed class Terminal : IAsyncDisposable
         IDictionary<string, string> environment,
         int cols = 120,
         int rows = 30,
-        int replayBufferSize = 16384,
+        int replayBufferSize = 10 * 1024 * 1024,
         string? title = null,
         CancellationToken ct = default)
     {
@@ -145,6 +145,12 @@ public sealed class Terminal : IAsyncDisposable
     /// Used to send screen state to new WebSocket connections.
     /// </summary>
     public byte[] GetReplayBuffer() => _outputBuffer.GetData();
+
+    /// <summary>
+    /// Get replay bytes starting from the last ANSI break point (alternate screen enter,
+    /// erase display, or full reset). Falls back to full GetReplayBuffer() if none recorded.
+    /// </summary>
+    public byte[] GetReplayBufferFromLastBreakPoint() => _outputBuffer.GetDataFromLastBreakPoint();
 
     /// <summary>
     /// Inject synthetic bytes directly into the output stream and replay buffer.
