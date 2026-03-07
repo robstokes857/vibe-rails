@@ -26,6 +26,12 @@ internal static class TerminalResizeCoordinator
         int rows,
         TerminalIoSource source)
     {
+        // Skip if PTY is already at the requested dimensions — calling ResizePseudoConsole
+        // with the same size triggers a full ConPTY redraw, which produces duplicate output
+        // when a replay buffer was just sent to the connecting viewer.
+        if (terminal.Cols == cols && terminal.Rows == rows)
+            return;
+
         terminal.Resize(cols, rows);
         stateService.RecordResize(sessionId, cols, rows, source);
 

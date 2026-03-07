@@ -198,7 +198,7 @@ public class TerminalRunner
                             }
 
                             await NotifyRemoteTakeoverAsync("replay");
-                            var replay = terminal.GetReplayBuffer();
+                            var replay = terminal.GetReplayBufferFromLastBreakPoint();
                             if (replay.Length > 0)
                                 await remoteConn.SendOutputAsync(replay);
                         }

@@ -166,7 +166,7 @@ public class TerminalSessionService : ITerminalSessionService
         // Codex rendering is more stable with a redraw instead of partial replay.
         if (shouldUseReplay)
         {
-            var replay = terminal.GetReplayBuffer();
+            var replay = terminal.GetReplayBufferFromLastBreakPoint();
             if (replay.Length > 0)
             {
                 try
@@ -595,19 +595,5 @@ public class TerminalSessionService : ITerminalSessionService
     private static string BuildSessionOwnerId(string sessionId)
         => $"terminal-session:{sessionId}";
 
-    private static bool ShouldUseReplayBuffer()
-    {
-        lock (s_lock)
-        {
-            if (string.IsNullOrWhiteSpace(s_activeCli))
-                return true;
-
-            // All current managed terminal sessions are AI CLIs with structured or
-            // full-screen terminal UIs. Replaying raw PTY history into a fresh xterm
-            // has proven visually unstable across providers, so reconnects use a
-            // redraw-first policy instead of buffer replay.
-            _ = s_activeCli;
-            return false;
-        }
-    }
+    private static bool ShouldUseReplayBuffer() => true;
 }

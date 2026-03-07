@@ -84,6 +84,7 @@
     }
 
     function shouldPause() {
+        if (localStorage.getItem('performanceMode') !== 'true') return false;
         return document.body.classList.contains('terminal-focus-active')
             || document.body.classList.contains('terminal-active-session');
     }
@@ -171,6 +172,7 @@
     });
 
     document.addEventListener('visibilitychange', updateAnimationState);
+    window.addEventListener('performanceModeChanged', updateAnimationState);
 
     resize();
     particles = Array.from({ length: config.count }, () => new Particle());
