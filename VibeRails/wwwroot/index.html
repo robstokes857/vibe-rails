@@ -11,7 +11,17 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=JetBrains+Mono:wght@400;600;700&display=swap">
     <link rel="stylesheet" href="assets/bootstrap.min.css" />
     <link rel="stylesheet" href="assets/xterm/xterm.css" />
-    <link rel="stylesheet" href="style.css">
+    <script>
+        window.__viberails_cache_bust__ = Date.now().toString(36);
+
+        const appStyleUrl = new URL('style.css', document.baseURI);
+        appStyleUrl.searchParams.set('v', window.__viberails_cache_bust__);
+
+        const appStyleLink = document.createElement('link');
+        appStyleLink.rel = 'stylesheet';
+        appStyleLink.href = appStyleUrl.toString();
+        document.head.appendChild(appStyleLink);
+    </script>
 </head>
 
 <body>
@@ -1050,7 +1060,11 @@
     <script src="assets/sortable.min.js"></script>
     <script src="assets/monaco/vs/loader.js"></script>
     <script src="js/background-effect.js"></script>
-    <script type="module" src="app.js"></script>
+    <script type="module">
+        const appEntryUrl = new URL('app.js', document.baseURI);
+        appEntryUrl.searchParams.set('v', window.__viberails_cache_bust__ || '');
+        await import(appEntryUrl.toString());
+    </script>
 </body>
 
 </html>
