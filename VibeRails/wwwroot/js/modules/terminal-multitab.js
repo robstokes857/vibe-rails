@@ -248,8 +248,8 @@ class TerminalTab {
         }
 
         if (signatureChanged && this.shouldResetDisplayBeforeResize()) {
-            // AI TUIs do not always erase stale right-edge cells when their layout
-            // shrinks. Clear the local viewport before the PTY redraws at the new size.
+            // Terminal apps do not always erase stale right-edge cells when their
+            // layout shrinks. Clear the local viewport before the PTY redraws.
             this.vibeTerminal.resetDisplayOnly();
         }
 
@@ -342,6 +342,9 @@ class TerminalTab {
         this.ensureTerminal();
         this.disconnectSocketOnly();
         this.lastResizeSignature = null;
+        // Replay rebuilds the current screen; clear any local render state first
+        // so reconnects do not append duplicated TUI content.
+        this.vibeTerminal?.reset();
 
         this.state.status = 'connecting';
         this.manager.updateUi();
@@ -457,6 +460,7 @@ class TerminalManager {
         this.app = app;
         this.container = container;
         this.options = options;
+        this._destroyed = false;
 
         this.maxTabs = 8;
         this.tabs = new Map();
@@ -492,6 +496,10 @@ class TerminalManager {
         this.focusLayoutHandler = null;
         this.focusLayoutRaf = null;
         this._themeSwatches = [];
+    }
+
+    isDestroyed() {
+        return this._destroyed;
     }
 
     _loadCursorBlink() {
@@ -547,6 +555,10 @@ class TerminalManager {
     }
 
     async initialize() {
+        if (this._destroyed) {
+            return;
+        }
+
         this.panel = this.container.querySelector('#terminal-panel');
         this.tabList = this.container.querySelector('#terminal-tab-list');
         this.tabAdd = this.container.querySelector('#terminal-tab-add-btn');
@@ -581,6 +593,10 @@ class TerminalManager {
         this._initSettingsPanel();
         await this.restoreTabs();
 
+        if (this._destroyed) {
+            return;
+        }
+
         if (this.tabOrder.length === 0) {
             const initialSelection = this.getInitialSelection();
             await this.createAndActivateTab({ selection: initialSelection });
@@ -589,7 +605,7 @@ class TerminalManager {
             const target = preferredTabId && this.tabs.has(preferredTabId)
                 ? preferredTabId
                 : this.tabOrder[0];
-            await this.activateTab(target, { connectIfNeeded: true });
+            await this.activateTab(target, { connectIfNeeded: false });
 
             if (typeof this.options.preferredSelection === 'string' && this.options.preferredSelection.length > 0) {
                 const active = this.getActiveTab();
@@ -605,6 +621,11 @@ class TerminalManager {
     }
 
     destroy() {
+        if (this._destroyed) {
+            return;
+        }
+
+        this._destroyed = true;
         this.removeFocusLayoutHandler();
         this.disableLockedLayout(this.lockedPanel);
         document.body.classList.remove('terminal-active-session');
@@ -695,11 +716,19 @@ class TerminalManager {
     }
 
     async restoreTabs() {
+        if (this._destroyed) {
+            return;
+        }
+
         let response;
         try {
             response = await this.app.apiCall('/api/v1/terminal/tabs', 'GET');
         } catch {
             response = { tabs: [], maxTabs: 8 };
+        }
+
+        if (this._destroyed) {
+            return;
         }
 
         this.maxTabs = Number.isFinite(response?.maxTabs) ? response.maxTabs : 8;
@@ -721,6 +750,10 @@ class TerminalManager {
     }
 
     addLocalTab(tabInfo, options = {}) {
+        if (this._destroyed) {
+            return null;
+        }
+
         const selection = options.selection || DEFAULT_SELECTION;
         const meta = this.getSelectionMeta(selection);
 
@@ -758,7 +791,7 @@ class TerminalManager {
                 });
                 return;
             }
-            void this.activateTab(state.id, { connectIfNeeded: true });
+            void this.activateTab(state.id, { connectIfNeeded: false });
         });
 
         const close = document.createElement('button');
@@ -822,6 +855,10 @@ class TerminalManager {
     }
 
     async activateTab(tabId, options = {}) {
+        if (this._destroyed) {
+            return;
+        }
+
         const target = this.tabs.get(tabId);
         if (!target) {
             return;
@@ -843,6 +880,9 @@ class TerminalManager {
 
         if (options.connectIfNeeded && target.state.hasActiveSession && !target.instance.hasOpenSocket()) {
             await target.instance.connect();
+            if (this._destroyed) {
+                return;
+            }
         }
 
         this.applyPanelState();
@@ -850,6 +890,10 @@ class TerminalManager {
     }
 
     async createAndActivateTab(options = {}) {
+        if (this._destroyed) {
+            return null;
+        }
+
         if (this.tabOrder.length >= this.maxTabs) {
             this.app.showError(`Maximum of ${this.maxTabs} terminal tabs reached.`);
             return null;
@@ -858,6 +902,15 @@ class TerminalManager {
         this.tabAdd && (this.tabAdd.disabled = true);
         try {
             const tabInfo = await this.app.apiCall('/api/v1/terminal/tabs', 'POST');
+            if (this._destroyed) {
+                try {
+                    await this.app.apiCall(`/api/v1/terminal/tabs/${encodeURIComponent(tabInfo.tabId)}`, 'DELETE');
+                } catch {
+                    // no-op
+                }
+                return null;
+            }
+
             const tab = this.addLocalTab(tabInfo, {
                 selection: options.selection || DEFAULT_SELECTION,
                 title: options.title || null,
@@ -866,6 +919,9 @@ class TerminalManager {
                 accentColor: options.accentColor || null,
                 taskKey: options.taskKey || null
             });
+            if (!tab) {
+                return null;
+            }
             await this.activateTab(tab.state.id, { connectIfNeeded: false });
             this.updateUi();
             return tab;
@@ -914,7 +970,7 @@ class TerminalManager {
 
         if (!this.activeTabId) {
             const nextId = this.tabOrder[Math.max(0, this.tabOrder.length - 1)];
-            await this.activateTab(nextId, { connectIfNeeded: true });
+            await this.activateTab(nextId, { connectIfNeeded: false });
         }
 
         this.updateUi();
@@ -2061,44 +2117,81 @@ export class TerminalController {
     constructor(app) {
         this.app = app;
         this.manager = null;
+        this.managerInitPromise = null;
+        this.managerGeneration = 0;
     }
 
     resetLayoutStateForNavigation() {
+        this.managerGeneration += 1;
+        this.managerInitPromise = null;
+
         if (!this.manager) {
             return;
         }
 
-        this.manager.resetLayoutStateForNavigation();
-        this.manager.destroy();
+        const manager = this.manager;
         this.manager = null;
+        manager.resetLayoutStateForNavigation();
+        manager.destroy();
     }
 
     async ensureManager(container) {
-        if (this.manager && this.manager.container === container) {
-            return this.manager;
+        if (this.manager && this.manager.container === container && !this.manager.isDestroyed()) {
+            if (this.managerInitPromise) {
+                await this.managerInitPromise;
+            }
+            if (this.manager && this.manager.container === container && !this.manager.isDestroyed()) {
+                return this.manager;
+            }
         }
 
         await this.bindTerminalActions(container, null, {});
-        return this.manager;
+        if (this.managerInitPromise) {
+            await this.managerInitPromise;
+        }
+        if (this.manager && this.manager.container === container && !this.manager.isDestroyed()) {
+            return this.manager;
+        }
+
+        return null;
     }
 
     async bindTerminalActions(container, preselectedEnvId = null, options = {}) {
+        const generation = ++this.managerGeneration;
+
         if (this.manager) {
             this.manager.destroy();
             this.manager = null;
         }
 
-        this.manager = new TerminalManager(this.app, container, {
+        const manager = new TerminalManager(this.app, container, {
             preselectedEnvId,
             ...options,
             focusView: options.focusView === true || !!container.closest('[data-view="terminal-focus"]')
         });
+        this.manager = manager;
 
-        await this.manager.initialize();
+        const initPromise = manager.initialize();
+        this.managerInitPromise = initPromise;
+
+        try {
+            await initPromise;
+        } finally {
+            if (this.managerInitPromise === initPromise) {
+                this.managerInitPromise = null;
+            }
+        }
+
+        if (this.managerGeneration !== generation || this.manager !== manager || manager.isDestroyed()) {
+            return;
+        }
     }
 
     async startTerminal(container, selection) {
         const manager = await this.ensureManager(container);
+        if (!manager) {
+            return;
+        }
         await manager.startFromSelection(selection || DEFAULT_SELECTION);
     }
 
@@ -2114,11 +2207,17 @@ export class TerminalController {
 
     async startTerminalWithOptions(options, container) {
         const manager = await this.ensureManager(container);
+        if (!manager) {
+            return { tabId: null, started: false, reusedExisting: false };
+        }
         return await manager.startWithOptions(options);
     }
 
     async focusTerminalTab(container, tabId) {
         const manager = await this.ensureManager(container);
+        if (!manager) {
+            return false;
+        }
         return await manager.focusTab(tabId, { connectIfNeeded: true });
     }
 
