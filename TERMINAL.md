@@ -192,6 +192,76 @@ The PTY and tab child processes are usually still running. The unstable part is:
 3. Make navigation restore non-destructive to tab state, but non-reconnecting by default.
 4. Re-enable durable terminal output persistence.
 5. After lifecycle is stable, evaluate proper screen-state snapshot/restore for AI TUIs.
+6. Native CLI coexists with remote viewer — add connect/disconnect notifications via synthetic PTY messages and OSC 2 title updates.
+7. Fix blank cursor on remote attach (issue 7) — add Ctrl+L fallback in `HandleRemoteReplayRequestAsync` when replay buffer has no break-point content.
+
+### 6. Remote viewer and native CLI coexist — add connect/disconnect notifications
+
+#### Design decision
+
+Native CLI and remote viewer **coexist**. The user is physically at their machine and should not
+be kicked. The remote browser watches (and can send input if no PIN). Only the local *web UI
+viewer* (browser WebSocket on the same machine) is disconnected when remote takes over, so the
+remote browser gets exclusive web access.
+
+#### Problem
+
+When a remote viewer connects or disconnects, the native CLI console gives no indication. The
+user sitting at the terminal has no idea someone is watching.
+
+#### Fix
+
+Write directly to `Console.Error` (stderr) on connect and disconnect. Stderr bypasses the PTY
+entirely — the TUI is never disturbed, no ANSI injection risk, and the remote viewer never sees
+it (stderr is local only). This is the most stable cross-platform option.
+
+- **Connect**: `Console.Error.WriteLine("[VibeRails] Remote viewer connected")`
+- **Disconnect**: `Console.Error.WriteLine("[VibeRails] Remote viewer disconnected")`
+
+Synthetic PTY messages and OSC title sequences were explicitly rejected: pushing into the PTY
+stream risks corrupting TUI rendering for a .0001% use case.
+
+Key files:
+- `VibeRails/Services/Terminal/TerminalRunner.cs` — `NotifyRemoteTakeoverAsync`, `HandleRemoteBrowserDisconnectedAsync`
+
+### 7. Native CLI shows only a blinking cursor in the remote server until resize
+
+#### Problem
+
+When a native CLI session is attached and a remote browser connects, the browser sees only a
+blinking cursor until the user sends a resize event (e.g. changing font size). After that the
+full screen appears normally.
+
+#### Root cause
+
+**Frontend layout race, not a replay problem.**
+
+The replay data is sent and received correctly. `CircularBuffer.GetDataFromLastBreakPoint()`
+already falls back to returning all buffered data when no break point exists, so the buffer
+is never empty if the CLI has been running.
+
+The issue is that `socket.onopen` immediately calls `fitAndSyncTerminal({ force: true })` before
+the terminal panel's CSS layout has settled. `activateViewportMode()` runs just before opening
+the socket and schedules `syncViewportLayout(40ms)`. The `_fit()` inside `fitAndSyncTerminal`
+fires before that 40ms delay, when the container may have zero or stale dimensions. xterm
+computes wrong cols/rows and sends a bad `__resize__`. The replay data arrives and renders into
+an improperly sized viewport, invisible to the user.
+
+When the user changes font size (or anything that triggers `refit()`), `_fit()` runs again with
+correct dimensions, xterm reflows, and the content appears.
+
+#### Fix
+
+Removed the premature `fitAndSyncTerminal({ force: true })` call from `socket.onopen` in
+`Index.cshtml`. `scheduleViewportLayoutSync(40)` already fires after layout settles — that
+refit sends the correct `__resize__`, which triggers the PTY redraw and makes the replay visible.
+
+Also kept the Ctrl+L fallback in `HandleRemoteReplayRequestAsync` as belt-and-suspenders for
+the truly-empty-buffer case (CLI just launched, no output yet at all).
+
+Key files:
+- `VibeRailsFrontEnd/.../Views/Terminals/Index.cshtml` — `socket.onopen` (removed premature fit)
+- `VibeRails/Services/Terminal/TerminalRunner.cs` — `HandleRemoteReplayRequestAsync` (Ctrl+L fallback)
 
 ## Notes
 

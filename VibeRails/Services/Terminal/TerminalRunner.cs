@@ -77,6 +77,11 @@ public class TerminalRunner
                         return;
 
                     remoteTakeoverNotified = true;
+
+                    // Write directly to stderr — bypasses the PTY entirely so the TUI is never
+                    // disturbed. The remote viewer does not see stderr, so this is local-only.
+                    Console.Error.WriteLine("[VibeRails] Remote viewer connected");
+
                     if (onRemoteTakeoverAuthorized == null)
                         return;
 
@@ -201,6 +206,8 @@ public class TerminalRunner
                             var replay = terminal.GetReplayBufferFromLastBreakPoint();
                             if (replay.Length > 0)
                                 await remoteConn.SendOutputAsync(replay);
+                            else
+                                await terminal.WriteBytesAsync(new byte[] { 0x0C }, CancellationToken.None); // Ctrl+L — no break point yet, force redraw
                         }
                         finally
                         {
@@ -232,8 +239,7 @@ public class TerminalRunner
                             takeoverGate.Release();
                         }
 
-                        var msg = System.Text.Encoding.UTF8.GetBytes("\r\n\x1b[90m[Remote viewer disconnected]\x1b[0m\r\n");
-                        terminal.PublishSynthetic(msg);
+                        Console.Error.WriteLine("[VibeRails] Remote viewer disconnected");
                     }
                     catch (Exception ex)
                     {
@@ -466,8 +472,13 @@ public class TerminalRunner
             makeRemote: makeRemote,
             onRemoteTakeoverAuthorized: trigger =>
             {
+                // Native CLI coexists with remote viewer — both can run concurrently.
+                // The connect/disconnect notifications are published to the PTY via
+                // NotifyRemoteTakeoverAsync / HandleRemoteBrowserDisconnectedAsync.
+                // Only the local web UI viewer (if any) is disconnected so the remote
+                // browser gets exclusive web access.
                 Log.Information(
-                    "[Terminal] Remote viewer authorized via {Trigger} — disconnecting local viewer",
+                    "[Terminal] Remote viewer authorized via {Trigger} — disconnecting local web viewer",
                     trigger);
                 return sessionService.DisconnectLocalViewerAsync("Session taken over by remote viewer");
             });
@@ -479,7 +490,7 @@ public class TerminalRunner
 
             if (remoteConn != null)
             {
-                Log.Information("[Terminal] Remote connection established — takeover guard active");
+                Log.Information("[Terminal] Remote connection established — native CLI coexists with remote viewer");
             }
             else
             {
