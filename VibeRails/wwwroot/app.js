@@ -897,7 +897,6 @@ export class VibeControlApp {
     }
 }
 
-// Initialize the app when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-    window.app = new VibeControlApp();
-});
+// Initialize the app — DOM is already ready when this module is executed
+// (dynamic import via `await import()` in index.html resolves after DOMContentLoaded)
+window.app = new VibeControlApp();
