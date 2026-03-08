@@ -25,64 +25,52 @@
 </head>
 
 <body>
-    <button id="nav-global-toggle-btn" class="nav-global-toggle-btn" type="button" data-action="toggle-nav" title="Toggle navigation" aria-label="Toggle navigation">
-        <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <line x1="3" y1="6" x2="21" y2="6"></line>
-            <line x1="3" y1="12" x2="21" y2="12"></line>
-            <line x1="3" y1="18" x2="21" y2="18"></line>
-        </svg>
-    </button>
-
-    <!-- Header -->
-    <nav class="navbar navbar-dark sticky-top">
-        <div class="container-fluid">
-            <a class="navbar-brand animate-fade-up" href="#" data-action="navigate-home">
-                <img src="assets/img/logo.png" alt="Vibe Rails logo" class="brand-logo">
-                <span class="brand-text">Vibe Rails</span>
+    <!-- Combined Navigation Bar -->
+    <nav class="app-subnav sticky-top">
+        <div class="d-flex align-items-center">
+            <a class="navbar-brand-sm animate-fade-up d-flex align-items-center gap-2 text-decoration-none" href="#" data-action="navigate-home">
+                <img src="assets/img/logo.png" alt="Vibe Rails logo" class="brand-logo-sm">
+                <span class="brand-text-sm">Vibe Rails</span>
             </a>
-            <div class="d-flex align-items-center gap-3 nav-actions">
-                <button class="nav-settings-btn" type="button" data-action="navigate-settings" title="Settings">
-                    <svg class="nav-settings-cog" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                </button>
-                <button id="exit-btn" class="nav-exit-btn"
-                    title="Close VibeRails and stop backend">
-                    <svg class="nav-exit-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                    <span>Exit</span>
-                </button>
-            </div>
         </div>
-    </nav>
 
-    <!-- Sub Nav Bar -->
-    <nav class="app-subnav">
-        <button class="app-subnav-link" data-action="navigate-home" title="Dashboard">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="me-1 icon-light" viewBox="0 0 16 16">
-                <path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4.5a.5.5 0 0 0 .5-.5v-4h2v4a.5.5 0 0 0 .5.5H14a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L13 5.793V2.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.293L8.354 1.146ZM2.5 14V7.707l5.5-5.5 5.5 5.5V14H10v-4a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5v4H2.5Z"/>
-            </svg>
-            Home
-        </button>
-        <button class="app-subnav-link" data-action="navigate" data-view="terminal-focus" title="Full-screen Terminal Workspace">
-            <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="me-1 icon-light" style="width: 14px; height: 14px;">
-            Terminals
-        </button>
-        <button class="app-subnav-link" data-action="navigate" data-view="environments" title="Manage Custom Environments & Sandboxes">
-            <img src="assets/img/icons/layer-group-solid-full.svg" alt="" class="me-1 icon-light" style="width: 14px; height: 14px;">
-            ENVS & Sandboxes
-        </button>
-        <button class="app-subnav-link" data-action="navigate" data-view="agents" title="Manage Agent Files and Rules">
-            <img src="assets/img/icons/agent.svg" alt="" class="me-1 icon-light" style="width: 14px; height: 14px;">
-            Rules & Agents
-        </button>
-        <button class="app-subnav-link" data-action="navigate" data-view="swarm" title="Swarm Planner">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="me-1 icon-light" viewBox="0 0 16 16">
-                <path d="M5.52.359A.5.5 0 0 1 6 0h4a.5.5 0 0 1 .443.706L8.753 4H11a.5.5 0 0 1 .374.832l-6 7a.5.5 0 0 1-.844-.469L6.127 8H4a.5.5 0 0 1-.374-.832l2-2.5z"/>
-            </svg>
-            Swarm
-        </button>
-        <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
-            <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="me-1 icon-light settings-card-cog" style="width: 14px; height: 14px;">
-            Settings
-        </button>
+        <div class="d-flex align-items-center justify-content-center flex-grow-1 gap-1">
+            <button class="app-subnav-link" data-action="navigate-home" title="Dashboard">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="me-1 icon-light" viewBox="0 0 16 16">
+                    <path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4.5a.5.5 0 0 0 .5-.5v-4h2v4a.5.5 0 0 0 .5.5H14a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L13 5.793V2.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.293L8.354 1.146ZM2.5 14V7.707l5.5-5.5 5.5 5.5V14H10v-4a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5v4H2.5Z"/>
+                </svg>
+                Home
+            </button>
+            <button class="app-subnav-link" data-action="navigate" data-view="terminal-focus" title="Full-screen Terminal Workspace">
+                <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="me-1 icon-light" style="width: 14px; height: 14px;">
+                Terminals
+            </button>
+            <button class="app-subnav-link" data-action="navigate" data-view="environments" title="Manage Custom Environments & Sandboxes">
+                <img src="assets/img/icons/layer-group-solid-full.svg" alt="" class="me-1 icon-light" style="width: 14px; height: 14px;">
+                ENVS
+            </button>
+            <button class="app-subnav-link" data-action="navigate" data-view="agents" title="Manage Agent Files and Rules">
+                <img src="assets/img/icons/agent.svg" alt="" class="me-1 icon-light" style="width: 14px; height: 14px;">
+                Agents
+            </button>
+            <button class="app-subnav-link" data-action="navigate" data-view="swarm" title="Swarm Planner">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="me-1 icon-light" viewBox="0 0 16 16">
+                    <path d="M5.52.359A.5.5 0 0 1 6 0h4a.5.5 0 0 1 .443.706L8.753 4H11a.5.5 0 0 1 .374.832l-6 7a.5.5 0 0 1-.844-.469L6.127 8H4a.5.5 0 0 1-.374-.832l2-2.5z"/>
+                </svg>
+                Swarm
+            </button>
+            <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
+                <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="me-1 icon-light settings-card-cog" style="width: 14px; height: 14px;">
+                Settings
+            </button>
+        </div>
+
+        <div class="d-flex align-items-center ms-auto">
+            <button id="exit-btn" class="nav-exit-btn-sm" title="Close VibeRails and stop backend">
+                <svg class="nav-exit-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                <span>Exit</span>
+            </button>
+        </div>
     </nav>
 
     <!-- Main Container -->

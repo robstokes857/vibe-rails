@@ -301,27 +301,17 @@ export class VibeControlApp {
                 const view = goNav.dataset.view;
                 if (view) this.navigate(view);
             }
-
-            const toggleNav = e.target.closest('[data-action="toggle-nav"]');
-            if (toggleNav) {
-                e.preventDefault();
-                this.toggleNavbars();
-            }
         });
     }
 
     applyNavbarsCollapsedState(collapsed) {
-        const next = !!collapsed;
-        this.navbarsCollapsed = next;
-        document.body.classList.toggle('navbars-collapsed', next);
+        // Method kept for compatibility but simplified as toggle is gone
+        this.navbarsCollapsed = false;
+        document.body.classList.remove('navbars-collapsed');
 
         // Focused terminal layout listens to resize events to recalc available height.
         window.dispatchEvent(new Event('resize'));
         this.terminalController?.refreshLayout?.();
-    }
-
-    toggleNavbars() {
-        this.applyNavbarsCollapsedState(!this.navbarsCollapsed);
     }
 
     bindActions(container, selector, handler) {
@@ -420,9 +410,7 @@ export class VibeControlApp {
     applyViewLayoutState(view) {
         const isTerminalFocus = view === 'terminal-focus';
         document.body.classList.toggle('terminal-focus-active', isTerminalFocus);
-        if (isTerminalFocus && !this.navbarsCollapsed) {
-            this.applyNavbarsCollapsedState(true);
-        }
+        // Removed automatic collapsing of navbars in terminal focus mode
     }
 
     // ============================================ 
