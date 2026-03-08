@@ -61,6 +61,9 @@
   <Target Name="EnsureScriptsDirExists" BeforeTargets="CopyFilesToOutputDirectory;_CopyOutOfDateSourceItemsToOutputDirectory">
     <MakeDir Directories="$(OutDir)scripts" />
   </Target>
+  <Target Name="EnsureScriptsDirExistsForPublish" BeforeTargets="CopyFilesToPublishDirectory;_CopyResolvedFilesToPublishAlways;_CopyResolvedFilesToPublishPreserveNewest">
+    <MakeDir Directories="$(PublishDir)scripts" />
+  </Target>
   <ItemGroup>
     <Content Include="scripts\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest">
       <Link>scripts\%(RecursiveDir)%(Filename)%(Extension)</Link>
