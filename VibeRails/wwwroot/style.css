@@ -184,10 +184,11 @@ code {
 }
 
 .brand-logo-sm {
-    height: 24px;
+    height: 48px;
     width: auto;
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
     transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    padding-right: 5px;
 }
 
 .navbar-brand-sm:hover .brand-logo-sm {

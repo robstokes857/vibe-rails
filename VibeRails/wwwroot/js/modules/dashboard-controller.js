@@ -360,20 +360,22 @@ export class DashboardController {
                 this.populateSandboxCliSelect(cliSelect);
             }
 
-            // Helper to resolve CLI selection
+            // Helper to resolve CLI selection — returns null and shakes if nothing selected
             const resolveCli = () => {
-                const selection = cliSelect?.value || 'base:claude';
-                let cli, environmentName;
-                if (selection.startsWith('base:')) {
-                    cli = selection.replace('base:', '');
-                } else if (selection.startsWith('env:')) {
-                    const parts = selection.split(':');
-                    const envId = parseInt(parts[1]);
-                    cli = parts[2];
-                    const env = (this.app.data.environments || []).find(e => e.id === envId);
-                    environmentName = env?.name;
+                const result = this.parseSandboxCliSelection(cliSelect);
+                if (!result) {
+                    if (cliSelect) {
+                        cliSelect.classList.remove('terminal-selection-shake');
+                        void cliSelect.offsetWidth;
+                        cliSelect.classList.add('terminal-selection-shake');
+                        cliSelect.focus();
+                        if (typeof cliSelect.showPicker === 'function') {
+                            try { cliSelect.showPicker(); } catch {}
+                        }
+                    }
+                    return null;
                 }
-                return { cli, environmentName };
+                return result;
             };
 
             // CLI launch button
@@ -381,8 +383,9 @@ export class DashboardController {
             if (cliBtn) {
                 cliBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const { cli, environmentName } = resolveCli();
-                    this.app.sandboxController.launchInExternalTerminal(sb.id, sb.name, cli, environmentName);
+                    const result = resolveCli();
+                    if (!result) return;
+                    this.app.sandboxController.launchInExternalTerminal(sb.id, sb.name, result.cli, result.environmentName);
                 });
             }
 
@@ -391,8 +394,9 @@ export class DashboardController {
             if (webUiBtn) {
                 webUiBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const { cli, environmentName } = resolveCli();
-                    this.app.sandboxController.launchInWebUI(sb.id, sb.name, cli, environmentName);
+                    const result = resolveCli();
+                    if (!result) return;
+                    this.app.sandboxController.launchInWebUI(sb.id, sb.name, result.cli, result.environmentName);
                 });
             }
 
