@@ -1060,11 +1060,7 @@
     <script src="assets/sortable.min.js"></script>
     <script src="assets/monaco/vs/loader.js"></script>
     <script src="js/background-effect.js"></script>
-    <script type="module">
-        const appEntryUrl = new URL('app.js', document.baseURI);
-        appEntryUrl.searchParams.set('v', window.__viberails_cache_bust__ || '');
-        await import(appEntryUrl.toString());
-    </script>
+    <script type="module" src="app.js"></script>
 </body>
 
 </html>
