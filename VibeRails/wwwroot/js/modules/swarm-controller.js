@@ -26,6 +26,7 @@ export class SwarmController {
         this.app = app;
         this.stateStore = new SwarmStateStore(app);
         this.planData = null;
+        this.activeHistoryId = null;
         this.initMessage = '';
         this.pendingPlan = null;
         this.hasSpawnedTerminals = false;
@@ -261,6 +262,7 @@ export class SwarmController {
         if (!activeRoot) return;
 
         this.planData = null;
+        this.activeHistoryId = null;
         this.pendingPlan = null;
         this.initMessage = '';
         this.hasSpawnedTerminals = false;
@@ -319,6 +321,7 @@ export class SwarmController {
 
         const loadedPlan = this.normalizePlan(entry.planData);
         this.planData = loadedPlan;
+        this.activeHistoryId = entry.id;
         this.pendingPlan = null;
         this.hasSpawnedTerminals = false;
         this.initMessage = typeof entry.initMessage === 'string' && entry.initMessage
@@ -542,6 +545,7 @@ export class SwarmController {
         this.planHistory = this.planHistory.filter((item) => item.id !== entry.id);
         this.planHistory.unshift(entry);
         this.planHistory = this.planHistory.slice(0, MAX_PLAN_HISTORY);
+        this.activeHistoryId = entry.id;
         this.renderPlanHistoryOptions(this.getActiveRoot() || this._root);
         return entry;
     }
@@ -656,12 +660,22 @@ export class SwarmController {
             return;
         }
 
+        // Keep the active history entry in sync with the current planData so
+        // completion status is preserved when the user reloads and reopens it.
+        if (this.planData && this.activeHistoryId) {
+            const activeEntry = this.planHistory.find((e) => e.id === this.activeHistoryId);
+            if (activeEntry) {
+                activeEntry.planData = this.planData;
+            }
+        }
+
         this.stateStore.save({
             promptMessage,
             initMessage: this.initMessage,
             hasSpawnedTerminals: this.hasSpawnedTerminals,
             pendingPlan,
             planData: this.planData,
+            activeHistoryId: this.activeHistoryId,
             planHistory: this.planHistory
         });
     }
@@ -669,6 +683,7 @@ export class SwarmController {
     restoreState(root) {
         const saved = this.stateStore.load();
         this.planHistory = this.normalizePlanHistory(saved?.planHistory);
+        this.activeHistoryId = typeof saved?.activeHistoryId === 'string' ? saved.activeHistoryId : null;
 
         this.renderPlanHistoryOptions(root);
 

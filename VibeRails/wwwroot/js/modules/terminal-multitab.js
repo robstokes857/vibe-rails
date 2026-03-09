@@ -50,6 +50,7 @@ class TerminalTab {
         this.inputFocusHandler = null;
         this.isActive = false;
         this.lastResizeSignature = null;
+        this._initialConnectActive = false;
     }
 
     hasOpenSocket() {
@@ -2288,7 +2289,7 @@ export class TerminalController {
                     <select class="form-select form-select-sm" id="terminal-header-select" style="width: auto;">
                         <option value="" disabled selected>Select LLM...</option>
                     </select>
-                    <div class="d-flex gap-2 align-items-center ms-auto terminal-controls-actions">
+                    <div class="d-flex gap-2 align-items-center terminal-controls-actions">
                         <button class="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-1" id="terminal-start-btn">
                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814z"/>
