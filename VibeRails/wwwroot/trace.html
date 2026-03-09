@@ -443,6 +443,32 @@
         .connect-btn:hover { background: #569cd6; color: #fff; }
         .connect-hint { font-size: 10px; color: #444; margin-left: 4px; }
         .connect-error { font-size: 10px; color: #f48771; margin-left: 4px; }
+
+        .trace-auth-gate {
+            margin: 8px;
+            border: 1px solid #4e4e6a;
+            border-radius: 6px;
+            background: #151523;
+            color: #f0f0f0;
+            padding: 8px 10px;
+        }
+        .trace-auth-gate h6 {
+            color: #f48771;
+            font-size: 11px;
+            margin: 0 0 4px;
+        }
+        .trace-auth-gate p {
+            margin: 0;
+            font-size: 10px;
+            color: #ccc;
+        }
+        .trace-auth-gate.hidden { display: none; }
+
+        .main-grid.trace-auth-locked {
+            pointer-events: none;
+            opacity: 0.45;
+            filter: grayscale(0.35);
+        }
     </style>
 </head>
 <body class="d-flex flex-column">
@@ -497,13 +523,18 @@
 </div>
 
 <!-- ── Connect bar ── -->
-<div class="connect-bar hidden" id="connect-bar">
+<div class="connect-bar" id="connect-bar">
     <span class="connect-bar-label">Instance</span>
     <input class="connect-input port-input" id="connect-port" type="number" placeholder="Port" min="1" max="65535">
     <span class="connect-bar-label">Bootstrap code</span>
     <input class="connect-input code-input" id="connect-code" type="text" placeholder="Paste bootstrap code or full URL">
     <button class="connect-btn" id="connect-go-btn">Connect</button>
     <span class="connect-hint" id="connect-hint">Paste the bootstrap URL from the instance's console, or enter port + code separately.</span>
+</div>
+
+<div class="trace-auth-gate hidden" id="trace-auth-gate">
+    <h6>Authentication Required</h6>
+    <p id="trace-auth-gate-message">A valid viberails_tab token and viberails_session cookie are required.</p>
 </div>
 
 <!-- ── Main grid ── -->
@@ -666,6 +697,131 @@ const TYPE_PANEL = {
 };
 const TYPE_NAMES = ['TerminalInput','TerminalOutput','McpToolCall','McpToolResult',
                     'RuleValidation','LogEntry','SessionLifecycle','Idle','Resize','HttpRequest','TerminalLaunch'];
+
+const TRACE_TAB_TOKEN_KEY = 'viberails_tab';
+const traceAuthGate = document.getElementById('trace-auth-gate');
+const traceAuthMessage = document.getElementById('trace-auth-gate-message');
+const connectHint = document.getElementById('connect-hint');
+const mainGrid = document.querySelector('.main-grid');
+let streamAbortController = null;
+let streamReconnectTimer = null;
+let traceAuthLocked = false;
+
+function getTraceTabToken() {
+    try {
+        return sessionStorage.getItem(TRACE_TAB_TOKEN_KEY) || '';
+    } catch {
+        return '';
+    }
+}
+
+function buildTraceHeaders(overrides = {}) {
+    const headers = new Headers();
+    if (overrides instanceof Headers) {
+        overrides.forEach((value, key) => headers.set(key, value));
+    } else if (overrides && typeof overrides === 'object') {
+        for (const [key, value] of Object.entries(overrides)) {
+            if (value != null) headers.set(key, String(value));
+        }
+    }
+
+    const tabToken = getTraceTabToken();
+    if (tabToken) {
+        headers.set('viberails_tab', tabToken);
+    }
+
+    return headers;
+}
+
+function showTraceAuthError(message) {
+    if (connectHint) {
+        connectHint.textContent = message;
+        connectHint.className = 'connect-error';
+    }
+
+    if (traceAuthMessage) traceAuthMessage.textContent = message;
+    if (traceAuthGate) traceAuthGate.classList.remove('hidden');
+    if (mainGrid) mainGrid.classList.add('trace-auth-locked');
+    traceAuthLocked = true;
+    setStatus('disconnected');
+}
+
+function clearTraceAuthError() {
+    if (connectHint) {
+        connectHint.textContent = 'Paste the bootstrap URL from the instance\'s console, or enter port + code separately.';
+        connectHint.className = 'connect-hint';
+    }
+
+    if (traceAuthGate) traceAuthGate.classList.add('hidden');
+    if (mainGrid) mainGrid.classList.remove('trace-auth-locked');
+    traceAuthLocked = false;
+}
+
+async function traceRequest(path, init = {}) {
+    if (!getTraceTabToken()) {
+        showTraceAuthError('Missing viberails_tab in sessionStorage. Open /auth/bootstrap to authenticate.');
+        return null;
+    }
+
+    const response = await fetch(path, {
+        credentials: 'include',
+        cache: 'no-store',
+        ...init,
+        headers: buildTraceHeaders(init.headers),
+    });
+
+    if (response.status === 401 || response.status === 403) {
+        showTraceAuthError('Missing/expired viberails_session cookie or invalid viberails_tab token.');
+        return null;
+    }
+
+    clearTraceAuthError();
+    return response;
+}
+
+async function traceRequestJson(path, init = {}) {
+    const response = await traceRequest(path, init);
+    if (!response || !response.ok) {
+        return null;
+    }
+
+    try {
+        return await response.json();
+    } catch {
+        return null;
+    }
+}
+
+function parseTraceEventFrame(frame) {
+    const lines = frame.replace(/\r/g, '').split('\n');
+    let eventName = '';
+    let data = '';
+
+    for (const line of lines) {
+        if (!line || line.startsWith(':')) continue;
+
+        const colon = line.indexOf(':');
+        if (colon < 0) continue;
+
+        const field = line.slice(0, colon).trim();
+        const value = (line.slice(colon + 1).trimStart());
+
+        if (field === 'event') {
+            eventName = value;
+        } else if (field === 'data') {
+            data = data ? `${data}\n${value}` : value;
+        }
+    }
+
+    if (!data) return null;
+    if (eventName && eventName !== 'trace' && eventName !== 'message') return null;
+
+    try {
+        return JSON.parse(data);
+    } catch {
+        return null;
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Trace type filters — persisted to localStorage
@@ -1171,16 +1327,65 @@ function mapType(t) {
 // SSE — trace event stream
 // ─────────────────────────────────────────────────────────────────────────────
 function connectSSE() {
+    if (traceAuthLocked) return;
+
+    if (streamReconnectTimer) {
+        clearTimeout(streamReconnectTimer);
+        streamReconnectTimer = null;
+    }
+    if (streamAbortController) {
+        streamAbortController.abort();
+        streamAbortController = null;
+    }
+
     setStatus('connecting');
-    const es = new EventSource('/api/v1/trace/stream');
-    es.addEventListener('trace', e => {
+    streamAbortController = new AbortController();
+
+    (async () => {
         try {
-            const evt = JSON.parse(e.data);
-            if (paused) pending.push(evt); else dispatchEvt(evt);
-        } catch {}
-    });
-    es.onopen  = () => setStatus('connected');
-    es.onerror = () => { setStatus('disconnected'); es.close(); setTimeout(connectSSE, 3000); };
+            const res = await traceRequest('/api/v1/trace/stream', { signal: streamAbortController.signal });
+            if (!res || !res.body || traceAuthLocked) return;
+            setStatus('connected');
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                if (!value) continue;
+
+                buffer += decoder.decode(value, { stream: true });
+
+                let frameEnd;
+                while ((frameEnd = buffer.indexOf('\n\n')) >= 0) {
+                    const frame = buffer.slice(0, frameEnd).trim();
+                    buffer = buffer.slice(frameEnd + 2);
+
+                    if (!frame) continue;
+                    const evt = parseTraceEventFrame(frame);
+                    if (!evt) continue;
+
+                    if (paused) pending.push(evt);
+                    else dispatchEvt(evt);
+                }
+            }
+        } catch (error) {
+            if (error?.name !== 'AbortError') {
+                if (!traceAuthLocked) {
+                    setStatus('disconnected');
+                }
+            }
+        } finally {
+            if (streamAbortController?.signal.aborted) return;
+            streamAbortController = null;
+            if (!traceAuthLocked) {
+                setStatus('disconnected');
+                streamReconnectTimer = setTimeout(connectSSE, 3000);
+            }
+        }
+    })();
 }
 
 function setStatus(state) {
@@ -1296,6 +1501,7 @@ const procCount = document.getElementById('count-proc');
 const procAge   = document.getElementById('proc-age');
 let procLastFetch = null;
 let procAgeTimer  = null;
+let processPollTimer = null;
 
 function startProcAgeTimer() {
     if (procAgeTimer) return;
@@ -1307,10 +1513,11 @@ function startProcAgeTimer() {
 }
 
 async function fetchProcesses() {
+    if (traceAuthLocked) return;
+
     try {
-        const res = await fetch('/api/v1/trace/processes');
-        if (!res.ok) { renderProcError(`HTTP ${res.status}`); return; }
-        const data = await res.json();
+        const data = await traceRequestJson('/api/v1/trace/processes');
+        if (!data) return;
         procLastFetch = Date.now();
         renderProcTable(data.processes || []);
     } catch (e) {
@@ -1430,10 +1637,11 @@ function renderProcError(msg) {
     const goBtn      = document.getElementById('connect-go-btn');
     const hint       = document.getElementById('connect-hint');
 
-    toggleBtn.addEventListener('click', () => {
-        bar.classList.toggle('hidden');
-        if (!bar.classList.contains('hidden')) portInput.focus();
-    });
+    // Keep the connect bar visible so credentials always remain available.
+    if (toggleBtn) {
+        toggleBtn.disabled = true;
+        toggleBtn.classList.add('d-none');
+    }
 
     // If user pastes a full URL, auto-parse port + code from it
     codeInput.addEventListener('input', () => {
@@ -1481,13 +1689,29 @@ function renderProcError(msg) {
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Trace boot
+// ─────────────────────────────────────────────────────────────────────────────
+async function initializeTracePage() {
+    applyAllPanelVisibility();
+    startProcAgeTimer();
+
+    if (await traceRequestJson('/api/v1/trace/events?count=1') === null) {
+        if (processPollTimer) clearInterval(processPollTimer);
+        return;
+    }
+
+    clearTraceAuthError();
+    fetchProcesses();
+    processPollTimer = setInterval(fetchProcesses, 3000);
+    connectSSE();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Boot
 // ─────────────────────────────────────────────────────────────────────────────
-applyAllPanelVisibility();
-fetchProcesses();
-setInterval(fetchProcesses, 3000);
-startProcAgeTimer();
-connectSSE();
+(async () => {
+    await initializeTracePage();
+})();
 </script>
 </body>
 </html>

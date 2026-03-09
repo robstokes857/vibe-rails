@@ -11,9 +11,9 @@ internal partial class ConfigJsonContext : JsonSerializerContext
 public class Settings
 {
     public string InstallDirName { get; set; } = PathConstants.DEFAULT_INSTALL_DIR_NAME;
-    public string Version { get; set; } = "1.0.0";
     public string ApiKey { get; set; } = string.Empty;
     public bool RemoteAccess { get; set; } = false;
+    public bool EnablePrerelease { get; set; } = false;
     public string PinHash { get; set; } = string.Empty;
     public string PinSalt { get; set; } = string.Empty;
     public HookSettings Hooks { get; set; } = new();

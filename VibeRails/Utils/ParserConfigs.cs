@@ -147,6 +147,7 @@ namespace VibeRails.Utils
 
         private static bool _remoteAccess = false;
         private static string _apiKey = string.Empty;
+        private static bool _enablePrerelease = false;
         private static string _frontendUrl = string.Empty;
 
         public static bool GetRemoteAccess()
@@ -164,6 +165,14 @@ namespace VibeRails.Utils
         public static void SetApiKey(string value)
         {
             _apiKey = value;
+        }
+        public static bool GetEnablePrerelease()
+        {
+            return _enablePrerelease;
+        }
+        public static void SetEnablePrerelease(bool value)
+        {
+            _enablePrerelease = value;
         }
         public static string GetFrontendUrl()
         {
