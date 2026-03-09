@@ -15,8 +15,13 @@
     <script>
         window.__viberails_cache_bust__ = Date.now().toString(36);
 
-        const appStyleUrl = new URL('style.css', document.baseURI);
-        appStyleUrl.searchParams.set('v', window.__viberails_cache_bust__);
+        const _styleBase = (window.__viberails_VSCODE__ && window.__viberails_ASSETS_BASE__)
+            ? window.__viberails_ASSETS_BASE__.replace(/\/$/, '') + '/'
+            : document.baseURI;
+        const appStyleUrl = new URL('style.css', _styleBase);
+        if (!window.__viberails_VSCODE__) {
+            appStyleUrl.searchParams.set('v', window.__viberails_cache_bust__);
+        }
 
         const appStyleLink = document.createElement('link');
         appStyleLink.rel = 'stylesheet';
