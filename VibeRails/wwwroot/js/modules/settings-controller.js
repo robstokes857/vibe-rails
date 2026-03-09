@@ -1,13 +1,14 @@
 export class SettingsController {
     constructor(app) {
         this.app = app;
+        this._pinIsSet = false;
     }
 
     async loadSettings() {
         const content = document.getElementById('app-content');
         if (!content) return;
 
-        let settings = { remoteAccess: false, apiKey: '' };
+        let settings = { remoteAccess: false, apiKey: '', enablePrerelease: false };
         try {
             settings = await this.app.apiCall('/api/v1/settings', 'GET');
         } catch (error) {
@@ -24,9 +25,16 @@ export class SettingsController {
             const remoteAccessToggle = root.querySelector('#setting-remote-access');
             const apiKeyInput = root.querySelector('#setting-api-key');
             const performanceModeToggle = root.querySelector('#setting-performance-mode');
+            const enablePrereleaseToggle = root.querySelector('#setting-enable-prerelease');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
+                remoteAccessToggle.addEventListener('change', () => {
+                    if (remoteAccessToggle.checked && !this._pinIsSet) {
+                        remoteAccessToggle.checked = false;
+                        this.app.showToast('Remote Access', 'A PIN must be set before enabling remote access.', 'warning');
+                    }
+                });
             }
             if (apiKeyInput) {
                 apiKeyInput.value = settings.apiKey || '';
@@ -38,14 +46,24 @@ export class SettingsController {
                     window.dispatchEvent(new CustomEvent('performanceModeChanged', { detail: { enabled: performanceModeToggle.checked } }));
                 });
             }
+            if (enablePrereleaseToggle) {
+                enablePrereleaseToggle.checked = settings.enablePrerelease || false;
+            }
 
             const form = root.querySelector('#app-settings-form');
             if (form) {
                 form.addEventListener('submit', async (e) => {
                     e.preventDefault();
+                    const wantsRemote = remoteAccessToggle?.checked || false;
+                    if (wantsRemote && !this._pinIsSet) {
+                        this.app.showToast('Remote Access', 'A PIN must be set before enabling remote access.', 'warning');
+                        if (remoteAccessToggle) remoteAccessToggle.checked = false;
+                        return;
+                    }
                     await this.saveSettings(
-                        remoteAccessToggle?.checked || false,
-                        apiKeyInput?.value || ''
+                        wantsRemote,
+                        apiKeyInput?.value || '',
+                        enablePrereleaseToggle?.checked || false
                     );
                 });
             }
@@ -56,15 +74,24 @@ export class SettingsController {
         content.appendChild(fragment);
     }
 
-    async saveSettings(remoteAccess, apiKey) {
+    async saveSettings(remoteAccess, apiKey, enablePrerelease) {
         try {
             await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
-                apiKey: apiKey
+                apiKey: apiKey,
+                enablePrerelease: enablePrerelease
             });
+            this.applyPrereleaseVisibility(enablePrerelease);
             this.app.showToast('Settings', 'Settings saved successfully', 'success');
         } catch (error) {
             this.app.showError('Failed to save settings: ' + error.message);
+        }
+    }
+
+    applyPrereleaseVisibility(enabled) {
+        const swarmBtn = document.getElementById('swarm-nav-btn');
+        if (swarmBtn) {
+            swarmBtn.style.display = enabled ? '' : 'none';
         }
     }
 
@@ -83,6 +110,7 @@ export class SettingsController {
             console.error('Failed to fetch PIN status:', error);
         }
 
+        this._pinIsSet = pinIsSet;
         this._updatePinUI(badge, btnSet, btnClear, pinIsSet);
 
         btnSet.addEventListener('click', () => {
@@ -90,6 +118,7 @@ export class SettingsController {
                 try {
                     await this.app.apiCall('/api/v1/settings/pin', 'POST', { pin });
                     this.app.closeModal();
+                    this._pinIsSet = true;
                     this._updatePinUI(badge, btnSet, btnClear, true);
                     this.app.showToast('PIN Lock', 'PIN set successfully', 'success');
                 } catch (error) {
@@ -101,8 +130,15 @@ export class SettingsController {
         btnClear.addEventListener('click', async () => {
             try {
                 await this.app.apiCall('/api/v1/settings/pin', 'DELETE');
+                this._pinIsSet = false;
                 this._updatePinUI(badge, btnSet, btnClear, false);
                 this.app.showToast('PIN Lock', 'PIN cleared', 'success');
+                // Revert remote access toggle if it was enabled
+                const remoteToggle = root.querySelector('#setting-remote-access');
+                if (remoteToggle?.checked) {
+                    remoteToggle.checked = false;
+                    this.app.showToast('Remote Access', 'Remote access disabled because PIN was cleared.', 'warning');
+                }
             } catch (error) {
                 this.app.showError('Failed to clear PIN: ' + error.message);
             }

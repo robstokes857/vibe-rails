@@ -51,6 +51,7 @@ export class VibeControlApp {
 
     async init() {
         await this.fetchConfigs();
+        await this.applyInitialSettings();
         this.applyNavbarsCollapsedState(false);
         if (!this.data.isInGit) {
             this.showNotInGitBanner();
@@ -70,6 +71,15 @@ export class VibeControlApp {
         this.setupKeyboardShortcuts();
         this.setupVSCodeIntegration();
         this.startLifecycleHeartbeat();
+    }
+
+    async applyInitialSettings() {
+        try {
+            const settings = await this.apiCall('/api/v1/settings', 'GET');
+            this.settingsController.applyPrereleaseVisibility(settings.enablePrerelease || false);
+        } catch (error) {
+            console.error('Failed to fetch initial settings:', error);
+        }
     }
 
     showNotInGitBanner() {
