@@ -403,47 +403,6 @@
         .proc-table .col-title  { color: #666; font-size: 10px; }
         .proc-age { font-size: 10px; color: #444; margin-left: auto; }
 
-        /* ── Connect bar ── */
-        .connect-bar {
-            background: #111120;
-            border-bottom: 1px solid #2a2a3e;
-            padding: 5px 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-shrink: 0;
-            font-size: 11px;
-        }
-        .connect-bar.hidden { display: none; }
-        .connect-bar-label { color: #555; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
-        .connect-input {
-            font-family: inherit;
-            font-size: 11px;
-            background: #141428;
-            border: 1px solid #333;
-            border-radius: 3px;
-            color: #d4d4d4;
-            padding: 2px 8px;
-            outline: none;
-        }
-        .connect-input:focus { border-color: #569cd6; }
-        .connect-input.port-input { width: 70px; }
-        .connect-input.code-input { flex: 1; max-width: 340px; font-family: monospace; }
-        .connect-btn {
-            font-size: 10px;
-            padding: 2px 10px;
-            border: 1px solid #569cd6;
-            border-radius: 3px;
-            background: transparent;
-            color: #569cd6;
-            cursor: pointer;
-            font-family: inherit;
-            white-space: nowrap;
-        }
-        .connect-btn:hover { background: #569cd6; color: #fff; }
-        .connect-hint { font-size: 10px; color: #444; margin-left: 4px; }
-        .connect-error { font-size: 10px; color: #f48771; margin-left: 4px; }
-
         .trace-auth-gate {
             margin: 8px;
             border: 1px solid #4e4e6a;
@@ -480,7 +439,6 @@
     <span class="status-label" id="status-label">Connecting...</span>
     <span class="flex-grow-1"></span>
     <input class="form-control form-control-sm global-search" id="global-search" type="text" placeholder="Filter...">
-    <button class="btn btn-sm btn-outline-secondary" id="connect-toggle-btn" title="Connect to a different instance">&#x2B67; Connect</button>
     <button class="btn btn-sm btn-outline-secondary" id="pause-btn">Pause</button>
     <button class="btn btn-sm btn-outline-secondary" id="clear-all-btn">Clear All</button>
     <div class="topbar-settings-wrap">
@@ -520,16 +478,6 @@
             <div class="settings-row"><input type="checkbox" id="panel-show-console" checked><label for="panel-show-console">Console</label></div>
         </div>
     </div>
-</div>
-
-<!-- ── Connect bar ── -->
-<div class="connect-bar" id="connect-bar">
-    <span class="connect-bar-label">Instance</span>
-    <input class="connect-input port-input" id="connect-port" type="number" placeholder="Port" min="1" max="65535">
-    <span class="connect-bar-label">Bootstrap code</span>
-    <input class="connect-input code-input" id="connect-code" type="text" placeholder="Paste bootstrap code or full URL">
-    <button class="connect-btn" id="connect-go-btn">Connect</button>
-    <span class="connect-hint" id="connect-hint">Paste the bootstrap URL from the instance's console, or enter port + code separately.</span>
 </div>
 
 <div class="trace-auth-gate hidden" id="trace-auth-gate">
@@ -701,7 +649,6 @@ const TYPE_NAMES = ['TerminalInput','TerminalOutput','McpToolCall','McpToolResul
 const TRACE_TAB_TOKEN_KEY = 'viberails_tab';
 const traceAuthGate = document.getElementById('trace-auth-gate');
 const traceAuthMessage = document.getElementById('trace-auth-gate-message');
-const connectHint = document.getElementById('connect-hint');
 const mainGrid = document.querySelector('.main-grid');
 let streamAbortController = null;
 let streamReconnectTimer = null;
@@ -734,11 +681,6 @@ function buildTraceHeaders(overrides = {}) {
 }
 
 function showTraceAuthError(message) {
-    if (connectHint) {
-        connectHint.textContent = message;
-        connectHint.className = 'connect-error';
-    }
-
     if (traceAuthMessage) traceAuthMessage.textContent = message;
     if (traceAuthGate) traceAuthGate.classList.remove('hidden');
     if (mainGrid) mainGrid.classList.add('trace-auth-locked');
@@ -747,11 +689,7 @@ function showTraceAuthError(message) {
 }
 
 function clearTraceAuthError() {
-    if (connectHint) {
-        connectHint.textContent = 'Paste the bootstrap URL from the instance\'s console, or enter port + code separately.';
-        connectHint.className = 'connect-hint';
-    }
-
+    if (traceAuthMessage) traceAuthMessage.textContent = '';
     if (traceAuthGate) traceAuthGate.classList.add('hidden');
     if (mainGrid) mainGrid.classList.remove('trace-auth-locked');
     traceAuthLocked = false;
@@ -759,7 +697,7 @@ function clearTraceAuthError() {
 
 async function traceRequest(path, init = {}) {
     if (!getTraceTabToken()) {
-        showTraceAuthError('Missing viberails_tab in sessionStorage. Open /auth/bootstrap to authenticate.');
+        showTraceAuthError('Missing viberails_tab in sessionStorage. Open an authenticated VibeRails tab to establish one.');
         return null;
     }
 
@@ -1623,68 +1561,6 @@ function renderProcError(msg) {
             savePanelVisibility();
             applyPanelVisibility(id);
         });
-    }
-})();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Connect bar — navigate to another instance via bootstrap URL
-// ─────────────────────────────────────────────────────────────────────────────
-(function initConnectBar() {
-    const toggleBtn  = document.getElementById('connect-toggle-btn');
-    const bar        = document.getElementById('connect-bar');
-    const portInput  = document.getElementById('connect-port');
-    const codeInput  = document.getElementById('connect-code');
-    const goBtn      = document.getElementById('connect-go-btn');
-    const hint       = document.getElementById('connect-hint');
-
-    // Keep the connect bar visible so credentials always remain available.
-    if (toggleBtn) {
-        toggleBtn.disabled = true;
-        toggleBtn.classList.add('d-none');
-    }
-
-    // If user pastes a full URL, auto-parse port + code from it
-    codeInput.addEventListener('input', () => {
-        const val = codeInput.value.trim();
-        try {
-            const url = new URL(val);
-            const code = url.searchParams.get('code');
-            const port = url.port || (url.protocol === 'https:' ? '443' : '80');
-            if (code && port) {
-                portInput.value = port;
-                codeInput.value = code;
-                hint.textContent = `Parsed port ${port} from URL.`;
-                hint.className = 'connect-hint';
-            }
-        } catch { /* not a URL, that's fine */ }
-    });
-
-    goBtn.addEventListener('click', doConnect);
-    codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') doConnect(); });
-    portInput.addEventListener('keydown', e => { if (e.key === 'Enter') codeInput.focus(); });
-
-    function doConnect() {
-        const port = parseInt(portInput.value, 10);
-        const code = codeInput.value.trim();
-
-        if (!port || port < 1 || port > 65535) {
-            showError('Enter a valid port number.');
-            return;
-        }
-        if (!code) {
-            showError('Paste the bootstrap code or URL.');
-            return;
-        }
-
-        // Navigate to the target instance's bootstrap endpoint.
-        // It will set the cookie for that origin and redirect back to /trace.html.
-        const url = `http://localhost:${port}/auth/bootstrap?code=${encodeURIComponent(code)}&redirect=/trace.html`;
-        window.location.href = url;
-    }
-
-    function showError(msg) {
-        hint.textContent = msg;
-        hint.className = 'connect-error';
     }
 })();
 

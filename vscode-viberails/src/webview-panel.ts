@@ -85,7 +85,7 @@ export class WebviewPanelManager {
             `font-src ${webview.cspSource} https://fonts.gstatic.com`,
             `connect-src http://localhost:${port} ws://localhost:${port} ${webview.cspSource}`,
             `form-action 'none'`,
-            `base-uri 'self'`,
+            `base-uri ${webview.cspSource} 'self'`,
         ].join('; ');
 
         const assetsBaseUri = webview.asWebviewUri(wwwrootUri).toString();
