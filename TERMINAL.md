@@ -4,264 +4,137 @@ Terminal problem tracker for the Web UI terminal stack.
 
 Date started: 2026-03-07
 
-## Current Read
-
-The terminal issues are not one bug. They are a cluster of lifecycle and state-recovery bugs:
-
-1. Browser terminal instances are being torn down and recreated during navigation.
-2. Reconnect is currently mixed into tab activation and view restore.
-3. AI CLIs are full-screen TUIs, but reconnect/recovery logic still has some line-shell assumptions.
-4. Browser scrollback and durable terminal history are separate concerns, and neither is fully restored today.
-
-## Recent Changes
-
-### 2026-03-07
-
-- Removed implicit reconnect on normal tab activation and navigation restore.
-- Added manager invalidation guards so stale async terminal initialization should not complete after navigation destroys that manager.
-- Left reconnect in explicit flows only, such as the reconnect button and explicit focus/quick-launch reuse paths.
-
 ## Active Issues
 
-### 1. Duplicate output after navigation with multiple open terminals
+### 1. Duplicate output / incorrect render on navigation and reload
 
 #### Problem
 
-When multiple terminal tabs are open and the user navigates around the app, returning to the terminal view can cause output to appear twice. The duplication is not always symmetric:
-
-- one tab may show only the top portion duplicated
-- another tab may show a much larger block duplicated
-- a previously open but not currently selected tab can appear to go offline briefly
+When the user navigates away from the terminal view and returns, or reloads the page, the terminal
+can show duplicate output or render incorrectly after reconnecting. The duplication is not always
+symmetric and can vary between tabs.
 
 #### Current hypothesis
 
-This looks like a terminal manager lifecycle problem more than a rendering-only problem.
+Terminal manager lifecycle problem. On every navigation `resetLayoutStateForNavigation()` destroys
+the current manager and closes all sockets. A new manager is created when the view re-renders and
+`initialize()` restores tabs. There is still something in the reconnect/redraw path that causes
+content to appear twice, but the exact trigger has not been isolated yet.
 
 Relevant code paths:
 
-- `VibeRails/wwwroot/app.js`
-  - `loadView()` always calls `terminalController.resetLayoutStateForNavigation()`
 - `VibeRails/wwwroot/js/modules/terminal-multitab.js`
-  - `TerminalController.resetLayoutStateForNavigation()` destroys the current manager
-  - `bindTerminalActions()` creates a new manager and asynchronously calls `initialize()`
-  - `TerminalManager.initialize()` restores tabs and auto-activates one with `connectIfNeeded: true`
+  - `TerminalController.resetLayoutStateForNavigation()` — destroys the manager and generation guard
+  - `TerminalManager.initialize()` — restores tabs with `connectIfNeeded: false`
+  - `TerminalTab.connect()` — resets xterm before opening the socket
 
-Likely failure pattern:
+#### Status
 
-1. Navigation destroys the current browser-side terminal manager and closes sockets.
-2. A new manager is created when the dashboard or focus view re-renders.
-3. The restore/initialize path reconnects automatically.
-4. There is no generation token or cancellation guard around in-flight async initialization.
-5. If old and new lifecycle work overlap, duplicate browser consumers or duplicate redraw/bootstrap windows can occur.
+Ongoing. Previous fixes (generation guards, removing implicit reconnect from tab activation,
+`connectIfNeeded: false` in restore) reduced but did not eliminate the issue.
 
-#### Why the screenshots fit this theory
+---
 
-- only part of one terminal duplicated: likely partial redraw or partial replay window during reconnect
-- larger history duplicated in another tab: likely a second attach/bootstrap on a tab with more visible content
-- non-selected tab looked offline: navigation destroys all browser sockets, but only the restored/active tab reconnects immediately
-
-#### Fix plan
-
-1. Add a manager-generation or cancellation guard so stale `initialize()` / reconnect work cannot complete after navigation.
-2. Make view restore choose tabs without auto-connecting them.
-3. Ensure only one browser socket can be active per terminal tab from the local app at a time.
-4. Re-test with two or more active tabs while navigating between dashboard, swarm, and focus view.
-
-### 2. Clicking a tab auto-reconnects the terminal
+### 2. Double cursor on page reload
 
 #### Problem
 
-Clicking into a disconnected terminal tab reconnects it automatically. The user does not want selection to imply reconnect.
+After a hard page reload, reconnecting a terminal that has an active session shows two cursors on
+screen simultaneously. This does **not** happen on normal in-app navigation — only on full page
+reload.
 
-#### Current hypothesis
+#### Hypothesis
 
-This is explicit in the current code.
+Root cause is `resetDisplayOnly()` being triggered mid-stream during the initial connect sequence.
 
-Relevant code paths:
+Sequence of events:
 
-- `TerminalManager.addLocalTab()`
-  - tab button click calls `activateTab(state.id, { connectIfNeeded: true })` for tabs with active sessions
-- `TerminalManager.activateTab()`
-  - if `connectIfNeeded` is true and the tab has an active session but no open socket, it calls `connect()`
+1. `connect()` calls `vibeTerminal.reset()` before the socket opens — cursor goes to (0,0).
+2. `socket.onopen` fires, `fitAndSyncTerminal()` runs, `sendResizeToPty()` fires immediately.
+   `shouldResetDisplayBeforeResize()` returns true (socket is open, session is active) so
+   `resetDisplayOnly()` is called again. Resize sent to PTY.
+3. `scheduleFitPasses()` queues an RAF fit and a 120 ms deferred fit.
+4. PTY receives the resize and starts sending the redrawn screen, which includes ANSI cursor
+   positioning escape sequences.
+5. The RAF fit or the WebFontsAddon `onLoaded` callback fires `scheduleFitPasses()` while PTY
+   data is still mid-stream. If the measured size changed (e.g. fonts not yet settled on first
+   load), another `sendResizeToPty()` runs, `shouldResetDisplayBeforeResize()` fires, and
+   `resetDisplayOnly()` clears xterm to (0,0) while the AI CLI's ANSI stream expects the cursor
+   to already be at its current TUI position.
+6. The next batch of PTY data writes from where the CLI thinks the cursor is, while xterm's own
+   cursor is at (0,0). Both positions are visible — two cursors.
 
-This means simple tab selection acts as an implicit reconnect command.
+This is unique to page reload because fonts are not cached in JavaScript memory, so the
+WebFontsAddon `onLoaded` event fires and changes the measured cell metrics during the initial
+connect window.
 
-#### Fix plan
+#### Fix attempted (2026-03-08)
 
-1. Separate `activateTab()` from reconnect behavior.
-2. Make tab selection UI-only by default.
-3. Reserve reconnect for:
-   - explicit reconnect button
-   - explicit user command
-   - optional future preference if we decide to support auto-reconnect as a setting
+Added `_initialConnectActive` flag to `TerminalTab`:
 
-### 3. Unselected tabs temporarily appear offline during navigation
+- Set to `true` at the start of `connect()`, immediately before the socket is created.
+- Cleared to `false` in `socket.onmessage` when the first data frame arrives.
+- Also cleared in `disconnect()` to avoid stale flag on forced teardown.
+- `shouldResetDisplayBeforeResize()` returns `false` while `_initialConnectActive` is true.
 
-#### Problem
+This prevents any resize-driven `resetDisplayOnly()` from firing between socket open and first
+data arrival, while still allowing mid-stream resets for user-initiated resizes after the session
+is live.
 
-When the user navigates away and comes back, a tab that was previously open but not selected can briefly show as offline or disconnected.
+Key file: `VibeRails/wwwroot/js/modules/terminal-multitab.js` — `TerminalTab`
 
-#### Current hypothesis
+---
 
-This is consistent with the current manager destroy/restore behavior.
+## Fixed Issues
 
-Relevant code paths:
+### ✅ 2. Clicking a tab auto-reconnected the terminal
 
-- navigation destroys the browser-side manager and all browser sockets
-- restored manager reconnects the chosen active tab during `initialize()`
-- inactive tabs remain disconnected until later interaction
+Tab button click passed `connectIfNeeded: true`, making tab selection act as an implicit
+reconnect. Fixed by changing all tab activation calls in `addLocalTab()` and `restoreTabs()` to
+`connectIfNeeded: false`. Reconnect is now explicit only (Reconnect button, or
+`reconnectActiveTab()`).
 
-This produces the perception that tabs are dropping offline during navigation.
+### ✅ 3. Unselected tabs appeared offline during navigation
 
-#### Fix plan
+Navigation destroyed all browser sockets. Only the active tab reconnected, making inactive tabs
+look offline. Resolved as a side effect of the `connectIfNeeded: false` change above. Tabs now
+correctly show as paused/disconnected rather than silently re-connecting on activation.
 
-1. Document the intended behavior: browser connection state is not the same thing as PTY/session state.
-2. After we remove implicit reconnect from tab activation, show disconnected tabs as paused viewers instead of silently reconnecting them.
-3. Decide whether navigation should:
-   - reconnect no tabs automatically
-   - reconnect only the selected tab
-   - reconnect all visible tabs
+### ✅ 4. History lost on reconnect / hard refresh (current screen)
 
-Current recommendation: reconnect none automatically.
+Current screen state is recovered via the redraw-first reconnect path for AI TUIs. Full
+scrollback history intentionally not stored (PTY output persistence remains disabled by design).
 
-### 4. History is lost on reconnect or hard refresh
+### ✅ 5. AI TUI double-render / stale cells on reconnect and resize
 
-#### Problem
+Mitigated by:
+- redraw-first (not replay) for AI CLI reconnect
+- `resetDisplayOnly()` in the resize path clears stale xterm cells before a real PTY geometry change
+- manager generation guards prevent stale async init from completing after navigation
 
-After reconnect or refresh, the user loses terminal scrollback/history from the browser view.
+### ✅ 6. Remote viewer connect/disconnect not visible on native CLI
 
-#### Current hypothesis
+Fixed by writing directly to `Console.Error` (stderr) on remote attach and detach.
+Stderr bypasses the PTY so the TUI is never disturbed.
 
-There are two different kinds of history:
+Key files: `VibeRails/Services/Terminal/TerminalRunner.cs` —
+`NotifyRemoteTakeoverAsync`, `HandleRemoteBrowserDisconnectedAsync`
 
-1. current screen state
-2. durable output history / scrollback
+### ✅ 7. Native CLI showed only a blinking cursor in remote browser until resize
 
-Today the app only partially recovers the first, and does not durably restore the second.
+**Root cause:** premature `fitAndSyncTerminal({ force: true })` call in `socket.onopen` fired
+before the terminal panel CSS had settled, sending wrong cols/rows to the PTY. The PTY redrawn
+content arrived into an improperly sized viewport and was invisible.
 
-Relevant code paths:
-
-- `VibeRails/Services/Terminal/Terminal.cs`
-  - keeps only a 16 KB replay buffer
-- `VibeRails/Services/Terminal/TerminalSessionService.cs`
-  - uses redraw-first reconnect for current AI CLIs instead of replay
-- `VibeRails/wwwroot/js/modules/terminal-multitab.js`
-  - restores tab chrome/state, not browser xterm scrollback
-- `VibeRails/Services/Terminal/TerminalStateService.cs`
-  - terminal output persistence is intentionally disabled
-
-So a reconnect can recover the current live screen, but not a full browser history. A hard refresh definitely loses the browser xterm buffer because that state lived in JavaScript memory.
-
-#### Fix plan
-
-1. Re-enable durable output persistence for terminal output.
-2. Keep reconnect fidelity work separate from history work.
-3. Evaluate a proper screen-state restore mechanism instead of raw byte replay for AI TUIs.
-
-## Known TUI-Specific Rendering Problems
-
-### 5. AI terminal reconnect/resize can double-render or leave stale cells
-
-#### Problem
-
-AI CLIs such as Claude and Codex use full-screen TUI patterns. Replaying partial PTY history or resizing without clearing stale local cells can duplicate welcome cards, prompts, or layout borders.
-
-#### Current status
-
-Partially mitigated already:
-
-- local reconnect uses redraw-first instead of replay for current AI CLIs
-- resize path clears the local xterm view before a real PTY geometry change
-
-This reduces duplication, but does not solve the navigation/lifecycle bugs above.
-
-## Working Theory
-
-The main unresolved problem is local browser lifecycle, not PTY process lifetime.
-
-The PTY and tab child processes are usually still running. The unstable part is:
-
-- browser socket ownership
-- manager initialization/destruction overlap
-- reconnect policy being tied to selection and view restore
-
-## Next Fix Order
-
-1. Remove implicit reconnect from tab activation.
-2. Add cancellation/generation guards to terminal manager initialization and restore flows.
-3. Make navigation restore non-destructive to tab state, but non-reconnecting by default.
-4. Re-enable durable terminal output persistence.
-5. After lifecycle is stable, evaluate proper screen-state snapshot/restore for AI TUIs.
-6. Native CLI coexists with remote viewer — add connect/disconnect notifications via synthetic PTY messages and OSC 2 title updates.
-7. Fix blank cursor on remote attach (issue 7) — add Ctrl+L fallback in `HandleRemoteReplayRequestAsync` when replay buffer has no break-point content.
-
-### 6. Remote viewer and native CLI coexist — add connect/disconnect notifications
-
-#### Design decision
-
-Native CLI and remote viewer **coexist**. The user is physically at their machine and should not
-be kicked. The remote browser watches (and can send input if no PIN). Only the local *web UI
-viewer* (browser WebSocket on the same machine) is disconnected when remote takes over, so the
-remote browser gets exclusive web access.
-
-#### Problem
-
-When a remote viewer connects or disconnects, the native CLI console gives no indication. The
-user sitting at the terminal has no idea someone is watching.
-
-#### Fix
-
-Write directly to `Console.Error` (stderr) on connect and disconnect. Stderr bypasses the PTY
-entirely — the TUI is never disturbed, no ANSI injection risk, and the remote viewer never sees
-it (stderr is local only). This is the most stable cross-platform option.
-
-- **Connect**: `Console.Error.WriteLine("[VibeRails] Remote viewer connected")`
-- **Disconnect**: `Console.Error.WriteLine("[VibeRails] Remote viewer disconnected")`
-
-Synthetic PTY messages and OSC title sequences were explicitly rejected: pushing into the PTY
-stream risks corrupting TUI rendering for a .0001% use case.
+**Fix:** removed the premature call. `scheduleViewportLayoutSync(40ms)` already fires after
+layout settles, sends the correct resize, and triggers the visible PTY redraw. Ctrl+L fallback
+added in `HandleRemoteReplayRequestAsync` for the truly-empty-buffer edge case.
 
 Key files:
-- `VibeRails/Services/Terminal/TerminalRunner.cs` — `NotifyRemoteTakeoverAsync`, `HandleRemoteBrowserDisconnectedAsync`
+- `VibeRailsFrontEnd/.../Views/Terminals/Index.cshtml` — `socket.onopen`
+- `VibeRails/Services/Terminal/TerminalRunner.cs` — `HandleRemoteReplayRequestAsync`
 
-### 7. Native CLI shows only a blinking cursor in the remote server until resize
-
-#### Problem
-
-When a native CLI session is attached and a remote browser connects, the browser sees only a
-blinking cursor until the user sends a resize event (e.g. changing font size). After that the
-full screen appears normally.
-
-#### Root cause
-
-**Frontend layout race, not a replay problem.**
-
-The replay data is sent and received correctly. `CircularBuffer.GetDataFromLastBreakPoint()`
-already falls back to returning all buffered data when no break point exists, so the buffer
-is never empty if the CLI has been running.
-
-The issue is that `socket.onopen` immediately calls `fitAndSyncTerminal({ force: true })` before
-the terminal panel's CSS layout has settled. `activateViewportMode()` runs just before opening
-the socket and schedules `syncViewportLayout(40ms)`. The `_fit()` inside `fitAndSyncTerminal`
-fires before that 40ms delay, when the container may have zero or stale dimensions. xterm
-computes wrong cols/rows and sends a bad `__resize__`. The replay data arrives and renders into
-an improperly sized viewport, invisible to the user.
-
-When the user changes font size (or anything that triggers `refit()`), `_fit()` runs again with
-correct dimensions, xterm reflows, and the content appears.
-
-#### Fix
-
-Removed the premature `fitAndSyncTerminal({ force: true })` call from `socket.onopen` in
-`Index.cshtml`. `scheduleViewportLayoutSync(40)` already fires after layout settles — that
-refit sends the correct `__resize__`, which triggers the PTY redraw and makes the replay visible.
-
-Also kept the Ctrl+L fallback in `HandleRemoteReplayRequestAsync` as belt-and-suspenders for
-the truly-empty-buffer case (CLI just launched, no output yet at all).
-
-Key files:
-- `VibeRailsFrontEnd/.../Views/Terminals/Index.cshtml` — `socket.onopen` (removed premature fit)
-- `VibeRails/Services/Terminal/TerminalRunner.cs` — `HandleRemoteReplayRequestAsync` (Ctrl+L fallback)
+---
 
 ## Notes
 
