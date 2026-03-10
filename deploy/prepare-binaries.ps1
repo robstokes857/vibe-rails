@@ -2,10 +2,11 @@
 # prepare-binaries.ps1 - Copy AOT binaries + wwwroot to extension bin/ folder
 # Usage:
 #   npm run prepare-binaries
+#   pwsh ../deploy/prepare-binaries.ps1
 #   pwsh ../deploy/prepare-binaries.ps1 -Targets win32-x64
 
 param(
-    [string[]]$Targets = @("win32-x64", "linux-x64"),
+    [string[]]$Targets = @(),
     [string]$ArtifactsRoot = ""
 )
 
@@ -18,21 +19,36 @@ $ExtensionRoot = Join-Path $RepoRoot "vscode-viberails"
 $ArtifactsDir = if ($ArtifactsRoot) { $ArtifactsRoot } else { Join-Path $RepoRoot "Scripts" "artifacts" "aot" }
 $WwwrootSource = Join-Path $RepoRoot "VibeRails" "wwwroot"
 $BinDir = Join-Path $ExtensionRoot "bin"
-$supportedTargets = @("win32-x64", "linux-x64")
-$invalidTargets = @($Targets | Where-Object { $_ -notin $supportedTargets })
+$supportedTargets = @("win32-x64", "linux-x64", "darwin-x64", "darwin-arm64")
 
 Write-Host "VibeRails Extension - Binary Preparation" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-if ($invalidTargets.Count -gt 0) {
-    throw "Unsupported target(s): $($invalidTargets -join ', '). Supported targets: $($supportedTargets -join ', ')"
-}
-
 # Check if AOT binaries exist
 $targetConfigs = @{
     "win32-x64" = @{ SourceDir = "win-x64"; Binary = "vb.exe" }
     "linux-x64" = @{ SourceDir = "linux-x64"; Binary = "vb" }
+    "darwin-x64" = @{ SourceDir = "osx-x64"; Binary = "vb" }
+    "darwin-arm64" = @{ SourceDir = "osx-arm64"; Binary = "vb" }
+}
+
+if ($Targets.Count -eq 0) {
+    $Targets = @(
+        $supportedTargets | Where-Object {
+            $config = $targetConfigs[$_]
+            Test-Path (Join-Path (Join-Path $ArtifactsDir $config.SourceDir) $config.Binary)
+        }
+    )
+}
+
+$invalidTargets = @($Targets | Where-Object { $_ -notin $supportedTargets })
+if ($invalidTargets.Count -gt 0) {
+    throw "Unsupported target(s): $($invalidTargets -join ', '). Supported targets: $($supportedTargets -join ', ')"
+}
+
+if ($Targets.Count -eq 0) {
+    throw "No AOT binaries found under ${ArtifactsDir}. Build or download the target backends before packaging the extension."
 }
 
 $missingBinaries = @()
@@ -46,17 +62,13 @@ foreach ($target in $Targets) {
 }
 
 if ($missingBinaries.Count -gt 0) {
-    Write-Host "Missing AOT binaries under ${ArtifactsDir}:" -ForegroundColor Yellow
-    $missingBinaries | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
-    Write-Host ""
-    Write-Host "Build the required AOT binaries before packaging the extension." -ForegroundColor Yellow
-    exit 1
+    $missingList = $missingBinaries -join ", "
+    throw "Missing AOT binaries under ${ArtifactsDir}: $missingList. Build the required AOT binaries before packaging the extension."
 }
 
 # Check if wwwroot exists
 if (-not (Test-Path $WwwrootSource)) {
-    Write-Host "Error: wwwroot not found at $WwwrootSource" -ForegroundColor Red
-    exit 1
+    throw "wwwroot not found at $WwwrootSource"
 }
 
 # Clean and create bin directory structure
@@ -93,7 +105,7 @@ foreach ($platform in $platforms) {
     Write-Host "    Copied wwwroot/ ($fileCount files)" -ForegroundColor Green
 
     # Set execute permissions on Linux binary (no-op on Windows)
-    if ($platform.Name -eq "linux-x64" -and $IsLinux) {
+    if ($platform.Binary -eq "vb" -and -not $IsWindows) {
         chmod +x $destBinary
         Write-Host "    Set execute permissions" -ForegroundColor Green
     }

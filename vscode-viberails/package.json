@@ -59,6 +59,8 @@
     "package:all": "pwsh -ExecutionPolicy Bypass -File ../deploy/package-platforms.ps1",
     "package:win32-x64": "pwsh -ExecutionPolicy Bypass -File ../deploy/package-platforms.ps1 -Targets win32-x64",
     "package:linux-x64": "pwsh -ExecutionPolicy Bypass -File ../deploy/package-platforms.ps1 -Targets linux-x64",
+    "package:darwin-x64": "pwsh -ExecutionPolicy Bypass -File ../deploy/package-platforms.ps1 -Targets darwin-x64",
+    "package:darwin-arm64": "pwsh -ExecutionPolicy Bypass -File ../deploy/package-platforms.ps1 -Targets darwin-arm64",
     "release": "pwsh -ExecutionPolicy Bypass -File ../deploy/buildAndDeployVSCodeExt.ps1",
     "marketplace:test": "pwsh -ExecutionPolicy Bypass -File ../deploy/test-vscode-marketplace.ps1",
     "marketplace:publish-only": "pwsh -ExecutionPolicy Bypass -File ../deploy/test-vscode-marketplace.ps1 -Publish"

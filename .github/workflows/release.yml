@@ -116,7 +116,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload publish output for extension packaging
-        if: ${{ matrix.rid == 'win-x64' || matrix.rid == 'linux-x64' }}
+        if: ${{ matrix.rid == 'win-x64' || matrix.rid == 'linux-x64' || matrix.rid == 'osx-x64' || matrix.rid == 'osx-arm64' }}
         uses: actions/upload-artifact@v4
         with:
           name: publish-${{ matrix.rid }}
@@ -138,6 +138,14 @@ jobs:
           - target: linux-x64
             rid: linux-x64
             os: ubuntu-latest
+            binary_name: vb
+          - target: darwin-x64
+            rid: osx-x64
+            os: macos-15-intel
+            binary_name: vb
+          - target: darwin-arm64
+            rid: osx-arm64
+            os: macos-14
             binary_name: vb
 
     steps:
@@ -164,8 +172,8 @@ jobs:
           name: publish-${{ matrix.rid }}
           path: Scripts/artifacts/aot/${{ matrix.rid }}
 
-      - name: Restore executable bit for Linux binary
-        if: runner.os == 'Linux'
+      - name: Restore executable bit for non-Windows binary
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
