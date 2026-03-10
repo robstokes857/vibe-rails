@@ -241,10 +241,11 @@ namespace VibeRails.Services
                     "commit -m \"Auto-commit before merge\"", throwOnError: true, ct);
             }
 
-            // Check source project is clean
+            // Stash any uncommitted changes in the source project so the merge can proceed
             var sourceStatus = await RunGitCommandAsync(sandbox.ProjectPath, "status --porcelain", ct);
-            if (!string.IsNullOrWhiteSpace(sourceStatus))
-                throw new InvalidOperationException("Source project has uncommitted changes. Please commit or stash them before merging.");
+            var sourceHasChanges = !string.IsNullOrWhiteSpace(sourceStatus);
+            if (sourceHasChanges)
+                await RunGitCommandAsync(sandbox.ProjectPath, "stash push --include-untracked -m \"viberails-merge-stash\"", throwOnError: true, ct);
 
             // Check source project is on the expected branch
             var sourceBranch = sandbox.SourceBranch ?? "main";
@@ -284,6 +285,12 @@ namespace VibeRails.Services
             {
                 try { await RunGitCommandAsync(sandbox.ProjectPath, $"remote remove \"{remoteName}\"", ct); }
                 catch { /* best effort cleanup */ }
+
+                if (sourceHasChanges)
+                {
+                    try { await RunGitCommandAsync(sandbox.ProjectPath, "stash pop", ct); }
+                    catch { /* best effort stash restore */ }
+                }
             }
         }
 
