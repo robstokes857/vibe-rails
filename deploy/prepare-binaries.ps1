@@ -98,6 +98,15 @@ foreach ($platform in $platforms) {
     Copy-Item -Path $sourceBinary -Destination $destBinary -Force
     Write-Host "    Copied $($platform.Binary)" -ForegroundColor Green
 
+    # Copy appsettings.json
+    $sourceAppSettings = Join-Path (Join-Path $ArtifactsDir $platform.SourceDir) "appsettings.json"
+    if (Test-Path $sourceAppSettings) {
+        Copy-Item -Path $sourceAppSettings -Destination (Join-Path $platformDir "appsettings.json") -Force
+        Write-Host "    Copied appsettings.json" -ForegroundColor Green
+    } else {
+        throw "appsettings.json not found at $sourceAppSettings"
+    }
+
     # Copy wwwroot
     $destWwwroot = Join-Path $platformDir "wwwroot"
     Copy-Item -Path $WwwrootSource -Destination $destWwwroot -Recurse -Force

@@ -160,7 +160,8 @@ export class VibeTerminal {
             this._terminal.unicode.activeVersion = '15-graphemes';
         }
 
-        if (window.ImageAddon?.ImageAddon) {
+        // ImageAddon uses WebAssembly which requires 'unsafe-eval' — skip in VS Code webview (strict CSP)
+        if (window.ImageAddon?.ImageAddon && !window.__viberails_VSCODE__) {
             this._imageAddon = new window.ImageAddon.ImageAddon();
             this._terminal.loadAddon(this._imageAddon);
         }
@@ -287,6 +288,8 @@ export class VibeTerminal {
     }
 
     _loadLigaturesAddon() {
+        // LigaturesAddon calls queryLocalFonts() which is blocked by VS Code webview Permissions Policy
+        if (window.__viberails_VSCODE__) { return; }
         if (this._ligaturesLoadPromise || !this._terminal) {
             return;
         }
