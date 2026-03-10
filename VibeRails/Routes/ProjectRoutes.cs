@@ -47,12 +47,16 @@ public static class ProjectRoutes
                 gitRemoteUrl = await gitService.GetRemoteUrlAsync(cancellationToken);
             }
 
+            var sandboxesDir = Path.Combine(Utils.PathConstants.GetInstallDirPath(), Utils.PathConstants.SANDBOXES_SUBDIR);
+            var isSandbox = launchDirectory.StartsWith(sandboxesDir, StringComparison.OrdinalIgnoreCase);
+
             return Results.Ok(new ContextResponse(
                 IsInGit: isInGit,
                 LaunchDirectory: launchDirectory,
                 RootPath: rootPath,
                 GitBranch: gitBranch,
-                GitRemoteUrl: gitRemoteUrl
+                GitRemoteUrl: gitRemoteUrl,
+                IsSandbox: isSandbox
             ));
         }).WithName("GetContext");
 
