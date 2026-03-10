@@ -81,25 +81,29 @@ try {
         Write-Host "Packaging extension (no GitHub release/tag involved)..." -ForegroundColor Cyan
         Invoke-CheckedCommand -Command "npm" -Arguments @("run", "package")
 
-        $vsix = Join-Path $distDir "vscode-viberails-$version.vsix"
-        if (-not (Test-Path $vsix)) {
-            throw "Expected VSIX not found: $vsix"
+        $vsixFiles = @(Get-ChildItem -Path $distDir -File -Filter "vscode-viberails-*-$version.vsix" | Sort-Object Name)
+        if ($vsixFiles.Count -eq 0) {
+            throw "Expected platform-specific VSIX files were not found in $distDir"
         }
 
-        $sizeMb = [math]::Round((Get-Item $vsix).Length / 1MB, 2)
         Write-Host ""
         Write-Host "Marketplace preflight PASSED." -ForegroundColor Green
-        Write-Host "  VSIX: $vsix ($sizeMb MB)" -ForegroundColor White
+        foreach ($vsix in $vsixFiles) {
+            $sizeMb = [math]::Round($vsix.Length / 1MB, 2)
+            Write-Host "  VSIX: $($vsix.FullName) ($sizeMb MB)" -ForegroundColor White
+        }
 
         if ($Publish) {
             Write-Host ""
-            Write-Host "Publishing VSIX to Marketplace..." -ForegroundColor Cyan
-            Invoke-Vsce -Arguments @("publish", "--packagePath", $vsix, "--skip-duplicate")
+            Write-Host "Publishing VSIX packages to Marketplace..." -ForegroundColor Cyan
+            foreach ($vsix in $vsixFiles) {
+                Invoke-Vsce -Arguments @("publish", "--packagePath", $vsix.FullName, "--skip-duplicate")
+            }
             Write-Host "Marketplace publish completed." -ForegroundColor Green
         } else {
             Write-Host ""
             Write-Host "No publish executed (default)." -ForegroundColor Yellow
-            Write-Host "Re-run with -Publish to publish this VSIX only." -ForegroundColor Yellow
+            Write-Host "Re-run with -Publish to publish these VSIX packages." -ForegroundColor Yellow
         }
     } finally {
         $env:VSCE_PAT = $originalVscePat

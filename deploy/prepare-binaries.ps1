@@ -1,6 +1,13 @@
 #!/usr/bin/env pwsh
 # prepare-binaries.ps1 - Copy AOT binaries + wwwroot to extension bin/ folder
-# Usage: Run from vscode-viberails directory: npm run prepare-binaries
+# Usage:
+#   npm run prepare-binaries
+#   pwsh ../deploy/prepare-binaries.ps1 -Targets win32-x64
+
+param(
+    [string[]]$Targets = @("win32-x64", "linux-x64"),
+    [string]$ArtifactsRoot = ""
+)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -8,31 +15,41 @@ Set-StrictMode -Version Latest
 $ScriptDir = Split-Path -Parent $PSCommandPath
 $RepoRoot = Split-Path -Parent $ScriptDir
 $ExtensionRoot = Join-Path $RepoRoot "vscode-viberails"
-$ArtifactsDir = Join-Path $RepoRoot "Scripts" "artifacts" "aot"
+$ArtifactsDir = if ($ArtifactsRoot) { $ArtifactsRoot } else { Join-Path $RepoRoot "Scripts" "artifacts" "aot" }
 $WwwrootSource = Join-Path $RepoRoot "VibeRails" "wwwroot"
 $BinDir = Join-Path $ExtensionRoot "bin"
+$supportedTargets = @("win32-x64", "linux-x64")
+$invalidTargets = @($Targets | Where-Object { $_ -notin $supportedTargets })
 
 Write-Host "VibeRails Extension - Binary Preparation" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
+if ($invalidTargets.Count -gt 0) {
+    throw "Unsupported target(s): $($invalidTargets -join ', '). Supported targets: $($supportedTargets -join ', ')"
+}
+
 # Check if AOT binaries exist
-$winBinary = Join-Path $ArtifactsDir "win-x64" "vb.exe"
-$linuxBinary = Join-Path $ArtifactsDir "linux-x64" "vb"
+$targetConfigs = @{
+    "win32-x64" = @{ SourceDir = "win-x64"; Binary = "vb.exe" }
+    "linux-x64" = @{ SourceDir = "linux-x64"; Binary = "vb" }
+}
 
 $missingBinaries = @()
-if (-not (Test-Path $winBinary)) {
-    $missingBinaries += "win-x64/vb.exe"
-}
-if (-not (Test-Path $linuxBinary)) {
-    $missingBinaries += "linux-x64/vb"
+foreach ($target in $Targets) {
+    $config = $targetConfigs[$target]
+    $binaryDir = Join-Path $ArtifactsDir $config.SourceDir
+    $binaryPath = Join-Path $binaryDir $config.Binary
+    if (-not (Test-Path $binaryPath)) {
+        $missingBinaries += "$($config.SourceDir)/$($config.Binary)"
+    }
 }
 
 if ($missingBinaries.Count -gt 0) {
-    Write-Host "Missing AOT binaries:" -ForegroundColor Yellow
+    Write-Host "Missing AOT binaries under ${ArtifactsDir}:" -ForegroundColor Yellow
     $missingBinaries | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
     Write-Host ""
-    Write-Host "Run Scripts/build.ps1 first to build AOT binaries." -ForegroundColor Yellow
+    Write-Host "Build the required AOT binaries before packaging the extension." -ForegroundColor Yellow
     exit 1
 }
 
@@ -49,10 +66,14 @@ if (Test-Path $BinDir) {
     Remove-Item -Recurse -Force $BinDir
 }
 
-$platforms = @(
-    @{ Name = "win32-x64"; SourceDir = "win-x64"; Binary = "vb.exe" },
-    @{ Name = "linux-x64"; SourceDir = "linux-x64"; Binary = "vb" }
-)
+$platforms = foreach ($target in $Targets) {
+    $config = $targetConfigs[$target]
+    @{
+        Name = $target
+        SourceDir = $config.SourceDir
+        Binary = $config.Binary
+    }
+}
 
 foreach ($platform in $platforms) {
     $platformDir = Join-Path $BinDir $platform.Name
@@ -60,7 +81,7 @@ foreach ($platform in $platforms) {
     Write-Host "  Created bin/$($platform.Name)/" -ForegroundColor Green
 
     # Copy binary
-    $sourceBinary = Join-Path $ArtifactsDir $platform.SourceDir $platform.Binary
+    $sourceBinary = Join-Path (Join-Path $ArtifactsDir $platform.SourceDir) $platform.Binary
     $destBinary = Join-Path $platformDir $platform.Binary
     Copy-Item -Path $sourceBinary -Destination $destBinary -Force
     Write-Host "    Copied $($platform.Binary)" -ForegroundColor Green
@@ -103,6 +124,7 @@ foreach ($platform in $platforms) {
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
 Write-Host "  1. npm run compile" -ForegroundColor White
-Write-Host "  2. npm run package:win32-x64" -ForegroundColor White
-Write-Host "  3. npm run package:linux-x64" -ForegroundColor White
+foreach ($platform in $platforms) {
+    Write-Host "  - npm run package:$($platform.Name)" -ForegroundColor White
+}
 Write-Host ""

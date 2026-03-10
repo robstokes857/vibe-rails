@@ -1,12 +1,15 @@
 import * as vscode from 'vscode';
-import * as cp from 'child_process';
 import * as http from 'http';
 import * as path from 'path';
 import * as fs from 'fs';
 import { BackendManager } from './backend-manager';
 import { WebviewPanelManager } from './webview-panel';
 
-const INSTALL_DIR = path.join(process.env.USERPROFILE || process.env.HOME || '', '.vibe_rails');
+interface BundledAssets {
+    target: string;
+    exePath: string;
+    wwwrootPath: string;
+}
 
 let backendManager: BackendManager | null = null;
 let webviewManager: WebviewPanelManager | null = null;
@@ -15,8 +18,6 @@ let stopBarItem: vscode.StatusBarItem | null = null;
 let closingPromise: Promise<void> | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
-    backendManager = new BackendManager();
-
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
     statusBarItem.text = "$(rocket) VibeRails";
     statusBarItem.tooltip = "Open VibeRails Dashboard";
@@ -92,9 +93,9 @@ async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
         return;
     }
 
+    const bundledAssets = resolveBundledAssets(context);
     const targetProjectFolder = getCurrentWorkspaceFolder();
-    await ensureInstalled();
-    const webviewWwwrootPath = resolveWebviewWwwrootPath();
+    backendManager ??= new BackendManager(bundledAssets.exePath);
 
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
@@ -120,7 +121,7 @@ async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
             ({ sessionToken, tabToken } = await fetchTokens(bootstrapUrl));
         }
 
-        webviewManager = new WebviewPanelManager(webviewWwwrootPath);
+        webviewManager = new WebviewPanelManager(bundledAssets.wwwrootPath);
 
         webviewManager.onCloseRequested(() => { void closeDashboard(true, false); });
 
@@ -137,93 +138,37 @@ function getCurrentWorkspaceFolder(): string | null {
     return null;
 }
 
-async function ensureInstalled(): Promise<void> {
+function resolveBundledAssets(context: vscode.ExtensionContext): BundledAssets {
+    const target = getSupportedExtensionTarget();
     const exeName = process.platform === 'win32' ? 'vb.exe' : 'vb';
-    const exePath = path.join(INSTALL_DIR, exeName);
-    const installedWwwrootPath = path.join(INSTALL_DIR, 'wwwroot', 'index.html');
-    const hasInstalledWwwroot = fs.existsSync(installedWwwrootPath);
+    const basePath = path.join(context.extensionPath, 'bin', target);
+    const exePath = path.join(basePath, exeName);
+    const wwwrootPath = path.join(basePath, 'wwwroot');
+    const indexPath = path.join(wwwrootPath, 'index.html');
 
-    if (fs.existsSync(exePath) && hasInstalledWwwroot) {
-        return;
+    if (!fs.existsSync(exePath) || !fs.existsSync(indexPath)) {
+        throw new Error(
+            `Bundled VibeRails backend is missing for ${target}. Reinstall the extension or rebuild the packaged assets.`
+        );
     }
 
-    const choice = await vscode.window.showInformationMessage(
-        'VibeRails is not installed. Would you like to install it now?',
-        { modal: true },
-        'Install',
-        'Cancel'
-    );
-
-    if (choice !== 'Install') {
-        throw new Error('VibeRails is not installed.');
-    }
-
-    await vscode.window.withProgress({
-        location: vscode.ProgressLocation.Notification,
-        title: 'Installing VibeRails...',
-        cancellable: false
-    }, async (progress) => {
-        progress.report({ message: 'Downloading from GitHub releases...' });
-        await runInstallCommand();
-    });
-
-    if (!fs.existsSync(exePath)) {
-        throw new Error(`Installation failed. Binary not found at ${exePath}. Check the "VibeRails Installer" output for details.`);
-    }
+    return {
+        target,
+        exePath,
+        wwwrootPath
+    };
 }
 
-function resolveWebviewWwwrootPath(): string {
-    return path.join(INSTALL_DIR, 'wwwroot');
-}
+function getSupportedExtensionTarget(): string {
+    if (process.platform === 'win32' && process.arch === 'x64') {
+        return 'win32-x64';
+    }
 
-async function runInstallCommand(): Promise<void> {
-    return new Promise((resolve, reject) => {
-        let command: string;
-        let args: string[];
+    if (process.platform === 'linux' && process.arch === 'x64') {
+        return 'linux-x64';
+    }
 
-        if (process.platform === 'win32') {
-            command = 'powershell.exe';
-            args = [
-                '-NoProfile',
-                '-ExecutionPolicy', 'Bypass',
-                '-Command',
-                'irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.ps1 | iex'
-            ];
-        } else {
-            command = '/bin/bash';
-            args = [
-                '-c',
-                'wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash'
-            ];
-        }
-
-        const outputChannel = vscode.window.createOutputChannel('VibeRails Installer');
-        outputChannel.show(true);
-
-        const proc = cp.spawn(command, args, {
-            cwd: process.env.USERPROFILE || process.env.HOME || undefined,
-            stdio: ['pipe', 'pipe', 'pipe'],
-            shell: false
-        });
-
-        proc.stdout?.on('data', (data: Buffer) => outputChannel.append(data.toString()));
-        proc.stderr?.on('data', (data: Buffer) => outputChannel.append(data.toString()));
-        proc.on('error', (err) => reject(new Error(`Install process error: ${err.message}`)));
-        proc.on('exit', (code) => {
-            if (code === 0) {
-                resolve();
-            } else {
-                reject(new Error(`Install script exited with code ${code}`));
-            }
-        });
-
-        setTimeout(() => {
-            if (proc.exitCode === null) {
-                proc.kill();
-                reject(new Error('Installation timed out after 2 minutes.'));
-            }
-        }, 120000);
-    });
+    throw new Error(`Unsupported platform for bundled VibeRails backend: ${process.platform}-${process.arch}`);
 }
 
 function fetchTokens(bootstrapUrl: string): Promise<{ sessionToken: string | null, tabToken: string | null }> {

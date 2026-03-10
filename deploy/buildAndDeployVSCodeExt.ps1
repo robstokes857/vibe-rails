@@ -126,16 +126,17 @@ try {
 
         $vsixFiles = @()
         if (Test-Path $DistDir) {
-            $vsixFiles = @(Get-ChildItem -Path $DistDir -File -Filter "vscode-viberails-$currentVersion.vsix" | Sort-Object Name)
+            $vsixFiles = @(Get-ChildItem -Path $DistDir -File -Filter "vscode-viberails-*-$currentVersion.vsix" | Sort-Object Name)
         }
 
         if ($vsixFiles.Count -eq 0) {
-            throw "No VSIX files found for version $currentVersion in dist/. Run packaging first."
+            throw "No platform-specific VSIX files found for version $currentVersion in dist/. Run packaging first."
         }
 
         Write-Host "Publishing $($vsixFiles.Count) package(s)..." -ForegroundColor Cyan
-        $publishArgs = @("publish", "--packagePath") + ($vsixFiles | ForEach-Object { $_.FullName }) + @("--skip-duplicate")
-        Invoke-Vsce -Arguments $publishArgs
+        foreach ($file in $vsixFiles) {
+            Invoke-Vsce -Arguments @("publish", "--packagePath", $file.FullName, "--skip-duplicate")
+        }
 
         Write-Host ""
         Write-Host "Release published successfully." -ForegroundColor Green

@@ -378,38 +378,31 @@ export class VibeTerminal {
     attachClipboardPaste(callback) {
         if (!this._terminal) return;
 
-        // Prevent xterm.js from handling the native paste event (which would fire
-        // onData and double-send when our custom Ctrl+V handler also fires).
+        // Handle ALL paste operations (Ctrl+V and right-click) via the paste event.
+        // Using capture + stopImmediatePropagation blocks xterm's own bubble-phase paste
+        // listener, which would otherwise also fire onData and cause a double-send.
         const ta = this._terminal.textarea;
         if (ta) {
-            ta.addEventListener('paste', (e) => e.preventDefault(), true);
+            ta.addEventListener('paste', (e) => {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                const text = e.clipboardData?.getData('text/plain') ?? '';
+                if (text && typeof callback === 'function') {
+                    callback(text);
+                }
+            }, true);
         }
 
+        // Prevent xterm from processing Ctrl+V as a key; the actual paste text
+        // arrives via the paste event above.
         this.addCustomKeyEventHandler((event) => {
-            const isPaste = event.type === 'keydown'
+            if (event.type === 'keydown'
                 && (event.ctrlKey || event.metaKey)
                 && !event.altKey
-                && (event.key || '').toLowerCase() === 'v';
-
-            if (!isPaste) {
-                return true;
-            }
-
-            if (typeof callback !== 'function' || typeof navigator.clipboard?.readText !== 'function') {
+                && (event.key || '').toLowerCase() === 'v') {
                 return false;
             }
-
-            navigator.clipboard.readText()
-                .then((text) => {
-                    if (text) {
-                        callback(text);
-                    }
-                })
-                .catch(() => {
-                    // Clipboard permission may be denied.
-                });
-
-            return false;
+            return true;
         });
     }
 

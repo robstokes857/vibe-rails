@@ -57,8 +57,8 @@
     "prepare-binaries": "pwsh -ExecutionPolicy Bypass -File ../deploy/prepare-binaries.ps1",
     "package": "npm run package:all",
     "package:all": "pwsh -ExecutionPolicy Bypass -File ../deploy/package-platforms.ps1",
-    "package:win32-x64": "npx vsce package --target win32-x64 -o dist/",
-    "package:linux-x64": "npx vsce package --target linux-x64 -o dist/",
+    "package:win32-x64": "pwsh -ExecutionPolicy Bypass -File ../deploy/package-platforms.ps1 -Targets win32-x64",
+    "package:linux-x64": "pwsh -ExecutionPolicy Bypass -File ../deploy/package-platforms.ps1 -Targets linux-x64",
     "release": "pwsh -ExecutionPolicy Bypass -File ../deploy/buildAndDeployVSCodeExt.ps1",
     "marketplace:test": "pwsh -ExecutionPolicy Bypass -File ../deploy/test-vscode-marketplace.ps1",
     "marketplace:publish-only": "pwsh -ExecutionPolicy Bypass -File ../deploy/test-vscode-marketplace.ps1 -Publish"

@@ -115,10 +115,126 @@ jobs:
           path: release-assets/*
           if-no-files-found: error
 
+      - name: Upload publish output for extension packaging
+        if: ${{ matrix.rid == 'win-x64' || matrix.rid == 'linux-x64' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-${{ matrix.rid }}
+          path: artifacts/${{ matrix.rid }}/*
+          if-no-files-found: error
+
+  package_extension:
+    name: Package VSIX ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win32-x64
+            rid: win-x64
+            os: windows-latest
+            binary_name: vb.exe
+          - target: linux-x64
+            rid: linux-x64
+            os: ubuntu-latest
+            binary_name: vb
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vscode-viberails/package-lock.json
+
+      - name: Install extension dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd vscode-viberails
+          npm ci
+
+      - name: Download publish output
+        uses: actions/download-artifact@v4
+        with:
+          name: publish-${{ matrix.rid }}
+          path: Scripts/artifacts/aot/${{ matrix.rid }}
+
+      - name: Restore executable bit for Linux binary
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x "Scripts/artifacts/aot/${{ matrix.rid }}/${{ matrix.binary_name }}"
+
+      - name: Package bundled VSIX
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Push-Location "vscode-viberails"
+          try {
+              ../deploy/package-platforms.ps1 -Targets "${{ matrix.target }}"
+          } finally {
+              Pop-Location
+          }
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-vsix-${{ matrix.target }}
+          path: vscode-viberails/dist/vscode-viberails-${{ matrix.target }}-*.vsix
+          if-no-files-found: error
+
+  publish_extension:
+    name: Publish VS Code Extension
+    runs-on: ubuntu-latest
+    needs: package_extension
+    env:
+      VSCE_PAT: ${{ secrets.VS_PAT }}
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Download VSIX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: extension-vsix-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish VSIX packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${VSCE_PAT:-}" ]; then
+            echo "VS_PAT GitHub secret is required to publish the VS Code extension." >&2
+            exit 1
+          fi
+
+          shopt -s nullglob
+          packages=(dist/*.vsix)
+          if [ ${#packages[@]} -eq 0 ]; then
+            echo "No VSIX packages found to publish." >&2
+            exit 1
+          fi
+
+          for package in "${packages[@]}"; do
+            npx --yes @vscode/vsce publish --packagePath "$package" --skip-duplicate
+          done
+
   upload:
     name: Upload Assets To GitHub Release
     runs-on: ubuntu-latest
-    needs: build
+    needs:
+      - build
+      - package_extension
+      - publish_extension
     steps:
       - name: Ensure GitHub CLI
         shell: bash
@@ -133,6 +249,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: release-assets-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Download VSIX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: extension-vsix-*
           path: release-assets
           merge-multiple: true
 
