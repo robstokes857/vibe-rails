@@ -9,6 +9,7 @@ namespace VibeRails.Services
         Task<string> GetRootPathAsync(CancellationToken cancellationToken = default);
         Task<string?> GetCurrentCommitHashAsync(CancellationToken cancellationToken = default);
         Task<string?> GetCurrentBranchAsync(CancellationToken cancellationToken = default);
+        Task<string?> GetRemoteUrlAsync(CancellationToken cancellationToken = default);
         Task<List<FileChangeInfo>> GetFileChangesSinceAsync(string commitHash, CancellationToken cancellationToken = default);
     }
 
@@ -27,6 +28,19 @@ namespace VibeRails.Services
         {
             var rootPath = await RunGitCommandAsync("rev-parse --show-toplevel", cancellationToken);
             return rootPath;
+        }
+
+        public async Task<string?> GetRemoteUrlAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var remote = await RunGitCommandAsync("remote get-url origin", cancellationToken);
+                return string.IsNullOrWhiteSpace(remote) ? null : remote.Trim();
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         public async Task<List<string>> GetChangedFileAsync(CancellationToken cancellationToken)

@@ -6,86 +6,28 @@ Date started: 2026-03-07
 
 ## Active Issues
 
-### 1. Duplicate output / incorrect render on navigation and reload
-
-#### Problem
-
-When the user navigates away from the terminal view and returns, or reloads the page, the terminal
-can show duplicate output or render incorrectly after reconnecting. The duplication is not always
-symmetric and can vary between tabs.
-
-#### Current hypothesis
-
-Terminal manager lifecycle problem. On every navigation `resetLayoutStateForNavigation()` destroys
-the current manager and closes all sockets. A new manager is created when the view re-renders and
-`initialize()` restores tabs. There is still something in the reconnect/redraw path that causes
-content to appear twice, but the exact trigger has not been isolated yet.
-
-Relevant code paths:
-
-- `VibeRails/wwwroot/js/modules/terminal-multitab.js`
-  - `TerminalController.resetLayoutStateForNavigation()` — destroys the manager and generation guard
-  - `TerminalManager.initialize()` — restores tabs with `connectIfNeeded: false`
-  - `TerminalTab.connect()` — resets xterm before opening the socket
-
-#### Status
-
-Ongoing. Previous fixes (generation guards, removing implicit reconnect from tab activation,
-`connectIfNeeded: false` in restore) reduced but did not eliminate the issue.
-
----
-
-### 2. Double cursor on page reload
-
-#### Problem
-
-After a hard page reload, reconnecting a terminal that has an active session shows two cursors on
-screen simultaneously. This does **not** happen on normal in-app navigation — only on full page
-reload.
-
-#### Hypothesis
-
-Root cause is `resetDisplayOnly()` being triggered mid-stream during the initial connect sequence.
-
-Sequence of events:
-
-1. `connect()` calls `vibeTerminal.reset()` before the socket opens — cursor goes to (0,0).
-2. `socket.onopen` fires, `fitAndSyncTerminal()` runs, `sendResizeToPty()` fires immediately.
-   `shouldResetDisplayBeforeResize()` returns true (socket is open, session is active) so
-   `resetDisplayOnly()` is called again. Resize sent to PTY.
-3. `scheduleFitPasses()` queues an RAF fit and a 120 ms deferred fit.
-4. PTY receives the resize and starts sending the redrawn screen, which includes ANSI cursor
-   positioning escape sequences.
-5. The RAF fit or the WebFontsAddon `onLoaded` callback fires `scheduleFitPasses()` while PTY
-   data is still mid-stream. If the measured size changed (e.g. fonts not yet settled on first
-   load), another `sendResizeToPty()` runs, `shouldResetDisplayBeforeResize()` fires, and
-   `resetDisplayOnly()` clears xterm to (0,0) while the AI CLI's ANSI stream expects the cursor
-   to already be at its current TUI position.
-6. The next batch of PTY data writes from where the CLI thinks the cursor is, while xterm's own
-   cursor is at (0,0). Both positions are visible — two cursors.
-
-This is unique to page reload because fonts are not cached in JavaScript memory, so the
-WebFontsAddon `onLoaded` event fires and changes the measured cell metrics during the initial
-connect window.
-
-#### Fix attempted (2026-03-08)
-
-Added `_initialConnectActive` flag to `TerminalTab`:
-
-- Set to `true` at the start of `connect()`, immediately before the socket is created.
-- Cleared to `false` in `socket.onmessage` when the first data frame arrives.
-- Also cleared in `disconnect()` to avoid stale flag on forced teardown.
-- `shouldResetDisplayBeforeResize()` returns `false` while `_initialConnectActive` is true.
-
-This prevents any resize-driven `resetDisplayOnly()` from firing between socket open and first
-data arrival, while still allowing mid-stream resets for user-initiated resizes after the session
-is live.
-
-Key file: `VibeRails/wwwroot/js/modules/terminal-multitab.js` — `TerminalTab`
+None.
 
 ---
 
 ## Fixed Issues
+
+### ✅ 1. Double paste when pasting into the terminal
+
+Pasting into the web terminal (Ctrl+V or right-click paste) sent the clipboard text twice.
+
+`attachClipboardPaste` in `vibe-terminal.js` had two simultaneous paste paths: (1) a Ctrl+V
+keydown handler calling `navigator.clipboard.readText()`, and (2) xterm's own bubble-phase
+`paste` listener, which also fired `onData` because the capture listener only called
+`e.preventDefault()` — not `e.stopImmediatePropagation()`. xterm does not check
+`e.defaultPrevented`, so it always ran regardless.
+
+Fixed by consolidating to a single paste path: the capture-phase `paste` listener now calls
+`e.stopImmediatePropagation()` to block xterm's listener. All paste text is read from
+`e.clipboardData`. The keydown handler now only returns `false` to prevent xterm from processing
+Ctrl+V as a raw key sequence.
+
+Key file: `VibeRails/wwwroot/js/modules/vibe-terminal.js` — `attachClipboardPaste`
 
 ### ✅ 2. Clicking a tab auto-reconnected the terminal
 

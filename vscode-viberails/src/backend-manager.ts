@@ -2,10 +2,6 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as path from 'path';
 
-const INSTALL_DIR = path.join(process.env.USERPROFILE || process.env.HOME || '', '.vibe_rails');
-const EXE_NAME = process.platform === 'win32' ? 'vb.exe' : 'vb';
-const EXE_PATH = path.join(INSTALL_DIR, EXE_NAME);
-
 export class BackendManager {
     private process: cp.ChildProcess | null = null;
     private port: number | null = null;
@@ -16,7 +12,7 @@ export class BackendManager {
     private _onPortDetected: vscode.EventEmitter<number> = new vscode.EventEmitter<number>();
     public readonly onPortDetected: vscode.Event<number> = this._onPortDetected.event;
 
-    constructor() {
+    constructor(private readonly exePath: string) {
         this.outputChannel = vscode.window.createOutputChannel('VibeRails Backend');
     }
 
@@ -41,14 +37,14 @@ export class BackendManager {
             return this.port!;
         }
 
-        const cwd = targetProjectFolder || INSTALL_DIR;
+        const cwd = targetProjectFolder || path.dirname(this.exePath);
 
-        this.outputChannel.appendLine(`Starting VibeRails: ${EXE_PATH}`);
+        this.outputChannel.appendLine(`Starting VibeRails: ${this.exePath}`);
         this.outputChannel.appendLine(`Working directory: ${cwd}`);
         this.outputChannel.show(true);
 
         return new Promise((resolve, reject) => {
-            this.process = cp.spawn(EXE_PATH, ['--vs-code-v1'], {
+            this.process = cp.spawn(this.exePath, ['--vs-code-v1'], {
                 cwd,
                 stdio: ['pipe', 'pipe', 'pipe'],
                 shell: false,

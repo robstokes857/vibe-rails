@@ -4,6 +4,7 @@ using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
+using VibeRails.Services;
 
 namespace VibeRails.Routes;
 
@@ -34,12 +35,24 @@ public static class ProjectRoutes
 
     public static void Map(WebApplication app, string launchDirectory)
     {
-        app.MapGet("/api/v1/context", () =>
+        app.MapGet("/api/v1/context", async (IGitService gitService, CancellationToken cancellationToken) =>
         {
+            var rootPath = Utils.ParserConfigs.GetRootPath();
+            var isInGit = !string.IsNullOrEmpty(rootPath);
+            string? gitBranch = null;
+            string? gitRemoteUrl = null;
+            if (isInGit)
+            {
+                gitBranch = await gitService.GetCurrentBranchAsync(cancellationToken);
+                gitRemoteUrl = await gitService.GetRemoteUrlAsync(cancellationToken);
+            }
+
             return Results.Ok(new ContextResponse(
-                IsInGit: !string.IsNullOrEmpty(Utils.ParserConfigs.GetRootPath()),
+                IsInGit: isInGit,
                 LaunchDirectory: launchDirectory,
-                RootPath: Utils.ParserConfigs.GetRootPath()
+                RootPath: rootPath,
+                GitBranch: gitBranch,
+                GitRemoteUrl: gitRemoteUrl
             ));
         }).WithName("GetContext");
 

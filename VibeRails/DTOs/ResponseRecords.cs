@@ -71,7 +71,9 @@ namespace VibeRails.DTOs
     public record ContextResponse(
         bool IsInGit,
         string? LaunchDirectory = null,
-        string? RootPath = null
+        string? RootPath = null,
+        string? GitBranch = null,
+        string? GitRemoteUrl = null
     );
 
     public record GitOpenDirectoryRequest(string Directory);

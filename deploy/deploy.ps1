@@ -2,7 +2,8 @@
 # deploy.ps1 - Preflight + version sync + tag orchestration
 # .github/workflows/release.yml publishes:
 #   - .NET NativeAOT release assets (win/linux/macos)
-# Then this script publishes the VS Code extension locally.
+#   - Platform-specific VS Code extension packages
+#   - VS Code Marketplace extension updates
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -13,8 +14,6 @@ $AppSettingsFile = Join-Path $RepoRoot "VibeRails" "appsettings.json"
 $PackageJsonFile = Join-Path $RepoRoot "vscode-viberails" "package.json"
 $PackageLockFile = Join-Path $RepoRoot "vscode-viberails" "package-lock.json"
 $GithubRepo = "robstokes857/vibe-rails"
-$VsPatEnvName = "VS_PAT"
-
 # --- Helper Functions ---
 
 function Test-PreFlightChecks {
@@ -161,15 +160,19 @@ function Wait-ForReleaseWorkflow {
         throw "Release workflow conclusion is '$runConclusion'. Run URL: $($runView.url)"
     }
 
-    $requiredBuildJobs = @(
+    $requiredJobs = @(
         "Build win-x64",
         "Build linux-x64",
         "Build osx-x64",
-        "Build osx-arm64"
+        "Build osx-arm64",
+        "Package VSIX win32-x64",
+        "Package VSIX linux-x64",
+        "Publish VS Code Extension",
+        "Upload Assets To GitHub Release"
     )
 
     $jobs = @($runView.jobs)
-    foreach ($jobName in $requiredBuildJobs) {
+    foreach ($jobName in $requiredJobs) {
         $job = $jobs | Where-Object { $_.name -eq $jobName } | Select-Object -First 1
         if (-not $job) {
             throw "Required release job missing: '$jobName'. Run URL: $($runView.url)"
@@ -179,14 +182,6 @@ function Wait-ForReleaseWorkflow {
         if ($jobConclusion -ne "success") {
             throw "Release job '$jobName' finished with '$jobConclusion'. Run URL: $($runView.url)"
         }
-    }
-
-    $uploadJob = $jobs | Where-Object { $_.name -eq "Upload Assets To GitHub Release" } | Select-Object -First 1
-    if (-not $uploadJob) {
-        throw "Required release job missing: 'Upload Assets To GitHub Release'. Run URL: $($runView.url)"
-    }
-    if ([string]$uploadJob.conclusion -ne "success") {
-        throw "Release job 'Upload Assets To GitHub Release' finished with '$($uploadJob.conclusion)'. Run URL: $($runView.url)"
     }
 
     Write-Host "Release workflow completed successfully with all required jobs." -ForegroundColor Green
@@ -202,6 +197,7 @@ function Assert-ReleaseAssetsPresent {
 
     $release = $releaseJson | ConvertFrom-Json
     $assetNames = @($release.assets | ForEach-Object { [string]$_.name })
+    $version = $Tag.TrimStart('v')
 
     $requiredAssets = @(
         "vb-win-x64.zip",
@@ -211,7 +207,9 @@ function Assert-ReleaseAssetsPresent {
         "vb-osx-x64.tar.gz",
         "vb-osx-x64.tar.gz.sha256",
         "vb-osx-arm64.tar.gz",
-        "vb-osx-arm64.tar.gz.sha256"
+        "vb-osx-arm64.tar.gz.sha256",
+        "vscode-viberails-win32-x64-$version.vsix",
+        "vscode-viberails-linux-x64-$version.vsix"
     )
 
     $missing = @()
@@ -228,44 +226,6 @@ function Assert-ReleaseAssetsPresent {
     Write-Host "Verified release assets for $Tag." -ForegroundColor Green
 }
 
-function Get-RequiredVsPat {
-    $vsPat = [Environment]::GetEnvironmentVariable($VsPatEnvName)
-    if ([string]::IsNullOrWhiteSpace($vsPat)) {
-        throw "$VsPatEnvName is not set. Set $VsPatEnvName to your Visual Studio Marketplace PAT before running deploy."
-    }
-    return $vsPat
-}
-
-function Test-VsPatForPublisher {
-    param([Parameter(Mandatory = $true)][string]$VsPat)
-
-    $package = Get-Content $PackageJsonFile -Raw | ConvertFrom-Json
-    $publisher = [string]$package.publisher
-    if ([string]::IsNullOrWhiteSpace($publisher)) {
-        throw "Could not read 'publisher' from $PackageJsonFile."
-    }
-
-    $originalVscePat = $env:VSCE_PAT
-    $env:VSCE_PAT = $VsPat
-    try {
-        Write-Host "Validating $VsPatEnvName for VS Code publisher '$publisher'..." -ForegroundColor Cyan
-        if (Get-Command vsce -ErrorAction SilentlyContinue) {
-            vsce verify-pat $publisher
-        } elseif (Get-Command npx -ErrorAction SilentlyContinue) {
-            npx --yes @vscode/vsce verify-pat $publisher
-        } else {
-            throw "Neither 'vsce' nor 'npx' found. Install Node.js/npm or @vscode/vsce."
-        }
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "$VsPatEnvName failed validation for publisher '$publisher'."
-        }
-        Write-Host "  ✓ $VsPatEnvName is valid for publisher '$publisher'" -ForegroundColor Green
-    } finally {
-        $env:VSCE_PAT = $originalVscePat
-    }
-}
-
 # --- Main ---
 
 $banner = @"
@@ -278,8 +238,6 @@ $banner = @"
 Write-Host $banner -ForegroundColor Magenta
 
 Test-PreFlightChecks
-$vsPat = Get-RequiredVsPat
-Test-VsPatForPublisher -VsPat $vsPat
 
 $currentVersion = Get-LatestReleaseVersion
 Write-Host "Current release: " -NoNewline
@@ -349,16 +307,6 @@ $headSha = (git rev-parse HEAD).Trim()
 Wait-ForReleaseWorkflow -HeadSha $headSha -Tag $tag
 Assert-ReleaseAssetsPresent -Tag $tag
 
-Write-Host "`nPublishing VS Code extension..." -ForegroundColor Cyan
-$vsCodeReleaseScript = Join-Path $RepoRoot "deploy" "buildAndDeployVSCodeExt.ps1"
-if (-not (Test-Path $vsCodeReleaseScript)) {
-    throw "VS Code release script not found: $vsCodeReleaseScript"
-}
-& $vsCodeReleaseScript -Version $newVersion.ToString() -Pat $vsPat -SkipVersionUpdate
-if ($LASTEXITCODE -ne 0) {
-    throw "VS Code extension publish script failed."
-}
-
 Write-Host "`nPublished release: https://github.com/$GithubRepo/releases/tag/$tag" -ForegroundColor Green
-Write-Host "Installer commands now resolve to this published version." -ForegroundColor Green
+Write-Host "GitHub Actions built the native assets, published the VS Code extension, and uploaded the VSIX packages." -ForegroundColor Green
 Write-Host "`nDone!" -ForegroundColor Green

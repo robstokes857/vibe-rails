@@ -20,7 +20,8 @@ scripts/**
 # Agent docs
 AGENTS.md
 
-# Exclude all bin directories by default
+# Exclude all bin directories by default.
+# deploy/package-platforms.ps1 re-includes the target-specific bundled backend folder per package.
 bin/**
 
 # Git files
@@ -30,3 +31,5 @@ bin/**
 # Documentation (except README)
 *.md
 !README.md
+
+

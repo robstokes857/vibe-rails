@@ -3,8 +3,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 
-const DEFAULT_WWWROOT = path.join(process.env.USERPROFILE || process.env.HOME || '', '.vibe_rails', 'wwwroot');
-
 export class WebviewPanelManager {
     private panel: vscode.WebviewPanel | null = null;
     private readonly wwwrootPath: string;
@@ -12,8 +10,8 @@ export class WebviewPanelManager {
     private _onCloseRequested: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
     public readonly onCloseRequested: vscode.Event<void> = this._onCloseRequested.event;
 
-    constructor(wwwrootPath?: string) {
-        this.wwwrootPath = wwwrootPath || DEFAULT_WWWROOT;
+    constructor(wwwrootPath: string) {
+        this.wwwrootPath = wwwrootPath;
     }
 
     public isVisible(): boolean {
