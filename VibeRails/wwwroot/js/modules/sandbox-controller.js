@@ -423,6 +423,12 @@ export class SandboxController {
         modalContainer.querySelectorAll('[data-action="close-modal"]')
             .forEach(btn => btn.addEventListener('click', () => this.app.closeModal()));
 
+        // Dispose any previous diff editor before creating a new one
+        if (this._diffEditor) {
+            try { this._diffEditor.dispose(); } catch (_) {}
+            this._diffEditor = null;
+        }
+
         // Create diff editor
         const editorContainer = document.getElementById('sandbox-diff-editor');
         const diffEditor = monacoInstance.editor.createDiffEditor(editorContainer, {
@@ -483,9 +489,14 @@ export class SandboxController {
     }
 
     _loadFileInDiff(diffEditor, monacoInstance, file) {
+        const oldModel = diffEditor.getModel();
         const originalModel = monacoInstance.editor.createModel(file.originalContent || '', file.language || 'plaintext');
         const modifiedModel = monacoInstance.editor.createModel(file.modifiedContent || '', file.language || 'plaintext');
         diffEditor.setModel({ original: originalModel, modified: modifiedModel });
+        if (oldModel) {
+            try { oldModel.original?.dispose(); } catch (_) {}
+            try { oldModel.modified?.dispose(); } catch (_) {}
+        }
     }
 
     _updateDiffStats(diffEditor) {
