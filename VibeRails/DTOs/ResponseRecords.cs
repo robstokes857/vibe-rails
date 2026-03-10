@@ -73,7 +73,8 @@ namespace VibeRails.DTOs
         string? LaunchDirectory = null,
         string? RootPath = null,
         string? GitBranch = null,
-        string? GitRemoteUrl = null
+        string? GitRemoteUrl = null,
+        bool IsSandbox = false
     );
 
     public record GitOpenDirectoryRequest(string Directory);

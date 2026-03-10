@@ -48,12 +48,15 @@ export class DashboardController {
                 const sandboxCount = this.app.data.sandboxes.length;
                 const agentCount = this.app.data.agents.length;
                 const gitBranch = this.app.data.configs?.gitBranch;
+                const isSandbox = this.app.data.configs?.isSandbox === true;
 
                 headingContainer.innerHTML = `
-                    <div class="context-header-card position-relative overflow-hidden">
+                    <div class="context-header-card position-relative overflow-hidden py-3 px-4" style="background: ${isSandbox ? 'rgba(20, 14, 5, 0.5)' : 'rgba(15, 23, 42, 0.4)'}; border: 1px solid ${isSandbox ? 'rgba(251, 146, 60, 0.25)' : 'rgba(255, 255, 255, 0.05)'}; border-radius: 12px; backdrop-filter: blur(10px);">
+                        ${isSandbox ? `<div style="position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, rgba(251,146,60,0.6), transparent);"></div>` : ''}
                         <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
-                            <div class="d-flex align-items-center gap-3">
-                                <div class="project-logo-wrapper" style="color: var(--color-primary);">
+                            <div class="d-flex align-items-center gap-4">
+                                <div class="project-logo-wrapper d-flex align-items-center justify-content-center" style="width: 52px; height: 52px; background: ${isSandbox ? 'rgba(251,146,60,0.08)' : 'rgba(59, 130, 246, 0.08)'}; border: 1px solid ${isSandbox ? 'rgba(251,146,60,0.25)' : 'rgba(59, 130, 246, 0.2)'}; border-radius: 12px; color: ${isSandbox ? '#fb923c' : 'var(--color-primary)'}; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+
                                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
                                         <path d="M9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.825a2 2 0 0 1-1.991-1.819l-.637-7a2 2 0 0 1 .342-1.31L.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3m-8.322.12C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 1z"/>
                                     </svg>
@@ -62,7 +65,8 @@ export class DashboardController {
                                     <div class="d-flex align-items-center flex-wrap gap-3">
                                         <div class="d-flex align-items-center gap-2">
                                             <span class="text-muted xx-small text-uppercase fw-bold opacity-50" style="letter-spacing: 0.1em;">Project</span>
-                                            <h5 class="mb-0 text-white fw-bold" style="font-size: 1.1rem;">${this.app.escapeHtml(projectName)}</h5>
+                                            <h5 class="mb-0 text-white fw-bold" style="font-size: 1.15rem;">${this.app.escapeHtml(projectName)}</h5>
+                                            ${isSandbox ? `<span style="font-size: 0.6rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #fb923c; background: rgba(251,146,60,0.12); border: 1px solid rgba(251,146,60,0.3); border-radius: 4px; padding: 2px 6px;">Sandbox</span>` : ''}
                                             <button class="btn btn-link btn-sm p-0 text-muted hover-accent ms-1" type="button" data-action="set-custom-name" title="Rename project">
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
                                                     <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/>
