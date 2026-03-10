@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
-import * as path from 'path';
 
 export class BackendManager {
     private process: cp.ChildProcess | null = null;
@@ -37,7 +36,10 @@ export class BackendManager {
             return this.port!;
         }
 
-        const cwd = targetProjectFolder || path.dirname(this.exePath);
+        if (!targetProjectFolder) {
+            throw new Error('No workspace folder is open. Open a project folder in VS Code before starting VibeRails.');
+        }
+        const cwd = targetProjectFolder;
 
         this.outputChannel.appendLine(`Starting VibeRails: ${this.exePath}`);
         this.outputChannel.appendLine(`Working directory: ${cwd}`);
@@ -97,10 +99,6 @@ export class BackendManager {
                 }
             }, 30000);
         });
-    }
-
-    private delay(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     public async stop(): Promise<void> {
