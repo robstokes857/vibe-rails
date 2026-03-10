@@ -167,6 +167,8 @@ function Wait-ForReleaseWorkflow {
         "Build osx-arm64",
         "Package VSIX win32-x64",
         "Package VSIX linux-x64",
+        "Package VSIX darwin-x64",
+        "Package VSIX darwin-arm64",
         "Publish VS Code Extension",
         "Upload Assets To GitHub Release"
     )
@@ -209,7 +211,9 @@ function Assert-ReleaseAssetsPresent {
         "vb-osx-arm64.tar.gz",
         "vb-osx-arm64.tar.gz.sha256",
         "vscode-viberails-win32-x64-$version.vsix",
-        "vscode-viberails-linux-x64-$version.vsix"
+        "vscode-viberails-linux-x64-$version.vsix",
+        "vscode-viberails-darwin-x64-$version.vsix",
+        "vscode-viberails-darwin-arm64-$version.vsix"
     )
 
     $missing = @()

@@ -168,6 +168,14 @@ function getSupportedExtensionTarget(): string {
         return 'linux-x64';
     }
 
+    if (process.platform === 'darwin' && process.arch === 'x64') {
+        return 'darwin-x64';
+    }
+
+    if (process.platform === 'darwin' && process.arch === 'arm64') {
+        return 'darwin-arm64';
+    }
+
     throw new Error(`Unsupported platform for bundled VibeRails backend: ${process.platform}-${process.arch}`);
 }
 

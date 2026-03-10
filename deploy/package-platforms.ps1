@@ -4,9 +4,11 @@
 #   npm run package:all
 #   npm run package:win32-x64
 #   npm run package:linux-x64
+#   npm run package:darwin-x64
+#   npm run package:darwin-arm64
 
 param(
-    [string[]]$Targets = @("win32-x64", "linux-x64")
+    [string[]]$Targets = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +20,7 @@ $ExtensionRoot = Join-Path $RepoRoot "vscode-viberails"
 $DistDir = Join-Path $ExtensionRoot "dist"
 $PrepareBinariesScript = Join-Path $ScriptDir "prepare-binaries.ps1"
 $VsCodeIgnorePath = Join-Path $ExtensionRoot ".vscodeignore"
+$ArtifactsDir = Join-Path $RepoRoot "Scripts" "artifacts" "aot"
 
 Write-Host "VibeRails Extension - Packaging" -ForegroundColor Cyan
 Write-Host "===============================" -ForegroundColor Cyan
@@ -33,10 +36,30 @@ if (-not $vsceIsGlobal -and -not (Get-Command npx -ErrorAction SilentlyContinue)
 }
 
 # Validate input
-$supportedTargets = @("win32-x64", "linux-x64")
+$supportedTargets = @("win32-x64", "linux-x64", "darwin-x64", "darwin-arm64")
+$targetConfigs = @{
+    "win32-x64" = @{ SourceDir = "win-x64"; Binary = "vb.exe" }
+    "linux-x64" = @{ SourceDir = "linux-x64"; Binary = "vb" }
+    "darwin-x64" = @{ SourceDir = "osx-x64"; Binary = "vb" }
+    "darwin-arm64" = @{ SourceDir = "osx-arm64"; Binary = "vb" }
+}
+
+if ($Targets.Count -eq 0) {
+    $Targets = @(
+        $supportedTargets | Where-Object {
+            $config = $targetConfigs[$_]
+            Test-Path (Join-Path (Join-Path $ArtifactsDir $config.SourceDir) $config.Binary)
+        }
+    )
+}
+
 $invalidTargets = @($Targets | Where-Object { $_ -notin $supportedTargets })
 if ($invalidTargets.Count -gt 0) {
     throw "Unsupported target(s): $($invalidTargets -join ', '). Supported targets: $($supportedTargets -join ', ')"
+}
+
+if ($Targets.Count -eq 0) {
+    throw "No packaged backend targets were detected under ${ArtifactsDir}. Build or download the target backends first."
 }
 
 # Create dist directory
@@ -65,9 +88,6 @@ if (-not (Test-Path $PrepareBinariesScript)) {
 }
 
 & $PrepareBinariesScript -Targets $Targets
-if ($LASTEXITCODE -ne 0) {
-    throw "prepare-binaries.ps1 failed"
-}
 
 if (-not (Test-Path $VsCodeIgnorePath)) {
     throw ".vscodeignore not found: $VsCodeIgnorePath"
