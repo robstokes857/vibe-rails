@@ -13,9 +13,14 @@ public static class AppSettingsRoutes
         app.MapGet("/api/v1/settings", () =>
         {
             var settings = Config.Load();
+            var maskedKey = string.IsNullOrEmpty(settings.ApiKey)
+                ? ""
+                : settings.ApiKey.Length <= 4
+                    ? new string('•', settings.ApiKey.Length)
+                    : new string('•', settings.ApiKey.Length - 4) + settings.ApiKey[^4..];
             return Results.Ok(new AppSettingsDto(
                 settings.RemoteAccess,
-                settings.ApiKey,
+                maskedKey,
                 settings.EnablePrerelease
             ));
         }).WithName("GetAppSettings");
@@ -31,7 +36,9 @@ public static class AppSettingsRoutes
 
             // Update only the RemoteAccess, ApiKey, and EnablePrerelease fields
             settings.RemoteAccess = remoteAccess;
-            settings.ApiKey = settingsDto.ApiKey;
+            // Empty apiKey means "unchanged" (masked value was not edited)
+            if (!string.IsNullOrEmpty(settingsDto.ApiKey))
+                settings.ApiKey = settingsDto.ApiKey;
             settings.EnablePrerelease = settingsDto.EnablePrerelease;
 
             // Save back to settings.json
@@ -39,7 +46,8 @@ public static class AppSettingsRoutes
 
             // Update static Configs so runtime reflects the change immediately
             ParserConfigs.SetRemoteAccess(remoteAccess);
-            ParserConfigs.SetApiKey(settingsDto.ApiKey);
+            if (!string.IsNullOrEmpty(settingsDto.ApiKey))
+                ParserConfigs.SetApiKey(settingsDto.ApiKey);
             ParserConfigs.SetEnablePrerelease(settingsDto.EnablePrerelease);
             return Results.Ok(settingsDto with { RemoteAccess = remoteAccess });
         }).WithName("UpdateAppSettings");

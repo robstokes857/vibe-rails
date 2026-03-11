@@ -38,6 +38,7 @@ export class SettingsController {
             }
             if (apiKeyInput) {
                 apiKeyInput.value = settings.apiKey || '';
+                apiKeyInput.dataset.originalValue = settings.apiKey || '';
             }
             if (performanceModeToggle) {
                 performanceModeToggle.checked = localStorage.getItem('performanceMode') === 'true';
@@ -60,9 +61,11 @@ export class SettingsController {
                         if (remoteAccessToggle) remoteAccessToggle.checked = false;
                         return;
                     }
+                    const apiKeyValue = apiKeyInput?.value || '';
+                    const apiKeyChanged = apiKeyValue !== (apiKeyInput?.dataset.originalValue || '');
                     await this.saveSettings(
                         wantsRemote,
-                        apiKeyInput?.value || '',
+                        apiKeyChanged ? apiKeyValue : '',
                         enablePrereleaseToggle?.checked || false
                     );
                 });
