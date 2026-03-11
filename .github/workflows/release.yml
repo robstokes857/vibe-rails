@@ -12,6 +12,7 @@ env:
   PROJECT_PATH: ./VibeRails/VibeRails.csproj
   CONFIGURATION: Release
   FRAMEWORK: net10.0
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
