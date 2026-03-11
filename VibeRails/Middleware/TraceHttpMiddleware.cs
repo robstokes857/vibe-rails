@@ -12,6 +12,8 @@ public sealed class TraceHttpMiddleware
     private static readonly HashSet<string> s_skipPaths = new(StringComparer.OrdinalIgnoreCase)
     {
         "/api/v1/trace/stream",
+        "/api/v1/trace/events",
+        "/api/v1/trace/processes",
         "/api/v1/terminal/ws",
     };
 

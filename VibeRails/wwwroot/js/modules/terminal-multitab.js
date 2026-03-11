@@ -687,6 +687,12 @@ class TerminalManager {
         });
 
         this.stopBtn?.addEventListener('click', () => {
+            const active = this.getActiveTab();
+            if (active?.state?.hasActiveSession && active.state.status === 'disconnected') {
+                void this.reconnectActiveTab();
+                return;
+            }
+
             void this.stopActiveTab();
         });
 
@@ -1535,12 +1541,30 @@ class TerminalManager {
 
     updateActionButtons({ start, reconnect, stop }) {
         this.startBtn?.classList.toggle('d-none', !start);
-        this.reconnectBtn?.classList.toggle('d-none', !reconnect);
+        this.reconnectBtn?.classList.add('d-none');
         this.stopBtn?.classList.toggle('d-none', !stop);
+        this.updateConnectionButtonMode(reconnect);
 
         // connected = has active session AND not in disconnected state
         const connected = stop && !reconnect;
         this.controlsBar?.classList.toggle('d-none', connected);
+    }
+
+    updateConnectionButtonMode(reconnect) {
+        if (!this.stopBtn) return;
+
+        const label = this.stopBtn.querySelector('span');
+        const nextLabel = reconnect ? 'Connect' : 'Disconnect';
+        const nextTitle = reconnect ? 'Reconnect terminal session' : 'Disconnect terminal session';
+
+        this.stopBtn.title = nextTitle;
+        this.stopBtn.setAttribute('aria-label', nextTitle);
+        this.stopBtn.classList.toggle('btn-outline-success', reconnect);
+        this.stopBtn.classList.toggle('btn-outline-danger', !reconnect);
+
+        if (label) {
+            label.textContent = nextLabel;
+        }
     }
 
     showPlaceholder() {

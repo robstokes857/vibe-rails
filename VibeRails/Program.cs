@@ -64,6 +64,12 @@ builder.Services.AddSingleton(traceBuffer);
 // Register DI services
 MapRegisterServices.Register(builder.Services);
 
+// MCP log tailer — only enabled when --trace is passed
+if (args.Contains("--trace", StringComparer.OrdinalIgnoreCase))
+{
+    builder.Services.AddHostedService<McpLogTailerService>();
+}
+
 
 // Add CORS support for localhost and VSCode webview
 builder.Services.AddCors(options =>

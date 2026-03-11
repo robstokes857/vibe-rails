@@ -53,10 +53,11 @@ namespace VibeRails
             var frontendUrl = configuration["VibeRails:FrontendUrl"] ?? throw new InvalidOperationException("VibeRails:FrontendUrl is not configured in appsettings.json");
             ParserConfigs.SetFrontendUrl(frontendUrl);
 
-            // Load ApiKey and RemoteAccess from settings.json in ~/.vibe_rails/
+            // Load app settings from settings.json in ~/.vibe_rails/
             var settings = Config.Load();
             ParserConfigs.SetRemoteAccess(settings.RemoteAccess);
             ParserConfigs.SetApiKey(settings.ApiKey);
+            ParserConfigs.SetDeveloperOptions(settings.DeveloperOptions);
         }
     }
 }

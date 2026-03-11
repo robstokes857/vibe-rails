@@ -2,15 +2,17 @@ export class SettingsController {
     constructor(app) {
         this.app = app;
         this._pinIsSet = false;
+        this.performanceMode = window.VibeRailsPerformance;
     }
 
     async loadSettings() {
         const content = document.getElementById('app-content');
         if (!content) return;
 
-        let settings = { remoteAccess: false, apiKey: '', enablePrerelease: false };
+        let settings = { remoteAccess: false, apiKey: '', enablePrerelease: false, developerOptions: false };
         try {
             settings = await this.app.apiCall('/api/v1/settings', 'GET');
+            this.app.setAppSettings(settings);
         } catch (error) {
             console.error('Failed to fetch settings:', error);
         }
@@ -26,6 +28,7 @@ export class SettingsController {
             const apiKeyInput = root.querySelector('#setting-api-key');
             const performanceModeToggle = root.querySelector('#setting-performance-mode');
             const enablePrereleaseToggle = root.querySelector('#setting-enable-prerelease');
+            const developerOptionsToggle = root.querySelector('#setting-developer-options');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
@@ -41,14 +44,18 @@ export class SettingsController {
                 apiKeyInput.dataset.originalValue = settings.apiKey || '';
             }
             if (performanceModeToggle) {
-                performanceModeToggle.checked = localStorage.getItem('performanceMode') === 'true';
+                performanceModeToggle.checked = this.performanceMode?.isEnabled?.() === true;
                 performanceModeToggle.addEventListener('change', () => {
-                    localStorage.setItem('performanceMode', performanceModeToggle.checked);
-                    window.dispatchEvent(new CustomEvent('performanceModeChanged', { detail: { enabled: performanceModeToggle.checked } }));
+                    if (this.performanceMode?.setEnabled) {
+                        this.performanceMode.setEnabled(performanceModeToggle.checked);
+                    }
                 });
             }
             if (enablePrereleaseToggle) {
                 enablePrereleaseToggle.checked = settings.enablePrerelease || false;
+            }
+            if (developerOptionsToggle) {
+                developerOptionsToggle.checked = settings.developerOptions || false;
             }
 
             const form = root.querySelector('#app-settings-form');
@@ -66,7 +73,8 @@ export class SettingsController {
                     await this.saveSettings(
                         wantsRemote,
                         apiKeyChanged ? apiKeyValue : '',
-                        enablePrereleaseToggle?.checked || false
+                        enablePrereleaseToggle?.checked || false,
+                        developerOptionsToggle?.checked || false
                     );
                 });
             }
@@ -77,14 +85,16 @@ export class SettingsController {
         content.appendChild(fragment);
     }
 
-    async saveSettings(remoteAccess, apiKey, enablePrerelease) {
+    async saveSettings(remoteAccess, apiKey, enablePrerelease, developerOptions) {
         try {
-            await this.app.apiCall('/api/v1/settings', 'POST', {
+            const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
                 apiKey: apiKey,
-                enablePrerelease: enablePrerelease
+                enablePrerelease: enablePrerelease,
+                developerOptions: developerOptions
             });
-            this.applyPrereleaseVisibility(enablePrerelease);
+            this.app.setAppSettings(savedSettings);
+            this.applyPrereleaseVisibility(savedSettings.enablePrerelease || false);
             this.app.showToast('Settings', 'Settings saved successfully', 'success');
         } catch (error) {
             this.app.showError('Failed to save settings: ' + error.message);
