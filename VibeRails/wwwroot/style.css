@@ -191,6 +191,20 @@ code {
     padding-right: 5px;
 }
 
+.navbar-brand-sm {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+}
+
+.navbar-brand-sm:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 4px;
+}
+
 .navbar-brand-sm:hover .brand-logo-sm {
     transform: scale(1.1) rotate(-3deg);
 }

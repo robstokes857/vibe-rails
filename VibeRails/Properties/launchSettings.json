@@ -17,7 +17,7 @@
     },
     "LaunchBrowser": {
       "commandName": "Project",
-      "commandLineArgs": "--open-browser",
+      "commandLineArgs": "--open-browser --trace",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },

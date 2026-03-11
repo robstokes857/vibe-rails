@@ -1,4 +1,5 @@
 (function () {
+    const performanceMode = window.VibeRailsPerformance;
     const canvas = document.createElement('canvas');
     canvas.id = 'bg-canvas';
     Object.assign(canvas.style, {
@@ -8,7 +9,8 @@
         width: '100%',
         height: '100%',
         zIndex: '-1',
-        pointerEvents: 'none'
+        pointerEvents: 'none',
+        display: performanceMode?.isEnabled?.() ? 'none' : ''
     });
     document.body.prepend(canvas);
 
@@ -83,15 +85,12 @@
         height = canvas.height = window.innerHeight;
     }
 
-    function shouldPause() {
-        if (localStorage.getItem('performanceMode') !== 'true') return false;
-        return document.body.classList.contains('terminal-focus-active')
-            || document.body.classList.contains('terminal-active-session');
+    function isBackgroundDisabled() {
+        return performanceMode?.isEnabled?.() === true;
     }
 
     let rafId = null;
     let isAnimating = false;
-    let bodyClassObserver = null;
 
     function renderFrame() {
         ctx.clearRect(0, 0, width, height);
@@ -129,7 +128,7 @@
     }
 
     function startAnimation() {
-        if (isAnimating || shouldPause() || document.hidden) {
+        if (isAnimating || isBackgroundDisabled() || document.hidden) {
             return;
         }
 
@@ -146,7 +145,9 @@
     }
 
     function updateAnimationState() {
-        if (shouldPause() || document.hidden) {
+        canvas.style.display = isBackgroundDisabled() ? 'none' : '';
+
+        if (isBackgroundDisabled() || document.hidden) {
             stopAnimation();
         } else {
             startAnimation();
@@ -156,7 +157,7 @@
     window.addEventListener('resize', () => {
         resize();
         particles = Array.from({ length: config.count }, () => new Particle());
-        if (!shouldPause()) {
+        if (!isBackgroundDisabled()) {
             renderFrame();
         }
     });
@@ -172,18 +173,10 @@
     });
 
     document.addEventListener('visibilitychange', updateAnimationState);
-    window.addEventListener('performanceModeChanged', updateAnimationState);
+    performanceMode?.subscribe?.(() => updateAnimationState());
 
     resize();
     particles = Array.from({ length: config.count }, () => new Particle());
-
-    if (document.body) {
-        bodyClassObserver = new MutationObserver(updateAnimationState);
-        bodyClassObserver.observe(document.body, {
-            attributes: true,
-            attributeFilter: ['class']
-        });
-    }
 
     updateAnimationState();
 })();

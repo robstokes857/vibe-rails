@@ -20,6 +20,12 @@ export class VibeControlApp {
     constructor() {
         this.currentView = 'dashboard';
         this.navigationStack = ['dashboard'];
+        this.appSettings = {
+            remoteAccess: false,
+            apiKey: '',
+            enablePrerelease: false,
+            developerOptions: false
+        };
         this.data = {
             agents: [],
             environments: [],
@@ -29,6 +35,7 @@ export class VibeControlApp {
             configs: null
         };
         this.hostUnreachableToastShown = false;
+        this.brandClickTimestamps = [];
         
         // Initialize Controllers
         this.agentController = new AgentController(this);
@@ -76,6 +83,7 @@ export class VibeControlApp {
     async applyInitialSettings() {
         try {
             const settings = await this.apiCall('/api/v1/settings', 'GET');
+            this.setAppSettings(settings);
             this.settingsController.applyPrereleaseVisibility(settings.enablePrerelease || false);
         } catch (error) {
             console.error('Failed to fetch initial settings:', error);
@@ -286,6 +294,12 @@ export class VibeControlApp {
 
     bindGlobalActions() {
         document.addEventListener('click', (e) => {
+            const brandLogo = e.target.closest('.navbar-brand-sm');
+            if (brandLogo) {
+                this.handleBrandLogoClick();
+                return;
+            }
+
             const goBack = e.target.closest('[data-action="go-back"]');
             if (goBack) {
                 this.goBack();
@@ -328,6 +342,155 @@ export class VibeControlApp {
         container.querySelectorAll(selector).forEach((element) => {
             element.addEventListener('click', () => handler(element));
         });
+    }
+
+    setAppSettings(settings = {}) {
+        this.appSettings = {
+            ...this.appSettings,
+            ...settings
+        };
+    }
+
+    isDeveloperOptionsEnabled() {
+        return this.appSettings?.developerOptions === true;
+    }
+
+    handleBrandLogoClick() {
+        const now = Date.now();
+        this.brandClickTimestamps.push(now);
+        this.brandClickTimestamps = this.brandClickTimestamps.filter(timestamp => now - timestamp <= 900);
+
+        if (this.brandClickTimestamps.length < 3 || !this.isDeveloperOptionsEnabled()) {
+            return;
+        }
+
+        this.brandClickTimestamps = [];
+        this.showDeveloperTracerModal();
+    }
+
+    showDeveloperTracerModal() {
+        const payloadText = JSON.stringify(this.buildDeveloperTracerPayload(), null, 2);
+        this.showModal('Developer Tracer Payload', `
+            <div class="d-flex flex-column gap-3">
+                <p class="text-muted mb-0">Copy this JSON into the tracer.</p>
+                <textarea
+                    id="developer-tracer-payload"
+                    class="form-control font-monospace"
+                    rows="10"
+                    spellcheck="false"
+                    readonly
+                ></textarea>
+                <div class="d-flex justify-content-end gap-2">
+                    <button type="button" class="btn btn-secondary" data-action="close-modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="copy-developer-tracer-payload">Copy JSON</button>
+                </div>
+            </div>
+        `);
+
+        const payloadInput = document.getElementById('developer-tracer-payload');
+        if (payloadInput) {
+            payloadInput.value = payloadText;
+            payloadInput.focus();
+            payloadInput.select();
+        }
+
+        document.getElementById('copy-developer-tracer-payload')?.addEventListener('click', async () => {
+            const copied = await this.copyTextToClipboard(payloadText);
+            if (copied) {
+                this.showToast('Tracer Payload', 'Copied JSON to clipboard', 'success');
+                return;
+            }
+
+            payloadInput?.focus();
+            payloadInput?.select();
+            this.showToast('Tracer Payload', 'Clipboard copy failed. The JSON is selected and ready to copy.', 'warning');
+        });
+    }
+
+    buildDeveloperTracerPayload() {
+        return {
+            portNumber: this.getCurrentPortNumber(),
+            viberails_tab: this.getSessionStorageValue('viberails_tab'),
+            viberails_session: this.getCookieValue('viberails_session')
+        };
+    }
+
+    getCurrentPortNumber() {
+        const sources = [window.location.href, this.getApiBaseUrl()];
+
+        for (const source of sources) {
+            if (!source) continue;
+
+            try {
+                const url = new URL(source, window.location.origin);
+                const portValue = url.port
+                    || (url.protocol === 'https:' ? '443' : url.protocol === 'http:' ? '80' : '');
+                if (!portValue) continue;
+
+                const parsedPort = Number.parseInt(portValue, 10);
+                if (!Number.isNaN(parsedPort)) {
+                    return parsedPort;
+                }
+            } catch {
+                // Ignore malformed URLs and continue to the next source.
+            }
+        }
+
+        return null;
+    }
+
+    getSessionStorageValue(key) {
+        try {
+            return window.sessionStorage.getItem(key);
+        } catch {
+            return null;
+        }
+    }
+
+    getCookieValue(name) {
+        const cookieString = document.cookie || '';
+        const cookiePrefix = `${name}=`;
+
+        for (const cookieEntry of cookieString.split(';')) {
+            const cookie = cookieEntry.trim();
+            if (!cookie.startsWith(cookiePrefix)) continue;
+
+            const rawValue = cookie.slice(cookiePrefix.length);
+            try {
+                return decodeURIComponent(rawValue);
+            } catch {
+                return rawValue;
+            }
+        }
+
+        return null;
+    }
+
+    async copyTextToClipboard(text) {
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            }
+        } catch {
+            // Fall through to legacy copy support.
+        }
+
+        try {
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = text;
+            tempTextArea.setAttribute('readonly', 'readonly');
+            tempTextArea.style.position = 'fixed';
+            tempTextArea.style.opacity = '0';
+            document.body.appendChild(tempTextArea);
+            tempTextArea.focus();
+            tempTextArea.select();
+            const copied = document.execCommand('copy');
+            tempTextArea.remove();
+            return copied;
+        } catch {
+            return false;
+        }
     }
 
     // ============================================ 

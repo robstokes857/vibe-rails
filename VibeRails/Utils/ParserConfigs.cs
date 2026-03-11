@@ -65,6 +65,9 @@ namespace VibeRails.Utils
         // Output options
         public bool Verbose { get; set; }      // --verbose
 
+        // Trace mode
+        public bool Trace { get; set; }        // --trace
+
         // Help/Version
         public bool Help { get; set; }
         public bool Version { get; set; }
@@ -148,6 +151,7 @@ namespace VibeRails.Utils
         private static bool _remoteAccess = false;
         private static string _apiKey = string.Empty;
         private static bool _enablePrerelease = false;
+        private static bool _developerOptions = false;
         private static string _frontendUrl = string.Empty;
 
         public static bool GetRemoteAccess()
@@ -173,6 +177,14 @@ namespace VibeRails.Utils
         public static void SetEnablePrerelease(bool value)
         {
             _enablePrerelease = value;
+        }
+        public static bool GetDeveloperOptions()
+        {
+            return _developerOptions;
+        }
+        public static void SetDeveloperOptions(bool value)
+        {
+            _developerOptions = value;
         }
         public static string GetFrontendUrl()
         {

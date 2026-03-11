@@ -375,6 +375,10 @@ namespace VibeRails.Utils
                     parsed.Verbose = true;
                     return true;
 
+                case "--trace":
+                    parsed.Trace = true;
+                    return true;
+
                 default:
                     return false;
             }

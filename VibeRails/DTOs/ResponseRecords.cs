@@ -296,7 +296,8 @@ namespace VibeRails.DTOs
     public record AppSettingsDto(
         bool RemoteAccess,
         string ApiKey,
-        bool EnablePrerelease
+        bool EnablePrerelease,
+        bool DeveloperOptions
     );
 
     // Remote PIN DTOs
