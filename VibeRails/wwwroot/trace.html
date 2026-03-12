@@ -31,12 +31,10 @@
         .conn-helper {
             background: #0e0e1c;
             border-bottom: 1px solid #2a2a40;
-            padding: 6px 12px;
-            display: flex;
-            align-items: center;
+            padding: 8px 12px;
+            display: grid;
             gap: 8px;
             flex-shrink: 0;
-            flex-wrap: wrap;
         }
         .conn-helper.hidden { display: none; }
         .conn-label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; }
@@ -51,9 +49,24 @@
             outline: none;
         }
         .conn-input:focus { border-color: #569cd6; }
-        .conn-input.conn-port  { width: 70px; }
-        .conn-input.conn-tab   { width: 200px; }
-        .conn-input.conn-sess  { width: 200px; }
+        .conn-json {
+            min-height: 132px;
+            width: min(100%, 820px);
+            resize: vertical;
+            line-height: 1.45;
+            padding: 8px 10px;
+            white-space: pre;
+        }
+        .conn-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .conn-hint {
+            font-size: 10px;
+            color: #666;
+        }
         .conn-apply-btn {
             font-size: 11px;
             padding: 3px 12px;
@@ -67,7 +80,6 @@
         .conn-apply-btn:hover { background: #1a2a3a; }
         .conn-status { font-size: 10px; color: #4caf50; }
         .conn-status.err { color: #f48771; }
-        .conn-sep { color: #333; }
 
         /* ── Main grid fills remaining height ── */
         .main-grid { flex: 1; min-height: 0; }
@@ -387,21 +399,24 @@
 
 <!-- ── Connection helper ── -->
 <div class="conn-helper hidden" id="conn-helper">
-    <span class="conn-label">Port</span>
-    <input class="conn-input conn-port" id="conn-port" type="text" placeholder="5000" title="Server port (leave blank for current origin)">
-    <span class="conn-sep">|</span>
-    <span class="conn-label">viberails_tab</span>
-    <input class="conn-input conn-tab" id="conn-tab" type="text" placeholder="paste tab token" title="Set sessionStorage viberails_tab">
-    <span class="conn-sep">|</span>
-    <span class="conn-label">viberails_session</span>
-    <input class="conn-input conn-sess" id="conn-sess" type="text" placeholder="paste session token" title="Sent as viberails_session header">
-    <button class="conn-apply-btn" id="conn-apply-btn">Connect</button>
-    <span class="conn-status hidden" id="conn-status"></span>
+    <span class="conn-label">Tracer JSON</span>
+    <textarea
+        class="conn-input conn-json"
+        id="conn-json"
+        spellcheck="false"
+        placeholder='{\n  "portNumber": 5001,\n  "viberails_tab": "...",\n  "viberails_session": null\n}'
+        title="Paste the JSON copied from the app logo"
+    ></textarea>
+    <div class="conn-actions">
+        <button class="conn-apply-btn" id="conn-apply-btn">Connect</button>
+        <span class="conn-status hidden" id="conn-status"></span>
+        <span class="conn-hint">Paste the JSON payload from the app logo modal. `viberails_session` can be `null`.</span>
+    </div>
 </div>
 
 <div class="trace-auth-gate hidden" id="trace-auth-gate">
     <h6>Authentication Required</h6>
-    <p id="trace-auth-gate-message">A valid viberails_tab token and viberails_session cookie are required. Use the Connect button above to supply credentials.</p>
+    <p id="trace-auth-gate-message">Paste the tracer JSON from the source app with the Connect button above.</p>
 </div>
 
 <!-- ── Main grid ── -->
@@ -636,7 +651,7 @@ function clearTraceAuthError() {
 
 async function traceRequest(path, init = {}) {
     if (!getTraceTabToken() && !connConfig.sessionToken) {
-        showTraceAuthError('Missing credentials. Use the Connect button to supply viberails_tab and viberails_session tokens.');
+        showTraceAuthError('Missing credentials. Paste the tracer JSON into Connect to load the viberails_tab token.');
         return null;
     }
     const response = await fetch(getApiBase() + path, {
@@ -646,7 +661,7 @@ async function traceRequest(path, init = {}) {
         headers: buildTraceHeaders(init.headers),
     });
     if (response.status === 401 || response.status === 403) {
-        showTraceAuthError('Invalid or expired credentials. Use the Connect button to update them.');
+        showTraceAuthError('Invalid or expired credentials. Paste a fresh tracer JSON payload from the source app.');
         return null;
     }
     clearTraceAuthError();
@@ -664,42 +679,60 @@ async function traceRequestJson(path, init = {}) {
 // ─────────────────────────────────────────────────────────────────────────────
 const connHelper    = document.getElementById('conn-helper');
 const connToggleBtn = document.getElementById('conn-toggle-btn');
-const connPortEl    = document.getElementById('conn-port');
-const connTabEl     = document.getElementById('conn-tab');
-const connSessEl    = document.getElementById('conn-sess');
+const connJsonEl    = document.getElementById('conn-json');
 const connStatusEl  = document.getElementById('conn-status');
 
-function populateConnForm() {
-    connPortEl.value = connConfig.baseUrl
-        ? connConfig.baseUrl.replace(/^https?:\/\/[^:]+:?/, '').replace(/\/$/, '')
-        : (window.location.port || '');
-    connTabEl.value  = getTraceTabToken();
-    connSessEl.value = connConfig.sessionToken;
+function buildConnPayload() {
+    const currentUrl = connConfig.baseUrl
+        ? new URL(connConfig.baseUrl)
+        : new URL(window.location.origin);
+    const defaultPort = currentUrl.port
+        || (currentUrl.protocol === 'https:' ? '443' : currentUrl.protocol === 'http:' ? '80' : '');
+
+    return {
+        portNumber: defaultPort ? Number.parseInt(defaultPort, 10) : null,
+        viberails_tab: getTraceTabToken() || null,
+        viberails_session: connConfig.sessionToken || null,
+    };
 }
 
-connToggleBtn.addEventListener('click', () => {
-    const hidden = connHelper.classList.toggle('hidden');
-    if (!hidden) populateConnForm();
-});
+function populateConnForm() {
+    connJsonEl.value = JSON.stringify(buildConnPayload(), null, 2);
+}
 
-document.getElementById('conn-apply-btn').addEventListener('click', () => {
-    const portVal = connPortEl.value.trim();
-    const tabVal  = connTabEl.value.trim();
-    const sessVal = connSessEl.value.trim();
-
-    connConfig.baseUrl      = portVal ? `http://localhost:${portVal}` : '';
-    connConfig.sessionToken = sessVal;
-    saveConnConfig();
-
-    if (tabVal) {
-        try { sessionStorage.setItem(TRACE_TAB_TOKEN_KEY, tabVal); } catch {}
+function parseConnPayload(raw) {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Expected a JSON object.');
     }
 
-    connStatusEl.textContent = 'Connecting...';
-    connStatusEl.className = 'conn-status';
+    const portValue = parsed.portNumber;
+    let baseUrl = '';
+    if (portValue !== null && portValue !== undefined && String(portValue).trim() !== '') {
+        const portText = String(portValue).trim();
+        if (!/^\d+$/.test(portText)) {
+            throw new Error('portNumber must be a numeric TCP port.');
+        }
+        const portNumber = Number.parseInt(portText, 10);
+        if (Number.isNaN(portNumber) || portNumber <= 0 || portNumber > 65535) {
+            throw new Error('portNumber must be a valid TCP port.');
+        }
+        baseUrl = `http://localhost:${portNumber}`;
+    }
 
-    // Restart the trace session
+    const tabToken = parsed.viberails_tab == null ? '' : String(parsed.viberails_tab).trim();
+    const sessionToken = parsed.viberails_session == null ? '' : String(parsed.viberails_session).trim();
+
+    if (!tabToken && !sessionToken) {
+        throw new Error('The payload must include viberails_tab or viberails_session.');
+    }
+
+    return { baseUrl, tabToken, sessionToken };
+}
+
+function restartTraceConnection() {
     traceAuthLocked = false;
+    clearTraceAuthError();
     if (streamAbortController) { streamAbortController.abort(); streamAbortController = null; }
     if (streamReconnectTimer)  { clearTimeout(streamReconnectTimer); streamReconnectTimer = null; }
     if (processPollTimer)      { clearInterval(processPollTimer); processPollTimer = null; }
@@ -708,6 +741,36 @@ document.getElementById('conn-apply-btn').addEventListener('click', () => {
         connStatusEl.textContent = traceAuthLocked ? 'Failed' : 'Connected';
         connStatusEl.className = 'conn-status' + (traceAuthLocked ? ' err' : '');
     });
+}
+
+connToggleBtn.addEventListener('click', () => {
+    const hidden = connHelper.classList.toggle('hidden');
+    if (!hidden) populateConnForm();
+});
+
+document.getElementById('conn-apply-btn').addEventListener('click', () => {
+    try {
+        const nextConfig = parseConnPayload(connJsonEl.value.trim());
+
+        connConfig.baseUrl      = nextConfig.baseUrl;
+        connConfig.sessionToken = nextConfig.sessionToken;
+        saveConnConfig();
+
+        try {
+            if (nextConfig.tabToken) sessionStorage.setItem(TRACE_TAB_TOKEN_KEY, nextConfig.tabToken);
+            else sessionStorage.removeItem(TRACE_TAB_TOKEN_KEY);
+        } catch {}
+
+        connStatusEl.textContent = 'Connecting...';
+        connStatusEl.className = 'conn-status';
+        connStatusEl.classList.remove('hidden');
+
+        restartTraceConnection();
+    } catch (error) {
+        connStatusEl.textContent = error?.message || 'Invalid JSON payload';
+        connStatusEl.className = 'conn-status err';
+        connStatusEl.classList.remove('hidden');
+    }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1022,12 +1085,21 @@ function finalizeGroupedTerminalRow(kind) {
     const panel = panels[kind];
     const state = groupedTerminalRows[kind];
     if (!panel || !state.row) { groupedTerminalRows[kind] = createGroupedRowState(); return; }
-    if (!state.text.trim()) {
+    if (!state.text.length) {
         state.row.remove();
         panel.count = Math.max(0, panel.count - 1);
         panel.countEl.textContent = panel.count;
     }
     groupedTerminalRows[kind] = createGroupedRowState();
+}
+
+function appendStandaloneTerminalRow(panel, evt, typeName) {
+    const row = buildRow(evt, typeName);
+    applySearchVisibility(row);
+    panel.body.appendChild(row);
+    panel.count++;
+    panel.countEl.textContent = panel.count;
+    if (panel.autoScroll) panel.body.scrollTop = panel.body.scrollHeight;
 }
 
 function dispatchGroupedTerminalEvent(kind, evt) {
@@ -1036,14 +1108,22 @@ function dispatchGroupedTerminalEvent(kind, evt) {
     panel.body.querySelector('.panel-empty')?.remove();
 
     const typeName = kind === 'input' ? 'TerminalInput' : 'TerminalOutput';
-    const raw = evt.detail || stripPrefix(evt.summary, typeName);
-    if (!raw) return;
-
     const state = groupedTerminalRows[kind];
+    const raw = evt.detail || '';
+    const renderedChunk = kind === 'input'
+        ? appendInputChunk('', raw)
+        : normalizeOutputChunk(raw);
+    const fallbackSummary = stripPrefix(evt.summary, typeName);
     const hasNewline = kind === 'input' ? /[\r\n]/.test(raw) : raw.includes('\n');
 
+    if (!renderedChunk) {
+        finalizeGroupedTerminalRow(kind);
+        if (fallbackSummary) appendStandaloneTerminalRow(panel, evt, typeName);
+        return;
+    }
+
     if (kind === 'input') state.text = appendInputChunk(state.text, raw);
-    else state.text += normalizeOutputChunk(raw);
+    else state.text += renderedChunk;
 
     if (state.text.length > 0) ensureGroupedTerminalRow(kind, typeName, panel, evt);
 
@@ -1141,9 +1221,15 @@ function buildRow(evt, typeName) {
 
 function stripPrefix(text, typeName) {
     if (!text) return '';
-    const prefixes = ['Terminal launch: ','Input (LocalWebUi): ','Input (LocalCli): ','Input (Pty): ',
-                      'Output: ','MCP call: ','MCP result: ','MCP error: '];
-    for (const p of prefixes) if (text.startsWith(p)) return text.slice(p.length);
+    const prefixes = [
+        /^Terminal launch:\s*/,
+        /^Input \([^)]+\):\s*/,
+        /^Output \([^)]+\):\s*/,
+        /^MCP call:\s*/,
+        /^MCP result:\s*/,
+        /^MCP error:\s*/,
+    ];
+    for (const p of prefixes) if (p.test(text)) return text.replace(p, '');
     return text;
 }
 

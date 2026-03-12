@@ -54,58 +54,39 @@ export class DashboardController {
                     <div class="context-header-card position-relative overflow-hidden py-3 px-4" style="background: ${isSandbox ? 'rgba(20, 14, 5, 0.5)' : 'rgba(15, 23, 42, 0.4)'}; border: 1px solid ${isSandbox ? 'rgba(251, 146, 60, 0.25)' : 'rgba(255, 255, 255, 0.05)'}; border-radius: 12px; backdrop-filter: blur(10px);">
                         ${isSandbox ? `<div style="position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, rgba(251,146,60,0.6), transparent);"></div>` : ''}
                         <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
-                            <div class="d-flex align-items-center gap-4">
-                                <div class="project-logo-wrapper d-flex align-items-center justify-content-center" style="width: 52px; height: 52px; background: ${isSandbox ? 'rgba(251,146,60,0.08)' : 'rgba(59, 130, 246, 0.08)'}; border: 1px solid ${isSandbox ? 'rgba(251,146,60,0.25)' : 'rgba(59, 130, 246, 0.2)'}; border-radius: 12px; color: ${isSandbox ? '#fb923c' : 'var(--color-primary)'}; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
-                                        <path d="M9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.825a2 2 0 0 1-1.991-1.819l-.637-7a2 2 0 0 1 .342-1.31L.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3m-8.322.12C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 1z"/>
-                                    </svg>
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="project-logo-wrapper d-flex align-items-center justify-content-center flex-shrink-0" style="width: 48px; height: 48px; background: ${isSandbox ? 'rgba(251,146,60,0.08)' : 'rgba(59, 130, 246, 0.08)'}; border: 1px solid ${isSandbox ? 'rgba(251,146,60,0.25)' : 'rgba(59, 130, 246, 0.2)'}; border-radius: 12px; color: ${isSandbox ? '#fb923c' : 'var(--color-primary)'}; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 20px;">
+                                    <i class="fa-solid fa-folder-open"></i>
                                 </div>
                                 <div class="d-flex flex-column gap-1">
-                                    <div class="d-flex align-items-center flex-wrap gap-3">
-                                        <div class="d-flex align-items-center gap-2">
-                                            <span class="text-muted xx-small text-uppercase fw-bold opacity-50" style="letter-spacing: 0.1em;">Project</span>
-                                            <h5 class="mb-0 text-white fw-bold" style="font-size: 1.15rem;">${this.app.escapeHtml(projectName)}</h5>
-                                            ${isSandbox ? `<span style="font-size: 0.6rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #fb923c; background: rgba(251,146,60,0.12); border: 1px solid rgba(251,146,60,0.3); border-radius: 4px; padding: 2px 6px;">Sandbox</span>` : ''}
-                                            <button class="btn btn-link btn-sm p-0 text-muted hover-accent ms-1" type="button" data-action="set-custom-name" title="Rename project">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/>
-                                                </svg>
-                                            </button>
-                                        </div>
-                                        <div class="d-flex align-items-center gap-2">
-                                            <span class="text-muted xx-small text-uppercase fw-bold opacity-50" style="letter-spacing: 0.1em;">Repo</span>
-                                            ${gitRemoteUrl ? `
-                                                <a href="${gitRemoteUrl}" target="_blank" class="fw-bold small text-decoration-none d-flex align-items-center gap-1" style="color: var(--color-accent);">
-                                                    ${this.app.escapeHtml(repoName)}
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16">
-                                                        <path d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/>
-                                                        <path d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/>
-                                                    </svg>
-                                                </a>
-                                            ` : `
-                                                <span class="fw-bold small" style="color: var(--color-accent);">${this.app.escapeHtml(repoName)}</span>
-                                            `}
-                                        </div>
-                                        ${gitBranch ? `
-                                        <div class="d-flex align-items-center gap-2">
-                                            <span class="text-muted xx-small text-uppercase fw-bold opacity-50" style="letter-spacing: 0.1em;">Branch</span>
-                                            <span class="d-flex align-items-center gap-1 px-2 py-1" style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.15); color: var(--color-primary); font-size: 0.7rem; font-weight: 500; border-radius: 6px;">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path fill-rule="evenodd" d="M11.5 2a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3M9.05 3a2.5 2.5 0 0 1 4.9 0H16v1h-2.05a2.5 2.5 0 0 1-4.9 0H0V3zM4.5 7a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3M2.05 8a2.5 2.5 0 0 1 4.9 0H16v1H6.95a2.5 2.5 0 0 1-4.9 0H0V8zm9.45 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3m-2.45 1a2.5 2.5 0 0 1 4.9 0H16v1h-2.05a2.5 2.5 0 0 1-4.9 0H0v-1z"/>
-                                                </svg>
-                                                ${this.app.escapeHtml(gitBranch)}
-                                            </span>
-                                        </div>` : ''}
-                                    </div>
                                     <div class="d-flex align-items-center gap-2">
-                                        <span class="text-muted xx-small text-uppercase fw-bold opacity-40" style="letter-spacing: 0.1em;">Path</span>
+                                        <h5 class="mb-0 text-white fw-bold" style="font-size: 1.15rem;">${this.app.escapeHtml(projectName)}</h5>
+                                        ${isSandbox ? `<span style="font-size: 0.6rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #fb923c; background: rgba(251,146,60,0.12); border: 1px solid rgba(251,146,60,0.3); border-radius: 4px; padding: 2px 6px;">Sandbox</span>` : ''}
+                                        <button class="btn btn-link btn-sm p-0 text-muted hover-accent ms-1 d-flex align-items-center" type="button" data-action="set-custom-name" title="Rename project">
+                                            <i class="fa-solid fa-pen-to-square" style="font-size: 12px;"></i>
+                                        </button>
+                                    </div>
+                                    <div class="d-flex align-items-center flex-wrap gap-2">
+                                        ${gitRemoteUrl ? `
                                         <div class="d-flex align-items-center gap-1">
-                                            <div class="text-muted xx-small font-monospace opacity-50 text-truncate" style="max-width: 450px;">${rootPath}</div>
-                                            <button class="btn btn-link btn-sm p-0 text-muted hover-accent opacity-40" type="button" data-action="copy-path" title="Copy path">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path fill-rule="evenodd" d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1a.5.5 0 0 0-1 0v1a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5V6a.5.5 0 0 1 .5-.5h1a.5.5 0 0 0 0-1z"/>
-                                                </svg>
+                                            <i class="fa-brands fa-github text-muted opacity-75" style="font-size: 12px;"></i>
+                                            <span class="xx-small text-muted opacity-50 text-uppercase fw-bold" style="letter-spacing: 0.08em;">Repo</span>
+                                            <a href="${gitRemoteUrl}" target="_blank" class="text-decoration-none small text-muted hover-accent">
+                                                ${this.app.escapeHtml(repoName)}
+                                            </a>
+                                        </div>` : ''}
+                                        ${gitBranch ? `
+                                        <div class="d-flex align-items-center gap-1">
+                                            <i class="fa-solid fa-code-branch text-muted opacity-75" style="font-size: 11px;"></i>
+                                            <span class="xx-small text-muted opacity-50 text-uppercase fw-bold" style="letter-spacing: 0.08em;">Branch</span>
+                                            <span class="small text-muted">${this.app.escapeHtml(gitBranch)}</span>
+                                        </div>` : ''}
+                                        <div class="d-flex align-items-center gap-1 min-w-0">
+                                            <i class="fa-solid fa-folder text-muted opacity-75 flex-shrink-0" style="font-size: 11px;"></i>
+                                            <span class="xx-small text-muted opacity-50 text-uppercase fw-bold flex-shrink-0" style="letter-spacing: 0.08em;">Path</span>
+                                            <div class="text-muted small font-monospace text-truncate">${rootPath}</div>
+                                            <button class="btn btn-link btn-sm p-0 text-muted hover-accent opacity-50 ms-1 flex-shrink-0 d-flex align-items-center" type="button" data-action="copy-path" title="Copy path">
+                                                <i class="fa-regular fa-copy" style="font-size: 11px;"></i>
                                             </button>
                                         </div>
                                     </div>
@@ -133,10 +114,10 @@ export class DashboardController {
                 });
             } else {
                 headingContainer.innerHTML = `
-                    <div class="context-header-card">
+                    <div class="context-header-card position-relative overflow-hidden py-3 px-4" style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 12px; backdrop-filter: blur(10px);">
                         <div class="d-flex align-items-center gap-3">
-                            <div class="project-logo-wrapper" style="width: 48px; height: 48px;">
-                                <span style="font-size: 1.5rem;">&#x1F310;</span>
+                            <div class="project-logo-wrapper d-flex align-items-center justify-content-center flex-shrink-0" style="width: 48px; height: 48px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 12px; color: var(--color-primary); box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 20px;">
+                                <i class="fa-solid fa-globe"></i>
                             </div>
                             <div>
                                 <h4 class="mb-0 text-white fw-semibold">Global Context</h4>

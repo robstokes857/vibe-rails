@@ -347,13 +347,22 @@ class TerminalTab {
         // so reconnects do not append duplicated TUI content.
         this.vibeTerminal?.reset();
 
+        // Fit now that the container is visible (showTerminal was called before
+        // connect in activateTab). This gives us the real cols/rows to send to
+        // the backend so it can resize the PTY *before* sending the replay.
+        if (this.vibeTerminal) {
+            this.vibeTerminal.fit({ force: true, notify: false });
+        }
+        const preConnectCols = this.vibeTerminal?.cols;
+        const preConnectRows = this.vibeTerminal?.rows;
+
         this.state.status = 'connecting';
         this.manager.updateUi();
 
         const tabToken = this.getSafeTabTokenForWebSocket(
             sessionStorage.getItem('viberails_tab')
         );
-        const wsUrl = this.manager.getWebSocketUrl(this.state.id);
+        const wsUrl = this.manager.getWebSocketUrl(this.state.id, preConnectCols, preConnectRows);
         const socket = new WebSocket(wsUrl, tabToken ? [tabToken] : []);
         socket.binaryType = 'arraybuffer';
         this.socket = socket;
@@ -886,6 +895,13 @@ class TerminalManager {
         target.instance.setActive(true);
 
         if (options.connectIfNeeded && target.state.hasActiveSession && !target.instance.hasOpenSocket()) {
+            // Make the terminal container visible before connecting so fit() can
+            // compute real pixel dimensions. Those dimensions are forwarded to the
+            // backend via the WebSocket URL, which lets the server resize the PTY
+            // *before* sending the replay buffer. Without this the replay arrives
+            // at the old (stale) PTY size, then a SIGWINCH redraws at the new size,
+            // causing content to appear twice ("double print / 2 cursors" bug).
+            this.showTerminal();
             await target.instance.connect();
             if (this._destroyed) {
                 return;
@@ -1632,15 +1648,21 @@ class TerminalManager {
         tab.instance.focusInput();
     }
 
-    getWebSocketUrl(tabId) {
+    getWebSocketUrl(tabId, cols, rows) {
         const encodedId = encodeURIComponent(tabId);
         const baseUrl = window.__viberails_API_BASE__ || '';
+        let url;
         if (baseUrl) {
-            return `${baseUrl.replace(/^http/, 'ws')}/api/v1/terminal/tabs/${encodedId}/ws`;
+            url = `${baseUrl.replace(/^http/, 'ws')}/api/v1/terminal/tabs/${encodedId}/ws`;
+        } else {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            url = `${protocol}//${window.location.host}/api/v1/terminal/tabs/${encodedId}/ws`;
         }
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${protocol}//${window.location.host}/api/v1/terminal/tabs/${encodedId}/ws`;
+        if (cols > 0 && rows > 0) {
+            url += `?cols=${cols}&rows=${rows}`;
+        }
+        return url;
     }
 
     parseSelectionMetadata(selection) {

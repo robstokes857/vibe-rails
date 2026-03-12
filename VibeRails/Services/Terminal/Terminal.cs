@@ -10,6 +10,10 @@ namespace VibeRails.Services.Terminal;
 /// </summary>
 public sealed class Terminal : IAsyncDisposable
 {
+    public const int DefaultCols = 120;
+    public const int DefaultRows = 30;
+    public const int DefaultReplayBufferSize = 10 * 1024 * 1024;
+
     private readonly IPtyConnection _pty;
     private readonly CircularBuffer _outputBuffer;
     private readonly CancellationTokenSource _cts = new();
@@ -24,6 +28,8 @@ public sealed class Terminal : IAsyncDisposable
     public int ExitCode => _pty.ExitCode;
     public int Cols => _cols;
     public int Rows => _rows;
+
+    public static string GetDefaultShellPath() => OperatingSystem.IsWindows() ? "pwsh.exe" : "bash";
 
     /// <summary>
     /// Event fired when the PTY process exits (naturally or via kill).
@@ -44,13 +50,13 @@ public sealed class Terminal : IAsyncDisposable
     public static async Task<Terminal> CreateAsync(
         string workingDirectory,
         IDictionary<string, string> environment,
-        int cols = 120,
-        int rows = 30,
-        int replayBufferSize = 10 * 1024 * 1024,
+        int cols = DefaultCols,
+        int rows = DefaultRows,
+        int replayBufferSize = DefaultReplayBufferSize,
         string? title = null,
         CancellationToken ct = default)
     {
-        var shell = OperatingSystem.IsWindows() ? "pwsh.exe" : "bash";
+        var shell = GetDefaultShellPath();
         var options = new PtyOptions
         {
             Name = title ?? "VibeRails-Terminal",

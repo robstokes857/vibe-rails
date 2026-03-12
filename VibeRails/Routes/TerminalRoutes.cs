@@ -121,7 +121,15 @@ public static class TerminalRoutes
 
             var acceptedSubprotocol = context.Items["viberails_accepted_subprotocol"] as string;
             using var webSocket = await context.WebSockets.AcceptWebSocketAsync(acceptedSubprotocol);
-            await terminalService.HandleWebSocketAsync(webSocket, context.RequestAborted);
+
+            int? cols = null;
+            int? rows = null;
+            if (context.Request.Query.TryGetValue("cols", out var colsStr) && int.TryParse(colsStr, out var c) && c > 0)
+                cols = c;
+            if (context.Request.Query.TryGetValue("rows", out var rowsStr) && int.TryParse(rowsStr, out var r) && r > 0)
+                rows = r;
+
+            await terminalService.HandleWebSocketAsync(webSocket, context.RequestAborted, cols, rows);
         });
 
         // GET /api/v1/terminal/bootstrap-command - Get the command to launch an LLM CLI in a terminal session

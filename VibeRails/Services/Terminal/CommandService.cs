@@ -4,13 +4,19 @@ using static VibeRails.Utils.ShellArgSanitizer;
 
 namespace VibeRails.Services.Terminal;
 
+public sealed record PreparedTerminalSession(
+    string Command,
+    string LaunchCommand,
+    IReadOnlyList<string> SetupCommands,
+    Dictionary<string, string> Environment);
+
 public interface ICommandService
 {
     /// <summary>
     /// Build the CLI command string and environment dictionary.
     /// Shared by both CLI and Web paths.
     /// </summary>
-    (string command, Dictionary<string, string> environment) PrepareSession(
+    PreparedTerminalSession PrepareSession(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null);
 }
 
@@ -25,18 +31,19 @@ public class CommandService : ICommandService
         _mcpSettings = mcpSettings;
     }
 
-    public (string command, Dictionary<string, string> environment) PrepareSession(
+    public PreparedTerminalSession PrepareSession(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null)
     {
-        var cli = llm.ToString().ToLower();
-        var safePrompt = string.IsNullOrWhiteSpace(initialPrompt) ? null : EscapeArg(initialPrompt);
+        _ = initialPrompt;
 
+        var cli = llm.ToString().ToLower();
         var cliCommand = extraArgs?.Length > 0
             ? $"{cli} {BuildSafeArgString(extraArgs)}"
             : cli;
 
         var builder = new ShellCommandBuilder()
             .SetLaunchCommand(cliCommand);
+        var setupCommands = new List<string>();
 
         // Register MCP server before launch
         if (!string.IsNullOrEmpty(_mcpSettings.ServerPath) && File.Exists(_mcpSettings.ServerPath))
@@ -52,6 +59,7 @@ public class CommandService : ICommandService
             if (mcpSetup != null)
             {
                 builder.AddSetup(mcpSetup);
+                setupCommands.Add(mcpSetup);
                 // Clear screen to hide MCP setup messages (e.g., "already added" warnings)
                 //builder.AddSetup("clear");
             }
@@ -71,6 +79,10 @@ public class CommandService : ICommandService
                 environment[kvp.Key] = kvp.Value;
         }
 
-        return (builder.Build(), environment);
+        return new PreparedTerminalSession(
+            builder.Build(),
+            cliCommand,
+            setupCommands.AsReadOnly(),
+            environment);
     }
 }

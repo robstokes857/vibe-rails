@@ -1,4 +1,5 @@
 using VibeRails.Services.Terminal;
+using System.Text;
 
 namespace VibeRails.Services.Tracing;
 
@@ -17,31 +18,27 @@ public sealed class TraceObserver : ITerminalIoObserver
 
     public ValueTask OnTerminalIoAsync(TerminalIoEvent ioEvent, CancellationToken cancellationToken = default)
     {
+        var raw = ioEvent.Text;
+        if (string.IsNullOrEmpty(raw))
+            return ValueTask.CompletedTask;
+
         if (ioEvent.Direction == TerminalIoDirection.Input)
         {
-            var plain = ioEvent.PlainText;
-            if (string.IsNullOrWhiteSpace(plain))
-                return ValueTask.CompletedTask;
-
             _buffer.Add(TraceEvent.Create(
                 TraceEventType.TerminalInput,
                 $"Terminal.{ioEvent.Source}",
-                $"Input ({ioEvent.Source}): {Truncate(plain, 120)}",
-                plain));
+                $"Input ({ioEvent.Source}): {DescribeForSummary(raw, 160)}",
+                raw));
         }
         else
         {
-            var plain = ioEvent.PlainText;
-            if (string.IsNullOrWhiteSpace(plain))
-                return ValueTask.CompletedTask;
-
             // Store raw ANSI text in Detail so the trace viewer can render it in xterm.js
             // without connecting to the live terminal WebSocket (which would steal the session).
             _buffer.Add(TraceEvent.Create(
                 TraceEventType.TerminalOutput,
-                "Terminal.Pty",
-                $"Output: {Truncate(plain, 200)}",
-                ioEvent.Text));
+                $"Terminal.{ioEvent.Source}",
+                $"Output ({ioEvent.Source}): {DescribeForSummary(raw, 200)}",
+                raw));
         }
 
         return ValueTask.CompletedTask;
@@ -91,10 +88,33 @@ public sealed class TraceObserver : ITerminalIoObserver
         return ValueTask.CompletedTask;
     }
 
-    private static string Truncate(string text, int maxLength)
+    private static string DescribeForSummary(string text, int maxLength)
     {
-        // Collapse whitespace for summary display
-        var collapsed = System.Text.RegularExpressions.Regex.Replace(text.Trim(), @"\s+", " ");
-        return collapsed.Length <= maxLength ? collapsed : collapsed[..maxLength] + "...";
+        var sb = new StringBuilder(Math.Min(text.Length, maxLength));
+
+        foreach (var ch in text)
+        {
+            var token = ch switch
+            {
+                '\r' => "\\r",
+                '\n' => "\\n",
+                '\t' => "\\t",
+                '\b' => "\\b",
+                '\x1b' => "\\x1b",
+                '\x7f' => "\\x7f",
+                _ when char.IsControl(ch) => $"\\x{(int)ch:x2}",
+                _ => ch.ToString()
+            };
+
+            if (sb.Length + token.Length > maxLength)
+            {
+                sb.Append("...");
+                break;
+            }
+
+            sb.Append(token);
+        }
+
+        return sb.Length == 0 ? "(empty)" : sb.ToString();
     }
 }
