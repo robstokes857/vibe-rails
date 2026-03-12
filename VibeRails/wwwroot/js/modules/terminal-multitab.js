@@ -248,9 +248,10 @@ class TerminalTab {
             return;
         }
 
-        if (signatureChanged && this.shouldResetDisplayBeforeResize()) {
+        if (signatureChanged && this.shouldResetDisplayBeforeResize(cols, rows)) {
             // Terminal apps do not always erase stale right-edge cells when their
-            // layout shrinks. Clear the local viewport before the PTY redraws.
+            // layout shrinks. Only clear on real shrink transitions; doing this
+            // on the first post-connect sync causes visible cursor jumping.
             this.vibeTerminal.resetDisplayOnly();
         }
 
@@ -258,8 +259,36 @@ class TerminalTab {
         this.socket.send(`${RESIZE_PREFIX}${cols},${rows}`);
     }
 
-    shouldResetDisplayBeforeResize() {
-        return this.isActive && this.state.hasActiveSession && this.hasOpenSocket();
+    getLastResizeGeometry() {
+        if (typeof this.lastResizeSignature !== 'string') {
+            return null;
+        }
+
+        const match = /^(\d+)x(\d+)$/.exec(this.lastResizeSignature);
+        if (!match) {
+            return null;
+        }
+
+        const cols = Number.parseInt(match[1], 10);
+        const rows = Number.parseInt(match[2], 10);
+        if (!Number.isFinite(cols) || !Number.isFinite(rows)) {
+            return null;
+        }
+
+        return { cols, rows };
+    }
+
+    shouldResetDisplayBeforeResize(nextCols, nextRows) {
+        if (!this.isActive || !this.state.hasActiveSession || !this.hasOpenSocket()) {
+            return false;
+        }
+
+        const previous = this.getLastResizeGeometry();
+        if (!previous) {
+            return false;
+        }
+
+        return nextCols < previous.cols || nextRows < previous.rows;
     }
 
     fitAndSyncTerminal() {
