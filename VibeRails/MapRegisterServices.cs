@@ -21,6 +21,7 @@ namespace VibeRails
         {
             serviceCollection.AddScoped<IFileService, FileService>();
             serviceCollection.AddSingleton<IBertInputCaptureService, BertInputCaptureService>();
+            serviceCollection.AddSingleton<IBertExplorerService, BertExplorerService>();
             serviceCollection.AddScoped<IDbService, DbService>();
             serviceCollection.AddScoped<IRepository>(sp =>
             {
@@ -132,4 +133,5 @@ namespace VibeRails
         }
     }
 }
+
 

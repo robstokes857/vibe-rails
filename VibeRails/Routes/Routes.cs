@@ -24,6 +24,8 @@ public static class RouteExtensions
         PinRoutes.Map(app);
         LifecycleRoutes.Map(app);
         TraceRoutes.Map(app);
+        BertRoutes.Map(app);
         //ProxyRoutes.Map(app);
     }
 }
+

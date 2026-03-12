@@ -1,3 +1,4 @@
+using Serilog;
 using VibeRails.Interfaces;
 using VibeRails.Utils;
 
@@ -83,8 +84,8 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             text,
             now));
         MarkOutputActivity(sessionId, now);
-        // Intentionally do not persist terminal output to SessionLogs for now.
-        // Keep observer hook only; output persistence can be re-enabled centrally here.
+        if (!TerminalOutputFilter.IsTransient(text))
+            _ = _dbService.LogSessionOutputAsync(sessionId, text, false);
     }
 
     public void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown)
@@ -283,6 +284,10 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         catch (OperationCanceledException)
         {
             // Session ended.
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[TerminalState] Idle monitor loop failed for session {SessionId}", sessionId);
         }
     }
 

@@ -378,6 +378,30 @@ export class VibeTerminal {
         };
     }
 
+    paste(text) {
+        if (!this._terminal || typeof text !== 'string' || text.length === 0) {
+            return;
+        }
+
+        this._terminal.paste(text);
+    }
+
+    isBracketedPasteModeEnabled() {
+        return this._terminal?.modes?.bracketedPasteMode === true;
+    }
+
+    createBracketedPastePayload(text) {
+        if (typeof text !== 'string' || text.length === 0) {
+            return '';
+        }
+
+        if (!this.isBracketedPasteModeEnabled()) {
+            return text;
+        }
+
+        return `\u001b[200~${text}\u001b[201~`;
+    }
+
     attachClipboardPaste(callback) {
         if (!this._terminal) return;
 

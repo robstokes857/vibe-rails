@@ -47,7 +47,14 @@
           "when": "true"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "key": "escape",
+        "command": "-editor.action.webvieweditor.escape",
+        "when": "activeWebviewPanelId == 'viberailsDashboard'"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
