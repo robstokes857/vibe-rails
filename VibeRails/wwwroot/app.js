@@ -73,7 +73,10 @@ export class VibeControlApp {
             this.startLifecycleHeartbeat();
             return;
         }
-        this.loadView('dashboard'); // Start with dashboard
+        const initialView = this.consumeRequestedInitialView();
+        this.navigationStack = [initialView];
+        this.currentView = initialView;
+        this.loadView(initialView);
         this.bindGlobalActions();
         this.setupKeyboardShortcuts();
         this.setupVSCodeIntegration();
@@ -372,26 +375,24 @@ export class VibeControlApp {
         const payloadText = JSON.stringify(this.buildDeveloperTracerPayload(), null, 2);
         this.showModal('Developer Tracer Payload', `
             <div class="d-flex flex-column gap-3">
-                <p class="text-muted mb-0">Copy this JSON into the tracer.</p>
-                <textarea
+                <p class="text-muted mb-0">Copy this JSON into the tracer. The auth session stays in an <code>HttpOnly</code> cookie, so only the tab token is exported here.</p>
+                <pre
                     id="developer-tracer-payload"
-                    class="form-control font-monospace"
-                    rows="10"
-                    spellcheck="false"
-                    readonly
-                ></textarea>
+                    class="developer-tracer-payload font-monospace"
+                    tabindex="0"
+                ></pre>
                 <div class="d-flex justify-content-end gap-2">
                     <button type="button" class="btn btn-secondary" data-action="close-modal">Close</button>
+                    <button type="button" class="btn btn-outline-light" id="open-duplicate-tab">Duplicate Tab</button>
                     <button type="button" class="btn btn-primary" id="copy-developer-tracer-payload">Copy JSON</button>
                 </div>
             </div>
         `);
 
-        const payloadInput = document.getElementById('developer-tracer-payload');
-        if (payloadInput) {
-            payloadInput.value = payloadText;
-            payloadInput.focus();
-            payloadInput.select();
+        const payloadOutput = document.getElementById('developer-tracer-payload');
+        if (payloadOutput) {
+            payloadOutput.textContent = payloadText;
+            payloadOutput.focus();
         }
 
         document.getElementById('copy-developer-tracer-payload')?.addEventListener('click', async () => {
@@ -401,18 +402,110 @@ export class VibeControlApp {
                 return;
             }
 
-            payloadInput?.focus();
-            payloadInput?.select();
+            this.selectElementContents(payloadOutput);
             this.showToast('Tracer Payload', 'Clipboard copy failed. The JSON is selected and ready to copy.', 'warning');
+        });
+
+        document.getElementById('open-duplicate-tab')?.addEventListener('click', async () => {
+            await this.openDuplicateTab();
         });
     }
 
     buildDeveloperTracerPayload() {
         return {
             portNumber: this.getCurrentPortNumber(),
-            viberails_tab: this.getSessionStorageValue('viberails_tab'),
-            viberails_session: this.getCookieValue('viberails_session')
+            viberails_tab: this.getSessionStorageValue('viberails_tab')
         };
+    }
+
+    getDuplicateTabView() {
+        return this.getDuplicateTabViewName(this.currentView);
+    }
+
+    buildDuplicateTabRedirect() {
+        const url = new URL(window.location.href);
+        const view = this.getDuplicateTabView();
+
+        if (view === 'dashboard') {
+            url.searchParams.delete('view');
+        } else {
+            url.searchParams.set('view', view);
+        }
+
+        return `${url.pathname}${url.search}${url.hash}`;
+    }
+
+    consumeRequestedInitialView() {
+        const url = new URL(window.location.href);
+        const requestedView = (url.searchParams.get('view') || '').trim();
+        const initialView = this.getDuplicateTabViewName(requestedView);
+
+        if (url.searchParams.has('view')) {
+            url.searchParams.delete('view');
+            try {
+                window.history.replaceState({}, document.title, url.toString());
+            } catch {
+                // Ignore history rewrite failures.
+            }
+        }
+
+        return initialView;
+    }
+
+    getDuplicateTabViewName(view) {
+        const normalizedView = view === 'agent-edit' || view === 'agent-create'
+            ? 'agents'
+            : view;
+        const duplicateableViews = new Set([
+            'dashboard',
+            'launch-cli',
+            'agents',
+            'check-violations',
+            'active-rules',
+            'environments',
+            'config',
+            'sessions',
+            'settings',
+            'terminal-focus',
+            'sandboxes',
+            'swarm'
+        ]);
+
+        return duplicateableViews.has(normalizedView) ? normalizedView : 'dashboard';
+    }
+
+    async openDuplicateTab() {
+        try {
+            const redirect = this.buildDuplicateTabRedirect();
+            const response = await this.apiCall(
+                `/api/v1/auth/duplicate-tab-link?redirect=${encodeURIComponent(redirect)}`,
+                'POST',
+                null,
+                { showLoading: false }
+            );
+
+            if (!response?.url) {
+                throw new Error('Duplicate tab link was not returned by the server.');
+            }
+
+            const duplicateWindow = window.open(response.url, '_blank');
+            if (duplicateWindow) {
+                duplicateWindow.opener = null;
+                this.showToast('Duplicate Tab', 'Opened a new authenticated tab.', 'success');
+                return;
+            }
+
+            const copied = await this.copyTextToClipboard(response.url);
+            if (copied) {
+                this.showToast('Duplicate Tab', 'Popup blocked. Copied the duplicate-tab link to the clipboard.', 'warning');
+                return;
+            }
+
+            throw new Error('Popup blocked. Allow popups and try again.');
+        } catch (error) {
+            console.error('Failed to duplicate tab:', error);
+            this.showToast('Duplicate Tab', error?.message || 'Failed to open duplicate tab.', 'error');
+        }
     }
 
     getCurrentPortNumber() {
@@ -447,23 +540,20 @@ export class VibeControlApp {
         }
     }
 
-    getCookieValue(name) {
-        const cookieString = document.cookie || '';
-        const cookiePrefix = `${name}=`;
-
-        for (const cookieEntry of cookieString.split(';')) {
-            const cookie = cookieEntry.trim();
-            if (!cookie.startsWith(cookiePrefix)) continue;
-
-            const rawValue = cookie.slice(cookiePrefix.length);
-            try {
-                return decodeURIComponent(rawValue);
-            } catch {
-                return rawValue;
-            }
+    selectElementContents(element) {
+        if (!element || !window.getSelection || !document.createRange) {
+            return;
         }
 
-        return null;
+        const selection = window.getSelection();
+        if (!selection) {
+            return;
+        }
+
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
     }
 
     async copyTextToClipboard(text) {

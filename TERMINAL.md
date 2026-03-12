@@ -12,6 +12,25 @@ None.
 
 ## Fixed Issues
 
+### ✅ 8. Cursor flicker / jumping cursor positions after reconnect and resize
+
+After the double-print fix, the Web UI terminal could still show the cursor jumping between
+old and new positions during reconnect or layout settle. The screenshot looked like "ghost"
+cursors being painted in multiple places even though the text itself was no longer duplicated.
+
+**Root cause:** the client-side resize path called `resetDisplayOnly()` on any new geometry,
+including the first post-connect sync. That local xterm reset was useful for stale right-edge
+cells on real shrink events, but it was too aggressive for reconnect. It briefly cleared and
+repainted the local viewport before the PTY had anything new to say, which made the cursor look
+like it was flickering or teleporting.
+
+**Fix:** only clear the local xterm viewport when the terminal actually shrinks
+(`newCols < oldCols || newRows < oldRows`). The first post-connect sync and grow-only layout
+passes now skip the local reset and just send the resize to the PTY.
+
+Key file: `VibeRails/wwwroot/js/modules/terminal-multitab.js` — `sendResizeToPty`,
+`shouldResetDisplayBeforeResize`
+
 ### ✅ 1. Double paste when pasting into the terminal
 
 Pasting into the web terminal (Ctrl+V or right-click paste) sent the clipboard text twice.
@@ -51,7 +70,7 @@ scrollback history intentionally not stored (PTY output persistence remains disa
 
 Mitigated by:
 - redraw-first (not replay) for AI CLI reconnect
-- `resetDisplayOnly()` in the resize path clears stale xterm cells before a real PTY geometry change
+- `resetDisplayOnly()` in the shrink-only resize path clears stale xterm cells before a real PTY geometry change
 - manager generation guards prevent stale async init from completing after navigation
 
 ### ✅ 6. Remote viewer connect/disconnect not visible on native CLI
@@ -80,6 +99,8 @@ Key files:
 
 ## Notes
 
+- Terminal tracking is consolidated in this root file. The duplicate `VibeRails/TERMINAL.md`
+  investigation file was removed on 2026-03-12.
 - Do not reintroduce raw replay as the reconnect baseline for current AI CLIs.
 - If replay is ever used again, limit it to plain shell / line-oriented sessions only.
 - A future screen-state solution should be treated separately from archived output history.
