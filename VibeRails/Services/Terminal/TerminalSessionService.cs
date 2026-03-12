@@ -28,7 +28,7 @@ public interface ITerminalSessionService
     string? ActiveSessionId { get; }
     bool IsExternallyOwned { get; }
     Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null);
-    Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken);
+    Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken, int? cols = null, int? rows = null);
     Task StopSessionAsync();
     void RegisterExternalTerminal(Terminal terminal, string sessionId, string? cliName = null);
     Task UnregisterTerminalAsync();
@@ -129,7 +129,7 @@ public class TerminalSessionService : ITerminalSessionService
         }
     }
 
-    public async Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken)
+    public async Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken, int? cols = null, int? rows = null)
     {
         Terminal? terminal;
         string? sessionId;
@@ -159,6 +159,28 @@ public class TerminalSessionService : ITerminalSessionService
         catch (Exception ex)
         {
             Log.Error(ex, "[Terminal] Failed to disconnect remote viewer");
+        }
+
+        // If the client told us its current dimensions, resize the PTY *before*
+        // sending the replay so the replayed output is already at the correct size.
+        // Without this, the replay arrives at the old (stale) size and the subsequent
+        // SIGWINCH-triggered redraw writes content a second time ("double print" bug).
+        if (cols.HasValue && rows.HasValue)
+        {
+            try
+            {
+                TerminalResizeCoordinator.ApplyResize(
+                    terminal,
+                    _stateService,
+                    sessionId,
+                    cols.Value,
+                    rows.Value,
+                    TerminalIoSource.LocalWebUi);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[Terminal] Failed to pre-resize PTY ({Cols}x{Rows}) before replay", cols, rows);
+            }
         }
 
         var shouldUseReplay = ShouldUseReplayBuffer();

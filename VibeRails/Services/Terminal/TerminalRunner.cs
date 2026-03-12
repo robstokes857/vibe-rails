@@ -44,10 +44,10 @@ public class TerminalRunner
     {
         var shouldEnableRemote = ShouldEnableRemote(makeRemote);
         var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct);
-        var (command, environment) = _commandService.PrepareSession(llm, envName, extraArgs, initialPrompt);
-        EmitTerminalLaunchTrace(sessionId, llm, workDir, envName, extraArgs, title, shouldEnableRemote, command, environment);
+        var preparedSession = _commandService.PrepareSession(llm, envName, extraArgs, initialPrompt);
+        EmitTerminalLaunchTrace(sessionId, llm, workDir, envName, extraArgs, title, shouldEnableRemote, initialPrompt, preparedSession);
 
-        var terminal = await Terminal.CreateAsync(workDir, environment, title: title, ct: ct);
+        var terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: title, ct: ct);
 
         // Always wire up DB logging
         terminal.Subscribe(new DbLoggingConsumer(_stateService, sessionId));
@@ -295,7 +295,7 @@ public class TerminalRunner
         }
 
         // Send the CLI command to the shell
-        await terminal.SendCommandAsync(command, ct);
+        await terminal.SendCommandAsync(preparedSession.Command, ct);
 
         return (terminal, sessionId, activeRemoteConn);
     }
@@ -308,8 +308,8 @@ public class TerminalRunner
         string[]? extraArgs,
         string? title,
         bool remoteEnabled,
-        string command,
-        Dictionary<string, string> environment)
+        string? initialPrompt,
+        PreparedTerminalSession preparedSession)
     {
         if (_traceBuffer == null)
             return;
@@ -322,8 +322,8 @@ public class TerminalRunner
             extraArgs,
             title,
             remoteEnabled,
-            command,
-            environment);
+            initialPrompt,
+            preparedSession);
 
         _traceBuffer.Add(TraceEvent.Create(
             TraceEventType.TerminalLaunch,
@@ -340,8 +340,8 @@ public class TerminalRunner
         string[]? extraArgs,
         string? title,
         bool remoteEnabled,
-        string command,
-        Dictionary<string, string> environment)
+        string? initialPrompt,
+        PreparedTerminalSession preparedSession)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"sessionId: {sessionId}");
@@ -350,6 +350,11 @@ public class TerminalRunner
         sb.AppendLine($"environmentName: {envName ?? "(default)"}");
         sb.AppendLine($"title: {title ?? "(none)"}");
         sb.AppendLine($"remoteEnabled: {remoteEnabled}");
+        sb.AppendLine($"initialPrompt: {initialPrompt ?? "(none)"}");
+        sb.AppendLine($"shell: {Terminal.GetDefaultShellPath()}");
+        sb.AppendLine($"ptyCols: {Terminal.DefaultCols}");
+        sb.AppendLine($"ptyRows: {Terminal.DefaultRows}");
+        sb.AppendLine($"replayBufferSizeBytes: {Terminal.DefaultReplayBufferSize}");
         sb.AppendLine("cliArgs:");
 
         if (extraArgs is { Length: > 0 })
@@ -362,11 +367,25 @@ public class TerminalRunner
             sb.AppendLine("  - (none)");
         }
 
-        sb.AppendLine("command:");
-        sb.AppendLine($"  {command}");
+        sb.AppendLine("setupCommands:");
+
+        if (preparedSession.SetupCommands.Count > 0)
+        {
+            foreach (var setupCommand in preparedSession.SetupCommands)
+                sb.AppendLine($"  - {setupCommand}");
+        }
+        else
+        {
+            sb.AppendLine("  - (none)");
+        }
+
+        sb.AppendLine("launchCommand:");
+        sb.AppendLine($"  {preparedSession.LaunchCommand}");
+        sb.AppendLine("fullCommand:");
+        sb.AppendLine($"  {preparedSession.Command}");
         sb.AppendLine("environment:");
 
-        foreach (var kvp in environment.OrderBy(k => k.Key, StringComparer.Ordinal))
+        foreach (var kvp in preparedSession.Environment.OrderBy(k => k.Key, StringComparer.Ordinal))
             sb.AppendLine($"  {kvp.Key}={kvp.Value}");
 
         return sb.ToString();

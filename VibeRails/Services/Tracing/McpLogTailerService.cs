@@ -1,14 +1,17 @@
+using VibeRails.Utils;
+
 namespace VibeRails.Services.Tracing;
 
 /// <summary>
 /// Background service that tails the MCP server log file and forwards new lines
 /// to the trace buffer as LogEntry events with source "MCP-Server".
-/// Only registered when --trace is passed on the command line.
 /// MCP_Server.exe is a separate stdio process that cannot write to the main
 /// app's Serilog buffer directly, so we tail its log file instead.
 /// </summary>
 public sealed class McpLogTailerService : BackgroundService
 {
+    private const int InitialTailBytes = 32 * 1024;
+
     private readonly TraceEventBuffer _buffer;
     private readonly string _logDir;
 
@@ -20,8 +23,9 @@ public sealed class McpLogTailerService : BackgroundService
     {
         _buffer = buffer;
         _logDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".vibe_rails", "log", "mcp");
+            PathConstants.GetInstallDirPath(),
+            PathConstants.LOG_SUBDIR,
+            PathConstants.MCP_LOG_SUBDIR);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -41,9 +45,13 @@ public sealed class McpLogTailerService : BackgroundService
 
     private async Task TailFile(string path, CancellationToken stoppingToken)
     {
-        // Start from the current end — don't replay old logs on startup
+        // Start near the end so newly opened trace sessions see recent MCP startup/activity.
         long position;
-        try { position = new FileInfo(path).Length; }
+        try
+        {
+            var length = new FileInfo(path).Length;
+            position = Math.Max(0, length - InitialTailBytes);
+        }
         catch { position = 0; }
 
         string? pendingLine = null;
@@ -92,7 +100,8 @@ public sealed class McpLogTailerService : BackgroundService
             catch (OperationCanceledException) { return; }
             catch { /* file briefly locked — retry on next iteration */ }
 
-            await Task.Delay(500, stoppingToken).ConfigureAwait(false);
+            try { await Task.Delay(500, stoppingToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
         }
     }
 

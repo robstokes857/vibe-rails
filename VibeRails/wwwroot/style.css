@@ -2127,7 +2127,7 @@ body.terminal-focus-active #terminal-panel #terminal-container {
     }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 992px) {
     #terminal-panel .card-header {
         padding: 10px 12px;
         gap: 10px;
@@ -4095,7 +4095,7 @@ input.form-control:disabled {
 }
 
 
-@media (max-width: 767.98px) {
+@media (max-width: 991.98px) {
     .swarm-task {
         flex-direction: column;
         align-items: stretch;
@@ -4126,7 +4126,7 @@ input.form-control:disabled {
 }
 
 /* --- General Mobile & Small Screen Friendliness --- */
-@media (max-width: 768px) {
+@media (max-width: 992px) {
     .app-subnav {
         padding: 0 0.75rem;
         gap: 0.5rem;

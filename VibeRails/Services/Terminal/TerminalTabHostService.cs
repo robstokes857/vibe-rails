@@ -18,7 +18,7 @@ public interface ITerminalTabHostService
     Task<TerminalStatusResponse?> GetStatusAsync(string tabId, CancellationToken cancellationToken = default);
     Task<TerminalStatusResponse> StartSessionAsync(string tabId, StartTerminalRequest request, CancellationToken cancellationToken = default);
     Task<TerminalStatusResponse> StopSessionAsync(string tabId, CancellationToken cancellationToken = default);
-    Task HandleWebSocketProxyAsync(string tabId, WebSocket browserSocket, CancellationToken cancellationToken = default);
+    Task HandleWebSocketProxyAsync(string tabId, WebSocket browserSocket, int? cols = null, int? rows = null, CancellationToken cancellationToken = default);
     Task StopAllAsync(CancellationToken cancellationToken = default);
 }
 
@@ -177,14 +177,17 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             cancellationToken);
     }
 
-    public async Task HandleWebSocketProxyAsync(string tabId, WebSocket browserSocket, CancellationToken cancellationToken = default)
+    public async Task HandleWebSocketProxyAsync(string tabId, WebSocket browserSocket, int? cols = null, int? rows = null, CancellationToken cancellationToken = default)
     {
         var child = GetChildOrThrow(tabId);
         using var upstream = new ClientWebSocket();
         upstream.Options.SetRequestHeader("viberails_session", child.SessionToken);
         upstream.Options.AddSubProtocol(child.TabToken);
 
-        var upstreamUri = new Uri($"ws://127.0.0.1:{child.Port}/api/v1/terminal/ws");
+        // Forward client dimensions so the child process can resize the PTY
+        // before sending the replay buffer, preventing double-draw on reconnect.
+        var query = (cols.HasValue && rows.HasValue) ? $"?cols={cols}&rows={rows}" : string.Empty;
+        var upstreamUri = new Uri($"ws://127.0.0.1:{child.Port}/api/v1/terminal/ws{query}");
         await upstream.ConnectAsync(upstreamUri, cancellationToken);
 
         var childToBrowser = RelayWebSocketAsync(upstream, browserSocket, cancellationToken);

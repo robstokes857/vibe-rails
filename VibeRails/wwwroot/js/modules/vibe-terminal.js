@@ -31,7 +31,7 @@ function isLikelyMobileViewport() {
             return true;
         }
 
-        if (window.matchMedia?.('(max-width: 900px)')?.matches) {
+        if (window.matchMedia?.('(max-width: 992px)')?.matches) {
             return true;
         }
     } catch {
