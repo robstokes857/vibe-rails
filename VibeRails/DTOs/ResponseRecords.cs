@@ -323,6 +323,94 @@ namespace VibeRails.DTOs
         DateTime Timestamp
     );
 
+    // BERT Explorer DTOs
+    public record BertStatusResponse(
+        bool CaptureEnabled,
+        bool DatabaseExists,
+        bool StateDatabaseExists,
+        bool ModelAvailable,
+        bool SemanticSearchAvailable,
+        string DataDirectory,
+        string DatabasePath,
+        string StateDatabasePath,
+        string ModelDirectory,
+        int DocumentCount,
+        int SessionCount,
+        DateTime? LatestCaptureUTC
+    );
+
+    public record BertFileChangeResponse(
+        string FilePath,
+        string ChangeType,
+        int? LinesAdded,
+        int? LinesDeleted
+    );
+
+    public record BertCaptureSummaryResponse(
+        string DocumentId,
+        string SessionId,
+        long? UserInputId,
+        int? Sequence,
+        DateTime? TimestampUTC,
+        string? Cli,
+        string? EnvironmentName,
+        string? WorkingDirectory,
+        string? GitCommitHash,
+        string UserTextPreview,
+        int FileChangeCount
+    );
+
+    public record BertCaptureDetailResponse(
+        string DocumentId,
+        string SessionId,
+        long? UserInputId,
+        int? Sequence,
+        DateTime? TimestampUTC,
+        string? Cli,
+        string? EnvironmentName,
+        string? WorkingDirectory,
+        string? GitCommitHash,
+        string UserText,
+        List<BertFileChangeResponse> FileChanges,
+        string RawText
+    );
+
+    public record BertCaptureListResponse(
+        List<BertCaptureSummaryResponse> Captures,
+        int TotalCount,
+        int Skip,
+        int Take
+    );
+
+    public record BertSearchRequest(
+        string Query,
+        string Mode = "semantic",
+        int TopK = 10
+    );
+
+    public record BertSearchHitResponse(
+        string DocumentId,
+        string SessionId,
+        long? UserInputId,
+        int? Sequence,
+        DateTime? TimestampUTC,
+        string? Cli,
+        string? EnvironmentName,
+        string? WorkingDirectory,
+        string? GitCommitHash,
+        string UserTextPreview,
+        int FileChangeCount,
+        double? Score
+    );
+
+    public record BertSearchResponse(
+        string Query,
+        string Mode,
+        int TopK,
+        int DocumentCount,
+        long SearchTimeMs,
+        List<BertSearchHitResponse> Results
+    );
     // Claude Plan DTOs
     public record ClaudePlanRecord(
         long Id,
@@ -486,6 +574,18 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ProcessInfoItem))]
     [JsonSerializable(typeof(List<ProcessInfoItem>))]
     [JsonSerializable(typeof(ProcessListResponse))]
+    // BERT explorer DTOs
+    [JsonSerializable(typeof(BertStatusResponse))]
+    [JsonSerializable(typeof(BertFileChangeResponse))]
+    [JsonSerializable(typeof(List<BertFileChangeResponse>))]
+    [JsonSerializable(typeof(BertCaptureSummaryResponse))]
+    [JsonSerializable(typeof(List<BertCaptureSummaryResponse>))]
+    [JsonSerializable(typeof(BertCaptureDetailResponse))]
+    [JsonSerializable(typeof(BertCaptureListResponse))]
+    [JsonSerializable(typeof(BertSearchRequest))]
+    [JsonSerializable(typeof(BertSearchHitResponse))]
+    [JsonSerializable(typeof(List<BertSearchHitResponse>))]
+    [JsonSerializable(typeof(BertSearchResponse))]
     // Trace DTOs
     [JsonSerializable(typeof(TraceEvent))]
     [JsonSerializable(typeof(List<TraceEvent>))]
@@ -496,3 +596,5 @@ namespace VibeRails.DTOs
     {
     }
 }
+
+

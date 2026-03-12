@@ -861,24 +861,20 @@ export class VibeControlApp {
         modalContainer.innerHTML = '';
     }
 
-    showToast(title, message, type = 'info') {
-        const toastContainer = document.getElementById('toast-container');
-        const toast = document.createElement('div');
-        toast.className = `toast ${type} show`;
-        // Escape title and message to prevent XSS
-        const escapedTitle = this.escapeHtml(title);
-        const escapedMessage = this.escapeHtml(message);
-        toast.innerHTML = `
-            <div class="toast-header">
-                <strong class="me-auto">${escapedTitle}</strong>
-                <button type="button" class="btn-close" data-action="dismiss-toast"></button>
-            </div>
-            <div class="toast-body">${escapedMessage}</div>
-        `;
-        toast.querySelector('[data-action="dismiss-toast"]')
-            .addEventListener('click', () => toast.remove());
-        toastContainer.appendChild(toast);
-        setTimeout(() => toast.remove(), 5000);
+    showToast(title, message, type = 'info', options = {}) {
+        const { icon, iconBackground, iconColor, theme = 'glassmorphism', duration = 5000, animation } = options;
+        toast({
+            title,
+            message,
+            type,
+            position: 'bottom-right',
+            duration,
+            theme,
+            animation: animation ?? { enter: 'slideInRight', exit: 'fadeOut' },
+            ...(icon != null && { icon, showIcon: true }),
+            ...(iconBackground != null && { iconBackground }),
+            ...(iconColor != null && { iconColor }),
+        });
     }
 
     showError(message) {

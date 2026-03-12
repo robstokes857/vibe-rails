@@ -86,9 +86,42 @@ class TerminalTab {
             }
         });
 
+        this.vibeTerminal.addCustomKeyEventHandler((event) => {
+            const isModifiedEnter = ((event.key || '') === 'Enter' || event.keyCode === 13)
+                && !event.altKey
+                && !event.metaKey
+                && (event.shiftKey || event.ctrlKey);
+
+            if (!isModifiedEnter || !this.vibeTerminal?.isBracketedPasteModeEnabled()) {
+                return true;
+            }
+
+            if (event.type !== 'keydown' && event.type !== 'keypress') {
+                return true;
+            }
+
+            // xterm invokes custom handlers for both keydown and keypress.
+            // Paste once on keydown, then suppress the follow-up keypress so
+            // Enter does not still submit the prompt.
+            event.preventDefault();
+            event.stopPropagation();
+
+            if (event.type === 'keydown'
+                && this.socket
+                && this.socket.readyState === WebSocket.OPEN) {
+                const payload = this.vibeTerminal?.createBracketedPastePayload('\n');
+                if (payload) {
+                    this.socket.send(payload);
+                }
+            }
+
+            return false;
+        });
+
         this.vibeTerminal.attachClipboardPaste((text) => {
             if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                this.socket.send(text);
+                const payload = this.vibeTerminal?.createBracketedPastePayload(text) ?? text;
+                this.socket.send(payload);
             }
         });
 

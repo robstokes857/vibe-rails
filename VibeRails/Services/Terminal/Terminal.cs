@@ -207,7 +207,7 @@ public sealed class Terminal : IAsyncDisposable
         if (_readLoop != null)
         {
             try { await _readLoop; }
-            catch (OperationCanceledException) { }
+            catch { }
         }
 
         _pty.Kill();
@@ -260,16 +260,15 @@ public sealed class Terminal : IAsyncDisposable
         }
         finally
         {
-            // Notify listeners that the PTY has exited
-            try
-            {
-                var exitCode = _pty.ExitCode;
-                Exited?.Invoke(this, exitCode);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[Terminal] Error notifying exit handlers");
-            }
+            // Notify listeners that the PTY has exited.
+            // ExitCode can throw if the process hasn't fully exited yet (pipe EOF races the process exit).
+            // Always invoke Exited regardless — use -1 as a fallback so listeners can clean up.
+            int exitCode;
+            try { exitCode = _pty.ExitCode; }
+            catch { exitCode = -1; }
+
+            try { Exited?.Invoke(this, exitCode); }
+            catch (Exception ex) { Log.Error(ex, "[Terminal] Error in exit handlers"); }
         }
     }
 

@@ -1,1493 +1,1199 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VibeRails Trace</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootswatch/5.3.8/slate/bootstrap.min.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
     <style>
-        html, body {
-            height: 100vh;
-            overflow: hidden;
-            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-            font-size: 12px;
-        }
-
-        /* ── Top bar ── */
-        .topbar {
-            background: #111120;
-            border-bottom: 1px solid #2a2a40;
-            flex-shrink: 0;
-        }
-        .topbar-title { font-size: 13px; font-weight: 700; color: #569cd6; letter-spacing: 0.12em; }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-        .status-dot.connected    { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
-        .status-dot.disconnected { background: #d73a49; }
-        .status-dot.connecting   { background: #e3b341; }
-        .status-label { font-size: 11px; color: #888; }
-
-        /* ── Connection helper ── */
-        .conn-helper {
-            background: #0e0e1c;
-            border-bottom: 1px solid #2a2a40;
-            padding: 8px 12px;
-            display: grid;
-            gap: 8px;
-            flex-shrink: 0;
-        }
-        .conn-helper.hidden { display: none; }
-        .conn-label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; }
-        .conn-input {
-            background: #151525;
-            border: 1px solid #2e2e4a;
-            border-radius: 3px;
-            color: #d4d4d4;
-            font-family: inherit;
-            font-size: 11px;
-            padding: 3px 7px;
-            outline: none;
-        }
-        .conn-input:focus { border-color: #569cd6; }
-        .conn-json {
-            min-height: 132px;
-            width: min(100%, 820px);
-            resize: vertical;
-            line-height: 1.45;
-            padding: 8px 10px;
-            white-space: pre;
-        }
-        .conn-actions {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        .conn-hint {
-            font-size: 10px;
-            color: #666;
-        }
-        .conn-apply-btn {
-            font-size: 11px;
-            padding: 3px 12px;
-            border: 1px solid #569cd6;
-            border-radius: 3px;
-            background: transparent;
-            color: #569cd6;
-            cursor: pointer;
-            font-family: inherit;
-        }
-        .conn-apply-btn:hover { background: #1a2a3a; }
-        .conn-status { font-size: 10px; color: #4caf50; }
-        .conn-status.err { color: #f48771; }
-
-        /* ── Main grid fills remaining height ── */
-        .main-grid { flex: 1; min-height: 0; }
-        .main-grid > .row { height: 100%; }
-
-        /* ── Left column ── */
-        .left-col {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            height: 100%;
-            padding: 6px;
-            min-height: 0;
-        }
-        .left-col .panel { flex: 1; min-height: 0; }
-        .left-col .panel.minimized { flex: 0 0 auto !important; min-height: 0 !important; }
-        .left-col .panel.minimized .panel-body { display: none !important; }
-        .left-col .panel.panel-hidden { display: none !important; }
-
-        /* ── Right column ── */
-        .right-col {
-            height: 100%;
-            padding: 6px 6px 6px 0;
-            min-height: 0;
-        }
-        .io-stack-shell {
-            height: 100%;
-            min-height: 0;
-            display: flex;
-            flex-direction: column;
-            border-radius: 6px;
-            overflow: hidden;
-            background: #0f0f20;
-            border: 1px solid #222235;
-        }
-        .io-stack-body {
-            flex: 1;
-            min-height: 0;
-            display: flex;
-            flex-direction: column;
-            padding: 5px;
-        }
-        .pane-section {
-            min-height: 80px;
-            display: flex;
-            flex-direction: column;
-        }
-        .pane-section > .panel { flex: 1; min-height: 0; }
-        .pane-resizer {
-            height: 7px;
-            margin: 1px 0;
-            cursor: row-resize;
-            position: relative;
-            flex: 0 0 auto;
-        }
-        .pane-resizer::before {
-            content: '';
-            position: absolute;
-            left: 25%; right: 25%; top: 3px;
-            height: 2px;
-            border-radius: 2px;
-            background: #252535;
-        }
-        .pane-resizer:hover::before { background: #569cd6; }
-        .collapsed-dock {
-            flex: 0 0 auto;
-            border-top: 1px solid #222235;
-            background: #0c0c18;
-            padding: 4px 8px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            flex-wrap: wrap;
-        }
-        .collapsed-dock.hidden { display: none; }
-        .collapsed-dock-label { font-size: 10px; color: #555; letter-spacing: 0.08em; text-transform: uppercase; }
-        .collapsed-pane-btn {
-            font-size: 10px;
-            padding: 2px 8px;
-            border: 1px solid #333;
-            border-radius: 3px;
-            background: transparent;
-            color: #8a8a9b;
-            cursor: pointer;
-            font-family: inherit;
-        }
-        .collapsed-pane-btn:hover { color: #d4d4d4; border-color: #569cd6; }
-
-        /* ── Panel card ── */
-        .panel {
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-            border-radius: 5px;
-            overflow: hidden;
-            background: #13132a;
-            border: 1px solid #1e1e35;
-        }
-        .panel-mcp     { border-color: #3a1f00; }
-        .panel-logs    { border-color: #221535; }
-        .panel-http    { border-color: #1a2d10; }
-        .panel-proc    { border-color: #0e2535; }
-        .panel-launch  { border-color: #2e2500; }
-        .panel-input   { border-color: #0d2a45; }
-        .panel-output  { border-color: #0d2e28; }
-        .panel-console { border-color: #1e1e35; }
-
-        /* ── Panel header ── */
-        .panel-header {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 5px 10px;
-            background: #0f0f22;
-            border-bottom: 1px solid;
-            flex-shrink: 0;
-        }
-        .panel-mcp     .panel-header { border-color: #3a1f00; }
-        .panel-logs    .panel-header { border-color: #221535; }
-        .panel-http    .panel-header { border-color: #1a2d10; }
-        .panel-proc    .panel-header { border-color: #0e2535; }
-        .panel-launch  .panel-header { border-color: #2e2500; }
-        .panel-input   .panel-header { border-color: #0d2a45; }
-        .panel-output  .panel-header { border-color: #0d2e28; }
-        .panel-console .panel-header { border-color: #1e1e35; }
-
-        .panel-label { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
-        .panel-mcp     .panel-label { color: #ce9178; }
-        .panel-logs    .panel-label { color: #c586c0; }
-        .panel-http    .panel-label { color: #8fbc45; }
-        .panel-proc    .panel-label { color: #56a8d6; }
-        .panel-launch  .panel-label { color: #d7ba7d; }
-        .panel-input   .panel-label { color: #569cd6; }
-        .panel-output  .panel-label { color: #4ec9b0; }
-        .panel-console .panel-label { color: #666; }
-
-        .panel-count { font-size: 10px; color: #444; }
-
-        .panel-btn {
-            font-size: 10px;
-            padding: 2px 7px;
-            border: 1px solid #2a2a3e;
-            border-radius: 3px;
-            background: transparent;
-            color: #666;
-            cursor: pointer;
-            font-family: inherit;
-            line-height: 1.4;
-        }
-        .panel-btn:hover { color: #aaa; border-color: #555; }
-        .panel-btn.locked { color: #569cd6; border-color: #1e3a5f; }
-
-        /* ── Panel body ── */
-        .panel-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 4px 0;
-            min-height: 0;
-            scrollbar-width: thin;
-            scrollbar-color: #2a2a40 transparent;
-        }
-        .panel-body::-webkit-scrollbar { width: 5px; }
-        .panel-body::-webkit-scrollbar-track { background: transparent; }
-        .panel-body::-webkit-scrollbar-thumb { background: #2a2a40; border-radius: 3px; }
-        .panel-empty { padding: 8px 12px; color: #333; font-size: 11px; font-style: italic; }
-
-        /* ── Event rows ── */
-        .event-row {
-            display: flex;
-            align-items: baseline;
-            gap: 6px;
-            padding: 2px 10px;
-            border-bottom: 1px solid transparent;
-            line-height: 1.45;
-        }
-        .event-row:hover { background: #16162e; }
-        .event-row.ev-call   { background: #1a0e00; }
-        .event-row.ev-call:hover { background: #201200; }
-        .event-row.ev-result { background: #0d1a0d; }
-        .event-row.ev-result:hover { background: #101f10; }
-        .event-row.ev-err    { background: #1f0808; }
-        .event-row.ev-err:hover { background: #260a0a; }
-        .event-row.ev-wrn    { background: #1a1400; }
-        .event-row.ev-wrn:hover { background: #201800; }
-        .event-row.ev-dbg    { opacity: 0.55; }
-        .event-row.ev-mcp-server { background: #1a0f1a; }
-        .event-row.ev-mcp-server:hover { background: #1f1420; }
-
-        .ev-meta { display: flex; align-items: baseline; gap: 5px; flex-shrink: 0; }
-        .ev-time { font-size: 10px; color: #3a3a55; white-space: nowrap; }
-        .ev-duration { font-size: 10px; color: #5a5a30; white-space: nowrap; }
-        .ev-text { flex: 1; color: #c8c8d8; font-size: 11px; word-break: break-all; white-space: pre-wrap; }
-        .ev-text .mcp-server-tag { color: #b06ec0; font-size: 10px; margin-right: 3px; }
-
-        .event-detail {
-            padding: 3px 10px 3px 28px;
-            font-size: 10px;
-            color: #666;
-            white-space: pre-wrap;
-            word-break: break-all;
-            border-bottom: 1px solid #181828;
-            background: #0d0d1e;
-        }
-
-        /* ── Process table ── */
-        .proc-table { width: 100%; border-collapse: collapse; }
-        .proc-table th { font-size: 10px; color: #444; padding: 2px 10px; text-align: left; font-weight: normal; border-bottom: 1px solid #1e1e30; }
-        .proc-table td { font-size: 11px; padding: 2px 10px; border-bottom: 1px solid #14142a; }
-        .proc-table tr:hover td { background: #16162e; }
-        .proc-table .col-pid    { color: #569cd6; width: 55px; }
-        .proc-table .col-uptime { color: #666; width: 65px; }
-        .proc-table .col-title  { color: #555; }
-        .proc-age { font-size: 10px; color: #333; margin-left: auto; }
-
-        /* ── Terminal wrap ── */
-        .terminal-wrap { flex: 1; min-height: 0; overflow: hidden; }
-
-        /* ── Settings popover ── */
-        .topbar-settings-wrap { position: relative; }
-        .settings-popover {
-            position: absolute;
-            right: 0; top: calc(100% + 4px);
-            background: #111120;
-            border: 1px solid #2a2a40;
-            border-radius: 5px;
-            padding: 10px;
-            min-width: 180px;
-            z-index: 1000;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.6);
-        }
-        .settings-popover.hidden { display: none; }
-        .settings-group-label { font-size: 9px; color: #555; text-transform: uppercase; letter-spacing: 0.1em; margin: 6px 0 4px; }
-        .settings-group-label:first-child { margin-top: 0; }
-        .settings-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
-        .settings-row label { font-size: 11px; color: #aaa; cursor: pointer; user-select: none; }
-        .settings-row input[type=checkbox] { accent-color: #569cd6; cursor: pointer; }
-        .settings-divider { border-color: #222235; margin: 6px 0; }
-        .settings-btn-row { display: flex; gap: 6px; margin-top: 4px; }
-        .settings-mini-btn {
-            flex: 1;
-            font-size: 10px;
-            padding: 2px 0;
-            border: 1px solid #2a2a40;
-            border-radius: 3px;
-            background: transparent;
-            color: #888;
-            cursor: pointer;
-            font-family: inherit;
-        }
-        .settings-mini-btn:hover { color: #d4d4d4; border-color: #569cd6; }
-
-        /* ── Auth gate ── */
-        .trace-auth-gate {
-            margin: 6px;
-            border: 1px solid #3a3a5a;
-            border-radius: 5px;
-            background: #0e0e1e;
-            padding: 7px 10px;
-            flex-shrink: 0;
-        }
-        .trace-auth-gate h6 { color: #f48771; font-size: 11px; margin: 0 0 3px; }
-        .trace-auth-gate p  { margin: 0; font-size: 10px; color: #aaa; }
-        .trace-auth-gate.hidden { display: none; }
-        .main-grid.trace-auth-locked { pointer-events: none; opacity: 0.4; filter: grayscale(0.4); }
+        :root{--bg:#06111a;--bg2:#0b1721;--surface:rgba(10,21,31,.86);--surface2:rgba(8,18,26,.96);--line:rgba(143,177,201,.18);--line2:rgba(117,200,255,.3);--text:#eef6fc;--muted:#90a8bc;--muted2:#b7c8d6;--accent:#57d6c6;--accent2:#ff9d5c;--accent3:#79b8ff;--danger:#ff7d7d;--warn:#f5c35d;--shadow:0 18px 60px rgba(0,0,0,.28);--radius:22px}
+        *{box-sizing:border-box}
+        html,body{height:100%;margin:0}
+        body{overflow:hidden;color:var(--text);font-family:"IBM Plex Mono",monospace;background:radial-gradient(circle at top left,rgba(87,214,198,.16),transparent 28%),radial-gradient(circle at top right,rgba(255,157,92,.13),transparent 30%),linear-gradient(180deg,#08111a 0%,#09141c 45%,#06111a 100%)}
+        button,input,textarea{font:inherit;color:inherit}
+        button{cursor:pointer}
+        pre{margin:0;white-space:pre-wrap;word-break:break-word}
+        .hidden{display:none!important}
+        .trace-shell{height:100%;display:grid;grid-template-rows:auto auto auto 1fr;gap:14px;padding:18px}
+        .hero{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(320px,560px);gap:16px;padding:18px 22px;border:1px solid var(--line);border-radius:28px;background:linear-gradient(135deg,rgba(12,27,39,.96),rgba(9,19,28,.92)),linear-gradient(90deg,rgba(87,214,198,.08),rgba(255,157,92,.05));box-shadow:var(--shadow);backdrop-filter:blur(14px)}
+        .eyebrow{color:var(--accent);text-transform:uppercase;letter-spacing:.18em;font-size:11px;margin-bottom:8px}
+        .brand-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+        .brand-row h1{margin:0;font-family:"Space Grotesk",sans-serif;font-size:clamp(28px,3.5vw,40px);line-height:1;letter-spacing:-.04em}
+        .hero-copy{margin:12px 0 0;max-width:72ch;color:var(--muted);line-height:1.65;font-size:13px}
+        .status-pill{display:inline-flex;align-items:center;gap:9px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:rgba(12,22,32,.72);color:var(--muted2);font-size:12px}
+        .status-pill:before{content:"";width:10px;height:10px;border-radius:50%;box-shadow:0 0 0 4px rgba(255,255,255,.03);background:var(--warn)}
+        .status-pill.connected:before{background:var(--accent);box-shadow:0 0 14px rgba(87,214,198,.45)}
+        .status-pill.disconnected:before{background:var(--danger);box-shadow:0 0 14px rgba(255,125,125,.45)}
+        .status-pill.connecting:before{background:var(--warn);box-shadow:0 0 14px rgba(245,195,93,.45)}
+        .hero-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+        .metric-card{padding:14px 16px;border-radius:18px;border:1px solid var(--line);background:rgba(13,24,35,.82);display:grid;gap:8px}
+        .metric-label,.section-tag,.stat-tile span,.kv-card span{color:var(--muted);text-transform:uppercase;letter-spacing:.12em;font-size:10px}
+        .metric-value,.stat-tile strong{font-family:"Space Grotesk",sans-serif;line-height:1;letter-spacing:-.04em}
+        .metric-value{font-size:28px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .metric-meta,.drawer-head p,.trace-auth-gate p,.section-header p,.rank-item small,.process-item small,.callout,.flow-card p{color:var(--muted);font-size:12px;line-height:1.55}
+        .toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;min-width:0}
+        .tab-strip{display:flex;gap:8px;flex-wrap:wrap;min-width:0}
+        .tab-btn,.control-btn,.filter-chip{border:1px solid var(--line);background:rgba(12,21,31,.72);color:var(--muted2);transition:border-color .2s ease,transform .2s ease,background .2s ease,color .2s ease}
+        .tab-btn:hover,.control-btn:hover,.filter-chip:hover{border-color:var(--line2);transform:translateY(-1px)}
+        .tab-btn{display:inline-flex;align-items:center;gap:10px;padding:12px 14px;border-radius:16px;font-size:12px}
+        .tab-btn.active,.filter-chip.active{background:linear-gradient(135deg,rgba(87,214,198,.2),rgba(121,184,255,.16));border-color:rgba(87,214,198,.42);color:var(--text)}
+        .tab-count,.pill,.type-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;font-size:10px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--muted2)}
+        .tab-count{min-width:28px;height:24px;padding:0 8px;font-size:11px}
+        .toolbar-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;min-width:0}
+        .search-shell{width:min(420px,40vw);min-width:220px;padding:0 14px;border-radius:16px;border:1px solid var(--line);background:rgba(10,19,29,.84);display:flex;align-items:center}
+        .search-shell input{width:100%;border:none;background:transparent;color:var(--text);padding:12px 0;outline:none}
+        .control-btn{padding:12px 14px;border-radius:16px;font-size:12px}
+        .control-btn.primary{background:linear-gradient(135deg,rgba(255,157,92,.22),rgba(87,214,198,.18));border-color:rgba(255,157,92,.36);color:var(--text)}
+        .connect-drawer,.trace-auth-gate,.surface{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow);backdrop-filter:blur(12px)}
+        .connect-drawer{padding:18px;display:grid;gap:14px}
+        .drawer-head h2,.trace-auth-gate h2,.section-header h2,.detail-section h3{margin:0;font-family:"Space Grotesk",sans-serif}
+        .drawer-head h2,.trace-auth-gate h2,.section-header h2{font-size:18px;letter-spacing:-.03em}
+        .connect-drawer textarea{min-height:180px;resize:vertical;width:100%;border:1px solid var(--line);border-radius:18px;background:rgba(7,16,24,.92);padding:14px;outline:none;line-height:1.65}
+        .connect-actions,.toolbar-inline,.chip-row,.event-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+        .connect-status{font-size:12px;color:var(--muted)}
+        .connect-status.err{color:var(--danger)}
+        .trace-auth-gate{padding:16px 18px;background:linear-gradient(135deg,rgba(255,125,125,.1),rgba(11,21,31,.9))}
+        .tab-panels{min-height:0}
+        .tab-panel{display:none;height:100%}
+        .tab-panel.active{display:block}
+        .panel-grid{height:100%;min-height:0;display:grid;gap:14px}
+        .panel-grid-live{grid-template-columns:300px minmax(0,1.3fr) 420px}
+        .panel-grid-standard{grid-template-columns:320px minmax(0,1.15fr) 420px}
+        .panel-grid-pty{grid-template-columns:360px minmax(0,1.1fr) 430px}
+        .stack-col{min-height:0;display:flex;flex-direction:column;gap:14px}
+        .surface{min-height:0;display:flex;flex-direction:column;gap:12px;padding:16px;overflow:hidden}
+        .section-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+        .stat-stack,.observer-flow,.launch-panel,.rank-list,.stream-list,.detail-panel,.process-panel{display:grid;gap:10px}
+        .stream-list,.detail-panel,.process-panel,.rank-list,.launch-panel{min-height:0;overflow:auto;padding-right:4px}
+        .stream-list::-webkit-scrollbar,.detail-panel::-webkit-scrollbar,.process-panel::-webkit-scrollbar,.rank-list::-webkit-scrollbar,.launch-panel::-webkit-scrollbar,.code-scroll::-webkit-scrollbar{width:8px;height:8px}
+        .stream-list::-webkit-scrollbar-thumb,.detail-panel::-webkit-scrollbar-thumb,.process-panel::-webkit-scrollbar-thumb,.rank-list::-webkit-scrollbar-thumb,.launch-panel::-webkit-scrollbar-thumb,.code-scroll::-webkit-scrollbar-thumb{background:rgba(121,184,255,.2);border-radius:999px}
+        .stat-tile,.kv-card,.rank-item,.process-item,.flow-card,.detail-summary,.detail-section,.event-card,.empty-state,.inline-preview,.code-block,.code-scroll,.terminal-shell{border-radius:18px;border:1px solid var(--line)}
+        .stat-tile,.kv-card,.rank-item,.process-item,.flow-card,.detail-summary,.detail-section,.event-card,.inline-preview{background:rgba(9,18,27,.84)}
+        .stat-tile,.kv-card,.rank-item,.process-item,.flow-card,.detail-summary,.detail-section{padding:14px}
+        .stat-tile strong{font-size:26px}
+        .empty-state{padding:18px;border-style:dashed;background:rgba(7,15,23,.7);color:var(--muted);line-height:1.7;font-size:12px}
+        .event-card.sev-warning{border-color:rgba(245,195,93,.34)}
+        .event-card.sev-error{border-color:rgba(255,125,125,.38)}
+        .event-card.expanded{border-color:rgba(87,214,198,.42);box-shadow:inset 0 0 0 1px rgba(87,214,198,.08)}
+        .event-head{width:100%;border:none;background:transparent;color:inherit;display:grid;grid-template-columns:92px minmax(0,1fr) 56px;gap:12px;align-items:start;text-align:left;padding:14px}
+        .event-time,.event-toggle,.mini-status{color:var(--muted);font-size:11px}
+        .event-toggle{text-transform:uppercase;letter-spacing:.12em;padding-top:4px;text-align:right}
+        .event-main{min-width:0;display:grid;gap:8px}
+        .event-summary{line-height:1.55;font-size:13px;word-break:break-word}
+        .pill,.type-pill{padding:5px 9px;gap:6px}
+        .type-terminal{color:#8ef1e3;border-color:rgba(87,214,198,.34);background:rgba(87,214,198,.08)}
+        .type-mcp{color:#ffbe91;border-color:rgba(255,157,92,.36);background:rgba(255,157,92,.08)}
+        .type-http{color:#9bc5ff;border-color:rgba(121,184,255,.36);background:rgba(121,184,255,.08)}
+        .type-log{color:#d2dfec;border-color:rgba(190,206,219,.24);background:rgba(190,206,219,.06)}
+        .type-warning{color:var(--warn);border-color:rgba(245,195,93,.32);background:rgba(245,195,93,.08)}
+        .type-error{color:var(--danger);border-color:rgba(255,125,125,.34);background:rgba(255,125,125,.08)}
+        .event-expanded{padding:0 14px 14px 118px;display:grid;gap:12px}
+        .inline-preview strong{display:block;margin-bottom:8px;color:var(--text);font-size:11px;text-transform:uppercase;letter-spacing:.12em}
+        .detail-title{font-family:"Space Grotesk",sans-serif;font-size:22px;line-height:1.2;letter-spacing:-.04em}
+        .detail-grid,.kv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+        .kv-card strong{font-size:12px;line-height:1.55;word-break:break-word}
+        .detail-section{gap:10px}
+        .detail-section h3{font-size:15px;letter-spacing:-.02em}
+        .code-block,.code-scroll{padding:12px;background:rgba(5,12,18,.92);color:var(--muted2);line-height:1.7;font-size:12px}
+        .code-scroll{max-height:240px;overflow:auto}
+        .callout{padding:14px;background:rgba(8,17,25,.88);border:1px solid rgba(121,184,255,.18)}
+        .flow-card strong{color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.12em}
+        .env-table{width:100%;border-collapse:collapse}
+        .env-table th,.env-table td{padding:8px 10px;text-align:left;border-bottom:1px solid rgba(143,177,201,.12);vertical-align:top;font-size:11px;line-height:1.6;word-break:break-word}
+        .env-table th{text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+        .terminal-shell{min-height:280px;flex:1;background:rgba(6,12,18,.98);overflow:hidden}
+        .toolbar-inline .control-btn{padding:10px 12px}
+        @media (max-width:1550px){.panel-grid-live,.panel-grid-standard,.panel-grid-pty{grid-template-columns:280px minmax(0,1fr) 360px}}
+        @media (max-width:1220px){body{overflow:auto}.trace-shell{height:auto;min-height:100%;grid-template-rows:auto auto auto auto}.hero,.panel-grid-live,.panel-grid-standard,.panel-grid-pty{grid-template-columns:1fr}.tab-panel{height:auto}}
+        @media (max-width:860px){.toolbar{flex-direction:column;align-items:stretch}.toolbar-actions{justify-content:stretch}.search-shell{width:100%}.hero-stats{grid-template-columns:1fr}.event-head{grid-template-columns:1fr}.event-expanded{padding:0 14px 14px}}
     </style>
 </head>
-<body class="d-flex flex-column">
-
-<!-- ── Top bar ── -->
-<div class="topbar d-flex align-items-center gap-2 px-3 py-1">
-    <span class="topbar-title">TRACE</span>
-    <span class="status-dot connecting" id="status-dot"></span>
-    <span class="status-label" id="status-label">Connecting...</span>
-    <span class="flex-grow-1"></span>
-    <input class="form-control form-control-sm" style="width:160px;font-size:11px;" id="global-search" type="text" placeholder="Filter...">
-    <button class="btn btn-sm btn-outline-secondary" id="pause-btn">Pause</button>
-    <button class="btn btn-sm btn-outline-secondary" id="clear-all-btn">Clear</button>
-    <div class="topbar-settings-wrap">
-        <button class="btn btn-sm btn-outline-secondary" id="settings-btn" title="Filters &amp; panels">&#9881;</button>
-        <div class="settings-popover hidden" id="settings-popover">
-            <div class="settings-group-label">Terminal</div>
-            <div class="settings-row"><input type="checkbox" id="filter-TerminalLaunch"><label for="filter-TerminalLaunch">Launch</label></div>
-            <div class="settings-row"><input type="checkbox" id="filter-TerminalInput"><label for="filter-TerminalInput">Input</label></div>
-            <div class="settings-row"><input type="checkbox" id="filter-TerminalOutput"><label for="filter-TerminalOutput">Output</label></div>
-            <hr class="settings-divider">
-            <div class="settings-group-label">MCP</div>
-            <div class="settings-row"><input type="checkbox" id="filter-McpToolCall"><label for="filter-McpToolCall">Tool Call</label></div>
-            <div class="settings-row"><input type="checkbox" id="filter-McpToolResult"><label for="filter-McpToolResult">Tool Result</label></div>
-            <hr class="settings-divider">
-            <div class="settings-group-label">HTTP</div>
-            <div class="settings-row"><input type="checkbox" id="filter-HttpRequest"><label for="filter-HttpRequest">HTTP Request</label></div>
-            <hr class="settings-divider">
-            <div class="settings-group-label">Logs</div>
-            <div class="settings-row"><input type="checkbox" id="filter-LogEntry"><label for="filter-LogEntry">Log Entry</label></div>
-            <div class="settings-row"><input type="checkbox" id="filter-RuleValidation"><label for="filter-RuleValidation">Rule Validation</label></div>
-            <div class="settings-row"><input type="checkbox" id="filter-SessionLifecycle"><label for="filter-SessionLifecycle">Session Lifecycle</label></div>
-            <div class="settings-row"><input type="checkbox" id="filter-Idle"><label for="filter-Idle">Idle</label></div>
-            <div class="settings-row"><input type="checkbox" id="filter-Resize"><label for="filter-Resize">Resize</label></div>
-            <div class="settings-btn-row">
-                <button class="settings-mini-btn" id="filter-all-btn">All</button>
-                <button class="settings-mini-btn" id="filter-none-btn">None</button>
+<body>
+<div class="trace-shell">
+    <header class="hero">
+        <div class="hero-main">
+            <div class="eyebrow">VibeRails Trace</div>
+            <div class="brand-row">
+                <h1>Single Page Trace Cockpit</h1>
+                <div class="status-pill connecting" id="status-pill">Connecting...</div>
             </div>
-            <hr class="settings-divider">
-            <div class="settings-group-label">Panels</div>
-            <div class="settings-row"><input type="checkbox" id="panel-show-mcp"><label for="panel-show-mcp">MCP</label></div>
-            <div class="settings-row"><input type="checkbox" id="panel-show-http"><label for="panel-show-http">HTTP</label></div>
-            <div class="settings-row"><input type="checkbox" id="panel-show-logs"><label for="panel-show-logs">Logs</label></div>
-            <div class="settings-row"><input type="checkbox" id="panel-show-proc"><label for="panel-show-proc">Processes</label></div>
-            <div class="settings-row"><input type="checkbox" id="panel-show-launch"><label for="panel-show-launch">Launch</label></div>
-            <div class="settings-row"><input type="checkbox" id="panel-show-input"><label for="panel-show-input">Input</label></div>
-            <div class="settings-row"><input type="checkbox" id="panel-show-output"><label for="panel-show-output">Output</label></div>
-            <div class="settings-row"><input type="checkbox" id="panel-show-console"><label for="panel-show-console">Console (xterm)</label></div>
+            <p class="hero-copy">Rebuilt around one shared event stream instead of a pile of weak panels. The four tabs below separate the noisy firehose from the MCP activity, the `ITerminalIoObserver` callbacks, and the exact CLI / PTY traffic.</p>
         </div>
-    </div>
-    <button class="btn btn-sm btn-outline-secondary" id="conn-toggle-btn" title="Connection settings">&#128279; Connect</button>
+        <div class="hero-stats">
+            <div class="metric-card"><div class="metric-label">Cached Events</div><div class="metric-value" id="metric-events">0</div><div class="metric-meta" id="metric-events-meta">Local browser cache of trace data.</div></div>
+            <div class="metric-card"><div class="metric-label">Alerts</div><div class="metric-value" id="metric-alerts">0</div><div class="metric-meta" id="metric-alerts-meta">Errors and warnings across the current cache.</div></div>
+            <div class="metric-card"><div class="metric-label">vb Processes</div><div class="metric-value" id="metric-processes">0</div><div class="metric-meta" id="metric-processes-meta">Polling `/api/v1/trace/processes`.</div></div>
+            <div class="metric-card"><div class="metric-label">Latest Event</div><div class="metric-value" id="metric-latest">None</div><div class="metric-meta" id="metric-latest-meta">Waiting for the stream to emit data.</div></div>
+        </div>
+    </header>
+
+    <section class="toolbar">
+        <div class="tab-strip" id="tab-strip">
+            <button class="tab-btn active" data-tab="live" type="button">Live Stream <span class="tab-count" id="tab-count-live">0</span></button>
+            <button class="tab-btn" data-tab="mcp" type="button">MCP <span class="tab-count" id="tab-count-mcp">0</span></button>
+            <button class="tab-btn" data-tab="observer" type="button">ITerminalIoObserver <span class="tab-count" id="tab-count-observer">0</span></button>
+            <button class="tab-btn" data-tab="pty" type="button">CLI / PTY <span class="tab-count" id="tab-count-pty">0</span></button>
+        </div>
+        <div class="toolbar-actions">
+            <label class="search-shell"><input id="global-search" type="text" placeholder="Search summary, detail, source, session..."></label>
+            <button class="control-btn" id="pause-btn" type="button">Pause</button>
+            <button class="control-btn" id="clear-all-btn" type="button">Clear Local View</button>
+            <button class="control-btn primary" id="conn-toggle-btn" type="button">Connect</button>
+        </div>
+    </section>
+
+    <section class="connect-drawer hidden" id="conn-helper">
+        <div class="drawer-head">
+            <h2>Connect The Tracer</h2>
+            <p>Paste the JSON payload copied from the main app. This page still relies on the same `viberails_tab` / `viberails_session` headers, but the UI around them is cleaner now.</p>
+        </div>
+        <textarea id="conn-json" spellcheck="false" placeholder='{
+  "portNumber": 5001,
+  "viberails_tab": "...",
+  "viberails_session": null
+}'></textarea>
+        <div class="connect-actions">
+            <button class="control-btn primary" id="conn-apply-btn" type="button">Reconnect Trace</button>
+            <span class="connect-status hidden" id="conn-status"></span>
+        </div>
+    </section>
+
+    <section class="trace-auth-gate hidden" id="trace-auth-gate">
+        <h2>Authentication Required</h2>
+        <p id="trace-auth-gate-message">Paste the tracer JSON above so this page can attach the required trace token headers.</p>
+    </section>
+
+    <main class="tab-panels" id="main-grid">
+        <section class="tab-panel active" data-tab-panel="live">
+            <div class="panel-grid panel-grid-live">
+                <aside class="stack-col">
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">Overview</div><h2>Stream Health</h2><p>Datadog-style quick read on the whole trace feed.</p></div></div>
+                        <div class="stat-stack" id="live-summary"></div>
+                    </section>
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">Live Slice</div><h2>Quick Filters</h2><p>Scope the full feed without leaving the tab.</p></div></div>
+                        <div class="chip-row" id="live-filter-group">
+                            <button class="filter-chip active" data-tab-scope="live" data-scope="all" type="button">All</button>
+                            <button class="filter-chip" data-tab-scope="live" data-scope="terminal" type="button">Terminal</button>
+                            <button class="filter-chip" data-tab-scope="live" data-scope="mcp" type="button">MCP</button>
+                            <button class="filter-chip" data-tab-scope="live" data-scope="http" type="button">HTTP</button>
+                            <button class="filter-chip" data-tab-scope="live" data-scope="logs" type="button">Logs</button>
+                            <button class="filter-chip" data-tab-scope="live" data-scope="errors" type="button">Alerts</button>
+                        </div>
+                    </section>
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">Processes</div><h2>Current `vb` Processes</h2><p>Quick visibility into the running app instances behind the stream.</p></div></div>
+                        <div class="process-panel" id="process-panel"></div>
+                    </section>
+                </aside>
+                <section class="surface">
+                    <div class="section-header"><div><div class="section-tag">Everything</div><h2>Expanded Event Stream</h2><p>Newest first. Click a row to expand it inline and inspect it on the right.</p></div></div>
+                    <div class="stream-list" id="live-list"></div>
+                </section>
+                <aside class="surface">
+                    <div class="section-header"><div><div class="section-tag">Inspector</div><h2>Selected Event</h2><p>Structured metadata and the full payload for the currently expanded row.</p></div></div>
+                    <div class="detail-panel" id="live-detail"></div>
+                </aside>
+            </div>
+        </section>
+
+        <section class="tab-panel" data-tab-panel="mcp">
+            <div class="panel-grid panel-grid-standard">
+                <aside class="stack-col">
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">MCP</div><h2>Tool Activity</h2><p>Calls, results, and MCP-server log lines only.</p></div></div>
+                        <div class="stat-stack" id="mcp-summary"></div>
+                    </section>
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">Focus</div><h2>MCP Filter</h2><p>Drill into just calls, results, or the server log tail.</p></div></div>
+                        <div class="chip-row" id="mcp-filter-group">
+                            <button class="filter-chip active" data-tab-scope="mcp" data-scope="all" type="button">All</button>
+                            <button class="filter-chip" data-tab-scope="mcp" data-scope="calls" type="button">Calls</button>
+                            <button class="filter-chip" data-tab-scope="mcp" data-scope="results" type="button">Results</button>
+                            <button class="filter-chip" data-tab-scope="mcp" data-scope="server-log" type="button">Server Log</button>
+                        </div>
+                    </section>
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">Breakdown</div><h2>Top Tools</h2><p>Which MCP tools are showing up the most in the local cache.</p></div></div>
+                        <div class="rank-list" id="mcp-tools"></div>
+                    </section>
+                </aside>
+                <section class="surface">
+                    <div class="section-header"><div><div class="section-tag">MCP Feed</div><h2>Calls, Results, Server Logs</h2><p>The trace feed stripped down to just the MCP story.</p></div></div>
+                    <div class="stream-list" id="mcp-list"></div>
+                </section>
+                <aside class="surface">
+                    <div class="section-header"><div><div class="section-tag">Inspector</div><h2>MCP Detail</h2><p>Arguments, results, durations, and server log payloads.</p></div></div>
+                    <div class="detail-panel" id="mcp-detail"></div>
+                </aside>
+            </div>
+        </section>
+
+        <section class="tab-panel" data-tab-panel="observer">
+            <div class="panel-grid panel-grid-standard">
+                <aside class="stack-col">
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">Contract</div><h2>`ITerminalIoObserver`</h2><p>Only the observer-driven event families belong here.</p></div></div>
+                        <div class="observer-flow">
+                            <div class="flow-card"><strong>OnTerminalIoAsync</strong><p>Dispatches `TerminalIoEvent` and becomes `TerminalInput` or `TerminalOutput` in the trace buffer.</p></div>
+                            <div class="flow-card"><strong>OnTerminalResizeAsync</strong><p>Fires when PTY dimensions change through the terminal state service and becomes `Resize`.</p></div>
+                            <div class="flow-card"><strong>OnTerminalIdleAsync</strong><p>Fires after the idle monitor crosses the threshold and becomes `Idle`.</p></div>
+                            <div class="flow-card"><strong>OnTerminalRemoteCommandAsync</strong><p>Fires for remote browser commands and lands in the trace as `SessionLifecycle` with a remote-command summary.</p></div>
+                        </div>
+                        <div class="callout">`TerminalLaunch` is intentionally not shown here. It is emitted directly by `TerminalRunner`, not by the `ITerminalIoObserver` pipeline.</div>
+                    </section>
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">Observer Feed</div><h2>Callback Summary</h2><p>Counts across only the observer-owned event types.</p></div></div>
+                        <div class="stat-stack" id="observer-summary"></div>
+                        <div class="chip-row" id="observer-filter-group">
+                            <button class="filter-chip active" data-tab-scope="observer" data-scope="all" type="button">All</button>
+                            <button class="filter-chip" data-tab-scope="observer" data-scope="io" type="button">Input / Output</button>
+                            <button class="filter-chip" data-tab-scope="observer" data-scope="resize" type="button">Resize</button>
+                            <button class="filter-chip" data-tab-scope="observer" data-scope="idle" type="button">Idle</button>
+                            <button class="filter-chip" data-tab-scope="observer" data-scope="remote" type="button">Remote Commands</button>
+                        </div>
+                    </section>
+                </aside>
+                <section class="surface">
+                    <div class="section-header"><div><div class="section-tag">Observer Events</div><h2>Only What The Observer Fired</h2><p>Input, output, resize, idle, and remote command lifecycle entries.</p></div></div>
+                    <div class="stream-list" id="observer-list"></div>
+                </section>
+                <aside class="surface">
+                    <div class="section-header"><div><div class="section-tag">Inspector</div><h2>Observer Detail</h2><p>Payloads shown in observer terms instead of the generic trace wall.</p></div></div>
+                    <div class="detail-panel" id="observer-detail"></div>
+                </aside>
+            </div>
+        </section>
+
+        <section class="tab-panel" data-tab-panel="pty">
+            <div class="panel-grid panel-grid-pty">
+                <aside class="stack-col">
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">CLI Launch</div><h2>What We Pass To The CLI</h2><p>Parsed from the `TerminalLaunch` detail payload.</p></div></div>
+                        <div class="launch-panel" id="pty-launch"></div>
+                    </section>
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">PTY Summary</div><h2>Traffic Snapshot</h2><p>Launches, input chunks, output chunks, and resizes in one place.</p></div></div>
+                        <div class="stat-stack" id="pty-summary"></div>
+                    </section>
+                </aside>
+                <section class="surface">
+                    <div class="section-header"><div><div class="section-tag">PTY Feed</div><h2>Launch + Input + Output + Resize</h2><p>Exactly the CLI handoff and PTY traffic you asked for.</p></div></div>
+                    <div class="chip-row" id="pty-filter-group">
+                        <button class="filter-chip active" data-tab-scope="pty" data-scope="all" type="button">All</button>
+                        <button class="filter-chip" data-tab-scope="pty" data-scope="launch" type="button">Launch</button>
+                        <button class="filter-chip" data-tab-scope="pty" data-scope="input" type="button">Input</button>
+                        <button class="filter-chip" data-tab-scope="pty" data-scope="output" type="button">Output</button>
+                        <button class="filter-chip" data-tab-scope="pty" data-scope="resize" type="button">Resize</button>
+                    </div>
+                    <div class="stream-list" id="pty-list"></div>
+                </section>
+                <aside class="stack-col">
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">Mirror</div><h2>Raw PTY Output</h2><p>Replayed from trace output events, not from the live terminal websocket.</p></div></div>
+                        <div class="mini-status" id="terminal-status">Waiting for terminal output...</div>
+                        <div class="terminal-shell" id="terminal-wrap"></div>
+                        <div class="toolbar-inline">
+                            <button class="control-btn" id="term-replay-btn" type="button">Replay From Cache</button>
+                            <button class="control-btn" id="term-clear-btn" type="button">Clear Mirror</button>
+                        </div>
+                    </section>
+                    <section class="surface">
+                        <div class="section-header"><div><div class="section-tag">Inspector</div><h2>CLI / PTY Detail</h2><p>Launch payloads and IO chunks in a cleaner reader.</p></div></div>
+                        <div class="detail-panel" id="pty-detail"></div>
+                    </section>
+                </aside>
+            </div>
+        </section>
+    </main>
 </div>
-
-<!-- ── Connection helper ── -->
-<div class="conn-helper hidden" id="conn-helper">
-    <span class="conn-label">Tracer JSON</span>
-    <textarea
-        class="conn-input conn-json"
-        id="conn-json"
-        spellcheck="false"
-        placeholder='{\n  "portNumber": 5001,\n  "viberails_tab": "...",\n  "viberails_session": null\n}'
-        title="Paste the JSON copied from the app logo"
-    ></textarea>
-    <div class="conn-actions">
-        <button class="conn-apply-btn" id="conn-apply-btn">Connect</button>
-        <span class="conn-status hidden" id="conn-status"></span>
-        <span class="conn-hint">Paste the JSON payload from the app logo modal. `viberails_session` can be `null`.</span>
-    </div>
-</div>
-
-<div class="trace-auth-gate hidden" id="trace-auth-gate">
-    <h6>Authentication Required</h6>
-    <p id="trace-auth-gate-message">Paste the tracer JSON from the source app with the Connect button above.</p>
-</div>
-
-<!-- ── Main grid ── -->
-<div class="main-grid container-fluid p-0">
-    <div class="row g-0">
-
-        <!-- Left column: MCP, LOGS, HTTP -->
-        <div class="col-6 left-col">
-
-            <div class="panel panel-mcp" id="panel-mcp" style="flex:1.4">
-                <div class="panel-header">
-                    <span class="panel-label">MCP</span>
-                    <span class="panel-count" id="count-mcp">0</span>
-                    <span class="flex-grow-1"></span>
-                    <button class="panel-btn locked" id="scroll-mcp">&#x2B07;</button>
-                    <button class="panel-btn" data-minimize="mcp">&#x2212;</button>
-                    <button class="panel-btn" data-panel="mcp">&times;</button>
-                </div>
-                <div class="panel-body" id="body-mcp">
-                    <div class="panel-empty">Waiting for MCP calls...</div>
-                </div>
-            </div>
-
-            <div class="panel panel-logs" id="panel-logs" style="flex:2.2">
-                <div class="panel-header">
-                    <span class="panel-label">LOGS</span>
-                    <span class="panel-count" id="count-logs">0</span>
-                    <span class="flex-grow-1"></span>
-                    <button class="panel-btn locked" id="scroll-logs">&#x2B07;</button>
-                    <button class="panel-btn" data-minimize="logs">&#x2212;</button>
-                    <button class="panel-btn" data-panel="logs">&times;</button>
-                </div>
-                <div class="panel-body" id="body-logs">
-                    <div class="panel-empty">Waiting for log entries...</div>
-                </div>
-            </div>
-
-            <div class="panel panel-http" id="panel-http" style="flex:0.9">
-                <div class="panel-header">
-                    <span class="panel-label">HTTP</span>
-                    <span class="panel-count" id="count-http">0</span>
-                    <span class="flex-grow-1"></span>
-                    <button class="panel-btn locked" id="scroll-http">&#x2B07;</button>
-                    <button class="panel-btn" data-minimize="http">&#x2212;</button>
-                    <button class="panel-btn" data-panel="http">&times;</button>
-                </div>
-                <div class="panel-body" id="body-http">
-                    <div class="panel-empty">Waiting for requests...</div>
-                </div>
-            </div>
-
-        </div><!-- /left-col -->
-
-        <!-- Right column: PROCESSES + terminal stack -->
-        <div class="col-6 right-col">
-            <div class="io-stack-shell">
-
-                <!-- Processes (fixed small section at top) -->
-                <div style="flex:0 0 auto; border-bottom:1px solid #1a1a30;">
-                    <div class="panel panel-proc" id="panel-proc" style="border-radius:0;border:none;">
-                        <div class="panel-header" style="border-radius:0;">
-                            <span class="panel-label">PROCESSES</span>
-                            <span class="panel-count" id="count-proc">0</span>
-                            <span class="flex-grow-1"></span>
-                            <span class="proc-age" id="proc-age"></span>
-                            <button class="panel-btn" data-minimize="proc">&#x2212;</button>
-                        </div>
-                        <div class="panel-body" id="body-proc" style="max-height:90px;">
-                            <div class="panel-empty">Polling for vb processes...</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Resizable terminal stack -->
-                <div class="io-stack-body" id="io-stack-body">
-                    <div class="pane-section" id="section-launch">
-                        <div class="panel panel-launch" id="panel-launch">
-                            <div class="panel-header">
-                                <span class="panel-label">LAUNCH</span>
-                                <span class="panel-count" id="count-launch">0</span>
-                                <span class="flex-grow-1"></span>
-                                <button class="panel-btn locked" id="scroll-launch">&#x2B07;</button>
-                                <button class="panel-btn" data-minimize="launch">&#x2212;</button>
-                                <button class="panel-btn" data-panel="launch">&times;</button>
-                            </div>
-                            <div class="panel-body" id="body-launch">
-                                <div class="panel-empty">Waiting for terminal launch...</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="pane-section" id="section-input">
-                        <div class="panel panel-input" id="panel-input">
-                            <div class="panel-header">
-                                <span class="panel-label">INPUT</span>
-                                <span class="panel-count" id="count-input">0</span>
-                                <span class="flex-grow-1"></span>
-                                <button class="panel-btn locked" id="scroll-input">&#x2B07;</button>
-                                <button class="panel-btn" data-minimize="input">&#x2212;</button>
-                                <button class="panel-btn" data-panel="input">&times;</button>
-                            </div>
-                            <div class="panel-body" id="body-input">
-                                <div class="panel-empty">Waiting for input...</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="pane-section" id="section-output">
-                        <div class="panel panel-output" id="panel-output">
-                            <div class="panel-header">
-                                <span class="panel-label">OUTPUT</span>
-                                <span class="panel-count" id="count-output">0</span>
-                                <span class="flex-grow-1"></span>
-                                <button class="panel-btn locked" id="scroll-output">&#x2B07;</button>
-                                <button class="panel-btn" data-minimize="output">&#x2212;</button>
-                                <button class="panel-btn" data-panel="output">&times;</button>
-                            </div>
-                            <div class="panel-body" id="body-output">
-                                <div class="panel-empty">Waiting for output...</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="pane-section" id="section-console">
-                        <div class="panel panel-console" id="panel-console">
-                            <div class="panel-header">
-                                <span class="panel-label">CONSOLE</span>
-                                <span id="terminal-status" style="font-size:10px;color:#444;">xterm mirror</span>
-                                <span class="flex-grow-1"></span>
-                                <button class="panel-btn" data-minimize="console">&#x2212;</button>
-                                <button class="panel-btn" id="term-reconnect-btn">Clear</button>
-                            </div>
-                            <div class="terminal-wrap" id="terminal-wrap"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="collapsed-dock hidden" id="collapsed-dock">
-                    <span class="collapsed-dock-label">Minimized</span>
-                    <div id="collapsed-pane-buttons" class="d-flex align-items-center gap-1 flex-wrap"></div>
-                </div>
-            </div>
-        </div><!-- /right-col -->
-
-    </div><!-- /row -->
-</div><!-- /main-grid -->
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
 <script>
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
-const TYPE_PANEL = {
-    TerminalLaunch:   'launch',
-    TerminalInput:    'input',
-    TerminalOutput:   'output',
-    McpToolCall:      'mcp',
-    McpToolResult:    'mcp',
-    RuleValidation:   'logs',
-    LogEntry:         'logs',
-    SessionLifecycle: 'logs',
-    Idle:             'logs',
-    Resize:           'logs',
-    HttpRequest:      'http',
-};
-const TYPE_NAMES = [
-    'TerminalInput','TerminalOutput','McpToolCall','McpToolResult',
-    'RuleValidation','LogEntry','SessionLifecycle','Idle','Resize','HttpRequest','TerminalLaunch'
-];
-const TRACE_TAB_TOKEN_KEY = 'viberails_tab';
-const CONN_STORAGE_KEY    = 'trace-conn-v2';
+const TYPE_NAMES=['TerminalInput','TerminalOutput','McpToolCall','McpToolResult','RuleValidation','LogEntry','SessionLifecycle','Idle','Resize','HttpRequest','TerminalLaunch'];
+const TRACE_TAB_TOKEN_KEY='viberails_tab';
+const CONN_STORAGE_KEY='trace-conn-v2';
+const ACTIVE_TAB_KEY='trace-active-tab-v3';
+const MAX_EVENTS=600;
+const MAX_RENDERED_ROWS=220;
+const state={connConfig:{baseUrl:'',sessionToken:''},selectedTab:'live',search:'',paused:false,events:[],pending:[],seenIds:new Set(),selectedIds:{live:'',mcp:'',observer:'',pty:''},scopes:{live:'all',mcp:'all',observer:'all',pty:'all'},streamStatus:'connecting',traceAuthLocked:false,processes:[],processesGeneratedAt:null,processPollTimer:null,streamAbortController:null,streamReconnectTimer:null,renderPending:false};
+const dom={mainGrid:document.getElementById('main-grid'),statusPill:document.getElementById('status-pill'),pauseBtn:document.getElementById('pause-btn'),clearBtn:document.getElementById('clear-all-btn'),search:document.getElementById('global-search'),connHelper:document.getElementById('conn-helper'),connToggleBtn:document.getElementById('conn-toggle-btn'),connJson:document.getElementById('conn-json'),connApplyBtn:document.getElementById('conn-apply-btn'),connStatus:document.getElementById('conn-status'),authGate:document.getElementById('trace-auth-gate'),authMessage:document.getElementById('trace-auth-gate-message'),metricEvents:document.getElementById('metric-events'),metricEventsMeta:document.getElementById('metric-events-meta'),metricAlerts:document.getElementById('metric-alerts'),metricAlertsMeta:document.getElementById('metric-alerts-meta'),metricProcesses:document.getElementById('metric-processes'),metricProcessesMeta:document.getElementById('metric-processes-meta'),metricLatest:document.getElementById('metric-latest'),metricLatestMeta:document.getElementById('metric-latest-meta'),liveSummary:document.getElementById('live-summary'),processPanel:document.getElementById('process-panel'),liveList:document.getElementById('live-list'),liveDetail:document.getElementById('live-detail'),mcpSummary:document.getElementById('mcp-summary'),mcpTools:document.getElementById('mcp-tools'),mcpList:document.getElementById('mcp-list'),mcpDetail:document.getElementById('mcp-detail'),observerSummary:document.getElementById('observer-summary'),observerList:document.getElementById('observer-list'),observerDetail:document.getElementById('observer-detail'),ptyLaunch:document.getElementById('pty-launch'),ptySummary:document.getElementById('pty-summary'),ptyList:document.getElementById('pty-list'),ptyDetail:document.getElementById('pty-detail'),tabButtons:Array.from(document.querySelectorAll('[data-tab]')),tabPanels:Array.from(document.querySelectorAll('[data-tab-panel]')),terminalWrap:document.getElementById('terminal-wrap'),terminalStatus:document.getElementById('terminal-status'),termReplayBtn:document.getElementById('term-replay-btn'),termClearBtn:document.getElementById('term-clear-btn')};
+let term=null;
+let fitAddon=null;
+let terminalResizeObserver=null;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Connection config — base URL override + session token
-// ─────────────────────────────────────────────────────────────────────────────
-let connConfig = { baseUrl: '', sessionToken: '' };
+loadConnConfig();
+loadActiveTab();
+applyTabState();
+populateConnForm();
+bindEvents();
+setStatus('connecting');
+scheduleRender();
+initializeTracePage();
 
-function loadConnConfig() {
-    try {
-        const s = JSON.parse(localStorage.getItem(CONN_STORAGE_KEY) || '{}');
-        connConfig.baseUrl      = s.baseUrl      || '';
-        connConfig.sessionToken = s.sessionToken || '';
-    } catch {}
+function bindEvents(){
+    dom.tabButtons.forEach(btn=>btn.addEventListener('click',()=>{
+        state.selectedTab=btn.dataset.tab||'live';
+        saveActiveTab();
+        applyTabState();
+        scheduleRender();
+        ensureTerminalMirror();
+        fitTerminalMirror();
+    }));
+    document.querySelectorAll('[data-tab-scope]').forEach(btn=>btn.addEventListener('click',()=>{
+        const tabKey=btn.dataset.tabScope;
+        const scope=btn.dataset.scope;
+        if(!tabKey||!scope)return;
+        state.scopes[tabKey]=scope;
+        scheduleRender();
+    }));
+    [['live',dom.liveList],['mcp',dom.mcpList],['observer',dom.observerList],['pty',dom.ptyList]].forEach(([tabKey,el])=>{
+        el.addEventListener('click',event=>{
+            const button=event.target.closest('[data-event-id]');
+            if(!button)return;
+            state.selectedIds[tabKey]=button.dataset.eventId||'';
+            scheduleRender();
+        });
+    });
+    dom.pauseBtn.addEventListener('click',()=>{
+        state.paused=!state.paused;
+        if(!state.paused&&state.pending.length>0){
+            const queued=state.pending.splice(0,state.pending.length);
+            ingestEvents(queued,true);
+        }
+        scheduleRender();
+    });
+    dom.clearBtn.addEventListener('click',()=>{
+        resetLocalView();
+        scheduleRender();
+    });
+    dom.search.addEventListener('input',()=>{
+        state.search=(dom.search.value||'').trim().toLowerCase();
+        scheduleRender();
+    });
+    dom.connToggleBtn.addEventListener('click',()=>{
+        dom.connHelper.classList.toggle('hidden');
+        if(!dom.connHelper.classList.contains('hidden'))populateConnForm();
+    });
+    dom.connApplyBtn.addEventListener('click',()=>{
+        try{
+            const next=parseConnPayload(dom.connJson.value.trim());
+            state.connConfig.baseUrl=next.baseUrl;
+            state.connConfig.sessionToken=next.sessionToken;
+            saveConnConfig();
+            try{
+                if(next.tabToken)sessionStorage.setItem(TRACE_TAB_TOKEN_KEY,next.tabToken);
+                else sessionStorage.removeItem(TRACE_TAB_TOKEN_KEY);
+            }catch{}
+            showConnStatus('Connecting...',false);
+            restartTraceConnection();
+        }catch(error){
+            showConnStatus(error&&error.message?error.message:'Invalid trace payload',true);
+        }
+    });
+    dom.termReplayBtn.addEventListener('click',()=>rebuildTerminalMirror());
+    dom.termClearBtn.addEventListener('click',()=>clearTerminalMirror('Mirror cleared.'));
+    window.addEventListener('resize',fitTerminalMirror);
 }
 
-function saveConnConfig() {
-    try { localStorage.setItem(CONN_STORAGE_KEY, JSON.stringify(connConfig)); } catch {}
+function loadConnConfig(){
+    try{
+        const saved=JSON.parse(localStorage.getItem(CONN_STORAGE_KEY)||'{}');
+        state.connConfig.baseUrl=saved.baseUrl||'';
+        state.connConfig.sessionToken=saved.sessionToken||'';
+    }catch{}
 }
 
-function getApiBase() { return connConfig.baseUrl || ''; }
-
-function getTraceTabToken() {
-    try { return sessionStorage.getItem(TRACE_TAB_TOKEN_KEY) || ''; } catch { return ''; }
+function saveConnConfig(){
+    try{localStorage.setItem(CONN_STORAGE_KEY,JSON.stringify(state.connConfig));}catch{}
 }
 
-function buildTraceHeaders(overrides = {}) {
-    const headers = new Headers();
-    if (overrides && typeof overrides === 'object' && !(overrides instanceof Headers)) {
-        for (const [k, v] of Object.entries(overrides)) { if (v != null) headers.set(k, String(v)); }
+function loadActiveTab(){
+    try{
+        const saved=localStorage.getItem(ACTIVE_TAB_KEY);
+        if(saved&&['live','mcp','observer','pty'].includes(saved))state.selectedTab=saved;
+    }catch{}
+}
+
+function saveActiveTab(){
+    try{localStorage.setItem(ACTIVE_TAB_KEY,state.selectedTab);}catch{}
+}
+
+function getTraceTabToken(){
+    try{return sessionStorage.getItem(TRACE_TAB_TOKEN_KEY)||'';}catch{return '';}
+}
+
+function buildConnPayload(){
+    const currentUrl=state.connConfig.baseUrl?new URL(state.connConfig.baseUrl):new URL(window.location.origin);
+    const defaultPort=currentUrl.port||(currentUrl.protocol==='https:'?'443':'80');
+    return{portNumber:defaultPort?Number.parseInt(defaultPort,10):null,viberails_tab:getTraceTabToken()||null,viberails_session:state.connConfig.sessionToken||null};
+}
+
+function populateConnForm(){
+    dom.connJson.value=JSON.stringify(buildConnPayload(),null,2);
+}
+
+function parseConnPayload(raw){
+    const parsed=JSON.parse(raw);
+    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('Expected a JSON object.');
+    let baseUrl='';
+    const portValue=parsed.portNumber;
+    if(portValue!==null&&portValue!==undefined&&String(portValue).trim()!==''){
+        const portText=String(portValue).trim();
+        if(!/^\d+$/.test(portText))throw new Error('portNumber must be a numeric TCP port.');
+        const portNumber=Number.parseInt(portText,10);
+        if(Number.isNaN(portNumber)||portNumber<=0||portNumber>65535)throw new Error('portNumber must be a valid TCP port.');
+        baseUrl='http://localhost:'+portNumber;
     }
-    const tab = getTraceTabToken();
-    if (tab) headers.set('viberails_tab', tab);
-    if (connConfig.sessionToken) headers.set('viberails_session', connConfig.sessionToken);
+    const tabToken=parsed.viberails_tab==null?'':String(parsed.viberails_tab).trim();
+    const sessionToken=parsed.viberails_session==null?'':String(parsed.viberails_session).trim();
+    if(!tabToken&&!sessionToken)throw new Error('The payload must include viberails_tab or viberails_session.');
+    return{baseUrl,tabToken,sessionToken};
+}
+
+function showConnStatus(message,isError){
+    dom.connStatus.textContent=message;
+    dom.connStatus.className='connect-status'+(isError?' err':'');
+    dom.connStatus.classList.remove('hidden');
+}
+
+function getApiBase(){return state.connConfig.baseUrl||'';}
+
+function buildTraceHeaders(headersInit){
+    const headers=new Headers(headersInit||{});
+    const tab=getTraceTabToken();
+    if(tab)headers.set('viberails_tab',tab);
+    if(state.connConfig.sessionToken)headers.set('viberails_session',state.connConfig.sessionToken);
     return headers;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Auth gate
-// ─────────────────────────────────────────────────────────────────────────────
-const traceAuthGate    = document.getElementById('trace-auth-gate');
-const traceAuthMessage = document.getElementById('trace-auth-gate-message');
-const mainGrid         = document.querySelector('.main-grid');
-let streamAbortController = null;
-let streamReconnectTimer  = null;
-let traceAuthLocked = false;
-
-function showTraceAuthError(message) {
-    if (traceAuthMessage) traceAuthMessage.textContent = message;
-    if (traceAuthGate) traceAuthGate.classList.remove('hidden');
-    if (mainGrid) mainGrid.classList.add('trace-auth-locked');
-    traceAuthLocked = true;
+function showTraceAuthError(message){
+    dom.authMessage.textContent=message;
+    dom.authGate.classList.remove('hidden');
+    state.traceAuthLocked=true;
     setStatus('disconnected');
 }
 
-function clearTraceAuthError() {
-    if (traceAuthMessage) traceAuthMessage.textContent = '';
-    if (traceAuthGate) traceAuthGate.classList.add('hidden');
-    if (mainGrid) mainGrid.classList.remove('trace-auth-locked');
-    traceAuthLocked = false;
+function clearTraceAuthError(){
+    dom.authMessage.textContent='';
+    dom.authGate.classList.add('hidden');
+    state.traceAuthLocked=false;
 }
 
-async function traceRequest(path, init = {}) {
-    if (!getTraceTabToken() && !connConfig.sessionToken) {
-        showTraceAuthError('Missing credentials. Paste the tracer JSON into Connect to load the viberails_tab token.');
+async function traceRequest(path,init){
+    if(!getTraceTabToken()&&!state.connConfig.sessionToken){
+        showTraceAuthError('Missing credentials. Use Connect and paste the tracer JSON payload first.');
         return null;
     }
-    const response = await fetch(getApiBase() + path, {
-        credentials: 'include',
-        cache: 'no-store',
-        ...init,
-        headers: buildTraceHeaders(init.headers),
-    });
-    if (response.status === 401 || response.status === 403) {
-        showTraceAuthError('Invalid or expired credentials. Paste a fresh tracer JSON payload from the source app.');
+    const response=await fetch(getApiBase()+path,{credentials:'include',cache:'no-store',...(init||{}),headers:buildTraceHeaders(init&&init.headers)});
+    if(response.status===401||response.status===403){
+        showTraceAuthError('Invalid or expired trace credentials. Paste a fresh tracer payload and reconnect.');
         return null;
     }
     clearTraceAuthError();
     return response;
 }
 
-async function traceRequestJson(path, init = {}) {
-    const r = await traceRequest(path, init);
-    if (!r || !r.ok) return null;
-    try { return await r.json(); } catch { return null; }
+async function traceRequestJson(path,init){
+    const response=await traceRequest(path,init);
+    if(!response||!response.ok)return null;
+    try{return await response.json();}catch{return null;}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Connection helper UI
-// ─────────────────────────────────────────────────────────────────────────────
-const connHelper    = document.getElementById('conn-helper');
-const connToggleBtn = document.getElementById('conn-toggle-btn');
-const connJsonEl    = document.getElementById('conn-json');
-const connStatusEl  = document.getElementById('conn-status');
-
-function buildConnPayload() {
-    const currentUrl = connConfig.baseUrl
-        ? new URL(connConfig.baseUrl)
-        : new URL(window.location.origin);
-    const defaultPort = currentUrl.port
-        || (currentUrl.protocol === 'https:' ? '443' : currentUrl.protocol === 'http:' ? '80' : '');
-
-    return {
-        portNumber: defaultPort ? Number.parseInt(defaultPort, 10) : null,
-        viberails_tab: getTraceTabToken() || null,
-        viberails_session: connConfig.sessionToken || null,
-    };
-}
-
-function populateConnForm() {
-    connJsonEl.value = JSON.stringify(buildConnPayload(), null, 2);
-}
-
-function parseConnPayload(raw) {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('Expected a JSON object.');
-    }
-
-    const portValue = parsed.portNumber;
-    let baseUrl = '';
-    if (portValue !== null && portValue !== undefined && String(portValue).trim() !== '') {
-        const portText = String(portValue).trim();
-        if (!/^\d+$/.test(portText)) {
-            throw new Error('portNumber must be a numeric TCP port.');
-        }
-        const portNumber = Number.parseInt(portText, 10);
-        if (Number.isNaN(portNumber) || portNumber <= 0 || portNumber > 65535) {
-            throw new Error('portNumber must be a valid TCP port.');
-        }
-        baseUrl = `http://localhost:${portNumber}`;
-    }
-
-    const tabToken = parsed.viberails_tab == null ? '' : String(parsed.viberails_tab).trim();
-    const sessionToken = parsed.viberails_session == null ? '' : String(parsed.viberails_session).trim();
-
-    if (!tabToken && !sessionToken) {
-        throw new Error('The payload must include viberails_tab or viberails_session.');
-    }
-
-    return { baseUrl, tabToken, sessionToken };
-}
-
-function restartTraceConnection() {
-    traceAuthLocked = false;
+function restartTraceConnection(){
+    stopTraceLoop();
+    resetLocalView();
     clearTraceAuthError();
-    if (streamAbortController) { streamAbortController.abort(); streamAbortController = null; }
-    if (streamReconnectTimer)  { clearTimeout(streamReconnectTimer); streamReconnectTimer = null; }
-    if (processPollTimer)      { clearInterval(processPollTimer); processPollTimer = null; }
-
-    initializeTracePage().then(() => {
-        connStatusEl.textContent = traceAuthLocked ? 'Failed' : 'Connected';
-        connStatusEl.className = 'conn-status' + (traceAuthLocked ? ' err' : '');
-    });
-}
-
-connToggleBtn.addEventListener('click', () => {
-    const hidden = connHelper.classList.toggle('hidden');
-    if (!hidden) populateConnForm();
-});
-
-document.getElementById('conn-apply-btn').addEventListener('click', () => {
-    try {
-        const nextConfig = parseConnPayload(connJsonEl.value.trim());
-
-        connConfig.baseUrl      = nextConfig.baseUrl;
-        connConfig.sessionToken = nextConfig.sessionToken;
-        saveConnConfig();
-
-        try {
-            if (nextConfig.tabToken) sessionStorage.setItem(TRACE_TAB_TOKEN_KEY, nextConfig.tabToken);
-            else sessionStorage.removeItem(TRACE_TAB_TOKEN_KEY);
-        } catch {}
-
-        connStatusEl.textContent = 'Connecting...';
-        connStatusEl.className = 'conn-status';
-        connStatusEl.classList.remove('hidden');
-
-        restartTraceConnection();
-    } catch (error) {
-        connStatusEl.textContent = error?.message || 'Invalid JSON payload';
-        connStatusEl.className = 'conn-status err';
-        connStatusEl.classList.remove('hidden');
-    }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SSE frame parser
-// ─────────────────────────────────────────────────────────────────────────────
-function parseTraceEventFrame(frame) {
-    const lines = frame.replace(/\r/g, '').split('\n');
-    let eventName = '', data = '';
-    for (const line of lines) {
-        if (!line || line.startsWith(':')) continue;
-        const colon = line.indexOf(':');
-        if (colon < 0) continue;
-        const field = line.slice(0, colon).trim();
-        const value = line.slice(colon + 1).trimStart();
-        if (field === 'event') eventName = value;
-        else if (field === 'data') data = data ? `${data}\n${value}` : value;
-    }
-    if (!data) return null;
-    if (eventName && eventName !== 'trace' && eventName !== 'message') return null;
-    try { return JSON.parse(data); } catch { return null; }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Filters
-// ─────────────────────────────────────────────────────────────────────────────
-const FILTER_STORAGE_KEY = 'trace-filters-v1';
-const ALL_FILTER_TYPES = [
-    'TerminalLaunch','TerminalInput','TerminalOutput',
-    'McpToolCall','McpToolResult',
-    'HttpRequest',
-    'LogEntry','RuleValidation','SessionLifecycle','Idle','Resize',
-];
-const typeFilters = loadFilters();
-
-function loadFilters() {
-    try {
-        const saved = JSON.parse(localStorage.getItem(FILTER_STORAGE_KEY) || '{}');
-        const result = {};
-        for (const t of ALL_FILTER_TYPES) result[t] = saved[t] !== false;
-        return result;
-    } catch { return Object.fromEntries(ALL_FILTER_TYPES.map(t => [t, true])); }
-}
-function saveFilters() {
-    try { localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(typeFilters)); } catch {}
-}
-function isTypeEnabled(t) { return typeFilters[t] !== false; }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Panel state
-// ─────────────────────────────────────────────────────────────────────────────
-const panels = {
-    launch: { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
-    input:  { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
-    output: { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
-    mcp:    { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
-    logs:   { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
-    http:   { count: 0, body: null, autoScroll: true, scrollBtn: null, countEl: null },
-};
-
-let paused = false;
-let pending = [];
-let globalSearch = '';
-
-for (const key of Object.keys(panels)) {
-    panels[key].body      = document.getElementById(`body-${key}`);
-    panels[key].countEl   = document.getElementById(`count-${key}`);
-    panels[key].scrollBtn = document.getElementById(`scroll-${key}`);
-}
-
-for (const [, panel] of Object.entries(panels)) {
-    if (!panel.scrollBtn) continue;
-    panel.scrollBtn.addEventListener('click', () => {
-        panel.autoScroll = !panel.autoScroll;
-        panel.scrollBtn.classList.toggle('locked', panel.autoScroll);
-        if (panel.autoScroll) panel.body.scrollTop = panel.body.scrollHeight;
-    });
-    panel.body.addEventListener('scroll', () => {
-        const atBottom = panel.body.scrollHeight - panel.body.scrollTop - panel.body.clientHeight < 40;
-        if (!atBottom && panel.autoScroll) {
-            panel.autoScroll = false;
-            panel.scrollBtn.classList.remove('locked');
-        }
-    });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Terminal stack (right column) — LAUNCH / INPUT / OUTPUT / CONSOLE
-// Console is hidden by default
-// ─────────────────────────────────────────────────────────────────────────────
-const stackPanelKeys = ['launch', 'input', 'output', 'console'];
-const stackBody          = document.getElementById('io-stack-body');
-const collapsedDock      = document.getElementById('collapsed-dock');
-const collapsedPaneButtons = document.getElementById('collapsed-pane-buttons');
-const paneSections = {
-    launch:  document.getElementById('section-launch'),
-    input:   document.getElementById('section-input'),
-    output:  document.getElementById('section-output'),
-    console: document.getElementById('section-console'),
-};
-// Weights (flex share) — persisted in panel visibility logic
-const paneWeights   = { launch: 0.9, input: 1.1, output: 2.0, console: 1.2 };
-const paneMinimized = { launch: false, input: false, output: false, console: true }; // console hidden by default
-const minimizeButtons = {};
-let resizeDragState = null;
-const groupedTerminalRows = { input: createGroupedRowState(), output: createGroupedRowState() };
-
-function visibleStackPanels() { return stackPanelKeys.filter(k => !paneMinimized[k]); }
-
-function createPaneResizer(upperKey, lowerKey) {
-    const r = document.createElement('div');
-    r.className = 'pane-resizer';
-    r.title = `Resize ${upperKey.toUpperCase()} / ${lowerKey.toUpperCase()}`;
-    r.addEventListener('mousedown', e => beginPaneResize(e, upperKey, lowerKey));
-    return r;
-}
-
-function renderCollapsedDock() {
-    collapsedPaneButtons.innerHTML = '';
-    let n = 0;
-    for (const key of stackPanelKeys) {
-        const btn = minimizeButtons[key];
-        if (btn) btn.textContent = paneMinimized[key] ? '+' : '−';
-        if (!paneMinimized[key]) continue;
-        n++;
-        const rb = document.createElement('button');
-        rb.className = 'collapsed-pane-btn';
-        rb.type = 'button';
-        rb.textContent = `${key.toUpperCase()} +`;
-        rb.addEventListener('click', () => setStackPaneMinimized(key, false));
-        collapsedPaneButtons.appendChild(rb);
-    }
-    collapsedDock.classList.toggle('hidden', n === 0);
-}
-
-function renderStackLayout() {
-    if (!stackBody) return;
-    const visible = visibleStackPanels();
-    if (visible.length === 0) { setStackPaneMinimized('output', false); return; }
-
-    stackBody.innerHTML = '';
-    let totalWeight = 0;
-    for (const k of visible) totalWeight += Math.max(0.3, paneWeights[k] || 1);
-
-    visible.forEach((key, idx) => {
-        const section = paneSections[key];
-        if (!section) return;
-        section.style.display = 'flex';
-        section.style.flex = `${Math.max(0.3, paneWeights[key] || 1) / totalWeight} 1 0`;
-        stackBody.appendChild(section);
-        if (idx < visible.length - 1) stackBody.appendChild(createPaneResizer(key, visible[idx + 1]));
-    });
-
-    for (const key of stackPanelKeys) {
-        if (visible.includes(key)) continue;
-        const s = paneSections[key];
-        if (s) s.style.display = 'none';
-    }
-
-    renderCollapsedDock();
-    try { fitAddon.fit(); } catch {}
-}
-
-function setStackPaneMinimized(key, minimized) {
-    if (!stackPanelKeys.includes(key)) return;
-    if (minimized && visibleStackPanels().length <= 1) return;
-    paneMinimized[key] = minimized;
-    renderStackLayout();
-}
-
-function beginPaneResize(evt, upperKey, lowerKey) {
-    evt.preventDefault();
-    const upper = paneSections[upperKey];
-    const lower = paneSections[lowerKey];
-    if (!upper || !lower) return;
-    resizeDragState = {
-        startY: evt.clientY, upperKey, lowerKey,
-        upperStart: upper.getBoundingClientRect().height,
-        lowerStart: lower.getBoundingClientRect().height,
-        minSize: 80,
-    };
-    document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onPaneResizeMove);
-    document.addEventListener('mouseup', endPaneResize);
-}
-
-function onPaneResizeMove(evt) {
-    if (!resizeDragState) return;
-    const { startY, upperKey, lowerKey, upperStart, lowerStart, minSize } = resizeDragState;
-    let nu = upperStart + (evt.clientY - startY);
-    let nl = lowerStart - (evt.clientY - startY);
-    if (nu < minSize) { nl -= (minSize - nu); nu = minSize; }
-    if (nl < minSize) { nu -= (minSize - nl); nl = minSize; }
-    paneWeights[upperKey] = Math.max(minSize, nu);
-    paneWeights[lowerKey] = Math.max(minSize, nl);
-    renderStackLayout();
-}
-
-function endPaneResize() {
-    resizeDragState = null;
-    document.body.style.userSelect = '';
-    document.removeEventListener('mousemove', onPaneResizeMove);
-    document.removeEventListener('mouseup', endPaneResize);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Controls
-// ─────────────────────────────────────────────────────────────────────────────
-document.getElementById('pause-btn').addEventListener('click', function() {
-    paused = !paused;
-    this.textContent = paused ? 'Resume' : 'Pause';
-    this.classList.toggle('btn-warning', paused);
-    this.classList.toggle('btn-outline-secondary', !paused);
-    if (!paused && pending.length) { pending.forEach(dispatchEvt); pending = []; }
-});
-
-document.getElementById('clear-all-btn').addEventListener('click', () => {
-    for (const [key, panel] of Object.entries(panels)) clearPanel(key, panel);
-});
-
-document.querySelectorAll('[data-panel]').forEach(btn => {
-    btn.addEventListener('click', () => clearPanel(btn.dataset.panel, panels[btn.dataset.panel]));
-});
-
-document.querySelectorAll('[data-minimize]').forEach(btn => {
-    const key = btn.dataset.minimize;
-    if (stackPanelKeys.includes(key)) minimizeButtons[key] = btn;
-    btn.addEventListener('click', () => {
-        if (stackPanelKeys.includes(key)) { setStackPaneMinimized(key, !paneMinimized[key]); return; }
-        const el = document.getElementById(`panel-${key}`);
-        if (!el) return;
-        const isMin = el.classList.toggle('minimized');
-        btn.textContent = isMin ? '+' : '−';
-    });
-});
-
-function clearPanel(key, panel) {
-    if (!panel) return;
-    panel.body.innerHTML = `<div class="panel-empty">${emptyMsg(key)}</div>`;
-    panel.count = 0;
-    panel.countEl.textContent = '0';
-    if (key === 'input' || key === 'output') groupedTerminalRows[key] = createGroupedRowState();
-}
-function emptyMsg(k) {
-    return {
-        launch:'Waiting for terminal launch...', input:'Waiting for input...',
-        output:'Waiting for output...', mcp:'Waiting for MCP calls...',
-        logs:'Waiting for log entries...', http:'Waiting for requests...'
-    }[k] || '';
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Search
-// ─────────────────────────────────────────────────────────────────────────────
-document.getElementById('global-search').addEventListener('input', function() {
-    globalSearch = this.value.toLowerCase();
-    for (const panel of Object.values(panels)) {
-        panel.body.querySelectorAll('.event-row').forEach(applySearchVisibility);
-    }
-});
-
-function applySearchVisibility(row) {
-    const text = (row.dataset.summary || '') + (row.dataset.detail || '');
-    row.style.display = (!globalSearch || text.toLowerCase().includes(globalSearch)) ? '' : 'none';
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Terminal I/O grouping
-// ─────────────────────────────────────────────────────────────────────────────
-function createGroupedRowState() { return { row: null, textEl: null, text: '' }; }
-
-function stripAnsi(text) {
-    if (!text) return '';
-    return text
-        .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
-        .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
-        .replace(/\x1B[@-_]/g, '');
-}
-
-function normalizeOutputChunk(raw) {
-    return raw ? stripAnsi(raw).replace(/\r(?!\n)/g, '') : '';
-}
-
-function appendInputChunk(current, chunk) {
-    if (!chunk) return current;
-    let next = current;
-    for (const ch of chunk) {
-        if (ch === '\b' || ch === '\x7f') { next = next.slice(0, -1); continue; }
-        if (ch === '\r' || ch === '\n') continue;
-        next += ch;
-    }
-    return next;
-}
-
-function ensureGroupedTerminalRow(kind, typeName, panel, evt) {
-    const state = groupedTerminalRows[kind];
-    if (state.row) return state;
-    const row = buildRow({ summary: '', detail: '', timestamp: evt.timestamp, durationMs: evt.durationMs }, typeName);
-    const textEl = row.querySelector('.ev-text');
-    if (!textEl) return state;
-    textEl.textContent = '';
-    row.dataset.summary = '';
-    row.dataset.detail = '';
-    panel.body.appendChild(row);
-    panel.count++;
-    panel.countEl.textContent = panel.count;
-    state.row = row;
-    state.textEl = textEl;
-    return state;
-}
-
-function finalizeGroupedTerminalRow(kind) {
-    const panel = panels[kind];
-    const state = groupedTerminalRows[kind];
-    if (!panel || !state.row) { groupedTerminalRows[kind] = createGroupedRowState(); return; }
-    if (!state.text.length) {
-        state.row.remove();
-        panel.count = Math.max(0, panel.count - 1);
-        panel.countEl.textContent = panel.count;
-    }
-    groupedTerminalRows[kind] = createGroupedRowState();
-}
-
-function appendStandaloneTerminalRow(panel, evt, typeName) {
-    const row = buildRow(evt, typeName);
-    applySearchVisibility(row);
-    panel.body.appendChild(row);
-    panel.count++;
-    panel.countEl.textContent = panel.count;
-    if (panel.autoScroll) panel.body.scrollTop = panel.body.scrollHeight;
-}
-
-function dispatchGroupedTerminalEvent(kind, evt) {
-    const panel = panels[kind];
-    if (!panel) return;
-    panel.body.querySelector('.panel-empty')?.remove();
-
-    const typeName = kind === 'input' ? 'TerminalInput' : 'TerminalOutput';
-    const state = groupedTerminalRows[kind];
-    const raw = evt.detail || '';
-    const renderedChunk = kind === 'input'
-        ? appendInputChunk('', raw)
-        : normalizeOutputChunk(raw);
-    const fallbackSummary = stripPrefix(evt.summary, typeName);
-    const hasNewline = kind === 'input' ? /[\r\n]/.test(raw) : raw.includes('\n');
-
-    if (!renderedChunk) {
-        finalizeGroupedTerminalRow(kind);
-        if (fallbackSummary) appendStandaloneTerminalRow(panel, evt, typeName);
-        return;
-    }
-
-    if (kind === 'input') state.text = appendInputChunk(state.text, raw);
-    else state.text += renderedChunk;
-
-    if (state.text.length > 0) ensureGroupedTerminalRow(kind, typeName, panel, evt);
-
-    if (state.row && state.textEl) {
-        state.textEl.textContent = state.text;
-        state.row.dataset.summary = state.text;
-        state.row.dataset.detail  = state.text;
-        applySearchVisibility(state.row);
-    }
-
-    if (panel.autoScroll) panel.body.scrollTop = panel.body.scrollHeight;
-    if (hasNewline || state.text.length >= 4000) finalizeGroupedTerminalRow(kind);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Dispatch
-// ─────────────────────────────────────────────────────────────────────────────
-function dispatchEvt(evt) {
-    const typeName = mapType(evt.type);
-    if (!isTypeEnabled(typeName)) return;
-
-    if (typeName === 'TerminalOutput') {
-        feedTerminal(evt);
-        dispatchGroupedTerminalEvent('output', evt);
-        return;
-    }
-    if (typeName === 'TerminalInput') {
-        dispatchGroupedTerminalEvent('input', evt);
-        return;
-    }
-
-    const panelKey = TYPE_PANEL[typeName];
-    if (!panelKey) return;
-
-    const panel = panels[panelKey];
-    panel.body.querySelector('.panel-empty')?.remove();
-
-    const row = buildRow(evt, typeName);
-    applySearchVisibility(row);
-    panel.body.appendChild(row);
-
-    if (evt.detail && typeName !== 'TerminalOutput') {
-        const detail = document.createElement('div');
-        detail.className = 'event-detail';
-        detail.textContent = tryFmtJson(evt.detail);
-        panel.body.appendChild(detail);
-    }
-
-    panel.count++;
-    panel.countEl.textContent = panel.count;
-    if (panel.autoScroll) panel.body.scrollTop = panel.body.scrollHeight;
-}
-
-function buildRow(evt, typeName) {
-    const row = document.createElement('div');
-    row.className = 'event-row';
-
-    if (typeName === 'McpToolCall')   row.classList.add('ev-call');
-    if (typeName === 'McpToolResult') row.classList.add('ev-result');
-
-    if (typeName === 'LogEntry') {
-        const s = evt.summary || '';
-        const isMcpServer = (evt.source || '') === 'MCP-Server';
-        if (isMcpServer)                          row.classList.add('ev-mcp-server');
-        else if (s.startsWith('[ERR]') || s.startsWith('[FTL]')) row.classList.add('ev-err');
-        else if (s.startsWith('[WRN]'))            row.classList.add('ev-wrn');
-        else if (s.startsWith('[DBG]') || s.startsWith('[VRB]')) row.classList.add('ev-dbg');
-    }
-
-    if (typeName === 'HttpRequest') {
-        const m = (evt.summary || '').match(/→ (\d{3})/);
-        if (m) {
-            const code = parseInt(m[1]);
-            if (code >= 500) row.classList.add('ev-err');
-            else if (code >= 400) row.classList.add('ev-wrn');
-        }
-    }
-
-    row.dataset.summary = evt.summary || '';
-    row.dataset.detail  = evt.detail  || '';
-
-    const time = new Date(evt.timestamp).toLocaleTimeString('en-US', { hour12: false, fractionalSecondDigits: 3 });
-    const dur  = evt.durationMs != null ? `${Math.round(evt.durationMs)}ms` : '';
-    const isMcpServer = typeName === 'LogEntry' && (evt.source || '') === 'MCP-Server';
-
-    row.innerHTML = `
-        <div class="ev-meta">
-            <span class="ev-time">${time}</span>
-            ${dur ? `<span class="ev-duration">${dur}</span>` : ''}
-        </div>
-        <div class="ev-text">${isMcpServer ? '<span class="mcp-server-tag">[mcp]</span>' : ''}${esc(stripPrefix(evt.summary, typeName))}</div>
-    `;
-    return row;
-}
-
-function stripPrefix(text, typeName) {
-    if (!text) return '';
-    const prefixes = [
-        /^Terminal launch:\s*/,
-        /^Input \([^)]+\):\s*/,
-        /^Output \([^)]+\):\s*/,
-        /^MCP call:\s*/,
-        /^MCP result:\s*/,
-        /^MCP error:\s*/,
-    ];
-    for (const p of prefixes) if (p.test(text)) return text.replace(p, '');
-    return text;
-}
-
-function mapType(t) {
-    if (typeof t === 'string') return t;
-    return TYPE_NAMES[t] || 'LogEntry';
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SSE stream
-// ─────────────────────────────────────────────────────────────────────────────
-function connectSSE() {
-    if (traceAuthLocked) return;
-    if (streamReconnectTimer) { clearTimeout(streamReconnectTimer); streamReconnectTimer = null; }
-    if (streamAbortController) { streamAbortController.abort(); streamAbortController = null; }
-
     setStatus('connecting');
-    streamAbortController = new AbortController();
+    initializeTracePage();
+}
 
-    (async () => {
-        try {
-            const res = await traceRequest('/api/v1/trace/stream', { signal: streamAbortController.signal });
-            if (!res || !res.body || traceAuthLocked) return;
+function stopTraceLoop(){
+    if(state.streamAbortController){
+        state.streamAbortController.abort();
+        state.streamAbortController=null;
+    }
+    if(state.streamReconnectTimer){
+        clearTimeout(state.streamReconnectTimer);
+        state.streamReconnectTimer=null;
+    }
+    if(state.processPollTimer){
+        clearInterval(state.processPollTimer);
+        state.processPollTimer=null;
+    }
+}
+
+async function initializeTracePage(){
+    const initialEvents=await traceRequestJson('/api/v1/trace/events?count=250');
+    if(initialEvents===null){
+        scheduleRender();
+        return;
+    }
+    resetLocalView();
+    ingestEvents(initialEvents,true);
+    await fetchProcesses();
+    startProcessPolling();
+    connectSse();
+    showConnStatus(state.traceAuthLocked?'Failed':'Connected',state.traceAuthLocked);
+    scheduleRender();
+}
+
+function resetLocalView(){
+    state.events=[];
+    state.pending=[];
+    state.seenIds=new Set();
+    state.selectedIds={live:'',mcp:'',observer:'',pty:''};
+    state.processes=[];
+    state.processesGeneratedAt=null;
+    clearTerminalMirror('Waiting for terminal output...');
+}
+
+function ingestEvents(items,rebuildMirror){
+    let changed=false;
+    for(const raw of items||[]){
+        if(ingestEvent(raw))changed=true;
+    }
+    if(rebuildMirror)rebuildTerminalMirror();
+    if(changed)scheduleRender();
+}
+
+function ingestEvent(raw){
+    if(!raw)return false;
+    const evt=normalizeEvent(raw);
+    if(!evt.id||state.seenIds.has(evt.id))return false;
+    state.seenIds.add(evt.id);
+    state.events.push(evt);
+    while(state.events.length>MAX_EVENTS){
+        const removed=state.events.shift();
+        if(removed)state.seenIds.delete(removed.id);
+    }
+    if(evt.typeName==='TerminalOutput')appendToTerminalMirror(evt);
+    return true;
+}
+
+function normalizeEvent(raw){
+    const typeName=mapType(raw.type);
+    const detail=raw.detail==null?'':String(raw.detail);
+    const summary=raw.summary==null?'':String(raw.summary);
+    const source=raw.source==null?'':String(raw.source);
+    const timestamp=raw.timestamp||new Date().toISOString();
+    const timestampMs=Date.parse(timestamp)||Date.now();
+    const sessionId=extractSessionId(detail);
+    return{id:raw.id||Math.random().toString(16).slice(2),timestamp,timestampMs,typeName,summary,detail,source,durationMs:raw.durationMs==null?null:Number(raw.durationMs),sessionId,searchBlob:(typeName+'\n'+summary+'\n'+detail+'\n'+source+'\n'+sessionId).toLowerCase()};
+}
+
+async function fetchProcesses(){
+    if(state.traceAuthLocked)return;
+    const data=await traceRequestJson('/api/v1/trace/processes');
+    if(!data)return;
+    state.processes=Array.isArray(data.processes)?data.processes:[];
+    state.processesGeneratedAt=data.generatedAt||new Date().toISOString();
+    scheduleRender();
+}
+
+function startProcessPolling(){
+    if(state.processPollTimer)clearInterval(state.processPollTimer);
+    state.processPollTimer=setInterval(fetchProcesses,4000);
+}
+
+function connectSse(){
+    if(state.traceAuthLocked)return;
+    if(state.streamReconnectTimer){
+        clearTimeout(state.streamReconnectTimer);
+        state.streamReconnectTimer=null;
+    }
+    if(state.streamAbortController)state.streamAbortController.abort();
+    setStatus('connecting');
+    state.streamAbortController=new AbortController();
+    (async()=>{
+        try{
+            const response=await traceRequest('/api/v1/trace/stream',{signal:state.streamAbortController.signal});
+            if(!response||!response.body||state.traceAuthLocked)return;
             setStatus('connected');
-
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder();
-            let buf = '';
-
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
-                if (!value) continue;
-                buf += decoder.decode(value, { stream: true });
-
+            const reader=response.body.getReader();
+            const decoder=new TextDecoder();
+            let buffer='';
+            while(true){
+                const result=await reader.read();
+                if(result.done)break;
+                if(!result.value)continue;
+                buffer+=decoder.decode(result.value,{stream:true});
                 let frameEnd;
-                while ((frameEnd = buf.indexOf('\n\n')) >= 0) {
-                    const frame = buf.slice(0, frameEnd).trim();
-                    buf = buf.slice(frameEnd + 2);
-                    if (!frame) continue;
-                    const evt = parseTraceEventFrame(frame);
-                    if (!evt) continue;
-                    if (paused) pending.push(evt);
-                    else dispatchEvt(evt);
+                while((frameEnd=buffer.indexOf('\n\n'))>=0){
+                    const frame=buffer.slice(0,frameEnd).trim();
+                    buffer=buffer.slice(frameEnd+2);
+                    if(!frame)continue;
+                    const evt=parseTraceFrame(frame);
+                    if(!evt)continue;
+                    if(state.paused)state.pending.push(evt);
+                    else ingestEvents([evt],false);
                 }
             }
-        } catch (error) {
-            if (error?.name !== 'AbortError' && !traceAuthLocked) setStatus('disconnected');
-        } finally {
-            if (streamAbortController?.signal.aborted) return;
-            streamAbortController = null;
-            if (!traceAuthLocked) {
+        }catch(error){
+            if(!(error&&error.name==='AbortError')&&!state.traceAuthLocked)setStatus('disconnected');
+        }finally{
+            if(state.streamAbortController&&state.streamAbortController.signal.aborted)return;
+            state.streamAbortController=null;
+            if(!state.traceAuthLocked){
                 setStatus('disconnected');
-                streamReconnectTimer = setTimeout(connectSSE, 3000);
+                state.streamReconnectTimer=setTimeout(connectSse,3000);
             }
         }
     })();
 }
 
-function setStatus(state) {
-    document.getElementById('status-dot').className = `status-dot ${state}`;
-    document.getElementById('status-label').textContent =
-        { connected:'Connected', disconnected:'Disconnected', connecting:'Connecting...' }[state];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// xterm.js — console mirror (hidden by default)
-// ─────────────────────────────────────────────────────────────────────────────
-const termStatusEl = document.getElementById('terminal-status');
-const termWrap     = document.getElementById('terminal-wrap');
-
-const term = new Terminal({
-    theme: {
-        background: '#0a0a18', foreground: '#d4d4d4', cursor: '#569cd6',
-        black: '#1e1e1e', brightBlack: '#555', white: '#d4d4d4', brightWhite: '#ffffff',
-    },
-    fontSize: 12,
-    fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
-    cursorBlink: false,
-    scrollback: 2000,
-    disableStdin: true,
-    convertEol: true,
-});
-const fitAddon = new FitAddon.FitAddon();
-term.loadAddon(fitAddon);
-term.open(termWrap);
-fitAddon.fit();
-
-new ResizeObserver(() => { try { fitAddon.fit(); } catch {} }).observe(termWrap);
-
-function feedTerminal(evt) {
-    const raw = evt.detail || stripPrefix(evt.summary, 'TerminalOutput');
-    if (raw) {
-        term.write(raw);
-        term.scrollToBottom();
-        if (termStatusEl) termStatusEl.textContent = 'receiving output';
+function parseTraceFrame(frame){
+    const lines=frame.replace(/\r/g,'').split('\n');
+    let eventName='';
+    let data='';
+    for(const line of lines){
+        if(!line||line.startsWith(':'))continue;
+        const colon=line.indexOf(':');
+        if(colon<0)continue;
+        const field=line.slice(0,colon).trim();
+        const value=line.slice(colon+1).trimStart();
+        if(field==='event')eventName=value;
+        else if(field==='data')data=data?data+'\n'+value:value;
     }
+    if(!data)return null;
+    if(eventName&&eventName!=='trace'&&eventName!=='message')return null;
+    try{return JSON.parse(data);}catch{return null;}
 }
 
-document.getElementById('term-reconnect-btn').addEventListener('click', () => {
-    term.clear();
-    if (termStatusEl) termStatusEl.textContent = 'cleared';
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-function esc(s) {
-    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function tryFmtJson(s) {
-    try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
+function setStatus(nextStatus){
+    state.streamStatus=nextStatus;
+    dom.statusPill.className='status-pill '+nextStatus;
+    dom.statusPill.textContent={connected:'Connected',disconnected:'Disconnected',connecting:'Connecting...'}[nextStatus]||'Connecting...';
+    scheduleRender();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Panel visibility — persisted to localStorage
-// ─────────────────────────────────────────────────────────────────────────────
-const PANEL_VIS_KEY = 'trace-panel-vis-v1';
-const ALL_PANEL_IDS = ['mcp', 'http', 'logs', 'proc', 'launch', 'input', 'output', 'console'];
-const panelVisible  = loadPanelVisibility();
-
-function loadPanelVisibility() {
-    try {
-        const saved = JSON.parse(localStorage.getItem(PANEL_VIS_KEY) || '{}');
-        const result = {};
-        for (const id of ALL_PANEL_IDS) result[id] = saved[id] !== false;
-        return result;
-    } catch { return Object.fromEntries(ALL_PANEL_IDS.map(id => [id, true])); }
-}
-function savePanelVisibility() {
-    try { localStorage.setItem(PANEL_VIS_KEY, JSON.stringify(panelVisible)); } catch {}
-}
-function applyPanelVisibility(id) {
-    const visible = panelVisible[id];
-    if (stackPanelKeys.includes(id)) { setStackPaneMinimized(id, !visible); return; }
-    const el = document.getElementById(`panel-${id}`);
-    if (el) el.classList.toggle('panel-hidden', !visible);
-}
-function applyAllPanelVisibility() {
-    for (const id of ALL_PANEL_IDS) applyPanelVisibility(id);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Process monitor
-// ─────────────────────────────────────────────────────────────────────────────
-const procBody  = document.getElementById('body-proc');
-const procCount = document.getElementById('count-proc');
-const procAge   = document.getElementById('proc-age');
-let procLastFetch = null;
-let procAgeTimer  = null;
-let processPollTimer = null;
-
-function startProcAgeTimer() {
-    if (procAgeTimer) return;
-    procAgeTimer = setInterval(() => {
-        if (!procLastFetch) return;
-        const secs = Math.round((Date.now() - procLastFetch) / 1000);
-        if (procAge) procAge.textContent = `${secs}s ago`;
-    }, 1000);
-}
-
-async function fetchProcesses() {
-    if (traceAuthLocked) return;
-    try {
-        const data = await traceRequestJson('/api/v1/trace/processes');
-        if (!data) return;
-        procLastFetch = Date.now();
-        renderProcTable(data.processes || []);
-    } catch (e) {
-        if (procBody) procBody.innerHTML = `<div class="panel-empty" style="color:#f48771">${esc(e.message || 'fetch failed')}</div>`;
-    }
-}
-
-function fmtUptime(isoStart) {
-    if (!isoStart) return '?';
-    const secs = Math.floor((Date.now() - new Date(isoStart).getTime()) / 1000);
-    if (secs < 60)   return `${secs}s`;
-    if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
-    return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
-}
-
-function renderProcTable(procs) {
-    if (procCount) procCount.textContent = procs.length;
-    if (!procBody) return;
-    if (procs.length === 0) { procBody.innerHTML = '<div class="panel-empty">No vb processes running</div>'; return; }
-    const rows = procs.map(p => `<tr>
-        <td class="col-pid">${p.pid}</td>
-        <td class="col-uptime">${fmtUptime(p.startTime)}</td>
-        ${p.title ? `<td class="col-title">${esc(p.title)}</td>` : '<td class="col-title" style="color:#333">—</td>'}
-    </tr>`).join('');
-    procBody.innerHTML = `<table class="proc-table">
-        <thead><tr><th>PID</th><th>Uptime</th><th>Title</th></tr></thead>
-        <tbody>${rows}</tbody>
-    </table>`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Settings popover
-// ─────────────────────────────────────────────────────────────────────────────
-(function initSettingsPopover() {
-    const settingsBtn = document.getElementById('settings-btn');
-    const popover     = document.getElementById('settings-popover');
-
-    for (const t of ALL_FILTER_TYPES) {
-        const cb = document.getElementById(`filter-${t}`);
-        if (cb) cb.checked = typeFilters[t];
-    }
-
-    settingsBtn.addEventListener('click', e => { e.stopPropagation(); popover.classList.toggle('hidden'); });
-    document.addEventListener('click', e => {
-        if (!popover.contains(e.target) && e.target !== settingsBtn) popover.classList.add('hidden');
+function applyTabState(){
+    dom.tabButtons.forEach(btn=>btn.classList.toggle('active',btn.dataset.tab===state.selectedTab));
+    dom.tabPanels.forEach(panel=>panel.classList.toggle('active',panel.dataset.tabPanel===state.selectedTab));
+    document.querySelectorAll('[data-tab-scope]').forEach(btn=>{
+        const tabKey=btn.dataset.tabScope;
+        const scope=btn.dataset.scope;
+        btn.classList.toggle('active',state.scopes[tabKey]===scope);
     });
+}
 
-    for (const t of ALL_FILTER_TYPES) {
-        const cb = document.getElementById(`filter-${t}`);
-        if (!cb) continue;
-        cb.addEventListener('change', () => { typeFilters[t] = cb.checked; saveFilters(); });
-    }
-
-    document.getElementById('filter-all-btn').addEventListener('click', () => {
-        for (const t of ALL_FILTER_TYPES) { typeFilters[t] = true; const cb = document.getElementById(`filter-${t}`); if (cb) cb.checked = true; }
-        saveFilters();
+function scheduleRender(){
+    if(state.renderPending)return;
+    state.renderPending=true;
+    requestAnimationFrame(()=>{
+        state.renderPending=false;
+        render();
     });
-    document.getElementById('filter-none-btn').addEventListener('click', () => {
-        for (const t of ALL_FILTER_TYPES) { typeFilters[t] = false; const cb = document.getElementById(`filter-${t}`); if (cb) cb.checked = false; }
-        saveFilters();
-    });
+}
 
-    for (const id of ALL_PANEL_IDS) {
-        const cb = document.getElementById(`panel-show-${id}`);
-        if (!cb) continue;
-        cb.checked = panelVisible[id];
-        cb.addEventListener('change', () => { panelVisible[id] = cb.checked; savePanelVisibility(); applyPanelVisibility(id); });
-    }
-})();
+function render(){
+    applyTabState();
+    renderHeader();
+    renderProcesses();
+    renderLiveTab();
+    renderMcpTab();
+    renderObserverTab();
+    renderPtyTab();
+    dom.pauseBtn.textContent=state.paused?'Resume':'Pause';
+    ensureTerminalMirror();
+    if(state.selectedTab==='pty')fitTerminalMirror();
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Boot
-// ─────────────────────────────────────────────────────────────────────────────
-async function initializeTracePage() {
-    applyAllPanelVisibility();
-    startProcAgeTimer();
+function renderHeader(){
+    const allEvents=getBaseTabEvents('live');
+    const alertCount=allEvents.filter(isAlertEvent).length;
+    const latest=allEvents[allEvents.length-1];
+    dom.metricEvents.textContent=String(allEvents.length);
+    dom.metricEventsMeta.textContent=state.paused?'Paused. Incoming events are queued until resume.':'Local browser cache of the trace stream.';
+    dom.metricAlerts.textContent=String(alertCount);
+    dom.metricAlertsMeta.textContent=alertCount===0?'No warnings or errors detected in the current cache.':'Warnings and errors across MCP, HTTP, logs, and terminal flows.';
+    dom.metricProcesses.textContent=String(state.processes.length);
+    dom.metricProcessesMeta.textContent=state.processesGeneratedAt?'Last polled '+formatTimestamp(state.processesGeneratedAt):'Polling `/api/v1/trace/processes`.';
+    dom.metricLatest.textContent=latest?typeLabel(latest.typeName):'None';
+    dom.metricLatestMeta.textContent=latest?cleanSummary(latest):'Waiting for the stream to emit data.';
+    setTabCount('live',getVisibleTabEvents('live').length);
+    setTabCount('mcp',getVisibleTabEvents('mcp').length);
+    setTabCount('observer',getVisibleTabEvents('observer').length);
+    setTabCount('pty',getVisibleTabEvents('pty').length);
+}
 
-    if (await traceRequestJson('/api/v1/trace/events?count=1') === null) {
-        if (processPollTimer) clearInterval(processPollTimer);
+function setTabCount(tabKey,count){
+    const el=document.getElementById('tab-count-'+tabKey);
+    if(el)el.textContent=String(count);
+}
+
+function renderProcesses(){
+    if(state.processes.length===0){
+        dom.processPanel.innerHTML=renderEmptyState('No `vb` processes detected right now.');
         return;
     }
-
-    clearTraceAuthError();
-    fetchProcesses();
-    processPollTimer = setInterval(fetchProcesses, 3000);
-    connectSSE();
+    dom.processPanel.innerHTML=state.processes.slice().sort((a,b)=>Date.parse(a.startTime||'')-Date.parse(b.startTime||'')).map(proc=>{
+        const title=proc.title&&proc.title.trim()?proc.title.trim():'No window title';
+        return '<div class="process-item"><div class="process-row"><strong>PID '+esc(proc.pid)+'</strong><span class="pill">'+esc(formatDurationSince(proc.startTime))+'</span></div><small>Started '+esc(formatTimestamp(proc.startTime))+'</small><small>'+esc(title)+'</small></div>';
+    }).join('');
 }
 
-loadConnConfig();
-renderStackLayout();
+function renderLiveTab(){
+    const baseEvents=getBaseTabEvents('live');
+    const visibleEvents=getVisibleTabEvents('live');
+    const selected=syncSelectedEvent('live',visibleEvents);
+    renderStatTiles(dom.liveSummary,[
+        {label:'Visible',value:visibleEvents.length,note:'Current search + live filter.'},
+        {label:'Terminal',value:baseEvents.filter(isTerminalFamily).length,note:'Launch, input, output, resize, idle, lifecycle.'},
+        {label:'MCP',value:baseEvents.filter(isMcpEvent).length,note:'Calls, results, and MCP-server log lines.'},
+        {label:'HTTP',value:baseEvents.filter(evt=>evt.typeName==='HttpRequest').length,note:'API calls captured by TraceHttpMiddleware.'},
+        {label:'Alerts',value:baseEvents.filter(isAlertEvent).length,note:'Errors and warnings across all event families.'}
+    ]);
+    renderEventList(dom.liveList,'live',visibleEvents,'No events match the current live-tab filters.');
+    renderEventInspector(dom.liveDetail,selected,'Pick any event from the stream to inspect its payload.');
+}
 
-(async () => { await initializeTracePage(); })();
+function renderMcpTab(){
+    const baseEvents=getBaseTabEvents('mcp');
+    const visibleEvents=getVisibleTabEvents('mcp');
+    const selected=syncSelectedEvent('mcp',visibleEvents);
+    renderStatTiles(dom.mcpSummary,[
+        {label:'Calls',value:baseEvents.filter(evt=>evt.typeName==='McpToolCall').length,note:'Captured `McpToolCall` events.'},
+        {label:'Results',value:baseEvents.filter(evt=>evt.typeName==='McpToolResult').length,note:'Successful and failed tool results.'},
+        {label:'Server Logs',value:baseEvents.filter(evt=>evt.typeName==='LogEntry'&&evt.source==='MCP-Server').length,note:'Tailed from the standalone MCP log file.'},
+        {label:'Errors',value:baseEvents.filter(isAlertEvent).length,note:'MCP errors and MCP-server warnings/errors.'}
+    ]);
+    const toolCounts=new Map();
+    baseEvents.forEach(evt=>{
+        const toolName=extractMcpToolName(evt);
+        if(!toolName)return;
+        toolCounts.set(toolName,(toolCounts.get(toolName)||0)+1);
+    });
+    const rankedTools=Array.from(toolCounts.entries()).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    dom.mcpTools.innerHTML=rankedTools.length===0?renderEmptyState('No MCP tool names found in the current cache.'):rankedTools.map(([name,count])=>'<div class="rank-item"><div class="rank-row"><strong>'+esc(name)+'</strong><span class="pill">'+esc(count)+' event(s)</span></div><small>Tool calls and results mentioning this MCP tool.</small></div>').join('');
+    renderEventList(dom.mcpList,'mcp',visibleEvents,'No MCP events match the current filter.');
+    renderEventInspector(dom.mcpDetail,selected,'Select an MCP call, result, or server log entry.');
+}
+
+function renderObserverTab(){
+    const baseEvents=getBaseTabEvents('observer');
+    const visibleEvents=getVisibleTabEvents('observer');
+    const selected=syncSelectedEvent('observer',visibleEvents);
+    renderStatTiles(dom.observerSummary,[
+        {label:'Input',value:baseEvents.filter(evt=>evt.typeName==='TerminalInput').length,note:'`OnTerminalIoAsync` with input direction.'},
+        {label:'Output',value:baseEvents.filter(evt=>evt.typeName==='TerminalOutput').length,note:'`OnTerminalIoAsync` with output direction.'},
+        {label:'Resize',value:baseEvents.filter(evt=>evt.typeName==='Resize').length,note:'`OnTerminalResizeAsync` emissions.'},
+        {label:'Idle',value:baseEvents.filter(evt=>evt.typeName==='Idle').length,note:'`OnTerminalIdleAsync` after threshold.'},
+        {label:'Remote',value:baseEvents.filter(isObserverRemoteCommand).length,note:'`OnTerminalRemoteCommandAsync` mapped into lifecycle events.'}
+    ]);
+    renderEventList(dom.observerList,'observer',visibleEvents,'No observer events match the current filter.');
+    renderEventInspector(dom.observerDetail,selected,'Select an observer event to inspect the callback payload.');
+}
+
+function renderPtyTab(){
+    const baseEvents=getBaseTabEvents('pty');
+    const visibleEvents=getVisibleTabEvents('pty');
+    const selected=syncSelectedEvent('pty',visibleEvents);
+    const launchEvents=baseEvents.filter(evt=>evt.typeName==='TerminalLaunch');
+    const latestLaunch=launchEvents.length?launchEvents[launchEvents.length-1]:null;
+    renderStatTiles(dom.ptySummary,[
+        {label:'Launches',value:launchEvents.length,note:'Captured `TerminalLaunch` payloads.'},
+        {label:'Input',value:baseEvents.filter(evt=>evt.typeName==='TerminalInput').length,note:'Chunks written toward the PTY.'},
+        {label:'Output',value:baseEvents.filter(evt=>evt.typeName==='TerminalOutput').length,note:'Chunks emitted by the PTY.'},
+        {label:'Resize',value:baseEvents.filter(evt=>evt.typeName==='Resize').length,note:'PTY size changes.'},
+        {label:'Sessions',value:countDistinctSessions(baseEvents),note:'Distinct session ids seen in the visible cache.'}
+    ]);
+    dom.ptyLaunch.innerHTML=latestLaunch?renderLaunchPanel(latestLaunch):renderEmptyState('Waiting for a `TerminalLaunch` event. Once a CLI starts, this panel will show args, setup commands, and environment.');
+    renderEventList(dom.ptyList,'pty',visibleEvents,'No CLI / PTY events match the current filter.');
+    renderEventInspector(dom.ptyDetail,selected,'Select a launch or PTY event to inspect it here.');
+    ensureTerminalMirror();
+}
+
+function renderStatTiles(container,items){
+    container.innerHTML=items.map(item=>'<div class="stat-tile"><span>'+esc(item.label)+'</span><strong>'+esc(item.value)+'</strong><small>'+esc(item.note)+'</small></div>').join('');
+}
+
+function renderEventList(container,tabKey,events,emptyMessage){
+    const rows=events.slice(-MAX_RENDERED_ROWS).reverse();
+    if(rows.length===0){
+        container.innerHTML=renderEmptyState(emptyMessage);
+        return;
+    }
+    const selectedId=state.selectedIds[tabKey];
+    container.innerHTML=rows.map(evt=>renderEventRow(evt,evt.id===selectedId)).join('');
+}
+
+function renderEventRow(evt,expanded){
+    const severity=deriveSeverity(evt);
+    const sessionPill=evt.sessionId?'<span class="pill">session '+esc(shortId(evt.sessionId))+'</span>':'';
+    const durationPill=evt.durationMs!=null?'<span class="pill">'+esc(Math.round(evt.durationMs))+'ms</span>':'';
+    const summary=cleanSummary(evt);
+    return '<article class="event-card sev-'+severity+(expanded?' expanded':'')+'"><button class="event-head" type="button" data-event-id="'+esc(evt.id)+'"><div class="event-time">'+esc(formatClock(evt.timestamp))+'</div><div class="event-main"><div class="event-meta"><span class="type-pill '+esc(typeTone(evt))+'">'+esc(typeLabel(evt.typeName))+'</span><span class="pill">'+esc(evt.source||'Unknown')+'</span>'+sessionPill+durationPill+'</div><div class="event-summary">'+esc(summary||'(no summary)')+'</div></div><div class="event-toggle">'+(expanded?'Open':'Expand')+'</div></button>'+(expanded?'<div class="event-expanded">'+renderInlinePreview(evt)+'</div>':'')+'</article>';
+}
+
+function renderInlinePreview(evt){
+    const previewTitle=evt.typeName==='TerminalOutput'?'Rendered Preview':evt.typeName==='TerminalInput'?'Normalized Input':evt.typeName==='TerminalLaunch'?'Launch Snapshot':'Payload Preview';
+    let body='';
+    if(evt.typeName==='TerminalLaunch'){
+        const launch=parseLaunchDetail(evt.detail);
+        body='<div class="kv-grid">'+renderKvCard('LLM',launch.fields.llm||'n/a')+renderKvCard('Environment',launch.fields.environmentName||'(default)')+renderKvCard('Session',launch.fields.sessionId||'n/a')+renderKvCard('Shell',launch.fields.shell||'n/a')+'</div>'+(launch.launchCommand?'<div class="code-block">'+esc(launch.launchCommand)+'</div>':'');
+    }else{
+        body='<div class="code-block">'+esc(clip(getReadableDetail(evt),1200))+'</div>';
+    }
+    return '<div class="inline-preview"><strong>'+esc(previewTitle)+'</strong>'+body+'</div>';
+}
+
+function renderEventInspector(container,evt,emptyMessage){
+    if(!evt){
+        container.innerHTML=renderEmptyState(emptyMessage);
+        return;
+    }
+    const cards=[renderKvCard('Time',formatTimestamp(evt.timestamp)),renderKvCard('Type',typeLabel(evt.typeName)),renderKvCard('Source',evt.source||'Unknown'),renderKvCard('Session',evt.sessionId||'n/a'),renderKvCard('Duration',evt.durationMs!=null?Math.round(evt.durationMs)+'ms':'n/a'),renderKvCard('Severity',deriveSeverity(evt))].join('');
+    let sections='';
+    if(evt.typeName==='TerminalLaunch'){
+        sections+=renderLaunchInspector(evt);
+    }else if(evt.typeName==='TerminalInput'){
+        sections+=renderDetailSection('Normalized Input','<div class="code-block">'+esc(normalizeInputPayload(evt.detail))+'</div>');
+        sections+=renderDetailSection('Raw Input Payload','<div class="code-block">'+esc(visualizeControlChars(evt.detail))+'</div>');
+    }else if(evt.typeName==='TerminalOutput'){
+        sections+=renderDetailSection('Rendered Output','<div class="code-scroll">'+esc(normalizeOutputPayload(evt.detail))+'</div>');
+        sections+=renderDetailSection('Raw ANSI Payload','<div class="code-scroll">'+esc(visualizeControlChars(evt.detail))+'</div>');
+    }else if(evt.typeName==='McpToolCall'||evt.typeName==='McpToolResult'){
+        sections+=renderDetailSection(evt.typeName==='McpToolCall'?'Arguments':'Result Payload','<div class="code-scroll">'+esc(prettyPrintMaybeJson(evt.detail||evt.summary))+'</div>');
+    }else{
+        const kvPairs=parseKeyValueDetail(evt.detail);
+        if(kvPairs.length>0)sections+=renderDetailSection('Parsed Fields','<div class="kv-grid">'+kvPairs.map(pair=>renderKvCard(pair.key,pair.value)).join('')+'</div>');
+        sections+=renderDetailSection('Raw Detail','<div class="code-scroll">'+esc(prettyPrintMaybeJson(evt.detail||evt.summary))+'</div>');
+    }
+    container.innerHTML='<div class="detail-summary"><div class="detail-title">'+esc(cleanSummary(evt)||'(no summary)')+'</div><div class="detail-grid">'+cards+'</div></div>'+sections;
+}
+
+function renderLaunchPanel(evt){
+    const launch=parseLaunchDetail(evt.detail);
+    const envRows=launch.environment.length===0?'<div class="empty-state">No environment variables were captured in the launch detail.</div>':'<div class="detail-section"><h3>Environment</h3><div class="code-scroll"><table class="env-table"><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>'+launch.environment.map(item=>'<tr><td>'+esc(item.key)+'</td><td>'+esc(item.value)+'</td></tr>').join('')+'</tbody></table></div></div>';
+    return '<div class="detail-section"><h3>Launch Overview</h3><div class="kv-grid">'+renderKvCard('Session',launch.fields.sessionId||'n/a')+renderKvCard('LLM',launch.fields.llm||'n/a')+renderKvCard('Environment',launch.fields.environmentName||'(default)')+renderKvCard('WorkDir',launch.fields.workDir||'n/a')+renderKvCard('Shell',launch.fields.shell||'n/a')+renderKvCard('Remote',launch.fields.remoteEnabled||'false')+'</div></div>'+renderDetailSection('Launch Command','<div class="code-block">'+esc(launch.launchCommand||'(none)')+'</div>')+renderDetailSection('Full Shell Command','<div class="code-block">'+esc(launch.fullCommand||'(none)')+'</div>')+renderDetailSection('CLI Args','<div class="code-block">'+esc((launch.cliArgs.length?launch.cliArgs:['(none)']).join('\n'))+'</div>')+renderDetailSection('Setup Commands','<div class="code-block">'+esc((launch.setupCommands.length?launch.setupCommands:['(none)']).join('\n'))+'</div>')+envRows;
+}
+
+function renderLaunchInspector(evt){
+    const launch=parseLaunchDetail(evt.detail);
+    const envHtml=launch.environment.length===0?'<div class="empty-state">No environment variables were captured.</div>':'<div class="code-scroll"><table class="env-table"><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>'+launch.environment.map(item=>'<tr><td>'+esc(item.key)+'</td><td>'+esc(item.value)+'</td></tr>').join('')+'</tbody></table></div>';
+    return renderDetailSection('Launch Fields','<div class="kv-grid">'+Object.entries(launch.fields).map(([key,value])=>renderKvCard(key,value||'n/a')).join('')+'</div>')+renderDetailSection('CLI Args','<div class="code-block">'+esc((launch.cliArgs.length?launch.cliArgs:['(none)']).join('\n'))+'</div>')+renderDetailSection('Setup Commands','<div class="code-block">'+esc((launch.setupCommands.length?launch.setupCommands:['(none)']).join('\n'))+'</div>')+renderDetailSection('Launch Command','<div class="code-block">'+esc(launch.launchCommand||'(none)')+'</div>')+renderDetailSection('Full Shell Command','<div class="code-block">'+esc(launch.fullCommand||'(none)')+'</div>')+renderDetailSection('Environment Variables',envHtml);
+}
+
+function renderDetailSection(title,body){return '<section class="detail-section"><h3>'+esc(title)+'</h3>'+body+'</section>';}
+function renderKvCard(label,value){return '<div class="kv-card"><span>'+esc(label)+'</span><strong>'+esc(value==null?'':value)+'</strong></div>';}
+function renderEmptyState(message){return '<div class="empty-state">'+esc(message)+'</div>';}
+
+function getBaseTabEvents(tabKey){
+    return state.events.filter(evt=>{
+        if(state.search&&!evt.searchBlob.includes(state.search))return false;
+        return matchesTab(evt,tabKey);
+    });
+}
+
+function getVisibleTabEvents(tabKey){return getBaseTabEvents(tabKey).filter(evt=>matchesScope(evt,tabKey,state.scopes[tabKey]));}
+
+function matchesTab(evt,tabKey){
+    switch(tabKey){
+        case'mcp':return isMcpEvent(evt);
+        case'observer':return isObserverEvent(evt);
+        case'pty':return isPtyEvent(evt);
+        case'live':
+        default:return true;
+    }
+}
+
+function matchesScope(evt,tabKey,scope){
+    switch(tabKey){
+        case'live':
+            switch(scope){
+                case'terminal':return isTerminalFamily(evt);
+                case'mcp':return isMcpEvent(evt);
+                case'http':return evt.typeName==='HttpRequest';
+                case'logs':return evt.typeName==='LogEntry'||evt.typeName==='RuleValidation';
+                case'errors':return isAlertEvent(evt);
+                default:return true;
+            }
+        case'mcp':
+            switch(scope){
+                case'calls':return evt.typeName==='McpToolCall';
+                case'results':return evt.typeName==='McpToolResult';
+                case'server-log':return evt.typeName==='LogEntry'&&evt.source==='MCP-Server';
+                default:return true;
+            }
+        case'observer':
+            switch(scope){
+                case'io':return evt.typeName==='TerminalInput'||evt.typeName==='TerminalOutput';
+                case'resize':return evt.typeName==='Resize';
+                case'idle':return evt.typeName==='Idle';
+                case'remote':return isObserverRemoteCommand(evt);
+                default:return true;
+            }
+        case'pty':
+            switch(scope){
+                case'launch':return evt.typeName==='TerminalLaunch';
+                case'input':return evt.typeName==='TerminalInput';
+                case'output':return evt.typeName==='TerminalOutput';
+                case'resize':return evt.typeName==='Resize';
+                default:return true;
+            }
+        default:return true;
+    }
+}
+
+function isMcpEvent(evt){return evt.typeName==='McpToolCall'||evt.typeName==='McpToolResult'||(evt.typeName==='LogEntry'&&evt.source==='MCP-Server');}
+function isObserverRemoteCommand(evt){return evt.typeName==='SessionLifecycle'&&/^Terminal\./.test(evt.source||'')&&/^Remote command:/i.test(evt.summary||'');}
+function isObserverEvent(evt){return evt.typeName==='TerminalInput'||evt.typeName==='TerminalOutput'||evt.typeName==='Resize'||evt.typeName==='Idle'||isObserverRemoteCommand(evt);}
+function isPtyEvent(evt){return evt.typeName==='TerminalLaunch'||evt.typeName==='TerminalInput'||evt.typeName==='TerminalOutput'||evt.typeName==='Resize';}
+function isTerminalFamily(evt){return evt.typeName==='TerminalLaunch'||evt.typeName==='TerminalInput'||evt.typeName==='TerminalOutput'||evt.typeName==='Resize'||evt.typeName==='Idle'||evt.typeName==='SessionLifecycle';}
+function isAlertEvent(evt){const severity=deriveSeverity(evt);return severity==='warning'||severity==='error';}
+
+function deriveSeverity(evt){
+    if(evt.typeName==='McpToolResult'&&/^MCP error:/i.test(evt.summary))return'error';
+    if(evt.typeName==='HttpRequest'){
+        const match=/→\s*(\d{3})/.exec(evt.summary);
+        if(match){
+            const code=Number.parseInt(match[1],10);
+            if(code>=500)return'error';
+            if(code>=400)return'warning';
+        }
+        return'info';
+    }
+    if(evt.typeName==='LogEntry'){
+        if(/^\[(ERR|FTL)\]/.test(evt.summary))return'error';
+        if(/^\[WRN\]/.test(evt.summary))return'warning';
+        return'info';
+    }
+    if(evt.typeName==='Idle')return'warning';
+    return'info';
+}
+
+function typeTone(evt){
+    const severity=deriveSeverity(evt);
+    if(severity==='error')return'type-error';
+    if(severity==='warning')return'type-warning';
+    if(evt.typeName==='McpToolCall'||evt.typeName==='McpToolResult')return'type-mcp';
+    if(evt.typeName==='HttpRequest')return'type-http';
+    if(evt.typeName==='LogEntry'||evt.typeName==='RuleValidation'||evt.typeName==='SessionLifecycle'||evt.typeName==='Idle')return'type-log';
+    return'type-terminal';
+}
+
+function typeLabel(typeName){
+    switch(typeName){
+        case'TerminalLaunch':return'Launch';
+        case'TerminalInput':return'Input';
+        case'TerminalOutput':return'Output';
+        case'McpToolCall':return'MCP Call';
+        case'McpToolResult':return'MCP Result';
+        case'RuleValidation':return'Rule';
+        case'LogEntry':return'Log';
+        case'SessionLifecycle':return'Lifecycle';
+        case'Idle':return'Idle';
+        case'Resize':return'Resize';
+        case'HttpRequest':return'HTTP';
+        default:return typeName||'Trace';
+    }
+}
+
+function cleanSummary(evt){return stripSummaryPrefix(evt.summary||'',evt.typeName);}
+
+function stripSummaryPrefix(summary,typeName){
+    const patterns=[/^Terminal launch:\s*/i,/^Input \([^)]+\):\s*/i,/^Output \([^)]+\):\s*/i,/^MCP call:\s*/i,/^MCP result:\s*/i,/^MCP error:\s*/i];
+    for(const pattern of patterns){
+        if(pattern.test(summary))return summary.replace(pattern,'');
+    }
+    if(typeName==='LogEntry'&&summary.startsWith('[INF] MCP-Server: '))return summary.slice('[INF] MCP-Server: '.length);
+    return summary;
+}
+
+function extractMcpToolName(evt){
+    if(evt.typeName==='McpToolCall')return cleanSummary(evt).trim()||'';
+    if(evt.typeName==='McpToolResult'){
+        const summary=cleanSummary(evt);
+        const match=/^(.+?)\s+\(\d+ms\)$/.exec(summary);
+        return match?match[1].trim():summary.trim();
+    }
+    return'';
+}
+
+function syncSelectedEvent(tabKey,visibleEvents){
+    const existingId=state.selectedIds[tabKey];
+    if(existingId&&visibleEvents.some(evt=>evt.id===existingId))return visibleEvents.find(evt=>evt.id===existingId)||null;
+    state.selectedIds[tabKey]=visibleEvents.length?visibleEvents[visibleEvents.length-1].id:'';
+    return visibleEvents.length?visibleEvents[visibleEvents.length-1]:null;
+}
+
+function countDistinctSessions(events){return new Set(events.map(evt=>evt.sessionId).filter(Boolean)).size;}
+
+function mapType(typeValue){
+    if(typeof typeValue==='string')return typeValue;
+    return TYPE_NAMES[typeValue]||'LogEntry';
+}
+
+function extractSessionId(detail){
+    if(!detail)return'';
+    const match=/(?:^|\n)sessionId:\s*([^\n]+)/i.exec(detail);
+    return match?match[1].trim():'';
+}
+
+function parseKeyValueDetail(detail){
+    if(!detail)return[];
+    return detail.split('\n').map(line=>line.trim()).filter(Boolean).map(line=>{
+        const idx=line.indexOf(':');
+        if(idx<0)return null;
+        return{key:line.slice(0,idx).trim(),value:line.slice(idx+1).trim()};
+    }).filter(Boolean);
+}
+
+function parseLaunchDetail(detail){
+    const result={fields:{},cliArgs:[],setupCommands:[],launchCommand:'',fullCommand:'',environment:[]};
+    let section='fields';
+    for(const rawLine of(detail||'').split('\n')){
+        const line=rawLine.replace(/\r/g,'');
+        if(!line.trim())continue;
+        if(/^cliArgs:$/i.test(line.trim())){section='cliArgs';continue;}
+        if(/^setupCommands:$/i.test(line.trim())){section='setupCommands';continue;}
+        if(/^launchCommand:$/i.test(line.trim())){section='launchCommand';continue;}
+        if(/^fullCommand:$/i.test(line.trim())){section='fullCommand';continue;}
+        if(/^environment:$/i.test(line.trim())){section='environment';continue;}
+        if(section==='cliArgs'||section==='setupCommands'){
+            const item=line.replace(/^\s*-\s*/,'').trim();
+            if(item)result[section].push(item);
+            continue;
+        }
+        if(section==='launchCommand'){result.launchCommand=(result.launchCommand?result.launchCommand+'\n':'')+line.trim();continue;}
+        if(section==='fullCommand'){result.fullCommand=(result.fullCommand?result.fullCommand+'\n':'')+line.trim();continue;}
+        if(section==='environment'){
+            const eqIndex=line.indexOf('=');
+            if(eqIndex>=0)result.environment.push({key:line.slice(0,eqIndex).trim(),value:line.slice(eqIndex+1).trim()});
+            continue;
+        }
+        const separator=line.indexOf(':');
+        if(separator>=0)result.fields[line.slice(0,separator).trim()]=line.slice(separator+1).trim();
+    }
+    return result;
+}
+
+function getReadableDetail(evt){
+    if(evt.typeName==='TerminalOutput')return normalizeOutputPayload(evt.detail);
+    if(evt.typeName==='TerminalInput')return normalizeInputPayload(evt.detail);
+    if(evt.typeName==='TerminalLaunch'){
+        const launch=parseLaunchDetail(evt.detail);
+        return['LLM: '+(launch.fields.llm||'n/a'),'Environment: '+(launch.fields.environmentName||'(default)'),'Session: '+(launch.fields.sessionId||'n/a'),'Launch Command: '+(launch.launchCommand||'(none)')].join('\n');
+    }
+    return prettyPrintMaybeJson(evt.detail||evt.summary||'');
+}
+
+function normalizeOutputPayload(text){return stripAnsi(text||'').replace(/\r(?!\n)/g,'');}
+
+function normalizeInputPayload(text){
+    let next='';
+    for(const ch of text||''){
+        if(ch==='\b'||ch==='\x7f'){next=next.slice(0,-1);continue;}
+        if(ch==='\r'){next+='\\r\n';continue;}
+        if(ch==='\n'){next+='\\n\n';continue;}
+        if(ch==='\t'){next+='\\t';continue;}
+        next+=ch;
+    }
+    return next||'(empty)';
+}
+
+function stripAnsi(text){
+    return(text||'').replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g,'').replace(/\x1B\[[0-?]*[ -/]*[@-~]/g,'').replace(/\x1B[@-_]/g,'');
+}
+
+function visualizeControlChars(text){
+    let output='';
+    for(const ch of text||''){
+        switch(ch){
+            case'\r':output+='\\r';break;
+            case'\n':output+='\\n\n';break;
+            case'\t':output+='\\t';break;
+            case'\b':output+='\\b';break;
+            case'\x1b':output+='\\x1b';break;
+            case'\x7f':output+='\\x7f';break;
+            default:output+=/[\x00-\x1f]/.test(ch)?'\\x'+ch.charCodeAt(0).toString(16).padStart(2,'0'):ch;break;
+        }
+    }
+    return output||'(empty)';
+}
+
+function prettyPrintMaybeJson(value){
+    if(!value)return'(empty)';
+    try{return JSON.stringify(JSON.parse(value),null,2);}catch{return value;}
+}
+
+function formatClock(value){
+    const date=new Date(value);
+    if(Number.isNaN(date.getTime()))return'??:??:??';
+    return date.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:3});
+}
+
+function formatTimestamp(value){
+    const date=new Date(value);
+    if(Number.isNaN(date.getTime()))return'Unknown time';
+    return date.toLocaleString('en-US',{hour12:false,year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+function formatDurationSince(value){
+    const start=new Date(value).getTime();
+    if(Number.isNaN(start))return'unknown';
+    const secs=Math.max(0,Math.floor((Date.now()-start)/1000));
+    if(secs<60)return secs+'s';
+    if(secs<3600)return Math.floor(secs/60)+'m '+secs%60+'s';
+    return Math.floor(secs/3600)+'h '+Math.floor((secs%3600)/60)+'m';
+}
+
+function shortId(value){return value?String(value).slice(0,8):'';}
+function clip(text,maxChars){const raw=text||'';return raw.length>maxChars?raw.slice(0,maxChars-1)+'…':raw;}
+
+function esc(value){
+    return String(value==null?'':value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function ensureTerminalMirror(){
+    if(term||!window.Terminal||!window.FitAddon||state.selectedTab!=='pty')return;
+    term=new Terminal({fontFamily:'"IBM Plex Mono", monospace',fontSize:12,cursorBlink:false,disableStdin:true,convertEol:true,scrollback:5000,theme:{background:'#060c13',foreground:'#e6f0f8',cursor:'#57d6c6',black:'#0b1218',brightBlack:'#657787',red:'#ff7d7d',brightRed:'#ff9a9a',green:'#57d6c6',brightGreen:'#8df2e5',yellow:'#f5c35d',brightYellow:'#ffd98d',blue:'#79b8ff',brightBlue:'#a6d4ff',magenta:'#c4b5fd',brightMagenta:'#ddd6fe',cyan:'#57d6c6',brightCyan:'#8df2e5',white:'#dce8f1',brightWhite:'#ffffff'}});
+    fitAddon=new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(dom.terminalWrap);
+    rebuildTerminalMirror();
+    fitTerminalMirror();
+    terminalResizeObserver=new ResizeObserver(()=>fitTerminalMirror());
+    terminalResizeObserver.observe(dom.terminalWrap);
+}
+
+function appendToTerminalMirror(evt){
+    if(!term)return;
+    const text=evt.detail||stripSummaryPrefix(evt.summary||'',evt.typeName);
+    if(!text)return;
+    term.write(text);
+    term.scrollToBottom();
+    dom.terminalStatus.textContent='Last output '+formatClock(evt.timestamp);
+}
+
+function rebuildTerminalMirror(){
+    if(!term)return;
+    term.clear();
+    const outputs=getBaseTabEvents('pty').filter(evt=>evt.typeName==='TerminalOutput');
+    outputs.forEach(evt=>{
+        const text=evt.detail||stripSummaryPrefix(evt.summary||'',evt.typeName);
+        if(text)term.write(text);
+    });
+    term.scrollToBottom();
+    dom.terminalStatus.textContent=outputs.length?'Replayed '+outputs.length+' PTY output event(s) from cache.':'No PTY output events in cache.';
+}
+
+function clearTerminalMirror(message){
+    if(term)term.clear();
+    dom.terminalStatus.textContent=message;
+}
+
+function fitTerminalMirror(){
+    if(!fitAddon||!dom.terminalWrap||state.selectedTab!=='pty')return;
+    if(!dom.terminalWrap.offsetParent)return;
+    try{fitAddon.fit();}catch{}
+}
 </script>
 </body>
 </html>

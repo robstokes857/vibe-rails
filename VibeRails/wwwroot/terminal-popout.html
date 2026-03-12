@@ -419,6 +419,18 @@
             terminal.scrollToBottom();
         }
 
+        function createBracketedPastePayload(text) {
+            if (typeof text !== 'string' || text.length === 0) {
+                return '';
+            }
+
+            if (terminal?.modes?.bracketedPasteMode !== true) {
+                return text;
+            }
+
+            return `\u001b[200~${text}\u001b[201~`;
+        }
+
         function findNextInTerminal(term = '') {
             if (!searchAddon) {
                 return false;
@@ -588,6 +600,20 @@
                     return true;
                 }
 
+                const isModifiedEnter = ((event.key || '') === 'Enter' || event.keyCode === 13)
+                    && !event.altKey
+                    && !event.metaKey
+                    && (event.shiftKey || event.ctrlKey);
+                if (isModifiedEnter && terminal?.modes?.bracketedPasteMode === true) {
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        const payload = createBracketedPastePayload('\n');
+                        if (payload) {
+                            socket.send(payload);
+                        }
+                    }
+                    return false;
+                }
+
                 const key = (event.key || '').toLowerCase();
                 const hasModifier = event.ctrlKey || event.metaKey;
                 if (!hasModifier || event.altKey) {
@@ -601,7 +627,10 @@
 
                     navigator.clipboard.readText().then((text) => {
                         if (socket && socket.readyState === WebSocket.OPEN) {
-                            socket.send(text);
+                            const payload = createBracketedPastePayload(text);
+                            if (payload) {
+                                socket.send(payload);
+                            }
                         }
                     }).catch(() => { });
                     return false;
