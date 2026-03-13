@@ -33,10 +33,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.103"
 
@@ -110,7 +110,7 @@ jobs:
           printf "%s  %s\n" "$hash" "$(basename "$archive")" > "${archive}.sha256"
 
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-assets-${{ matrix.rid }}
           path: release-assets/*
@@ -118,7 +118,7 @@ jobs:
 
       - name: Upload publish output for extension packaging
         if: ${{ matrix.rid == 'win-x64' || matrix.rid == 'linux-x64' || matrix.rid == 'osx-x64' || matrix.rid == 'osx-arm64' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: publish-${{ matrix.rid }}
           path: artifacts/${{ matrix.rid }}/*
@@ -151,10 +151,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: npm
@@ -168,7 +168,7 @@ jobs:
           npm ci
 
       - name: Download publish output
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: publish-${{ matrix.rid }}
           path: Scripts/artifacts/aot/${{ matrix.rid }}
@@ -192,7 +192,7 @@ jobs:
           }
 
       - name: Upload VSIX artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: extension-vsix-${{ matrix.target }}
           path: vscode-viberails/dist/vscode-viberails-${{ matrix.target }}-*.vsix
@@ -206,12 +206,12 @@ jobs:
       VSCE_PAT: ${{ secrets.VS_PAT }}
     steps:
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
 
       - name: Download VSIX artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: extension-vsix-*
           path: dist
@@ -255,14 +255,14 @@ jobs:
           fi
 
       - name: Download workflow artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: release-assets-*
           path: release-assets
           merge-multiple: true
 
       - name: Download VSIX artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: extension-vsix-*
           path: release-assets
