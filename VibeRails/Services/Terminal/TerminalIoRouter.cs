@@ -41,6 +41,15 @@ public readonly record struct TerminalIoEvent(
     public bool HasControl => TerminalTextSanitizer.HasControl(Text);
 }
 
+public readonly record struct TerminalSessionStartEvent(
+    string SessionId,
+    string Cli,
+    string WorkDir,
+    string? EnvName,
+    IReadOnlyList<string> SetupCommands,
+    string LaunchCommand,
+    DateTimeOffset TimestampUtc);
+
 public readonly record struct TerminalResizeEvent(
     string SessionId,
     TerminalIoSource Source,

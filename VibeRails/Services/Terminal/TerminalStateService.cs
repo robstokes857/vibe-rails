@@ -7,6 +7,7 @@ namespace VibeRails.Services.Terminal;
 public interface ITerminalStateService
 {
     Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default);
+    void PublishSessionStart(string sessionId, string cli, string workDir, string? envName, IReadOnlyList<string> setupCommands, string launchCommand);
     void LogOutput(string sessionId, string text, TerminalIoSource source = TerminalIoSource.Pty);
     void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown);
     void RecordResize(string sessionId, int cols, int rows, TerminalIoSource source);
@@ -69,6 +70,12 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         }
 
         return sessionId;
+    }
+
+    public void PublishSessionStart(string sessionId, string cli, string workDir, string? envName, IReadOnlyList<string> setupCommands, string launchCommand)
+    {
+        _ioObserverService.PublishSessionStart(new TerminalSessionStartEvent(
+            sessionId, cli, workDir, envName, setupCommands, launchCommand, DateTimeOffset.UtcNow));
     }
 
     public void LogOutput(string sessionId, string text, TerminalIoSource source = TerminalIoSource.Pty)

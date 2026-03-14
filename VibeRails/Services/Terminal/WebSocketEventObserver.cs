@@ -43,4 +43,19 @@ public sealed class WebSocketEventObserver : ITerminalIoObserver
         _eventBus.Publish("terminal_remote_cmd", text);
         return ValueTask.CompletedTask;
     }
+
+    public ValueTask OnSessionStartAsync(TerminalSessionStartEvent startEvent, CancellationToken cancellationToken = default)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"cli      = {startEvent.Cli}");
+        sb.Append($"\nworkDir  = {startEvent.WorkDir}");
+        if (!string.IsNullOrEmpty(startEvent.EnvName))
+            sb.Append($"\nenv      = {startEvent.EnvName}");
+        foreach (var cmd in startEvent.SetupCommands)
+            sb.Append($"\nsetup    = {cmd}");
+        sb.Append($"\nlaunch   = {startEvent.LaunchCommand}");
+        sb.Append($"\nsession  = {startEvent.SessionId}");
+        _eventBus.Publish("terminal_session_start", sb.ToString());
+        return ValueTask.CompletedTask;
+    }
 }
