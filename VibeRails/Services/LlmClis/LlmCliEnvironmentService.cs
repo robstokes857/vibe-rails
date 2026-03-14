@@ -55,6 +55,23 @@ namespace VibeRails.Services.LlmClis
             }
         }
 
+        public Task DeleteEnvironmentAsync(LLM_Environment environment, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(environment);
+
+            var environmentPath = string.IsNullOrWhiteSpace(environment.Path)
+                ? Path.Combine(ParserConfigs.GetEnvPath(), environment.CustomName)
+                : environment.Path;
+
+            if (string.IsNullOrWhiteSpace(environmentPath) || !_fileService.DirectoryExists(environmentPath))
+            {
+                return Task.CompletedTask;
+            }
+
+            _fileService.DeleteDirectory(environmentPath, recursive: true);
+            return Task.CompletedTask;
+        }
+
 
         public Dictionary<string, string> GetEnvironmentVariables(string envName, LLM llm)
         {

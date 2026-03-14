@@ -141,6 +141,7 @@ public static class EnvironmentRoutes
 
         // DELETE /api/v1/environments/{name} - Delete environment
         app.MapDelete("/api/v1/environments/{name}", async (
+            LlmCliEnvironmentService envService,
             IRepository repository,
             string name,
             CancellationToken cancellationToken) =>
@@ -159,6 +160,7 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse("Cannot delete default environments"));
             }
 
+            await envService.DeleteEnvironmentAsync(environment, cancellationToken);
             await repository.DeleteEnvironmentAsync(environment.Id, cancellationToken);
             return Results.Ok(new OK("Environment deleted"));
         }).WithName("DeleteEnvironment");

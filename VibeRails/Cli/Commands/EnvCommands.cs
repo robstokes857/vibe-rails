@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.LlmClis;
 using VibeRails.Utils;
 
 namespace VibeRails.Cli.Commands
@@ -16,13 +17,14 @@ namespace VibeRails.Cli.Commands
             }
 
             var repository = services.GetRequiredService<IRepository>();
+            var envService = services.GetRequiredService<LlmCliEnvironmentService>();
 
             return args.SubCommand.ToLowerInvariant() switch
             {
                 "list" => await ListAsync(repository, cancellationToken),
                 "create" => await CreateAsync(args, repository, cancellationToken),
                 "update" => await UpdateAsync(args, repository, cancellationToken),
-                "delete" => await DeleteAsync(args, repository, cancellationToken),
+                "delete" => await DeleteAsync(args, repository, envService, cancellationToken),
                 "show" => await ShowAsync(args, repository, cancellationToken),
                 "help" or "--help" => ShowHelp(),
                 _ => ShowUnknownSubcommand(args.SubCommand)
@@ -193,7 +195,11 @@ namespace VibeRails.Cli.Commands
             return 0;
         }
 
-        private static async Task<int> DeleteAsync(ParsedArgs args, IRepository repository, CancellationToken cancellationToken)
+        private static async Task<int> DeleteAsync(
+            ParsedArgs args,
+            IRepository repository,
+            LlmCliEnvironmentService envService,
+            CancellationToken cancellationToken)
         {
             var name = args.Target;
             if (string.IsNullOrEmpty(name))
@@ -223,6 +229,7 @@ namespace VibeRails.Cli.Commands
                 return 1;
             }
 
+            await envService.DeleteEnvironmentAsync(environment, cancellationToken);
             await repository.DeleteEnvironmentAsync(environment.Id, cancellationToken);
 
             CliOutput.Success($"Environment '{name}' deleted.");

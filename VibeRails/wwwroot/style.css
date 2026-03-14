@@ -3209,6 +3209,7 @@ input.form-control:disabled {
 .terminal-focus-layout {
     display: flex;
     flex-direction: row;
+    align-items: flex-start;
     gap: 0.75rem;
     flex: 1 1 auto;
     min-height: 0;
@@ -3217,6 +3218,8 @@ input.form-control:disabled {
 .ch-sidebar {
     width: 268px;
     flex-shrink: 0;
+    height: var(--ch-available-height, auto);
+    max-height: var(--ch-available-height, none);
     background: var(--color-bg-surface, #1e1e1e);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 8px;
@@ -3398,6 +3401,17 @@ input.form-control:disabled {
     padding: 28px;
 }
 
+.ch-loading.ch-loading-inline {
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px 16px;
+}
+
+.ch-loading-label {
+    font-size: 0.72rem;
+    color: #7f849c;
+}
+
 .ch-empty {
     padding: 28px 14px;
     font-size: 0.75rem;
@@ -3418,6 +3432,24 @@ input.form-control:disabled {
 
 .ch-item:hover {
     background: rgba(255, 255, 255, 0.04);
+}
+
+.ch-item.ch-item-menu-active {
+    background: rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 5;
+    position: relative;
+    border-radius: 6px;
+    margin: 0 4px;
+    width: calc(100% - 8px);
+    border-bottom: none;
+    transform: translateY(-1px);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ch-item.ch-item-menu-active .ch-item-menu-btn {
+    opacity: 1;
+    color: var(--color-accent, #3b82f6);
 }
 
 .ch-item:hover .ch-item-menu-btn {
@@ -4254,6 +4286,11 @@ input.form-control:disabled {
 .swarm-task-select option {
     background-color: var(--color-bg-base);
     color: var(--color-text);
+}
+
+.swarm-task-select optgroup {
+    background-color: var(--color-bg-base);
+    color: var(--color-text-muted);
 }
 
 .swarm-step-action-btn {

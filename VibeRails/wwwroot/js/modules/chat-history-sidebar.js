@@ -1,5 +1,7 @@
-import { formatRelativeTime, escapeHtml } from './utils.js';
+import { buildLlmSelectionOptions, formatRelativeTime, escapeHtml } from './utils.js';
 
+const DEFAULT_PAGE_SIZE = 20;
+const SCROLL_LOAD_THRESHOLD_PX = 48;
 
 export class ChatHistorySidebar {
     constructor(app) {
@@ -7,6 +9,13 @@ export class ChatHistorySidebar {
         this.allItems = [];
         this.filterText = '';
         this.activeItem = null;
+        this.pageSize = DEFAULT_PAGE_SIZE;
+        this.currentPage = 0;
+        this.hasMore = true;
+        this.isLoadingPage = false;
+        this.isLoadingForSearch = false;
+        this.loadFailed = false;
+        this.body = null;
     }
 
     static renderHtml() {
@@ -62,6 +71,7 @@ export class ChatHistorySidebar {
         const sidebar = root.querySelector('#ch-sidebar');
         const body = root.querySelector('#ch-sidebar-body');
         const contextMenu = root.querySelector('#ch-context-menu');
+        this.body = body;
 
         root.querySelector('#ch-sidebar-hide-btn')?.addEventListener('click', () => {
             sidebar?.classList.toggle('ch-sidebar-collapsed');
@@ -77,66 +87,171 @@ export class ChatHistorySidebar {
         const searchInput = root.querySelector('#ch-search-input');
         searchInput?.addEventListener('input', (e) => {
             this.filterText = e.target.value.toLowerCase().trim();
-            this._renderItems(body, this.allItems);
-        });
+            this._renderItems();
 
-        // Close menu on click outside
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('.ch-item-menu-btn') && !e.target.closest('.ch-context-menu')) {
-                contextMenu?.classList.remove('show');
+            if (this.filterText && this.hasMore) {
+                void this._loadRemainingPagesForSearch();
             }
         });
 
-        this._load(body);
+        body?.addEventListener('scroll', () => {
+            if (!this._shouldLoadNextPage()) {
+                return;
+            }
+
+            void this._loadNextPage();
+        }, { passive: true });
+
+        // Close menu on click outside
+        document.addEventListener('click', (e) => {
+            const isMenuBtn = e.target.closest('.ch-item-menu-btn');
+            const isMenu = e.target.closest('.ch-context-menu');
+            const isMenuItem = e.target.closest('.ch-context-menu-item') && !e.target.closest('.ch-has-submenu');
+
+            if (!isMenuBtn && (!isMenu || isMenuItem)) {
+                if (contextMenu?.classList.contains('show')) {
+                    contextMenu.classList.remove('show');
+                    sidebar?.querySelectorAll('.ch-item-menu-active').forEach(el => el.classList.remove('ch-item-menu-active'));
+                }
+            }
+        });
+
+        void this._load();
     }
 
-    async _load(body) {
-        if (!body) return;
-        body.innerHTML = '<div class="ch-loading"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>';
+    async _load() {
+        if (!this.body) {
+            return;
+        }
+
+        this.allItems = [];
+        this.currentPage = 0;
+        this.hasMore = true;
+        this.loadFailed = false;
+        this.body.innerHTML = '<div class="ch-loading"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>';
+        await this._loadNextPage({ initial: true });
+    }
+
+    async _loadNextPage({ initial = false } = {}) {
+        if (this.isLoadingPage || !this.hasMore) {
+            return false;
+        }
+
+        this.isLoadingPage = true;
+        if (!initial) {
+            this._renderItems();
+        }
+
+        const nextPage = this.currentPage + 1;
+        const params = new URLSearchParams({
+            page: String(nextPage),
+            pageSize: String(this.pageSize)
+        });
+
         try {
-            const data = await this.app.apiCall('/api/v1/chatHistory', 'GET', null, { showLoading: false });
-            this.allItems = data?.items || [];
-            this._renderItems(body, this.allItems);
-        } catch {
-            body.innerHTML = '<div class="ch-empty">Failed to load history.</div>';
+            const data = await this.app.apiCall(`/api/v1/chatHistory?${params.toString()}`, 'GET', null, { showLoading: false });
+            const items = Array.isArray(data?.items) ? data.items : [];
+
+            if (items.length === 0) {
+                this.hasMore = false;
+                return false;
+            }
+
+            this.currentPage = nextPage;
+            this.allItems.push(...items);
+            this.loadFailed = false;
+            return true;
+        } catch (error) {
+            this.loadFailed = true;
+            this.hasMore = false;
+
+            if (!initial && this.allItems.length > 0) {
+                const message = error?.message || 'Unknown error';
+                this.app.showError(`Failed to load more chat history: ${message}`);
+            }
+
+            return false;
+        } finally {
+            this.isLoadingPage = false;
+            this._renderItems();
+
+            if (this.filterText && this.hasMore && !this.isLoadingForSearch) {
+                void this._loadRemainingPagesForSearch();
+            }
         }
     }
 
-    _getLlmOptions() {
-        const lower = s => s ? s.toLowerCase() : '';
-        const options = [
-            { group: 'Base CLIs', value: 'base:claude', label: 'Claude (default)' },
-            { group: 'Base CLIs', value: 'base:codex', label: 'Codex (default)' },
-            { group: 'Base CLIs', value: 'base:gemini', label: 'Gemini (default)' },
-            { group: 'Base CLIs', value: 'base:copilot', label: 'Copilot (default)' }
-        ];
+    async _loadRemainingPagesForSearch() {
+        if (this.isLoadingForSearch || !this.filterText || !this.hasMore) {
+            return;
+        }
 
-        (this.app.data.environments || []).forEach((env) => {
-            options.push({
-                group: 'Custom Environments',
-                value: `env:${env.id}:${lower(env.cli)}`,
-                label: `${env.name} (${lower(env.cli)})`
-            });
-        });
+        this.isLoadingForSearch = true;
+        this._renderItems();
 
-        return options;
+        try {
+            while (this.filterText && this.hasMore) {
+                const didLoad = await this._loadNextPage();
+                if (!didLoad) {
+                    break;
+                }
+            }
+        } finally {
+            this.isLoadingForSearch = false;
+            this._renderItems();
+        }
     }
 
-    _renderItems(body, items) {
+    _shouldLoadNextPage() {
+        if (!this.body || this.filterText || this.isLoadingPage || !this.hasMore) {
+            return false;
+        }
+
+        if (this.body.scrollHeight <= this.body.clientHeight) {
+            return false;
+        }
+
+        return this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - SCROLL_LOAD_THRESHOLD_PX;
+    }
+
+    _getLlmOptions() {
+        return buildLlmSelectionOptions(this.app.data.environments || []);
+    }
+
+    _renderItems() {
+        if (!this.body) {
+            return;
+        }
+
+        if (this.loadFailed && this.allItems.length === 0) {
+            this.body.innerHTML = '<div class="ch-empty">Failed to load history.</div>';
+            return;
+        }
+
         const filteredItems = this.filterText
-            ? items.filter(item => {
+            ? this.allItems.filter(item => {
                 const rawName = (item.sessionDisplayName || item.inputText || '').toLowerCase();
                 const brand = (this.app.getCliBrand(item.cli)?.label || '').toLowerCase();
                 return rawName.includes(this.filterText) || brand.includes(this.filterText);
             })
-            : items;
+            : this.allItems;
 
         if (!filteredItems.length) {
-            body.innerHTML = `<div class="ch-empty">${this.filterText ? 'No matches found.' : 'No chat history yet.'}</div>`;
+            if (this.filterText && (this.isLoadingPage || this.isLoadingForSearch)) {
+                this.body.innerHTML = `
+                    <div class="ch-loading ch-loading-inline">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                        <span class="ch-loading-label">Searching older sessions...</span>
+                    </div>
+                `;
+                return;
+            }
+
+            this.body.innerHTML = `<div class="ch-empty">${this.filterText ? 'No matches found.' : 'No chat history yet.'}</div>`;
             return;
         }
 
-        body.innerHTML = filteredItems.map(item => {
+        this.body.innerHTML = `${filteredItems.map(item => {
             const brand = this.app.getCliBrand(item.cli);
             const rawName = item.sessionDisplayName?.trim() || item.inputText?.trim().split('\n')[0] || 'Untitled';
             const name = rawName.length > 52 ? rawName.slice(0, 52) + '…' : rawName;
@@ -146,7 +261,7 @@ export class ChatHistorySidebar {
                 ? `<img src="${escapeHtml(brand.logo)}" alt="${escapeHtml(brand.label)}" class="ch-item-logo">`
                 : `<span class="ch-item-logo-fallback">${escapeHtml((brand.label || '?')[0])}</span>`;
             return `
-                <div class="ch-item${isActive ? ' ch-item-active' : ''}" data-id="${item.sessionId}">
+                <div class="ch-item${isActive ? ' ch-item-active' : ''}" data-id="${escapeHtml(item.id)}">
                     <div class="ch-item-icon">${logoHtml}</div>
                     <div class="ch-item-content">
                         <div class="ch-item-name" title="${escapeHtml(rawName)}">${escapeHtml(name)}</div>
@@ -156,30 +271,56 @@ export class ChatHistorySidebar {
                         <i class="fa-solid fa-ellipsis-vertical"></i>
                     </button>
                 </div>`;
-        }).join('');
+        }).join('')}${this._renderFooter()}`;
 
         // Bind items to open menu
-        const itemElements = body.querySelectorAll('.ch-item');
-        const contextMenu = body.closest('.ch-sidebar').querySelector('#ch-context-menu');
+        const itemElements = this.body.querySelectorAll('.ch-item');
+        const contextMenu = this.body.closest('.ch-sidebar')?.querySelector('#ch-context-menu');
+        if (!contextMenu) {
+            return;
+        }
         const submenu = contextMenu.querySelector('#ch-send-to-submenu');
 
         itemElements.forEach(itemEl => {
             itemEl.addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.activeItem = this.allItems.find(i => i.sessionId === itemEl.dataset.id);
+                
+                const sidebar = this.body.closest('.ch-sidebar');
+                sidebar.querySelectorAll('.ch-item-menu-active').forEach(el => el.classList.remove('ch-item-menu-active'));
+                
+                this.activeItem = this.allItems.find(i => i.id === itemEl.dataset.id);
 
                 const rect = itemEl.getBoundingClientRect();
-                const sidebarRect = body.closest('.ch-sidebar').getBoundingClientRect();
+                const sidebarRect = sidebar.getBoundingClientRect();
 
                 // Position relative to the item
                 contextMenu.style.top = `${rect.top - sidebarRect.top}px`;
                 contextMenu.style.left = `${rect.right - sidebarRect.left + 5}px`;
                 contextMenu.classList.add('show');
+                
+                itemEl.classList.add('ch-item-menu-active');
 
                 // Populate LLM submenu
                 this._populateLlmSubmenu(submenu);
             });
         });
+    }
+
+    _renderFooter() {
+        if (!this.isLoadingPage && !this.isLoadingForSearch) {
+            return '';
+        }
+
+        const label = this.filterText
+            ? 'Searching older sessions...'
+            : 'Loading more sessions...';
+
+        return `
+            <div class="ch-loading ch-loading-inline">
+                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                <span class="ch-loading-label">${label}</span>
+            </div>
+        `;
     }
 
     _populateLlmSubmenu(submenu) {
@@ -204,9 +345,13 @@ export class ChatHistorySidebar {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const value = item.dataset.value;
-                console.log(`Send session ${this.activeItem?.sessionId} to ${value}`);
+                console.log(`Send session ${this.activeItem?.id} to ${value}`);
                 // Implement actual send logic here
-                submenu.closest('.ch-context-menu').classList.remove('show');
+                const menu = submenu.closest('.ch-context-menu');
+                menu.classList.remove('show');
+                
+                const sidebar = menu.closest('.ch-sidebar');
+                sidebar?.querySelectorAll('.ch-item-menu-active').forEach(el => el.classList.remove('ch-item-menu-active'));
             });
         });
     }

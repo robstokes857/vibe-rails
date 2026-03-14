@@ -1,5 +1,6 @@
 import { SwarmPlanView } from './swarm-plan-view.js';
 import { SwarmStateStore } from './swarm-state-store.js';
+import { buildLlmSelectionOptions, parseLlmSelection } from './utils.js';
 
 const STEP_COLORS = [
     '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
@@ -35,21 +36,7 @@ export class SwarmController {
     }
 
     get cliOptions() {
-        const options = [
-            { value: 'base:claude', label: 'Claude (default)' },
-            { value: 'base:codex', label: 'Codex (default)' },
-            { value: 'base:gemini', label: 'Gemini (default)' },
-            { value: 'base:copilot', label: 'Copilot (default)' },
-        ];
-
-        (this.app.data.environments || []).forEach((env) => {
-            options.push({
-                value: `env:${env.id}:${env.cli.toLowerCase()}`,
-                label: `${env.name} (${env.cli.toLowerCase()})`
-            });
-        });
-
-        return options;
+        return buildLlmSelectionOptions(this.app.data.environments || []);
     }
 
     loadSwarm() {
@@ -406,16 +393,11 @@ export class SwarmController {
     }
 
     parseSelection(selected) {
-        if (!selected) return { cli: null, environmentName: null };
-        if (selected.startsWith('base:')) return { cli: selected.slice(5), environmentName: null };
-        if (selected.startsWith('env:')) {
-            const parts = selected.split(':');
-            const envId = parseInt(parts[1], 10);
-            const cli = parts[2];
-            const env = (this.app.data.environments || []).find((item) => item.id === envId);
-            return { cli, environmentName: env?.name || null };
-        }
-        return { cli: selected, environmentName: null };
+        const parsed = parseLlmSelection(selected, this.app.data.environments || []);
+        return {
+            cli: parsed.cli,
+            environmentName: parsed.environmentName
+        };
     }
 
     bindInitMessageEditors(root) {

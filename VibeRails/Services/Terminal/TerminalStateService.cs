@@ -8,7 +8,7 @@ public interface ITerminalStateService
 {
     Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default);
     void PublishSessionStart(string sessionId, string cli, string workDir, string? envName, IReadOnlyList<string> setupCommands, string launchCommand);
-    void LogOutput(string sessionId, string text, TerminalIoSource source = TerminalIoSource.Pty);
+    void LogOutput(string sessionId, ReadOnlyMemory<byte> data, TerminalIoSource source = TerminalIoSource.Pty);
     void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown);
     void RecordResize(string sessionId, int cols, int rows, TerminalIoSource source);
     void RecordRemoteCommand(string sessionId, string command, string? payload, TerminalIoSource source = TerminalIoSource.RemoteWebUi);
@@ -78,9 +78,12 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             sessionId, cli, workDir, envName, setupCommands, launchCommand, DateTimeOffset.UtcNow));
     }
 
-    public void LogOutput(string sessionId, string text, TerminalIoSource source = TerminalIoSource.Pty)
+    public void LogOutput(string sessionId, ReadOnlyMemory<byte> data, TerminalIoSource source = TerminalIoSource.Pty)
     {
         var now = DateTimeOffset.UtcNow;
+        // Observer gets a string (for PlainText/HasControl analysis) — UTF8 decode here is fine
+        // because observers are for tracing/analysis, not for terminal state reconstruction.
+        var text = System.Text.Encoding.UTF8.GetString(data.Span);
         _ioObserverService.Publish(new TerminalIoEvent(
             sessionId,
             TerminalIoDirection.Output,
@@ -88,8 +91,9 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             text,
             now));
         MarkOutputActivity(sessionId, now);
-        if (!TerminalOutputFilter.IsTransient(text))
-            _ = _dbService.LogSessionOutputAsync(sessionId, text, false);
+
+        // DB gets the raw bytes — no encoding loss, no filtering.
+        _ = _dbService.LogSessionOutputAsync(sessionId, data.ToArray(), false);
     }
 
     public void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown)

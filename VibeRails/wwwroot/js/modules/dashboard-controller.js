@@ -1,3 +1,5 @@
+import { buildLlmSelectionValue, parseLlmSelection, populateLlmSelectionSelect } from './utils.js';
+
 export class DashboardController {
     constructor(app) {
         this.app = app;
@@ -189,7 +191,7 @@ export class DashboardController {
             if (cli) {
                 const terminalContent = document.querySelector('[data-terminal-content]');
                 if (terminalContent) {
-                    this.app.terminalController.startTerminal(terminalContent, `base:${cli}`);
+                    this.app.terminalController.startTerminal(terminalContent, buildLlmSelectionValue(cli));
                 }
             }
         });
@@ -457,48 +459,17 @@ export class DashboardController {
     }
 
     populateSandboxCliSelect(selectEl) {
-        const environments = this.app.data.environments || [];
-
-        // Clear and re-add base CLIs
-        selectEl.innerHTML = '<option value="" disabled selected>Select CLI...</option>';
-
-        const baseGroup = document.createElement('optgroup');
-        baseGroup.label = 'Base CLIs';
-        baseGroup.innerHTML = `
-            <option value="base:claude">Claude</option>
-            <option value="base:codex">Codex</option>
-            <option value="base:gemini">Gemini</option>
-            <option value="base:copilot">Copilot</option>
-        `;
-        selectEl.appendChild(baseGroup);
-
-        if (environments.length > 0) {
-            const envGroup = document.createElement('optgroup');
-            envGroup.label = 'Custom Environments';
-            environments.forEach(env => {
-                const option = document.createElement('option');
-                option.value = `env:${env.id}:${env.cli}`;
-                option.textContent = `${env.name} (${env.cli})`;
-                envGroup.appendChild(option);
-            });
-            selectEl.appendChild(envGroup);
-        }
+        populateLlmSelectionSelect(selectEl, this.app.data.environments || [], {
+            placeholder: 'Select CLI...',
+            includeDefaultSuffix: false
+        });
     }
 
     parseSandboxCliSelection(selectEl) {
-        const value = selectEl?.value;
-        if (!value) return null;
-        if (value.startsWith('base:')) {
-            return { cli: value.replace('base:', ''), environmentName: null };
-        }
-        if (value.startsWith('env:')) {
-            const parts = value.split(':');
-            const envId = parseInt(parts[1]);
-            const cli = parts[2];
-            const env = (this.app.data.environments || []).find(e => e.id === envId);
-            return { cli, environmentName: env?.name || null };
-        }
-        return { cli: value, environmentName: null };
+        const parsed = parseLlmSelection(selectEl?.value, this.app.data.environments || []);
+        return parsed.cli
+            ? { cli: parsed.cli, environmentName: parsed.environmentName }
+            : null;
     }
 
     async launchEnvInWebUI(envId, envName, cli) {
@@ -506,7 +477,7 @@ export class DashboardController {
 
         const terminalContent = document.querySelector('[data-terminal-content]');
         if (terminalContent) {
-            const selection = `env:${envId}:${cli}`;
+            const selection = buildLlmSelectionValue(cli, envId);
             await this.app.terminalController.startTerminal(terminalContent, selection);
         }
     }

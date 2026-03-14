@@ -121,10 +121,6 @@ public static class TerminalIoRouter
         if (outputBytes.IsEmpty)
             return;
 
-        var output = Encoding.UTF8.GetString(outputBytes.Span);
-        if (output.Length == 0)
-            return;
-
-        stateService.LogOutput(sessionId, output, source);
+        stateService.LogOutput(sessionId, outputBytes, source);
     }
 }
