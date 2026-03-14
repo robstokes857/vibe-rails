@@ -9,6 +9,7 @@ public static class RouteExtensions
         EnvironmentRoutes.Map(app);
         CliLaunchRoutes.Map(app, launchDirectory);
         SessionRoutes.Map(app);
+        ChatHistoryRoutes.Map(app);
         TerminalRoutes.Map(app, launchDirectory);
         TerminalTabsRoutes.Map(app);
         SandboxRoutes.Map(app, launchDirectory);
@@ -24,6 +25,7 @@ public static class RouteExtensions
         PinRoutes.Map(app);
         LifecycleRoutes.Map(app);
         TraceRoutes.Map(app);
+        EventRoutes.Map(app);
         BertRoutes.Map(app);
         //ProxyRoutes.Map(app);
     }

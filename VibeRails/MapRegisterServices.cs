@@ -1,9 +1,10 @@
 using VibeRails.Auth;
+using VibeRails.Jobs;
+using VibeRails.Services;
 using VibeRails.Services.Bert;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
-using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
 using VibeRails.Services.Messaging;
@@ -23,6 +24,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<IBertInputCaptureService, BertInputCaptureService>();
             serviceCollection.AddSingleton<IBertExplorerService, BertExplorerService>();
             serviceCollection.AddScoped<IDbService, DbService>();
+            serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
             serviceCollection.AddScoped<IRepository>(sp =>
             {
                 var connectionString = $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
@@ -79,11 +81,22 @@ namespace VibeRails
             // Terminal Session Service (scoped to work with other scoped services)
             serviceCollection.AddScoped<ITerminalIoObserver, MyTerminalObserver>();
             serviceCollection.AddScoped<ITerminalIoObserver, TraceObserver>();
+            serviceCollection.AddScoped<ITerminalIoObserver, WebSocketEventObserver>();
             serviceCollection.AddScoped<ITerminalIoObserverService, TerminalIoObserverService>();
             serviceCollection.AddScoped<ITerminalSessionService, TerminalSessionService>();
             serviceCollection.AddSingleton<ITerminalTabHostService, TerminalTabHostService>();
             serviceCollection.AddSingleton<ILocalClientTracker, LocalClientTracker>();
             serviceCollection.AddHostedService<LocalClientLifecycleWatchdogService>();
+
+            // System resource monitor — injectable as ISystemResourceService, also runs as a hosted service.
+            serviceCollection.AddSingleton<SystemResourceService>();
+            serviceCollection.AddSingleton<ISystemResourceService>(sp => sp.GetRequiredService<SystemResourceService>());
+            serviceCollection.AddHostedService(sp => sp.GetRequiredService<SystemResourceService>());
+
+            serviceCollection.AddHostedService<UpdateCheckJob>();
+
+            // Event bus — fire-and-forget publish to connected WebSocket viewers
+            serviceCollection.AddSingleton<EventBus>();
 
             // Remote State Service (for terminal session remote registration)
             serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>();

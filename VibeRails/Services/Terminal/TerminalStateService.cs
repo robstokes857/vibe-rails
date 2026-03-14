@@ -30,8 +30,8 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private static readonly Dictionary<string, IRemoteTerminalConnection> s_remoteConnections = new();
     private static readonly Dictionary<string, SessionActivityState> s_sessionActivity = new();
     private static readonly Lock s_stateLock = new();
-    private static readonly TimeSpan s_idleThreshold = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan s_idleCheckInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_idleThreshold = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_idleCheckInterval = TimeSpan.FromSeconds(2);
 
     public TerminalStateService(
         IDbService dbService,
@@ -49,9 +49,6 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     {
         var sessionId = Guid.NewGuid().ToString();
         await _dbService.CreateSessionAsync(sessionId, cli, envName, workDir);
-
-        var commitHash = await _gitService.GetCurrentCommitHashAsync(ct);
-        await _dbService.InsertUserInputAsync(sessionId, 0, "[SESSION_START]", commitHash);
 
         var now = DateTimeOffset.UtcNow;
         lock (s_stateLock)

@@ -1,4 +1,5 @@
 import { VibeTerminal } from './vibe-terminal.js';
+import { ChatHistorySidebar } from './chat-history-sidebar.js';
 
 const RESIZE_PREFIX = '__resize__:';
 const DEFAULT_SELECTION = null;
@@ -659,6 +660,7 @@ class TerminalManager {
         this.settingsBtn   = this.container.querySelector('#terminal-settings-btn');
         this.settingsPanel = this.container.querySelector('#terminal-settings-panel');
         this.settingsClose = this.container.querySelector('#terminal-settings-close');
+        this.historyBtn    = this.container.querySelector('#terminal-history-btn');
 
         this.populateSelect();
         this.bindActions();
@@ -781,6 +783,7 @@ class TerminalManager {
         this.zoomOutBtn?.addEventListener('click', () => this.adjustFontSize(-1));
         this.settingsBtn?.addEventListener('click',   () => this.toggleSettingsPanel());
         this.settingsClose?.addEventListener('click', () => this.toggleSettingsPanel(false));
+        this.historyBtn?.addEventListener('click',    () => this.toggleHistoryPanel());
         this.container.querySelector('#terminal-settings-font-size')
             ?.addEventListener('change', (e) => this.adjustFontSize(0, parseInt(e.target.value, 10)));
         this.container.querySelector('#terminal-settings-font-family')
@@ -2174,6 +2177,17 @@ class TerminalManager {
         if (!open) this.focusActiveTerminalInput();
     }
 
+    toggleHistoryPanel(forceOpen) {
+        const sidebar = document.getElementById('ch-sidebar');
+        if (!sidebar) return;
+        const isCollapsed = sidebar.classList.contains('ch-sidebar-collapsed');
+        const open = forceOpen ?? isCollapsed;
+        sidebar.classList.toggle('ch-sidebar-collapsed', !open);
+        this.historyBtn?.classList.toggle('active', open);
+        this.updateFocusContainerHeight();
+        if (!open) this.focusActiveTerminalInput();
+    }
+
     applyTheme(key) {
         if (!window.CXL_THEMES?.[key]) return;
         try { localStorage.setItem('viberails_terminal_theme', key); } catch {}
@@ -2338,7 +2352,10 @@ export class TerminalController {
 
         content.innerHTML = `
             <div class="view terminal-focus-view" data-view="terminal-focus">
-                <div class="terminal-focus-body" data-terminal-focus-content></div>
+                <div class="terminal-focus-layout">
+                    ${ChatHistorySidebar.renderHtml()}
+                    <div class="terminal-focus-body" data-terminal-focus-content></div>
+                </div>
             </div>
         `;
 
@@ -2351,6 +2368,14 @@ export class TerminalController {
             focusView: true,
             preferredSelection: data.preferredSelection || null,
             preferredTabId: data.preferredTabId || null
+        });
+
+        this._initChatHistorySidebar(root);
+    }
+
+    _initChatHistorySidebar(root) {
+        new ChatHistorySidebar(this.app).mount(root, {
+            onToggle: () => this.manager?.updateFocusContainerHeight()
         });
     }
 
@@ -2427,6 +2452,13 @@ export class TerminalController {
                             <button type="button" class="terminal-control-btn icon-btn terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
                             <span class="terminal-font-size-label" id="terminal-font-size-label">14</span>
                             <button type="button" class="terminal-control-btn icon-btn terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
+                            ${isFocusView ? `
+                            <button type="button" class="terminal-control-btn icon-btn" id="terminal-history-btn" title="Chat history" aria-label="Chat history">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
+                                    <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0"/>
+                                </svg>
+                            </button>` : ''}
                             <button type="button" class="terminal-control-btn icon-btn" id="terminal-settings-btn" title="Terminal settings" aria-label="Terminal settings">&#x2699;</button>
                             ${lockButtonHtml}
                             <button type="button" class="terminal-control-btn icon-btn" id="terminal-popout-btn" title="${isFocusView ? 'Return to dashboard' : 'Open in fullscreen'}" aria-label="${isFocusView ? 'Back to dashboard' : 'Open in fullscreen'}">

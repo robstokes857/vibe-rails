@@ -7,6 +7,11 @@ public static class AuthRoutes
 {
     public static void Map(WebApplication app)
     {
+        app.MapGet("/auth/tab-token", (IAuthService authService) =>
+        {
+            return Results.Text(authService.GetInstanceTabToken(), "text/plain");
+        });
+
         // Bootstrap endpoint - validates one-time code and sets auth cookie
         app.MapGet("/auth/bootstrap", (HttpContext context, IAuthService authService, string? code, string? redirect) =>
         {

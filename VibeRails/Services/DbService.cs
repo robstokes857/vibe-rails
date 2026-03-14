@@ -46,7 +46,9 @@ namespace VibeRails.Services
                     WorkingDirectory TEXT NOT NULL,
                     StartedUTC TEXT NOT NULL,
                     EndedUTC TEXT,
-                    ExitCode INTEGER
+                    ExitCode INTEGER,
+                    ParentSessionId TEXT DEFAULT '',
+                    SessionDisplayName TEXT DEFAULT ''
                 )
                 """,
                 "CREATE INDEX IF NOT EXISTS idx_sessions_started ON Sessions(StartedUTC DESC)",
@@ -117,6 +119,25 @@ namespace VibeRails.Services
                 using var cmd = connection.CreateCommand();
                 cmd.CommandText = sql;
                 cmd.ExecuteNonQuery();
+            }
+
+            // Schema migrations — silently skip if column already exists
+            foreach (var migration in new[]
+            {
+                "ALTER TABLE Sessions ADD COLUMN ParentSessionId TEXT DEFAULT ''",
+                "ALTER TABLE Sessions ADD COLUMN SessionDisplayName TEXT DEFAULT ''",
+            })
+            {
+                try
+                {
+                    using var cmd = connection.CreateCommand();
+                    cmd.CommandText = migration;
+                    cmd.ExecuteNonQuery();
+                }
+                catch (SqliteException ex) when (ex.Message.Contains("duplicate column name"))
+                {
+                    // Already migrated
+                }
             }
         }
 
@@ -275,6 +296,47 @@ namespace VibeRails.Services
             }
 
             return sessions;
+        }
+
+        public async Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            var items = new List<ChatHistoryItem>();
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT s.Id, s.Cli, s.EnvironmentName, s.WorkingDirectory, s.StartedUTC, s.EndedUTC, s.ExitCode, s.ParentSessionId, s.SessionDisplayName,
+                       u.Sequence, SUBSTR(u.InputText, 1, 120)
+                FROM Sessions s
+                LEFT JOIN UserInputs u ON u.Id = (
+                    SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
+                )
+                ORDER BY s.StartedUTC DESC
+                LIMIT $limit OFFSET $offset;
+                """;
+            cmd.Parameters.AddWithValue("$limit", limit);
+            cmd.Parameters.AddWithValue("$offset", offset);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(new ChatHistoryItem(
+                    Id: reader.GetString(0),
+                    Cli: reader.GetString(1),
+                    EnvironmentName: reader.IsDBNull(2) ? null : reader.GetString(2),
+                    WorkingDirectory: reader.GetString(3),
+                    StartedUTC: DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                    EndedUTC: reader.IsDBNull(5) ? null : DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                    ExitCode: reader.IsDBNull(6) ? null : reader.GetInt32(6),
+                    ParentSessionId: reader.IsDBNull(7) ? null : reader.GetString(7),
+                    SessionDisplayName: reader.IsDBNull(8) ? null : reader.GetString(8),
+                    Sequence: reader.IsDBNull(9) ? null : reader.GetInt32(9),
+                    InputText: reader.IsDBNull(10) ? null : reader.GetString(10)
+                ));
+            }
+
+            return items;
         }
 
         // User input tracking methods
