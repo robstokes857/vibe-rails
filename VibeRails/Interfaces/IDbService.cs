@@ -9,7 +9,7 @@ namespace VibeRails.Interfaces
 
         // Session logging for terminal sessions
         Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir);
-        Task LogSessionOutputAsync(string sessionId, string content, bool isError = false);
+        Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false);
         Task CompleteSessionAsync(string sessionId, int exitCode);
 
         // Session retrieval

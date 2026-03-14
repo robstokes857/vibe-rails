@@ -1,3 +1,5 @@
+import { buildLlmSelectionOptionsMarkup } from './utils.js';
+
 function escapeHtml(value) {
     if (value === null || value === undefined) return '';
     return String(value)
@@ -103,15 +105,10 @@ export class SwarmPlanView {
                                 rows="5">${escapeHtml(step.description || '')}</textarea>
                             <div class="swarm-task-controls">
                                 <select class="swarm-task-select" data-step-index="${stepIndex}">
-                                    <option value="">Select CLI / Environment</option>
-            `;
-
-            this.cliOptions.forEach(({ value, label }) => {
-                const sel = selected === value ? 'selected' : '';
-                html += `<option value="${escapeHtml(value)}" ${sel}>${escapeHtml(label)}</option>`;
-            });
-
-            html += `
+                                    ${buildLlmSelectionOptionsMarkup(this.cliOptions, {
+                                        placeholder: 'Select CLI / Environment',
+                                        selectedValue: selected
+                                    })}
                                 </select>
                                 <button class="swarm-task-start swarm-step-action-btn ${step.started ? 'active' : ''}"
                                     data-action="swarm-start-step"

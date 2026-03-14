@@ -57,7 +57,7 @@ namespace VibeRails.Services
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     SessionId TEXT NOT NULL,
                     Timestamp TEXT NOT NULL,
-                    Content TEXT NOT NULL,
+                    Content BLOB NOT NULL,
                     IsError INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY (SessionId) REFERENCES Sessions(Id)
                 )
@@ -165,7 +165,7 @@ namespace VibeRails.Services
             await cmd.ExecuteNonQueryAsync();
         }
 
-        public async Task LogSessionOutputAsync(string sessionId, string content, bool isError = false)
+        public async Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false)
         {
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
@@ -178,7 +178,7 @@ namespace VibeRails.Services
 
             cmd.Parameters.AddWithValue("$sessionId", sessionId);
             cmd.Parameters.AddWithValue("$timestamp", DateTime.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("$content", content);
+            cmd.Parameters.Add(new SqliteParameter("$content", SqliteType.Blob) { Value = content });
             cmd.Parameters.AddWithValue("$isError", isError ? 1 : 0);
 
             await cmd.ExecuteNonQueryAsync();
@@ -273,7 +273,7 @@ namespace VibeRails.Services
                         Id: reader.GetInt64(0),
                         SessionId: reader.GetString(1),
                         Timestamp: DateTime.Parse(reader.GetString(2), null, System.Globalization.DateTimeStyles.RoundtripKind),
-                        Content: reader.GetString(3),
+                        Content: Convert.ToBase64String((byte[])reader.GetValue(3)),
                         IsError: reader.GetInt32(4) == 1
                     ));
                 }

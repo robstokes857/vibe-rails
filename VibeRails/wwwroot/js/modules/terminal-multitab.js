@@ -1,5 +1,10 @@
 import { VibeTerminal } from './vibe-terminal.js';
 import { ChatHistorySidebar } from './chat-history-sidebar.js';
+import {
+    buildLlmSelectionValue,
+    parseLlmSelection,
+    populateLlmSelectionSelect
+} from './utils.js';
 
 const RESIZE_PREFIX = '__resize__:';
 const DEFAULT_SELECTION = null;
@@ -10,11 +15,6 @@ const TAB_META_PREFIX = 'viberails_terminal_tab_meta_';
 
 function lower(value) {
     return (value || '').toString().trim().toLowerCase();
-}
-
-function capitalize(value) {
-    if (!value) return '';
-    return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function cleanString(value) {
@@ -724,7 +724,7 @@ class TerminalManager {
         if (this.options.preselectedEnvId) {
             const env = (this.app.data.environments || []).find((item) => item.id === this.options.preselectedEnvId);
             if (env) {
-                return `env:${env.id}:${lower(env.cli)}`;
+                return buildLlmSelectionValue(env.cli, env.id);
             }
         }
 
@@ -1274,7 +1274,8 @@ class TerminalManager {
     }
 
     getSelectionMeta(selection) {
-        if (!selection) {
+        const parsed = parseLlmSelection(selection, this.app.data.environments || []);
+        if (!parsed.cli) {
             return {
                 cli: null,
                 envId: null,
@@ -1282,36 +1283,19 @@ class TerminalManager {
                 displayName: 'Select LLM to launch Terminal. Terminals run safely in the background even if you navigate away.'
             };
         }
-        if (!selection.startsWith('env:')) {
-            const cli = selection.startsWith('base:')
-                ? lower(selection.replace('base:', ''))
-                : lower(selection);
-            return {
-                cli,
-                envId: null,
-                environmentName: null,
-                displayName: capitalize(cli)
-            };
-        }
-
-        const parts = selection.split(':');
-        const envId = Number.parseInt(parts[1], 10);
-        const cli = lower(parts[2]);
-        const env = (this.app.data.environments || []).find((item) => item.id === envId);
-        const envName = env?.name || `Env ${envId}`;
 
         return {
-            cli,
-            envId,
-            environmentName: env?.name || null,
-            displayName: `${envName} (${cli})`
+            cli: parsed.cli,
+            envId: parsed.envId,
+            environmentName: parsed.environmentName,
+            displayName: parsed.displayName
         };
     }
 
     resolveSelectionFromOptions(options) {
         const cli = lower(options?.cli || 'claude');
         if (!options?.environmentName) {
-            return `base:${cli}`;
+            return buildLlmSelectionValue(cli);
         }
 
         const env = (this.app.data.environments || []).find((item) =>
@@ -1319,7 +1303,7 @@ class TerminalManager {
             && lower(item.cli) === cli
         );
 
-        return env ? `env:${env.id}:${cli}` : `base:${cli}`;
+        return env ? buildLlmSelectionValue(cli, env.id) : buildLlmSelectionValue(cli);
     }
 
     applySelection(tab, selection) {
@@ -1446,46 +1430,10 @@ class TerminalManager {
         this.renderTabButton(tab);
     }
 
-    getSelectionOptions() {
-        const options = [
-            { group: 'Base CLIs', value: 'base:claude', label: 'Claude (default)' },
-            { group: 'Base CLIs', value: 'base:codex', label: 'Codex (default)' },
-            { group: 'Base CLIs', value: 'base:gemini', label: 'Gemini (default)' },
-            { group: 'Base CLIs', value: 'base:copilot', label: 'Copilot (default)' }
-        ];
-
-        (this.app.data.environments || []).forEach((env) => {
-            options.push({
-                group: 'Custom Environments',
-                value: `env:${env.id}:${lower(env.cli)}`,
-                label: `${env.name} (${lower(env.cli)})`
-            });
-        });
-
-        return options;
-    }
-
     populateSelect() {
         if (!this.headerSelect || this.headerSelect.tagName !== 'SELECT') return;
-
-        this.headerSelect.innerHTML = '<option value="" disabled>Select LLM...</option>';
-
-        const groups = {};
-        this.getSelectionOptions().forEach((option) => {
-            if (!groups[option.group]) groups[option.group] = [];
-            groups[option.group].push(option);
-        });
-
-        Object.keys(groups).forEach(groupName => {
-            const optgroup = document.createElement('optgroup');
-            optgroup.label = groupName;
-            groups[groupName].forEach(option => {
-                const opt = document.createElement('option');
-                opt.value = option.value;
-                opt.textContent = option.label;
-                optgroup.appendChild(opt);
-            });
-            this.headerSelect.appendChild(optgroup);
+        populateLlmSelectionSelect(this.headerSelect, this.app.data.environments || [], {
+            placeholder: 'Select LLM...'
         });
     }
 
@@ -1731,14 +1679,13 @@ class TerminalManager {
     }
 
     parseSelectionMetadata(selection) {
-        if (!selection || !selection.startsWith('env:')) {
+        const parsed = parseLlmSelection(selection, this.app.data.environments || []);
+        if (parsed.kind !== 'environment') {
             return { preselectedEnvId: null };
         }
 
-        const parts = selection.split(':');
-        const envId = Number.parseInt(parts[1], 10);
         return {
-            preselectedEnvId: Number.isFinite(envId) ? envId : null
+            preselectedEnvId: parsed.envId
         };
     }
 
@@ -1862,6 +1809,7 @@ class TerminalManager {
         }
 
         this.panel?.style.removeProperty('--terminal-available-height');
+        document.getElementById('ch-sidebar')?.style.removeProperty('--ch-available-height');
     }
 
     updateFocusContainerHeight() {
@@ -1876,6 +1824,13 @@ class TerminalManager {
         const containerRect = this.terminalContainer.getBoundingClientRect();
         const availableHeight = Math.max(0, Math.round(viewportHeight - containerRect.top - 12));
         this.panel.style.setProperty('--terminal-available-height', `${availableHeight}px`);
+
+        const historySidebar = document.getElementById('ch-sidebar');
+        if (historySidebar) {
+            const sidebarRect = historySidebar.getBoundingClientRect();
+            const sidebarHeight = Math.max(0, Math.round(viewportHeight - sidebarRect.top - 12));
+            historySidebar.style.setProperty('--ch-available-height', `${sidebarHeight}px`);
+        }
     }
 
     updateWindowControlState() {
