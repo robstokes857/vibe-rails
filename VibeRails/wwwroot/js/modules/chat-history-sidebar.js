@@ -4,6 +4,9 @@ import { formatRelativeTime, escapeHtml } from './utils.js';
 export class ChatHistorySidebar {
     constructor(app) {
         this.app = app;
+        this.allItems = [];
+        this.filterText = '';
+        this.activeItem = null;
     }
 
     static renderHtml() {
@@ -17,23 +20,74 @@ export class ChatHistorySidebar {
                         </svg>
                         Chat History
                     </span>
-                    <button class="ch-sidebar-hide-btn" id="ch-sidebar-hide-btn" title="Hide history">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
-                            <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/>
-                        </svg>
-                    </button>
+                    <div class="ch-sidebar-actions">
+                        <button class="ch-sidebar-settings-btn" id="ch-sidebar-settings-btn" title="Chat Settings">
+                            <i class="fa-solid fa-gear"></i>
+                        </button>
+                        <button class="ch-sidebar-hide-btn" id="ch-sidebar-hide-btn" title="Hide history">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
+                                <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="ch-sidebar-search">
+                    <div class="ch-search-input-wrapper">
+                        <i class="fa-solid fa-magnifying-glass ch-search-icon"></i>
+                        <input type="text" class="ch-search-input" id="ch-search-input" placeholder="Search sessions..." autocomplete="off">
+                    </div>
                 </div>
                 <div class="ch-sidebar-body" id="ch-sidebar-body"></div>
+                
+                <!-- Floating Context Menu -->
+                <div class="ch-context-menu" id="ch-context-menu">
+                  <div class="ch-context-menu-item" data-action="resume">Resume</div>
+                   <div class="ch-context-menu-divider"></div>
+                    <div class="ch-context-menu-item ch-has-submenu" id="ch-menu-send-to">
+                        <span>Send to...</span>
+                        <i class="fa-solid fa-chevron-right ms-auto" style="font-size: 0.6rem; opacity: 0.5;"></i>
+                        <div class="ch-context-submenu" id="ch-send-to-submenu">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                    <div class="ch-context-menu-divider"></div>
+                    <div class="ch-context-menu-item" data-action="rename">Rename</div>
+                    <div class="ch-context-menu-item" data-action="summarize">Summarize</div>
+                    <div class="ch-context-menu-item text-danger" data-action="delete">Delete</div>
+                </div>
             </div>`;
     }
 
     mount(root, { onToggle } = {}) {
         const sidebar = root.querySelector('#ch-sidebar');
+        const body = root.querySelector('#ch-sidebar-body');
+        const contextMenu = root.querySelector('#ch-context-menu');
+
         root.querySelector('#ch-sidebar-hide-btn')?.addEventListener('click', () => {
             sidebar?.classList.toggle('ch-sidebar-collapsed');
             onToggle?.();
         });
-        this._load(root.querySelector('#ch-sidebar-body'));
+
+        root.querySelector('#ch-sidebar-settings-btn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            console.log('Chat History Settings Clicked');
+            // TODO: Implement settings modal or action
+        });
+
+        const searchInput = root.querySelector('#ch-search-input');
+        searchInput?.addEventListener('input', (e) => {
+            this.filterText = e.target.value.toLowerCase().trim();
+            this._renderItems(body, this.allItems);
+        });
+
+        // Close menu on click outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.ch-item-menu-btn') && !e.target.closest('.ch-context-menu')) {
+                contextMenu?.classList.remove('show');
+            }
+        });
+
+        this._load(body);
     }
 
     async _load(body) {
@@ -41,18 +95,48 @@ export class ChatHistorySidebar {
         body.innerHTML = '<div class="ch-loading"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>';
         try {
             const data = await this.app.apiCall('/api/v1/chatHistory', 'GET', null, { showLoading: false });
-            this._renderItems(body, data?.items || []);
+            this.allItems = data?.items || [];
+            this._renderItems(body, this.allItems);
         } catch {
             body.innerHTML = '<div class="ch-empty">Failed to load history.</div>';
         }
     }
 
+    _getLlmOptions() {
+        const lower = s => s ? s.toLowerCase() : '';
+        const options = [
+            { group: 'Base CLIs', value: 'base:claude', label: 'Claude (default)' },
+            { group: 'Base CLIs', value: 'base:codex', label: 'Codex (default)' },
+            { group: 'Base CLIs', value: 'base:gemini', label: 'Gemini (default)' },
+            { group: 'Base CLIs', value: 'base:copilot', label: 'Copilot (default)' }
+        ];
+
+        (this.app.data.environments || []).forEach((env) => {
+            options.push({
+                group: 'Custom Environments',
+                value: `env:${env.id}:${lower(env.cli)}`,
+                label: `${env.name} (${lower(env.cli)})`
+            });
+        });
+
+        return options;
+    }
+
     _renderItems(body, items) {
-        if (!items.length) {
-            body.innerHTML = '<div class="ch-empty">No chat history yet.</div>';
+        const filteredItems = this.filterText
+            ? items.filter(item => {
+                const rawName = (item.sessionDisplayName || item.inputText || '').toLowerCase();
+                const brand = (this.app.getCliBrand(item.cli)?.label || '').toLowerCase();
+                return rawName.includes(this.filterText) || brand.includes(this.filterText);
+            })
+            : items;
+
+        if (!filteredItems.length) {
+            body.innerHTML = `<div class="ch-empty">${this.filterText ? 'No matches found.' : 'No chat history yet.'}</div>`;
             return;
         }
-        body.innerHTML = items.map(item => {
+
+        body.innerHTML = filteredItems.map(item => {
             const brand = this.app.getCliBrand(item.cli);
             const rawName = item.sessionDisplayName?.trim() || item.inputText?.trim().split('\n')[0] || 'Untitled';
             const name = rawName.length > 52 ? rawName.slice(0, 52) + '…' : rawName;
@@ -62,13 +146,68 @@ export class ChatHistorySidebar {
                 ? `<img src="${escapeHtml(brand.logo)}" alt="${escapeHtml(brand.label)}" class="ch-item-logo">`
                 : `<span class="ch-item-logo-fallback">${escapeHtml((brand.label || '?')[0])}</span>`;
             return `
-                <div class="ch-item${isActive ? ' ch-item-active' : ''}">
+                <div class="ch-item${isActive ? ' ch-item-active' : ''}" data-id="${item.sessionId}">
                     <div class="ch-item-icon">${logoHtml}</div>
                     <div class="ch-item-content">
                         <div class="ch-item-name" title="${escapeHtml(rawName)}">${escapeHtml(name)}</div>
                         <div class="ch-item-meta">${escapeHtml(brand.label)}${isActive ? ' · <span class="ch-item-live">live</span>' : ` · ${time}`}</div>
                     </div>
+                    <button class="ch-item-menu-btn" title="Actions">
+                        <i class="fa-solid fa-ellipsis-vertical"></i>
+                    </button>
                 </div>`;
         }).join('');
+
+        // Bind items to open menu
+        const itemElements = body.querySelectorAll('.ch-item');
+        const contextMenu = body.closest('.ch-sidebar').querySelector('#ch-context-menu');
+        const submenu = contextMenu.querySelector('#ch-send-to-submenu');
+
+        itemElements.forEach(itemEl => {
+            itemEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.activeItem = this.allItems.find(i => i.sessionId === itemEl.dataset.id);
+
+                const rect = itemEl.getBoundingClientRect();
+                const sidebarRect = body.closest('.ch-sidebar').getBoundingClientRect();
+
+                // Position relative to the item
+                contextMenu.style.top = `${rect.top - sidebarRect.top}px`;
+                contextMenu.style.left = `${rect.right - sidebarRect.left + 5}px`;
+                contextMenu.classList.add('show');
+
+                // Populate LLM submenu
+                this._populateLlmSubmenu(submenu);
+            });
+        });
+    }
+
+    _populateLlmSubmenu(submenu) {
+        const options = this._getLlmOptions();
+        const groups = {};
+        options.forEach(opt => {
+            if (!groups[opt.group]) groups[opt.group] = [];
+            groups[opt.group].push(opt);
+        });
+
+        submenu.innerHTML = Object.keys(groups).map(groupName => `
+            <div class="ch-submenu-group-label">${escapeHtml(groupName)}</div>
+            ${groups[groupName].map(opt => `
+                <div class="ch-context-menu-item" data-value="${escapeHtml(opt.value)}">
+                    ${escapeHtml(opt.label)}
+                </div>
+            `).join('')}
+        `).join('<div class="ch-context-menu-divider"></div>');
+
+        // Bind submenu item clicks
+        submenu.querySelectorAll('.ch-context-menu-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const value = item.dataset.value;
+                console.log(`Send session ${this.activeItem?.sessionId} to ${value}`);
+                // Implement actual send logic here
+                submenu.closest('.ch-context-menu').classList.remove('show');
+            });
+        });
     }
 }

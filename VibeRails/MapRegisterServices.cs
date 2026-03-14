@@ -94,6 +94,7 @@ namespace VibeRails
             serviceCollection.AddHostedService(sp => sp.GetRequiredService<SystemResourceService>());
 
             serviceCollection.AddHostedService<UpdateCheckJob>();
+            serviceCollection.AddHostedService<StaleSessionCleanupJob>();
 
             // Event bus — fire-and-forget publish to connected WebSocket viewers
             serviceCollection.AddSingleton<EventBus>();

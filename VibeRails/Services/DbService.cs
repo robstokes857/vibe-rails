@@ -184,6 +184,23 @@ namespace VibeRails.Services
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task<List<string>> GetOpenSessionIdsAsync(DateTime olderThan, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT Id FROM Sessions WHERE EndedUTC IS NULL AND StartedUTC < $cutoff";
+            cmd.Parameters.AddWithValue("$cutoff", olderThan.ToString("O"));
+
+            var ids = new List<string>();
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                ids.Add(reader.GetString(0));
+
+            return ids;
+        }
+
         public async Task CompleteSessionAsync(string sessionId, int exitCode)
         {
             await using var connection = new SqliteConnection(_connectionString);

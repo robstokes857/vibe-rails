@@ -16,6 +16,7 @@ namespace VibeRails.Interfaces
         Task<SessionWithLogsResponse?> GetSessionWithLogsAsync(string sessionId, CancellationToken cancellationToken);
         Task<List<SessionResponse>> GetRecentSessionsAsync(int limit, CancellationToken cancellationToken);
         Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, CancellationToken cancellationToken);
+        Task<List<string>> GetOpenSessionIdsAsync(DateTime olderThan, CancellationToken cancellationToken);
 
         // User input tracking
         Task<UserInputRecord?> GetLastUserInputAsync(string sessionId);
