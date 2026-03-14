@@ -9,19 +9,6 @@ using VibeRails.Services;
 
 namespace VibeRails.Services.Terminal;
 
-public interface ITerminalTabHostService
-{
-    int MaxTabs { get; }
-    Task<IReadOnlyList<TerminalTabStatusResponse>> ListTabsAsync(CancellationToken cancellationToken = default);
-    Task<TerminalTabStatusResponse> CreateTabAsync(CancellationToken cancellationToken = default);
-    Task<bool> DeleteTabAsync(string tabId, CancellationToken cancellationToken = default);
-    Task<TerminalStatusResponse?> GetStatusAsync(string tabId, CancellationToken cancellationToken = default);
-    Task<TerminalStatusResponse> StartSessionAsync(string tabId, StartTerminalRequest request, CancellationToken cancellationToken = default);
-    Task<TerminalStatusResponse> StopSessionAsync(string tabId, CancellationToken cancellationToken = default);
-    Task HandleWebSocketProxyAsync(string tabId, WebSocket browserSocket, int? cols = null, int? rows = null, CancellationToken cancellationToken = default);
-    Task StopAllAsync(CancellationToken cancellationToken = default);
-}
-
 public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisposable
 {
     private const int StartupTimeoutSeconds = 30;
@@ -42,19 +29,22 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILocalClientTracker _localClientTracker;
+    private readonly EventBus _eventBus;
     private readonly SemaphoreSlim _createGate = new(1, 1);
     private readonly Lock _lock = new();
     private readonly Dictionary<string, TerminalChildProcess> _tabs = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CancellationTokenSource> _tabRelayCts = new(StringComparer.Ordinal);
     private readonly string _launchDirectory;
     private readonly string _tabsOwnerId;
     private bool _tabsOwnerAcquired;
 
     public int MaxTabs => 8;
 
-    public TerminalTabHostService(IHttpClientFactory httpClientFactory, ILocalClientTracker localClientTracker)
+    public TerminalTabHostService(IHttpClientFactory httpClientFactory, ILocalClientTracker localClientTracker, EventBus eventBus)
     {
         _httpClientFactory = httpClientFactory;
         _localClientTracker = localClientTracker;
+        _eventBus = eventBus;
         _launchDirectory = Directory.GetCurrentDirectory();
         _tabsOwnerId = $"terminal-tabs:{Environment.ProcessId}";
     }
@@ -94,11 +84,15 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
             child = await SpawnChildAsync(cancellationToken);
 
+            var relayCts = new CancellationTokenSource();
             lock (_lock)
             {
                 _tabs[child.TabId] = child;
+                _tabRelayCts[child.TabId] = relayCts;
                 EnsureTabsOwnerLocked();
             }
+
+            _ = RelayChildEventsAsync(child, relayCts.Token);
 
             return await BuildTabStatusAsync(child, cancellationToken);
         }
@@ -126,6 +120,11 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 return false;
             }
             _tabs.Remove(tabId);
+            if (_tabRelayCts.Remove(tabId, out var relayCts))
+            {
+                relayCts.Cancel();
+                relayCts.Dispose();
+            }
             ReleaseTabsOwnerIfNeededLocked();
         }
 
@@ -199,6 +198,73 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         await CloseWebSocketAsync(browserSocket, cancellationToken);
     }
 
+    private async Task RelayChildEventsAsync(TerminalChildProcess child, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested && !child.Process.HasExited)
+        {
+            try
+            {
+                using var ws = new ClientWebSocket();
+                ws.Options.SetRequestHeader("viberails_session", child.SessionToken);
+                ws.Options.AddSubProtocol(child.TabToken);
+
+                await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{child.Port}/api/v1/events/ws"), ct);
+
+                var buffer = new byte[8192];
+                using var frameAccumulator = new System.IO.MemoryStream();
+                while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
+                {
+                    var result = await ws.ReceiveAsync(buffer, ct);
+                    if (result.MessageType == WebSocketMessageType.Close)
+                        break;
+                    if (result.MessageType != WebSocketMessageType.Text)
+                        continue;
+
+                    frameAccumulator.Write(buffer, 0, result.Count);
+
+                    if (!result.EndOfMessage)
+                        continue;
+
+                    var json = Encoding.UTF8.GetString(frameAccumulator.GetBuffer(), 0, (int)frameAccumulator.Length);
+                    frameAccumulator.SetLength(0);
+
+                    try
+                    {
+                        var msg = JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.EventMessage);
+                        if (msg != null)
+                            _eventBus.Publish(msg.Type, msg.Text, child.TabId);
+                    }
+                    catch { }
+                }
+            }
+            catch (OperationCanceledException) { return; }
+            catch
+            {
+                try { await Task.Delay(2000, ct); }
+                catch (OperationCanceledException) { return; }
+            }
+        }
+    }
+
+    public async Task HandleEventWebSocketProxyAsync(string tabId, WebSocket browserSocket, CancellationToken cancellationToken = default)
+    {
+        var child = GetChildOrThrow(tabId);
+        using var upstream = new ClientWebSocket();
+        upstream.Options.SetRequestHeader("viberails_session", child.SessionToken);
+        upstream.Options.AddSubProtocol(child.TabToken);
+
+        var upstreamUri = new Uri($"ws://127.0.0.1:{child.Port}/api/v1/events/ws");
+        await upstream.ConnectAsync(upstreamUri, cancellationToken);
+
+        var childToBrowser = RelayWebSocketAsync(upstream, browserSocket, cancellationToken);
+        var browserToChild = RelayWebSocketAsync(browserSocket, upstream, cancellationToken);
+
+        await Task.WhenAny(childToBrowser, browserToChild);
+
+        await CloseWebSocketAsync(upstream, cancellationToken);
+        await CloseWebSocketAsync(browserSocket, cancellationToken);
+    }
+
     public async Task StopAllAsync(CancellationToken cancellationToken = default)
     {
         TerminalChildProcess[] snapshot;
@@ -206,6 +272,12 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         {
             snapshot = _tabs.Values.ToArray();
             _tabs.Clear();
+            foreach (var cts in _tabRelayCts.Values)
+            {
+                cts.Cancel();
+                cts.Dispose();
+            }
+            _tabRelayCts.Clear();
             ReleaseTabsOwnerIfNeededLocked();
         }
 
@@ -481,24 +553,41 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         StartTerminalRequest? payload,
         CancellationToken cancellationToken)
     {
-        using var request = CreateChildRequest(child, method, path, payload);
-        var http = _httpClientFactory.CreateClient();
-        using var response = await http.SendAsync(request, cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
+        if (child.Process.HasExited)
         {
-            var errorText = await ReadErrorTextAsync(response, cancellationToken);
-            throw new InvalidOperationException(
-                $"Child request {path} failed ({(int)response.StatusCode}): {errorText}");
+            RemoveChild(child.TabId, child.Process.Id);
+            throw new InvalidOperationException($"Terminal tab process has exited (tab {child.TabId[..Math.Min(8, child.TabId.Length)]}).");
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        var status = await JsonSerializer.DeserializeAsync(
-            stream,
-            AppJsonSerializerContext.Default.TerminalStatusResponse,
-            cancellationToken);
+        using var request = CreateChildRequest(child, method, path, payload);
+        var http = _httpClientFactory.CreateClient();
+        HttpResponseMessage response;
+        try
+        {
+            response = await http.SendAsync(request, cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new InvalidOperationException($"Could not reach terminal tab on port {child.Port}: {ex.Message}", ex);
+        }
 
-        return status ?? new TerminalStatusResponse(false, null);
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorText = await ReadErrorTextAsync(response, cancellationToken);
+                throw new InvalidOperationException(
+                    $"Child request {path} failed ({(int)response.StatusCode}): {errorText}");
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var status = await JsonSerializer.DeserializeAsync(
+                stream,
+                AppJsonSerializerContext.Default.TerminalStatusResponse,
+                cancellationToken);
+
+            return status ?? new TerminalStatusResponse(false, null);
+        }
     }
 
     private async Task<TerminalStatusResponse?> GetTerminalStatusFromChildAsync(
@@ -777,13 +866,21 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     private void RemoveChild(string tabId, int processId)
     {
+        CancellationTokenSource? relayCts = null;
         lock (_lock)
         {
             if (_tabs.TryGetValue(tabId, out var child) && child.Process.Id == processId)
             {
                 _tabs.Remove(tabId);
+                _tabRelayCts.Remove(tabId, out relayCts);
                 ReleaseTabsOwnerIfNeededLocked();
             }
+        }
+
+        if (relayCts != null)
+        {
+            relayCts.Cancel();
+            relayCts.Dispose();
         }
     }
 

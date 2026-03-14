@@ -411,6 +411,27 @@ namespace VibeRails.DTOs
         long SearchTimeMs,
         List<BertSearchHitResponse> Results
     );
+    // Chat History DTOs
+    public record ChatHistoryItem(
+        string Id,
+        string Cli,
+        string? EnvironmentName,
+        string WorkingDirectory,
+        DateTime StartedUTC,
+        DateTime? EndedUTC,
+        int? ExitCode,
+        string? ParentSessionId,
+        string? SessionDisplayName,
+        int? Sequence,
+        string? InputText
+    );
+
+    public record ChatHistoryResponse(
+        List<ChatHistoryItem> Items,
+        int Page,
+        int PageSize
+    );
+
     // Claude Plan DTOs
     public record ClaudePlanRecord(
         long Id,
@@ -462,6 +483,9 @@ namespace VibeRails.DTOs
         List<SwarmStepResponse> Steps
     );
 
+    public record EventMessage(string Type, string Text);
+
+    [JsonSerializable(typeof(EventMessage))]
     [JsonSerializable(typeof(HealthResponse))]
     [JsonSerializable(typeof(FileResponse))]
     [JsonSerializable(typeof(ErrorResponse))]
@@ -477,6 +501,10 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SessionWithLogsResponse))]
     [JsonSerializable(typeof(List<SessionResponse>))]
     [JsonSerializable(typeof(List<SessionLogResponse>))]
+    // Chat History DTOs
+    [JsonSerializable(typeof(ChatHistoryItem))]
+    [JsonSerializable(typeof(List<ChatHistoryItem>))]
+    [JsonSerializable(typeof(ChatHistoryResponse))]
     // User Input tracking DTOs
     [JsonSerializable(typeof(UserInputRecord))]
     [JsonSerializable(typeof(FileChangeInfo))]

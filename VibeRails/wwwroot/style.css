@@ -75,6 +75,7 @@ body.navbars-collapsed.terminal-focus-active .main-container {
 
 body.terminal-focus-active #app-content,
 body.terminal-focus-active .terminal-focus-view,
+body.terminal-focus-active .terminal-focus-layout,
 body.terminal-focus-active .terminal-focus-body,
 body.terminal-focus-active #terminal-panel.terminal-focus-card {
     width: 100%;
@@ -2100,6 +2101,7 @@ body.terminal-focus-active #terminal-panel #terminal-container {
 
 .terminal-focus-body {
     flex: 1 1 auto;
+    min-width: 0;
 }
 
 #terminal-panel.terminal-focus-card {
@@ -3201,6 +3203,189 @@ input.form-control:disabled {
 #terminal-panel .terminal-window-shell {
     position: relative;
     overflow: hidden;
+}
+
+/* ── Chat History Sidebar ─────────────────────────────────────────────────── */
+.terminal-focus-layout {
+    display: flex;
+    flex-direction: row;
+    gap: 0.75rem;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.ch-sidebar {
+    width: 268px;
+    flex-shrink: 0;
+    background: var(--color-bg-surface, #1e1e1e);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+    transition: width 0.2s ease;
+}
+
+.ch-sidebar.ch-sidebar-collapsed {
+    width: 36px;
+}
+
+.ch-sidebar.ch-sidebar-collapsed .ch-sidebar-title,
+.ch-sidebar.ch-sidebar-collapsed .ch-sidebar-body {
+    display: none;
+}
+
+.ch-sidebar.ch-sidebar-collapsed .ch-sidebar-header {
+    justify-content: center;
+    padding: 10px 0;
+}
+
+.ch-sidebar-hide-btn svg {
+    transition: transform 0.2s ease;
+}
+
+.ch-sidebar.ch-sidebar-collapsed .ch-sidebar-hide-btn svg {
+    transform: rotate(180deg);
+}
+
+.ch-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 13px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    flex-shrink: 0;
+}
+
+.ch-sidebar-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #cdd6f4;
+    letter-spacing: 0.01em;
+}
+
+.ch-sidebar-hide-btn {
+    background: transparent;
+    border: none;
+    color: #45475a;
+    cursor: pointer;
+    padding: 3px 4px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+}
+
+.ch-sidebar-hide-btn:hover {
+    color: #cdd6f4;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.ch-sidebar-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 5px 0;
+}
+
+.ch-sidebar-body::-webkit-scrollbar {
+    width: 3px;
+}
+
+.ch-sidebar-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.ch-sidebar-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}
+
+.ch-loading {
+    display: flex;
+    justify-content: center;
+    padding: 28px;
+}
+
+.ch-empty {
+    padding: 28px 14px;
+    font-size: 0.75rem;
+    color: #585b70;
+    text-align: center;
+    line-height: 1.5;
+}
+
+.ch-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    cursor: default;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    transition: background 0.12s;
+}
+
+.ch-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.ch-item-active {
+    border-left: 2px solid #3b82f6;
+    padding-left: 10px;
+}
+
+.ch-item-icon {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 7px;
+}
+
+.ch-item-logo {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+}
+
+.ch-item-logo-fallback {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #a6adc8;
+}
+
+.ch-item-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.ch-item-name {
+    font-size: 0.775rem;
+    color: #cdd6f4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+    line-height: 1.3;
+}
+
+.ch-item-meta {
+    font-size: 0.67rem;
+    color: #45475a;
+    margin-top: 2px;
+    line-height: 1.3;
+}
+
+.ch-item-live {
+    color: #a6e3a1;
+    font-weight: 600;
 }
 
 /* ── Terminal PIN Overlay ─────────────────────────────────────────────────── */
