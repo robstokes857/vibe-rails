@@ -45,6 +45,7 @@ public class TerminalRunner
         var shouldEnableRemote = ShouldEnableRemote(makeRemote);
         var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct);
         var preparedSession = _commandService.PrepareSession(llm, envName, extraArgs, initialPrompt);
+        _stateService.PublishSessionStart(sessionId, llm.ToString(), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
         EmitTerminalLaunchTrace(sessionId, llm, workDir, envName, extraArgs, title, shouldEnableRemote, initialPrompt, preparedSession);
 
         var terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: title, ct: ct);

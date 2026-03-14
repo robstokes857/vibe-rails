@@ -18,6 +18,9 @@ public interface ITerminalIoObserver
 
     ValueTask OnTerminalRemoteCommandAsync(TerminalRemoteCommandEvent commandEvent, CancellationToken cancellationToken = default)
         => ValueTask.CompletedTask;
+
+    ValueTask OnSessionStartAsync(TerminalSessionStartEvent startEvent, CancellationToken cancellationToken = default)
+        => ValueTask.CompletedTask;
 }
 
 public interface ITerminalIoObserverService
@@ -26,6 +29,7 @@ public interface ITerminalIoObserverService
     void PublishResize(TerminalResizeEvent resizeEvent);
     void PublishIdle(TerminalIdleEvent idleEvent);
     void PublishRemoteCommand(TerminalRemoteCommandEvent commandEvent);
+    void PublishSessionStart(TerminalSessionStartEvent startEvent);
 }
 
 /// <summary>
@@ -85,6 +89,17 @@ public sealed class TerminalIoObserverService : ITerminalIoObserverService
         }
     }
 
+    public void PublishSessionStart(TerminalSessionStartEvent startEvent)
+    {
+        if (_observers.Count == 0)
+            return;
+
+        foreach (var observer in _observers)
+        {
+            _ = NotifySessionStartAsync(observer, startEvent);
+        }
+    }
+
     private static async Task NotifyAsync(ITerminalIoObserver observer, TerminalIoEvent ioEvent)
     {
         try
@@ -130,6 +145,18 @@ public sealed class TerminalIoObserverService : ITerminalIoObserverService
         catch (Exception ex)
         {
             Log.Error(ex, "[TerminalIoObserverService] Remote command observer error");
+        }
+    }
+
+    private static async Task NotifySessionStartAsync(ITerminalIoObserver observer, TerminalSessionStartEvent startEvent)
+    {
+        try
+        {
+            await observer.OnSessionStartAsync(startEvent, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[TerminalIoObserverService] Session start observer error");
         }
     }
 }

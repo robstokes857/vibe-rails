@@ -37,14 +37,17 @@
   /* Row color stripe — left border on the time cell */
   #event-tbody tr td:first-child { border-left-width: 3px !important; border-left-style: solid !important; }
 
-  /* Copy button — hidden until row hover */
+  /* Copy button — hidden until row hover, pinned top-right of text cell */
+  #event-tbody td:last-child { position: relative; }
   .copy-btn {
-    background: none; border: none; cursor: pointer; padding: 0 0 0 6px;
+    position: absolute; top: 4px; right: 4px;
+    background: #1e1e2e; border: 1px solid #333; border-radius: 3px;
+    cursor: pointer; padding: 2px 4px;
     color: #555; opacity: 0; transition: opacity .15s, color .15s;
-    vertical-align: middle; line-height: 1;
+    line-height: 1;
   }
   tr:hover .copy-btn { opacity: 1; }
-  .copy-btn:hover { color: #ccc; }
+  .copy-btn:hover { color: #ccc; border-color: #666; }
 
   /* Section visibility toggles */
   #event-table-wrap.hide-rendered .rendered-line { display: none; }
@@ -74,14 +77,15 @@
         <input class="form-check-input" type="checkbox" id="auto-scroll-toggle" checked>
         <label class="form-check-label text-light" for="auto-scroll-toggle">Auto-scroll</label>
       </div>
-      <button class="btn btn-sm btn-outline-info active" id="toggle-rendered">Rendered</button>
-      <button class="btn btn-sm btn-outline-warning active" id="toggle-raw">Raw</button>
       <button class="btn btn-sm btn-outline-secondary" id="clear-btn">Clear</button>
     </div>
   </div>
 
   <!-- Filter bar -->
-  <div id="filter-bar" class="d-flex mb-2"></div>
+  <div id="filter-bar" class="d-flex mb-2">
+    <span id="toggle-rendered" class="filter-chip badge type-badge active" style="background:#0dcaf0;color:#000">rendered</span>
+    <span id="toggle-raw"      class="filter-chip badge type-badge active" style="background:#ffc107;color:#000">raw</span>
+  </div>
 
   <!-- Table -->
   <div id="event-table-wrap">
@@ -442,6 +446,9 @@ function addRow(type, text) {
   const badge = document.createElement('span');
   badge.className = `badge type-badge ${cssClass}`;
   badge.textContent = type.replace('terminal_', '');
+  typeTd.appendChild(badge);
+
+  // Text cell with copy button pinned top-right
   const copyBtn = document.createElement('button');
   copyBtn.className = 'copy-btn';
   copyBtn.title = 'Copy raw text';
@@ -452,10 +459,7 @@ function addRow(type, text) {
       setTimeout(() => { copyBtn.innerHTML = COPY_ICON; }, 1200);
     });
   });
-  typeTd.appendChild(badge);
-  typeTd.appendChild(copyBtn);
 
-  // Text cell
   const textTd = document.createElement('td');
   if (type === 'terminal_output') {
     textTd.innerHTML = `<div class="rendered-line">${ansiToHtml(text)}</div>`
@@ -463,6 +467,7 @@ function addRow(type, text) {
   } else {
     textTd.textContent = text;
   }
+  textTd.appendChild(copyBtn);
 
   tr.appendChild(timeTd);
   tr.appendChild(typeTd);
