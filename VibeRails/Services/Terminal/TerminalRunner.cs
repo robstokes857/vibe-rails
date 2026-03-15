@@ -204,11 +204,9 @@ public class TerminalRunner
                             }
 
                             await NotifyRemoteTakeoverAsync("replay");
-                            var replay = terminal.GetReplayBufferFromLastBreakPoint();
+                            var replay = terminal.GetGridReplay();
                             if (replay.Length > 0)
                                 await remoteConn.SendOutputAsync(replay);
-                            else
-                                await terminal.WriteBytesAsync(new byte[] { 0x0C }, CancellationToken.None); // Ctrl+L — no break point yet, force redraw
                         }
                         finally
                         {

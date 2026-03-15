@@ -30,6 +30,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Pty.Net\Pty.Net.csproj" />
+    <ProjectReference Include="..\TerminalEmulator\TerminalEmulator.csproj" />
   </ItemGroup>
   <!-- Copy wwwroot to output directory -->
   <ItemGroup>

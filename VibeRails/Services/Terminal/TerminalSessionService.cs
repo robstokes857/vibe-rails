@@ -188,17 +188,17 @@ public class TerminalSessionService : ITerminalSessionService
         // Codex rendering is more stable with a redraw instead of partial replay.
         if (shouldUseReplay)
         {
-            var replay = terminal.GetReplayBufferFromLastBreakPoint();
+            var replay = terminal.GetGridReplay();
             if (replay.Length > 0)
             {
                 try
                 {
                     await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
-                    Log.Information("[Terminal] Replayed {Bytes} bytes of buffered output to new viewer", replay.Length);
+                    Log.Information("[Terminal] Replayed {Bytes} bytes of grid state to new viewer", replay.Length);
                 }
                 catch (Exception ex)
                 {
-                    Log.Error(ex, "[Terminal] Failed to replay buffer");
+                    Log.Error(ex, "[Terminal] Failed to replay grid");
                 }
             }
         }
