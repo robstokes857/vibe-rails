@@ -19,6 +19,8 @@ public sealed class Terminal : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Lock _subscriberLock = new();
     private readonly List<ITerminalConsumer> _consumers = [];
+    private readonly TerminalEmulator.Terminal _emulator;
+    private readonly Lock _emulatorLock = new();
     private Task? _readLoop;
     private bool _disposed;
     private int _cols;
@@ -40,6 +42,7 @@ public sealed class Terminal : IAsyncDisposable
     {
         _pty = pty;
         _outputBuffer = new CircularBuffer(replayBufferSize);
+        _emulator = new TerminalEmulator.Terminal(cols: cols, rows: rows);
         _cols = cols;
         _rows = rows;
     }
@@ -70,6 +73,7 @@ public sealed class Terminal : IAsyncDisposable
 
         var pty = await PtyProvider.SpawnAsync(options, ct);
         var terminal = new Terminal(pty, replayBufferSize, cols, rows);
+        terminal.Subscribe(new TerminalEmulatorConsumer(terminal._emulator, terminal._emulatorLock));
 
         // Set terminal title via ANSI escape sequence if provided
         if (!string.IsNullOrEmpty(title))
@@ -159,6 +163,36 @@ public sealed class Terminal : IAsyncDisposable
     public byte[] GetReplayBufferFromLastBreakPoint() => _outputBuffer.GetDataFromLastBreakPoint();
 
     /// <summary>
+    /// Serializes the current emulator grid to an ANSI byte stream.
+    /// xterm.js clients replay this to reconstruct the exact current screen state.
+    /// Always returns a valid screen — no break-point heuristics required.
+    /// </summary>
+    public byte[] GetGridReplay()
+    {
+        TerminalEmulator.TerminalCell[,] snap;
+        int rows, cols, cursorRow, cursorCol;
+        lock (_emulatorLock)
+        {
+            snap = _emulator.GetSnapshot();
+            rows = _emulator.Rows;
+            cols = _emulator.Cols;
+            cursorRow = _emulator.CursorRow;
+            cursorCol = _emulator.CursorCol;
+        }
+        return TerminalGridSerializer.Serialize(snap, rows, cols, cursorRow, cursorCol);
+    }
+
+    /// <summary>
+    /// Returns the current screen as plain text (no ANSI codes), useful for logging/snapshots.
+    /// Each element is one row of text.
+    /// </summary>
+    public string[] GetScreenText()
+    {
+        lock (_emulatorLock)
+            return _emulator.GetScreenText();
+    }
+
+    /// <summary>
     /// Inject synthetic bytes directly into the output stream and replay buffer.
     /// Use sparingly — this bypasses the PTY and writes directly to all consumers.
     /// Capped at 4 KB to prevent buffer exhaustion; caller is responsible for content.
@@ -188,13 +222,15 @@ public sealed class Terminal : IAsyncDisposable
     }
 
     /// <summary>
-    /// Resize the PTY dimensions.
+    /// Resize the PTY dimensions. Also resizes the emulator to keep grid in sync.
     /// </summary>
     public void Resize(int cols, int rows)
     {
         _pty.Resize(cols, rows);
         _cols = cols;
         _rows = rows;
+        lock (_emulatorLock)
+            _emulator.Resize(cols, rows);
     }
 
     public async ValueTask DisposeAsync()
