@@ -1,3 +1,5 @@
+using Serilog;
+
 namespace VibeRails.Services;
 
 public interface IClaudeAgentSyncService
@@ -34,7 +36,7 @@ public class ClaudeAgentSyncService : IClaudeAgentSyncService
         catch (Exception ex)
         {
             // Log but don't fail the session
-            Console.Error.WriteLine($"[ClaudeAgentSync] Error during session start sync: {ex.Message}");
+            Log.Warning(ex, "[ClaudeAgentSync] Error during session start sync");
         }
     }
 
@@ -53,7 +55,7 @@ public class ClaudeAgentSyncService : IClaudeAgentSyncService
         catch (Exception ex)
         {
             // Log but don't fail the session
-            Console.Error.WriteLine($"[ClaudeAgentSync] Error during session end sync: {ex.Message}");
+            Log.Warning(ex, "[ClaudeAgentSync] Error during session end sync");
         }
     }
 

@@ -79,9 +79,7 @@ public class TerminalRunner
 
                     remoteTakeoverNotified = true;
 
-                    // Write directly to stderr — bypasses the PTY entirely so the TUI is never
-                    // disturbed. The remote viewer does not see stderr, so this is local-only.
-                    Console.Error.WriteLine("[VibeRails] Remote viewer connected");
+                    Log.Information("[VibeRails] Remote viewer connected");
 
                     if (onRemoteTakeoverAuthorized == null)
                         return;
@@ -238,7 +236,7 @@ public class TerminalRunner
                             takeoverGate.Release();
                         }
 
-                        Console.Error.WriteLine("[VibeRails] Remote viewer disconnected");
+                        Log.Information("[VibeRails] Remote viewer disconnected");
                     }
                     catch (Exception ex)
                     {
@@ -353,7 +351,7 @@ public class TerminalRunner
         sb.AppendLine($"shell: {Terminal.GetDefaultShellPath()}");
         sb.AppendLine($"ptyCols: {Terminal.DefaultCols}");
         sb.AppendLine($"ptyRows: {Terminal.DefaultRows}");
-        sb.AppendLine($"replayBufferSizeBytes: {Terminal.DefaultReplayBufferSize}");
+        sb.AppendLine($"emulatorScrollback: 1000 rows");
         sb.AppendLine("cliArgs:");
 
         if (extraArgs is { Length: > 0 })
@@ -401,7 +399,6 @@ public class TerminalRunner
         if (Interlocked.Exchange(ref s_emergencyShutdownRequested, 1) == 1)
             return;
 
-        Console.WriteLine(message);
         Log.Error("[PIN] {Message}", message);
 
         if (_appLifetime != null)

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Threading.Channels;
+using Serilog;
 
 namespace VibeRails.Utils;
 
@@ -152,7 +153,7 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
                     }
                     catch (Exception ex)
                     {
-                        Console.Error.WriteLine($"[VibeRails] Error in input callback: {ex.Message}");
+                        Log.Warning(ex, "[VibeRails] Error in input callback");
                     }
                 }
             }

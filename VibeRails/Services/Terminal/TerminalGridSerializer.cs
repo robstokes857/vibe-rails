@@ -4,68 +4,49 @@ using TerminalEmulator;
 namespace VibeRails.Services.Terminal;
 
 /// <summary>
-/// Converts a TerminalEmulator grid snapshot into an ANSI byte stream that
-/// xterm.js can replay to reconstruct the exact current screen state.
+/// Converts a TerminalEmulator snapshot (scrollback + current screen) into an
+/// ANSI byte stream that xterm.js renders instantly on reconnect — no animation,
+/// no DB, just the exact current state including full scroll history.
 /// </summary>
 internal static class TerminalGridSerializer
 {
     /// <summary>
-    /// Serializes the grid to a UTF-8 encoded ANSI byte stream.
-    /// Preamble: clear screen + home cursor.
-    /// Each row is rendered with delta SGR encoding (only emits codes on change).
-    /// Cursor is repositioned to (cursorRow, cursorCol) at the end.
+    /// Serializes scrollback rows followed by the current screen grid.
+    /// The result is a single ANSI byte stream:
+    ///   - Hard reset to clear any stale client state
+    ///   - Scrollback rows (oldest first) with SGR colors preserved
+    ///   - Current screen rows
+    ///   - Cursor repositioned to match terminal cursor
     /// </summary>
     public static byte[] Serialize(
-        TerminalCell[,] snap,
+        TerminalCell[][] scrollback,
+        TerminalCell[,] screen,
         int rows, int cols,
         int cursorRow, int cursorCol)
     {
-        // Rough capacity: clear+home (7) + per-row cursor move (10) + cols * ~8 bytes avg
-        var sb = new StringBuilder(rows * cols * 4 + rows * 12 + 64);
+        int scrollbackCount = scrollback.Length;
+        // Rough capacity: reset(4) + per-row(cols*8 avg + newline) for scrollback + screen
+        var sb = new StringBuilder((scrollbackCount + rows) * cols * 4 + (scrollbackCount + rows) * 16 + 64);
 
-        // Clear screen and home cursor
-        sb.Append("\x1b[2J\x1b[H");
+        // Hard reset — clears xterm.js completely including its own scrollback
+        sb.Append("\x1bc");
 
-        for (int r = 0; r < rows; r++)
+        // Scrollback rows (plain ANSI, newline-terminated)
+        foreach (var row in scrollback)
         {
-            // Move cursor to start of this row (1-based)
-            sb.Append("\x1b[");
-            sb.Append(r + 1);
-            sb.Append(";1H");
-
-            CellColor lastFg = default;
-            CellColor lastBg = default;
-            CellAttributes lastAttrs = CellAttributes.None;
-            bool firstCell = true;
-
-            for (int c = 0; c < cols; c++)
-            {
-                var cell = snap[r, c];
-                if (cell.IsWideContinuation) continue;
-
-                // Emit SGR only when something changed
-                if (firstCell || cell.Fg != lastFg || cell.Bg != lastBg || cell.Attributes != lastAttrs)
-                {
-                    var sgr = BuildSgr(cell.Fg, cell.Bg, cell.Attributes,
-                                       lastFg, lastBg, lastAttrs, firstCell);
-                    if (sgr.Length > 0)
-                        sb.Append(sgr);
-                    lastFg = cell.Fg;
-                    lastBg = cell.Bg;
-                    lastAttrs = cell.Attributes;
-                    firstCell = false;
-                }
-
-                char ch = cell.Char;
-                if (ch == '\0' || ch < ' ') ch = ' ';
-                sb.Append(ch);
-            }
-
-            // Reset colors at end of each row
-            sb.Append("\x1b[0m");
+            SerializeRow(sb, row, Math.Min(row.Length, cols));
+            sb.Append("\r\n");
         }
 
-        // Reposition cursor to where the terminal's cursor actually is (1-based)
+        // Current screen rows
+        for (int r = 0; r < rows; r++)
+        {
+            SerializeScreenRow(sb, screen, r, cols);
+            if (r < rows - 1)
+                sb.Append("\r\n");
+        }
+
+        // Reposition cursor to where the terminal's cursor actually is
         sb.Append("\x1b[");
         sb.Append(Math.Clamp(cursorRow + 1, 1, rows));
         sb.Append(';');
@@ -73,6 +54,66 @@ internal static class TerminalGridSerializer
         sb.Append('H');
 
         return Encoding.UTF8.GetBytes(sb.ToString());
+    }
+
+    private static void SerializeRow(StringBuilder sb, TerminalCell[] row, int cols)
+    {
+        CellColor lastFg = default;
+        CellColor lastBg = default;
+        CellAttributes lastAttrs = CellAttributes.None;
+        bool firstCell = true;
+
+        for (int c = 0; c < cols; c++)
+        {
+            var cell = row[c];
+            if (cell.IsWideContinuation) continue;
+
+            if (firstCell || cell.Fg != lastFg || cell.Bg != lastBg || cell.Attributes != lastAttrs)
+            {
+                var sgr = BuildSgr(cell.Fg, cell.Bg, cell.Attributes, lastFg, lastBg, lastAttrs, firstCell);
+                if (sgr.Length > 0) sb.Append(sgr);
+                lastFg = cell.Fg;
+                lastBg = cell.Bg;
+                lastAttrs = cell.Attributes;
+                firstCell = false;
+            }
+
+            char ch = cell.Char;
+            if (ch == '\0' || ch < ' ') ch = ' ';
+            sb.Append(ch);
+        }
+
+        sb.Append("\x1b[0m");
+    }
+
+    private static void SerializeScreenRow(StringBuilder sb, TerminalCell[,] screen, int row, int cols)
+    {
+        CellColor lastFg = default;
+        CellColor lastBg = default;
+        CellAttributes lastAttrs = CellAttributes.None;
+        bool firstCell = true;
+
+        for (int c = 0; c < cols; c++)
+        {
+            var cell = screen[row, c];
+            if (cell.IsWideContinuation) continue;
+
+            if (firstCell || cell.Fg != lastFg || cell.Bg != lastBg || cell.Attributes != lastAttrs)
+            {
+                var sgr = BuildSgr(cell.Fg, cell.Bg, cell.Attributes, lastFg, lastBg, lastAttrs, firstCell);
+                if (sgr.Length > 0) sb.Append(sgr);
+                lastFg = cell.Fg;
+                lastBg = cell.Bg;
+                lastAttrs = cell.Attributes;
+                firstCell = false;
+            }
+
+            char ch = cell.Char;
+            if (ch == '\0' || ch < ' ') ch = ' ';
+            sb.Append(ch);
+        }
+
+        sb.Append("\x1b[0m");
     }
 
     private static string BuildSgr(
@@ -84,7 +125,6 @@ internal static class TerminalGridSerializer
 
         if (reset) parts.Add("0");
 
-        // Attributes
         if (reset || attrs != prevAttrs)
         {
             if (attrs.HasFlag(CellAttributes.Bold))      parts.Add("1");
@@ -94,7 +134,6 @@ internal static class TerminalGridSerializer
             if (attrs.HasFlag(CellAttributes.Inverse))   parts.Add("7");
         }
 
-        // Foreground
         if (reset || fg != prevFg)
         {
             if (fg.IsDefault)
@@ -109,7 +148,6 @@ internal static class TerminalGridSerializer
                 { parts.Add("38"); parts.Add("2"); parts.Add(fg.R.ToString()); parts.Add(fg.G.ToString()); parts.Add(fg.B.ToString()); }
         }
 
-        // Background
         if (reset || bg != prevBg)
         {
             if (bg.IsDefault)

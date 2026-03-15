@@ -36,6 +36,11 @@ Log.Logger = new LoggerConfiguration()
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
+// Remove default host logging providers so Microsoft.Extensions.Logging does not
+// write into interactive native terminal sessions. File logging still goes
+// through the static Serilog logger configured above.
+builder.Logging.ClearProviders();
+
 // CreateSlimBuilder doesn't load appsettings.json by default — add it explicitly
 builder.Configuration.AddJsonFile(Path.Combine(exeDirectory, "appsettings.json"), optional: false, reloadOnChange: false);
 builder.Configuration.AddJsonFile(Path.Combine(exeDirectory, $"appsettings.{builder.Environment.EnvironmentName}.json"), optional: true, reloadOnChange: false);
@@ -132,10 +137,10 @@ _ = Task.Run(async () =>
             var updateInfo = await updateService.CheckForUpdateAsync();
             if (updateInfo?.UpdateAvailable == true)
             {
-                Console.WriteLine($"[VibeRails] Update available: v{updateInfo.CurrentVersion} -> v{updateInfo.LatestVersion}");
-                Console.WriteLine("[VibeRails] Install latest version:");
-                Console.WriteLine("[VibeRails]   Windows: irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.ps1 | iex");
-                Console.WriteLine("[VibeRails]   Linux:   wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash");
+                Log.Information(
+                    "[VibeRails] Update available: v{CurrentVersion} -> v{LatestVersion}. Windows install: irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.ps1 | iex. Linux install: wget -qO- https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/install.sh | bash",
+                    updateInfo.CurrentVersion,
+                    updateInfo.LatestVersion);
             }
         }
     }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Serilog;
 
 namespace VibeRails.Services;
 
@@ -70,7 +71,7 @@ public class UpdateService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[VibeRails] Error checking for updates: {ex.Message}");
+            Log.Warning(ex, "[VibeRails] Error checking for updates");
             return null;
         }
     }

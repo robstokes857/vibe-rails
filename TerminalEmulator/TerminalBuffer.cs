@@ -334,6 +334,22 @@ public sealed class TerminalBuffer
     // Snapshot / dirty tracking
     // ------------------------------------------------------------------
 
+    /// <summary>
+    /// Returns scrollback history as an ordered array of rows, oldest first.
+    /// Each row is a TerminalCell[] of length Cols at the time it was pushed.
+    /// Only populated from the normal screen — alternate screen has no scrollback.
+    /// </summary>
+    public TerminalCell[][] GetScrollback()
+    {
+        var result = new TerminalCell[_scrollbackCount][];
+        for (int i = 0; i < _scrollbackCount; i++)
+        {
+            int idx = (_scrollbackHead - _scrollbackCount + i + ScrollbackSize) % ScrollbackSize;
+            result[i] = (TerminalCell[])_scrollback[idx].Clone();
+        }
+        return result;
+    }
+
     /// <summary>Returns a copy of the current screen as a 2D cell array.</summary>
     public TerminalCell[,] GetSnapshot()
     {

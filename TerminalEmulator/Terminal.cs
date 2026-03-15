@@ -99,6 +99,12 @@ public sealed class Terminal
         return lines;
     }
 
+    /// <summary>
+    /// Returns scrollback history as an ordered array of rows, oldest first.
+    /// Each row is a TerminalCell[] of length Cols at time of scroll.
+    /// </summary>
+    public TerminalCell[][] GetScrollback() => _buffer.GetScrollback();
+
     /// <summary>Reset the terminal to initial state.</summary>
     public void Reset()
     {
