@@ -12,10 +12,8 @@ public sealed class Terminal : IAsyncDisposable
 {
     public const int DefaultCols = 120;
     public const int DefaultRows = 30;
-    public const int DefaultReplayBufferSize = 10 * 1024 * 1024;
 
     private readonly IPtyConnection _pty;
-    private readonly CircularBuffer _outputBuffer;
     private readonly CancellationTokenSource _cts = new();
     private readonly Lock _subscriberLock = new();
     private readonly List<ITerminalConsumer> _consumers = [];
@@ -38,10 +36,9 @@ public sealed class Terminal : IAsyncDisposable
     /// </summary>
     public event EventHandler<int>? Exited;
 
-    private Terminal(IPtyConnection pty, int replayBufferSize, int cols, int rows)
+    private Terminal(IPtyConnection pty, int cols, int rows)
     {
         _pty = pty;
-        _outputBuffer = new CircularBuffer(replayBufferSize);
         _emulator = new TerminalEmulator.Terminal(cols: cols, rows: rows);
         _cols = cols;
         _rows = rows;
@@ -55,7 +52,6 @@ public sealed class Terminal : IAsyncDisposable
         IDictionary<string, string> environment,
         int cols = DefaultCols,
         int rows = DefaultRows,
-        int replayBufferSize = DefaultReplayBufferSize,
         string? title = null,
         CancellationToken ct = default)
     {
@@ -72,7 +68,7 @@ public sealed class Terminal : IAsyncDisposable
         };
 
         var pty = await PtyProvider.SpawnAsync(options, ct);
-        var terminal = new Terminal(pty, replayBufferSize, cols, rows);
+        var terminal = new Terminal(pty, cols, rows);
         terminal.Subscribe(new TerminalEmulatorConsumer(terminal._emulator, terminal._emulatorLock));
 
         // Set terminal title via ANSI escape sequence if provided
@@ -151,74 +147,34 @@ public sealed class Terminal : IAsyncDisposable
     }
 
     /// <summary>
-    /// Get a snapshot of the replay buffer (last N bytes of output).
-    /// Used to send screen state to new WebSocket connections.
-    /// </summary>
-    public byte[] GetReplayBuffer() => _outputBuffer.GetData();
-
-    /// <summary>
-    /// Get replay bytes starting from the last ANSI break point (alternate screen enter,
-    /// erase display, or full reset). Falls back to full GetReplayBuffer() if none recorded.
-    /// </summary>
-    public byte[] GetReplayBufferFromLastBreakPoint() => _outputBuffer.GetDataFromLastBreakPoint();
-
-    /// <summary>
-    /// Serializes the current emulator grid to an ANSI byte stream.
-    /// xterm.js clients replay this to reconstruct the exact current screen state.
-    /// Always returns a valid screen — no break-point heuristics required.
+    /// Serializes the full emulator state (scrollback + current screen) to an ANSI byte stream.
+    /// On reconnect, xterm.js gets a hard reset then the complete history — scroll up to see
+    /// everything, current screen is at the bottom. No DB, no animation, instant.
     /// </summary>
     public byte[] GetGridReplay()
     {
+        TerminalEmulator.TerminalCell[][] scrollback;
         TerminalEmulator.TerminalCell[,] snap;
         int rows, cols, cursorRow, cursorCol;
         lock (_emulatorLock)
         {
+            scrollback = _emulator.GetScrollback();
             snap = _emulator.GetSnapshot();
             rows = _emulator.Rows;
             cols = _emulator.Cols;
             cursorRow = _emulator.CursorRow;
             cursorCol = _emulator.CursorCol;
         }
-        return TerminalGridSerializer.Serialize(snap, rows, cols, cursorRow, cursorCol);
+        return TerminalGridSerializer.Serialize(scrollback, snap, rows, cols, cursorRow, cursorCol);
     }
 
     /// <summary>
-    /// Returns the current screen as plain text (no ANSI codes), useful for logging/snapshots.
-    /// Each element is one row of text.
+    /// Returns the current screen as plain text lines (no ANSI codes).
     /// </summary>
     public string[] GetScreenText()
     {
         lock (_emulatorLock)
             return _emulator.GetScreenText();
-    }
-
-    /// <summary>
-    /// Inject synthetic bytes directly into the output stream and replay buffer.
-    /// Use sparingly — this bypasses the PTY and writes directly to all consumers.
-    /// Capped at 4 KB to prevent buffer exhaustion; caller is responsible for content.
-    /// </summary>
-    internal void PublishSynthetic(ReadOnlyMemory<byte> data)
-    {
-        const int maxSyntheticBytes = 4096;
-        if (data.Length > maxSyntheticBytes)
-        {
-            Log.Warning("[Terminal] PublishSynthetic oversized payload ({Bytes} bytes) — truncating", data.Length);
-            data = data[..maxSyntheticBytes];
-        }
-
-        _outputBuffer.Append(data.Span);
-
-        ITerminalConsumer[] snapshot;
-        lock (_subscriberLock)
-        {
-            snapshot = [.. _consumers];
-        }
-
-        foreach (var consumer in snapshot)
-        {
-            try { consumer.OnOutput(data); }
-            catch { }
-        }
     }
 
     /// <summary>
@@ -249,7 +205,6 @@ public sealed class Terminal : IAsyncDisposable
         _pty.Kill();
         _pty.Dispose();
         _cts.Dispose();
-        _outputBuffer.Clear();
     }
 
     private async Task ReadLoopAsync()
@@ -265,9 +220,6 @@ public sealed class Terminal : IAsyncDisposable
                 if (bytesRead == 0) break;
 
                 var data = new ReadOnlyMemory<byte>(buffer, 0, bytesRead);
-
-                // Always buffer for replay
-                _outputBuffer.Append(data.Span);
 
                 // Snapshot consumers under lock, iterate outside
                 ITerminalConsumer[] snapshot;
@@ -296,9 +248,8 @@ public sealed class Terminal : IAsyncDisposable
         }
         finally
         {
-            // Notify listeners that the PTY has exited.
-            // ExitCode can throw if the process hasn't fully exited yet (pipe EOF races the process exit).
-            // Always invoke Exited regardless — use -1 as a fallback so listeners can clean up.
+            // ExitCode can throw if the process hasn't fully exited yet (pipe EOF races process exit).
+            // Always invoke Exited — use -1 as fallback so listeners can clean up.
             int exitCode;
             try { exitCode = _pty.ExitCode; }
             catch { exitCode = -1; }

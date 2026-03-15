@@ -1,3 +1,4 @@
+using Serilog;
 using VibeRails.DTOs;
 
 namespace VibeRails.Services
@@ -190,7 +191,7 @@ namespace VibeRails.Services
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[VibeRails] Error getting file changes: {ex.Message}");
+                Log.Warning(ex, "[VibeRails] Error getting file changes");
             }
 
             return changes;

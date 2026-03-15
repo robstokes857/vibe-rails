@@ -14,8 +14,7 @@ public sealed record TerminalSnapshot(
     DateTimeOffset CapturedUtc,
     int Cols,
     int Rows,
-    byte[] ReplayBuffer,
-    string Utf8Text);
+    string[] ScreenText);
 
 public sealed record TerminalImageCaptureResult(
     bool Success,
@@ -183,23 +182,18 @@ public class TerminalSessionService : ITerminalSessionService
             }
         }
 
-        var shouldUseReplay = ShouldUseReplayBuffer();
-        // Replay buffered output so new viewer sees current screen state.
-        // Codex rendering is more stable with a redraw instead of partial replay.
-        if (shouldUseReplay)
+        // Send full emulator state (scrollback + screen) so reconnecting viewer sees everything.
+        var replay = terminal.GetGridReplay();
+        if (replay.Length > 0)
         {
-            var replay = terminal.GetGridReplay();
-            if (replay.Length > 0)
+            try
             {
-                try
-                {
-                    await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
-                    Log.Information("[Terminal] Replayed {Bytes} bytes of grid state to new viewer", replay.Length);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error(ex, "[Terminal] Failed to replay grid");
-                }
+                await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
+                Log.Information("[Terminal] Sent {Bytes} bytes of emulator state to viewer", replay.Length);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Terminal] Failed to send emulator state");
             }
         }
 
@@ -208,18 +202,6 @@ public class TerminalSessionService : ITerminalSessionService
         using var subscription = terminal.Subscribe(wsConsumer);
         ownerId = $"terminal-ws:{sessionId}:{Guid.NewGuid():N}";
         _localClientTracker.AcquireOwner(ownerId);
-
-        if (!shouldUseReplay)
-        {
-            try
-            {
-                await terminal.WriteBytesAsync(new byte[] { 0x0C }, cancellationToken); // Ctrl+L
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[Terminal] Failed to request redraw for reconnecting viewer");
-            }
-        }
 
         // Run WebSocket input loop (blocks until WebSocket closes or cancellation)
         try
@@ -367,15 +349,12 @@ public class TerminalSessionService : ITerminalSessionService
         if (terminal == null || sessionId == null)
             return Task.FromResult<TerminalSnapshot?>(null);
 
-        var replay = terminal.GetReplayBuffer();
-        var text = System.Text.Encoding.UTF8.GetString(replay);
         var snapshot = new TerminalSnapshot(
             sessionId,
             DateTimeOffset.UtcNow,
             terminal.Cols,
             terminal.Rows,
-            replay,
-            text);
+            terminal.GetScreenText());
 
         return Task.FromResult<TerminalSnapshot?>(snapshot);
     }
@@ -617,5 +596,4 @@ public class TerminalSessionService : ITerminalSessionService
     private static string BuildSessionOwnerId(string sessionId)
         => $"terminal-session:{sessionId}";
 
-    private static bool ShouldUseReplayBuffer() => true;
 }

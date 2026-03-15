@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
+using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.Bert;
@@ -492,7 +493,7 @@ namespace VibeRails.Services
                 }
                 else
                 {
-                    Console.Error.WriteLine($"[VibeRails] Error recording user input: {ex.Message}");
+                    Log.Warning(ex, "[VibeRails] Error recording user input for session {SessionId}", sessionId);
                 }
             }
         }
