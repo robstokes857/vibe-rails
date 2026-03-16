@@ -29,7 +29,7 @@ internal static class TerminalGridSerializer
         var sb = new StringBuilder((scrollbackCount + rows) * cols * 4 + (scrollbackCount + rows) * 16 + 64);
 
         // Hard reset — clears xterm.js completely including its own scrollback
-        sb.Append("\x1bc");
+        sb.Append("\u001bc");
 
         // Scrollback rows (plain ANSI, newline-terminated)
         foreach (var row in scrollback)
@@ -46,12 +46,20 @@ internal static class TerminalGridSerializer
                 sb.Append("\r\n");
         }
 
-        // Reposition cursor to where the terminal's cursor actually is
-        sb.Append("\x1b[");
+        // Reposition cursor to where the terminal's cursor actually is.
+        // Use SGR 0 first to clear any leftover attributes from the last cell written,
+        // then CUP to move to the correct position.
+        sb.Append("\u001b[0m");
+        sb.Append("\u001b[");
         sb.Append(Math.Clamp(cursorRow + 1, 1, rows));
         sb.Append(';');
         sb.Append(Math.Clamp(cursorCol + 1, 1, cols));
         sb.Append('H');
+
+        // Restore cursor visibility and blinking. \u001bc (RIS) resets these to
+        // xterm defaults (visible, no blink). Re-enable blink so TUI apps look correct.
+        sb.Append("\u001b[?25h");  // cursor visible (DECTCEM)
+        sb.Append("\u001b[?12h"); // cursor blink on (ATT160)
 
         return Encoding.UTF8.GetBytes(sb.ToString());
     }

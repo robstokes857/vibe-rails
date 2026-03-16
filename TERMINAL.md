@@ -6,7 +6,17 @@ Date started: 2026-03-07
 
 ## Active Issues
 
-None.
+### 🐛 11. Native CLI remote alerting deferred — remote disabled for native sessions
+
+The title-bar notification approach for alerting the local user when a remote viewer connects
+proved unreliable (OSC title gets overwritten by the TUI/shell immediately). A proper alerting
+layer is planned (interactive system sitting in front of all sessions). Until then, remote
+access is disabled for native CLI sessions via `_nativeRemoteEnabled = false` in
+`TerminalRunner.ShouldEnableRemote`. Web terminal remote access is unaffected.
+
+**To re-enable:** flip `_nativeRemoteEnabled = true` in `TerminalRunner.cs`.
+
+Key file: `VibeRails/Services/Terminal/TerminalRunner.cs` — `_nativeRemoteEnabled`, `ShouldEnableRemote`
 
 ---
 
@@ -61,10 +71,19 @@ Navigation destroyed all browser sockets. Only the active tab reconnected, makin
 look offline. Resolved as a side effect of the `connectIfNeeded: false` change above. Tabs now
 correctly show as paused/disconnected rather than silently re-connecting on activation.
 
-### ✅ 4. History lost on reconnect / hard refresh (current screen)
+### ✅ 4. History lost on reconnect / hard refresh
 
-Current screen state is recovered via the redraw-first reconnect path for AI TUIs. Full
-scrollback history intentionally not stored (PTY output persistence remains disabled by design).
+Previously used `CircularBuffer` with ANSI break-point heuristics (`\x1b[?1049h`, `\x1b[2J`,
+`\x1bc`) to find a "clean" restart point in raw PTY bytes. This was fragile — short sessions
+or plain-shell sessions often had no break point, giving clients a blank or partial screen.
+
+**Fix:** replaced `CircularBuffer` entirely with the `TerminalEmulator` library. Every PTY
+output chunk is fed to an in-memory VT100 state machine. On reconnect, `GetGridReplay()`
+serializes the full scrollback history + current screen as ANSI and sends it as a single
+binary WebSocket frame. xterm.js renders it instantly — no animation, no DB, no break-point
+guessing. The client always gets the complete scroll history, exactly as VS Code does.
+
+See **TerminalEmulator Integration** section below for architecture details.
 
 ### ✅ 5. AI TUI double-render / stale cells on reconnect and resize
 
@@ -73,23 +92,72 @@ Mitigated by:
 - `resetDisplayOnly()` in the shrink-only resize path clears stale xterm cells before a real PTY geometry change
 - manager generation guards prevent stale async init from completing after navigation
 
+### ✅ 12. Cursor stuck at bottom-right and not blinking after replay
+
+After reconnect the cursor appeared frozen at the bottom-right corner of the xterm.js viewport
+and cursor blink was disabled.
+
+**Root cause:** `\u001bc` (RIS hard reset) resets xterm.js cursor state to its defaults —
+visible but **not blinking**. TUI apps normally re-enable blink via `\x1b[?12h` on startup, but
+those sequences are ephemeral and not captured in the emulator cell grid, so they are never
+replayed. The cursor position was also left at the end of the last cell written before the CUP
+reposition.
+
+**Fix:** append to `TerminalGridSerializer.Serialize()` after the CUP sequence:
+- `\u001b[0m` — clear residual SGR from the last cell
+- `\u001b[?25h` — cursor visible (DECTCEM)
+- `\u001b[?12h` — cursor blink on (ATT160)
+
+Key file: `VibeRails/Services/Terminal/TerminalGridSerializer.cs` — end of `Serialize()`
+
+### ✅ 10. Double print on remote viewer connect + local title OSC wrong path
+
+**a) Double print:** `RemoteOutputConsumer` streamed live PTY bytes concurrently while
+`GetGridReplay()` snapshot was being sent, so the browser got live output interleaved with
+the full replay. Fixed by adding a `replayInProgress` volatile int — `canForward()` returns
+false while replay is in flight. Applied to both the replay path and PIN-verified path.
+
+**b) OSC title via wrong path:** `NotifyRemoteTakeoverAsync` wrote the title OSC to PTY stdin
+via `WriteBytesAsync`. ConPTY does not interpret OSC from stdin — it passes them to the shell
+as raw input. Fixed by adding `Terminal.PublishOutput()` which dispatches bytes to all
+`ITerminalConsumer`s via the output path (same as PTY-produced bytes). Title sequences now
+use that instead. Also corrected `\x1b` → `\u001b` escapes throughout.
+
+Key files:
+- `VibeRails/Services/Terminal/Terminal.cs` — new `PublishOutput` method
+- `VibeRails/Services/Terminal/TerminalRunner.cs` — `replayInProgress` gate,
+  `PublishOutput` in `NotifyRemoteTakeoverAsync` / `HandleRemoteBrowserDisconnectedAsync`
+
 ### ✅ 6. Remote viewer connect/disconnect not visible on native CLI
 
-Fixed by writing directly to `Console.Error` (stderr) on remote attach and detach.
-Stderr bypasses the PTY so the TUI is never disturbed.
+Superseded by issue #11. The OSC title approach was implemented (via `PublishOutput`) but
+the title gets overwritten immediately by the TUI/shell. Remote access for native CLI sessions
+has been disabled pending a proper alerting layer (see issue #11).
 
 Key files: `VibeRails/Services/Terminal/TerminalRunner.cs` —
-`NotifyRemoteTakeoverAsync`, `HandleRemoteBrowserDisconnectedAsync`
+`_nativeRemoteEnabled`, `ShouldEnableRemote`, `isNativeCli` parameter on `CreateSessionAsync`
+
+### ✅ 9. Garbled character (Ƽ) at start of remote viewer replay
+
+The first character rendered in the remote viewer on reconnect was `Ƽ` (U+01BC) instead of a
+clean screen reset.
+
+**Root cause:** `TerminalGridSerializer.cs` emitted `"\x1bc"` as the hard-reset sequence. In
+C#, `\x` greedily consumes hex digits, so `\x1bc` is codepoint `0x1BC` (Ƽ), not ESC + `c`.
+
+**Fix:** `"\x1bc"` → `"\u001bc"` in `TerminalGridSerializer.cs:32`.
+
+Key file: `VibeRails/Services/Terminal/TerminalGridSerializer.cs` — `Serialize()`
 
 ### ✅ 7. Native CLI showed only a blinking cursor in remote browser until resize
 
 **Root cause:** premature `fitAndSyncTerminal({ force: true })` call in `socket.onopen` fired
-before the terminal panel CSS had settled, sending wrong cols/rows to the PTY. The PTY redrawn
-content arrived into an improperly sized viewport and was invisible.
+before the terminal panel CSS had settled, sending wrong cols/rows to the PTY.
 
-**Fix:** removed the premature call. `scheduleViewportLayoutSync(40ms)` already fires after
-layout settles, sends the correct resize, and triggers the visible PTY redraw. Ctrl+L fallback
-added in `HandleRemoteReplayRequestAsync` for the truly-empty-buffer edge case.
+**Fix:** removed the premature call. `scheduleViewportLayoutSync(40ms)` fires after layout
+settles and sends the correct resize. The Ctrl+L fallback in `HandleRemoteReplayRequestAsync`
+has been removed — `GetGridReplay()` always returns a valid full-screen state, so no fallback
+is needed. The PIN-verified path also now uses `GetGridReplay()` instead of Ctrl+L.
 
 Key files:
 - `VibeRailsFrontEnd/.../Views/Terminals/Index.cshtml` — `socket.onopen`
@@ -97,10 +165,49 @@ Key files:
 
 ---
 
+## TerminalEmulator Integration
+
+`TerminalEmulator` (`C:\source\VibeControl2\TerminalEmulator\`) is an AOT-safe, net10.0 VT100
+state machine that replaced `CircularBuffer` as the terminal state proxy.
+
+**What it does:**
+- Parses all ANSI/VT100 sequences (CSI, OSC, DCS, SGR, alternate screen, 256-color, true color)
+- Maintains a 2D cell grid (`TerminalCell[rows, cols]`) for the current visible screen
+- Keeps a scrollback ring buffer (1000 rows default) of rows that have scrolled off
+- Tracks cursor position, SGR attributes, and alternate screen state
+
+**How it's wired:**
+- `TerminalEmulatorConsumer` (`ITerminalConsumer`) subscribes to every PTY output chunk and
+  feeds it to the emulator under `_emulatorLock`
+- `Terminal.Resize()` also resizes the emulator to keep dimensions in sync
+- `Terminal.GetGridReplay()` snapshots scrollback + screen under lock, then calls
+  `TerminalGridSerializer.Serialize()` outside the lock
+
+**`TerminalGridSerializer.Serialize()`:**
+- Emits `\x1bc` (hard reset) to clear xterm.js including its own scrollback
+- Writes scrollback rows oldest-first, each with `\r\n`, using delta SGR encoding
+- Writes current screen rows
+- Repositions cursor to the emulator's current cursor position
+- Returns UTF-8 bytes ready for a binary WebSocket frame
+
+**Thread safety:**
+- `_emulatorLock` (C# 13 `Lock`) serializes `Write()` and `Resize()` from concurrent threads
+- `GetSnapshot()` and `GetScrollback()` return copies — serialization is lock-free
+
+**Key files:**
+- `TerminalEmulator/Terminal.cs` — public API (`Write`, `Resize`, `GetSnapshot`, `GetScrollback`)
+- `TerminalEmulator/TerminalBuffer.cs` — grid + scrollback state
+- `TerminalEmulator/AnsiParser.cs` — VT100 state machine
+- `VibeRails/Services/Terminal/Terminal.cs` — `GetGridReplay()`
+- `VibeRails/Services/Terminal/TerminalGridSerializer.cs` — ANSI serializer
+- `VibeRails/Services/Terminal/TerminalEmulatorConsumer.cs` — feeds PTY bytes to emulator
+
+---
+
 ## Notes
 
 - Terminal tracking is consolidated in this root file. The duplicate `VibeRails/TERMINAL.md`
   investigation file was removed on 2026-03-12.
-- Do not reintroduce raw replay as the reconnect baseline for current AI CLIs.
+- Do not reintroduce `CircularBuffer` or raw replay as the reconnect baseline — fully replaced
+  by the TerminalEmulator grid approach.
 - If replay is ever used again, limit it to plain shell / line-oriented sessions only.
-- A future screen-state solution should be treated separately from archived output history.

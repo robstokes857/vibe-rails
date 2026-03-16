@@ -48,6 +48,17 @@ public sealed class MyTerminalObserver : ITerminalIoObserver
         return ValueTask.CompletedTask;
     }
 
+    // ── Synthetic output ──────────────────────────────────────────────────────
+    //
+    // To inject bytes that appear in the native terminal, remote viewer, and emulator
+    // without writing to PTY stdin, call terminal.PublishOutput(bytes).
+    // Use sparingly — the injected content enters the emulator grid and will appear
+    // in GetGridReplay() output.
+    //
+    // Example: inject an OSC title update from an observer:
+    //   terminal.PublishOutput(
+    //       System.Text.Encoding.UTF8.GetBytes("\u001b]0;My Title\u0007"));
+
     private static ValueTask OnResizeAsync(TerminalResizeEvent resizeEvent, CancellationToken cancellationToken)
     {
         _ = resizeEvent;
