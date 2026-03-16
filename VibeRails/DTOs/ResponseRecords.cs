@@ -483,8 +483,19 @@ namespace VibeRails.DTOs
         List<SwarmStepResponse> Steps
     );
 
+    public record AppToastNotification(
+        string Title,
+        string Message,
+        string Type = "info",
+        bool RequireDismiss = false,
+        string? Icon = null,
+        string? IconBackground = null,
+        string? IconColor = null
+    );
+
     public record EventMessage(string Type, string Text);
 
+    [JsonSerializable(typeof(AppToastNotification))]
     [JsonSerializable(typeof(EventMessage))]
     [JsonSerializable(typeof(HealthResponse))]
     [JsonSerializable(typeof(FileResponse))]

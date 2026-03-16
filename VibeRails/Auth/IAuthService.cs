@@ -6,7 +6,7 @@ public interface IAuthService
     bool ValidateToken(string? token);
     string GenerateBootstrapCode();
     bool ValidateAndConsumeBootstrapCode(string? code);
-
-    string GetInstanceTabToken();
     bool ValidateTabToken(string? token);
+    void SetTabTokenHeader(HttpContext context);
+    string ReplaceTabInHtmlString(string html);
 }

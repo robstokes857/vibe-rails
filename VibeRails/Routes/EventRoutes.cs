@@ -1,3 +1,6 @@
+#if DEBUG
+
+
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -10,11 +13,6 @@ namespace VibeRails.Routes;
 
 public static class EventRoutes
 {
-    private static readonly JsonSerializerOptions s_jsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        TypeInfoResolver = AppJsonSerializerContext.Default
-    };
 
     public static void Map(WebApplication app)
     {
@@ -45,7 +43,7 @@ public static class EventRoutes
             {
                 if (tabIdFilter != null && tabId != tabIdFilter)
                     return;
-
+            
                 var json = JsonSerializer.Serialize(new EventMessage(type, text), AppJsonSerializerContext.Default.EventMessage);
                 channel.Writer.TryWrite(json);
             }
@@ -109,3 +107,6 @@ public static class EventRoutes
         });
     }
 }
+
+
+#endif
