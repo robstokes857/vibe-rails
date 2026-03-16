@@ -6,57 +6,6 @@ Date started: 2026-03-07
 
 ## Active Issues
 
-### 🐛 Cursor flickering during TUI loading
-
-While a TUI application (e.g. Claude Code) is starting up, the cursor visibly flickers or jumps
-around during the initialization/loading phase.
-
-**Observed in:** Both browser and VS Code extension (shared stack).
-
-**Likely area:** TUI apps emit rapid cursor movement/show/hide sequences during startup. Combined
-with xterm.js re-rendering and the `cursorBlink` toggle in `setCursorActive()`, this may produce
-visible flicker. Could also interact with the replay path if a reconnect happens during TUI init.
-
-Key files: `VibeRails/wwwroot/js/modules/vibe-terminal.js` — `setCursorActive`,
-`VibeRails/wwwroot/js/modules/terminal-multitab.js`
-
----
-
-### 🐛 Sluggish typing — input delay before character appears
-
-There is a noticeable delay between pressing a key and seeing the character appear on screen.
-Keystrokes are not dropped — just latency before the echo renders.
-
-**Observed in:** Both browser and VS Code extension (shared stack).
-
-**Likely area:** WebSocket round-trip latency (keystroke → server PTY → PTY echo → xterm write),
-or xterm `write()` batching/debouncing. Could also be WebGL renderer overhead.
-
-**Note:** Investigation only — do not attempt a fix until root cause is identified.
-
-Key files: `VibeRails/wwwroot/js/modules/vibe-terminal.js` — `writeData`,
-`VibeRails/wwwroot/js/modules/terminal-multitab.js` — WebSocket send path
-
----
-
-### 🐛 Double/phantom cursor — ghost cursor at bottom-right of viewport
-
-While typing in the terminal, a second ghost cursor appears at the bottom-right corner of the
-terminal viewport and blinks alongside the real cursor. The real cursor is correctly positioned
-in the input line. When typing reaches the end of a row (line wrap), the phantom cursor snaps
-back to the bottom-right corner.
-
-**Observed in:** Both browser and VS Code extension (shared stack).
-
-**Likely area:** xterm.js cursor rendering — possibly a stale cursor position left over after a
-replay or resize write, or the xterm cursor not being suppressed when a custom/overlay cursor is
-active. Related to `cursorInactiveStyle`, `cursorBlink`, or how cursor position is managed after
-`GetGridReplay()` serializes and the CUP sequence lands.
-
-Key files: `VibeRails/wwwroot/js/modules/vibe-terminal.js` — cursor options,
-`VibeRails/Services/Terminal/TerminalGridSerializer.cs` — CUP positioning at end of `Serialize()`
-
----
 
 ### 🐛 Native CLI remote alerting deferred — remote disabled for native sessions
 
@@ -73,6 +22,55 @@ Key file: `VibeRails/Services/Terminal/TerminalRunner.cs` — `_nativeRemoteEnab
 ---
 
 ## Fixed Issues
+
+### ✅ Double/phantom cursor — ghost cursor alongside real cursor
+
+While typing, a second blinking cursor appeared alongside the real cursor. When typing reached
+end of a row, the phantom moved to the bottom-right corner of the viewport. Observed in both
+browser and VS Code extension.
+
+**Root cause:** xterm.js v6 positions the `xterm-helper-textarea` ON-SCREEN at the cursor
+location (for IME composition support), unlike older xterm.js which parked it at `left: -9999em`.
+The browser renders the textarea's native caret at that pixel position, producing a second
+blinking cursor on top of xterm.js's own canvas-rendered cursor. At end-of-row / pending-wrap,
+xterm.js moves the textarea to the wrap position a frame late, leaving the native caret briefly
+at the old column — visually "stuck at bottom-right".
+
+**Fix:** `caret-color: transparent !important` on `.terminal-element .xterm-helper-textarea`
+in `style.css`. This hides the browser caret while xterm.js's own cursor remains fully visible.
+
+Key file: `VibeRails/wwwroot/style.css` — `.terminal-element .xterm-helper-textarea`
+
+---
+
+### ✅ Cursor flickering during TUI loading
+
+The cursor visibly flickered or jumped around while a TUI app (e.g. Claude Code) was loading.
+Observed in both browser and VS Code extension.
+
+**Root cause (primary):** Same as the double/phantom cursor above — xterm.js v6 moves the
+textarea to the cursor position on every cursor-movement sequence. TUI apps emit rapid cursor
+moves during startup (`\u001b[R;CH`, `\u001b[?25l/h`, etc.), causing the browser native caret
+to flicker across the screen as the textarea tracks each move. Fixed by `caret-color: transparent`.
+
+**Root cause (secondary):** `socket.onopen` called `fitAndSyncTerminal()` which force-sent a
+`__resize__` control frame even when dimensions were identical to the pre-connect fit already
+forwarded in the WebSocket URL. The server received the same-size resize, sent SIGWINCH to the
+PTY, and the TUI performed a full redraw right on top of the just-loaded replay — causing an
+additional wave of cursor movement and redraw flicker immediately after reconnect.
+
+**Fix:** Prime `this.lastResizeSignature` in `connect()` with the pre-connect dimensions after
+the pre-connect fit. Replace `fitAndSyncTerminal()` in `socket.onopen` with a non-forced
+`sendResizeToPty()` that skips if the signature is unchanged. The server already has the correct
+PTY dimensions from the URL; the post-connect sync only sends `__resize__` if the container
+genuinely changed between pre-connect and `onopen`.
+
+Key files:
+- `VibeRails/wwwroot/style.css` — `caret-color: transparent`
+- `VibeRails/wwwroot/js/modules/terminal-multitab.js` — `connect()` signature priming, `socket.onopen` resize path
+
+---
+
 
 ### ✅ Cursor flicker / jumping cursor positions after reconnect and resize
 
@@ -263,3 +261,7 @@ state machine that replaced `CircularBuffer` as the terminal state proxy.
 - Do not reintroduce `CircularBuffer` or raw replay as the reconnect baseline — fully replaced
   by the TerminalEmulator grid approach.
 - If replay is ever used again, limit it to plain shell / line-oriented sessions only.
+- **Sluggish typing (accepted):** ~20 ms per character echo latency is inherent — xterm.js v6
+  `WriteBuffer` batches via `setTimeout(0)` (~4 ms) + rAF render (~16 ms). No delay on our
+  `onData` → `socket.send()` path; the bottleneck is xterm.js's async write pipeline. Fixing
+  would require local echo or xterm.js internal APIs. Accepted as-is.

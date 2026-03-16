@@ -1996,6 +1996,11 @@ body.terminal-focus-active #terminal-panel #terminal-container {
 
 .terminal-element .xterm-helper-textarea {
     font-size: 16px !important;
+    /* xterm.js v6 positions the textarea on-screen at the cursor location for IME
+       support. Without this, the browser's native caret is visible alongside
+       xterm.js's own rendered cursor, producing a double-cursor effect and
+       flickering during TUI startup as the textarea tracks rapid cursor moves. */
+    caret-color: transparent !important;
 }
 
 .terminal-element .xterm-viewport {

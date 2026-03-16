@@ -419,6 +419,13 @@ class TerminalTab {
         const preConnectCols = this.vibeTerminal?.cols;
         const preConnectRows = this.vibeTerminal?.rows;
 
+        // Prime the resize signature with the pre-connect dimensions. The server
+        // receives these in the WebSocket URL and resizes the PTY before sending
+        // the replay, so the post-connect fit in onopen must not re-send the same
+        // dimensions — a redundant __resize__ triggers SIGWINCH, causing TUI apps
+        // to redraw right on top of the just-loaded replay (cursor flicker).
+        this.lastResizeSignature = `${preConnectCols}x${preConnectRows}`;
+
         this.state.status = 'connecting';
         this.manager.updateUi();
 
@@ -445,7 +452,11 @@ class TerminalTab {
 
                 if (this.isActive) {
                     this.setupResizeHandling();
-                    this.fitAndSyncTerminal();
+                    // Fit but only send resize if dimensions changed since the
+                    // pre-connect fit (signature already primed above). Avoids
+                    // a spurious SIGWINCH → TUI redraw over the loaded replay.
+                    this.vibeTerminal.fit({ force: true, notify: false });
+                    this.sendResizeToPty();
                     this.scheduleFitPasses();
                     this.focusInput();
                 }
