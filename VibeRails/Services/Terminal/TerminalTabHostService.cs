@@ -29,7 +29,9 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILocalClientTracker _localClientTracker;
+#if DEBUG
     private readonly EventBus _eventBus;
+#endif
     private readonly SemaphoreSlim _createGate = new(1, 1);
     private readonly Lock _lock = new();
     private readonly Dictionary<string, TerminalChildProcess> _tabs = new(StringComparer.Ordinal);
@@ -40,11 +42,19 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     public int MaxTabs => 8;
 
-    public TerminalTabHostService(IHttpClientFactory httpClientFactory, ILocalClientTracker localClientTracker, EventBus eventBus)
+    public TerminalTabHostService(
+        IHttpClientFactory httpClientFactory,
+        ILocalClientTracker localClientTracker
+#if DEBUG
+        , EventBus eventBus
+#endif
+    )
     {
         _httpClientFactory = httpClientFactory;
         _localClientTracker = localClientTracker;
+#if DEBUG
         _eventBus = eventBus;
+#endif
         _launchDirectory = Directory.GetCurrentDirectory();
         _tabsOwnerId = $"terminal-tabs:{Environment.ProcessId}";
     }
@@ -84,16 +94,20 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
             child = await SpawnChildAsync(cancellationToken);
 
-            var relayCts = new CancellationTokenSource();
             lock (_lock)
             {
                 _tabs[child.TabId] = child;
+#if DEBUG
+                var relayCts = new CancellationTokenSource();
                 _tabRelayCts[child.TabId] = relayCts;
+#endif
                 EnsureTabsOwnerLocked();
             }
 
-            _ = RelayChildEventsAsync(child, relayCts.Token);
-
+#if DEBUG
+            var relayToken = _tabRelayCts[child.TabId].Token;
+            _ = RelayChildEventsAsync(child, relayToken);
+#endif
             return await BuildTabStatusAsync(child, cancellationToken);
         }
         catch
@@ -198,6 +212,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         await CloseWebSocketAsync(browserSocket, cancellationToken);
     }
 
+#if DEBUG
     private async Task RelayChildEventsAsync(TerminalChildProcess child, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested && !child.Process.HasExited)
@@ -264,6 +279,12 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         await CloseWebSocketAsync(upstream, cancellationToken);
         await CloseWebSocketAsync(browserSocket, cancellationToken);
     }
+#else
+    public Task HandleEventWebSocketProxyAsync(string tabId, WebSocket browserSocket, CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Event WebSocket proxying is only available in debug builds.");
+    }
+#endif
 
     public async Task StopAllAsync(CancellationToken cancellationToken = default)
     {

@@ -25,9 +25,13 @@ public static class RouteExtensions
         PinRoutes.Map(app);
         LifecycleRoutes.Map(app);
         TraceRoutes.Map(app);
-        EventRoutes.Map(app);
+        AppNotificationRoutes.Map(app);
         BertRoutes.Map(app);
-        //ProxyRoutes.Map(app);
+
+        // Debug routes - only map if in debug mode
+#if DEBUG
+        EventRoutes.Map(app);
+#endif
     }
 }
 

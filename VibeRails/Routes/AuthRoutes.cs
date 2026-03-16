@@ -7,10 +7,6 @@ public static class AuthRoutes
 {
     public static void Map(WebApplication app)
     {
-        app.MapGet("/auth/tab-token", (IAuthService authService) =>
-        {
-            return Results.Text(authService.GetInstanceTabToken(), "text/plain");
-        });
 
         // Bootstrap endpoint - validates one-time code and sets auth cookie
         app.MapGet("/auth/bootstrap", (HttpContext context, IAuthService authService, string? code, string? redirect) =>
@@ -40,17 +36,15 @@ public static class AuthRoutes
             var destination = (!string.IsNullOrWhiteSpace(redirect) && redirect.StartsWith('/') && !redirect.StartsWith("//"))
                 ? redirect
                 : "/";
-
-            // Expose tab token as a response header so the VSCode extension can read it
-            // without parsing the HTML body.
-            context.Response.Headers["viberails_tab"] = authService.GetInstanceTabToken();
+            //Set the tab token header for the next request, which the client-side script will save to sessionStorage
+            authService.SetTabTokenHeader(context);
 
             // Encode for safe JS string embedding without relying on reflection-based JSON serialization.
             var destinationEscaped = System.Text.Json.JsonEncodedText.Encode(destination).ToString();
-            var tabTokenEscaped = System.Text.Json.JsonEncodedText.Encode(authService.GetInstanceTabToken()).ToString();
+           
             var html = STRINGS.AUTH_BOOTSTRAP_HTML
-                .Replace("window.location.replace('/')", $"window.location.replace(\"{destinationEscaped}\")")
-                .Replace("'__VIBERAILS_TAB_TOKEN__'", $"'{tabTokenEscaped}'");
+                .Replace("window.location.replace('/')", $"window.location.replace(\"{destinationEscaped}\")");
+            html = authService.ReplaceTabInHtmlString(html);
             return Results.Content(html, "text/html");
         }).WithName("AuthBootstrap");
     }

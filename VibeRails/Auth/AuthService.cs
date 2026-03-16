@@ -5,6 +5,7 @@ namespace VibeRails.Auth;
 public class AuthService : IAuthService
 {
     private readonly string _instanceToken;
+    //Can you make this a secure string in memory?
     private readonly string _tabToken;
     private string? _bootstrapCode;
     private DateTime? _bootstrapCodeExpiry;
@@ -38,7 +39,6 @@ public class AuthService : IAuthService
         );
     }
 
-    public string GetInstanceTabToken() => _tabToken;
 
     public bool ValidateTabToken(string? token)
     {
@@ -92,4 +92,18 @@ public class AuthService : IAuthService
             return false;
         }
     }
+
+    public void SetTabTokenHeader(HttpContext context)
+    {
+        if (context.Request.Path.Value != "/auth/bootstrap")
+            throw new Exception("You can only get this once.");
+
+        context.Response.Headers["viberails_tab"] = _tabToken;
+    }
+    public string ReplaceTabInHtmlString(string html)
+    {
+        string tabTokenEscaped = System.Text.Json.JsonEncodedText.Encode(_tabToken).ToString();
+        return html.Replace("'__VIBERAILS_TAB_TOKEN__'", $"'{tabTokenEscaped}'");
+    }
+
 }

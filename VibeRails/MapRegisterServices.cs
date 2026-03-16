@@ -81,7 +81,9 @@ namespace VibeRails
             // Terminal Session Service (scoped to work with other scoped services)
             serviceCollection.AddScoped<ITerminalIoObserver, MyTerminalObserver>();
             serviceCollection.AddScoped<ITerminalIoObserver, TraceObserver>();
+#if DEBUG
             serviceCollection.AddScoped<ITerminalIoObserver, WebSocketEventObserver>();
+#endif
             serviceCollection.AddScoped<ITerminalIoObserverService, TerminalIoObserverService>();
             serviceCollection.AddScoped<ITerminalSessionService, TerminalSessionService>();
             serviceCollection.AddSingleton<ITerminalTabHostService, TerminalTabHostService>();
@@ -96,8 +98,11 @@ namespace VibeRails
             serviceCollection.AddHostedService<UpdateCheckJob>();
             serviceCollection.AddHostedService<StaleSessionCleanupJob>();
 
+#if DEBUG
             // Event bus — fire-and-forget publish to connected WebSocket viewers
             serviceCollection.AddSingleton<EventBus>();
+#endif
+            serviceCollection.AddSingleton<IAppNotificationService, AppNotificationService>();
 
             // Remote State Service (for terminal session remote registration)
             serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>();

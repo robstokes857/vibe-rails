@@ -14,6 +14,8 @@ import { TerminalController } from './js/modules/terminal-multitab.js';
 import { SandboxController } from './js/modules/sandbox-controller.js';
 import { SettingsController } from './js/modules/settings-controller.js';
 import { SwarmController } from './js/modules/swarm-controller.js';
+import { ServerToastClient } from './js/modules/server-toast-client.js';
+import { showAppToast } from './js/modules/toast-service.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
 export class VibeControlApp {
@@ -49,6 +51,7 @@ export class VibeControlApp {
         this.sandboxController = new SandboxController(this);
         this.settingsController = new SettingsController(this);
         this.swarmController = new SwarmController(this);
+        this.serverToastClient = new ServerToastClient(this);
         this.lifecycleHeartbeatTimer = null;
         this.lifecycleClientId = this.getOrCreateLifecycleClientId();
         this.navbarsCollapsed = false;
@@ -59,6 +62,7 @@ export class VibeControlApp {
     async init() {
         await this.fetchConfigs();
         await this.applyInitialSettings();
+        this.serverToastClient.start();
         this.applyNavbarsCollapsedState(false);
         if (!this.data.isInGit) {
             this.showNotInGitBanner();
@@ -862,19 +866,7 @@ export class VibeControlApp {
     }
 
     showToast(title, message, type = 'info', options = {}) {
-        const { icon, iconBackground, iconColor, theme = 'glassmorphism', duration = 5000, animation } = options;
-        toast({
-            title,
-            message,
-            type,
-            position: 'bottom-right',
-            duration,
-            theme,
-            animation: animation ?? { enter: 'slideInRight', exit: 'fadeOut' },
-            ...(icon != null && { icon, showIcon: true }),
-            ...(iconBackground != null && { iconBackground }),
-            ...(iconColor != null && { iconColor }),
-        });
+        showAppToast(title, message, type, options);
     }
 
     showError(message) {
@@ -1004,7 +996,10 @@ export class VibeControlApp {
             this.sendLifecyclePing();
         }, 30000);
 
-        const onDisconnect = () => this.sendLifecycleDisconnect();
+        const onDisconnect = () => {
+            this.serverToastClient.stop();
+            this.sendLifecycleDisconnect();
+        };
         window.addEventListener('beforeunload', onDisconnect);
         window.addEventListener('pagehide', onDisconnect);
         document.addEventListener('visibilitychange', () => {
