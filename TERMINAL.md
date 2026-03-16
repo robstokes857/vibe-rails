@@ -6,7 +6,59 @@ Date started: 2026-03-07
 
 ## Active Issues
 
-### 🐛 11. Native CLI remote alerting deferred — remote disabled for native sessions
+### 🐛 Cursor flickering during TUI loading
+
+While a TUI application (e.g. Claude Code) is starting up, the cursor visibly flickers or jumps
+around during the initialization/loading phase.
+
+**Observed in:** Both browser and VS Code extension (shared stack).
+
+**Likely area:** TUI apps emit rapid cursor movement/show/hide sequences during startup. Combined
+with xterm.js re-rendering and the `cursorBlink` toggle in `setCursorActive()`, this may produce
+visible flicker. Could also interact with the replay path if a reconnect happens during TUI init.
+
+Key files: `VibeRails/wwwroot/js/modules/vibe-terminal.js` — `setCursorActive`,
+`VibeRails/wwwroot/js/modules/terminal-multitab.js`
+
+---
+
+### 🐛 Sluggish typing — input delay before character appears
+
+There is a noticeable delay between pressing a key and seeing the character appear on screen.
+Keystrokes are not dropped — just latency before the echo renders.
+
+**Observed in:** Both browser and VS Code extension (shared stack).
+
+**Likely area:** WebSocket round-trip latency (keystroke → server PTY → PTY echo → xterm write),
+or xterm `write()` batching/debouncing. Could also be WebGL renderer overhead.
+
+**Note:** Investigation only — do not attempt a fix until root cause is identified.
+
+Key files: `VibeRails/wwwroot/js/modules/vibe-terminal.js` — `writeData`,
+`VibeRails/wwwroot/js/modules/terminal-multitab.js` — WebSocket send path
+
+---
+
+### 🐛 Double/phantom cursor — ghost cursor at bottom-right of viewport
+
+While typing in the terminal, a second ghost cursor appears at the bottom-right corner of the
+terminal viewport and blinks alongside the real cursor. The real cursor is correctly positioned
+in the input line. When typing reaches the end of a row (line wrap), the phantom cursor snaps
+back to the bottom-right corner.
+
+**Observed in:** Both browser and VS Code extension (shared stack).
+
+**Likely area:** xterm.js cursor rendering — possibly a stale cursor position left over after a
+replay or resize write, or the xterm cursor not being suppressed when a custom/overlay cursor is
+active. Related to `cursorInactiveStyle`, `cursorBlink`, or how cursor position is managed after
+`GetGridReplay()` serializes and the CUP sequence lands.
+
+Key files: `VibeRails/wwwroot/js/modules/vibe-terminal.js` — cursor options,
+`VibeRails/Services/Terminal/TerminalGridSerializer.cs` — CUP positioning at end of `Serialize()`
+
+---
+
+### 🐛 Native CLI remote alerting deferred — remote disabled for native sessions
 
 The title-bar notification approach for alerting the local user when a remote viewer connects
 proved unreliable (OSC title gets overwritten by the TUI/shell immediately). A proper alerting
@@ -22,7 +74,7 @@ Key file: `VibeRails/Services/Terminal/TerminalRunner.cs` — `_nativeRemoteEnab
 
 ## Fixed Issues
 
-### ✅ 8. Cursor flicker / jumping cursor positions after reconnect and resize
+### ✅ Cursor flicker / jumping cursor positions after reconnect and resize
 
 After the double-print fix, the Web UI terminal could still show the cursor jumping between
 old and new positions during reconnect or layout settle. The screenshot looked like "ghost"
@@ -41,7 +93,7 @@ passes now skip the local reset and just send the resize to the PTY.
 Key file: `VibeRails/wwwroot/js/modules/terminal-multitab.js` — `sendResizeToPty`,
 `shouldResetDisplayBeforeResize`
 
-### ✅ 1. Double paste when pasting into the terminal
+### ✅ Double paste when pasting into the terminal
 
 Pasting into the web terminal (Ctrl+V or right-click paste) sent the clipboard text twice.
 
@@ -58,20 +110,20 @@ Ctrl+V as a raw key sequence.
 
 Key file: `VibeRails/wwwroot/js/modules/vibe-terminal.js` — `attachClipboardPaste`
 
-### ✅ 2. Clicking a tab auto-reconnected the terminal
+### ✅ Clicking a tab auto-reconnected the terminal
 
 Tab button click passed `connectIfNeeded: true`, making tab selection act as an implicit
 reconnect. Fixed by changing all tab activation calls in `addLocalTab()` and `restoreTabs()` to
 `connectIfNeeded: false`. Reconnect is now explicit only (Reconnect button, or
 `reconnectActiveTab()`).
 
-### ✅ 3. Unselected tabs appeared offline during navigation
+### ✅ Unselected tabs appeared offline during navigation
 
 Navigation destroyed all browser sockets. Only the active tab reconnected, making inactive tabs
 look offline. Resolved as a side effect of the `connectIfNeeded: false` change above. Tabs now
 correctly show as paused/disconnected rather than silently re-connecting on activation.
 
-### ✅ 4. History lost on reconnect / hard refresh
+### ✅ History lost on reconnect / hard refresh
 
 Previously used `CircularBuffer` with ANSI break-point heuristics (`\x1b[?1049h`, `\x1b[2J`,
 `\x1bc`) to find a "clean" restart point in raw PTY bytes. This was fragile — short sessions
@@ -85,14 +137,14 @@ guessing. The client always gets the complete scroll history, exactly as VS Code
 
 See **TerminalEmulator Integration** section below for architecture details.
 
-### ✅ 5. AI TUI double-render / stale cells on reconnect and resize
+### ✅ AI TUI double-render / stale cells on reconnect and resize
 
 Mitigated by:
 - redraw-first (not replay) for AI CLI reconnect
 - `resetDisplayOnly()` in the shrink-only resize path clears stale xterm cells before a real PTY geometry change
 - manager generation guards prevent stale async init from completing after navigation
 
-### ✅ 12. Cursor stuck at bottom-right and not blinking after replay
+### ✅ Cursor stuck at bottom-right and not blinking after replay
 
 After reconnect the cursor appeared frozen at the bottom-right corner of the xterm.js viewport
 and cursor blink was disabled.
@@ -110,7 +162,7 @@ reposition.
 
 Key file: `VibeRails/Services/Terminal/TerminalGridSerializer.cs` — end of `Serialize()`
 
-### ✅ 10. Double print on remote viewer connect + local title OSC wrong path
+### ✅ Double print on remote viewer connect + local title OSC wrong path
 
 **a) Double print:** `RemoteOutputConsumer` streamed live PTY bytes concurrently while
 `GetGridReplay()` snapshot was being sent, so the browser got live output interleaved with
@@ -128,16 +180,16 @@ Key files:
 - `VibeRails/Services/Terminal/TerminalRunner.cs` — `replayInProgress` gate,
   `PublishOutput` in `NotifyRemoteTakeoverAsync` / `HandleRemoteBrowserDisconnectedAsync`
 
-### ✅ 6. Remote viewer connect/disconnect not visible on native CLI
+### ✅ Remote viewer connect/disconnect not visible on native CLI
 
-Superseded by issue #11. The OSC title approach was implemented (via `PublishOutput`) but
-the title gets overwritten immediately by the TUI/shell. Remote access for native CLI sessions
-has been disabled pending a proper alerting layer (see issue #11).
+Superseded by the native CLI remote alerting deferred issue above. The OSC title approach was
+implemented (via `PublishOutput`) but the title gets overwritten immediately by the TUI/shell.
+Remote access for native CLI sessions has been disabled pending a proper alerting layer.
 
 Key files: `VibeRails/Services/Terminal/TerminalRunner.cs` —
 `_nativeRemoteEnabled`, `ShouldEnableRemote`, `isNativeCli` parameter on `CreateSessionAsync`
 
-### ✅ 9. Garbled character (Ƽ) at start of remote viewer replay
+### ✅ Garbled character (Ƽ) at start of remote viewer replay
 
 The first character rendered in the remote viewer on reconnect was `Ƽ` (U+01BC) instead of a
 clean screen reset.
@@ -149,7 +201,7 @@ C#, `\x` greedily consumes hex digits, so `\x1bc` is codepoint `0x1BC` (Ƽ), not
 
 Key file: `VibeRails/Services/Terminal/TerminalGridSerializer.cs` — `Serialize()`
 
-### ✅ 7. Native CLI showed only a blinking cursor in remote browser until resize
+### ✅ Native CLI showed only a blinking cursor in remote browser until resize
 
 **Root cause:** premature `fitAndSyncTerminal({ force: true })` call in `socket.onopen` fired
 before the terminal panel CSS had settled, sending wrong cols/rows to the PTY.
