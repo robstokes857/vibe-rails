@@ -147,6 +147,25 @@ public sealed class Terminal : IAsyncDisposable
     }
 
     /// <summary>
+    /// Inject bytes into the output stream — dispatched to all consumers (native terminal,
+    /// remote viewer, emulator) exactly as if the PTY had produced them, without writing
+    /// to PTY stdin. Use for ANSI sequences like title updates (OSC) that must travel
+    /// the output path to be interpreted by the terminal emulator.
+    /// </summary>
+    public void PublishOutput(ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty) return;
+        ITerminalConsumer[] snapshot;
+        lock (_subscriberLock)
+            snapshot = [.. _consumers];
+        foreach (var c in snapshot)
+        {
+            try { c.OnOutput(data); }
+            catch { }
+        }
+    }
+
+    /// <summary>
     /// Serializes the full emulator state (scrollback + current screen) to an ANSI byte stream.
     /// On reconnect, xterm.js gets a hard reset then the complete history — scroll up to see
     /// everything, current screen is at the bottom. No DB, no animation, instant.

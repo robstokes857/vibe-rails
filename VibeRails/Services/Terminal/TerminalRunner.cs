@@ -40,9 +40,10 @@ public class TerminalRunner
         string? title = null,
         bool makeRemote = false,
         string? initialPrompt = null,
-        Func<string, Task>? onRemoteTakeoverAuthorized = null)
+        Func<string, Task>? onRemoteTakeoverAuthorized = null,
+        bool isNativeCli = false)
     {
-        var shouldEnableRemote = ShouldEnableRemote(makeRemote);
+        var shouldEnableRemote = ShouldEnableRemote(makeRemote, isNativeCli);
         var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct);
         var preparedSession = _commandService.PrepareSession(llm, envName, extraArgs, initialPrompt);
         _stateService.PublishSessionStart(sessionId, llm.ToString(), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
@@ -68,9 +69,12 @@ public class TerminalRunner
                 var remoteTakeoverNotified = false;
                 var lockPromptSent = false;
                 var failedPinAttempts = 0;
+                var replayInProgress = 0; // 1 while GetGridReplay snapshot is being sent; live forward paused
                 terminal.Subscribe(new RemoteOutputConsumer(
                     remoteConn,
-                    canForward: () => System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 1));
+                    canForward: () =>
+                        System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 1 &&
+                        System.Threading.Volatile.Read(ref replayInProgress) == 0));
 
                 async Task NotifyRemoteTakeoverAsync(string trigger)
                 {
@@ -80,6 +84,12 @@ public class TerminalRunner
                     remoteTakeoverNotified = true;
 
                     Log.Information("[VibeRails] Remote viewer connected");
+
+                    // Update the native terminal's title bar so the local user knows someone is watching.
+                    // Published via the output path (not PTY stdin) so ConPTY/the terminal emulator
+                    // interprets the OSC title sequence rather than passing it to the shell as input.
+                    terminal.PublishOutput(
+                        System.Text.Encoding.UTF8.GetBytes("\u001b]0;\u26a0 REMOTE USER CONNECTED TO THIS SESSION\u0007"));
 
                     if (onRemoteTakeoverAuthorized == null)
                         return;
@@ -140,7 +150,17 @@ public class TerminalRunner
 
                                         await remoteConn.SendControlAsync(TerminalControlProtocol.Unlocked);
                                         await NotifyRemoteTakeoverAsync("pin");
-                                        await terminal.WriteBytesAsync(new byte[] { 0x0C }, CancellationToken.None); // Ctrl+L
+                                        System.Threading.Volatile.Write(ref replayInProgress, 1);
+                                        try
+                                        {
+                                            var pinReplay = terminal.GetGridReplay();
+                                            if (pinReplay.Length > 0)
+                                                await remoteConn.SendOutputAsync(pinReplay);
+                                        }
+                                        finally
+                                        {
+                                            System.Threading.Volatile.Write(ref replayInProgress, 0);
+                                        }
                                         return;
                                     }
 
@@ -202,9 +222,19 @@ public class TerminalRunner
                             }
 
                             await NotifyRemoteTakeoverAsync("replay");
-                            var replay = terminal.GetGridReplay();
-                            if (replay.Length > 0)
-                                await remoteConn.SendOutputAsync(replay);
+                            // Pause live forwarding so the replay snapshot is not interleaved
+                            // with PTY output that arrived after the snapshot was taken.
+                            System.Threading.Volatile.Write(ref replayInProgress, 1);
+                            try
+                            {
+                                var replay = terminal.GetGridReplay();
+                                if (replay.Length > 0)
+                                    await remoteConn.SendOutputAsync(replay);
+                            }
+                            finally
+                            {
+                                System.Threading.Volatile.Write(ref replayInProgress, 0);
+                            }
                         }
                         finally
                         {
@@ -237,6 +267,10 @@ public class TerminalRunner
                         }
 
                         Log.Information("[VibeRails] Remote viewer disconnected");
+
+                        // Restore the native terminal title bar now that the remote viewer is gone.
+                        terminal.PublishOutput(
+                            System.Text.Encoding.UTF8.GetBytes("\u001b]0;VibeRails Terminal\u0007"));
                     }
                     catch (Exception ex)
                     {
@@ -388,8 +422,17 @@ public class TerminalRunner
         return sb.ToString();
     }
 
-    private static bool ShouldEnableRemote(bool makeRemoteRequested)
+    // TODO: re-enable once the interactive alerting layer is in place to notify
+    // the local user when a remote viewer connects. Until then, remote access
+    // for native CLI sessions is disabled regardless of config.
+    // Web terminal sessions are unaffected — they pass isNativeCli: false.
+    private const bool _nativeRemoteEnabled = false;
+
+    private static bool ShouldEnableRemote(bool makeRemoteRequested, bool isNativeCli)
     {
+        if (isNativeCli && !_nativeRemoteEnabled)
+            return false;
+
         _ = makeRemoteRequested;
         return ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey());
     }
@@ -439,7 +482,7 @@ public class TerminalRunner
     /// </summary>
     public async Task<int> RunCliAsync(LLM llm, string workDir, string? envName, string[]? extraArgs, CancellationToken ct)
     {
-        var (terminal, sessionId, _) = await CreateSessionAsync(llm, workDir, envName, extraArgs, ct);
+        var (terminal, sessionId, _) = await CreateSessionAsync(llm, workDir, envName, extraArgs, ct, isNativeCli: true);
         var exitCode = 0;
 
         await using (terminal)
@@ -485,6 +528,7 @@ public class TerminalRunner
             extraArgs,
             ct,
             makeRemote: makeRemote,
+            isNativeCli: true,
             onRemoteTakeoverAuthorized: trigger =>
             {
                 // Native CLI coexists with remote viewer — both can run concurrently.
