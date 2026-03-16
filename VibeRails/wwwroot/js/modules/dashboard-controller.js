@@ -358,6 +358,9 @@ export class DashboardController {
             const branch = node.querySelector('[data-sandbox-branch]');
             if (branch) branch.textContent = sb.branch;
 
+            const path = node.querySelector('[data-sandbox-path]');
+            if (path) path.textContent = sb.path;
+
             const time = node.querySelector('[data-sandbox-time]');
             if (time) time.textContent = sb.created;
 
