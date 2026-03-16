@@ -64,6 +64,10 @@ body.terminal-scroll-locked {
     overflow-y: scroll;
 }
 
+body.terminal-focus-active {
+    overflow: hidden;
+}
+
 body.terminal-focus-active .main-container {
     max-width: none;
     padding: 0.5rem 0.75rem 0.75rem;
@@ -2120,6 +2124,7 @@ body.terminal-focus-active #terminal-panel #terminal-container {
 #terminal-panel.terminal-focus-card #terminal-container {
     min-height: var(--terminal-min-height);
     height: max(var(--terminal-min-height), var(--terminal-available-height, calc(100dvh - 220px))) !important;
+    max-height: 1400px;
 }
 
 @media (max-width: 992px) {
@@ -2187,6 +2192,18 @@ body.terminal-focus-active #terminal-panel #terminal-container {
 
     .terminal-focus-view {
         min-height: 0;
+    }
+}
+
+/* On very short screens allow page scroll and reduce min-height */
+@media (max-height: 500px) {
+    body.terminal-focus-active {
+        overflow-y: auto;
+    }
+
+    #terminal-panel.terminal-focus-card #terminal-container {
+        min-height: 300px;
+        max-height: none;
     }
 }
 
