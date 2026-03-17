@@ -315,7 +315,7 @@ public class GeminiSettingsTests : IDisposable
         public Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir)
             => Task.CompletedTask;
 
-        public Task LogSessionOutputAsync(string sessionId, string content, bool isError = false)
+        public Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false)
             => Task.CompletedTask;
 
         public Task CompleteSessionAsync(string sessionId, int exitCode)
@@ -326,6 +326,12 @@ public class GeminiSettingsTests : IDisposable
 
         public Task<List<SessionResponse>> GetRecentSessionsAsync(int limit, CancellationToken cancellationToken)
             => Task.FromResult(new List<SessionResponse>());
+
+        public Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, CancellationToken cancellationToken)
+            => Task.FromResult(new List<ChatHistoryItem>());
+
+        public Task<List<string>> GetOpenSessionIdsAsync(DateTime olderThan, CancellationToken cancellationToken)
+            => Task.FromResult(new List<string>());
 
         public Task<UserInputRecord?> GetLastUserInputAsync(string sessionId)
             => Task.FromResult<UserInputRecord?>(null);

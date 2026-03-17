@@ -456,5 +456,7 @@ public class AgentFileServiceTests : IDisposable
         public Task<string?> GetCurrentBranchAsync(CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
 
         public Task<List<FileChangeInfo>> GetFileChangesSinceAsync(string commitHash, CancellationToken cancellationToken = default) => Task.FromResult(new List<FileChangeInfo>());
+
+        public Task<string?> GetRemoteUrlAsync(CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
     }
 }
