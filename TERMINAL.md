@@ -6,34 +6,7 @@ Date started: 2026-03-07
 
 ## Active Issues
 
-Only this terminal issue is currently considered open.
-
-### 🐛 Remaining roaming cursor still visible in Web UI terminal
-
-The cursor issue is improved but not fully gone. The old extra cursor that ignored terminal
-setting changes appears to be fixed, but users still report one cursor artifact that flies
-around the viewport, usually less often than before, and can still end up near the bottom-right
-corner during wraps or redraws.
-
-**Root cause (confirmed 2026-03-16):** xterm.css hides textarea content via `opacity: 0` but
-does NOT set `outline: none` on the helper textarea (only on `.xterm.focus`). On Windows/Chrome
-the browser focus-ring is composited at the OS level and can show through `opacity: 0`, so the
-focused textarea's outline rectangle appears as a phantom cursor at the cursor position. During
-line wrap the textarea briefly stays at the old right-edge position before updating — exactly
-the "parks at bottom-right" symptom. `caret-color: transparent` alone was insufficient because
-the visible artefact was the outline/focus-ring, not the text caret.
-
-**2026-03-16 fix:** added `outline: none !important` and `opacity: 0 !important` to
-`.vb-terminal-element .xterm-helper-textarea` in `style.css`; added matching inline
-`ta.style.outline = 'none'` and `ta.style.opacity = '0'` in `patchTextarea()` as runtime
-backup.
-
-**Retest needed:** verify no phantom cursor while typing, reconnecting, resizing, hard
-refreshing. Confirm the bottom-right artefact on wrap is gone.
-
-Key files:
-- `VibeRails/wwwroot/style.css` — `.vb-terminal-element .xterm-helper-textarea`
-- `VibeRails/wwwroot/js/modules/vibe-terminal.js` — `patchTextarea()`
+None. All known cursor and replay issues are resolved as of 2026-03-17.
 
 ---
 
@@ -54,6 +27,59 @@ Key file: `VibeRails/Services/Terminal/TerminalRunner.cs` — `_nativeRemoteEnab
 ---
 
 ## Fixed Issues
+
+### ✅ Ghost / roaming cursor after reconnect — TUI fake cursor vs real xterm.js cursor (2026-03-17)
+
+After reconnect, a second cursor-like block appeared alongside or flew around the viewport
+independently of the real cursor. It was most visible during TUI loading and immediately after
+replay.
+
+**Root cause (primary — cursor visibility fight):**
+TUI apps (Claude Code, etc.) intentionally hide the real xterm.js cursor (`?25l`) and draw their
+own block/beam glyph at the prompt. `TerminalGridSerializer.Serialize()` was appending `?25h`
+(cursor visible) at the end of every replay. This un-hid the real cursor, giving xterm.js two
+"cursors": the real hardware cursor (restored by `?25h`) and the TUI's own drawn block — both
+visible simultaneously. Removing `?25h` from the end of replay fixes this entirely. The cursor
+stays hidden after replay; the subsequent Ctrl+L redraw causes the TUI to re-establish its own
+cursor state naturally.
+
+**Root cause (secondary — cursor flying during repaint):**
+The replay sequence began with `ESC c` (RIS hard reset) and painted all screen rows using
+sequential CRLF flow (`\r\n` between rows). During repaint, xterm.js rendered the cursor
+wherever it currently thought it was, then moved it again at the final CUP — visually the
+cursor appeared to fly around. Fix: hide cursor at the very start of replay with `?25l`, and
+paint each screen row using absolute CUP addressing (`\x1b[{r+1};1H`) instead of CRLF flow.
+This makes it impossible for cumulative drift (wide chars, full-width columns, wrap semantics)
+to misplace the cursor during repaint.
+
+**Root cause (tertiary — hard reset side-effects):**
+`\u001bc` (RIS) resets many terminal modes beyond screen content. In xterm.js this can cause
+cursor state changes, mode resets, and visual artifacts when content is immediately repainted.
+Replaced with a targeted soft clear: `?25l` + `ED2` + `ED3` + `CUP(1,1)` — clears screen and
+scrollback only, leaves all other terminal modes intact.
+
+**Fix summary (`TerminalGridSerializer.Serialize()`):**
+1. Start with `?25l` (hide cursor) + `\x1b[2J\x1b[3J\x1b[H` instead of `ESC c`
+2. Scrollback rows unchanged (CRLF flow into xterm scrollback is correct)
+3. Each screen row prefixed with `\x1b[{r+1};1H` (absolute CUP, no CRLF)
+4. End with `\x1b[0m` + CUP to real cursor position — no `?25h`, no `?12h`
+
+**Fix summary (`TerminalSessionService.HandleWebSocketAsync()`):**
+Added a comment documenting the critical ordering invariant: snapshot must be sent before
+subscribing the live WebSocket consumer. If the consumer is subscribed first, live PTY output
+can arrive at the browser while the snapshot is in-flight, producing a concurrent-write race
+that creates ghost cursors and corrupted screen state.
+
+**Also closed:** the "Remaining roaming cursor" active bug (2026-03-16 CSS fix + retest pending)
+is confirmed resolved by this change. The CSS `outline: none`/`opacity: 0` fix on
+`.vb-terminal-element .xterm-helper-textarea` remains in place as defense-in-depth against the
+focus-ring artefact.
+
+Key files:
+- `VibeRails/Services/Terminal/TerminalGridSerializer.cs` — `Serialize()`
+- `VibeRails/Services/Terminal/TerminalSessionService.cs` — `HandleWebSocketAsync()` comment
+
+---
 
 ### ✅ Double print / full-session duplicate replay on reconnect and hard refresh
 
@@ -208,13 +234,12 @@ and cursor blink was disabled.
 **Root cause:** `\u001bc` (RIS hard reset) resets xterm.js cursor state to its defaults —
 visible but **not blinking**. TUI apps normally re-enable blink via `\x1b[?12h` on startup, but
 those sequences are ephemeral and not captured in the emulator cell grid, so they are never
-replayed. The cursor position was also left at the end of the last cell written before the CUP
-reposition.
+replayed.
 
-**Fix:** append to `TerminalGridSerializer.Serialize()` after the CUP sequence:
-- `\u001b[0m` — clear residual SGR from the last cell
-- `\u001b[?25h` — cursor visible (DECTCEM)
-- `\u001b[?12h` — cursor blink on (ATT160)
+**Original fix (2026-03-16):** appended `?25h` + `?12h` after CUP. **Superseded 2026-03-17**
+by the ghost-cursor fix — `?25h` was causing a second ghost cursor when TUIs drew their own
+block and the real cursor was unexpectedly restored. Both `?25h` and `?12h` removed. The Ctrl+L
+redraw now handles all cursor state restoration correctly.
 
 Key file: `VibeRails/Services/Terminal/TerminalGridSerializer.cs` — end of `Serialize()`
 
@@ -292,10 +317,14 @@ state machine that replaced `CircularBuffer` as the terminal state proxy.
   `TerminalGridSerializer.Serialize()` outside the lock
 
 **`TerminalGridSerializer.Serialize()`:**
-- Emits `\x1bc` (hard reset) to clear xterm.js including its own scrollback
-- Writes scrollback rows oldest-first, each with `\r\n`, using delta SGR encoding
-- Writes current screen rows
-- Repositions cursor to the emulator's current cursor position
+- Hides cursor (`?25l`), then soft-clears screen (`ED2`) + scrollback (`ED3`) + homes cursor (`CUP 1,1`)
+  — does NOT use `ESC c` (RIS) which resets terminal modes and fights TUI cursor state
+- Writes scrollback rows oldest-first with `\r\n`, using delta SGR encoding (pushes into xterm scrollback)
+- Writes each screen row prefixed with `\x1b[{r+1};1H` (absolute CUP per row, prevents drift from
+  wide chars / full-width columns / wrap semantics)
+- Resets SGR and repositions cursor via CUP to the emulator's real cursor position
+- Does NOT restore cursor visibility — leaves cursor hidden so Ctrl+L redraw lets the TUI
+  re-establish its own cursor state (avoids ghost cursor from real + TUI fake cursors both visible)
 - Returns UTF-8 bytes ready for a binary WebSocket frame
 
 **Thread safety:**
