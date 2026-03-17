@@ -23,36 +23,18 @@ const BASE_TOAST_OPTIONS = Object.freeze({
     iconAnimation: 'pulse'
 });
 
-const TOAST_TONES = Object.freeze({
-    info: Object.freeze({
-        accent: '#3b82f6',
-        border: 'rgba(59, 130, 246, 0.4)',
-        iconBackground: 'rgba(59, 130, 246, 0.1)',
-        closeButtonColor: '#94a3b8'
-    }),
-    success: Object.freeze({
-        accent: '#10b981',
-        border: 'rgba(20, 116, 84, 0.86)',
-        iconBackground: 'rgba(16, 185, 129, 0.1)',
-        closeButtonColor: '#94a3b8'
-    }),
-    warning: Object.freeze({
-        accent: '#f59e0b',
-        border: 'rgba(245, 158, 11, 0.4)',
-        iconBackground: 'rgba(245, 158, 11, 0.1)',
-        closeButtonColor: '#94a3b8'
-    }),
-    error: Object.freeze({
-        accent: '#ef4444',
-        border: 'rgba(239, 68, 68, 0.4)',
-        iconBackground: 'rgba(239, 68, 68, 0.1)',
-        closeButtonColor: '#94a3b8'
-    })
+const DEFAULT_TONE = Object.freeze({
+    accent: '#3b82f6',
+    border: 'rgba(59, 130, 246, 0.4)',
+    iconBackground: 'rgba(59, 130, 246, 0.1)',
+    closeButtonColor: '#94a3b8'
 });
+
+const TOAST_TYPES = Object.freeze(['info', 'success', 'warning', 'error']);
 
 function normalizeToastType(type) {
     const normalizedType = (type || 'info').toLowerCase();
-    return Object.hasOwn(TOAST_TONES, normalizedType) ? normalizedType : 'info';
+    return TOAST_TYPES.includes(normalizedType) ? normalizedType : 'info';
 }
 
 function formatToastMessage(title, message) {
@@ -83,7 +65,7 @@ export function showAppToast(title, message, type = 'info', options = {}) {
     } = options;
 
     const toastType = normalizeToastType(type);
-    const tone = TOAST_TONES[toastType];
+    const tone = DEFAULT_TONE;
     const shouldAutoClose = autoClose === false ? false : !requireDismiss;
     const resolvedDuration = shouldAutoClose ? (duration ?? DEFAULT_DURATIONS[toastType]) : 0;
 
