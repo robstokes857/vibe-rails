@@ -1,52 +1,52 @@
 import { escapeHtml } from './utils.js';
 
-const DEFAULT_THEME = 'xrayOverlay';
+const DEFAULT_THEME = 'glassmorphism';
 const DEFAULT_POSITION = 'top-right';
-const DEFAULT_ENTRY_ANIMATION = 'swingDownIn';
-const DEFAULT_EXIT_ANIMATION = 'dustOut';
+const DEFAULT_ENTRY_ANIMATION = 'fadeIn';
+const DEFAULT_EXIT_ANIMATION = 'fadeOut';
 
 const DEFAULT_DURATIONS = Object.freeze({
     info: 5000,
-    success: 4200,
-    warning: 6500,
+    success: 4000,
+    warning: 6000,
     error: 7000
 });
 
 const BASE_TOAST_OPTIONS = Object.freeze({
-    borderRadius: '18px',
-    background: 'linear-gradient(135deg, rgba(10, 18, 28, 0.96), rgba(18, 28, 44, 0.92))',
-    color: '#eefbff',
-    fontFamily: '\'JetBrains Mono\', \'Fira Code\', monospace',
+    borderRadius: '4px',
+    color: '#f8fafc',
+    fontFamily: '\'Inter\', -apple-system, sans-serif',
     showIcon: true,
-    progressBarPosition: 'top',
-    progressBarHeight: '0.18rem',
+    showCloseButton: true,
+    progressBarPosition: 'bottom',
+    progressBarHeight: '2px',
     iconAnimation: 'pulse'
 });
 
 const TOAST_TONES = Object.freeze({
     info: Object.freeze({
-        accent: '#67e8f9',
-        border: 'rgba(103, 232, 249, 0.45)',
-        iconBackground: 'rgba(8, 145, 178, 0.22)',
-        closeButtonColor: '#a5f3fc'
+        accent: '#06b6d4',
+        border: 'rgba(6, 182, 212, 0.4)',
+        iconBackground: 'rgba(6, 182, 212, 0.1)',
+        closeButtonColor: '#94a3b8'
     }),
     success: Object.freeze({
-        accent: '#4ade80',
-        border: 'rgba(74, 222, 128, 0.42)',
-        iconBackground: 'rgba(22, 163, 74, 0.2)',
-        closeButtonColor: '#86efac'
+        accent: '#10b981',
+        border: 'rgba(16, 185, 129, 0.4)',
+        iconBackground: 'rgba(16, 185, 129, 0.1)',
+        closeButtonColor: '#94a3b8'
     }),
     warning: Object.freeze({
-        accent: '#fbbf24',
-        border: 'rgba(251, 191, 36, 0.45)',
-        iconBackground: 'rgba(217, 119, 6, 0.2)',
-        closeButtonColor: '#fde68a'
+        accent: '#f59e0b',
+        border: 'rgba(245, 158, 11, 0.4)',
+        iconBackground: 'rgba(245, 158, 11, 0.1)',
+        closeButtonColor: '#94a3b8'
     }),
     error: Object.freeze({
-        accent: '#fb7185',
-        border: 'rgba(251, 113, 133, 0.48)',
-        iconBackground: 'rgba(225, 29, 72, 0.2)',
-        closeButtonColor: '#fda4af'
+        accent: '#ef4444',
+        border: 'rgba(239, 68, 68, 0.4)',
+        iconBackground: 'rgba(239, 68, 68, 0.1)',
+        closeButtonColor: '#94a3b8'
     })
 });
 
