@@ -1,7 +1,6 @@
 const tabToken = sessionStorage.getItem('viberails_tab');
 
 const term = new Terminal({
-  cursorBlink: true,
   fontSize: 14,
   fontFamily: 'Consolas, "Courier New", monospace',
   scrollback: 5000,

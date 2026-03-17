@@ -97,7 +97,6 @@ export class VibeTerminal {
         this._terminal = new window.Terminal({
             cols,
             rows,
-            cursorBlink: false,
             fontFamily: this._fontFamily,
             fontSize: metrics.fontSize,
             lineHeight: metrics.lineHeight,
@@ -107,8 +106,6 @@ export class VibeTerminal {
             disableStdin,
             convertEol: false,
             minimumContrastRatio: 3,
-            cursorStyle: 'block',
-            cursorInactiveStyle: 'none',
             theme: DEFAULT_THEME
         });
 
@@ -607,11 +604,6 @@ export class VibeTerminal {
         this._searchTerm = '';
         this._lastCols = null;
         this._lastRows = null;
-    }
-
-    setInteractive(active) {
-        if (!this._terminal) return;
-        this._terminal.options.cursorBlink = !!active;
     }
 
     fit({ notify = true, forceNotify = false, force = false } = {}) {

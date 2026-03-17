@@ -586,14 +586,6 @@ class TerminalManager {
         return this._destroyed;
     }
 
-    _loadCursorBlink() {
-        try {
-            return localStorage.getItem('viberails_terminal_cursorBlink') === 'true';
-        } catch {
-            return false;
-        }
-    }
-
     _loadRendererPreference() {
         try {
             return localStorage.getItem('viberails_terminal_webgl') === 'true' ? 'webgl' : 'canvas';
@@ -610,14 +602,6 @@ class TerminalManager {
         }
     }
 
-    _loadCursorStyle() {
-        try {
-            return localStorage.getItem('viberails_terminal_cursorStyle') || 'block';
-        } catch {
-            return 'block';
-        }
-    }
-
     _applySavedTerminalSettings(tab) {
         const vibe = tab?.instance?.vibeTerminal;
         const terminal = vibe?._terminal;
@@ -627,11 +611,6 @@ class TerminalManager {
         if (themeKey && window.CXL_THEMES?.[themeKey]) {
             terminal.options.theme = window.CXL_THEMES[themeKey];
         }
-
-        const cursorStyle = this._loadCursorStyle();
-        const cursorBlink = this._loadCursorBlink();
-        terminal.options.cursorStyle = cursorStyle;
-        terminal.options.cursorBlink = cursorBlink;
     }
 
     applySavedTerminalSettingsForTab(tabId) {
@@ -799,10 +778,6 @@ class TerminalManager {
             ?.addEventListener('change', (e) => this.adjustFontSize(0, parseInt(e.target.value, 10)));
         this.container.querySelector('#terminal-settings-font-family')
             ?.addEventListener('change', (e) => this.applyFontFamily(e.target.value));
-        this.container.querySelector('#terminal-settings-cursor-style')
-            ?.addEventListener('change', (e) => this.applyCursorStyle(e.target.value));
-        this.container.querySelector('#terminal-settings-cursor-blink')
-            ?.addEventListener('change', (e) => this.applyCursorBlink(e.target.value === 'true'));
         this.container.querySelector('#terminal-settings-renderer')
             ?.addEventListener('change', (e) => this.applyRendererPreference(e.target.value));
     }
@@ -1559,7 +1534,7 @@ class TerminalManager {
             return { text: 'Not Started', className: 'bg-secondary' };
         }
         if (state.status === 'connected') {
-            return { text: 'Connected', className: 'bg-success' };
+            return { text: 'Connected', className: 'bg-secondary' };
         }
         if (state.status === 'connecting') {
             return { text: 'Connecting', className: 'bg-warning' };
@@ -2117,14 +2092,6 @@ class TerminalManager {
             if (saved) familySelect.value = saved;
         }
 
-        const cursorStyleSelect = this.container.querySelector('#terminal-settings-cursor-style');
-        const savedCursorStyle = localStorage.getItem('viberails_terminal_cursorStyle');
-        if (cursorStyleSelect && savedCursorStyle) cursorStyleSelect.value = savedCursorStyle;
-
-        const cursorBlinkSelect = this.container.querySelector('#terminal-settings-cursor-blink');
-        const savedCursorBlink = localStorage.getItem('viberails_terminal_cursorBlink');
-        if (cursorBlinkSelect && savedCursorBlink) cursorBlinkSelect.value = savedCursorBlink;
-
         const rendererSelect = this.container.querySelector('#terminal-settings-renderer');
         if (rendererSelect) rendererSelect.value = this._loadRendererPreference();
 
@@ -2170,24 +2137,6 @@ class TerminalManager {
         try { localStorage.setItem('viberails_terminal_fontFamily', family); } catch {}
         this.tabs.forEach((tab) => {
             tab.instance.applyFontFamily(family);
-        });
-    }
-
-    applyCursorStyle(style) {
-        try { localStorage.setItem('viberails_terminal_cursorStyle', style); } catch {}
-        this.tabs.forEach((tab) => {
-            if (tab.instance.vibeTerminal?._terminal) {
-                tab.instance.vibeTerminal._terminal.options.cursorStyle = style;
-            }
-        });
-    }
-
-    applyCursorBlink(blink) {
-        try { localStorage.setItem('viberails_terminal_cursorBlink', blink); } catch {}
-        this.tabs.forEach((tab) => {
-            if (tab.instance.vibeTerminal?._terminal) {
-                tab.instance.vibeTerminal._terminal.options.cursorBlink = blink;
-            }
         });
     }
 
@@ -2468,24 +2417,6 @@ export class TerminalController {
                                 <div class="vb-terminal-settings-row">
                                     <label>Size</label>
                                     <input type="number" id="terminal-settings-font-size" min="6" max="72">
-                                </div>
-                            </div>
-                            <div class="vb-terminal-settings-section">
-                                <div class="vb-terminal-settings-section-title">Cursor</div>
-                                <div class="vb-terminal-settings-row">
-                                    <label>Style</label>
-                                    <select id="terminal-settings-cursor-style">
-                                        <option value="block">Block</option>
-                                        <option value="bar">Bar</option>
-                                        <option value="underline">Underline</option>
-                                    </select>
-                                </div>
-                                <div class="vb-terminal-settings-row">
-                                    <label>Blink</label>
-                                    <select id="terminal-settings-cursor-blink">
-                                        <option value="true">On</option>
-                                        <option value="false">Off</option>
-                                    </select>
                                 </div>
                             </div>
                         </div>
