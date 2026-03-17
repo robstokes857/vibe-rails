@@ -25,6 +25,9 @@ public sealed class Terminal
     public int CursorRow => _buffer.CursorRow;
     public bool CursorVisible => _buffer.CursorVisible;
     public bool IsAlternateScreen => _buffer.IsAlternateScreen;
+    public CellAttributes CurrentAttributes => _buffer.CurrentAttributes;
+    public CellColor CurrentFg => _buffer.CurrentFg;
+    public CellColor CurrentBg => _buffer.CurrentBg;
 
     /// <summary>
     /// Fired after each Write() call with the row indices that changed.

@@ -28,6 +28,13 @@ public sealed class TerminalBuffer
     // Saved cursor (DECSC/DECRC)
     private CursorState _savedCursor;
 
+    // Scrolling region (DECSTBM) — default is full screen
+    private int _scrollTop;
+    private int _scrollBottom;
+
+    // Tab stops — true at columns where a tab stop is set
+    private bool[] _tabStops;
+
     public int Cols { get; private set; }
     public int Rows { get; private set; }
     public int ScrollbackSize { get; }
@@ -35,6 +42,9 @@ public sealed class TerminalBuffer
     public int CursorCol => ActiveCursor.Col;
     public int CursorRow => ActiveCursor.Row;
     public bool CursorVisible => ActiveCursor.Visible;
+
+    public int ScrollTop => _scrollTop;
+    public int ScrollBottom => _scrollBottom;
 
     // Tracks which rows changed since last snapshot — cleared by consumer
     private readonly bool[] _dirtyRows;
@@ -58,6 +68,12 @@ public sealed class TerminalBuffer
         _scrollback = new TerminalCell[scrollbackSize][];
         _scrollbackHead = 0;
         _scrollbackCount = 0;
+
+        _scrollTop    = 0;
+        _scrollBottom = rows - 1;
+
+        _tabStops = new bool[cols];
+        InitDefaultTabStops();
 
         FillWithEmpty(_normal);
         FillWithEmpty(_alternate);
@@ -128,30 +144,52 @@ public sealed class TerminalBuffer
     public void LineFeed(bool scroll = true)
     {
         ref var cursor = ref ActiveCursor;
-        if (cursor.Row < Rows - 1)
-        {
-            cursor.Row++;
-        }
-        else if (scroll)
+        if (cursor.Row == _scrollBottom && scroll)
         {
             ScrollUp(1);
+            // cursor stays at _scrollBottom (screen scrolled under it)
+        }
+        else if (cursor.Row < Rows - 1)
+        {
+            cursor.Row++;
         }
     }
 
     public void ReverseLineFeed()
     {
         ref var cursor = ref ActiveCursor;
-        if (cursor.Row > 0)
+        if (cursor.Row == _scrollTop)
+            InsertLineAt(_scrollTop);
+        else if (cursor.Row > 0)
             cursor.Row--;
-        else
-            InsertLineAt(0);
     }
 
     public void Tab()
     {
         ref var cursor = ref ActiveCursor;
-        int next = ((cursor.Col / 8) + 1) * 8;
-        cursor.Col = Math.Min(next, Cols - 1);
+        for (int c = cursor.Col + 1; c < Cols; c++)
+        {
+            if (_tabStops[c])
+            {
+                cursor.Col = c;
+                return;
+            }
+        }
+        cursor.Col = Cols - 1;
+    }
+
+    public void BackTab()
+    {
+        ref var cursor = ref ActiveCursor;
+        for (int c = cursor.Col - 1; c >= 0; c--)
+        {
+            if (_tabStops[c])
+            {
+                cursor.Col = c;
+                return;
+            }
+        }
+        cursor.Col = 0;
     }
 
     public void Backspace()
@@ -160,11 +198,40 @@ public sealed class TerminalBuffer
         if (cursor.Col > 0) cursor.Col--;
     }
 
+    // Set scrolling region (DECSTBM). Homes cursor to (0,0) per VT spec.
+    public void SetScrollRegion(int top, int bottom)
+    {
+        _scrollTop    = Math.Clamp(top, 0, Rows - 1);
+        _scrollBottom = Math.Clamp(bottom, _scrollTop, Rows - 1);
+        MoveCursorTo(0, 0);
+    }
+
+    // Set a tab stop at the current cursor column (HTS).
+    public void SetTabStop()
+    {
+        int col = ActiveCursor.Col;
+        if (col < Cols)
+            _tabStops[col] = true;
+    }
+
+    // Clear tab stop(s) (TBC). mode 0 = current column, mode 3 = all.
+    public void ClearTabStop(int mode)
+    {
+        if (mode == 0)
+        {
+            int col = ActiveCursor.Col;
+            if (col < Cols) _tabStops[col] = false;
+        }
+        else if (mode == 3)
+        {
+            Array.Clear(_tabStops, 0, _tabStops.Length);
+        }
+    }
+
     // Erase in display
     public void EraseInDisplay(int mode)
     {
         ref var cursor = ref ActiveCursor;
-        var screen = ActiveScreen;
         switch (mode)
         {
             case 0: // cursor to end
@@ -246,19 +313,19 @@ public sealed class TerminalBuffer
         var screen = ActiveScreen;
         for (int i = 0; i < count; i++)
         {
-            // Push top row into scrollback
-            if (!_usingAlternate)
-                PushScrollback(screen, 0);
+            // Push top row into scrollback only when region starts at top of screen
+            if (!_usingAlternate && _scrollTop == 0)
+                PushScrollback(screen, _scrollTop);
 
-            // Shift rows up
-            for (int r = 0; r < Rows - 1; r++)
+            // Shift rows up within the scroll region
+            for (int r = _scrollTop; r < _scrollBottom; r++)
             {
                 for (int c = 0; c < Cols; c++)
                     screen[r, c] = screen[r + 1, c];
                 MarkDirty(r);
             }
-            // Clear bottom row
-            EraseRow(Rows - 1, 0, Cols);
+            // Clear bottom row of region
+            EraseRow(_scrollBottom, 0, Cols);
         }
     }
 
@@ -267,13 +334,13 @@ public sealed class TerminalBuffer
         var screen = ActiveScreen;
         for (int i = 0; i < count; i++)
         {
-            for (int r = Rows - 1; r > 0; r--)
+            for (int r = _scrollBottom; r > _scrollTop; r--)
             {
                 for (int c = 0; c < Cols; c++)
                     screen[r, c] = screen[r - 1, c];
                 MarkDirty(r);
             }
-            EraseRow(0, 0, Cols);
+            EraseRow(_scrollTop, 0, Cols);
         }
     }
 
@@ -303,6 +370,8 @@ public sealed class TerminalBuffer
     // Resize — preserve as much content as possible
     public void Resize(int newCols, int newRows)
     {
+        bool wasFullHeight = (_scrollTop == 0 && _scrollBottom == Rows - 1);
+
         var newNormal    = new TerminalCell[newRows, newCols];
         var newAlternate = new TerminalCell[newRows, newCols];
         FillWithEmpty(newNormal);
@@ -328,6 +397,26 @@ public sealed class TerminalBuffer
         _normalCursor.Col    = Math.Min(_normalCursor.Col,    newCols - 1);
         _alternateCursor.Row = Math.Min(_alternateCursor.Row, newRows - 1);
         _alternateCursor.Col = Math.Min(_alternateCursor.Col, newCols - 1);
+
+        // Update scroll region
+        if (wasFullHeight)
+        {
+            _scrollTop    = 0;
+            _scrollBottom = newRows - 1;
+        }
+        else
+        {
+            _scrollTop    = Math.Min(_scrollTop, newRows - 1);
+            _scrollBottom = Math.Clamp(_scrollBottom, _scrollTop, newRows - 1);
+        }
+
+        // Resize tab stops — extend with defaults for new columns
+        var newTabStops = new bool[newCols];
+        int copyTabCols = Math.Min(_tabStops.Length, newCols);
+        Array.Copy(_tabStops, newTabStops, copyTabCols);
+        for (int c = copyTabCols; c < newCols; c++)
+            newTabStops[c] = (c % 8 == 0);
+        _tabStops = newTabStops;
     }
 
     // ------------------------------------------------------------------
@@ -377,6 +466,12 @@ public sealed class TerminalBuffer
     // Private helpers
     // ------------------------------------------------------------------
 
+    private void InitDefaultTabStops()
+    {
+        for (int c = 0; c < Cols; c++)
+            _tabStops[c] = (c % 8 == 0);
+    }
+
     private void EraseRow(int row, int fromCol, int toColExclusive)
     {
         var screen = ActiveScreen;
@@ -388,7 +483,8 @@ public sealed class TerminalBuffer
     private void InsertLineAt(int row)
     {
         var screen = ActiveScreen;
-        for (int r = Rows - 1; r > row; r--)
+        // Shift rows down within the scroll region
+        for (int r = _scrollBottom; r > row; r--)
         {
             for (int c = 0; c < Cols; c++)
                 screen[r, c] = screen[r - 1, c];
@@ -400,13 +496,13 @@ public sealed class TerminalBuffer
     private void DeleteLineAt(int row)
     {
         var screen = ActiveScreen;
-        for (int r = row; r < Rows - 1; r++)
+        for (int r = row; r < _scrollBottom; r++)
         {
             for (int c = 0; c < Cols; c++)
                 screen[r, c] = screen[r + 1, c];
             MarkDirty(r);
         }
-        EraseRow(Rows - 1, 0, Cols);
+        EraseRow(_scrollBottom, 0, Cols);
     }
 
     private void PushScrollback(TerminalCell[,] screen, int row)

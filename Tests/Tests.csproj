@@ -32,4 +32,11 @@
     </Content>
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="headless\**\*.cs" />
+    <None Remove="headless\**\*" />
+    <EmbeddedResource Remove="headless\**\*" />
+    <Content Remove="headless\**\*" />
+  </ItemGroup>
+
 </Project>

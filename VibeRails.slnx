@@ -1,6 +1,9 @@
 <Solution>
+  <Project Path="IntegrationTest/IntegrationTest.csproj" />
   <Project Path="MCP_Server/MCP_Server.csproj" />
   <Project Path="Pty.Net/Pty.Net.csproj" />
+  <Project Path="TerminalEmulator/TerminalEmulator.csproj" />
+  <Project Path="TerminalEmulator.Tests/TerminalEmulator.Tests.csproj" />
   <Project Path="Tests/Tests.csproj" />
   <Project Path="VibeRails/VibeRails.csproj" />
 </Solution>
