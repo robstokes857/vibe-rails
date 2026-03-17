@@ -13,7 +13,7 @@ const DEFAULT_DURATIONS = Object.freeze({
 });
 
 const BASE_TOAST_OPTIONS = Object.freeze({
-    borderRadius: '4px',
+    borderRadius: '12px',
     color: '#f8fafc',
     fontFamily: '\'Inter\', -apple-system, sans-serif',
     showIcon: true,
@@ -25,14 +25,14 @@ const BASE_TOAST_OPTIONS = Object.freeze({
 
 const TOAST_TONES = Object.freeze({
     info: Object.freeze({
-        accent: '#06b6d4',
-        border: 'rgba(6, 182, 212, 0.4)',
-        iconBackground: 'rgba(6, 182, 212, 0.1)',
+        accent: '#3b82f6',
+        border: 'rgba(59, 130, 246, 0.4)',
+        iconBackground: 'rgba(59, 130, 246, 0.1)',
         closeButtonColor: '#94a3b8'
     }),
     success: Object.freeze({
         accent: '#10b981',
-        border: 'rgba(16, 185, 129, 0.4)',
+        border: 'rgba(20, 116, 84, 0.86)',
         iconBackground: 'rgba(16, 185, 129, 0.1)',
         closeButtonColor: '#94a3b8'
     }),
