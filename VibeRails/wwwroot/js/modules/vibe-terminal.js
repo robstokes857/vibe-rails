@@ -361,6 +361,14 @@ export class VibeTerminal {
         ta.setAttribute('data-gramm_editor', 'false');
         ta.setAttribute('data-enable-grammarly', 'false');
         ta.spellcheck = false;
+
+        // xterm v6 keeps the helper textarea at the live cursor position for IME.
+        // Force the browser caret and focus-ring invisible at runtime so only
+        // xterm's canvas cursor is ever visible, even if stylesheet ordering changes.
+        ta.style.caretColor = 'transparent';
+        ta.style.outline = 'none';
+        ta.style.opacity = '0';
+        ta.style.pointerEvents = 'none';
     }
 
     onData(callback) {

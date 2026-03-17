@@ -9,7 +9,7 @@ using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
 using VibeRails.Services.Messaging;
 using VibeRails.Services.Terminal;
-using VibeRails.Services.Tracing;
+
 using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Validators;
 using VibeRails.Utils;
@@ -80,7 +80,7 @@ namespace VibeRails
 
             // Terminal Session Service (scoped to work with other scoped services)
             serviceCollection.AddScoped<ITerminalIoObserver, MyTerminalObserver>();
-            serviceCollection.AddScoped<ITerminalIoObserver, TraceObserver>();
+
 #if DEBUG
             serviceCollection.AddScoped<ITerminalIoObserver, WebSocketEventObserver>();
 #endif

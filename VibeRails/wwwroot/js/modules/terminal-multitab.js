@@ -643,20 +643,20 @@ class TerminalManager {
             return;
         }
 
-        this.panel = this.container.querySelector('#terminal-panel');
-        this.tabList = this.container.querySelector('#terminal-tab-list');
-        this.tabAdd = this.container.querySelector('#terminal-tab-add-btn');
-        this.tabSelect = this.container.querySelector('#terminal-tab-select-btn');
-        this.tabPanels = this.container.querySelector('#terminal-tab-panels');
+        this.panel = this.container.querySelector('#vb-terminal-panel');
+        this.tabList = this.container.querySelector('#vb-terminal-tab-list');
+        this.tabAdd = this.container.querySelector('#vb-terminal-tab-add-btn');
+        this.tabSelect = this.container.querySelector('#vb-terminal-tab-select-btn');
+        this.tabPanels = this.container.querySelector('#vb-terminal-tab-panels');
         this.placeholder = this.container.querySelector('#terminal-placeholder');
         this.terminalContainer = this.container.querySelector('#terminal-container');
         this.statusBadge = this.container.querySelector('#terminal-status-badge');
-        this.windowTitle = this.container.querySelector('#terminal-window-title');
+        this.windowTitle = this.container.querySelector('#vb-terminal-window-title');
 
         this.startBtn = this.container.querySelector('#terminal-start-btn');
         this.reconnectBtn = this.container.querySelector('#terminal-reconnect-btn');
         this.stopBtn = this.container.querySelector('#terminal-stop-btn');
-        this.controlsBar = this.container.querySelector('#terminal-controls-bar');
+        this.controlsBar = this.container.querySelector('#vb-terminal-controls-bar');
         this.headerSelect = this.container.querySelector('#terminal-header-select');
         this.closeDot = this.container.querySelector('#terminal-close-dot');
         this.minimizeDot = this.container.querySelector('#terminal-minimize-dot');
@@ -667,9 +667,9 @@ class TerminalManager {
 
         this.zoomInBtn     = this.container.querySelector('#terminal-zoom-in-btn');
         this.zoomOutBtn    = this.container.querySelector('#terminal-zoom-out-btn');
-        this.fontSizeLabel = this.container.querySelector('#terminal-font-size-label');
+        this.fontSizeLabel = this.container.querySelector('#vb-terminal-font-size-label');
         this.settingsBtn   = this.container.querySelector('#terminal-settings-btn');
-        this.settingsPanel = this.container.querySelector('#terminal-settings-panel');
+        this.settingsPanel = this.container.querySelector('#vb-terminal-settings-panel');
         this.settingsClose = this.container.querySelector('#terminal-settings-close');
         this.historyBtn    = document.getElementById('terminal-history-btn');
 
@@ -713,7 +713,7 @@ class TerminalManager {
         this._destroyed = true;
         this.removeFocusLayoutHandler();
         this.disableLockedLayout(this.lockedPanel);
-        document.body.classList.remove('terminal-active-session');
+        document.body.classList.remove('vb-terminal-active-session');
 
         this.tabs.forEach((tab) => tab.instance.dispose());
         this.tabs.clear();
@@ -868,12 +868,12 @@ class TerminalManager {
         };
 
         const item = document.createElement('div');
-        item.className = 'terminal-tab-item';
+        item.className = 'vb-terminal-tab-item';
         item.dataset.tabId = state.id;
 
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = 'terminal-tab-button';
+        button.className = 'vb-terminal-tab-button';
         button.textContent = shorten(state.label);
         button.title = state.label;
         button.addEventListener('click', () => {
@@ -888,7 +888,7 @@ class TerminalManager {
 
         const close = document.createElement('button');
         close.type = 'button';
-        close.className = 'terminal-tab-close';
+        close.className = 'vb-terminal-tab-close';
         close.innerHTML = '&times;';
         close.title = 'Close tab';
         close.addEventListener('click', (event) => {
@@ -900,12 +900,12 @@ class TerminalManager {
         item.appendChild(close);
 
         const panel = document.createElement('div');
-        panel.className = 'terminal-tab-panel';
+        panel.className = 'vb-terminal-tab-panel';
         panel.dataset.tabId = state.id;
         panel.style.display = 'none';
 
         const terminalElement = document.createElement('div');
-        terminalElement.className = 'terminal-element';
+        terminalElement.className = 'vb-terminal-element';
         terminalElement.style.width = '100%';
         terminalElement.style.height = '100%';
         panel.appendChild(terminalElement);
@@ -1346,13 +1346,13 @@ class TerminalManager {
         button.innerHTML = '';
         if (tab.state.icon) {
             const iconSpan = document.createElement('span');
-            iconSpan.className = 'terminal-tab-icon';
+            iconSpan.className = 'vb-terminal-tab-icon';
             iconSpan.textContent = `${tab.state.icon} `;
             button.appendChild(iconSpan);
         }
 
         const labelSpan = document.createElement('span');
-        labelSpan.className = 'terminal-tab-label';
+        labelSpan.className = 'vb-terminal-tab-label';
         labelSpan.textContent = shorten(tab.state.label || 'Terminal');
         button.appendChild(labelSpan);
         button.title = tab.state.label || 'Terminal';
@@ -1365,12 +1365,12 @@ class TerminalManager {
         const accent = this.normalizeAccentColor(tab.state.accentColor);
         if (!accent) {
             item.classList.remove('has-custom-accent');
-            item.style.removeProperty('--terminal-tab-accent');
+            item.style.removeProperty('--vb-terminal-tab-accent');
             return;
         }
 
         item.classList.add('has-custom-accent');
-        item.style.setProperty('--terminal-tab-accent', accent);
+        item.style.setProperty('--vb-terminal-tab-accent', accent);
     }
 
     findTabByTaskKey(taskKey) {
@@ -1457,10 +1457,10 @@ class TerminalManager {
         const triggerElement = options.triggerElement || null;
         if (options.animate === true) {
             [triggerElement, selectEl].filter(Boolean).forEach((el) => {
-                el.classList.remove('terminal-selection-shake');
+                el.classList.remove('vb-terminal-selection-shake');
                 // Force reflow so repeated clicks replay the animation.
                 void el.offsetWidth;
-                el.classList.add('terminal-selection-shake');
+                el.classList.add('vb-terminal-selection-shake');
             });
         }
 
@@ -1509,7 +1509,7 @@ class TerminalManager {
     updateUi() {
         const active = this.getActiveTab();
         const hasActiveSession = this.tabOrder.some((id) => this.tabs.get(id)?.state?.hasActiveSession === true);
-        document.body.classList.toggle('terminal-active-session', hasActiveSession);
+        document.body.classList.toggle('vb-terminal-active-session', hasActiveSession);
 
         this.tabs.forEach((tab) => {
             this.renderTabButton(tab);
@@ -1765,11 +1765,11 @@ class TerminalManager {
         const tab = this.getActiveTab();
         const mode = tab?.state.viewState.mode || 'normal';
 
-        this.panel.classList.remove('terminal-minimized', 'terminal-expanded');
+        this.panel.classList.remove('vb-terminal-minimized', 'vb-terminal-expanded');
         if (mode === 'minimized') {
-            this.panel.classList.add('terminal-minimized');
+            this.panel.classList.add('vb-terminal-minimized');
         } else if (mode === 'expanded') {
-            this.panel.classList.add('terminal-expanded');
+            this.panel.classList.add('vb-terminal-expanded');
         }
 
         if (tab?.state.viewState.locked) {
@@ -1852,7 +1852,7 @@ class TerminalManager {
         const isFocusView = this.options.focusView === true;
 
         const setLabel = (button, text) => {
-            const label = button?.querySelector('.terminal-control-text');
+            const label = button?.querySelector('.vb-terminal-control-text');
             if (label) label.textContent = text;
         };
 
@@ -1901,17 +1901,17 @@ class TerminalManager {
         if (isLocked) {
             if (this.isScrollLocked) return;
             this.lockScrollTop = window.scrollY || window.pageYOffset || 0;
-            document.body.classList.add('terminal-scroll-locked');
+            document.body.classList.add('vb-terminal-scroll-locked');
             document.body.style.top = `-${this.lockScrollTop}px`;
             this.isScrollLocked = true;
             return;
         }
 
-        if (!this.isScrollLocked && !document.body.classList.contains('terminal-scroll-locked')) {
+        if (!this.isScrollLocked && !document.body.classList.contains('vb-terminal-scroll-locked')) {
             return;
         }
 
-        document.body.classList.remove('terminal-scroll-locked');
+        document.body.classList.remove('vb-terminal-scroll-locked');
         document.body.style.removeProperty('top');
         const restoreTop = Number.isFinite(this.lockScrollTop) ? this.lockScrollTop : 0;
         this.lockScrollTop = 0;
@@ -1939,8 +1939,8 @@ class TerminalManager {
 
         panel.scrollIntoView({ block: 'center', inline: 'nearest' });
         this.removeLockLayoutHandler();
-        panel.classList.remove('terminal-minimized');
-        panel.classList.add('terminal-locked');
+        panel.classList.remove('vb-terminal-minimized');
+        panel.classList.add('vb-terminal-locked');
         this.lockedPanel = panel;
 
         this.updateLockedPanelPosition(panel);
@@ -1965,7 +1965,7 @@ class TerminalManager {
     disableLockedLayout(panel) {
         const target = panel || this.lockedPanel;
         if (target) {
-            target.classList.remove('terminal-locked');
+            target.classList.remove('vb-terminal-locked');
             target.style.removeProperty('--terminal-lock-max-height');
         }
 
@@ -2090,12 +2090,12 @@ class TerminalManager {
         if (sizeInput) sizeInput.value = size;
 
         this._themeSwatches = [];
-        const themeList = this.container.querySelector('#terminal-settings-theme-list');
+        const themeList = this.container.querySelector('#vb-terminal-settings-theme-list');
         if (themeList && window.CXL_THEMES) {
             for (const [key, theme] of Object.entries(window.CXL_THEMES)) {
                 const btn = document.createElement('button');
                 btn.type = 'button';
-                btn.className = 'terminal-settings-theme-swatch';
+                btn.className = 'vb-terminal-settings-theme-swatch';
                 btn.dataset.theme = key;
                 btn.title = theme.name;
                 btn.style.background = `linear-gradient(135deg, ${theme.background} 50%, ${theme.foreground} 50%)`;
@@ -2317,10 +2317,10 @@ export class TerminalController {
         if (!content) return;
 
         content.innerHTML = `
-            <div class="view terminal-focus-view" data-view="terminal-focus">
-                <div class="terminal-focus-layout">
+            <div class="view vb-terminal-focus-view" data-view="terminal-focus">
+                <div class="vb-terminal-focus-layout">
                     ${ChatHistorySidebar.renderHtml()}
-                    <div class="terminal-focus-body" data-terminal-focus-content></div>
+                    <div class="vb-terminal-focus-body" data-terminal-focus-content></div>
                 </div>
             </div>
         `;
@@ -2348,16 +2348,16 @@ export class TerminalController {
     renderTerminalPanel(options = {}) {
         const isFocusView = options.focusView === true;
         const lockButtonHtml = isFocusView ? '' : `
-                            <button type="button" class="terminal-control-btn icon-btn" id="terminal-lock-btn" title="Lock terminal in sticky focus mode" aria-label="Lock terminal focus mode">
+                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-lock-btn" title="Lock terminal in sticky focus mode" aria-label="Lock terminal focus mode">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
                                     <path d="M8 1a3 3 0 0 0-3 3v2H4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1V4a3 3 0 0 0-3-3m2 5H6V4a2 2 0 1 1 4 0z"/>
                                 </svg>
-                                <span class="terminal-control-text">Lock Focus</span>
+                                <span class="vb-terminal-control-text">Lock Focus</span>
                             </button>
         `;
 
         return `
-            <div class="card ${isFocusView ? 'terminal-page-mode terminal-expanded terminal-focus-card' : 'mb-4'}" id="terminal-panel">
+            <div class="card ${isFocusView ? 'vb-terminal-page-mode vb-terminal-expanded vb-terminal-focus-card' : 'mb-4'}" id="vb-terminal-panel">
                 <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
                     <div class="d-flex align-items-center gap-2 flex-wrap">
                         <span class="card-title d-inline-flex align-items-center gap-2 mb-0">
@@ -2384,11 +2384,11 @@ export class TerminalController {
                         </button>
                     </div>
                 </div>
-                <div class="d-flex gap-2 align-items-center flex-wrap px-3 py-2 border-bottom terminal-controls-bar" id="terminal-controls-bar">
+                <div class="d-flex gap-2 align-items-center flex-wrap px-3 py-2 border-bottom vb-terminal-controls-bar" id="vb-terminal-controls-bar">
                     <select class="form-select form-select-sm" id="terminal-header-select" style="width: auto;">
                         <option value="" disabled selected>Select LLM...</option>
                     </select>
-                    <div class="d-flex gap-2 align-items-center terminal-controls-actions">
+                    <div class="d-flex gap-2 align-items-center vb-terminal-controls-actions">
                         <button class="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-1" id="terminal-start-btn">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814z"/>
@@ -2405,53 +2405,53 @@ export class TerminalController {
                         </button>
                     </div>
                 </div>
-                <div class="terminal-window-shell">
-                    <div class="terminal-window-header">
-                        <div class="terminal-tab-strip" id="terminal-tab-strip">
-                            <div class="terminal-tab-list" id="terminal-tab-list"></div>
-                            <button type="button" class="terminal-tab-add" id="terminal-tab-add-btn" title="Open a new terminal tab" aria-label="Open a new terminal tab">+</button>
-                            <button type="button" class="terminal-tab-select" id="terminal-tab-select-btn" title="Select CLI/environment for active tab" aria-label="Select CLI/environment">
+                <div class="vb-terminal-window-shell">
+                    <div class="vb-terminal-window-header">
+                        <div class="vb-terminal-tab-strip" id="vb-terminal-tab-strip">
+                            <div class="vb-terminal-tab-list" id="vb-terminal-tab-list"></div>
+                            <button type="button" class="vb-terminal-tab-add" id="vb-terminal-tab-add-btn" title="Open a new terminal tab" aria-label="Open a new terminal tab">+</button>
+                            <button type="button" class="vb-terminal-tab-select" id="vb-terminal-tab-select-btn" title="Select CLI/environment for active tab" aria-label="Select CLI/environment">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708"/></svg>
                             </button>
                         </div>
-                        <div class="terminal-window-controls terminal-window-controls-right">
-                            <button type="button" class="terminal-control-btn icon-btn terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
-                            <span class="terminal-font-size-label" id="terminal-font-size-label">14</span>
-                            <button type="button" class="terminal-control-btn icon-btn terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
-                            <button type="button" class="terminal-control-btn icon-btn" id="terminal-settings-btn" title="Terminal settings" aria-label="Terminal settings">&#x2699;</button>
+                        <div class="vb-terminal-window-controls vb-terminal-window-controls-right">
+                            <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
+                            <span class="vb-terminal-font-size-label" id="vb-terminal-font-size-label">14</span>
+                            <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
+                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-settings-btn" title="Terminal settings" aria-label="Terminal settings">&#x2699;</button>
                             ${lockButtonHtml}
-                            <button type="button" class="terminal-control-btn icon-btn" id="terminal-popout-btn" title="${isFocusView ? 'Return to dashboard' : 'Open in fullscreen'}" aria-label="${isFocusView ? 'Back to dashboard' : 'Open in fullscreen'}">
+                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-popout-btn" title="${isFocusView ? 'Return to dashboard' : 'Open in fullscreen'}" aria-label="${isFocusView ? 'Back to dashboard' : 'Open in fullscreen'}">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
                                     <path d="M6 3a2 2 0 0 0-2 2v7a1 1 0 0 0 1 1h7a2 2 0 0 0 2-2V6h-1v5a1 1 0 0 1-1 1H5V5a1 1 0 0 1 1-1z"/>
                                     <path d="M8.5 1a.5.5 0 0 0 0 1h4.793L6.146 9.146a.5.5 0 1 0 .708.708L14 2.707V7.5a.5.5 0 0 0 1 0V1z"/>
                                 </svg>
-                                <span class="terminal-control-text">${isFocusView ? 'Back to Dashboard' : 'Open In Fullscreen'}</span>
+                                <span class="vb-terminal-control-text">${isFocusView ? 'Back to Dashboard' : 'Open In Fullscreen'}</span>
                             </button>
                         </div>
                     </div>
-                    <div class="terminal-window-title-bar">
-                        <div class="terminal-window-title" id="terminal-window-title">Terminals run safely in the background even if you navigate away.</div>
+                    <div class="vb-terminal-window-title-bar">
+                        <div class="vb-terminal-window-title" id="vb-terminal-window-title">Terminals run safely in the background even if you navigate away.</div>
                     </div>
                     <div class="card-body p-0" id="terminal-container" style="display: none; overflow: hidden;">
-                        <div id="terminal-tab-panels" class="terminal-tab-panels"></div>
+                        <div id="vb-terminal-tab-panels" class="vb-terminal-tab-panels"></div>
                     </div>
                     <div class="card-body text-center text-muted" id="terminal-placeholder">
                         <p class="mb-3">Select a LLM to continue</p>
                         <p class="small mb-0">Use the <strong>+</strong> button to open a tab, then pick a CLI/environment.</p>
                     </div>
-                    <div class="terminal-settings-panel" id="terminal-settings-panel">
-                        <div class="terminal-settings-header">
+                    <div class="vb-terminal-settings-panel" id="vb-terminal-settings-panel">
+                        <div class="vb-terminal-settings-header">
                             <span>Terminal Settings</span>
                             <button type="button" id="terminal-settings-close">&#x2715;</button>
                         </div>
-                        <div class="terminal-settings-body">
-                            <div class="terminal-settings-section">
-                                <div class="terminal-settings-section-title">Theme</div>
-                                <div class="terminal-settings-theme-list" id="terminal-settings-theme-list"></div>
+                        <div class="vb-terminal-settings-body">
+                            <div class="vb-terminal-settings-section">
+                                <div class="vb-terminal-settings-section-title">Theme</div>
+                                <div class="vb-terminal-settings-theme-list" id="vb-terminal-settings-theme-list"></div>
                             </div>
-                            <div class="terminal-settings-section">
-                                <div class="terminal-settings-section-title">Rendering</div>
-                                <div class="terminal-settings-row">
+                            <div class="vb-terminal-settings-section">
+                                <div class="vb-terminal-settings-section-title">Rendering</div>
+                                <div class="vb-terminal-settings-row">
                                     <label>Renderer</label>
                                     <select id="terminal-settings-renderer">
                                         <option value="canvas">Canvas (Recommended)</option>
@@ -2459,20 +2459,20 @@ export class TerminalController {
                                     </select>
                                 </div>
                             </div>
-                            <div class="terminal-settings-section">
-                                <div class="terminal-settings-section-title">Font</div>
-                                <div class="terminal-settings-row">
+                            <div class="vb-terminal-settings-section">
+                                <div class="vb-terminal-settings-section-title">Font</div>
+                                <div class="vb-terminal-settings-row">
                                     <label>Family</label>
                                     <select id="terminal-settings-font-family"></select>
                                 </div>
-                                <div class="terminal-settings-row">
+                                <div class="vb-terminal-settings-row">
                                     <label>Size</label>
                                     <input type="number" id="terminal-settings-font-size" min="6" max="72">
                                 </div>
                             </div>
-                            <div class="terminal-settings-section">
-                                <div class="terminal-settings-section-title">Cursor</div>
-                                <div class="terminal-settings-row">
+                            <div class="vb-terminal-settings-section">
+                                <div class="vb-terminal-settings-section-title">Cursor</div>
+                                <div class="vb-terminal-settings-row">
                                     <label>Style</label>
                                     <select id="terminal-settings-cursor-style">
                                         <option value="block">Block</option>
@@ -2480,7 +2480,7 @@ export class TerminalController {
                                         <option value="underline">Underline</option>
                                     </select>
                                 </div>
-                                <div class="terminal-settings-row">
+                                <div class="vb-terminal-settings-row">
                                     <label>Blink</label>
                                     <select id="terminal-settings-cursor-blink">
                                         <option value="true">On</option>
@@ -2495,4 +2495,6 @@ export class TerminalController {
         `;
     }
 }
+
+
 

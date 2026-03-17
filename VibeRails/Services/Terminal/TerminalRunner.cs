@@ -2,7 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services.Terminal.Consumers;
-using VibeRails.Services.Tracing;
+
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
@@ -12,18 +12,15 @@ public class TerminalRunner
     private static int s_emergencyShutdownRequested;
     private readonly ITerminalStateService _stateService;
     private readonly ICommandService _commandService;
-    private readonly TraceEventBuffer? _traceBuffer;
     private readonly IHostApplicationLifetime? _appLifetime;
 
     public TerminalRunner(
         ITerminalStateService stateService,
         ICommandService commandService,
-        TraceEventBuffer? traceBuffer = null,
         IHostApplicationLifetime? appLifetime = null)
     {
         _stateService = stateService;
         _commandService = commandService;
-        _traceBuffer = traceBuffer;
         _appLifetime = appLifetime;
     }
 
@@ -47,7 +44,6 @@ public class TerminalRunner
         var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct);
         var preparedSession = _commandService.PrepareSession(llm, envName, extraArgs, initialPrompt);
         _stateService.PublishSessionStart(sessionId, llm.ToString(), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
-        EmitTerminalLaunchTrace(sessionId, llm, workDir, envName, extraArgs, title, shouldEnableRemote, initialPrompt, preparedSession);
 
         var terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: title, ct: ct);
 
@@ -329,97 +325,6 @@ public class TerminalRunner
         await terminal.SendCommandAsync(preparedSession.Command, ct);
 
         return (terminal, sessionId, activeRemoteConn);
-    }
-
-    private void EmitTerminalLaunchTrace(
-        string sessionId,
-        LLM llm,
-        string workDir,
-        string? envName,
-        string[]? extraArgs,
-        string? title,
-        bool remoteEnabled,
-        string? initialPrompt,
-        PreparedTerminalSession preparedSession)
-    {
-        if (_traceBuffer == null)
-            return;
-
-        var launchDetail = BuildTerminalLaunchDetail(
-            sessionId,
-            llm,
-            workDir,
-            envName,
-            extraArgs,
-            title,
-            remoteEnabled,
-            initialPrompt,
-            preparedSession);
-
-        _traceBuffer.Add(TraceEvent.Create(
-            TraceEventType.TerminalLaunch,
-            "Terminal.Runner",
-            $"Terminal launch: {llm} ({sessionId[..8]})",
-            launchDetail));
-    }
-
-    private static string BuildTerminalLaunchDetail(
-        string sessionId,
-        LLM llm,
-        string workDir,
-        string? envName,
-        string[]? extraArgs,
-        string? title,
-        bool remoteEnabled,
-        string? initialPrompt,
-        PreparedTerminalSession preparedSession)
-    {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"sessionId: {sessionId}");
-        sb.AppendLine($"llm: {llm}");
-        sb.AppendLine($"workDir: {workDir}");
-        sb.AppendLine($"environmentName: {envName ?? "(default)"}");
-        sb.AppendLine($"title: {title ?? "(none)"}");
-        sb.AppendLine($"remoteEnabled: {remoteEnabled}");
-        sb.AppendLine($"initialPrompt: {initialPrompt ?? "(none)"}");
-        sb.AppendLine($"shell: {Terminal.GetDefaultShellPath()}");
-        sb.AppendLine($"ptyCols: {Terminal.DefaultCols}");
-        sb.AppendLine($"ptyRows: {Terminal.DefaultRows}");
-        sb.AppendLine($"emulatorScrollback: 1000 rows");
-        sb.AppendLine("cliArgs:");
-
-        if (extraArgs is { Length: > 0 })
-        {
-            foreach (var arg in extraArgs)
-                sb.AppendLine($"  - {arg}");
-        }
-        else
-        {
-            sb.AppendLine("  - (none)");
-        }
-
-        sb.AppendLine("setupCommands:");
-
-        if (preparedSession.SetupCommands.Count > 0)
-        {
-            foreach (var setupCommand in preparedSession.SetupCommands)
-                sb.AppendLine($"  - {setupCommand}");
-        }
-        else
-        {
-            sb.AppendLine("  - (none)");
-        }
-
-        sb.AppendLine("launchCommand:");
-        sb.AppendLine($"  {preparedSession.LaunchCommand}");
-        sb.AppendLine("fullCommand:");
-        sb.AppendLine($"  {preparedSession.Command}");
-        sb.AppendLine("environment:");
-
-        foreach (var kvp in preparedSession.Environment.OrderBy(k => k.Key, StringComparer.Ordinal))
-            sb.AppendLine($"  {kvp.Key}={kvp.Value}");
-
-        return sb.ToString();
     }
 
     // TODO: re-enable once the interactive alerting layer is in place to notify

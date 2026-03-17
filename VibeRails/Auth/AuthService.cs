@@ -14,8 +14,9 @@ public class AuthService : IAuthService
 
     public AuthService()
     {
-        // Generate one random token per app instance (64 bytes = 512 bits)
-        _instanceToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(128));
+        // Both tokens use URL-safe base64 so they can be sent as WebSocket subprotocol values.
+        // RFC 6455 subprotocols must be valid HTTP tokens — standard base64 (+, /, =) is not.
+        _instanceToken = GenerateSafeToken(128);
         _tabToken = GenerateSafeToken(128);
     }
 
@@ -96,7 +97,7 @@ public class AuthService : IAuthService
     public void SetTabTokenHeader(HttpContext context)
     {
         if (context.Request.Path.Value != "/auth/bootstrap")
-            throw new Exception("You can only get this once.");
+            throw new InvalidOperationException("SetTabTokenHeader may only be called from the /auth/bootstrap route.");
 
         context.Response.Headers["viberails_tab"] = _tabToken;
     }

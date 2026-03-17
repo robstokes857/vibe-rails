@@ -32,11 +32,13 @@ public class CookieAuthMiddleware
         var token = context.Request.Cookies["viberails_session"]
             ?? context.Request.Headers["viberails_session"].FirstOrDefault();
 
-        // WebSocket requests from browser JS cannot set custom headers.
-        // Allow token in query string for terminal WS handshake.
+        // Internal server-to-server ClientWebSocket connections (e.g. parent→child tab proxy)
+        // cannot use cookies and send the session token as a WebSocket subprotocol instead.
+        // Browser WebSocket connections always send the HttpOnly cookie automatically.
         if (string.IsNullOrEmpty(token) && isWebSocketRequest)
         {
-            token = context.Request.Query["viberails_session"].FirstOrDefault();
+            token = context.WebSockets.WebSocketRequestedProtocols
+                .FirstOrDefault(x => _authService.ValidateToken(x));
         }
 
         if (!_authService.ValidateToken(token))

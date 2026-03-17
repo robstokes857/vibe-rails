@@ -27,7 +27,7 @@ export class CliLauncher {
     async launchCLI(cliType, environmentName = null) {
         const terminal = document.getElementById('cli-terminal');
         if (terminal) {
-            terminal.innerHTML = `<div class="terminal-line">Launching ${cliType.toUpperCase()} CLI...</div>`;
+            terminal.innerHTML = `<div class="vb-terminal-line">Launching ${cliType.toUpperCase()} CLI...</div>`;
         }
 
         try {
@@ -39,12 +39,12 @@ export class CliLauncher {
             const response = await this.app.apiCall(`/api/v1/cli/launch/${cliType}`, 'POST', requestBody);
 
             if (terminal) {
-                terminal.innerHTML += `<div class="terminal-line">${response.message}</div>`;
+                terminal.innerHTML += `<div class="vb-terminal-line">${response.message}</div>`;
                 if (response.standardOutput) {
-                    terminal.innerHTML += `<div class="terminal-line">${response.standardOutput}</div>`;
+                    terminal.innerHTML += `<div class="vb-terminal-line">${response.standardOutput}</div>`;
                 }
                 if (response.standardError) {
-                    terminal.innerHTML += `<div class="terminal-line" style="color: #ff6b6b;">${response.standardError}</div>`;
+                    terminal.innerHTML += `<div class="vb-terminal-line" style="color: #ff6b6b;">${response.standardError}</div>`;
                 }
             }
 
@@ -55,7 +55,7 @@ export class CliLauncher {
             }
         } catch (error) {
             if (terminal) {
-                terminal.innerHTML += `<div class="terminal-line" style="color: #ff6b6b;">Error: ${error.message}</div>`;
+                terminal.innerHTML += `<div class="vb-terminal-line" style="color: #ff6b6b;">Error: ${error.message}</div>`;
             }
             this.app.showError(`Failed to launch ${cliType} CLI`);
         }

@@ -194,7 +194,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     {
         var child = GetChildOrThrow(tabId);
         using var upstream = new ClientWebSocket();
-        upstream.Options.SetRequestHeader("viberails_session", child.SessionToken);
+        upstream.Options.AddSubProtocol(child.SessionToken);
         upstream.Options.AddSubProtocol(child.TabToken);
 
         // Forward client dimensions so the child process can resize the PTY
@@ -220,7 +220,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             try
             {
                 using var ws = new ClientWebSocket();
-                ws.Options.SetRequestHeader("viberails_session", child.SessionToken);
+                ws.Options.AddSubProtocol(child.SessionToken);
                 ws.Options.AddSubProtocol(child.TabToken);
 
                 await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{child.Port}/api/v1/events/ws"), ct);
@@ -265,7 +265,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     {
         var child = GetChildOrThrow(tabId);
         using var upstream = new ClientWebSocket();
-        upstream.Options.SetRequestHeader("viberails_session", child.SessionToken);
+        upstream.Options.AddSubProtocol(child.SessionToken);
         upstream.Options.AddSubProtocol(child.TabToken);
 
         var upstreamUri = new Uri($"ws://127.0.0.1:{child.Port}/api/v1/events/ws");

@@ -5,7 +5,7 @@ using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal.Consumers;
-using VibeRails.Services.Tracing;
+
 
 namespace VibeRails.Services.Terminal;
 
@@ -62,13 +62,12 @@ public class TerminalSessionService : ITerminalSessionService
         McpSettings mcpSettings,
         IRemoteStateService remoteStateService,
         ITerminalIoObserverService ioObserverService,
-        TraceEventBuffer traceBuffer,
         IHostApplicationLifetime appLifetime,
         ILocalClientTracker localClientTracker)
     {
         _stateService = new TerminalStateService(dbService, gitService, remoteStateService, ioObserverService);
         var commandService = new CommandService(envService, mcpSettings);
-        _runner = new TerminalRunner(_stateService, commandService, traceBuffer, appLifetime);
+        _runner = new TerminalRunner(_stateService, commandService, appLifetime);
         _localClientTracker = localClientTracker;
     }
 
@@ -133,11 +132,13 @@ public class TerminalSessionService : ITerminalSessionService
         Terminal? terminal;
         string? sessionId;
         string? ownerId = null;
+        string? activeCli;
 
         lock (s_lock)
         {
             terminal = s_terminal;
             sessionId = s_sessionId;
+            activeCli = s_activeCli;
         }
 
         if (terminal == null || sessionId == null)
@@ -182,18 +183,24 @@ public class TerminalSessionService : ITerminalSessionService
             }
         }
 
-        // Send full emulator state (scrollback + screen) so reconnecting viewer sees everything.
-        var replay = terminal.GetGridReplay();
-        if (replay.Length > 0)
+        var useRedrawAttach = ShouldUseRedrawAttach(activeCli);
+
+        if (!useRedrawAttach)
         {
-            try
+            // Send full emulator state (scrollback + screen) so reconnecting viewers
+            // for plain shell / line-oriented sessions see everything immediately.
+            var replay = terminal.GetGridReplay();
+            if (replay.Length > 0)
             {
-                await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
-                Log.Information("[Terminal] Sent {Bytes} bytes of emulator state to viewer", replay.Length);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[Terminal] Failed to send emulator state");
+                try
+                {
+                    await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
+                    Log.Information("[Terminal] Sent {Bytes} bytes of emulator state to viewer", replay.Length);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "[Terminal] Failed to send emulator state");
+                }
             }
         }
 
@@ -202,6 +209,24 @@ public class TerminalSessionService : ITerminalSessionService
         using var subscription = terminal.Subscribe(wsConsumer);
         ownerId = $"terminal-ws:{sessionId}:{Guid.NewGuid():N}";
         _localClientTracker.AcquireOwner(ownerId);
+
+        if (useRedrawAttach)
+        {
+            try
+            {
+                await terminal.WriteBytesAsync(new byte[] { 0x0C }, cancellationToken); // Ctrl+L
+                Log.Information(
+                    "[Terminal] Requested redraw-first attach for {Cli} instead of replay",
+                    activeCli ?? "unknown");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(
+                    ex,
+                    "[Terminal] Failed to request redraw-first attach for {Cli}",
+                    activeCli ?? "unknown");
+            }
+        }
 
         // Run WebSocket input loop (blocks until WebSocket closes or cancellation)
         try
@@ -595,5 +620,17 @@ public class TerminalSessionService : ITerminalSessionService
 
     private static string BuildSessionOwnerId(string sessionId)
         => $"terminal-session:{sessionId}";
+
+    private static bool ShouldUseRedrawAttach(string? cliName)
+    {
+        return cliName?.Trim().ToLowerInvariant() switch
+        {
+            "claude" => true,
+            "codex" => true,
+            "gemini" => true,
+            "copilot" => true,
+            _ => false
+        };
+    }
 
 }

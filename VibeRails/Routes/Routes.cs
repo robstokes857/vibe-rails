@@ -24,7 +24,6 @@ public static class RouteExtensions
         AppSettingsRoutes.Map(app);
         PinRoutes.Map(app);
         LifecycleRoutes.Map(app);
-        TraceRoutes.Map(app);
         AppNotificationRoutes.Map(app);
         BertRoutes.Map(app);
 

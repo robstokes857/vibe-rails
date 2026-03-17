@@ -402,9 +402,9 @@ export class DashboardController {
                 const result = this.parseSandboxCliSelection(cliSelect);
                 if (!result) {
                     if (cliSelect) {
-                        cliSelect.classList.remove('terminal-selection-shake');
+                        cliSelect.classList.remove('vb-terminal-selection-shake');
                         void cliSelect.offsetWidth;
-                        cliSelect.classList.add('terminal-selection-shake');
+                        cliSelect.classList.add('vb-terminal-selection-shake');
                         cliSelect.focus();
                         if (typeof cliSelect.showPicker === 'function') {
                             try { cliSelect.showPicker(); } catch {}
@@ -494,3 +494,4 @@ export class DashboardController {
         }
     }
 }
+

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using VibeRails.Interfaces;
 using VibeRails.Services;
 
@@ -9,20 +8,19 @@ public sealed class StaleSessionCleanupJob(
     ISystemResourceService resources,
     IServiceScopeFactory scopeFactory) : JobBase(logger, resources)
 {
-    private static volatile bool s_didComplete;
+    // Tab child processes are spawned with --parent-pid; only the root parent should clean up.
+    private static readonly bool s_isTabChild =
+        Environment.GetCommandLineArgs().Any(a =>
+            a.StartsWith("--parent-pid", StringComparison.OrdinalIgnoreCase));
 
     protected override TimeSpan Interval => TimeSpan.FromMinutes(10);
     protected override JobPriority Priority => JobPriority.Lowest;
 
     protected override async Task ExecuteJob(CancellationToken cancellationToken)
     {
-        if (s_didComplete)
-            return;
-
-        var procName = Process.GetCurrentProcess().ProcessName;
-        if (Process.GetProcessesByName(procName).Length > 1)
+        if (s_isTabChild)
         {
-            _logger.LogDebug("[StaleSessionCleanupJob] Multiple instances detected — skipping cleanup");
+            _logger.LogDebug("[StaleSessionCleanupJob] Running as tab child — skipping cleanup");
             return;
         }
 
@@ -31,8 +29,6 @@ public sealed class StaleSessionCleanupJob(
         var dbService = scope.ServiceProvider.GetRequiredService<IDbService>();
 
         var staleIds = await dbService.GetOpenSessionIdsAsync(cutoff, cancellationToken);
-
-        s_didComplete = true;
 
         if (staleIds.Count == 0)
             return;
