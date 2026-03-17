@@ -373,3 +373,5 @@ FodyWeavers.xsd
 /vscode-viberails/nul
 /VibeRails/.claude/settings.local.json
 /vscode-viberails/.claude/settings.local.json
+/TerminalEmulator.Tests/snapshots
+/fixtures
