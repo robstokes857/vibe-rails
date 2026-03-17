@@ -183,49 +183,41 @@ public class TerminalSessionService : ITerminalSessionService
             }
         }
 
-        var useRedrawAttach = ShouldUseRedrawAttach(activeCli);
-
-        if (!useRedrawAttach)
+        // Send full emulator state (scrollback + screen) so the viewer sees content immediately.
+        // ORDERING MATTERS: snapshot must be sent before subscribing the live consumer.
+        // If the consumer is subscribed first, live PTY output can arrive at the browser
+        // while the snapshot is still in-flight, producing a concurrent-write race that
+        // causes ghost cursors and corrupted screen state.
+        var replay = terminal.GetGridReplay();
+        if (replay.Length > 0)
         {
-            // Send full emulator state (scrollback + screen) so reconnecting viewers
-            // for plain shell / line-oriented sessions see everything immediately.
-            var replay = terminal.GetGridReplay();
-            if (replay.Length > 0)
+            try
             {
-                try
-                {
-                    await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
-                    Log.Information("[Terminal] Sent {Bytes} bytes of emulator state to viewer", replay.Length);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error(ex, "[Terminal] Failed to send emulator state");
-                }
+                await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
+                Log.Information("[Terminal] Sent {Bytes} bytes of emulator state to viewer", replay.Length);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Terminal] Failed to send emulator state");
             }
         }
 
-        // Subscribe WebSocket as output consumer
+        // Subscribe WebSocket as output consumer — live output only starts flowing here,
+        // after the snapshot is fully sent. Ctrl+L (below) covers the small gap between
+        // snapshot capture and subscription.
         using var wsConsumer = new WebSocketConsumer(webSocket, cancellationToken);
         using var subscription = terminal.Subscribe(wsConsumer);
         ownerId = $"terminal-ws:{sessionId}:{Guid.NewGuid():N}";
         _localClientTracker.AcquireOwner(ownerId);
 
-        if (useRedrawAttach)
+        // Send Ctrl+L after replay so the CLI redraws cleanly at the current size.
+        try
         {
-            try
-            {
-                await terminal.WriteBytesAsync(new byte[] { 0x0C }, cancellationToken); // Ctrl+L
-                Log.Information(
-                    "[Terminal] Requested redraw-first attach for {Cli} instead of replay",
-                    activeCli ?? "unknown");
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(
-                    ex,
-                    "[Terminal] Failed to request redraw-first attach for {Cli}",
-                    activeCli ?? "unknown");
-            }
+            await terminal.WriteBytesAsync(new byte[] { 0x0C }, cancellationToken); // Ctrl+L
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[Terminal] Failed to send Ctrl+L redraw");
         }
 
         // Run WebSocket input loop (blocks until WebSocket closes or cancellation)
@@ -621,16 +613,5 @@ public class TerminalSessionService : ITerminalSessionService
     private static string BuildSessionOwnerId(string sessionId)
         => $"terminal-session:{sessionId}";
 
-    private static bool ShouldUseRedrawAttach(string? cliName)
-    {
-        return cliName?.Trim().ToLowerInvariant() switch
-        {
-            "claude" => true,
-            "codex" => true,
-            "gemini" => true,
-            "copilot" => true,
-            _ => false
-        };
-    }
 
 }

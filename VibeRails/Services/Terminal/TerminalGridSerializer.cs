@@ -28,38 +28,43 @@ internal static class TerminalGridSerializer
         // Rough capacity: reset(4) + per-row(cols*8 avg + newline) for scrollback + screen
         var sb = new StringBuilder((scrollbackCount + rows) * cols * 4 + (scrollbackCount + rows) * 16 + 64);
 
-        // Hard reset — clears xterm.js completely including its own scrollback
-        sb.Append("\u001bc");
+        // Hide cursor before repaint to prevent ghost-cursor artifacts during replay.
+        // Use soft clear instead of RIS (ESC c) — RIS resets terminal modes and can
+        // cause xterm.js cursor state weirdness / visual artifacts on reconnect.
+        sb.Append("\x1b[?25l");  // hide cursor
+        sb.Append("\x1b[2J");    // clear visible screen
+        sb.Append("\x1b[3J");    // clear scrollback
+        sb.Append("\x1b[H");     // home cursor (1,1)
 
-        // Scrollback rows (plain ANSI, newline-terminated)
+        // Scrollback rows (plain ANSI, newline-terminated — pushes into xterm scrollback)
         foreach (var row in scrollback)
         {
             SerializeRow(sb, row, Math.Min(row.Length, cols));
             sb.Append("\r\n");
         }
 
-        // Current screen rows
+        // Current screen rows — use absolute CUP addressing per row to prevent
+        // cumulative cursor drift (wrap semantics, wide chars, full-width columns).
         for (int r = 0; r < rows; r++)
         {
+            sb.Append($"\x1b[{r + 1};1H");
             SerializeScreenRow(sb, screen, r, cols);
-            if (r < rows - 1)
-                sb.Append("\r\n");
         }
 
-        // Reposition cursor to where the terminal's cursor actually is.
-        // Use SGR 0 first to clear any leftover attributes from the last cell written,
-        // then CUP to move to the correct position.
-        sb.Append("\u001b[0m");
-        sb.Append("\u001b[");
+        // Reset attributes, then reposition cursor to match the terminal's real cursor.
+        sb.Append("\x1b[0m");
+        sb.Append("\x1b[");
         sb.Append(Math.Clamp(cursorRow + 1, 1, rows));
         sb.Append(';');
         sb.Append(Math.Clamp(cursorCol + 1, 1, cols));
         sb.Append('H');
 
-        // Restore cursor visibility and blinking. \u001bc (RIS) resets these to
-        // xterm defaults (visible, no blink). Re-enable blink so TUI apps look correct.
-        sb.Append("\u001b[?25h");  // cursor visible (DECTCEM)
-        sb.Append("\u001b[?12h"); // cursor blink on (ATT160)
+        // Do NOT restore cursor visibility here. The cursor was hidden above with ?25l
+        // to prevent ghost-cursor artifacts during replay. Leave it hidden — the Ctrl+L
+        // redraw (sent immediately after this snapshot) will cause the TUI/CLI to
+        // re-establish its own cursor state. Forcing ?25h here fights TUIs that
+        // intentionally hide the real cursor and draw their own block glyph, which
+        // would produce a duplicate: one real cursor + one TUI-drawn fake cursor.
 
         return Encoding.UTF8.GetBytes(sb.ToString());
     }
