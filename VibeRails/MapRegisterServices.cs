@@ -1,5 +1,6 @@
 using VibeRails.Auth;
 using VibeRails.Jobs;
+using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Services.Bert;
 using VibeRails.DB;
@@ -101,8 +102,10 @@ namespace VibeRails
 #if DEBUG
             // Event bus — fire-and-forget publish to connected WebSocket viewers
             serviceCollection.AddSingleton<EventBus>();
+            serviceCollection.AddSingleton<EventWebSocketHandler>();
 #endif
             serviceCollection.AddSingleton<IAppNotificationService, AppNotificationService>();
+            serviceCollection.AddSingleton<AppNotificationWebSocketHandler>();
 
             // Remote State Service (for terminal session remote registration)
             serviceCollection.AddHttpClient<IRemoteStateService, RemoteStateService>();

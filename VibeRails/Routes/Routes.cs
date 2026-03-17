@@ -24,12 +24,13 @@ public static class RouteExtensions
         AppSettingsRoutes.Map(app);
         PinRoutes.Map(app);
         LifecycleRoutes.Map(app);
-        AppNotificationRoutes.Map(app);
+        app.Services.GetRequiredService<AppNotificationWebSocketHandler>().MapWebSocket(app);
         BertRoutes.Map(app);
 
         // Debug routes - only map if in debug mode
 #if DEBUG
-        EventRoutes.Map(app);
+        app.Services.GetRequiredService<EventWebSocketHandler>().MapWebSocket(app);
+        EventTabProxyRoutes.Map(app);
 #endif
     }
 }
