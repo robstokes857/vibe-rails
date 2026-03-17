@@ -87,9 +87,9 @@ export class EnvironmentController {
                     const selection = this.app.dashboardController.parseSandboxCliSelection(select);
                     
                     if (!selection) {
-                        select.classList.remove('terminal-selection-shake');
+                        select.classList.remove('vb-terminal-selection-shake');
                         void select.offsetWidth;
-                        select.classList.add('terminal-selection-shake');
+                        select.classList.add('vb-terminal-selection-shake');
                         select.focus();
                         if (typeof select.showPicker === 'function') {
                             try { select.showPicker(); } catch {}
@@ -692,3 +692,4 @@ export class EnvironmentController {
         }, 300);
     }
 }
+

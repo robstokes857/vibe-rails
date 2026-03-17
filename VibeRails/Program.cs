@@ -8,7 +8,7 @@ using VibeRails.Middleware;
 using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Services.Terminal;
-using VibeRails.Services.Tracing;
+
 using VibeRails.Utils;
 
 
@@ -23,7 +23,6 @@ string webRootPath = Path.Combine(exeDirectory, "wwwroot");
 // Configure Serilog — file sink to ~/.vibe_rails/logs/
 var logDir = Path.Combine(PathConstants.GetInstallDirPath(), "logs");
 Directory.CreateDirectory(logDir);
-var traceBuffer = new TraceEventBuffer();
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .WriteTo.File(
@@ -31,7 +30,6 @@ Log.Logger = new LoggerConfiguration()
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 7,
         outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
-    .WriteTo.Sink(new TraceSerilogSink(traceBuffer))
     .CreateLogger();
 
 var builder = WebApplication.CreateSlimBuilder(args);
@@ -63,15 +61,8 @@ builder.WebHost.ConfigureKestrel(options =>
     options.ListenLocalhost(port);
 });
 
-// Register trace buffer (created before Serilog for the sink)
-builder.Services.AddSingleton(traceBuffer);
-
 // Register DI services
 MapRegisterServices.Register(builder.Services);
-
-// MCP log tailer feeds trace.html from the standalone MCP server log file.
-builder.Services.AddHostedService<McpLogTailerService>();
-
 
 // Add CORS support for localhost and VSCode webview
 builder.Services.AddCors(options =>
@@ -154,7 +145,6 @@ _ = Task.Run(async () =>
 app.UseCors("VSCodeWebview");
 app.UseWebSockets();
 app.UseMiddleware<CookieAuthMiddleware>();  // Auth checks happen FIRST
-app.UseMiddleware<TraceHttpMiddleware>();   // Trace all API requests
 
 // Static files middleware runs AFTER auth - if auth passes, files are served
 if (Directory.Exists(webRootPath))

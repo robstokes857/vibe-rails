@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 using VibeRails.Services;
-using VibeRails.Services.Tracing;
+
 
 namespace VibeRails.DTOs
 {
@@ -311,18 +311,6 @@ namespace VibeRails.DTOs
     // Proxy relay DTOs (sent from proxy WS to browser)
     public record ProxyRelayMessage(string Type, string Message, string? Signature = null, bool? Verified = null);
 
-    // Process monitor DTOs
-    public record ProcessInfoItem(
-        int Pid,
-        string Title,
-        DateTime StartTime
-    );
-
-    public record ProcessListResponse(
-        List<ProcessInfoItem> Processes,
-        DateTime Timestamp
-    );
-
     // BERT Explorer DTOs
     public record BertStatusResponse(
         bool CaptureEnabled,
@@ -609,10 +597,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SignedMessage))]
     [JsonSerializable(typeof(SignatureVerificationResponse))]
     [JsonSerializable(typeof(ProxyRelayMessage))]
-    // Process monitor DTOs
-    [JsonSerializable(typeof(ProcessInfoItem))]
-    [JsonSerializable(typeof(List<ProcessInfoItem>))]
-    [JsonSerializable(typeof(ProcessListResponse))]
     // BERT explorer DTOs
     [JsonSerializable(typeof(BertStatusResponse))]
     [JsonSerializable(typeof(BertFileChangeResponse))]
@@ -625,9 +609,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BertSearchHitResponse))]
     [JsonSerializable(typeof(List<BertSearchHitResponse>))]
     [JsonSerializable(typeof(BertSearchResponse))]
-    // Trace DTOs
-    [JsonSerializable(typeof(TraceEvent))]
-    [JsonSerializable(typeof(List<TraceEvent>))]
     // App Configuration (for appsettings.json VibeRails section)
     [JsonSerializable(typeof(Services.VibeRailsConfiguration))]
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]

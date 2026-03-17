@@ -6,8 +6,40 @@ Date started: 2026-03-07
 
 ## Active Issues
 
+Only this terminal issue is currently considered open.
 
-### 🐛 Native CLI remote alerting deferred — remote disabled for native sessions
+### 🐛 Remaining roaming cursor still visible in Web UI terminal
+
+The cursor issue is improved but not fully gone. The old extra cursor that ignored terminal
+setting changes appears to be fixed, but users still report one cursor artifact that flies
+around the viewport, usually less often than before, and can still end up near the bottom-right
+corner during wraps or redraws.
+
+**Root cause (confirmed 2026-03-16):** xterm.css hides textarea content via `opacity: 0` but
+does NOT set `outline: none` on the helper textarea (only on `.xterm.focus`). On Windows/Chrome
+the browser focus-ring is composited at the OS level and can show through `opacity: 0`, so the
+focused textarea's outline rectangle appears as a phantom cursor at the cursor position. During
+line wrap the textarea briefly stays at the old right-edge position before updating — exactly
+the "parks at bottom-right" symptom. `caret-color: transparent` alone was insufficient because
+the visible artefact was the outline/focus-ring, not the text caret.
+
+**2026-03-16 fix:** added `outline: none !important` and `opacity: 0 !important` to
+`.vb-terminal-element .xterm-helper-textarea` in `style.css`; added matching inline
+`ta.style.outline = 'none'` and `ta.style.opacity = '0'` in `patchTextarea()` as runtime
+backup.
+
+**Retest needed:** verify no phantom cursor while typing, reconnecting, resizing, hard
+refreshing. Confirm the bottom-right artefact on wrap is gone.
+
+Key files:
+- `VibeRails/wwwroot/style.css` — `.vb-terminal-element .xterm-helper-textarea`
+- `VibeRails/wwwroot/js/modules/vibe-terminal.js` — `patchTextarea()`
+
+---
+
+## Deferred / Parked
+
+### Native CLI remote alerting deferred — remote disabled for native sessions
 
 The title-bar notification approach for alerting the local user when a remote viewer connects
 proved unreliable (OSC title gets overwritten by the TUI/shell immediately). A proper alerting
@@ -22,6 +54,32 @@ Key file: `VibeRails/Services/Terminal/TerminalRunner.cs` — `_nativeRemoteEnab
 ---
 
 ## Fixed Issues
+
+### ✅ Double print / full-session duplicate replay on reconnect and hard refresh
+
+On reconnect and especially on hard refresh, the browser could repaint the top/full screen
+twice or replay the entire visible AI CLI session again. This was most noticeable with
+full-screen TUI CLIs like Codex/Claude/Gemini/Copilot.
+
+**Root cause:** the local WebSocket attach path unconditionally sent `terminal.GetGridReplay()`
+before subscribing the live WebSocket consumer. For managed AI CLI sessions, this conflicted
+with redraw-style attach behavior and caused duplicated TUI content on browser reconnect / hard
+refresh. Plain shell / line-oriented sessions could still use replay, but managed AI CLIs
+needed redraw-first attach instead.
+
+**Fix:** updated `VibeRails/Services/Terminal/TerminalSessionService.cs` so managed AI CLIs
+(`Claude`, `Codex`, `Gemini`, `Copilot`) now skip local replay on attach and instead subscribe
+the WebSocket first, then request a redraw with `Ctrl+L`. Plain shell / line-oriented sessions
+still use `GetGridReplay()`.
+
+**2026-03-16 retest:** user confirmed this tested good. The duplicate replay / double print
+issue no longer reproduces in current testing.
+
+Key files:
+- `VibeRails/Services/Terminal/TerminalSessionService.cs` — `HandleWebSocketAsync`, `s_activeCli`
+- `VibeRails/wwwroot/js/modules/terminal-multitab.js` — `connect()`, restore/attach flow
+
+---
 
 ### ✅ Double/phantom cursor — ghost cursor alongside real cursor
 
