@@ -30,6 +30,10 @@ public sealed class AnsiParser
     private int _utf8Remaining;
     private uint _utf8Codepoint;
 
+    // Last printed graphic character (for REP / CSI b)
+    private char _lastPrintedChar = '\0';
+    private bool _lastPrintedWide = false;
+
     public AnsiParser(TerminalBuffer buffer)
     {
         _buffer = buffer;
@@ -144,13 +148,21 @@ public sealed class AnsiParser
             case 0x5F: // _ -> APC
                 _state = ParserState.DcsPassthrough;
                 break;
-            case 0x4D: // M -> Reverse Index (RI)
-                _buffer.ReverseLineFeed();
+            case 0x44: // D -> IND (Index) — like LF, scroll if at bottom margin
+                _buffer.LineFeed(scroll: true);
                 _state = ParserState.Ground;
                 break;
-            case 0x45: // E -> Next Line (NEL)
+            case 0x45: // E -> NEL (Next Line)
                 _buffer.CarriageReturn();
                 _buffer.LineFeed();
+                _state = ParserState.Ground;
+                break;
+            case 0x48: // H -> HTS (Horizontal Tab Set)
+                _buffer.SetTabStop();
+                _state = ParserState.Ground;
+                break;
+            case 0x4D: // M -> Reverse Index (RI)
+                _buffer.ReverseLineFeed();
                 _state = ParserState.Ground;
                 break;
             case 0x37: // 7 -> DECSC save cursor
@@ -277,6 +289,13 @@ public sealed class AnsiParser
         int p0 = _paramCount > 0 ? _params[0] : 0;
         int p1 = _paramCount > 1 ? _params[1] : 0;
 
+        // DECSTR soft reset — intermediate '!' final 'p'
+        if (intermediate == (byte)'!')
+        {
+            if ((char)finalByte == 'p') SoftReset();
+            return;
+        }
+
         // Private modes — intermediate is '?' or '>'
         if (intermediate == (byte)'?')
         {
@@ -314,15 +333,30 @@ public sealed class AnsiParser
             case 'S': _buffer.ScrollUp(Math.Max(1, p0)); break;                  // SU
             case 'T': _buffer.ScrollDown(Math.Max(1, p0)); break;                // SD
             case 'X': _buffer.EraseChars(Math.Max(1, p0)); break;                // ECH
-            case 'Z': // CBT - cursor backward tab
-                for (int i = 0; i < Math.Max(1, p0); i++) _buffer.Backspace();
+            case 'Z': // CBT - cursor backward tab (jump to previous tab stop)
+                for (int i = 0; i < Math.Max(1, p0); i++) _buffer.BackTab();
                 break;
             case '@': _buffer.InsertChars(Math.Max(1, p0)); break;               // ICH
+            case 'a': _buffer.MoveCursorRelative(0, Math.Max(1, p0)); break;     // HPR
+            case 'b': // REP - repeat last printed character
+                if (_lastPrintedChar != '\0')
+                {
+                    int repCount = Math.Max(1, p0);
+                    for (int i = 0; i < repCount; i++)
+                        _buffer.WriteChar(_lastPrintedChar, _lastPrintedWide);
+                }
+                break;
             case 'd': _buffer.SetCursorRow(Math.Max(1, p0) - 1); break;          // VPA
+            case 'e': _buffer.MoveCursorRelative(Math.Max(1, p0), 0); break;     // VPR
+            case 'g': _buffer.ClearTabStop(p0); break;                           // TBC
             case 'm': DispatchSgr(); break;                                       // SGR
             case 'n': // DSR — Device Status Report (respond with position)
                 break; // ignore — we're headless
-            case 'r': // DECSTBM — set scrolling region (simplified: ignore)
+            case 'r': // DECSTBM — set scrolling region
+                if (_paramCount >= 2)
+                    _buffer.SetScrollRegion(Math.Max(1, _params[0]) - 1, Math.Max(1, _params[1]) - 1);
+                else
+                    _buffer.SetScrollRegion(0, _buffer.Rows - 1);
                 break;
             case 's': _buffer.SaveCursor(); break;
             case 'u': _buffer.RestoreCursor(); break;
@@ -331,6 +365,7 @@ public sealed class AnsiParser
             case 'h': break; // SM  — ignore non-private modes
             case 'l': break; // RM  — ignore non-private modes
             case 'q': break; // DECSCUSR cursor shape — ignore
+            case '`': _buffer.SetCursorCol(Math.Max(1, p0) - 1); break;          // HPA
         }
     }
 
@@ -489,6 +524,13 @@ public sealed class AnsiParser
         _buffer.CurrentAttributes = CellAttributes.None;
     }
 
+    private void SoftReset()
+    {
+        ResetSgr();
+        _buffer.SetCursorVisible(true);
+        _buffer.SetScrollRegion(0, _buffer.Rows - 1);
+    }
+
     private void FullReset()
     {
         ResetSgr();
@@ -496,6 +538,7 @@ public sealed class AnsiParser
         _buffer.EraseInDisplay(2);
         _buffer.ExitAlternateScreen();
         _buffer.SetCursorVisible(true);
+        _buffer.SetScrollRegion(0, _buffer.Rows - 1);
     }
 
     // ------------------------------------------------------------------
@@ -554,6 +597,8 @@ public sealed class AnsiParser
         if (cp <= 0xFFFF)
         {
             _buffer.WriteChar((char)cp, wide);
+            _lastPrintedChar = (char)cp;
+            _lastPrintedWide = wide;
         }
         else
         {
@@ -562,6 +607,8 @@ public sealed class AnsiParser
             char high = (char)(0xD800 + (cp >> 10));
             char low  = (char)(0xDC00 + (cp & 0x3FF));
             _buffer.WriteChar(high, wide);
+            _lastPrintedChar = high;
+            _lastPrintedWide = wide;
             // low surrogate written as continuation
         }
     }
