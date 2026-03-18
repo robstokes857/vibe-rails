@@ -2168,19 +2168,40 @@ class TerminalManager {
         const sizeInput = this.container.querySelector('#terminal-settings-font-size');
         if (sizeInput) sizeInput.value = size;
 
-        this._themeSwatches = [];
+        this._themeItems = [];
         const themeList = this.container.querySelector('#vb-terminal-settings-theme-list');
         if (themeList && window.CXL_THEMES) {
+            themeList.innerHTML = '';
             for (const [key, theme] of Object.entries(window.CXL_THEMES)) {
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'vb-terminal-settings-theme-swatch';
-                btn.dataset.theme = key;
-                btn.title = theme.name;
-                btn.style.background = `linear-gradient(135deg, ${theme.background} 50%, ${theme.foreground} 50%)`;
-                btn.addEventListener('click', () => this.applyTheme(key));
-                themeList.appendChild(btn);
-                this._themeSwatches.push(btn);
+                const item = document.createElement('div');
+                item.className = 'vb-terminal-settings-theme-item';
+                item.dataset.theme = key;
+                item.title = theme.name;
+
+                const preview = document.createElement('div');
+                preview.className = 'vb-terminal-settings-theme-preview';
+                preview.style.background = theme.background;
+
+                // Add accent pills to preview
+                const accents = [theme.red, theme.green, theme.blue, theme.magenta, theme.cyan, theme.yellow];
+                const activeAccents = accents.filter(c => c).slice(0, 4);
+                activeAccents.forEach(color => {
+                    const pill = document.createElement('div');
+                    pill.className = 'accent-pill';
+                    pill.style.background = color;
+                    preview.appendChild(pill);
+                });
+
+                const name = document.createElement('div');
+                name.className = 'vb-terminal-settings-theme-name';
+                name.textContent = theme.name;
+
+                item.appendChild(preview);
+                item.appendChild(name);
+
+                item.addEventListener('click', () => this.applyTheme(key));
+                themeList.appendChild(item);
+                this._themeItems.push(item);
             }
         }
 
@@ -2201,8 +2222,8 @@ class TerminalManager {
 
         const savedTheme = this._loadThemePreference();
         if (savedTheme) {
-            this._themeSwatches?.forEach((swatch) => {
-                swatch.classList.toggle('active', swatch.dataset.theme === savedTheme);
+            this._themeItems?.forEach((item) => {
+                item.classList.toggle('active', item.dataset.theme === savedTheme);
             });
         }
     }
@@ -2234,7 +2255,7 @@ class TerminalManager {
                 tab.instance.vibeTerminal._terminal.options.theme = theme;
             }
         });
-        this._themeSwatches?.forEach(s => s.classList.toggle('active', s.dataset.theme === key));
+        this._themeItems?.forEach(s => s.classList.toggle('active', s.dataset.theme === key));
     }
 
     applyFontFamily(family) {
