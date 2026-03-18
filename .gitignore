@@ -375,3 +375,4 @@ FodyWeavers.xsd
 /vscode-viberails/.claude/settings.local.json
 /TerminalEmulator.Tests/snapshots
 /fixtures
+TerminalEmulator.Tests/state.db
