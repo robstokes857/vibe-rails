@@ -588,10 +588,19 @@ export class VibeTerminal {
         this.patchTextarea();
     }
 
-    reset() {
-        if (this._terminal) {
-            this._terminal.reset();
+    clearDisplay() {
+        if (!this._terminal) {
+            return;
         }
+
+        this._terminal.clearSelection?.();
+        this._terminal.clear();
+        this.patchTextarea();
+        this._followOutput = true;
+    }
+
+    reset() {
+        this.clearDisplay();
         this._searchTerm = '';
     }
 
@@ -600,7 +609,7 @@ export class VibeTerminal {
             return;
         }
 
-        this._terminal.reset();
+        this.clearDisplay();
         this._searchTerm = '';
         this._lastCols = null;
         this._lastRows = null;

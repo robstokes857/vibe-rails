@@ -1,6 +1,47 @@
 # TERMINAL.md
 
-## 2026-03-17 Deep backend C# code review
+
+Open issues. 
+
+1. We made it flicker again. 
+2. In copilot only on reconnect we can't type in the console anymore.
+
+
+
+## 2026-03-18 follow-up audit after backend/emulator hardening
+
+This repo has now landed the terminal backend/emulator hardening pass plus expanded regression
+coverage.
+
+Status against the 2026-03-17 review:
+
+- Fixed before this pass: finding 9 (`ESC \` termination inside DCS/APC/PM/SOS passthrough).
+- Fixed in this pass: findings 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, and 17.
+- Resolved as documentation/architecture drift: finding 10. The current attach policy is unified
+  emulator replay plus post-replay redraw for all sessions; the old managed-AI "skip replay" note
+  later in this file is historical and has now been superseded.
+- Reduced but not fully eliminated: finding 18. Stale cleanup is now activity-aware
+  (`SessionLogs` / `UserInputs`) instead of age-only, but it still is not a true OS-process
+  liveness check.
+
+New regression coverage added in this pass:
+
+- `CSI 3 J` clears scrollback without erasing the visible screen
+- multi-parameter private CSI mode handling applies every mode in the sequence
+- resize marks newly-added rows dirty
+- supplementary-plane glyphs round-trip through snapshot/screen text
+- snapshot normalization now collapses surrogate pairs consistently for golden fixtures
+
+Validation after the hardening pass:
+
+- `dotnet test .\TerminalEmulator.Tests\TerminalEmulator.Tests.csproj --no-restore --nologo`
+  -> 756 passed
+- `dotnet test .\Tests\Tests.csproj --no-restore --nologo`
+  -> 139 passed
+
+---
+
+## 2026-03-17 Deep backend C# code review (historical snapshot)
 I found several remaining C#-side hazards that can still produce:
 
 - duplicate or orphaned terminal sessions
@@ -496,16 +537,12 @@ Date started: 2026-03-07
 
 ## Active Issues
 
-Backend review found active C# stability work items:
+Post-hardening remaining work is smaller and lower-risk:
 
-- `StartSessionAsync()` still has a race that can create multiple PTYs / sessions
-- output persistence and transport are still using unbounded fire-and-forget pipelines
-- replay fidelity still has backend gaps (`ED3` scrollback clear, remote cursor/redraw semantics,
-  managed-CLI attach policy drift)
-- the emulator/parser still has state-model gaps (`ED3`, `ESC \`-terminated DCS-like strings,
-  non-BMP/wide-char fidelity)
-- native CLI session lifetime is still vulnerable to lingering host processes after PTY exit
-- startup/stop/exit cleanup is not fully transactional yet
+- stale-session cleanup is activity-aware now, but still not true process-liveness detection
+- `InputAccumulator` still uses an unbounded channel (lower risk than PTY output, but not bounded)
+- `TerminalIoObserverService` still fans out on fire-and-forget tasks with no hard cap
+- end-to-end lifecycle/replay race coverage is still thinner than the emulator/parser regression suite
 
 ---
 
@@ -526,6 +563,88 @@ Key file: `VibeRails/Services/Terminal/TerminalRunner.cs` — `_nativeRemoteEnab
 ---
 
 ## Fixed Issues
+
+### ✅ Backend lifecycle / transport hardening pass (2026-03-18)
+
+This pass closed the core backend hazards from the 2026-03-17 review:
+
+- `TerminalSessionService` startup/stop/detach now runs behind a single lifecycle gate, closing the
+  single-session race and making teardown ownership transitions explicit
+- PTY output persistence now uses a bounded per-session single-writer pipeline instead of spawning
+  unbounded fire-and-forget SQLite writes
+- local WebSocket and remote relay output paths are now bounded; overflow explicitly disconnects the
+  lagging consumer instead of growing memory without limit
+- `TerminalRunner.CreateSessionAsync()` is now transactional: startup rollback disposes the PTY,
+  tears down remote connection state, and completes the DB session on failure
+- PTY exit cleanup no longer runs as `async void`; exit is funneled through scheduled task-based
+  teardown
+- stop/exit cleanup now explicitly closes the active local WebSocket, disposes the PTY before
+  waiting for the read loop, and flushes queued DB output before completing the session
+- title OSC is published on the output path instead of being injected into PTY stdin
+- remote register/deregister no longer block the main session critical path
+- stale-session cleanup no longer closes sessions on age alone; it now checks recent log/input
+  activity first
+
+Key files:
+- `VibeRails/Services/Terminal/TerminalSessionService.cs`
+- `VibeRails/Services/Terminal/TerminalRunner.cs`
+- `VibeRails/Services/Terminal/TerminalStateService.cs`
+- `VibeRails/Services/Terminal/Terminal.cs`
+- `VibeRails/Services/Terminal/Consumers/WebSocketConsumer.cs`
+- `VibeRails/Services/Terminal/RemoteTerminalConnection.cs`
+- `VibeRails/Services/DbService.cs`
+
+---
+
+### ✅ Emulator/parser fidelity hardening pass (2026-03-18)
+
+This pass also closed the major emulator-side fidelity gaps from the review:
+
+- `ED3` / `CSI 3 J` now clears scrollback only and no longer erases the visible screen
+- remote replay now gets the same redraw follow-up as local replay, and remote resize is serialized
+  through the same replay/takeover gate
+- native CLI console input loop now exits when the PTY exits instead of lingering on
+  `Console.ReadKey()` semantics
+- supplementary-plane glyphs now preserve the full Unicode scalar for replay/serialization
+- resize now resizes `_dirtyRows` and marks new rows dirty
+- private CSI mode handling now applies every mode parameter, not just the first
+- snapshot normalization was updated so the expanded non-BMP behavior compares cleanly against
+  historical golden files
+
+Finding 9 (`ESC \` terminator handling inside DCS/APC/PM/SOS passthrough) was already fixed before
+this pass and remained green.
+
+Key files:
+- `TerminalEmulator/AnsiParser.cs`
+- `TerminalEmulator/TerminalBuffer.cs`
+- `TerminalEmulator/TerminalCell.cs`
+- `TerminalEmulator/Terminal.cs`
+- `VibeRails/Services/Terminal/TerminalGridSerializer.cs`
+- `TerminalEmulator.Tests/AnsiParserTests.cs`
+- `TerminalEmulator.Tests/EscapeSequenceTests.cs`
+- `TerminalEmulator.Tests/SnapshotTests.cs`
+
+---
+
+### ✅ Attach policy reconciled — unified replay is now the intended baseline (2026-03-18)
+
+This file previously contained two conflicting stories:
+
+- one section said managed AI CLIs should skip replay and use redraw-first attach
+- later sections described emulator replay as the reconnect baseline
+
+Current code has standardized on a single attach policy for local and remote viewers:
+
+- resize first (if dimensions are known)
+- capture emulator replay
+- send replay before subscribing live output
+- subscribe live output
+- send `Ctrl+L` redraw immediately after replay
+
+That means the old managed-AI skip-replay guidance is no longer the current contract. Keep the older
+incident notes below as history, not as current architecture guidance.
+
+---
 
 ### ✅ JS cursor settings removed — prevents future cursor state fights (2026-03-17)
 
@@ -627,6 +746,11 @@ still use `GetGridReplay()`.
 
 **2026-03-16 retest:** user confirmed this tested good. The duplicate replay / double print
 issue no longer reproduces in current testing.
+
+**Superseded 2026-03-18:** local attach no longer uses a managed-AI special case. The backend now
+standardizes on emulator replay for all local sessions, with pre-resize, replay-before-subscribe
+ordering, and an immediate post-replay `Ctrl+L` redraw. Treat the old skip-replay branch described
+above as historical incident context only.
 
 Key files:
 - `VibeRails/Services/Terminal/TerminalSessionService.cs` — `HandleWebSocketAsync`, `s_activeCli`
@@ -749,7 +873,7 @@ See **TerminalEmulator Integration** section below for architecture details.
 ### ✅ AI TUI double-render / stale cells on reconnect and resize
 
 Mitigated by:
-- redraw-first (not replay) for AI CLI reconnect
+- pre-resize + replay-before-subscribe + immediate post-replay redraw on reconnect
 - `resetDisplayOnly()` in the shrink-only resize path clears stale xterm cells before a real PTY geometry change
 - manager generation guards prevent stale async init from completing after navigation
 
@@ -842,6 +966,9 @@ state machine that replaced `CircularBuffer` as the terminal state proxy.
 - `Terminal.Resize()` also resizes the emulator to keep dimensions in sync
 - `Terminal.GetGridReplay()` snapshots scrollback + screen under lock, then calls
   `TerminalGridSerializer.Serialize()` outside the lock
+- reconnect/reattach now uses emulator replay for both plain shells and managed AI CLIs; attach
+  correctness comes from pre-resize + snapshot-before-subscribe + post-replay redraw, not from a
+  CLI-type-specific replay bypass
 
 **`TerminalGridSerializer.Serialize()`:**
 - Hides cursor (`?25l`), then soft-clears screen (`ED2`) + scrollback (`ED3`) + homes cursor (`CUP 1,1`)
@@ -874,7 +1001,8 @@ state machine that replaced `CircularBuffer` as the terminal state proxy.
   investigation file was removed on 2026-03-12.
 - Do not reintroduce `CircularBuffer` or raw replay as the reconnect baseline — fully replaced
   by the TerminalEmulator grid approach.
-- If replay is ever used again, limit it to plain shell / line-oriented sessions only.
+- Replay is now the standard reconnect baseline for all session types. Do not reintroduce
+  CLI-specific skip-replay branches unless a concrete reproducer and regression tests require it.
 - **Sluggish typing (accepted):** ~20 ms per character echo latency is inherent — xterm.js v6
   `WriteBuffer` batches via `setTimeout(0)` (~4 ms) + rAF render (~16 ms). No delay on our
   `onData` → `socket.send()` path; the bottleneck is xterm.js's async write pipeline. Fixing

@@ -21,6 +21,7 @@ public sealed class Terminal : IAsyncDisposable
     private readonly Lock _emulatorLock = new();
     private Task? _readLoop;
     private bool _disposed;
+    private int _hasExited;
     private int _cols;
     private int _rows;
 
@@ -28,6 +29,15 @@ public sealed class Terminal : IAsyncDisposable
     public int ExitCode => _pty.ExitCode;
     public int Cols => _cols;
     public int Rows => _rows;
+    public bool HasExited => Volatile.Read(ref _hasExited) == 1;
+    public bool IsSyncOutputActive
+    {
+        get
+        {
+            lock (_emulatorLock)
+                return _emulator.SyncOutputActive;
+        }
+    }
 
     public static string GetDefaultShellPath() => OperatingSystem.IsWindows() ? "pwsh.exe" : "bash";
 
@@ -70,15 +80,6 @@ public sealed class Terminal : IAsyncDisposable
         var pty = await PtyProvider.SpawnAsync(options, ct);
         var terminal = new Terminal(pty, cols, rows);
         terminal.Subscribe(new TerminalEmulatorConsumer(terminal._emulator, terminal._emulatorLock));
-
-        // Set terminal title via ANSI escape sequence if provided
-        if (!string.IsNullOrEmpty(title))
-        {
-            var titleSequence = $"\x1b]0;{title}\x07";
-            var bytes = System.Text.Encoding.UTF8.GetBytes(titleSequence);
-            await pty.WriterStream.WriteAsync(bytes, ct);
-            await pty.WriterStream.FlushAsync(ct);
-        }
 
         return terminal;
     }
@@ -160,8 +161,14 @@ public sealed class Terminal : IAsyncDisposable
             snapshot = [.. _consumers];
         foreach (var c in snapshot)
         {
-            try { c.OnOutput(data); }
-            catch { }
+            try
+            {
+                c.OnOutput(data);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Terminal] Consumer error while publishing synthetic output");
+            }
         }
     }
 
@@ -174,7 +181,8 @@ public sealed class Terminal : IAsyncDisposable
     {
         TerminalEmulator.TerminalCell[][] scrollback;
         TerminalEmulator.TerminalCell[,] snap;
-        int rows, cols, cursorRow, cursorCol;
+        int rows, cols, cursorRow, cursorCol, cursorShape;
+        bool cursorVisible, syncOutputActive;
         lock (_emulatorLock)
         {
             scrollback = _emulator.GetScrollback();
@@ -183,8 +191,15 @@ public sealed class Terminal : IAsyncDisposable
             cols = _emulator.Cols;
             cursorRow = _emulator.CursorRow;
             cursorCol = _emulator.CursorCol;
+            cursorVisible = _emulator.CursorVisible;
+            cursorShape = _emulator.CursorShape;
+            syncOutputActive = _emulator.SyncOutputActive;
         }
-        return TerminalGridSerializer.Serialize(scrollback, snap, rows, cols, cursorRow, cursorCol);
+
+        if (syncOutputActive)
+            Log.Warning("[Terminal] Snapshot taken during synchronized output — replay may capture mid-frame state");
+
+        return TerminalGridSerializer.Serialize(scrollback, snap, rows, cols, cursorRow, cursorCol, cursorVisible, cursorShape);
     }
 
     /// <summary>
@@ -215,13 +230,29 @@ public sealed class Terminal : IAsyncDisposable
 
         await _cts.CancelAsync();
 
-        if (_readLoop != null)
+        try
         {
-            try { await _readLoop; }
-            catch { }
+            _pty.Kill();
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[Terminal] PTY kill during dispose failed or was unnecessary");
         }
 
-        _pty.Kill();
+        if (_readLoop != null)
+        {
+            var completed = await Task.WhenAny(_readLoop, Task.Delay(TimeSpan.FromSeconds(1)));
+            if (completed == _readLoop)
+            {
+                try { await _readLoop; }
+                catch { }
+            }
+            else
+            {
+                Log.Warning("[Terminal] Read loop did not exit promptly after PTY kill");
+            }
+        }
+
         _pty.Dispose();
         _cts.Dispose();
     }
@@ -269,6 +300,7 @@ public sealed class Terminal : IAsyncDisposable
         {
             // ExitCode can throw if the process hasn't fully exited yet (pipe EOF races process exit).
             // Always invoke Exited — use -1 as fallback so listeners can clean up.
+            Interlocked.Exchange(ref _hasExited, 1);
             int exitCode;
             try { exitCode = _pty.ExitCode; }
             catch { exitCode = -1; }

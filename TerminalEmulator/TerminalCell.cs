@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace TerminalEmulator;
 
 /// <summary>
@@ -63,6 +65,13 @@ public struct TerminalCell
     /// <summary>The character at this cell. '\0' means empty/continuation.</summary>
     public char Char;
 
+    /// <summary>
+    /// Full Unicode scalar value for this cell. For BMP text this matches <see cref="Char"/>.
+    /// For supplementary-plane glyphs, <see cref="Char"/> stores the lead surrogate while
+    /// <see cref="Codepoint"/> preserves the full scalar for replay/serialization.
+    /// </summary>
+    public int Codepoint;
+
     /// <summary>Foreground color.</summary>
     public CellColor Fg;
 
@@ -78,6 +87,7 @@ public struct TerminalCell
     public static readonly TerminalCell Empty = new()
     {
         Char = ' ',
+        Codepoint = ' ',
         Fg = CellColor.Default,
         Bg = CellColor.Default,
         Attributes = CellAttributes.None,
@@ -85,5 +95,32 @@ public struct TerminalCell
     };
 
     public readonly bool IsEmpty =>
-        Char == ' ' && Fg.IsDefault && Bg.IsDefault && Attributes == CellAttributes.None;
+        Codepoint == ' ' && Fg.IsDefault && Bg.IsDefault && Attributes == CellAttributes.None;
+
+    public readonly void AppendText(StringBuilder builder, bool replaceControlWithSpace = false)
+    {
+        if (IsWideContinuation)
+            return;
+
+        var scalar = Codepoint != 0 ? Codepoint : Char;
+        if (scalar == 0)
+        {
+            builder.Append(' ');
+            return;
+        }
+
+        if (replaceControlWithSpace && scalar < ' ')
+        {
+            builder.Append(' ');
+            return;
+        }
+
+        if (scalar <= char.MaxValue)
+        {
+            builder.Append((char)scalar);
+            return;
+        }
+
+        builder.Append(char.ConvertFromUtf32(scalar));
+    }
 }

@@ -35,14 +35,16 @@ string solutionRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".
 string defaultDb    = Path.Combine(solutionRoot, "TerminalEmulator.Tests", "state.db");
 
 var rawArgs = Environment.GetCommandLineArgs();
-string command = rawArgs.Skip(1).FirstOrDefault(a => !a.StartsWith('-')) ?? "replay";
+string command = rawArgs.Skip(1).FirstOrDefault(a => !a.StartsWith('-')) ?? "menu";
 
 return command switch
 {
     "export"   => RunExport(),
     "snapshot" => RunSnapshot(),
     "render"   => RunRender(),
-    _          => await RunReplay(),
+    "replay"   => await RunReplay(),
+    "demo"     => await RunDemo(),
+    _          => await RunMenu(),
 };
 
 // ── Export ────────────────────────────────────────────────────────────────────
@@ -267,6 +269,97 @@ async Task<int> RunReplay()
     Console.SetCursorPosition(0, terminalOriginRow + rows);
     Console.WriteLine("\nAll sessions done. Press any key.");
     Console.ReadKey(intercept: true);
+    return 0;
+}
+
+// ── Menu ──────────────────────────────────────────────────────────────────────
+
+async Task<int> RunMenu()
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    Console.Clear();
+    Console.WriteLine("VibeControl2 — Terminal Emulator Test Tool\n");
+    Console.WriteLine("  1   Session Replay   replay recorded sessions from state.db");
+    Console.WriteLine("  2   Sequence Demos   visual tour of ANSI/VT escape sequences");
+    Console.WriteLine("\n  Ctrl+C to exit");
+    Console.Write("\nChoice [1/2]: ");
+    var key = Console.ReadKey(intercept: false);
+    Console.WriteLine();
+    return key.KeyChar switch
+    {
+        '2' => await RunDemo(),
+        _   => await RunReplay(),
+    };
+}
+
+// ── Demo ──────────────────────────────────────────────────────────────────────
+
+async Task<int> RunDemo()
+{
+    int cols = Console.WindowWidth;
+    int rows = Console.WindowHeight - 2;
+
+    Console.OutputEncoding = Encoding.UTF8;
+    Console.CursorVisible = false;
+    Console.Clear();
+
+    var appCts = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; appCts.Cancel(); };
+
+    var skip = new bool[1];
+    _ = Task.Run(async () =>
+    {
+        while (!appCts.Token.IsCancellationRequested)
+        {
+            if (Console.KeyAvailable)
+            {
+                var key = Console.ReadKey(intercept: true);
+                if (key.Key is ConsoleKey.Enter or ConsoleKey.RightArrow or ConsoleKey.DownArrow
+                    or ConsoleKey.Spacebar)
+                    skip[0] = true;
+            }
+            try { await Task.Delay(30, appCts.Token); }
+            catch (OperationCanceledException) { }
+        }
+    });
+
+    const int STATUS_ROW      = 0;
+    const int terminalOriginRow = 1;
+
+    var demos = DemoBuilder.Build();
+
+    for (int i = 0; i < demos.Count && !appCts.Token.IsCancellationRequested; i++)
+    {
+        skip[0] = false;
+        var demo = demos[i];
+
+        var terminal = new Terminal(cols: cols, rows: rows);
+        var bytes = Encoding.UTF8.GetBytes(demo.Sequence);
+        terminal.Write(bytes.AsSpan());
+
+        Console.Clear();
+        var snap = terminal.GetSnapshot();
+        for (int r = 0; r < terminal.Rows; r++)
+            RenderRow(terminal, terminalOriginRow, snap, r);
+
+        while (!skip[0] && !appCts.Token.IsCancellationRequested)
+        {
+            Console.SetCursorPosition(0, STATUS_ROW);
+            Console.BackgroundColor = ConsoleColor.DarkCyan;
+            Console.ForegroundColor = ConsoleColor.White;
+            string msg = $" [{i + 1}/{demos.Count}] {demo.Category} — {demo.Name}  |  Enter=next  Ctrl+C=quit";
+            if (msg.Length > Console.WindowWidth - 1) msg = msg[..(Console.WindowWidth - 1)];
+            Console.Write(msg.PadRight(Console.WindowWidth - 1));
+            Console.ResetColor();
+            try { await Task.Delay(100, appCts.Token); }
+            catch (OperationCanceledException) { }
+        }
+    }
+
+    appCts.Cancel();
+    Console.CursorVisible = true;
+    Console.Clear();
+    Console.WriteLine("All demos done.");
     return 0;
 }
 

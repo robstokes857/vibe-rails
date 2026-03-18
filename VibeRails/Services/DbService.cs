@@ -191,7 +191,17 @@ namespace VibeRails.Services
             await connection.OpenAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT Id FROM Sessions WHERE EndedUTC IS NULL AND StartedUTC < $cutoff";
+            cmd.CommandText = """
+                SELECT s.Id
+                FROM Sessions s
+                WHERE s.EndedUTC IS NULL
+                  AND s.StartedUTC < $cutoff
+                  AND MAX(
+                        COALESCE((SELECT MAX(l.Timestamp) FROM SessionLogs l WHERE l.SessionId = s.Id), ''),
+                        COALESCE((SELECT MAX(u.TimestampUTC) FROM UserInputs u WHERE u.SessionId = s.Id), ''),
+                        s.StartedUTC
+                      ) < $cutoff;
+                """;
             cmd.Parameters.AddWithValue("$cutoff", olderThan.ToString("O"));
 
             var ids = new List<string>();

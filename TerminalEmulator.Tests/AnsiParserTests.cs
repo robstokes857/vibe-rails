@@ -340,6 +340,32 @@ public class AnsiParserTests
         Assert.Equal(10, t.Rows);
     }
 
+    [Fact]
+    public void Resize_FiresDirtyRows_ForNewRows()
+    {
+        var t = Make(cols: 10, rows: 2);
+        int[]? dirtyRows = null;
+        t.OnRender += rows => dirtyRows = rows;
+
+        t.Resize(10, 4);
+
+        Assert.NotNull(dirtyRows);
+        Assert.Contains(2, dirtyRows!);
+        Assert.Contains(3, dirtyRows!);
+    }
+
+    [Fact]
+    public void SupplementaryPlaneGlyph_RoundTripsInScreenText()
+    {
+        var t = Make(cols: 10, rows: 5);
+        t.Write("🙂");
+
+        var snapshot = t.GetSnapshot();
+        Assert.Equal('\uD83D', snapshot[0, 0].Char);
+        Assert.True(snapshot[0, 1].IsWideContinuation);
+        Assert.Equal("🙂", t.GetScreenText()[0]);
+    }
+
     // ------------------------------------------------------------------
     // Real-world sequences from the DB (hardcoded samples)
     // ------------------------------------------------------------------

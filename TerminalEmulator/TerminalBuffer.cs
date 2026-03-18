@@ -32,6 +32,13 @@ public sealed class TerminalBuffer
     private int _scrollTop;
     private int _scrollBottom;
 
+    // Cursor shape (DECSCUSR): 0=default, 1=blinking block, 2=steady block,
+    // 3=blinking underline, 4=steady underline, 5=blinking bar, 6=steady bar
+    private int _cursorShape;
+
+    // Synchronized output mode (?2026) — true while TUI is mid-frame redraw
+    private bool _syncOutputActive;
+
     // Tab stops — true at columns where a tab stop is set
     private bool[] _tabStops;
 
@@ -42,12 +49,14 @@ public sealed class TerminalBuffer
     public int CursorCol => ActiveCursor.Col;
     public int CursorRow => ActiveCursor.Row;
     public bool CursorVisible => ActiveCursor.Visible;
+    public int CursorShape => _cursorShape;
+    public bool SyncOutputActive => _syncOutputActive;
 
     public int ScrollTop => _scrollTop;
     public int ScrollBottom => _scrollBottom;
 
     // Tracks which rows changed since last snapshot — cleared by consumer
-    private readonly bool[] _dirtyRows;
+    private bool[] _dirtyRows;
 
     private ref CursorState ActiveCursor =>
         ref _usingAlternate ? ref _alternateCursor : ref _normalCursor;
@@ -84,6 +93,9 @@ public sealed class TerminalBuffer
     // ------------------------------------------------------------------
 
     public void WriteChar(char ch, bool wideChar = false)
+        => WriteCodepoint(ch, wideChar);
+
+    public void WriteCodepoint(int codepoint, bool wideChar = false)
     {
         ref var cursor = ref ActiveCursor;
         if (cursor.Col >= Cols)
@@ -92,10 +104,15 @@ public sealed class TerminalBuffer
             LineFeed(scroll: true);
         }
 
+        var displayChar = codepoint <= char.MaxValue
+            ? (char)codepoint
+            : char.ConvertFromUtf32(codepoint)[0];
+
         var screen = ActiveScreen;
         screen[cursor.Row, cursor.Col] = new TerminalCell
         {
-            Char = ch,
+            Char = displayChar,
+            Codepoint = codepoint,
             Fg = CurrentFg,
             Bg = CurrentBg,
             Attributes = CurrentAttributes,
@@ -107,6 +124,7 @@ public sealed class TerminalBuffer
             screen[cursor.Row, cursor.Col + 1] = new TerminalCell
             {
                 Char = '\0',
+                Codepoint = 0,
                 Fg = CurrentFg,
                 Bg = CurrentBg,
                 Attributes = CurrentAttributes,
@@ -243,10 +261,19 @@ public sealed class TerminalBuffer
                 EraseRow(cursor.Row, 0, cursor.Col + 1);
                 break;
             case 2: // whole screen
-            case 3: // whole screen + scrollback (treat same as 2 for now)
                 for (int r = 0; r < Rows; r++) EraseRow(r, 0, Cols);
                 break;
+            case 3: // scrollback only
+                ClearScrollback();
+                break;
         }
+    }
+
+    public void ClearScrollback()
+    {
+        Array.Clear(_scrollback, 0, _scrollback.Length);
+        _scrollbackHead = 0;
+        _scrollbackCount = 0;
     }
 
     // Erase in line
@@ -366,6 +393,8 @@ public sealed class TerminalBuffer
     public void RestoreCursor() => ActiveCursor = _savedCursor;
 
     public void SetCursorVisible(bool visible) => ActiveCursor.Visible = visible;
+    public void SetCursorShape(int shape) => _cursorShape = shape;
+    public void SetSyncOutput(bool active) => _syncOutputActive = active;
 
     // Resize — preserve as much content as possible
     public void Resize(int newCols, int newRows)
@@ -417,6 +446,9 @@ public sealed class TerminalBuffer
         for (int c = copyTabCols; c < newCols; c++)
             newTabStops[c] = (c % 8 == 0);
         _tabStops = newTabStops;
+
+        _dirtyRows = new bool[newRows];
+        Array.Fill(_dirtyRows, true);
     }
 
     // ------------------------------------------------------------------

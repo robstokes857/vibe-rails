@@ -52,6 +52,7 @@ class TerminalTab {
         this.isActive = false;
         this.lastResizeSignature = null;
         this._initialConnectActive = false;
+        this._connectFocusTimeouts = [];
     }
 
     hasOpenSocket() {
@@ -213,6 +214,8 @@ class TerminalTab {
     }
 
     disconnectSocketOnly() {
+        this.clearConnectFocusTimeouts();
+        this._initialConnectActive = false;
         if (!this.socket) {
             return;
         }
@@ -227,18 +230,52 @@ class TerminalTab {
         this.lastResizeSignature = null;
     }
 
+    disposeTerminalInstance() {
+        if (!this.vibeTerminal) {
+            return;
+        }
+
+        this.vibeTerminal.dispose();
+        this.vibeTerminal = null;
+        this.terminal = null;
+
+        if (this.onDataDispose) {
+            try { this.onDataDispose(); } catch (e) { /* no-op */ }
+            this.onDataDispose = null;
+        }
+    }
+
+    clearConnectFocusTimeouts() {
+        while (this._connectFocusTimeouts.length > 0) {
+            const timeoutId = this._connectFocusTimeouts.pop();
+            clearTimeout(timeoutId);
+        }
+    }
+
+    scheduleConnectFocusPasses(socket) {
+        if (!this.isActive || this.socket !== socket) {
+            return;
+        }
+
+        this.clearConnectFocusTimeouts();
+        for (const delay of [0, 50, 150, 300, 600, 1000]) {
+            const timeoutId = window.setTimeout(() => {
+                if (!this.isActive || this.socket !== socket) {
+                    return;
+                }
+
+                this.focusInput();
+            }, delay);
+            this._connectFocusTimeouts.push(timeoutId);
+        }
+    }
+
     disconnect({ disposeTerminal = false, preserveStatus = false } = {}) {
         this.teardownResizeHandling();
         this.disconnectSocketOnly();
 
-        if (disposeTerminal && this.vibeTerminal) {
-            this.vibeTerminal.dispose();
-            this.vibeTerminal = null;
-            this.terminal = null;
-            if (this.onDataDispose) {
-                try { this.onDataDispose(); } catch (e) { /* no-op */ }
-                this.onDataDispose = null;
-            }
+        if (disposeTerminal) {
+            this.disposeTerminalInstance();
         }
 
         if (!preserveStatus) {
@@ -403,12 +440,12 @@ class TerminalTab {
             return false;
         }
 
-        this.ensureTerminal();
         this.disconnectSocketOnly();
+        this.disposeTerminalInstance();
+        this.ensureTerminal();
+        this.clearConnectFocusTimeouts();
+        this._initialConnectActive = true;
         this.lastResizeSignature = null;
-        // Replay rebuilds the current screen; clear any local render state first
-        // so reconnects do not append duplicated TUI content.
-        this.vibeTerminal?.reset();
 
         // Fit now that the container is visible (showTerminal was called before
         // connect in activateTab). This gives us the real cols/rows to send to
@@ -459,20 +496,87 @@ class TerminalTab {
                     this.sendResizeToPty();
                     this.scheduleFitPasses();
                     this.focusInput();
+                    this.scheduleConnectFocusPasses(socket);
                 }
 
                 resolve(true);
             };
 
+            // Client-side write coalescing: buffer incoming binary frames and flush
+            // them into a single term.write() call via queueMicrotask. This reduces
+            // the number of distinct write() calls xterm.js sees, which in turn
+            // reduces the number of rAF render cycles. TUI apps like Codex split
+            // their screen updates across several small PTY writes (erase, ?2026h
+            // sync-on, content, ?2026l sync-off) that arrive as separate WebSocket
+            // frames a few ms apart. If each triggers its own term.write(), xterm.js
+            // may render an intermediate torn state (e.g. erased cells visible for
+            // one frame before ?2026h suppresses rendering). Batching them into one
+            // write() processes the whole sequence atomically.
+            let replayFocusDone = false;
+            let pendingChunks = [];
+            let flushScheduled = false;
+
+            const flushPendingChunks = () => {
+                flushScheduled = false;
+                if (pendingChunks.length === 0) return;
+                if (this.socket !== socket) { pendingChunks = []; return; }
+
+                let data;
+                if (pendingChunks.length === 1) {
+                    data = pendingChunks[0];
+                } else {
+                    let total = 0;
+                    for (const c of pendingChunks) total += c.byteLength;
+                    const merged = new Uint8Array(total);
+                    let offset = 0;
+                    for (const c of pendingChunks) { merged.set(c, offset); offset += c.byteLength; }
+                    data = merged;
+                }
+                pendingChunks = [];
+
+                this.vibeTerminal?.write(data);
+
+                // Re-focus once after the replay renders. Scheduled here (after write)
+                // so the rAF fires AFTER xterm.js has processed and rendered the data.
+                // Any page-level focus event that lands between socket.onopen and the
+                // render rAF can steal focus, causing "paste works, keys don't".
+                if (!replayFocusDone && this.isActive) {
+                    replayFocusDone = true;
+                    requestAnimationFrame(() => {
+                        if (this.socket === socket && this.isActive) {
+                            this.focusInput();
+                        }
+                    });
+                }
+            };
+
             socket.onmessage = (event) => {
                 if (this.socket !== socket) return;
-                this.writeData(event.data);
+
+                pendingChunks.push(new Uint8Array(event.data));
+                if (!flushScheduled) {
+                    flushScheduled = true;
+                    queueMicrotask(flushPendingChunks);
+                }
+
+                // Fire first-message init synchronously (before flush) — these actions
+                // (fit, focus, resize) don't need the data to be written to xterm yet.
+                if (this._initialConnectActive) {
+                    this._initialConnectActive = false;
+                    if (this.isActive) {
+                        this.scheduleFitPasses();
+                        this.focusInput();
+                        this.scheduleConnectFocusPasses(socket);
+                    }
+                }
             };
 
             socket.onclose = (event) => {
                 if (this.socket !== socket) return;
 
                 this.teardownResizeHandling();
+                this.clearConnectFocusTimeouts();
+                this._initialConnectActive = false;
                 this.socket = null;
                 this.lastResizeSignature = null;
 
@@ -509,7 +613,7 @@ class TerminalTab {
 
             this.state.status = 'connecting';
             this.manager.updateUi();
-            this.vibeTerminal?.reset();
+            this.disconnect({ disposeTerminal: true, preserveStatus: true });
             await this.connect();
             return true;
         } catch (error) {

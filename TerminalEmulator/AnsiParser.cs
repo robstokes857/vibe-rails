@@ -31,7 +31,7 @@ public sealed class AnsiParser
     private uint _utf8Codepoint;
 
     // Last printed graphic character (for REP / CSI b)
-    private char _lastPrintedChar = '\0';
+    private int _lastPrintedCodepoint;
     private bool _lastPrintedWide = false;
 
     public AnsiParser(TerminalBuffer buffer)
@@ -160,7 +160,7 @@ public sealed class AnsiParser
                 break;
             case 0x45: // E -> NEL (Next Line)
                 _buffer.CarriageReturn();
-                _buffer.LineFeed();
+                _buffer.LineFeed(scroll: true);
                 _state = ParserState.Ground;
                 break;
             case 0x48: // H -> HTS (Horizontal Tab Set)
@@ -305,7 +305,8 @@ public sealed class AnsiParser
         // Private modes — intermediate is '?' or '>'
         if (intermediate == (byte)'?')
         {
-            DispatchCsiPrivate(finalByte, p0);
+            for (int i = 0; i < _paramCount; i++)
+                DispatchCsiPrivate(finalByte, _params[i]);
             return;
         }
 
@@ -345,11 +346,11 @@ public sealed class AnsiParser
             case '@': _buffer.InsertChars(Math.Max(1, p0)); break;               // ICH
             case 'a': _buffer.MoveCursorRelative(0, Math.Max(1, p0)); break;     // HPR
             case 'b': // REP - repeat last printed character
-                if (_lastPrintedChar != '\0')
+                if (_lastPrintedCodepoint != 0)
                 {
                     int repCount = Math.Max(1, p0);
                     for (int i = 0; i < repCount; i++)
-                        _buffer.WriteChar(_lastPrintedChar, _lastPrintedWide);
+                        _buffer.WriteCodepoint(_lastPrintedCodepoint, _lastPrintedWide);
                 }
                 break;
             case 'd': _buffer.SetCursorRow(Math.Max(1, p0) - 1); break;          // VPA
@@ -370,7 +371,9 @@ public sealed class AnsiParser
             case 'c': break; // DA — ignore
             case 'h': break; // SM  — ignore non-private modes
             case 'l': break; // RM  — ignore non-private modes
-            case 'q': break; // DECSCUSR cursor shape — ignore
+            case 'q': // DECSCUSR cursor shape: CSI Ps SP q (intermediate = space 0x20)
+                if (intermediate == (byte)' ') _buffer.SetCursorShape(p0);
+                break;
             case '`': _buffer.SetCursorCol(Math.Max(1, p0) - 1); break;          // HPA
         }
     }
@@ -400,7 +403,7 @@ public sealed class AnsiParser
                 else         { _buffer.ExitAlternateScreen(); _buffer.RestoreCursor(); }
                 break;
             case 2004: break; // bracketed paste
-            case 2026: break; // synchronized output
+            case 2026: _buffer.SetSyncOutput(enable); break; // synchronized output
             case 9001: break; // win32 input mode
         }
     }
@@ -533,7 +536,9 @@ public sealed class AnsiParser
     private void SoftReset()
     {
         ResetSgr();
-        _buffer.SetCursorVisible(true);
+        // Do NOT force cursor visible — DECSTR resets many things but must not
+        // override a TUI's explicit ?25l. Forcing visible here causes the serializer
+        // to replay a phantom cursor on reconnect when TUIs like Copilot use DECSTR.
         _buffer.SetScrollRegion(0, _buffer.Rows - 1);
     }
 
@@ -599,24 +604,9 @@ public sealed class AnsiParser
         if (cp == 0x7F) return; // DEL
 
         bool wide = IsWideChar(cp);
-
-        if (cp <= 0xFFFF)
-        {
-            _buffer.WriteChar((char)cp, wide);
-            _lastPrintedChar = (char)cp;
-            _lastPrintedWide = wide;
-        }
-        else
-        {
-            // Surrogate pair for supplementary chars
-            cp -= 0x10000;
-            char high = (char)(0xD800 + (cp >> 10));
-            char low  = (char)(0xDC00 + (cp & 0x3FF));
-            _buffer.WriteChar(high, wide);
-            _lastPrintedChar = high;
-            _lastPrintedWide = wide;
-            // low surrogate written as continuation
-        }
+        _buffer.WriteCodepoint((int)cp, wide);
+        _lastPrintedCodepoint = (int)cp;
+        _lastPrintedWide = wide;
     }
 
     /// <summary>
