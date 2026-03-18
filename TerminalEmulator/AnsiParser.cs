@@ -115,8 +115,14 @@ public sealed class AnsiParser
                 break;
 
             case ParserState.DcsPassthrough:
-                // DCS data — consume until ST (ESC \) or BEL
-                if (b == 0x07 || (b == 0x9C)) _state = ParserState.Ground;
+                // DCS data — consume until BEL, 8-bit ST, or ESC (start of ESC \)
+                if (b == 0x07 || b == 0x9C)
+                    _state = ParserState.Ground;
+                else if (b == 0x1B)
+                {
+                    _state = ParserState.Escape;
+                    _intermediate = 0;
+                }
                 break;
         }
     }
