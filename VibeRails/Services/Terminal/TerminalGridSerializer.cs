@@ -22,7 +22,9 @@ internal static class TerminalGridSerializer
         TerminalCell[][] scrollback,
         TerminalCell[,] screen,
         int rows, int cols,
-        int cursorRow, int cursorCol)
+        int cursorRow, int cursorCol,
+        bool cursorVisible = true,
+        int cursorShape = 0)
     {
         int scrollbackCount = scrollback.Length;
         // Rough capacity: reset(4) + per-row(cols*8 avg + newline) for scrollback + screen
@@ -52,19 +54,36 @@ internal static class TerminalGridSerializer
         }
 
         // Reset attributes, then reposition cursor to match the terminal's real cursor.
-        sb.Append("\x1b[0m");
-        sb.Append("\x1b[");
-        sb.Append(Math.Clamp(cursorRow + 1, 1, rows));
-        sb.Append(';');
-        sb.Append(Math.Clamp(cursorCol + 1, 1, cols));
-        sb.Append('H');
+        // If the cursor is parked outside the visible area (e.g. Copilot parks its idle
+        // cursor at col 295 in a 185-col terminal), treat it as hidden rather than
+        // clamping to the screen edge — clamping produces a visible phantom cursor at
+        // the far right of the last row which confuses users on reconnect.
+        bool cursorInBounds = cursorRow >= 0 && cursorRow < rows && cursorCol >= 0 && cursorCol < cols;
+        bool effectivelyVisible = cursorVisible && cursorInBounds;
 
-        // Do NOT restore cursor visibility here. The cursor was hidden above with ?25l
-        // to prevent ghost-cursor artifacts during replay. Leave it hidden — the Ctrl+L
-        // redraw (sent immediately after this snapshot) will cause the TUI/CLI to
-        // re-establish its own cursor state. Forcing ?25h here fights TUIs that
-        // intentionally hide the real cursor and draw their own block glyph, which
-        // would produce a duplicate: one real cursor + one TUI-drawn fake cursor.
+        sb.Append("\x1b[0m");
+        if (cursorInBounds)
+        {
+            sb.Append("\x1b[");
+            sb.Append(cursorRow + 1);
+            sb.Append(';');
+            sb.Append(cursorCol + 1);
+            sb.Append('H');
+        }
+
+        // Restore cursor visibility and shape to match the emulator's actual state.
+        // TUIs that hide the cursor (drawing their own block glyph) will have
+        // cursorVisible=false, so the cursor stays hidden — no ghost cursor.
+        // Regular shells with cursorVisible=true get it shown at the right position.
+        sb.Append(effectivelyVisible ? "\x1b[?25h" : "\x1b[?25l");
+
+        // Restore cursor shape (DECSCUSR: CSI Ps SP q). Always emit so xterm.js
+        // matches the app's cursor style rather than its own default.
+        // 0=default, 1=blinking block, 2=steady block, 3=blinking underline,
+        // 4=steady underline, 5=blinking bar, 6=steady bar
+        sb.Append("\x1b[");
+        sb.Append(cursorShape);
+        sb.Append(" q");
 
         return Encoding.UTF8.GetBytes(sb.ToString());
     }
@@ -91,9 +110,7 @@ internal static class TerminalGridSerializer
                 firstCell = false;
             }
 
-            char ch = cell.Char;
-            if (ch == '\0' || ch < ' ') ch = ' ';
-            sb.Append(ch);
+            cell.AppendText(sb, replaceControlWithSpace: true);
         }
 
         sb.Append("\x1b[0m");
@@ -121,9 +138,7 @@ internal static class TerminalGridSerializer
                 firstCell = false;
             }
 
-            char ch = cell.Char;
-            if (ch == '\0' || ch < ' ') ch = ' ';
-            sb.Append(ch);
+            cell.AppendText(sb, replaceControlWithSpace: true);
         }
 
         sb.Append("\x1b[0m");

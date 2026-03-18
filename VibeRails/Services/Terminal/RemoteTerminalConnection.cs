@@ -12,13 +12,21 @@ namespace VibeRails.Services.Terminal;
 /// </summary>
 public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
 {
-    private readonly Channel<OutboundFrame> _outbound = Channel.CreateUnbounded<OutboundFrame>(
-        new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+    private const int MaxBufferedFrames = 256;
+
+    private readonly Channel<OutboundFrame> _outbound = Channel.CreateBounded<OutboundFrame>(
+        new BoundedChannelOptions(MaxBufferedFrames)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.Wait
+        });
 
     private ClientWebSocket? _socket;
     private CancellationTokenSource? _cts;
     private Task? _sendLoop;
     private Task? _receiveLoop;
+    private int _overflowTriggered;
 
     public event Action<byte[]>? OnInputReceived;
     public event Action? OnReplayRequested;
@@ -182,7 +190,10 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
         if (_socket?.State != WebSocketState.Open || payload.Length == 0)
             return;
 
-        _outbound.Writer.TryWrite(new OutboundFrame(payload, messageType));
+        if (!_outbound.Writer.TryWrite(new OutboundFrame(payload, messageType)))
+        {
+            TriggerOverflowDisconnect();
+        }
     }
 
     private async Task SendLoopAsync(CancellationToken ct)
@@ -237,4 +248,14 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
     }
 
     private sealed record OutboundFrame(byte[] Payload, WebSocketMessageType MessageType);
+
+    private void TriggerOverflowDisconnect()
+    {
+        if (Interlocked.Exchange(ref _overflowTriggered, 1) == 1)
+            return;
+
+        Log.Warning("[Remote] Output backlog overflowed; disconnecting remote relay");
+        _cts?.Cancel();
+        _outbound.Writer.TryComplete();
+    }
 }

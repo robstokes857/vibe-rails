@@ -90,8 +90,18 @@ public class SnapshotTests
     {
         if (!s.Any(char.IsSurrogate)) return s;
         var sb = new System.Text.StringBuilder(s.Length);
-        foreach (char c in s)
+        for (var i = 0; i < s.Length; i++)
+        {
+            var c = s[i];
+            if (char.IsHighSurrogate(c) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1]))
+            {
+                sb.Append('\uFFFD');
+                i++;
+                continue;
+            }
+
             sb.Append(char.IsSurrogate(c) ? '\uFFFD' : c);
+        }
         return sb.ToString();
     }
 

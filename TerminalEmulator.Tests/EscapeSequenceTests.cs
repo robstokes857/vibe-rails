@@ -206,6 +206,18 @@ public class EscapeSequenceTests
     }
 
     [Fact]
+    public void ESC_E_NEL_ScrollsAtBottom()
+    {
+        var t = Make(cols: 5, rows: 2);
+        Write(t, "AAAAA\r\nBBBBB");
+        Write(t, "\u001BE");
+        Assert.Equal('B', Char(t, 0, 0));
+        Assert.Equal(E, Char(t, 1, 0));
+        Assert.Equal(1, t.CursorRow);
+        Assert.Equal(0, t.CursorCol);
+    }
+
+    [Fact]
     public void ESC_H_HTS_SetsTabStop_At_Custom_Col()
     {
         var t = Make();
@@ -789,7 +801,7 @@ public class EscapeSequenceTests
         Write(t, "\u001B[?25l");
         Write(t, "\u001B[2;4r");
         Write(t, "\u001B[!p");
-        Assert.True(t.CursorVisible);
+        Assert.False(t.CursorVisible); // DECSTR must not override explicit ?25l — cursor stays hidden
         // Scroll region reset to full screen — LF at bottom scrolls whole screen
         Write(t, "AAAAA\r\nBBBBB\r\nCCCCC\r\nDDDDD\r\nEEEEE");
         Write(t, "\n");
@@ -1252,6 +1264,21 @@ public class EscapeSequenceTests
         Assert.Equal('A', sb[0][0].Char);
     }
 
+    [Fact]
+    public void CSI_3J_ClearsScrollback_WithoutClearingVisibleScreen()
+    {
+        var t = Make(cols: 5, rows: 2);
+        Write(t, "AAAAA\r\nBBBBB\r\nCCCCC");
+
+        var before = t.GetScreenText();
+        Assert.NotEmpty(t.GetScrollback());
+
+        Write(t, "\u001B[3J");
+
+        Assert.Empty(t.GetScrollback());
+        Assert.Equal(before, t.GetScreenText());
+    }
+
     // ------------------------------------------------------------------
     // Resize
     // ------------------------------------------------------------------
@@ -1277,5 +1304,37 @@ public class EscapeSequenceTests
         Assert.Equal(8, t.CursorCol);
         Write(t, "\t");
         Assert.Equal(16, t.CursorCol);
+    }
+
+    [Fact]
+    public void DECSET_MultiplePrivateModes_AppliesEveryMode()
+    {
+        var t = Make(cols: 5, rows: 5);
+        Write(t, "\u001B[?25l");
+        Assert.False(t.CursorVisible);
+
+        Write(t, "\u001B[?1049;25h");
+
+        Assert.True(t.IsAlternateScreen);
+        Assert.True(t.CursorVisible);
+    }
+
+    [Fact]
+    public void DECSCUSR_SetsCursorShape()
+    {
+        var t = Make();
+        Write(t, "\u001B[5 q");
+        Assert.Equal(5, t.CursorShape);
+    }
+
+    [Fact]
+    public void DECSET_2026_TracksSynchronizedOutput()
+    {
+        var t = Make();
+        Write(t, "\u001B[?2026h");
+        Assert.True(t.SyncOutputActive);
+
+        Write(t, "\u001B[?2026l");
+        Assert.False(t.SyncOutputActive);
     }
 }

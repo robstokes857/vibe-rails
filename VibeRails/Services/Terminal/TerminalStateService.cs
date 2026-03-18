@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Serilog;
 using VibeRails.Interfaces;
 using VibeRails.Utils;
@@ -28,6 +29,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     // Shared across scoped TerminalStateService instances so terminal state remains
     // consistent across start/WS/reconnect/stop requests.
     private static readonly Dictionary<string, InputAccumulator> s_inputAccumulators = new();
+    private static readonly Dictionary<string, SessionOutputWriter> s_outputWriters = new();
     private static readonly Dictionary<string, IRemoteTerminalConnection> s_remoteConnections = new();
     private static readonly Dictionary<string, SessionActivityState> s_sessionActivity = new();
     private static readonly Lock s_stateLock = new();
@@ -58,6 +60,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             {
                 await _dbService.RecordUserInputAsync(sessionId, inputText, _gitService, ct);
             });
+            s_outputWriters[sessionId] = new SessionOutputWriter(sessionId, _dbService);
             s_sessionActivity[sessionId] = new SessionActivityState(now);
         }
         StartIdleMonitor(sessionId);
@@ -66,7 +69,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         // Keep makeRemote in the signature so explicit per-session controls can be reintroduced later.
         if (ShouldRegisterRemoteSession(makeRemote))
         {
-            await _remoteStateService.RegisterTerminalAsync(sessionId, cli, workDir, envName);
+            _ = _remoteStateService.RegisterTerminalAsync(sessionId, cli, workDir, envName);
         }
 
         return sessionId;
@@ -92,8 +95,21 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             now));
         MarkOutputActivity(sessionId, now);
 
-        // DB gets the raw bytes — no encoding loss, no filtering.
-        _ = _dbService.LogSessionOutputAsync(sessionId, data.ToArray(), false);
+        SessionOutputWriter? outputWriter;
+        lock (s_stateLock)
+        {
+            s_outputWriters.TryGetValue(sessionId, out outputWriter);
+        }
+
+        if (outputWriter == null)
+        {
+            Log.Warning("[TerminalState] Dropping PTY output for unknown or completed session {SessionId}", sessionId);
+            return;
+        }
+
+        // DB gets the raw bytes — no encoding loss, no filtering. The per-session writer
+        // serializes inserts so output order matches PTY order and shutdown can drain cleanly.
+        outputWriter.Enqueue(data.ToArray());
     }
 
     public void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown)
@@ -180,22 +196,30 @@ public class TerminalStateService : ITerminalStateService, IDisposable
 
     public async Task CompleteSessionAsync(string sessionId, int exitCode)
     {
-        await _dbService.CompleteSessionAsync(sessionId, exitCode);
-
+        SessionOutputWriter? outputWriter;
         InputAccumulator? accumulatorToDispose;
         SessionActivityState? activityState;
         lock (s_stateLock)
         {
+            s_outputWriters.TryGetValue(sessionId, out outputWriter);
+            s_outputWriters.Remove(sessionId);
             s_inputAccumulators.TryGetValue(sessionId, out accumulatorToDispose);
             s_inputAccumulators.Remove(sessionId);
             s_sessionActivity.TryGetValue(sessionId, out activityState);
             s_sessionActivity.Remove(sessionId);
         }
 
+        if (outputWriter != null)
+        {
+            await outputWriter.DisposeAsync();
+        }
+
         if (accumulatorToDispose != null)
         {
             await accumulatorToDispose.DisposeAsync();
         }
+
+        await _dbService.CompleteSessionAsync(sessionId, exitCode);
 
         activityState?.Dispose();
 
@@ -215,7 +239,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         // Deregister terminal remotely if configured
         if (ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey()))
         {
-            await _remoteStateService.DeregisterTerminalAsync(sessionId);
+            _ = _remoteStateService.DeregisterTerminalAsync(sessionId);
         }
     }
 
@@ -358,6 +382,63 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         {
             _cts.Cancel();
             _cts.Dispose();
+        }
+    }
+
+    private sealed class SessionOutputWriter : IAsyncDisposable
+    {
+        private readonly string _sessionId;
+        private readonly IDbService _dbService;
+        private readonly Channel<byte[]> _channel = Channel.CreateUnbounded<byte[]>(
+            new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+        private readonly Task _worker;
+        private int _disposed;
+
+        public SessionOutputWriter(string sessionId, IDbService dbService)
+        {
+            _sessionId = sessionId;
+            _dbService = dbService;
+            _worker = Task.Run(DrainAsync);
+        }
+
+        public void Enqueue(byte[] payload)
+        {
+            if (payload.Length == 0 || Volatile.Read(ref _disposed) == 1)
+                return;
+
+            _channel.Writer.TryWrite(payload);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+                return;
+
+            _channel.Writer.TryComplete();
+
+            try
+            {
+                await _worker.ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[TerminalState] Output writer shutdown failed for session {SessionId}", _sessionId);
+            }
+        }
+
+        private async Task DrainAsync()
+        {
+            await foreach (var payload in _channel.Reader.ReadAllAsync().ConfigureAwait(false))
+            {
+                try
+                {
+                    await _dbService.LogSessionOutputAsync(_sessionId, payload, false).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "[TerminalState] Failed to persist terminal output for session {SessionId}", _sessionId);
+                }
+            }
         }
     }
 }

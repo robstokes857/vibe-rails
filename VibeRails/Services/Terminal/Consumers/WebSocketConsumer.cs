@@ -40,15 +40,48 @@ public sealed class WebSocketConsumer : ITerminalConsumer, IDisposable
     {
         try
         {
+            var frames = new List<byte[]>(16);
+
             while (await _outbound.Reader.WaitToReadAsync(_ct))
             {
+                // Brief coalescing window: TUI apps (Codex, Copilot) split their screen
+                // updates across multiple small PTY writes that arrive 1-10ms apart —
+                // e.g. an erase sequence, then ?2026h (sync-on), then the redrawn content,
+                // then ?2026l (sync-off/render). If each arrives as a separate WebSocket
+                // frame, xterm.js may render intermediate torn states (blank cells) between
+                // the erase and the sync-on. Waiting 4ms gives the PTY reader time to
+                // enqueue related writes so they coalesce into one frame and xterm.js
+                // processes the whole sequence atomically in a single write() call.
+                await Task.Delay(4, _ct);
+
+                frames.Clear();
+                int totalLen = 0;
                 while (_outbound.Reader.TryRead(out var frame))
                 {
-                    if (_webSocket.State != WebSocketState.Open)
-                        return;
-
-                    await _webSocket.SendAsync(frame, WebSocketMessageType.Binary, true, _ct);
+                    frames.Add(frame);
+                    totalLen += frame.Length;
                 }
+
+                if (frames.Count == 0) continue;
+                if (_webSocket.State != WebSocketState.Open) return;
+
+                byte[] payload;
+                if (frames.Count == 1)
+                {
+                    payload = frames[0];
+                }
+                else
+                {
+                    payload = new byte[totalLen];
+                    int offset = 0;
+                    foreach (var f in frames)
+                    {
+                        Buffer.BlockCopy(f, 0, payload, offset, f.Length);
+                        offset += f.Length;
+                    }
+                }
+
+                await _webSocket.SendAsync(payload, WebSocketMessageType.Binary, true, _ct);
             }
         }
         catch (OperationCanceledException) { }

@@ -24,6 +24,8 @@ public sealed class Terminal
     public int CursorCol => _buffer.CursorCol;
     public int CursorRow => _buffer.CursorRow;
     public bool CursorVisible => _buffer.CursorVisible;
+    public int CursorShape => _buffer.CursorShape;
+    public bool SyncOutputActive => _buffer.SyncOutputActive;
     public bool IsAlternateScreen => _buffer.IsAlternateScreen;
     public CellAttributes CurrentAttributes => _buffer.CurrentAttributes;
     public CellColor CurrentFg => _buffer.CurrentFg;
@@ -84,8 +86,13 @@ public sealed class Terminal
         var sb = new System.Text.StringBuilder(Cols);
         for (int c = 0; c < Cols; c++)
         {
-            char ch = snap[row, c].Char;
-            sb.Append(ch == '\0' ? ' ' : ch);
+            if (snap[row, c].IsWideContinuation)
+            {
+                sb.Append(' ');
+                continue;
+            }
+
+            snap[row, c].AppendText(sb, replaceControlWithSpace: true);
         }
         return sb.ToString().TrimEnd();
     }

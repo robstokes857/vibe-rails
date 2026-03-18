@@ -44,6 +44,7 @@ public class TerminalSessionService : ITerminalSessionService
     private readonly ILocalClientTracker _localClientTracker;
 
     private static readonly Lock s_lock = new();
+    private static readonly SemaphoreSlim s_lifecycleGate = new(1, 1);
     private static Terminal? s_terminal;
     private static string? s_sessionId;
     private static WebSocket? s_activeWebSocket;
@@ -51,8 +52,24 @@ public class TerminalSessionService : ITerminalSessionService
     private static string? s_activeCli;
     private static bool s_externallyOwned;
 
-    public bool HasActiveSession => s_terminal != null;
-    public string? ActiveSessionId => s_sessionId;
+    public bool HasActiveSession
+    {
+        get
+        {
+            lock (s_lock)
+                return s_terminal != null;
+        }
+    }
+
+    public string? ActiveSessionId
+    {
+        get
+        {
+            lock (s_lock)
+                return s_sessionId;
+        }
+    }
+
     public bool IsExternallyOwned { get { lock (s_lock) return s_externallyOwned; } }
 
     public TerminalSessionService(
@@ -73,13 +90,16 @@ public class TerminalSessionService : ITerminalSessionService
 
     public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null)
     {
-        lock (s_lock)
-        {
-            if (s_terminal != null) return false;
-        }
+        await s_lifecycleGate.WaitAsync();
 
         try
         {
+            lock (s_lock)
+            {
+                if (s_terminal != null)
+                    return false;
+            }
+
             var (terminal, sessionId, _) = await _runner.CreateSessionAsync(
                 llm,
                 workingDirectory,
@@ -97,13 +117,7 @@ public class TerminalSessionService : ITerminalSessionService
                     return DisconnectLocalViewerAsync("Session taken over by remote viewer");
                 });
 
-            // Subscribe to terminal exit event
-            terminal.Exited += async (sender, exitCode) =>
-            {
-                var capturedSessionId = sessionId;
-                await _stateService.CompleteSessionAsync(capturedSessionId, exitCode);
-                await CleanupAsync();
-            };
+            terminal.Exited += (_, exitCode) => ScheduleExitCleanup(terminal, sessionId, exitCode);
 
             // Start the read loop (DB logging consumer is already wired by CreateSessionAsync)
             terminal.StartReadLoop();
@@ -122,8 +136,11 @@ public class TerminalSessionService : ITerminalSessionService
         catch (Exception ex)
         {
             Log.Error(ex, "[Terminal] Failed to start session");
-            await CleanupAsync();
             throw;
+        }
+        finally
+        {
+            s_lifecycleGate.Release();
         }
     }
 
@@ -183,23 +200,37 @@ public class TerminalSessionService : ITerminalSessionService
             }
         }
 
-        // Send full emulator state (scrollback + screen) so the viewer sees content immediately.
-        // ORDERING MATTERS: snapshot must be sent before subscribing the live consumer.
-        // If the consumer is subscribed first, live PTY output can arrive at the browser
-        // while the snapshot is still in-flight, producing a concurrent-write race that
-        // causes ghost cursors and corrupted screen state.
-        var replay = terminal.GetGridReplay();
-        if (replay.Length > 0)
+        var syncOutputActive = terminal.IsSyncOutputActive;
+        var useRedrawAttach = TerminalReplayPolicy.ShouldUseRedrawAttach(activeCli, syncOutputActive);
+        var redrawReason = TerminalReplayPolicy.DescribeReason(activeCli, syncOutputActive);
+
+        if (!useRedrawAttach)
         {
-            try
+            // Send full emulator state (scrollback + screen) so the viewer sees content immediately.
+            // ORDERING MATTERS: snapshot must be sent before subscribing the live consumer.
+            // If the consumer is subscribed first, live PTY output can arrive at the browser
+            // while the snapshot is still in-flight, producing a concurrent-write race that
+            // causes ghost cursors and corrupted screen state.
+            var replay = terminal.GetGridReplay();
+            if (replay.Length > 0)
             {
-                await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
-                Log.Information("[Terminal] Sent {Bytes} bytes of emulator state to viewer", replay.Length);
+                try
+                {
+                    await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
+                    Log.Information("[Terminal] Sent {Bytes} bytes of emulator state to viewer", replay.Length);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "[Terminal] Failed to send emulator state");
+                }
             }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[Terminal] Failed to send emulator state");
-            }
+        }
+        else
+        {
+            Log.Information(
+                "[Terminal] Using redraw-first attach for {Cli} ({Reason})",
+                activeCli ?? "unknown",
+                redrawReason);
         }
 
         // Subscribe WebSocket as output consumer — live output only starts flowing here,
@@ -210,7 +241,9 @@ public class TerminalSessionService : ITerminalSessionService
         ownerId = $"terminal-ws:{sessionId}:{Guid.NewGuid():N}";
         _localClientTracker.AcquireOwner(ownerId);
 
-        // Send Ctrl+L after replay so the CLI redraws cleanly at the current size.
+        // Send Ctrl+L after attach so TUIs redraw cleanly at the current size.
+        // This is also the reconnect fallback for Codex/Copilot and for sessions
+        // caught mid synchronized-output redraw.
         try
         {
             await terminal.WriteBytesAsync(new byte[] { 0x0C }, cancellationToken); // Ctrl+L
@@ -245,73 +278,45 @@ public class TerminalSessionService : ITerminalSessionService
 
     public void RegisterExternalTerminal(Terminal terminal, string sessionId, string? cliName = null)
     {
-        lock (s_lock)
+        s_lifecycleGate.Wait();
+        try
         {
-            if (s_terminal != null)
-                throw new InvalidOperationException("A terminal session is already active");
-            s_terminal = terminal;
-            s_sessionId = sessionId;
-            s_sessionOwnerId = BuildSessionOwnerId(sessionId);
-            s_activeCli = cliName;
-            s_externallyOwned = true;
+            lock (s_lock)
+            {
+                if (s_terminal != null)
+                    throw new InvalidOperationException("A terminal session is already active");
+                s_terminal = terminal;
+                s_sessionId = sessionId;
+                s_sessionOwnerId = BuildSessionOwnerId(sessionId);
+                s_activeCli = cliName;
+                s_externallyOwned = true;
+            }
+        }
+        finally
+        {
+            s_lifecycleGate.Release();
         }
         _localClientTracker.AcquireOwner(BuildSessionOwnerId(sessionId));
     }
 
     public async Task UnregisterTerminalAsync()
     {
-        WebSocket? wsToClose;
-        string? sessionIdToClear;
-        string? ownerIdToRelease;
-        lock (s_lock)
-        {
-            sessionIdToClear = s_sessionId;
-            ownerIdToRelease = s_sessionOwnerId;
-            s_terminal = null;
-            s_sessionId = null;
-            s_sessionOwnerId = null;
-            s_activeCli = null;
-            s_externallyOwned = false;
-            wsToClose = s_activeWebSocket;
-            s_activeWebSocket = null;
-        }
-
-        if (!string.IsNullOrEmpty(ownerIdToRelease))
-        {
-            _localClientTracker.ReleaseOwner(ownerIdToRelease);
-        }
-
-        if (!string.IsNullOrEmpty(sessionIdToClear))
-        {
-            TerminalResizeCoordinator.ClearSession(sessionIdToClear);
-        }
-
-        if (wsToClose?.State == WebSocketState.Open)
-        {
-            try
-            {
-                await wsToClose.CloseAsync(WebSocketCloseStatus.NormalClosure, "CLI session ended", CancellationToken.None);
-            }
-            catch { }
-        }
+        await DetachExternalSessionAsync("CLI session ended");
     }
 
     public async Task StopSessionAsync()
     {
-        string? sessionId;
         lock (s_lock)
         {
-            if (s_externallyOwned) return;
-            sessionId = s_sessionId;
+            if (s_externallyOwned)
+                return;
         }
 
-        // Complete the session before cleanup
-        if (sessionId != null)
-        {
-            await _stateService.CompleteSessionAsync(sessionId, 0);
-        }
-
-        await CleanupAsync();
+        await ShutdownActiveSessionAsync(
+            expectedTerminal: null,
+            exitCode: 0,
+            closeReason: "Terminal session stopped",
+            requireExternalOwnership: false);
     }
 
     public async Task DisconnectLocalViewerAsync(string reason)
@@ -578,40 +583,136 @@ public class TerminalSessionService : ITerminalSessionService
         }
     }
 
-    private async Task CleanupAsync()
+    private async Task ShutdownActiveSessionAsync(
+        Terminal? expectedTerminal,
+        int exitCode,
+        string closeReason,
+        bool requireExternalOwnership)
     {
-        Terminal? terminalToDispose;
-        string? sessionIdToClear;
-        string? ownerIdToRelease;
+        await s_lifecycleGate.WaitAsync();
+        try
+        {
+            var teardown = CaptureSessionForTeardown(expectedTerminal, requireExternalOwnership, detachOnly: false);
+            if (teardown == null)
+                return;
+
+            if (!string.IsNullOrEmpty(teardown.OwnerId))
+            {
+                _localClientTracker.ReleaseOwner(teardown.OwnerId);
+            }
+
+            await CloseWebSocketAsync(teardown.ActiveWebSocket, closeReason);
+
+            if (teardown.TerminalToDispose != null)
+            {
+                await teardown.TerminalToDispose.DisposeAsync();
+            }
+
+            TerminalResizeCoordinator.ClearSession(teardown.SessionId);
+            await _stateService.CompleteSessionAsync(teardown.SessionId, exitCode);
+        }
+        finally
+        {
+            s_lifecycleGate.Release();
+        }
+    }
+
+    private async Task DetachExternalSessionAsync(string closeReason)
+    {
+        await s_lifecycleGate.WaitAsync();
+        try
+        {
+            var teardown = CaptureSessionForTeardown(expectedTerminal: null, requireExternalOwnership: true, detachOnly: true);
+            if (teardown == null)
+                return;
+
+            if (!string.IsNullOrEmpty(teardown.OwnerId))
+            {
+                _localClientTracker.ReleaseOwner(teardown.OwnerId);
+            }
+
+            TerminalResizeCoordinator.ClearSession(teardown.SessionId);
+            await CloseWebSocketAsync(teardown.ActiveWebSocket, closeReason);
+        }
+        finally
+        {
+            s_lifecycleGate.Release();
+        }
+    }
+
+    private void ScheduleExitCleanup(Terminal terminal, string sessionId, int exitCode)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ShutdownActiveSessionAsync(
+                    expectedTerminal: terminal,
+                    exitCode: exitCode,
+                    closeReason: "Terminal session exited",
+                    requireExternalOwnership: false);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "[Terminal] Exit cleanup failed for session {SessionId}", sessionId);
+            }
+        });
+    }
+
+    private SessionTeardownState? CaptureSessionForTeardown(
+        Terminal? expectedTerminal,
+        bool requireExternalOwnership,
+        bool detachOnly)
+    {
         lock (s_lock)
         {
-            sessionIdToClear = s_sessionId;
-            ownerIdToRelease = s_sessionOwnerId;
-            terminalToDispose = s_externallyOwned ? null : s_terminal;
+            if (s_terminal == null || s_sessionId == null)
+                return null;
+
+            if (expectedTerminal != null && !ReferenceEquals(s_terminal, expectedTerminal))
+                return null;
+
+            if (requireExternalOwnership && !s_externallyOwned)
+                return null;
+
+            var teardown = new SessionTeardownState(
+                SessionId: s_sessionId,
+                OwnerId: s_sessionOwnerId,
+                ActiveWebSocket: s_activeWebSocket,
+                TerminalToDispose: (!detachOnly && !s_externallyOwned) ? s_terminal : null);
+
             s_terminal = null;
             s_sessionId = null;
             s_sessionOwnerId = null;
+            s_activeWebSocket = null;
             s_activeCli = null;
+            s_externallyOwned = false;
+            return teardown;
         }
+    }
 
-        if (!string.IsNullOrEmpty(ownerIdToRelease))
+    private static async Task CloseWebSocketAsync(WebSocket? webSocket, string reason)
+    {
+        if (webSocket?.State != WebSocketState.Open)
+            return;
+
+        try
         {
-            _localClientTracker.ReleaseOwner(ownerIdToRelease);
+            await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, reason, CancellationToken.None);
         }
-
-        if (!string.IsNullOrEmpty(sessionIdToClear))
+        catch (Exception)
         {
-            TerminalResizeCoordinator.ClearSession(sessionIdToClear);
-        }
-
-        if (terminalToDispose != null)
-        {
-            await terminalToDispose.DisposeAsync();
+            // Best-effort close only.
         }
     }
 
     private static string BuildSessionOwnerId(string sessionId)
         => $"terminal-session:{sessionId}";
 
+    private sealed record SessionTeardownState(
+        string SessionId,
+        string? OwnerId,
+        WebSocket? ActiveWebSocket,
+        Terminal? TerminalToDispose);
 
 }
