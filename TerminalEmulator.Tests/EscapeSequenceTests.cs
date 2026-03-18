@@ -516,8 +516,8 @@ public class EscapeSequenceTests
         var s = t.GetSnapshot();
         Assert.Equal(E, s[0, 0].Char);
         Assert.Equal(E, s[1, 0].Char);
-        Assert.Equal(E, s[1, 2].Char);
-        Assert.Equal('H', s[1, 3].Char);
+        Assert.Equal(E, s[1, 2].Char);   // H is at col 2 — erased
+        Assert.Equal('I', s[1, 3].Char); // col 3+ preserved
         Assert.Equal('K', s[2, 0].Char);
     }
 
