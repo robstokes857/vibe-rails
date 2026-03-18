@@ -414,9 +414,9 @@ code {
 
 /* Terminal Hub on Dashboard */
 [data-terminal-section] .vb-terminal-panel {
-    border: 1px solid var(--color-border);
-    background: var(--color-bg-surface);
-    box-shadow: var(--shadow-soft);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: #0d0e1c;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
 }
 
 [data-terminal-section] .vb-terminal-panel-header {
@@ -1389,24 +1389,27 @@ button:hover .card-nav-cog {
 }
 
 #vb-terminal-panel.card {
-    border: 1px solid var(--terminal-border);
-    background: var(--terminal-body-bg);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: #111221;
     overflow: hidden;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+    box-shadow: 
+        0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 20px 50px -12px rgba(0, 0, 0, 0.9),
+        0 15px 35px -15px rgba(0, 0, 0, 0.7);
 }
 
 /* Window shell */
 #vb-terminal-panel .vb-terminal-window-shell {
-    background: var(--terminal-body-bg);
+    background: #0d0e1c;
     overflow: hidden;
-    border-radius: 0 0 var(--border-radius) var(--border-radius);
+    border-radius: 0 0 8px 8px;
 }
 
 /* Card header — restyle as a dark title bar */
 #vb-terminal-panel .card-header {
-    background: var(--terminal-header-bg);
-    border-bottom: 1px solid var(--terminal-border);
-    padding: 8px 16px;
+    background: #18192d;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 12px 16px;
 }
 
 #vb-terminal-panel .card-header .card-title {
@@ -2079,7 +2082,7 @@ body.vb-terminal-focus-active #vb-terminal-panel #terminal-container {
     position: relative;
     z-index: 40;
     border-color: rgba(154, 198, 197, 0.45);
-    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
     display: flex;
     flex-direction: column;
     margin-bottom: 0;
@@ -3105,15 +3108,16 @@ input.form-control:disabled {
     top: 0;
     right: 0;
     bottom: 0;
-    width: 260px;
-    background: #1a1b2e;
-    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    width: 280px;
+    background: #111221;
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
     display: flex;
     flex-direction: column;
     z-index: 20;
     transform: translateX(100%);
-    transition: transform 0.2s ease;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden;
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.3);
 }
 
 #vb-terminal-panel .vb-terminal-settings-panel.open {
@@ -3124,11 +3128,12 @@ input.form-control:disabled {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    font-size: 0.8rem;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 0.85rem;
     font-weight: 600;
     color: #cdd6f4;
+    background: rgba(255, 255, 255, 0.02);
     flex-shrink: 0;
 }
 
@@ -3137,45 +3142,58 @@ input.form-control:disabled {
     border: none;
     color: #6c7086;
     cursor: pointer;
-    font-size: 0.85rem;
-    padding: 2px 4px;
+    font-size: 0.9rem;
+    padding: 4px;
     line-height: 1;
+    transition: color 0.2s, transform 0.2s;
 }
 
 #vb-terminal-panel .vb-terminal-settings-header button:hover {
-    color: #cdd6f4;
+    color: #f38ba8;
+    transform: scale(1.1);
 }
 
 #vb-terminal-panel .vb-terminal-settings-body {
     flex: 1;
     overflow-y: auto;
-    padding: 10px 0;
+    padding: 12px 0;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+#vb-terminal-panel .vb-terminal-settings-body::-webkit-scrollbar {
+    width: 4px;
+}
+
+#vb-terminal-panel .vb-terminal-settings-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
 }
 
 #vb-terminal-panel .vb-terminal-settings-section {
-    padding: 8px 14px;
+    padding: 12px 16px;
 }
 
 #vb-terminal-panel .vb-terminal-settings-section+.vb-terminal-settings-section {
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 #vb-terminal-panel .vb-terminal-settings-section-title {
-    font-size: 0.68rem;
-    font-weight: 600;
+    font-size: 0.7rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #6c7086;
-    margin-bottom: 8px;
+    letter-spacing: 0.08em;
+    color: #9399b2;
+    margin-bottom: 12px;
 }
 
 #vb-terminal-panel .vb-terminal-settings-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 8px;
-    font-size: 0.78rem;
+    gap: 12px;
+    margin-bottom: 10px;
+    font-size: 0.8rem;
     color: #a6adc8;
 }
 
@@ -3185,43 +3203,94 @@ input.form-control:disabled {
 
 #vb-terminal-panel .vb-terminal-settings-row select,
 #vb-terminal-panel .vb-terminal-settings-row input[type="number"] {
-    background: #24273a;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
+    background: #1e1e2e;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
     color: #cdd6f4;
-    font-size: 0.75rem;
-    padding: 3px 6px;
-    max-width: 130px;
+    font-size: 0.78rem;
+    padding: 4px 8px;
+    max-width: 140px;
     width: 100%;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+#vb-terminal-panel .vb-terminal-settings-row select:focus,
+#vb-terminal-panel .vb-terminal-settings-row input[type="number"]:focus {
+    border-color: #89b4fa;
+    box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.2);
 }
 
 #vb-terminal-panel .vb-terminal-settings-row input[type="number"] {
-    max-width: 60px;
+    max-width: 70px;
 }
 
-/* Theme swatches grid */
+/* Modern Theme Selection List */
 #vb-terminal-panel .vb-terminal-settings-theme-list {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+
+#vb-terminal-panel .vb-terminal-settings-theme-item {
+    display: flex;
+    flex-direction: column;
     gap: 6px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 8px;
+    transition: all 0.2s ease;
+}
+
+#vb-terminal-panel .vb-terminal-settings-theme-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+}
+
+#vb-terminal-panel .vb-terminal-settings-theme-item.active {
+    background: rgba(137, 180, 250, 0.1);
+    border-color: #89b4fa;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+#vb-terminal-panel .vb-terminal-settings-theme-preview {
+    width: 100%;
+    height: 40px;
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 4px;
+}
+
+#vb-terminal-panel .vb-terminal-settings-theme-preview .accent-pill {
+    width: 12px;
+    height: 4px;
+    border-radius: 2px;
+    opacity: 0.8;
+}
+
+#vb-terminal-panel .vb-terminal-settings-theme-name {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: #a6adc8;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#vb-terminal-panel .vb-terminal-settings-theme-item.active .vb-terminal-settings-theme-name {
+    color: #cdd6f4;
 }
 
 #vb-terminal-panel .vb-terminal-settings-theme-swatch {
-    width: 100%;
-    aspect-ratio: 1;
-    border-radius: 4px;
-    border: 2px solid transparent;
-    cursor: pointer;
-    padding: 0;
-    transition: border-color 0.15s;
-}
-
-#vb-terminal-panel .vb-terminal-settings-theme-swatch:hover {
-    border-color: rgba(255, 255, 255, 0.3);
-}
-
-#vb-terminal-panel .vb-terminal-settings-theme-swatch.active {
-    border-color: #89b4fa;
+    display: none; /* Hide old swatch style if still in DOM */
 }
 
 /* Make the shell container position:relative so the panel can absolute-position */
