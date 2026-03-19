@@ -22,8 +22,21 @@ const DEFAULT_THEME = {
     brightWhite: '#ffffff'
 };
 
+const HIDDEN_CURSOR_THEME = {
+    cursor: 'rgba(0, 0, 0, 0)',
+    cursorAccent: 'rgba(0, 0, 0, 0)'
+};
+
 const DEFAULT_TERMINAL_FONT_FAMILY = '"Fira Code", "JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace';
 const LIGATURES_ADDON_MODULE_PATH = '../../assets/xterm/addon-ligatures.js';
+
+function buildTerminalTheme(theme = null) {
+    return {
+        ...DEFAULT_THEME,
+        ...(theme && typeof theme === 'object' ? theme : {}),
+        ...HIDDEN_CURSOR_THEME
+    };
+}
 
 function isLikelyMobileViewport() {
     try {
@@ -106,7 +119,7 @@ export class VibeTerminal {
             disableStdin,
             convertEol: false,
             minimumContrastRatio: 3,
-            theme: DEFAULT_THEME
+            theme: buildTerminalTheme()
         });
 
         this._searchAddon = null;
@@ -580,6 +593,14 @@ export class VibeTerminal {
 
     getFontSize() {
         return this._terminal?.options.fontSize ?? this._desktopFontSize;
+    }
+
+    setTheme(theme) {
+        if (!this._terminal) {
+            return;
+        }
+
+        this._terminal.options.theme = buildTerminalTheme(theme);
     }
 
     focus() {
