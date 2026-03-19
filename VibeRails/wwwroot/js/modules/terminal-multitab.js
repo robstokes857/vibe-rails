@@ -708,12 +708,11 @@ class TerminalManager {
 
     _applySavedTerminalSettings(tab) {
         const vibe = tab?.instance?.vibeTerminal;
-        const terminal = vibe?._terminal;
-        if (!terminal) return;
+        if (!vibe?._terminal) return;
 
         const themeKey = this._loadThemePreference();
         if (themeKey && window.CXL_THEMES?.[themeKey]) {
-            terminal.options.theme = window.CXL_THEMES[themeKey];
+            vibe.setTheme(window.CXL_THEMES[themeKey]);
         }
     }
 
@@ -2252,7 +2251,7 @@ class TerminalManager {
         const theme = window.CXL_THEMES[key];
         this.tabs.forEach((tab) => {
             if (tab.instance.vibeTerminal?._terminal) {
-                tab.instance.vibeTerminal._terminal.options.theme = theme;
+                tab.instance.vibeTerminal.setTheme(theme);
             }
         });
         this._themeItems?.forEach(s => s.classList.toggle('active', s.dataset.theme === key));
