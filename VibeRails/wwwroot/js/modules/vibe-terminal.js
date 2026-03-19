@@ -22,19 +22,13 @@ const DEFAULT_THEME = {
     brightWhite: '#ffffff'
 };
 
-const HIDDEN_CURSOR_THEME = {
-    cursor: 'rgba(0, 0, 0, 0)',
-    cursorAccent: 'rgba(0, 0, 0, 0)'
-};
-
 const DEFAULT_TERMINAL_FONT_FAMILY = '"Fira Code", "JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace';
 const LIGATURES_ADDON_MODULE_PATH = '../../assets/xterm/addon-ligatures.js';
 
 function buildTerminalTheme(theme = null) {
     return {
         ...DEFAULT_THEME,
-        ...(theme && typeof theme === 'object' ? theme : {}),
-        ...HIDDEN_CURSOR_THEME
+        ...(theme && typeof theme === 'object' ? theme : {})
     };
 }
 
@@ -69,7 +63,10 @@ export class VibeTerminal {
         mobileFontSize = 14,
         desktopLineHeight = 1.12,
         mobileLineHeight = 1.2,
-        scrollOnWrite = true
+        scrollOnWrite = true,
+        cursorBlink = true,
+        cursorStyle = 'block',
+        cursorInactiveStyle = 'outline'
     } = {}) {
         if (!outputEl) {
             throw new Error('VibeTerminal requires { outputEl }.');
@@ -119,6 +116,9 @@ export class VibeTerminal {
             disableStdin,
             convertEol: false,
             minimumContrastRatio: 3,
+            cursorBlink,
+            cursorStyle,
+            cursorInactiveStyle,
             theme: buildTerminalTheme()
         });
 
@@ -601,6 +601,21 @@ export class VibeTerminal {
         }
 
         this._terminal.options.theme = buildTerminalTheme(theme);
+    }
+
+    setCursorBlink(blink) {
+        if (!this._terminal) return;
+        this._terminal.options.cursorBlink = blink;
+    }
+
+    setCursorStyle(style) {
+        if (!this._terminal) return;
+        this._terminal.options.cursorStyle = style;
+    }
+
+    setCursorInactiveStyle(style) {
+        if (!this._terminal) return;
+        this._terminal.options.cursorInactiveStyle = style;
     }
 
     focus() {

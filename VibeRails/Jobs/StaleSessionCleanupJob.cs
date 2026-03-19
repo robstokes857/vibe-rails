@@ -1,12 +1,14 @@
 using VibeRails.Interfaces;
 using VibeRails.Services;
+using VibeRails.Services.Terminal;
 
 namespace VibeRails.Jobs;
 
 public sealed class StaleSessionCleanupJob(
     ILogger<StaleSessionCleanupJob> logger,
     ISystemResourceService resources,
-    IServiceScopeFactory scopeFactory) : JobBase(logger, resources)
+    IServiceScopeFactory scopeFactory,
+    IRemoteStateService remoteStateService) : JobBase(logger, resources)
 {
     // Tab child processes are spawned with --parent-pid; only the root parent should clean up.
     private static readonly bool s_isTabChild =
@@ -36,6 +38,9 @@ public sealed class StaleSessionCleanupJob(
         _logger.LogInformation("[StaleSessionCleanupJob] Closing {Count} stale session(s)", staleIds.Count);
 
         foreach (var id in staleIds)
+        {
             await dbService.CompleteSessionAsync(id, -1);
+            await remoteStateService.DeregisterTerminalAsync(id);
+        }
     }
 }
