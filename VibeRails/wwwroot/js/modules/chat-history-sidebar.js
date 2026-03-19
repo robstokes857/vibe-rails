@@ -15,7 +15,10 @@ export class ChatHistorySidebar {
         this.isLoadingPage = false;
         this.isLoadingForSearch = false;
         this.loadFailed = false;
+        this.sidebar = null;
         this.body = null;
+        this.contextMenu = null;
+        this.refreshButton = null;
     }
 
     static renderHtml() {
@@ -30,6 +33,9 @@ export class ChatHistorySidebar {
                         Chat History
                     </span>
                     <div class="ch-sidebar-actions">
+                        <button class="ch-sidebar-refresh-btn" id="ch-sidebar-refresh-btn" title="Refresh history" aria-label="Refresh history">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                        </button>
                         <button class="ch-sidebar-settings-btn" id="ch-sidebar-settings-btn" title="Chat Settings">
                             <i class="fa-solid fa-gear"></i>
                         </button>
@@ -71,11 +77,26 @@ export class ChatHistorySidebar {
         const sidebar = root.querySelector('#ch-sidebar');
         const body = root.querySelector('#ch-sidebar-body');
         const contextMenu = root.querySelector('#ch-context-menu');
+        this.sidebar = sidebar;
         this.body = body;
+        this.contextMenu = contextMenu;
+        this.refreshButton = root.querySelector('#ch-sidebar-refresh-btn');
+        const emitToggleState = () => onToggle?.(!sidebar?.classList.contains('ch-sidebar-collapsed'));
 
         root.querySelector('#ch-sidebar-hide-btn')?.addEventListener('click', () => {
+            this._closeContextMenu();
             sidebar?.classList.toggle('ch-sidebar-collapsed');
-            onToggle?.();
+            emitToggleState();
+        });
+
+        this.refreshButton?.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (this.isLoadingPage || this.isLoadingForSearch) {
+                return;
+            }
+
+            this._closeContextMenu();
+            await this._load();
         });
 
         root.querySelector('#ch-sidebar-settings-btn')?.addEventListener('click', (e) => {
@@ -109,13 +130,11 @@ export class ChatHistorySidebar {
             const isMenuItem = e.target.closest('.ch-context-menu-item') && !e.target.closest('.ch-has-submenu');
 
             if (!isMenuBtn && (!isMenu || isMenuItem)) {
-                if (contextMenu?.classList.contains('show')) {
-                    contextMenu.classList.remove('show');
-                    sidebar?.querySelectorAll('.ch-item-menu-active').forEach(el => el.classList.remove('ch-item-menu-active'));
-                }
+                this._closeContextMenu();
             }
         });
 
+        emitToggleState();
         void this._load();
     }
 
@@ -124,10 +143,13 @@ export class ChatHistorySidebar {
             return;
         }
 
+        this.activeItem = null;
         this.allItems = [];
         this.currentPage = 0;
         this.hasMore = true;
         this.loadFailed = false;
+        this._closeContextMenu();
+        this._setRefreshButtonState();
         this.body.innerHTML = '<div class="ch-loading"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>';
         await this._loadNextPage({ initial: true });
     }
@@ -138,29 +160,40 @@ export class ChatHistorySidebar {
         }
 
         this.isLoadingPage = true;
+        this._setRefreshButtonState();
         if (!initial) {
             this._renderItems();
         }
 
-        const nextPage = this.currentPage + 1;
-        const params = new URLSearchParams({
-            page: String(nextPage),
-            pageSize: String(this.pageSize)
-        });
-
         try {
-            const data = await this.app.apiCall(`/api/v1/chatHistory?${params.toString()}`, 'GET', null, { showLoading: false });
-            const items = Array.isArray(data?.items) ? data.items : [];
+            let didLoadPage = false;
 
-            if (items.length === 0) {
-                this.hasMore = false;
-                return false;
+            while (this.hasMore) {
+                const nextPage = this.currentPage + 1;
+                const params = new URLSearchParams({
+                    page: String(nextPage),
+                    pageSize: String(this.pageSize)
+                });
+                const data = await this.app.apiCall(`/api/v1/chatHistory?${params.toString()}`, 'GET', null, { showLoading: false });
+                const fetchedItems = Array.isArray(data?.items) ? data.items : [];
+
+                if (fetchedItems.length === 0) {
+                    this.hasMore = false;
+                    return didLoadPage;
+                }
+
+                didLoadPage = true;
+                this.currentPage = nextPage;
+
+                const visibleItems = fetchedItems.filter(item => this._shouldDisplayItem(item));
+                if (visibleItems.length > 0) {
+                    this.allItems.push(...visibleItems);
+                    break;
+                }
             }
 
-            this.currentPage = nextPage;
-            this.allItems.push(...items);
             this.loadFailed = false;
-            return true;
+            return didLoadPage;
         } catch (error) {
             this.loadFailed = true;
             this.hasMore = false;
@@ -173,6 +206,7 @@ export class ChatHistorySidebar {
             return false;
         } finally {
             this.isLoadingPage = false;
+            this._setRefreshButtonState();
             this._renderItems();
 
             if (this.filterText && this.hasMore && !this.isLoadingForSearch) {
@@ -187,6 +221,7 @@ export class ChatHistorySidebar {
         }
 
         this.isLoadingForSearch = true;
+        this._setRefreshButtonState();
         this._renderItems();
 
         try {
@@ -198,6 +233,7 @@ export class ChatHistorySidebar {
             }
         } finally {
             this.isLoadingForSearch = false;
+            this._setRefreshButtonState();
             this._renderItems();
         }
     }
@@ -218,6 +254,63 @@ export class ChatHistorySidebar {
         return buildLlmSelectionOptions(this.app.data.environments || []);
     }
 
+    _closeContextMenu() {
+        if (!this.contextMenu?.classList.contains('show')) {
+            return;
+        }
+
+        this.contextMenu.classList.remove('show');
+        this.sidebar?.classList.remove('ch-sidebar-menu-open');
+        this.sidebar?.querySelectorAll('.ch-item-menu-active').forEach(el => el.classList.remove('ch-item-menu-active'));
+    }
+
+    _setRefreshButtonState() {
+        if (!this.refreshButton) {
+            return;
+        }
+
+        const isBusy = this.isLoadingPage || this.isLoadingForSearch;
+        this.refreshButton.disabled = isBusy;
+        this.refreshButton.classList.toggle('is-loading', isBusy);
+    }
+
+    _getDisplayName(item) {
+        const sessionName = item.sessionDisplayName?.trim();
+        if (sessionName) {
+            return sessionName;
+        }
+
+        const inputName = item.inputText?.trim().split('\n')[0]?.trim();
+        return inputName || '';
+    }
+
+    _shouldDisplayItem(item) {
+        const displayName = this._getDisplayName(item);
+        return displayName.length > 0 && displayName.toLowerCase() !== 'untitled';
+    }
+
+    _openContextMenu(itemEl, anchorEl, submenu) {
+        if (!this.sidebar || !this.contextMenu) {
+            return;
+        }
+
+        this.sidebar.querySelectorAll('.ch-item-menu-active').forEach(el => el.classList.remove('ch-item-menu-active'));
+
+        this.activeItem = this.allItems.find(i => i.id === itemEl.dataset.id) || null;
+
+        const itemRect = itemEl.getBoundingClientRect();
+        const anchorRect = anchorEl.getBoundingClientRect();
+        const sidebarRect = this.sidebar.getBoundingClientRect();
+
+        this.contextMenu.style.top = `${itemRect.top - sidebarRect.top}px`;
+        this.contextMenu.style.left = `${anchorRect.right - sidebarRect.left + 6}px`;
+        this.sidebar.classList.add('ch-sidebar-menu-open');
+        this.contextMenu.classList.add('show');
+
+        itemEl.classList.add('ch-item-menu-active');
+        this._populateLlmSubmenu(submenu);
+    }
+
     _renderItems() {
         if (!this.body) {
             return;
@@ -230,7 +323,7 @@ export class ChatHistorySidebar {
 
         const filteredItems = this.filterText
             ? this.allItems.filter(item => {
-                const rawName = (item.sessionDisplayName || item.inputText || '').toLowerCase();
+                const rawName = this._getDisplayName(item).toLowerCase();
                 const brand = (this.app.getCliBrand(item.cli)?.label || '').toLowerCase();
                 return rawName.includes(this.filterText) || brand.includes(this.filterText);
             })
@@ -253,7 +346,7 @@ export class ChatHistorySidebar {
 
         this.body.innerHTML = `${filteredItems.map(item => {
             const brand = this.app.getCliBrand(item.cli);
-            const rawName = item.sessionDisplayName?.trim() || item.inputText?.trim().split('\n')[0] || 'Untitled';
+            const rawName = this._getDisplayName(item);
             const name = rawName.length > 52 ? rawName.slice(0, 52) + '…' : rawName;
             const time = formatRelativeTime(item.startedUTC);
             const isActive = !item.endedUTC;
@@ -273,35 +366,20 @@ export class ChatHistorySidebar {
                 </div>`;
         }).join('')}${this._renderFooter()}`;
 
-        // Bind items to open menu
+        // Bind menu buttons
         const itemElements = this.body.querySelectorAll('.ch-item');
-        const contextMenu = this.body.closest('.ch-sidebar')?.querySelector('#ch-context-menu');
-        if (!contextMenu) {
+        if (!this.contextMenu) {
             return;
         }
-        const submenu = contextMenu.querySelector('#ch-send-to-submenu');
+        const submenu = this.contextMenu.querySelector('#ch-send-to-submenu');
+        if (!submenu) {
+            return;
+        }
 
         itemElements.forEach(itemEl => {
-            itemEl.addEventListener('click', (e) => {
+            itemEl.querySelector('.ch-item-menu-btn')?.addEventListener('click', (e) => {
                 e.stopPropagation();
-                
-                const sidebar = this.body.closest('.ch-sidebar');
-                sidebar.querySelectorAll('.ch-item-menu-active').forEach(el => el.classList.remove('ch-item-menu-active'));
-                
-                this.activeItem = this.allItems.find(i => i.id === itemEl.dataset.id);
-
-                const rect = itemEl.getBoundingClientRect();
-                const sidebarRect = sidebar.getBoundingClientRect();
-
-                // Position relative to the item
-                contextMenu.style.top = `${rect.top - sidebarRect.top}px`;
-                contextMenu.style.left = `${rect.right - sidebarRect.left + 5}px`;
-                contextMenu.classList.add('show');
-                
-                itemEl.classList.add('ch-item-menu-active');
-
-                // Populate LLM submenu
-                this._populateLlmSubmenu(submenu);
+                this._openContextMenu(itemEl, e.currentTarget, submenu);
             });
         });
     }
