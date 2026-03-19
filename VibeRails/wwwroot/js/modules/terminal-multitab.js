@@ -1951,8 +1951,8 @@ class TerminalManager {
 
         const historySidebar = document.getElementById('ch-sidebar');
         if (historySidebar) {
-            const sidebarRect = historySidebar.getBoundingClientRect();
-            const sidebarHeight = Math.max(0, Math.round(viewportHeight - sidebarRect.top - 12));
+            const panelRect = this.panel.getBoundingClientRect();
+            const sidebarHeight = Math.max(0, Math.round(panelRect.height));
             historySidebar.style.setProperty('--ch-available-height', `${sidebarHeight}px`);
         }
     }
@@ -1995,10 +1995,8 @@ class TerminalManager {
         if (this.focusBtn) {
             this.focusBtn.classList.remove('active');
             this.focusBtn.setAttribute('aria-pressed', 'false');
-            this.focusBtn.title = isFocusView
-                ? 'Return to dashboard terminal section'
-                : 'Open terminal in focused page view';
-            setLabel(this.focusBtn, isFocusView ? 'Back to Dashboard' : 'Open In Fullscreen');
+            this.focusBtn.title = 'Open terminal in focused page view';
+            setLabel(this.focusBtn, 'Open In Fullscreen');
         }
     }
 
@@ -2278,15 +2276,34 @@ class TerminalManager {
         if (!open) this.focusActiveTerminalInput();
     }
 
+    syncHistoryPanelState(forceOpen) {
+        const sidebar = document.getElementById('ch-sidebar');
+        if (!sidebar) return;
+
+        const open = typeof forceOpen === 'boolean'
+            ? forceOpen
+            : !sidebar.classList.contains('ch-sidebar-collapsed');
+        const layout = sidebar.closest('.vb-terminal-focus-layout');
+
+        sidebar.classList.toggle('ch-sidebar-collapsed', !open);
+        layout?.classList.toggle('vb-history-under', !open);
+        this.historyBtn?.classList.toggle('active', open);
+        this.updateFocusContainerHeight();
+
+        if (!open) {
+            this.focusActiveTerminalInput();
+        }
+    }
+
     toggleHistoryPanel(forceOpen) {
         const sidebar = document.getElementById('ch-sidebar');
         if (!sidebar) return;
-        const isCollapsed = sidebar.classList.contains('ch-sidebar-collapsed');
-        const open = forceOpen ?? isCollapsed;
-        sidebar.classList.toggle('ch-sidebar-collapsed', !open);
-        this.historyBtn?.classList.toggle('active', open);
-        this.updateFocusContainerHeight();
-        if (!open) this.focusActiveTerminalInput();
+
+        const open = typeof forceOpen === 'boolean'
+            ? forceOpen
+            : sidebar.classList.contains('ch-sidebar-collapsed');
+
+        this.syncHistoryPanelState(open);
     }
 
     applyTheme(key) {
@@ -2479,18 +2496,19 @@ export class TerminalController {
 
     _initChatHistorySidebar(root) {
         new ChatHistorySidebar(this.app).mount(root, {
-            onToggle: () => this.manager?.updateFocusContainerHeight()
+            onToggle: (open) => this.manager?.syncHistoryPanelState(open)
         });
     }
 
     renderTerminalPanel(options = {}) {
         const isFocusView = options.focusView === true;
-        const lockButtonHtml = isFocusView ? '' : `
-                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-lock-btn" title="Lock terminal in sticky focus mode" aria-label="Lock terminal focus mode">
+        const focusButtonHtml = isFocusView ? '' : `
+                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-popout-btn" title="Open in fullscreen" aria-label="Open in fullscreen">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
-                                    <path d="M8 1a3 3 0 0 0-3 3v2H4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1V4a3 3 0 0 0-3-3m2 5H6V4a2 2 0 1 1 4 0z"/>
+                                    <path d="M6 3a2 2 0 0 0-2 2v7a1 1 0 0 0 1 1h7a2 2 0 0 0 2-2V6h-1v5a1 1 0 0 1-1 1H5V5a1 1 0 0 1 1-1z"/>
+                                    <path d="M8.5 1a.5.5 0 0 0 0 1h4.793L6.146 9.146a.5.5 0 1 0 .708.708L14 2.707V7.5a.5.5 0 0 0 1 0V1z"/>
                                 </svg>
-                                <span class="vb-terminal-control-text">Lock Focus</span>
+                                <span class="vb-terminal-control-text">Open In Fullscreen</span>
                             </button>
         `;
 
@@ -2506,14 +2524,7 @@ export class TerminalController {
                         </span>
                         <span class="badge bg-secondary d-none" id="terminal-status-badge"></span>
                     </div>
-                    <div class="d-flex gap-2 align-items-center" id="terminal-actions">
-                        <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1 d-none d-md-none" id="terminal-keyboard-btn" title="Focus terminal input keyboard">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M14 5H2a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1M2 4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/>
-                                <path d="M2 7h1v1H2zm2 0h1v1H4zm2 0h1v1H6zm2 0h1v1H8zm2 0h1v1h-1zm2 0h1v1h-1zM2 9h8v1H2z"/>
-                            </svg>
-                            <span>Keyboard</span>
-                        </button>
+                    <div class="d-flex gap-2 align-items-center" id="terminal-actions">                        
                         <button class="btn btn-sm btn-outline-danger d-none d-inline-flex align-items-center gap-1" id="terminal-stop-btn" title="Disconnect terminal session">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>
@@ -2557,14 +2568,7 @@ export class TerminalController {
                             <span class="vb-terminal-font-size-label" id="vb-terminal-font-size-label">14</span>
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
                             <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-settings-btn" title="Terminal settings" aria-label="Terminal settings">&#x2699;</button>
-                            ${lockButtonHtml}
-                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-popout-btn" title="${isFocusView ? 'Return to dashboard' : 'Open in fullscreen'}" aria-label="${isFocusView ? 'Back to dashboard' : 'Open in fullscreen'}">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
-                                    <path d="M6 3a2 2 0 0 0-2 2v7a1 1 0 0 0 1 1h7a2 2 0 0 0 2-2V6h-1v5a1 1 0 0 1-1 1H5V5a1 1 0 0 1 1-1z"/>
-                                    <path d="M8.5 1a.5.5 0 0 0 0 1h4.793L6.146 9.146a.5.5 0 1 0 .708.708L14 2.707V7.5a.5.5 0 0 0 1 0V1z"/>
-                                </svg>
-                                <span class="vb-terminal-control-text">${isFocusView ? 'Back to Dashboard' : 'Open In Fullscreen'}</span>
-                            </button>
+                            ${focusButtonHtml}
                         </div>
                     </div>
                     <div class="vb-terminal-window-title-bar">

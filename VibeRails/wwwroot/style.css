@@ -37,8 +37,8 @@
     /* Squarer, cleaner look */
     --transition-speed: 0.15s;
     /* Snappier interactions */
-    --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.5);
-    --shadow-hover: 0 4px 6px rgba(0, 0, 0, 0.5);
+    --shadow-soft: none;
+    --shadow-hover: none;
 
     --navbar-height: 52px;
 }
@@ -1275,18 +1275,18 @@ button:hover .card-nav-cog {
 
 /* Connected badge glow effect */
 .badge.bg-success {
-    animation: badge-glow 2s ease-in-out infinite;
+    animation: badge-glow 3.2s ease-in-out infinite;
 }
 
 @keyframes badge-glow {
 
     0%,
     100% {
-        box-shadow: 0 0 4px rgba(76, 175, 80, 0.3), 0 0 8px rgba(76, 175, 80, 0.15);
+        box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.14), 0 2px 6px rgba(76, 175, 80, 0.08);
     }
 
     50% {
-        box-shadow: 0 0 8px rgba(76, 175, 80, 0.5), 0 0 16px rgba(76, 175, 80, 0.3), 0 0 24px rgba(76, 175, 80, 0.1);
+        box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.2), 0 4px 10px rgba(76, 175, 80, 0.14);
     }
 }
 
@@ -1390,12 +1390,9 @@ button:hover .card-nav-cog {
 
 #vb-terminal-panel.card {
     border: 1px solid rgba(255, 255, 255, 0.1);
-    background: #111221;
+    background: transparent;
     overflow: hidden;
-    box-shadow: 
-        0 0 0 1px rgba(255, 255, 255, 0.05),
-        0 20px 50px -12px rgba(0, 0, 0, 0.9),
-        0 15px 35px -15px rgba(0, 0, 0, 0.7);
+    box-shadow: none;
 }
 
 /* Window shell */
@@ -2117,12 +2114,18 @@ body.vb-terminal-focus-active #vb-terminal-panel #terminal-container {
 .vb-terminal-focus-body {
     flex: 1 1 auto;
     min-width: 0;
+    position: relative;
+    z-index: 2;
+    transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1), filter 0.35s ease;
 }
 
 #vb-terminal-panel.vb-terminal-focus-card {
     margin-bottom: 0;
     display: flex;
     flex-direction: column;
+    position: relative;
+    z-index: 2;
+    transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.55s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.35s ease;
 }
 
 #vb-terminal-panel.vb-terminal-focus-card .vb-terminal-window-shell {
@@ -3301,16 +3304,36 @@ input.form-control:disabled {
 
 /* ── Chat History Sidebar ─────────────────────────────────────────────────── */
 .vb-terminal-focus-layout {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 0.75rem;
+    --ch-sidebar-width: 268px;
+    --ch-sidebar-peek: 58px;
+    display: grid;
+    grid-template-columns: var(--ch-sidebar-width) minmax(0, 1fr);
+    column-gap: 0.75rem;
+    align-items: stretch;
     flex: 1 1 auto;
     min-height: 0;
+    position: relative;
+    isolation: isolate;
+    transition: grid-template-columns 0.55s cubic-bezier(0.22, 1, 0.36, 1), column-gap 0.45s ease;
+}
+
+.vb-terminal-focus-layout.vb-history-under {
+    grid-template-columns: var(--ch-sidebar-peek) minmax(0, 1fr);
+    column-gap: 0;
+}
+
+.vb-terminal-focus-layout.vb-history-under .vb-terminal-focus-body {
+    transform: translateX(-6px);
+}
+
+.vb-terminal-focus-layout.vb-history-under #vb-terminal-panel.vb-terminal-focus-card {
+    transform: translateX(-2px);
+    box-shadow: 0 28px 56px rgba(6, 10, 18, 0.42), 0 4px 18px rgba(6, 10, 18, 0.28);
+    border-color: rgba(255, 255, 255, 0.12);
 }
 
 .ch-sidebar {
-    width: 268px;
+    width: var(--ch-sidebar-width);
     flex-shrink: 0;
     height: var(--ch-available-height, auto);
     max-height: var(--ch-available-height, none);
@@ -3321,23 +3344,44 @@ input.form-control:disabled {
     flex-direction: column;
     overflow: hidden;
     min-height: 0;
-    transition: width 0.2s ease;
+    justify-self: start;
+    position: relative;
+    z-index: 1;
+    transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.55s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.35s ease, filter 0.35s ease, opacity 0.25s ease;
 }
 
-.ch-sidebar.ch-sidebar-collapsed {
-    width: 36px;
+.ch-sidebar.ch-sidebar-menu-open {
+    overflow: visible;
+    z-index: 6;
 }
 
-.ch-sidebar.ch-sidebar-collapsed .ch-sidebar-title,
-.ch-sidebar.ch-sidebar-collapsed .ch-sidebar-body,
-.ch-sidebar.ch-sidebar-collapsed .ch-sidebar-settings-btn {
-    display: none;
+.ch-sidebar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 72px;
+    pointer-events: none;
+    opacity: 0;
+    background: linear-gradient(90deg, rgba(20, 22, 31, 0) 0%, rgba(16, 18, 26, 0.82) 58%, rgba(11, 12, 18, 0.98) 100%);
+    transition: opacity 0.45s ease;
 }
 
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar {
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.05), 0 18px 36px rgba(0, 0, 0, 0.24);
+    border-color: rgba(255, 255, 255, 0.05);
+    filter: saturate(0.92) brightness(0.93);
+}
 
-.ch-sidebar.ch-sidebar-collapsed .ch-sidebar-header {
-    justify-content: center;
-    padding: 10px 0;
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar::after {
+    opacity: 1;
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-header {
+    justify-content: flex-start;
+    padding: 10px 12px;
+    border-bottom-color: transparent;
 }
 
 .ch-sidebar-hide-btn svg {
@@ -3355,14 +3399,25 @@ input.form-control:disabled {
     padding: 10px 13px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     flex-shrink: 0;
+    transition: padding 0.35s ease, border-color 0.35s ease;
 }
 
 .ch-sidebar-actions {
     display: flex;
     align-items: center;
     gap: 4px;
+    transition: left 0.45s cubic-bezier(0.22, 1, 0.36, 1), top 0.45s cubic-bezier(0.22, 1, 0.36, 1), gap 0.25s ease;
 }
 
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-actions {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    gap: 0;
+    flex-direction: row-reverse;
+}
+
+.ch-sidebar-refresh-btn,
 .ch-sidebar-settings-btn,
 .ch-sidebar-hide-btn {
     background: transparent;
@@ -3374,21 +3429,36 @@ input.form-control:disabled {
     display: flex;
     align-items: center;
     border-radius: 4px;
-    transition: color 0.15s, background 0.15s;
+    transition: color 0.15s, background 0.15s, transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease, box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
+.ch-sidebar-refresh-btn,
 .ch-sidebar-settings-btn {
     font-size: 0.75rem;
 }
 
+.ch-sidebar-refresh-btn:hover,
 .ch-sidebar-settings-btn:hover,
 .ch-sidebar-hide-btn:hover {
     color: #cdd6f4;
     background: rgba(255, 255, 255, 0.06);
 }
 
+.ch-sidebar-refresh-btn i,
 .ch-sidebar-settings-btn i {
     transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.ch-sidebar-refresh-btn.is-loading {
+    color: var(--color-accent);
+}
+
+.ch-sidebar-refresh-btn.is-loading i {
+    animation: ch-sidebar-refresh-spin 0.85s linear infinite;
+}
+
+.ch-sidebar-refresh-btn:disabled {
+    cursor: default;
 }
 
 .ch-sidebar-settings-btn:hover i {
@@ -3396,14 +3466,20 @@ input.form-control:disabled {
     color: var(--color-accent);
 }
 
+@keyframes ch-sidebar-refresh-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .ch-sidebar-search {
     padding: 8px 12px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     flex-shrink: 0;
-}
-
-.ch-sidebar.ch-sidebar-collapsed .ch-sidebar-search {
-    display: none;
+    transition: opacity 0.2s ease, transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.35s ease;
 }
 
 .ch-search-input-wrapper {
@@ -3450,6 +3526,7 @@ input.form-control:disabled {
     font-weight: 600;
     color: #cdd6f4;
     letter-spacing: 0.01em;
+    transition: opacity 0.2s ease, transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .ch-sidebar-hide-btn {
@@ -3462,7 +3539,7 @@ input.form-control:disabled {
     display: flex;
     align-items: center;
     border-radius: 4px;
-    transition: color 0.15s, background 0.15s;
+    transition: color 0.15s, background 0.15s, transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
 .ch-sidebar-hide-btn:hover {
@@ -3474,6 +3551,34 @@ input.form-control:disabled {
     flex: 1;
     overflow-y: auto;
     padding: 5px 0;
+    transition: opacity 0.2s ease, filter 0.35s ease;
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-title,
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-refresh-btn,
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-settings-btn,
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-search {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-16px);
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-body {
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(90deg, rgba(0, 0, 0, 1) 0, rgba(0, 0, 0, 1) 40px, rgba(0, 0, 0, 0.92) 56px, rgba(0, 0, 0, 0.25) 88px, rgba(0, 0, 0, 0) 116px);
+    mask-image: linear-gradient(90deg, rgba(0, 0, 0, 1) 0, rgba(0, 0, 0, 1) 40px, rgba(0, 0, 0, 0.92) 56px, rgba(0, 0, 0, 0.25) 88px, rgba(0, 0, 0, 0) 116px);
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-hide-btn {
+    color: #e6ebff;
+    background: rgba(11, 15, 24, 0.86);
+    border: 1px solid rgba(122, 164, 255, 0.2);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.28);
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-hide-btn:hover {
+    color: #ffffff;
+    background: rgba(16, 22, 34, 0.96);
 }
 
 .ch-sidebar-body::-webkit-scrollbar {
@@ -3519,7 +3624,7 @@ input.form-control:disabled {
     align-items: center;
     gap: 10px;
     padding: 8px 12px;
-    cursor: pointer;
+    cursor: default;
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     transition: background 0.12s;
 }
