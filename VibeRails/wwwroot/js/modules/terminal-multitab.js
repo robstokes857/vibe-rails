@@ -706,6 +706,31 @@ class TerminalManager {
         }
     }
 
+    _loadCursorBlink() {
+        try {
+            const val = localStorage.getItem('viberails_terminal_cursorBlink');
+            return val === null ? true : val === 'true';
+        } catch {
+            return true;
+        }
+    }
+
+    _loadCursorStyle() {
+        try {
+            return localStorage.getItem('viberails_terminal_cursorStyle') || 'block';
+        } catch {
+            return 'block';
+        }
+    }
+
+    _loadCursorInactiveStyle() {
+        try {
+            return localStorage.getItem('viberails_terminal_cursorInactiveStyle') || 'outline';
+        } catch {
+            return 'outline';
+        }
+    }
+
     _applySavedTerminalSettings(tab) {
         const vibe = tab?.instance?.vibeTerminal;
         if (!vibe?._terminal) return;
@@ -714,6 +739,10 @@ class TerminalManager {
         if (themeKey && window.CXL_THEMES?.[themeKey]) {
             vibe.setTheme(window.CXL_THEMES[themeKey]);
         }
+
+        vibe.setCursorBlink(this._loadCursorBlink());
+        vibe.setCursorStyle(this._loadCursorStyle());
+        vibe.setCursorInactiveStyle(this._loadCursorInactiveStyle());
     }
 
     applySavedTerminalSettingsForTab(tabId) {
@@ -883,6 +912,12 @@ class TerminalManager {
             ?.addEventListener('change', (e) => this.applyFontFamily(e.target.value));
         this.container.querySelector('#terminal-settings-renderer')
             ?.addEventListener('change', (e) => this.applyRendererPreference(e.target.value));
+        this.container.querySelector('#terminal-settings-cursor-blink')
+            ?.addEventListener('change', (e) => this.applyCursorBlink(e.target.checked));
+        this.container.querySelector('#terminal-settings-cursor-style')
+            ?.addEventListener('change', (e) => this.applyCursorStyle(e.target.value));
+        this.container.querySelector('#terminal-settings-cursor-inactive')
+            ?.addEventListener('change', (e) => this.applyCursorInactiveStyle(e.target.value));
     }
 
     async restoreTabs() {
@@ -2219,6 +2254,15 @@ class TerminalManager {
         const rendererSelect = this.container.querySelector('#terminal-settings-renderer');
         if (rendererSelect) rendererSelect.value = this._loadRendererPreference();
 
+        const cursorBlinkCheck = this.container.querySelector('#terminal-settings-cursor-blink');
+        if (cursorBlinkCheck) cursorBlinkCheck.checked = this._loadCursorBlink();
+
+        const cursorStyleSelect = this.container.querySelector('#terminal-settings-cursor-style');
+        if (cursorStyleSelect) cursorStyleSelect.value = this._loadCursorStyle();
+
+        const cursorInactiveSelect = this.container.querySelector('#terminal-settings-cursor-inactive');
+        if (cursorInactiveSelect) cursorInactiveSelect.value = this._loadCursorInactiveStyle();
+
         const savedTheme = this._loadThemePreference();
         if (savedTheme) {
             this._themeItems?.forEach((item) => {
@@ -2272,6 +2316,27 @@ class TerminalManager {
             'Renderer preference saved. Restart active terminal tabs to apply.',
             'info'
         );
+    }
+
+    applyCursorBlink(blink) {
+        try { localStorage.setItem('viberails_terminal_cursorBlink', String(blink)); } catch {}
+        this.tabs.forEach((tab) => {
+            tab.instance.vibeTerminal?.setCursorBlink(blink);
+        });
+    }
+
+    applyCursorStyle(style) {
+        try { localStorage.setItem('viberails_terminal_cursorStyle', style); } catch {}
+        this.tabs.forEach((tab) => {
+            tab.instance.vibeTerminal?.setCursorStyle(style);
+        });
+    }
+
+    applyCursorInactiveStyle(style) {
+        try { localStorage.setItem('viberails_terminal_cursorInactiveStyle', style); } catch {}
+        this.tabs.forEach((tab) => {
+            tab.instance.vibeTerminal?.setCursorInactiveStyle(style);
+        });
     }
 }
 
@@ -2541,6 +2606,31 @@ export class TerminalController {
                                 <div class="vb-terminal-settings-row">
                                     <label>Size</label>
                                     <input type="number" id="terminal-settings-font-size" min="6" max="72">
+                                </div>
+                            </div>
+                            <div class="vb-terminal-settings-section">
+                                <div class="vb-terminal-settings-section-title">Cursor</div>
+                                <div class="vb-terminal-settings-row">
+                                    <label>Blink</label>
+                                    <input type="checkbox" id="terminal-settings-cursor-blink">
+                                </div>
+                                <div class="vb-terminal-settings-row">
+                                    <label>Active style</label>
+                                    <select id="terminal-settings-cursor-style">
+                                        <option value="block">Block</option>
+                                        <option value="bar">Bar</option>
+                                        <option value="underline">Underline</option>
+                                    </select>
+                                </div>
+                                <div class="vb-terminal-settings-row">
+                                    <label>Inactive style</label>
+                                    <select id="terminal-settings-cursor-inactive">
+                                        <option value="outline">Outline</option>
+                                        <option value="block">Block</option>
+                                        <option value="bar">Bar</option>
+                                        <option value="underline">Underline</option>
+                                        <option value="none">None</option>
+                                    </select>
                                 </div>
                             </div>
                         </div>
