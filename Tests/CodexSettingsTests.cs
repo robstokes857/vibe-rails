@@ -329,8 +329,29 @@ model = ""o3""
         public Task<List<SessionResponse>> GetRecentSessionsAsync(int limit, CancellationToken cancellationToken)
             => Task.FromResult(new List<SessionResponse>());
 
+        public Task<List<SessionOutputListItem>> GetRecentSessionOutputsAsync(int limit, CancellationToken cancellationToken)
+            => Task.FromResult(new List<SessionOutputListItem>());
+
+        public Task<SessionOutputDetailResponse?> GetSessionOutputAsync(string sessionId, CancellationToken cancellationToken)
+            => Task.FromResult<SessionOutputDetailResponse?>(null);
+
+        public Task<List<string>> GetEndedUnprocessedSessionIdsAsync(int limit, CancellationToken cancellationToken)
+            => Task.FromResult(new List<string>());
+
+        public Task<List<SessionLogChunkRecord>> GetSessionLogChunksAsync(string sessionId, CancellationToken cancellationToken)
+            => Task.FromResult(new List<SessionLogChunkRecord>());
+
+        public Task SaveSessionOutputAndMarkProcessedAsync(string sessionId, string text, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
         public Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, CancellationToken cancellationToken)
             => Task.FromResult(new List<ChatHistoryItem>());
+
+        public Task<bool> UpdateChatHistorySessionNameAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken)
+            => Task.FromResult(false);
+
+        public Task<bool> DeleteChatHistorySessionAsync(string sessionId, CancellationToken cancellationToken)
+            => Task.FromResult(false);
 
         public Task<List<string>> GetOpenSessionIdsAsync(DateTime olderThan, CancellationToken cancellationToken)
             => Task.FromResult(new List<string>());

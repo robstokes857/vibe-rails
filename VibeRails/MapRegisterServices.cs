@@ -26,6 +26,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<IBertExplorerService, BertExplorerService>();
             serviceCollection.AddScoped<IDbService, DbService>();
             serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
+            serviceCollection.AddSingleton<ISessionOutputParser, SessionOutputParser>();
             serviceCollection.AddScoped<IRepository>(sp =>
             {
                 var connectionString = $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
@@ -98,6 +99,7 @@ namespace VibeRails
 
             serviceCollection.AddHostedService<UpdateCheckJob>();
             serviceCollection.AddHostedService<StaleSessionCleanupJob>();
+            serviceCollection.AddHostedService<SessionOutputProcessingJob>();
 
 #if DEBUG
             // Event bus — fire-and-forget publish to connected WebSocket viewers

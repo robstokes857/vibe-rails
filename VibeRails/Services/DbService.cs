@@ -48,6 +48,7 @@ namespace VibeRails.Services
                     StartedUTC TEXT NOT NULL,
                     EndedUTC TEXT,
                     ExitCode INTEGER,
+                    Processed INTEGER NOT NULL DEFAULT 0,
                     ParentSessionId TEXT DEFAULT '',
                     SessionDisplayName TEXT DEFAULT ''
                 )
@@ -64,6 +65,15 @@ namespace VibeRails.Services
                 )
                 """,
                 "CREATE INDEX IF NOT EXISTS idx_session_logs_session ON SessionLogs(SessionId)",
+                """
+                CREATE TABLE IF NOT EXISTS sessionOutPut (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    SessionId TEXT NOT NULL,
+                    Text TEXT NOT NULL,
+                    FOREIGN KEY (SessionId) REFERENCES Sessions(Id) ON DELETE CASCADE
+                )
+                """,
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_session_output_session ON sessionOutPut(SessionId)",
                 // User Input tracking tables
                 """
                 CREATE TABLE IF NOT EXISTS UserInputs (
@@ -125,6 +135,7 @@ namespace VibeRails.Services
             // Schema migrations — silently skip if column already exists
             foreach (var migration in new[]
             {
+                "ALTER TABLE Sessions ADD COLUMN Processed INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE Sessions ADD COLUMN ParentSessionId TEXT DEFAULT ''",
                 "ALTER TABLE Sessions ADD COLUMN SessionDisplayName TEXT DEFAULT ''",
             })
@@ -134,6 +145,13 @@ namespace VibeRails.Services
                     using var cmd = connection.CreateCommand();
                     cmd.CommandText = migration;
                     cmd.ExecuteNonQuery();
+
+                    if (migration.Contains("Processed", StringComparison.Ordinal))
+                    {
+                        using var seedCmd = connection.CreateCommand();
+                        seedCmd.CommandText = "UPDATE Sessions SET Processed = 1";
+                        seedCmd.ExecuteNonQuery();
+                    }
                 }
                 catch (SqliteException ex) when (ex.Message.Contains("duplicate column name"))
                 {
@@ -326,6 +344,172 @@ namespace VibeRails.Services
             return sessions;
         }
 
+        public async Task<List<SessionOutputListItem>> GetRecentSessionOutputsAsync(int limit, CancellationToken cancellationToken)
+        {
+            var items = new List<SessionOutputListItem>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT s.Id, s.Cli, s.EnvironmentName, s.WorkingDirectory, s.StartedUTC, s.EndedUTC, s.Processed,
+                       COALESCE(LENGTH(o.Text), 0),
+                       COALESCE(SUBSTR(o.Text, 1, 220), '')
+                FROM Sessions s
+                LEFT JOIN sessionOutPut o ON o.SessionId = s.Id
+                ORDER BY s.StartedUTC DESC
+                LIMIT $limit;
+                """;
+            cmd.Parameters.AddWithValue("$limit", limit);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(new SessionOutputListItem(
+                    SessionId: reader.GetString(0),
+                    Cli: reader.GetString(1),
+                    EnvironmentName: reader.IsDBNull(2) ? null : reader.GetString(2),
+                    WorkingDirectory: reader.GetString(3),
+                    StartedUTC: DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                    EndedUTC: reader.IsDBNull(5) ? null : DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                    Processed: reader.GetInt32(6) == 1,
+                    OutputLength: reader.GetInt32(7),
+                    Preview: reader.GetString(8)
+                ));
+            }
+
+            return items;
+        }
+
+        public async Task<SessionOutputDetailResponse?> GetSessionOutputAsync(string sessionId, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT s.Id, s.Cli, s.EnvironmentName, s.WorkingDirectory, s.StartedUTC, s.EndedUTC, s.Processed,
+                       COALESCE(o.Text, '')
+                FROM Sessions s
+                LEFT JOIN sessionOutPut o ON o.SessionId = s.Id
+                WHERE s.Id = $sessionId;
+                """;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return null;
+
+            return new SessionOutputDetailResponse(
+                SessionId: reader.GetString(0),
+                Cli: reader.GetString(1),
+                EnvironmentName: reader.IsDBNull(2) ? null : reader.GetString(2),
+                WorkingDirectory: reader.GetString(3),
+                StartedUTC: DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                EndedUTC: reader.IsDBNull(5) ? null : DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                Processed: reader.GetInt32(6) == 1,
+                Text: reader.GetString(7)
+            );
+        }
+
+        public async Task<List<string>> GetEndedUnprocessedSessionIdsAsync(int limit, CancellationToken cancellationToken)
+        {
+            var sessionIds = new List<string>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT Id
+                FROM Sessions
+                WHERE EndedUTC IS NOT NULL
+                  AND Processed = 0
+                ORDER BY EndedUTC ASC
+                LIMIT $limit;
+                """;
+            cmd.Parameters.AddWithValue("$limit", limit);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                sessionIds.Add(reader.GetString(0));
+            }
+
+            return sessionIds;
+        }
+
+        public async Task<List<SessionLogChunkRecord>> GetSessionLogChunksAsync(string sessionId, CancellationToken cancellationToken)
+        {
+            var chunks = new List<SessionLogChunkRecord>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT Id, Content
+                FROM SessionLogs
+                WHERE SessionId = $sessionId
+                ORDER BY Id ASC;
+                """;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                chunks.Add(new SessionLogChunkRecord(
+                    Id: reader.GetInt64(0),
+                    Content: (byte[])reader.GetValue(1)));
+            }
+
+            return chunks;
+        }
+
+        public async Task SaveSessionOutputAndMarkProcessedAsync(string sessionId, string text, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+            try
+            {
+                await using (var outputCmd = connection.CreateCommand())
+                {
+                    outputCmd.Transaction = transaction;
+                    outputCmd.CommandText = """
+                        INSERT INTO sessionOutPut (SessionId, Text)
+                        VALUES ($sessionId, $text)
+                        ON CONFLICT(SessionId) DO UPDATE SET
+                            Text = excluded.Text;
+                        """;
+                    outputCmd.Parameters.AddWithValue("$sessionId", sessionId);
+                    outputCmd.Parameters.AddWithValue("$text", text);
+                    await outputCmd.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await using (var sessionCmd = connection.CreateCommand())
+                {
+                    sessionCmd.Transaction = transaction;
+                    sessionCmd.CommandText = """
+                        UPDATE Sessions
+                        SET Processed = 1
+                        WHERE Id = $sessionId;
+                        """;
+                    sessionCmd.Parameters.AddWithValue("$sessionId", sessionId);
+                    await sessionCmd.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
         public async Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, CancellationToken cancellationToken)
         {
             await using var connection = new SqliteConnection(_connectionString);
@@ -407,6 +591,10 @@ namespace VibeRails.Services
                     """,
                     """
                     DELETE FROM ClaudePlans
+                    WHERE SessionId = $sessionId;
+                    """,
+                    """
+                    DELETE FROM sessionOutPut
                     WHERE SessionId = $sessionId;
                     """,
                     """
