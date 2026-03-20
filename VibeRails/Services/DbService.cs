@@ -344,44 +344,6 @@ namespace VibeRails.Services
             return sessions;
         }
 
-        public async Task<List<SessionOutputListItem>> GetRecentSessionOutputsAsync(int limit, CancellationToken cancellationToken)
-        {
-            var items = new List<SessionOutputListItem>();
-
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
-
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT s.Id, s.Cli, s.EnvironmentName, s.WorkingDirectory, s.StartedUTC, s.EndedUTC, s.Processed,
-                       COALESCE(LENGTH(o.Text), 0),
-                       COALESCE(SUBSTR(o.Text, 1, 220), '')
-                FROM Sessions s
-                LEFT JOIN sessionOutPut o ON o.SessionId = s.Id
-                ORDER BY s.StartedUTC DESC
-                LIMIT $limit;
-                """;
-            cmd.Parameters.AddWithValue("$limit", limit);
-
-            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                items.Add(new SessionOutputListItem(
-                    SessionId: reader.GetString(0),
-                    Cli: reader.GetString(1),
-                    EnvironmentName: reader.IsDBNull(2) ? null : reader.GetString(2),
-                    WorkingDirectory: reader.GetString(3),
-                    StartedUTC: DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
-                    EndedUTC: reader.IsDBNull(5) ? null : DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind),
-                    Processed: reader.GetInt32(6) == 1,
-                    OutputLength: reader.GetInt32(7),
-                    Preview: reader.GetString(8)
-                ));
-            }
-
-            return items;
-        }
-
         public async Task<SessionOutputDetailResponse?> GetSessionOutputAsync(string sessionId, CancellationToken cancellationToken)
         {
             await using var connection = new SqliteConnection(_connectionString);

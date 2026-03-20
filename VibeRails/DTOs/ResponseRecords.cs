@@ -505,8 +505,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SessionWithLogsResponse))]
     [JsonSerializable(typeof(List<SessionResponse>))]
     [JsonSerializable(typeof(List<SessionLogResponse>))]
-    [JsonSerializable(typeof(SessionOutputListItem))]
-    [JsonSerializable(typeof(List<SessionOutputListItem>))]
     [JsonSerializable(typeof(SessionOutputDetailResponse))]
     // Chat History DTOs
     [JsonSerializable(typeof(ChatHistoryItem))]
