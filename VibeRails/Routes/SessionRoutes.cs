@@ -28,5 +28,28 @@ public static class SessionRoutes
             var sessions = await dbService.GetRecentSessionsAsync(limit ?? 10, cancellationToken);
             return Results.Ok(sessions);
         }).WithName("GetRecentSessions");
+
+        app.MapGet("/api/v1/sessions/output/recent", async (
+            IDbService dbService,
+            int? limit,
+            CancellationToken cancellationToken) =>
+        {
+            var items = await dbService.GetRecentSessionOutputsAsync(limit ?? 100, cancellationToken);
+            return Results.Ok(items);
+        }).WithName("GetRecentSessionOutputs");
+
+        app.MapGet("/api/v1/sessions/{sessionId}/output", async (
+            IDbService dbService,
+            string sessionId,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await dbService.GetSessionOutputAsync(sessionId, cancellationToken);
+            if (result == null)
+            {
+                return Results.NotFound(new ErrorResponse($"Session not found: {sessionId}"));
+            }
+
+            return Results.Ok(result);
+        }).WithName("GetSessionOutput");
     }
 }
