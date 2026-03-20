@@ -367,6 +367,87 @@ namespace VibeRails.Services
             return items;
         }
 
+        public async Task<bool> UpdateChatHistorySessionNameAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                UPDATE Sessions
+                SET SessionDisplayName = $sessionDisplayName
+                WHERE Id = $sessionId;
+                """;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+            cmd.Parameters.AddWithValue("$sessionDisplayName", sessionDisplayName);
+
+            var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            return rowsAffected > 0;
+        }
+
+        public async Task<bool> DeleteChatHistorySessionAsync(string sessionId, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+            try
+            {
+                var commands = new[]
+                {
+                    """
+                    UPDATE Sessions
+                    SET ParentSessionId = ''
+                    WHERE ParentSessionId = $sessionId;
+                    """,
+                    """
+                    DELETE FROM InputFileChanges
+                    WHERE UserInputId IN (SELECT Id FROM UserInputs WHERE SessionId = $sessionId)
+                       OR PreviousInputId IN (SELECT Id FROM UserInputs WHERE SessionId = $sessionId);
+                    """,
+                    """
+                    DELETE FROM ClaudePlans
+                    WHERE SessionId = $sessionId;
+                    """,
+                    """
+                    DELETE FROM SessionLogs
+                    WHERE SessionId = $sessionId;
+                    """,
+                    """
+                    DELETE FROM UserInputs
+                    WHERE SessionId = $sessionId;
+                    """,
+                    """
+                    DELETE FROM Sessions
+                    WHERE Id = $sessionId;
+                    """
+                };
+
+                var deletedSession = false;
+                foreach (var sql in commands)
+                {
+                    await using var cmd = connection.CreateCommand();
+                    cmd.Transaction = transaction;
+                    cmd.CommandText = sql;
+                    cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+                    var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+                    if (!deletedSession && sql.Contains("DELETE FROM Sessions", StringComparison.Ordinal))
+                    {
+                        deletedSession = rowsAffected > 0;
+                    }
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+                return deletedSession;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
         // User input tracking methods
 
         public async Task<UserInputRecord?> GetLastUserInputAsync(string sessionId)
