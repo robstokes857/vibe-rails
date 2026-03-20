@@ -15,7 +15,6 @@ namespace VibeRails.Interfaces
         // Session retrieval
         Task<SessionWithLogsResponse?> GetSessionWithLogsAsync(string sessionId, CancellationToken cancellationToken);
         Task<List<SessionResponse>> GetRecentSessionsAsync(int limit, CancellationToken cancellationToken);
-        Task<List<SessionOutputListItem>> GetRecentSessionOutputsAsync(int limit, CancellationToken cancellationToken);
         Task<SessionOutputDetailResponse?> GetSessionOutputAsync(string sessionId, CancellationToken cancellationToken);
         Task<List<string>> GetEndedUnprocessedSessionIdsAsync(int limit, CancellationToken cancellationToken);
         Task<List<SessionLogChunkRecord>> GetSessionLogChunksAsync(string sessionId, CancellationToken cancellationToken);

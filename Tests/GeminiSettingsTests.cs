@@ -327,9 +327,6 @@ public class GeminiSettingsTests : IDisposable
         public Task<List<SessionResponse>> GetRecentSessionsAsync(int limit, CancellationToken cancellationToken)
             => Task.FromResult(new List<SessionResponse>());
 
-        public Task<List<SessionOutputListItem>> GetRecentSessionOutputsAsync(int limit, CancellationToken cancellationToken)
-            => Task.FromResult(new List<SessionOutputListItem>());
-
         public Task<SessionOutputDetailResponse?> GetSessionOutputAsync(string sessionId, CancellationToken cancellationToken)
             => Task.FromResult<SessionOutputDetailResponse?>(null);
 
