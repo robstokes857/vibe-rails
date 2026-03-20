@@ -105,6 +105,16 @@ export class ChatHistorySidebar {
             // TODO: Implement settings modal or action
         });
 
+        contextMenu?.querySelector('[data-action="rename"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            void this._showRenameModal();
+        });
+
+        contextMenu?.querySelector('[data-action="delete"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            void this._showDeleteModal();
+        });
+
         const searchInput = root.querySelector('#ch-search-input');
         searchInput?.addEventListener('input', (e) => {
             this.filterText = e.target.value.toLowerCase().trim();
@@ -287,6 +297,89 @@ export class ChatHistorySidebar {
     _shouldDisplayItem(item) {
         const displayName = this._getDisplayName(item);
         return displayName.length > 0 && displayName.toLowerCase() !== 'untitled';
+    }
+
+    async _showRenameModal() {
+        if (!this.activeItem) {
+            return;
+        }
+
+        const sessionId = this.activeItem.id;
+        const currentName = this._getDisplayName(this.activeItem);
+        this._closeContextMenu();
+
+        this.app.showModal('Rename Chat', `
+            <form id="chat-history-rename-form">
+                <div class="mb-3">
+                    <label class="form-label">Chat Name</label>
+                    <input type="text" class="form-control" id="chat-history-rename-input" value="${escapeHtml(currentName)}" maxlength="200" required>
+                    <small class="form-text text-muted">Choose a friendlier label for this chat history entry.</small>
+                </div>
+                <div class="d-flex gap-2 justify-content-end">
+                    <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Name</button>
+                </div>
+            </form>
+        `);
+
+        document.getElementById('chat-history-rename-form')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const input = document.getElementById('chat-history-rename-input');
+            const nextName = input?.value?.trim() || '';
+
+            if (!nextName) {
+                this.app.showError('Chat name is required.');
+                return;
+            }
+
+            try {
+                await this.app.apiCall(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}`, 'PATCH', {
+                    sessionDisplayName: nextName
+                });
+                this.app.showToast('Chat Renamed', `Updated chat name to "${nextName}"`, 'success');
+                this.app.closeModal();
+                await this._load();
+            } catch (error) {
+                this.app.showError(`Failed to rename chat: ${error.message}`);
+            }
+        });
+    }
+
+    async _showDeleteModal() {
+        if (!this.activeItem) {
+            return;
+        }
+
+        const sessionId = this.activeItem.id;
+        const currentName = this._getDisplayName(this.activeItem);
+        this._closeContextMenu();
+
+        this.app.showModal('Delete Chat', `
+            <div class="text-center py-3">
+                <div class="mb-3 text-danger">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
+                    </svg>
+                </div>
+                <h5>Delete "${escapeHtml(currentName)}"?</h5>
+                <p class="text-muted small px-4">This removes the chat history entry and its recorded session data. This action cannot be undone.</p>
+            </div>
+            <div class="d-flex gap-2 justify-content-end">
+                <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-chat-history-btn">Delete Chat</button>
+            </div>
+        `);
+
+        document.getElementById('confirm-delete-chat-history-btn')?.addEventListener('click', async () => {
+            try {
+                await this.app.apiCall(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}`, 'DELETE');
+                this.app.showToast('Chat Deleted', `Deleted "${currentName}"`, 'info');
+                this.app.closeModal();
+                await this._load();
+            } catch (error) {
+                this.app.showError(`Failed to delete chat: ${error.message}`);
+            }
+        });
     }
 
     _openContextMenu(itemEl, anchorEl, submenu) {

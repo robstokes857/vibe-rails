@@ -399,6 +399,11 @@ namespace VibeRails.DTOs
         long SearchTimeMs,
         List<BertSearchHitResponse> Results
     );
+
+    public record UpdateChatHistorySessionRequest(
+        string? SessionDisplayName
+    );
+
     // Chat History DTOs
     public record ChatHistoryItem(
         string Id,
@@ -504,6 +509,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ChatHistoryItem))]
     [JsonSerializable(typeof(List<ChatHistoryItem>))]
     [JsonSerializable(typeof(ChatHistoryResponse))]
+    [JsonSerializable(typeof(UpdateChatHistorySessionRequest))]
     // User Input tracking DTOs
     [JsonSerializable(typeof(UserInputRecord))]
     [JsonSerializable(typeof(FileChangeInfo))]

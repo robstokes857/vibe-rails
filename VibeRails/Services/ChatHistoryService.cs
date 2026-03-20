@@ -11,4 +11,10 @@ public class ChatHistoryService(IDbService dbService) : IChatHistoryService
         var items = await dbService.GetChatHistoryPageAsync(pageSize, offset, cancellationToken);
         return new ChatHistoryResponse(items, page, pageSize);
     }
+
+    public Task<bool> RenameSessionAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken)
+        => dbService.UpdateChatHistorySessionNameAsync(sessionId, sessionDisplayName, cancellationToken);
+
+    public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken)
+        => dbService.DeleteChatHistorySessionAsync(sessionId, cancellationToken);
 }
