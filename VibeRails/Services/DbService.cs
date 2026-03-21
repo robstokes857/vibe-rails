@@ -411,7 +411,7 @@ namespace VibeRails.Services
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT Id, Content
+                SELECT Id, Timestamp, Content
                 FROM SessionLogs
                 WHERE SessionId = $sessionId
                 ORDER BY Id ASC;
@@ -423,10 +423,43 @@ namespace VibeRails.Services
             {
                 chunks.Add(new SessionLogChunkRecord(
                     Id: reader.GetInt64(0),
-                    Content: (byte[])reader.GetValue(1)));
+                    TimestampUtc: DateTime.Parse(reader.GetString(1), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                    Content: (byte[])reader.GetValue(2)));
             }
 
             return chunks;
+        }
+
+        public async Task<List<UserInputRecord>> GetUserInputsForSessionAsync(string sessionId, CancellationToken cancellationToken)
+        {
+            var inputs = new List<UserInputRecord>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT Id, SessionId, Sequence, InputText, GitCommitHash, TimestampUTC
+                FROM UserInputs
+                WHERE SessionId = $sessionId
+                ORDER BY Sequence ASC;
+                """;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                inputs.Add(new UserInputRecord(
+                    Id: reader.GetInt64(0),
+                    SessionId: reader.GetString(1),
+                    Sequence: reader.GetInt32(2),
+                    InputText: reader.GetString(3),
+                    GitCommitHash: reader.IsDBNull(4) ? null : reader.GetString(4),
+                    TimestampUTC: DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind)
+                ));
+            }
+
+            return inputs;
         }
 
         public async Task SaveSessionOutputAndMarkProcessedAsync(string sessionId, string text, CancellationToken cancellationToken)

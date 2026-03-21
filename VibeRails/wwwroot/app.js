@@ -22,12 +22,7 @@ export class VibeControlApp {
     constructor() {
         this.currentView = 'dashboard';
         this.navigationStack = ['dashboard'];
-        this.appSettings = {
-            remoteAccess: false,
-            apiKey: '',
-            enablePrerelease: false,
-            developerOptions: false
-        };
+        this.appSettings = this._normalizeAppSettings();
         this.data = {
             agents: [],
             environments: [],
@@ -352,9 +347,27 @@ export class VibeControlApp {
     }
 
     setAppSettings(settings = {}) {
-        this.appSettings = {
+        this.appSettings = this._normalizeAppSettings({
             ...this.appSettings,
-            ...settings
+            ...settings,
+            chatHistorySettings: {
+                ...(this.appSettings?.chatHistorySettings || {}),
+                ...(settings?.chatHistorySettings || {})
+            }
+        });
+    }
+
+    _normalizeAppSettings(settings = {}) {
+        return {
+            remoteAccess: false,
+            apiKey: '',
+            enablePrerelease: false,
+            developerOptions: false,
+            ...settings,
+            chatHistorySettings: {
+                processingLlm: '',
+                ...(settings?.chatHistorySettings || {})
+            }
         };
     }
 

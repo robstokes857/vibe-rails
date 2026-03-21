@@ -35,14 +35,7 @@ public static class TerminalRoutes
             }
 
             // Resolve LLM type
-            var llm = request.Cli.ToLowerInvariant() switch
-            {
-                "claude" => LLM.Claude,
-                "codex" => LLM.Codex,
-                "gemini" => LLM.Gemini,
-                "copilot" => LLM.Copilot,
-                _ => LLM.NotSet
-            };
+            var llm = LLMParser.Parse(request.Cli);
 
             if (llm == LLM.NotSet)
             {
@@ -139,14 +132,7 @@ public static class TerminalRoutes
             string? environmentName,
             CancellationToken cancellationToken) =>
         {
-            var llm = cli.ToLowerInvariant() switch
-            {
-                "claude" => LLM.Claude,
-                "codex" => LLM.Codex,
-                "gemini" => LLM.Gemini,
-                "copilot" => LLM.Copilot,
-                _ => LLM.NotSet
-            };
+            var llm = LLMParser.Parse(cli);
 
             if (llm == LLM.NotSet)
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {cli}"));

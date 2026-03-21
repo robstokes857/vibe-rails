@@ -336,6 +336,9 @@ public class GeminiSettingsTests : IDisposable
         public Task<List<SessionLogChunkRecord>> GetSessionLogChunksAsync(string sessionId, CancellationToken cancellationToken)
             => Task.FromResult(new List<SessionLogChunkRecord>());
 
+        public Task<List<UserInputRecord>> GetUserInputsForSessionAsync(string sessionId, CancellationToken cancellationToken)
+            => Task.FromResult(new List<UserInputRecord>());
+
         public Task SaveSessionOutputAndMarkProcessedAsync(string sessionId, string text, CancellationToken cancellationToken)
             => Task.CompletedTask;
 

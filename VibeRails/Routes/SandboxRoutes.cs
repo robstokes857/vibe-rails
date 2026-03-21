@@ -200,14 +200,7 @@ public static class SandboxRoutes
             if (sandbox == null)
                 return Results.NotFound(new ErrorResponse("Sandbox not found"));
 
-            var llm = cli.ToLowerInvariant() switch
-            {
-                "claude" => LLM.Claude,
-                "codex" => LLM.Codex,
-                "gemini" => LLM.Gemini,
-                "copilot" => LLM.Copilot,
-                _ => LLM.NotSet
-            };
+            var llm = LLMParser.Parse(cli);
 
             if (llm == LLM.NotSet)
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {cli}"));

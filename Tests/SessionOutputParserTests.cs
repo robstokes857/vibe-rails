@@ -45,7 +45,10 @@ public class SessionOutputParserTests
     {
         var chunks = new List<SessionLogChunkRecord>
         {
-            new(1, System.Text.Encoding.UTF8.GetBytes(
+            new(
+                1,
+                DateTime.UtcNow,
+                System.Text.Encoding.UTF8.GetBytes(
                 "PowerShell 7.5.4\r\n" +
                 "Loading personal and system profiles took 1234ms.\r\n" +
                 "(base) PS C:\\source\\VibeControl2> codex\r\n" +
@@ -71,7 +74,10 @@ public class SessionOutputParserTests
             var length = Math.Min(chunkSize, bytes.Length - offset);
             var chunk = new byte[length];
             Array.Copy(bytes, offset, chunk, 0, length);
-            chunks.Add(new SessionLogChunkRecord(chunks.Count + 1, chunk));
+            chunks.Add(new SessionLogChunkRecord(
+                Id: chunks.Count + 1,
+                TimestampUtc: DateTime.UtcNow.AddMilliseconds(offset),
+                Content: chunk));
         }
 
         return chunks;

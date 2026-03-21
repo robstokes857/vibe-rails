@@ -23,14 +23,7 @@ public static class CliLaunchRoutes
             LaunchCliRequest? request,
             CancellationToken cancellationToken) =>
         {
-            var llm = cli.ToLowerInvariant() switch
-            {
-                "claude" => LLM.Claude,
-                "codex" => LLM.Codex,
-                "gemini" => LLM.Gemini,
-                "copilot" => LLM.Copilot,
-                _ => LLM.NotSet
-            };
+            var llm = LLMParser.Parse(cli);
 
             if (llm == LLM.NotSet)
             {

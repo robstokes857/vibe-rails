@@ -49,14 +49,7 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse("CLI type is required"));
             }
 
-            var llm = request.Cli.ToLowerInvariant() switch
-            {
-                "claude" => LLM.Claude,
-                "codex" => LLM.Codex,
-                "gemini" => LLM.Gemini,
-                "copilot" => LLM.Copilot,
-                _ => LLM.NotSet
-            };
+            var llm = LLMParser.Parse(request.Cli);
 
             if (llm == LLM.NotSet)
             {

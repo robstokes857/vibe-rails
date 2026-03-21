@@ -1,4 +1,3 @@
-using System.Text.Json;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Utils;
@@ -22,7 +21,8 @@ public static class AppSettingsRoutes
                 settings.RemoteAccess,
                 maskedKey,
                 settings.EnablePrerelease,
-                settings.DeveloperOptions
+                settings.DeveloperOptions,
+                new ChatHistorySettingsDto(LLMParser.Normalize(settings.ChatHistorySettings?.ProcessingLlm))
             ));
         }).WithName("GetAppSettings");
 
@@ -42,6 +42,9 @@ public static class AppSettingsRoutes
                 settings.ApiKey = settingsDto.ApiKey;
             settings.EnablePrerelease = settingsDto.EnablePrerelease;
             settings.DeveloperOptions = settingsDto.DeveloperOptions;
+            settings.ChatHistorySettings ??= new ChatHistorySettings();
+            if (settingsDto.ChatHistorySettings is not null)
+                settings.ChatHistorySettings.ProcessingLlm = LLMParser.Normalize(settingsDto.ChatHistorySettings.ProcessingLlm);
 
             // Save back to settings.json
             Config.Save(settings);
@@ -52,7 +55,11 @@ public static class AppSettingsRoutes
                 ParserConfigs.SetApiKey(settingsDto.ApiKey);
             ParserConfigs.SetEnablePrerelease(settingsDto.EnablePrerelease);
             ParserConfigs.SetDeveloperOptions(settingsDto.DeveloperOptions);
-            return Results.Ok(settingsDto with { RemoteAccess = remoteAccess });
+            return Results.Ok(settingsDto with
+            {
+                RemoteAccess = remoteAccess,
+                ChatHistorySettings = new ChatHistorySettingsDto(settings.ChatHistorySettings.ProcessingLlm)
+            });
         }).WithName("UpdateAppSettings");
     }
 }

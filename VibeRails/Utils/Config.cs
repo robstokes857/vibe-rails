@@ -18,11 +18,19 @@ public class Settings
     public string PinHash { get; set; } = string.Empty;
     public string PinSalt { get; set; } = string.Empty;
     public HookSettings Hooks { get; set; } = new();
+    [JsonPropertyName("chatHistorySettings")]
+    public ChatHistorySettings ChatHistorySettings { get; set; } = new();
 }
 
 public class HookSettings
 {
     public bool InstallOnStartup { get; set; } = false;
+}
+
+public class ChatHistorySettings
+{
+    [JsonPropertyName("processingLlm")]
+    public string ProcessingLlm { get; set; } = string.Empty;
 }
 
 public static class Config
