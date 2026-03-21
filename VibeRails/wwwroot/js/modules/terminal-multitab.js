@@ -683,6 +683,8 @@ class TerminalManager {
         this.isScrollLocked = false;
         this.focusLayoutHandler = null;
         this.focusLayoutRaf = null;
+        this.downloadMenu = null;
+        this.downloadMenuDismissHandler = null;
         this._themeSwatches = [];
     }
 
@@ -824,6 +826,11 @@ class TerminalManager {
         this._destroyed = true;
         this.removeFocusLayoutHandler();
         this.disableLockedLayout(this.lockedPanel);
+        if (this.downloadMenuDismissHandler) {
+            document.removeEventListener('click', this.downloadMenuDismissHandler);
+            this.downloadMenuDismissHandler = null;
+        }
+        this.downloadMenu = null;
         document.body.classList.remove('vb-terminal-active-session');
 
         this.tabs.forEach((tab) => tab.instance.dispose());
@@ -851,6 +858,20 @@ class TerminalManager {
         }
 
         return DEFAULT_SELECTION;
+    }
+
+    saveActiveTerminalSession(format) {
+        const active = this.getActiveTab();
+        const vt = active?.instance?.vibeTerminal;
+        if (!vt) return;
+        const label = (active.state.label || 'terminal-session')
+            .replace(/[^a-zA-Z0-9_-]/g, '-')
+            .toLowerCase();
+        if (format === 'html') {
+            vt.downloadAsHtml(`${label}.html`);
+        } else {
+            vt.downloadAsText(`${label}.txt`);
+        }
     }
 
     bindActions() {
@@ -903,6 +924,29 @@ class TerminalManager {
 
         this.zoomInBtn?.addEventListener('click',  () => this.adjustFontSize(1));
         this.zoomOutBtn?.addEventListener('click', () => this.adjustFontSize(-1));
+
+        this.downloadMenu = this.container.querySelector('#vb-terminal-download-menu');
+        this.container.querySelector('#terminal-download-btn')
+            ?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.downloadMenu?.toggleAttribute('hidden');
+            });
+        if (this.downloadMenuDismissHandler) {
+            document.removeEventListener('click', this.downloadMenuDismissHandler);
+        }
+        this.downloadMenuDismissHandler = () => this.downloadMenu?.setAttribute('hidden', '');
+        document.addEventListener('click', this.downloadMenuDismissHandler);
+        this.container.querySelector('#terminal-save-text')
+            ?.addEventListener('click', () => {
+                this.downloadMenu?.setAttribute('hidden', '');
+                this.saveActiveTerminalSession('text');
+            });
+        this.container.querySelector('#terminal-save-html')
+            ?.addEventListener('click', () => {
+                this.downloadMenu?.setAttribute('hidden', '');
+                this.saveActiveTerminalSession('html');
+            });
+
         this.settingsBtn?.addEventListener('click',   () => this.toggleSettingsPanel());
         this.settingsClose?.addEventListener('click', () => this.toggleSettingsPanel(false));
         this.historyBtn?.addEventListener('click',    () => this.toggleHistoryPanel());
@@ -2567,6 +2611,18 @@ export class TerminalController {
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
                             <span class="vb-terminal-font-size-label" id="vb-terminal-font-size-label">14</span>
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
+                            <div class="vb-terminal-download-wrap" id="vb-terminal-download-wrap">
+                                <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-download-btn" title="Save session" aria-label="Save session">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/>
+                                        <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708z"/>
+                                    </svg>
+                                </button>
+                                <div class="vb-terminal-download-menu" id="vb-terminal-download-menu" hidden>
+                                    <button type="button" id="terminal-save-text">Save as Text (.txt)</button>
+                                    <button type="button" id="terminal-save-html">Save as HTML (.html)</button>
+                                </div>
+                            </div>
                             <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-settings-btn" title="Terminal settings" aria-label="Terminal settings">&#x2699;</button>
                             ${focusButtonHtml}
                         </div>
@@ -2596,7 +2652,7 @@ export class TerminalController {
                                 <div class="vb-terminal-settings-row">
                                     <label>Renderer</label>
                                     <select id="terminal-settings-renderer">
-                                        <option value="canvas">Canvas (Recommended)</option>
+                                        <option value="canvas">Canvas (Preferred)</option>
                                         <option value="webgl">WebGL (GPU)</option>
                                     </select>
                                 </div>

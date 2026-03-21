@@ -4,6 +4,7 @@
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 .tmp_build/
 .dotnet/.dotnet/
+.dotnet-home/
 .claude/
 artifacts/
 # User-specific files

@@ -293,11 +293,16 @@ namespace VibeRails.DTOs
     );
 
     // App Settings DTOs
+    public record ChatHistorySettingsDto(
+        string ProcessingLlm
+    );
+
     public record AppSettingsDto(
         bool RemoteAccess,
         string ApiKey,
         bool EnablePrerelease,
-        bool DeveloperOptions
+        bool DeveloperOptions,
+        ChatHistorySettingsDto? ChatHistorySettings = null
     );
 
     // Remote PIN DTOs
@@ -596,6 +601,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(MessageResponse))]
     [JsonSerializable(typeof(UpdateInfo))]
     // App Settings DTOs
+    [JsonSerializable(typeof(ChatHistorySettingsDto))]
     [JsonSerializable(typeof(AppSettingsDto))]
     // Remote PIN DTOs
     [JsonSerializable(typeof(SetPinRequest))]

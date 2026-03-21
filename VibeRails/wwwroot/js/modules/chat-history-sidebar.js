@@ -1,4 +1,11 @@
-import { buildLlmSelectionOptions, formatRelativeTime, escapeHtml } from './utils.js';
+import {
+    buildLlmSelectionOptions,
+    buildLlmSelectionValue,
+    formatRelativeTime,
+    escapeHtml,
+    parseLlmSelection,
+    populateLlmSelectionSelect
+} from './utils.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 const SCROLL_LOAD_THRESHOLD_PX = 48;
@@ -16,9 +23,15 @@ export class ChatHistorySidebar {
         this.isLoadingForSearch = false;
         this.loadFailed = false;
         this.sidebar = null;
+        this.search = null;
         this.body = null;
         this.contextMenu = null;
         this.refreshButton = null;
+        this.settingsButton = null;
+        this.settingsPanel = null;
+        this.settingsSelect = null;
+        this.settingsCloseButton = null;
+        this.isSavingSettings = false;
     }
 
     static renderHtml() {
@@ -46,13 +59,33 @@ export class ChatHistorySidebar {
                         </button>
                     </div>
                 </div>
-                <div class="ch-sidebar-search">
-                    <div class="ch-search-input-wrapper">
-                        <i class="fa-solid fa-magnifying-glass ch-search-icon"></i>
-                        <input type="text" class="ch-search-input" id="ch-search-input" placeholder="Search sessions..." autocomplete="off">
+                <div class="ch-sidebar-main">
+                    <div class="ch-sidebar-search">
+                        <div class="ch-search-input-wrapper">
+                            <i class="fa-solid fa-magnifying-glass ch-search-icon"></i>
+                            <input type="text" class="ch-search-input" id="ch-search-input" placeholder="Search sessions..." autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="ch-sidebar-body" id="ch-sidebar-body"></div>
+                    <div class="ch-sidebar-settings-panel" id="ch-sidebar-settings-panel" aria-hidden="true">
+                        <div class="ch-sidebar-settings-panel-header">
+                            <div>
+                                <div class="ch-sidebar-settings-panel-title">Chat Settings</div>
+                                <div class="ch-sidebar-settings-panel-subtitle">Changes save immediately.</div>
+                            </div>
+                            <button type="button" class="ch-sidebar-settings-close-btn" id="ch-sidebar-settings-close-btn" aria-label="Close chat settings">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                        <div class="ch-sidebar-settings-panel-body">
+                            <div class="ch-sidebar-settings-card">
+                                <label class="ch-sidebar-settings-label" for="ch-processing-llm-select">Select LLM for processing</label>
+                                <select class="ch-sidebar-settings-select" id="ch-processing-llm-select"></select>
+                                <p class="ch-sidebar-settings-help">This only stores the preferred base CLI for future chat-history processing actions.</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="ch-sidebar-body" id="ch-sidebar-body"></div>
                 
                 <!-- Floating Context Menu -->
                 <div class="ch-context-menu" id="ch-context-menu">
@@ -75,23 +108,30 @@ export class ChatHistorySidebar {
 
     mount(root, { onToggle } = {}) {
         const sidebar = root.querySelector('#ch-sidebar');
+        const search = root.querySelector('.ch-sidebar-search');
         const body = root.querySelector('#ch-sidebar-body');
         const contextMenu = root.querySelector('#ch-context-menu');
         this.sidebar = sidebar;
+        this.search = search;
         this.body = body;
         this.contextMenu = contextMenu;
         this.refreshButton = root.querySelector('#ch-sidebar-refresh-btn');
+        this.settingsButton = root.querySelector('#ch-sidebar-settings-btn');
+        this.settingsPanel = root.querySelector('#ch-sidebar-settings-panel');
+        this.settingsSelect = root.querySelector('#ch-processing-llm-select');
+        this.settingsCloseButton = root.querySelector('#ch-sidebar-settings-close-btn');
         const emitToggleState = () => onToggle?.(!sidebar?.classList.contains('ch-sidebar-collapsed'));
 
         root.querySelector('#ch-sidebar-hide-btn')?.addEventListener('click', () => {
             this._closeContextMenu();
+            this._toggleSettingsPanel(false);
             sidebar?.classList.toggle('ch-sidebar-collapsed');
             emitToggleState();
         });
 
         this.refreshButton?.addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (this.isLoadingPage || this.isLoadingForSearch) {
+            if (this.isLoadingPage || this.isLoadingForSearch || this.sidebar?.classList.contains('ch-sidebar-settings-open')) {
                 return;
             }
 
@@ -99,10 +139,16 @@ export class ChatHistorySidebar {
             await this._load();
         });
 
-        root.querySelector('#ch-sidebar-settings-btn')?.addEventListener('click', (e) => {
+        this.settingsButton?.addEventListener('click', (e) => {
             e.stopPropagation();
-            console.log('Chat History Settings Clicked');
-            // TODO: Implement settings modal or action
+            this._toggleSettingsPanel();
+        });
+        this.settingsCloseButton?.addEventListener('click', () => this._toggleSettingsPanel(false));
+
+        this._populateSettingsSelect();
+        this.settingsSelect?.addEventListener('change', async (e) => {
+            const nextValue = e.target?.value || '';
+            await this._saveProcessingLlm(nextValue);
         });
 
         contextMenu?.querySelector('[data-action="rename"]')?.addEventListener('click', (e) => {
@@ -264,6 +310,22 @@ export class ChatHistorySidebar {
         return buildLlmSelectionOptions(this.app.data.environments || []);
     }
 
+    _getSettingsLlmOptions() {
+        return buildLlmSelectionOptions([], {
+            includeGroups: false,
+            includeDefaultSuffix: false
+        });
+    }
+
+    _getSavedProcessingLlm() {
+        return this.app.appSettings?.chatHistorySettings?.processingLlm || '';
+    }
+
+    _getSavedProcessingSelectionValue() {
+        const cli = this._getSavedProcessingLlm();
+        return cli ? buildLlmSelectionValue(cli) : '';
+    }
+
     _closeContextMenu() {
         if (!this.contextMenu?.classList.contains('show')) {
             return;
@@ -282,6 +344,102 @@ export class ChatHistorySidebar {
         const isBusy = this.isLoadingPage || this.isLoadingForSearch;
         this.refreshButton.disabled = isBusy;
         this.refreshButton.classList.toggle('is-loading', isBusy);
+    }
+
+    _populateSettingsSelect() {
+        if (!this.settingsSelect) {
+            return;
+        }
+
+        const selectedValue = this._getSavedProcessingSelectionValue();
+        const options = this._getSettingsLlmOptions();
+        populateLlmSelectionSelect(this.settingsSelect, [], {
+            placeholder: null,
+            selectedValue,
+            includeGroups: false,
+            includeDefaultSuffix: false
+        });
+
+        const unsetOption = document.createElement('option');
+        unsetOption.value = '';
+        unsetOption.textContent = 'Not set';
+        this.settingsSelect.insertBefore(unsetOption, this.settingsSelect.firstChild);
+
+        if (!selectedValue) {
+            this.settingsSelect.value = '';
+        }
+
+        const validValues = new Set(['', ...options.map((item) => item.value)]);
+        if (!validValues.has(this.settingsSelect.value)) {
+            this.settingsSelect.value = '';
+        }
+    }
+
+    _toggleSettingsPanel(forceOpen) {
+        if (!this.sidebar || !this.settingsPanel) {
+            return;
+        }
+
+        if (this.sidebar.classList.contains('ch-sidebar-collapsed')) {
+            return;
+        }
+
+        const open = typeof forceOpen === 'boolean'
+            ? forceOpen
+            : !this.sidebar.classList.contains('ch-sidebar-settings-open');
+
+        if (open) {
+            this._closeContextMenu();
+            this._populateSettingsSelect();
+        }
+
+        this.sidebar.classList.toggle('ch-sidebar-settings-open', open);
+        this.settingsButton?.classList.toggle('active', open);
+        this.settingsPanel.setAttribute('aria-hidden', String(!open));
+    }
+
+    async _saveProcessingLlm(selectionValue) {
+        if (!this.settingsSelect || this.isSavingSettings) {
+            return;
+        }
+
+        const parsed = parseLlmSelection(selectionValue, []);
+        const nextCli = parsed.kind === 'base' ? (parsed.cli || '') : '';
+        const previousCli = this._getSavedProcessingLlm();
+
+        if (nextCli === previousCli) {
+            return;
+        }
+
+        this.isSavingSettings = true;
+        this.settingsPanel?.classList.add('is-saving');
+        this.settingsSelect.disabled = true;
+
+        try {
+            const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
+                remoteAccess: this.app.appSettings?.remoteAccess || false,
+                apiKey: '',
+                enablePrerelease: this.app.appSettings?.enablePrerelease || false,
+                developerOptions: this.app.appSettings?.developerOptions || false,
+                chatHistorySettings: {
+                    processingLlm: nextCli
+                }
+            });
+            this.app.setAppSettings(savedSettings);
+            this._populateSettingsSelect();
+
+            const toastMessage = nextCli
+                ? `Processing LLM set to ${nextCli}.`
+                : 'Processing LLM cleared.';
+            this.app.showToast('Chat History', toastMessage, 'success');
+        } catch (error) {
+            this._populateSettingsSelect();
+            this.app.showError(`Failed to save chat history settings: ${error.message}`);
+        } finally {
+            this.isSavingSettings = false;
+            this.settingsPanel?.classList.remove('is-saving');
+            this.settingsSelect.disabled = false;
+        }
     }
 
     _getDisplayName(item) {

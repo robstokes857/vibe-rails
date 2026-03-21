@@ -57,6 +57,15 @@ namespace VibeRails
             serviceCollection.AddScoped<LogAllFileChangesValidator>();
             serviceCollection.AddScoped<PackageChangeValidator>();
 
+            // Shell service (cross-platform process runner)
+            serviceCollection.AddScoped<IShellService, ShellService>();
+
+            // Local LLM services (run installed CLIs locally)
+            serviceCollection.AddScoped<ILocalClaudeService, LocalClaudeService>();
+            serviceCollection.AddScoped<ILocalCodexService, LocalCodexService>();
+            serviceCollection.AddScoped<ILocalGeminiService, LocalGeminiService>();
+            serviceCollection.AddScoped<ILocalCopilotService, LocalCopilotService>();
+
             // LLM CLI Environment services
             serviceCollection.AddScoped<IClaudeLlmCliEnvironment, ClaudeLlmCliEnvironment>();
             serviceCollection.AddScoped<ICodexLlmCliEnvironment, CodexLlmCliEnvironment>();

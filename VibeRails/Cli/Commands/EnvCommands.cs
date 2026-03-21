@@ -159,7 +159,7 @@ namespace VibeRails.Cli.Commands
 
             // Find environment - we need to check all LLM types since name might match multiple
             LLM_Environment? environment = null;
-            foreach (var llm in new[] { LLM.Claude, LLM.Codex, LLM.Gemini, LLM.Copilot })
+            foreach (var llm in LLMParser.All)
             {
                 environment = await repository.GetEnvironmentByNameAndLlmAsync(name, llm, cancellationToken);
                 if (environment != null) break;
@@ -217,7 +217,7 @@ namespace VibeRails.Cli.Commands
 
             // Find environment
             LLM_Environment? environment = null;
-            foreach (var llm in new[] { LLM.Claude, LLM.Codex, LLM.Gemini, LLM.Copilot })
+            foreach (var llm in LLMParser.All)
             {
                 environment = await repository.GetEnvironmentByNameAndLlmAsync(name, llm, cancellationToken);
                 if (environment != null) break;
@@ -248,7 +248,7 @@ namespace VibeRails.Cli.Commands
 
             // Find environment
             LLM_Environment? environment = null;
-            foreach (var llm in new[] { LLM.Claude, LLM.Codex, LLM.Gemini, LLM.Copilot })
+            foreach (var llm in LLMParser.All)
             {
                 environment = await repository.GetEnvironmentByNameAndLlmAsync(name, llm, cancellationToken);
                 if (environment != null) break;
@@ -281,14 +281,7 @@ namespace VibeRails.Cli.Commands
 
         private static bool TryParseLlm(string value, out LLM llm)
         {
-            llm = value.ToLowerInvariant() switch
-            {
-                "claude" => LLM.Claude,
-                "codex" => LLM.Codex,
-                "gemini" => LLM.Gemini,
-                "copilot" => LLM.Copilot,
-                _ => LLM.NotSet
-            };
+            llm = LLMParser.Parse(value);
             return llm != LLM.NotSet;
         }
 

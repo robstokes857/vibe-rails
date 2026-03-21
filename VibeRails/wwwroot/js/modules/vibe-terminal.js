@@ -126,7 +126,6 @@ export class VibeTerminal {
         this._webLinksAddon = null;
         this._ligaturesAddon = null;
         this._webFontsAddon = null;
-        this._imageAddon = null;
         this._progressAddon = null;
         this._ligaturesLoadPromise = null;
 
@@ -170,12 +169,6 @@ export class VibeTerminal {
             this._terminal.unicode.activeVersion = '15-graphemes';
         }
 
-        // ImageAddon uses WebAssembly which requires 'unsafe-eval' — skip in VS Code webview (strict CSP)
-        if (window.ImageAddon?.ImageAddon && !window.__viberails_VSCODE__) {
-            this._imageAddon = new window.ImageAddon.ImageAddon();
-            this._terminal.loadAddon(this._imageAddon);
-        }
-
         if (window.ProgressAddon?.ProgressAddon) {
             this._progressAddon = new window.ProgressAddon.ProgressAddon();
             this._terminal.loadAddon(this._progressAddon);
@@ -205,6 +198,14 @@ export class VibeTerminal {
                 this._terminal.loadAddon(new window.WebglAddon.WebglAddon());
             } catch (e) {
                 console.warn('WebGL addon failed, falling back to canvas renderer:', e);
+            }
+        }
+
+        if (window.ClipboardAddon?.ClipboardAddon) {
+            try {
+                this._terminal.loadAddon(new window.ClipboardAddon.ClipboardAddon());
+            } catch {
+                // no-op
             }
         }
 
@@ -270,6 +271,14 @@ export class VibeTerminal {
             const hasModifier = event.ctrlKey || event.metaKey;
             if (!hasModifier || event.altKey) {
                 return true;
+            }
+
+            if (key === 'c' && event.shiftKey) {
+                const selected = this._terminal?.getSelection();
+                if (selected) {
+                    navigator.clipboard?.writeText(selected).catch(() => {});
+                }
+                return false;
             }
 
             if (key === 'f') {
@@ -808,7 +817,6 @@ export class VibeTerminal {
         this._webLinksAddon = null;
         this._ligaturesAddon = null;
         this._webFontsAddon = null;
-        this._imageAddon = null;
         this._progressAddon = null;
         this._ligaturesLoadPromise = null;
         this._onFitChange = null;
@@ -818,5 +826,64 @@ export class VibeTerminal {
         this._lastFitWidth = null;
         this._lastFitHeight = null;
         this._searchTerm = '';
+    }
+
+    getPlainText() {
+        if (!this._terminal) return '';
+        const buffer = this._terminal.buffer.active;
+        const lines = [];
+        for (let i = 0; i < buffer.length; i++) {
+            const line = buffer.getLine(i);
+            lines.push(line ? line.translateToString(false) : '');
+        }
+        let end = lines.length;
+        while (end > 0 && lines[end - 1].trim() === '') {
+            end--;
+        }
+        return lines.slice(0, end).join('\n');
+    }
+
+    _triggerDownload(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    downloadAsText(filename = 'terminal-session.txt') {
+        const text = this.getPlainText();
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        this._triggerDownload(blob, filename);
+    }
+
+    downloadAsHtml(filename = 'terminal-session.html') {
+        const text = this.getPlainText();
+        const theme = this._terminal?.options?.theme || {};
+        const bg = theme.background || '#1e1e1e';
+        const fg = theme.foreground || '#d4d4d4';
+        const fontFamily = (this._fontFamily || 'monospace').replace(/"/g, "'");
+        const fontSize = this._terminal?.options?.fontSize || 14;
+        const escaped = text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Terminal Session</title>
+<style>
+html, body { margin: 0; padding: 0; background: ${bg}; }
+pre { margin: 0; padding: 16px; color: ${fg}; font-family: ${fontFamily}; font-size: ${fontSize}px; line-height: 1.4; white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body><pre>${escaped}</pre></body>
+</html>`;
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        this._triggerDownload(blob, filename);
     }
 }
