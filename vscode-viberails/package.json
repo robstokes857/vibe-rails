@@ -2,7 +2,7 @@
   "name": "vscode-viberails",
   "displayName": "VibeRails",
   "description": "Launch and control VibeRails dashboard inside VS Code",
-  "version": "1.4.20",
+  "version": "1.4.21",
   "publisher": "viberails",
   "icon": "media/vs-logo.png",
   "license": "MIT",
