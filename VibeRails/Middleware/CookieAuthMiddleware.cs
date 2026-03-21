@@ -35,10 +35,13 @@ public class CookieAuthMiddleware
         // Internal server-to-server ClientWebSocket connections (e.g. parent→child tab proxy)
         // cannot use cookies and send the session token as a WebSocket subprotocol instead.
         // Browser WebSocket connections always send the HttpOnly cookie automatically.
+        // VSCode webview WebSocket connections pass the token as a query parameter since
+        // the webview sandbox does not share cookies with the extension host.
         if (string.IsNullOrEmpty(token) && isWebSocketRequest)
         {
             token = context.WebSockets.WebSocketRequestedProtocols
-                .FirstOrDefault(x => _authService.ValidateToken(x));
+                .FirstOrDefault(x => _authService.ValidateToken(x))
+                ?? context.Request.Query["viberails_session"].FirstOrDefault();
         }
 
         if (!_authService.ValidateToken(token))
