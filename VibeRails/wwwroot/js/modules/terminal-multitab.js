@@ -926,26 +926,31 @@ class TerminalManager {
         this.zoomOutBtn?.addEventListener('click', () => this.adjustFontSize(-1));
 
         this.downloadMenu = this.container.querySelector('#vb-terminal-download-menu');
-        this.container.querySelector('#terminal-download-btn')
-            ?.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.downloadMenu?.toggleAttribute('hidden');
-            });
-        if (this.downloadMenuDismissHandler) {
-            document.removeEventListener('click', this.downloadMenuDismissHandler);
+        if (window.__viberails_VSCODE__) {
+            const downloadWrap = this.container.querySelector('#vb-terminal-download-wrap');
+            if (downloadWrap) downloadWrap.style.display = 'none';
+        } else {
+            this.container.querySelector('#terminal-download-btn')
+                ?.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.downloadMenu?.toggleAttribute('hidden');
+                });
+            if (this.downloadMenuDismissHandler) {
+                document.removeEventListener('click', this.downloadMenuDismissHandler);
+            }
+            this.downloadMenuDismissHandler = () => this.downloadMenu?.setAttribute('hidden', '');
+            document.addEventListener('click', this.downloadMenuDismissHandler);
+            this.container.querySelector('#terminal-save-text')
+                ?.addEventListener('click', () => {
+                    this.downloadMenu?.setAttribute('hidden', '');
+                    this.saveActiveTerminalSession('text');
+                });
+            this.container.querySelector('#terminal-save-html')
+                ?.addEventListener('click', () => {
+                    this.downloadMenu?.setAttribute('hidden', '');
+                    this.saveActiveTerminalSession('html');
+                });
         }
-        this.downloadMenuDismissHandler = () => this.downloadMenu?.setAttribute('hidden', '');
-        document.addEventListener('click', this.downloadMenuDismissHandler);
-        this.container.querySelector('#terminal-save-text')
-            ?.addEventListener('click', () => {
-                this.downloadMenu?.setAttribute('hidden', '');
-                this.saveActiveTerminalSession('text');
-            });
-        this.container.querySelector('#terminal-save-html')
-            ?.addEventListener('click', () => {
-                this.downloadMenu?.setAttribute('hidden', '');
-                this.saveActiveTerminalSession('html');
-            });
 
         this.settingsBtn?.addEventListener('click',   () => this.toggleSettingsPanel());
         this.settingsClose?.addEventListener('click', () => this.toggleSettingsPanel(false));
