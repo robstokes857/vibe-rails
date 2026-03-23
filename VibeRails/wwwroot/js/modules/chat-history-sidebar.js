@@ -156,6 +156,11 @@ export class ChatHistorySidebar {
             void this._showRenameModal();
         });
 
+        contextMenu?.querySelector('[data-action="summarize"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            void this._showSummaryModal();
+        });
+
         contextMenu?.querySelector('[data-action="delete"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             void this._showDeleteModal();
@@ -650,6 +655,95 @@ export class ChatHistorySidebar {
                 <span class="ch-loading-label">${label}</span>
             </div>
         `;
+    }
+
+    async _showSummaryModal() {
+        if (!this.activeItem) {
+            return;
+        }
+
+        const sessionId = this.activeItem.id;
+        const chatName = this._getDisplayName(this.activeItem);
+        this._closeContextMenu();
+
+        this.app.showModal('Chat Summary', `
+            <div class="text-muted small mb-3">${escapeHtml(chatName)}</div>
+            <div id="ch-summary-body">
+                <div class="d-flex flex-column gap-2 py-2 text-muted">
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="spinner-border spinner-border-sm flex-shrink-0" role="status"></div>
+                        <span>Generating summary…</span>
+                    </div>
+                    <div class="small" style="padding-left:1.75rem;">This might take a while. You can navigate away and come back when it is done.</div>
+                </div>
+            </div>
+            <div class="d-flex justify-content-end gap-2 mt-3">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="ch-summary-regenerate-btn" disabled>
+                    <i class="fa-solid fa-rotate-right me-1"></i>Regenerate
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" data-action="close-modal">Close</button>
+            </div>
+        `);
+
+        const loadSummary = async (regenerate) => {
+            const summaryBody = document.getElementById('ch-summary-body');
+            const regenerateBtn = document.getElementById('ch-summary-regenerate-btn');
+            if (!summaryBody) return;
+
+            summaryBody.innerHTML = `
+                <div class="d-flex flex-column gap-2 py-2 text-muted">
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="spinner-border spinner-border-sm flex-shrink-0" role="status"></div>
+                        <span>Generating summary…</span>
+                    </div>
+                    <div class="small" style="padding-left:1.75rem;">This might take a while. You can navigate away and come back when it is done.</div>
+                </div>`;
+            if (regenerateBtn) regenerateBtn.disabled = true;
+
+            try {
+                const url = `/api/v1/chatHistory/${encodeURIComponent(sessionId)}/Summary${regenerate ? '?regenerate=true' : ''}`;
+                const result = await this.app.apiCall(url, 'GET', null, { showLoading: false });
+
+                const summary = result?.summary ?? '';
+                const transcript = result?.transcript ?? '';
+                const cleanTranscript = this._stripAnsi(transcript);
+
+                if (summaryBody) {
+                    summaryBody.innerHTML = `
+                        <div class="mb-3">
+                            <div class="fw-semibold small text-muted mb-1 text-uppercase" style="letter-spacing:.05em;">Summary</div>
+                            <div class="p-3 rounded" style="background:var(--bs-tertiary-bg,#f8f9fa);white-space:pre-wrap;line-height:1.6;">${escapeHtml(summary)}</div>
+                        </div>
+                        <details>
+                            <summary class="fw-semibold small text-muted mb-1 text-uppercase" style="letter-spacing:.05em;cursor:pointer;">Raw Transcript</summary>
+                            <div class="mt-2 p-2 rounded" style="background:var(--bs-body-bg,#fff);border:1px solid var(--bs-border-color,#dee2e6);max-height:260px;overflow-y:auto;">
+                                <pre class="mb-0 small" style="white-space:pre-wrap;word-break:break-word;">${escapeHtml(cleanTranscript || '(empty)')}</pre>
+                            </div>
+                        </details>`;
+                }
+                if (regenerateBtn) regenerateBtn.disabled = false;
+                this.app.showToast('Chat Summary', `Summary ready for "${chatName}"`, 'success');
+            } catch (error) {
+                if (summaryBody) {
+                    summaryBody.innerHTML = `<div class="text-danger small">Failed to generate summary: ${escapeHtml(error.message)}</div>`;
+                }
+                if (regenerateBtn) regenerateBtn.disabled = false;
+            }
+        };
+
+        document.getElementById('ch-summary-regenerate-btn')?.addEventListener('click', () => loadSummary(true));
+
+        await loadSummary(false);
+    }
+
+    _stripAnsi(text) {
+        if (!text) return text;
+        // Strip ANSI escape sequences and other common control chars
+        return text
+            .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+            .replace(/\x1b[()][A-Z0-9]/g, '')
+            .replace(/\x1b[^[\]]/g, '')
+            .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
     }
 
     _populateLlmSubmenu(submenu) {

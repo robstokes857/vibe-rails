@@ -410,6 +410,11 @@ namespace VibeRails.DTOs
     );
 
     // Chat History DTOs
+    public record ChatSummaryResponse(
+        string Summary,
+        string Transcript
+    );
+
     public record ChatHistoryItem(
         string Id,
         string Cli,
@@ -459,6 +464,17 @@ namespace VibeRails.DTOs
         List<ClaudePlanRecord> Plans,
         int TotalCount
     );
+
+    // Summary DTOs (remote summary service)
+    public class SummaryPostDto
+    {
+        public string SessionText { get; set; } = string.Empty;
+    }
+
+    public class SummaryResponseDto
+    {
+        public string Summary { get; set; } = string.Empty;
+    }
 
     // Swarm planning DTOs (mock API for UI integration)
     public record SwarmPlanRequest(
@@ -512,6 +528,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<SessionLogResponse>))]
     [JsonSerializable(typeof(SessionOutputDetailResponse))]
     // Chat History DTOs
+    [JsonSerializable(typeof(ChatSummaryResponse))]
     [JsonSerializable(typeof(ChatHistoryItem))]
     [JsonSerializable(typeof(List<ChatHistoryItem>))]
     [JsonSerializable(typeof(ChatHistoryResponse))]
@@ -589,6 +606,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(CreateClaudePlanRequest))]
     [JsonSerializable(typeof(UpdateClaudePlanStatusRequest))]
     [JsonSerializable(typeof(ClaudePlanListResponse))]
+    // Summary DTOs
+    [JsonSerializable(typeof(SummaryPostDto))]
+    [JsonSerializable(typeof(SummaryResponseDto))]
     // Swarm plan DTOs
     [JsonSerializable(typeof(SwarmPlanRequest))]
     [JsonSerializable(typeof(SwarmPlanWrapper))]

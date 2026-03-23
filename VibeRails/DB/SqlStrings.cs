@@ -42,6 +42,16 @@ namespace VibeRails.DB
             """;
         public const string CreateProjectMetadataPathIndex = "CREATE INDEX IF NOT EXISTS idx_project_metadata_path ON ProjectMetadata(Path)";
 
+        // ChatSummary Table
+        public const string CreateChatSummaryTable = """
+            CREATE TABLE IF NOT EXISTS ChatSummary (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                SessionId TEXT NOT NULL UNIQUE,
+                SummaryText TEXT NOT NULL DEFAULT '',
+                Date TEXT NOT NULL
+            )
+            """;
+
         // Sandboxes Table (project-scoped via ProjectPath)
         public const string CreateSandboxesTable = """
             CREATE TABLE IF NOT EXISTS Sandboxes (
@@ -68,13 +78,15 @@ namespace VibeRails.DB
             CreateProjectMetadataTable,
             CreateProjectMetadataPathIndex,
             CreateSandboxesTable,
-            CreateSandboxesIndex
+            CreateSandboxesIndex,
+            CreateChatSummaryTable
         ];
 
         public static readonly string[] MigrationStatements =
         [
             "ALTER TABLE Sandboxes ADD COLUMN RemoteUrl TEXT;",
-            "ALTER TABLE Sandboxes ADD COLUMN SourceBranch TEXT;"
+            "ALTER TABLE Sandboxes ADD COLUMN SourceBranch TEXT;",
+            "ALTER TABLE ChatSummary DROP COLUMN SummaryBy;"
         ];
 
         // Environment CRUD (global)
@@ -183,5 +195,32 @@ namespace VibeRails.DB
             FROM ProjectMetadata
             WHERE Path = $path;
             """;
+
+        // ChatSummary CRUD
+        public const string UpsertChatSummary = """
+            INSERT INTO ChatSummary (SessionId, SummaryText, Date)
+            VALUES ($sessionId, $summaryText, $date)
+            ON CONFLICT(SessionId) DO UPDATE SET
+                SummaryText = excluded.SummaryText,
+                Date = excluded.Date
+            RETURNING Id;
+            """;
+        public const string SelectChatSummaryById = """
+            SELECT Id, SessionId, SummaryText, Date
+            FROM ChatSummary
+            WHERE Id = $id;
+            """;
+        public const string SelectChatSummariesBySession = """
+            SELECT Id, SessionId, SummaryText, Date
+            FROM ChatSummary
+            WHERE SessionId = $sessionId
+            ORDER BY Date DESC;
+            """;
+        public const string SelectAllChatSummaries = """
+            SELECT Id, SessionId, SummaryText, Date
+            FROM ChatSummary
+            ORDER BY Date DESC;
+            """;
+        public const string DeleteChatSummary = "DELETE FROM ChatSummary WHERE Id = $id;";
     }
 }

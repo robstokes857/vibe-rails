@@ -1185,6 +1185,7 @@ class TerminalManager {
             }
             await this.activateTab(tab.state.id, { connectIfNeeded: false });
             this.updateUi();
+            requestAnimationFrame(() => this.updateFocusContainerHeight());
             return tab;
         } catch (error) {
             this.app.showError(`Failed to create terminal tab: ${error.message}`);
@@ -1206,8 +1207,11 @@ class TerminalManager {
         try {
             await this.app.apiCall(`/api/v1/terminal/tabs/${encodeURIComponent(tabId)}`, 'DELETE');
         } catch (error) {
-            this.app.showError(`Failed to close terminal tab: ${error.message}`);
-            return;
+            // 404 means tab already expired server-side (e.g. LLM never selected) — close silently
+            if (error.message !== 'API call failed: Not Found') {
+                this.app.showError(`Failed to close terminal tab: ${error.message}`);
+            }
+            // Always fall through to local cleanup so the tab is removed from the UI
         }
 
         tab.instance.dispose();

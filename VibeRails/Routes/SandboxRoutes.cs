@@ -191,6 +191,7 @@ public static class SandboxRoutes
         app.MapPost("/api/v1/sandboxes/{id:int}/launch/{cli}", async (
             IRepository repository,
             ILaunchLLMService launchService,
+            ILlmParser llmParser,
             int id,
             string cli,
             LaunchCliRequest? request,
@@ -200,7 +201,7 @@ public static class SandboxRoutes
             if (sandbox == null)
                 return Results.NotFound(new ErrorResponse("Sandbox not found"));
 
-            var llm = LLMParser.Parse(cli);
+            var llm = llmParser.Parse(cli);
 
             if (llm == LLM.NotSet)
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {cli}"));

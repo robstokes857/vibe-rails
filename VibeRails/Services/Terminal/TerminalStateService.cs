@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Serilog;
 using VibeRails.Interfaces;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;

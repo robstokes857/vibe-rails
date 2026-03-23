@@ -7,6 +7,7 @@ using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 
 using VibeRails.Utils;
 
