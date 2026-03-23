@@ -1,50 +1,26 @@
-using VibeRails.Interfaces;
-using VibeRails.Services;
-using System.Text;
 using VibeRails.DTOs;
+using VibeRails.Interfaces;
+using System.Text;
 
-namespace VibeRails.Jobs;
+namespace VibeRails.Services;
 
-public sealed class SessionOutputProcessingJob(
-    ILogger<SessionOutputProcessingJob> logger,
-    ISystemResourceService resources,
-    IServiceScopeFactory scopeFactory,
-    ISessionOutputParser sessionOutputParser) : JobBase(logger, resources)
+public class SessionTranscriptService(
+    IDbService dbService,
+    ISessionOutputParser sessionOutputParser) : ISessionTranscriptService
 {
-    private const int BatchSize = 5;
-
-    protected override TimeSpan Interval => TimeSpan.FromMinutes(1);
-    protected override JobPriority Priority => JobPriority.Low;
-
-    protected override async Task ExecuteJob(CancellationToken cancellationToken)
+    public async Task<string> GetOrBuildAsync(string sessionId, CancellationToken cancellationToken)
     {
-        using var scope = scopeFactory.CreateScope();
-        var dbService = scope.ServiceProvider.GetRequiredService<IDbService>();
-        var sessionIds = await dbService.GetEndedUnprocessedSessionIdsAsync(BatchSize, cancellationToken);
+        var existing = await dbService.GetSessionOutputAsync(sessionId, cancellationToken);
+        if (existing != null && !string.IsNullOrWhiteSpace(existing.Text))
+            return existing.Text;
 
-        foreach (var sessionId in sessionIds)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
+        var chunks = await dbService.GetSessionLogChunksAsync(sessionId, cancellationToken);
+        var userInputs = await dbService.GetUserInputsForSessionAsync(sessionId, cancellationToken);
+        var text = await BuildTranscriptAsync(chunks, userInputs, cancellationToken);
 
-            try
-            {
-                var chunks = await dbService.GetSessionLogChunksAsync(sessionId, cancellationToken);
-                var userInputs = await dbService.GetUserInputsForSessionAsync(sessionId, cancellationToken);
-                var text = await BuildTranscriptAsync(chunks, userInputs, cancellationToken);
-                await dbService.SaveSessionOutputAndMarkProcessedAsync(sessionId, text, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "[SessionOutputProcessingJob] Failed to parse session output for {SessionId}",
-                    sessionId);
-            }
-        }
+        await dbService.SaveSessionOutputAndMarkProcessedAsync(sessionId, text, cancellationToken);
+
+        return text;
     }
 
     private async Task<string> BuildTranscriptAsync(

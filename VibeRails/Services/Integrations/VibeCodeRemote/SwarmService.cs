@@ -2,7 +2,7 @@ using System.Net.Http.Json;
 using VibeRails.DTOs;
 using VibeRails.Utils;
 
-namespace VibeRails.Services;
+namespace VibeRails.Services.Integrations.VibeCodeRemote;
 
 public class SwarmService(HttpClient httpClient)
 {

@@ -1,5 +1,6 @@
 using VibeRails.Interfaces;
 using VibeRails.DTOs;
+using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace VibeRails.Routes;
 
@@ -57,5 +58,19 @@ public static class ChatHistoryRoutes
                 ? Results.Ok(new MessageResponse("Chat deleted."))
                 : Results.NotFound(new ErrorResponse("Chat history entry not found."));
         }).WithName("DeleteChatHistory");
+
+
+        app.MapGet("/api/v1/chatHistory/{sessionId}/Summary", async (
+           IChatHistoryService chatHistoryService,
+           string sessionId,
+           bool? regenerate,
+           CancellationToken cancellationToken) =>
+       {
+           if (string.IsNullOrWhiteSpace(sessionId))
+               return Results.BadRequest(new ErrorResponse("Session id is required."));
+
+           var result = await chatHistoryService.GetSummaryAsync(sessionId, regenerate == true, cancellationToken);
+           return Results.Ok(result);
+       }).WithName("GetChatHistorySummary");
     }
 }

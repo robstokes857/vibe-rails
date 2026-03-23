@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal.Consumers;
 

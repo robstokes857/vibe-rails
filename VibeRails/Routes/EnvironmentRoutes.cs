@@ -35,6 +35,7 @@ public static class EnvironmentRoutes
         // POST /api/v1/environments - Create new environment
         app.MapPost("/api/v1/environments", async (
             LlmCliEnvironmentService envService,
+            ILlmParser llmParser,
             IRepository repository,
             CreateEnvironmentRequest request,
             CancellationToken cancellationToken) =>
@@ -49,7 +50,7 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse("CLI type is required"));
             }
 
-            var llm = LLMParser.Parse(request.Cli);
+            var llm = llmParser.Parse(request.Cli);
 
             if (llm == LLM.NotSet)
             {

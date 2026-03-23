@@ -18,14 +18,15 @@ namespace VibeRails.Cli.Commands
 
             var repository = services.GetRequiredService<IRepository>();
             var envService = services.GetRequiredService<LlmCliEnvironmentService>();
+            var llmParser = services.GetRequiredService<ILlmParser>();
 
             return args.SubCommand.ToLowerInvariant() switch
             {
                 "list" => await ListAsync(repository, cancellationToken),
-                "create" => await CreateAsync(args, repository, cancellationToken),
-                "update" => await UpdateAsync(args, repository, cancellationToken),
-                "delete" => await DeleteAsync(args, repository, envService, cancellationToken),
-                "show" => await ShowAsync(args, repository, cancellationToken),
+                "create" => await CreateAsync(args, repository, llmParser, cancellationToken),
+                "update" => await UpdateAsync(args, repository, llmParser, cancellationToken),
+                "delete" => await DeleteAsync(args, repository, envService, llmParser, cancellationToken),
+                "show" => await ShowAsync(args, repository, llmParser, cancellationToken),
                 "help" or "--help" => ShowHelp(),
                 _ => ShowUnknownSubcommand(args.SubCommand)
             };
@@ -92,7 +93,7 @@ namespace VibeRails.Cli.Commands
             return 0;
         }
 
-        private static async Task<int> CreateAsync(ParsedArgs args, IRepository repository, CancellationToken cancellationToken)
+        private static async Task<int> CreateAsync(ParsedArgs args, IRepository repository, ILlmParser llmParser, CancellationToken cancellationToken)
         {
             var name = args.Target;
             if (string.IsNullOrEmpty(name))
@@ -108,7 +109,7 @@ namespace VibeRails.Cli.Commands
                 return 1;
             }
 
-            if (!TryParseLlm(args.Cli, out var llm))
+            if (!TryParseLlm(args.Cli, llmParser, out var llm))
             {
                 CliOutput.Error($"Invalid CLI type: {args.Cli}. Must be claude, codex, gemini, or copilot.");
                 return 1;
@@ -147,7 +148,7 @@ namespace VibeRails.Cli.Commands
             return 0;
         }
 
-        private static async Task<int> UpdateAsync(ParsedArgs args, IRepository repository, CancellationToken cancellationToken)
+        private static async Task<int> UpdateAsync(ParsedArgs args, IRepository repository, ILlmParser llmParser, CancellationToken cancellationToken)
         {
             var name = args.Target;
             if (string.IsNullOrEmpty(name))
@@ -159,7 +160,7 @@ namespace VibeRails.Cli.Commands
 
             // Find environment - we need to check all LLM types since name might match multiple
             LLM_Environment? environment = null;
-            foreach (var llm in LLMParser.All)
+            foreach (var llm in llmParser.All)
             {
                 environment = await repository.GetEnvironmentByNameAndLlmAsync(name, llm, cancellationToken);
                 if (environment != null) break;
@@ -199,6 +200,7 @@ namespace VibeRails.Cli.Commands
             ParsedArgs args,
             IRepository repository,
             LlmCliEnvironmentService envService,
+            ILlmParser llmParser,
             CancellationToken cancellationToken)
         {
             var name = args.Target;
@@ -217,7 +219,7 @@ namespace VibeRails.Cli.Commands
 
             // Find environment
             LLM_Environment? environment = null;
-            foreach (var llm in LLMParser.All)
+            foreach (var llm in llmParser.All)
             {
                 environment = await repository.GetEnvironmentByNameAndLlmAsync(name, llm, cancellationToken);
                 if (environment != null) break;
@@ -236,7 +238,7 @@ namespace VibeRails.Cli.Commands
             return 0;
         }
 
-        private static async Task<int> ShowAsync(ParsedArgs args, IRepository repository, CancellationToken cancellationToken)
+        private static async Task<int> ShowAsync(ParsedArgs args, IRepository repository, ILlmParser llmParser, CancellationToken cancellationToken)
         {
             var name = args.Target;
             if (string.IsNullOrEmpty(name))
@@ -248,7 +250,7 @@ namespace VibeRails.Cli.Commands
 
             // Find environment
             LLM_Environment? environment = null;
-            foreach (var llm in LLMParser.All)
+            foreach (var llm in llmParser.All)
             {
                 environment = await repository.GetEnvironmentByNameAndLlmAsync(name, llm, cancellationToken);
                 if (environment != null) break;
@@ -279,9 +281,9 @@ namespace VibeRails.Cli.Commands
             return 0;
         }
 
-        private static bool TryParseLlm(string value, out LLM llm)
+        private static bool TryParseLlm(string value, ILlmParser llmParser, out LLM llm)
         {
-            llm = LLMParser.Parse(value);
+            llm = llmParser.Parse(value);
             return llm != LLM.NotSet;
         }
 

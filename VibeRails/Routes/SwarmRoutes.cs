@@ -1,5 +1,5 @@
 using VibeRails.DTOs;
-using VibeRails.Services;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 
 namespace VibeRails.Routes;
 

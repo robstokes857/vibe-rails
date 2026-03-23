@@ -19,6 +19,7 @@ public static class TerminalRoutes
         // POST /api/v1/terminal/start - Start a terminal session with LLM CLI
         app.MapPost("/api/v1/terminal/start", async (
             ITerminalSessionService terminalService,
+            ILlmParser llmParser,
             IRepository repository,
             StartTerminalRequest? request,
             CancellationToken cancellationToken) =>
@@ -35,7 +36,7 @@ public static class TerminalRoutes
             }
 
             // Resolve LLM type
-            var llm = LLMParser.Parse(request.Cli);
+            var llm = llmParser.Parse(request.Cli);
 
             if (llm == LLM.NotSet)
             {
@@ -127,12 +128,13 @@ public static class TerminalRoutes
 
         // GET /api/v1/terminal/bootstrap-command - Get the command to launch an LLM CLI in a terminal session
         app.MapGet("/api/v1/terminal/bootstrap-command", async (
+            ILlmParser llmParser,
             IRepository repository,
             string cli,
             string? environmentName,
             CancellationToken cancellationToken) =>
         {
-            var llm = LLMParser.Parse(cli);
+            var llm = llmParser.Parse(cli);
 
             if (llm == LLM.NotSet)
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {cli}"));

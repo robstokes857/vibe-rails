@@ -9,7 +9,7 @@ public static class AppSettingsRoutes
     public static void Map(WebApplication app)
     {
         // GET /api/v1/settings - Read current app settings
-        app.MapGet("/api/v1/settings", () =>
+        app.MapGet("/api/v1/settings", (ILlmParser llmParser) =>
         {
             var settings = Config.Load();
             var maskedKey = string.IsNullOrEmpty(settings.ApiKey)
@@ -22,12 +22,12 @@ public static class AppSettingsRoutes
                 maskedKey,
                 settings.EnablePrerelease,
                 settings.DeveloperOptions,
-                new ChatHistorySettingsDto(LLMParser.Normalize(settings.ChatHistorySettings?.ProcessingLlm))
+                new ChatHistorySettingsDto(llmParser.Normalize(settings.ChatHistorySettings?.ProcessingLlm))
             ));
         }).WithName("GetAppSettings");
 
         // POST /api/v1/settings - Update app settings
-        app.MapPost("/api/v1/settings", (AppSettingsDto settingsDto) =>
+        app.MapPost("/api/v1/settings", (AppSettingsDto settingsDto, ILlmParser llmParser) =>
         {
             // Remote access requires a PIN — if none is set, force it off
             var remoteAccess = settingsDto.RemoteAccess && RemoteConfig.IsPinConfigured;
@@ -44,7 +44,7 @@ public static class AppSettingsRoutes
             settings.DeveloperOptions = settingsDto.DeveloperOptions;
             settings.ChatHistorySettings ??= new ChatHistorySettings();
             if (settingsDto.ChatHistorySettings is not null)
-                settings.ChatHistorySettings.ProcessingLlm = LLMParser.Normalize(settingsDto.ChatHistorySettings.ProcessingLlm);
+                settings.ChatHistorySettings.ProcessingLlm = llmParser.Normalize(settingsDto.ChatHistorySettings.ProcessingLlm);
 
             // Save back to settings.json
             Config.Save(settings);

@@ -14,6 +14,7 @@ using VibeRails.Services.Terminal;
 using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Validators;
 using VibeRails.Utils;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 
 namespace VibeRails
 {
@@ -21,9 +22,16 @@ namespace VibeRails
     {
         public static void Register(IServiceCollection serviceCollection)
         {
+            serviceCollection.AddHttpClient<ISummaryService, SummaryService>(
+                x =>
+                {
+                    x.BaseAddress = new Uri("https://viberails.ai");
+                });
+
             serviceCollection.AddScoped<IFileService, FileService>();
             serviceCollection.AddSingleton<IBertInputCaptureService, BertInputCaptureService>();
             serviceCollection.AddSingleton<IBertExplorerService, BertExplorerService>();
+            serviceCollection.AddSingleton<ILlmParser, LlmParser>();
             serviceCollection.AddScoped<IDbService, DbService>();
             serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
             serviceCollection.AddSingleton<ISessionOutputParser, SessionOutputParser>();
@@ -108,7 +116,7 @@ namespace VibeRails
 
             serviceCollection.AddHostedService<UpdateCheckJob>();
             serviceCollection.AddHostedService<StaleSessionCleanupJob>();
-            serviceCollection.AddHostedService<SessionOutputProcessingJob>();
+            serviceCollection.AddScoped<ISessionTranscriptService, SessionTranscriptService>();
 
 #if DEBUG
             // Event bus — fire-and-forget publish to connected WebSocket viewers

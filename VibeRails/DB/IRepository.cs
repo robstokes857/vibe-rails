@@ -29,5 +29,12 @@ namespace VibeRails.DB
         // Project metadata operations
         Task<string?> GetProjectCustomNameAsync(string path, CancellationToken cancellationToken = default);
         Task SetProjectCustomNameAsync(string path, string customName, CancellationToken cancellationToken = default);
+
+        // ChatSummary operations
+        Task<ChatSummary> SaveChatSummaryAsync(ChatSummary chatSummary, CancellationToken cancellationToken = default);
+        Task<ChatSummary?> GetChatSummaryByIdAsync(int id, CancellationToken cancellationToken = default);
+        Task<List<ChatSummary>> GetChatSummariesBySessionAsync(string sessionId, CancellationToken cancellationToken = default);
+        Task<List<ChatSummary>> GetAllChatSummariesAsync(CancellationToken cancellationToken = default);
+        Task DeleteChatSummaryAsync(int id, CancellationToken cancellationToken = default);
     }
 }

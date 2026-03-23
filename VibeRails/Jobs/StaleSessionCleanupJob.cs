@@ -1,6 +1,7 @@
 using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 
 namespace VibeRails.Jobs;
 

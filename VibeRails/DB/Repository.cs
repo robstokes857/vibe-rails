@@ -354,6 +354,95 @@ namespace VibeRails.DB
 
         #endregion
 
+        #region ChatSummary CRUD
+
+        public async Task<ChatSummary> SaveChatSummaryAsync(ChatSummary chatSummary, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.UpsertChatSummary;
+            cmd.Parameters.AddWithValue("$sessionId", chatSummary.SessionId);
+            cmd.Parameters.AddWithValue("$summaryText", chatSummary.SummaryText);
+            cmd.Parameters.AddWithValue("$date", chatSummary.Date.ToString("O"));
+
+            var result = await cmd.ExecuteScalarAsync(cancellationToken);
+            chatSummary.Id = Convert.ToInt32(result);
+            return chatSummary;
+        }
+
+        public async Task<ChatSummary?> GetChatSummaryByIdAsync(int id, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectChatSummaryById;
+            cmd.Parameters.AddWithValue("$id", id);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                return ReadChatSummary(reader);
+            }
+
+            return null;
+        }
+
+        public async Task<List<ChatSummary>> GetChatSummariesBySessionAsync(string sessionId, CancellationToken cancellationToken = default)
+        {
+            var summaries = new List<ChatSummary>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectChatSummariesBySession;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                summaries.Add(ReadChatSummary(reader));
+            }
+
+            return summaries;
+        }
+
+        public async Task<List<ChatSummary>> GetAllChatSummariesAsync(CancellationToken cancellationToken = default)
+        {
+            var summaries = new List<ChatSummary>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectAllChatSummaries;
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                summaries.Add(ReadChatSummary(reader));
+            }
+
+            return summaries;
+        }
+
+        public async Task DeleteChatSummaryAsync(int id, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.DeleteChatSummary;
+            cmd.Parameters.AddWithValue("$id", id);
+
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        #endregion
+
         #region Private Helpers
 
         private async Task<List<LLM_Environment>> QueryEnvironmentsAsync(string sql, CancellationToken cancellationToken)
@@ -387,6 +476,17 @@ namespace VibeRails.DB
                 CustomPrompt = reader.GetString(5),
                 CreatedUTC = DateTime.Parse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind),
                 LastUsedUTC = DateTime.Parse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind)
+            };
+        }
+
+        private static ChatSummary ReadChatSummary(SqliteDataReader reader)
+        {
+            return new ChatSummary
+            {
+                Id = reader.GetInt32(0),
+                SessionId = reader.GetString(1),
+                SummaryText = reader.GetString(2),
+                Date = DateTime.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind)
             };
         }
 

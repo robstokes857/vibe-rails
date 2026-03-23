@@ -18,12 +18,13 @@ public static class CliLaunchRoutes
 
         app.MapPost("/api/v1/cli/launch/{cli}", async (
             ILaunchLLMService launchService,
+            ILlmParser llmParser,
             IRepository repository,
             string cli,
             LaunchCliRequest? request,
             CancellationToken cancellationToken) =>
         {
-            var llm = LLMParser.Parse(cli);
+            var llm = llmParser.Parse(cli);
 
             if (llm == LLM.NotSet)
             {

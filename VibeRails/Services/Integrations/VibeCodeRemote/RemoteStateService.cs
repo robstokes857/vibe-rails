@@ -1,12 +1,10 @@
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Configuration;
 using Serilog;
 using VibeRails.Utils;
 
-namespace VibeRails.Services.Terminal;
+namespace VibeRails.Services.Integrations.VibeCodeRemote;
 
 /// <summary>
 /// Handles remote registration/deregistration of terminal sessions with the VibeRails-Front server.
