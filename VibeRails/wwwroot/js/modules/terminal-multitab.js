@@ -2492,6 +2492,55 @@ export class TerminalController {
         await manager.startFromSelection(selection || DEFAULT_SELECTION);
     }
 
+    /**
+     * Wire session state events from AppEventClient to tab progress indicators.
+     * Safe to call before the manager is created — handlers null-check this.manager.
+     */
+    bindSessionEvents(appEventClient) {
+        const findTab = (sessionId) => {
+            if (!this.manager) return null;
+            for (const tab of this.manager.tabs.values()) {
+                if (tab.state.sessionId === sessionId) return tab;
+            }
+            return null;
+        };
+
+        appEventClient.on('session_started', (payload) => {
+            const tab = findTab(payload?.sessionId);
+            if (!tab) return;
+            this.manager.updateTabProgress(tab.state.id, { state: 3, value: 0 });
+        });
+
+        appEventClient.on('session_busy', (payload) => {
+            const tab = findTab(payload?.sessionId);
+            if (!tab) return;
+            this.manager.updateTabProgress(tab.state.id, { state: 3, value: 0 });
+        });
+
+        appEventClient.on('session_idle', (payload) => {
+            const tab = findTab(payload?.sessionId);
+            const cli = payload?.cli || 'Session';
+            if (tab) {
+                this.manager.updateTabProgress(tab.state.id, { state: 4, value: 0 });
+            } else {
+                this.app.showToast(cli, 'Terminal is idle', 'info');
+            }
+        });
+
+        appEventClient.on('session_completed', (payload) => {
+            const tab = findTab(payload?.sessionId);
+            const cli = payload?.cli || 'Session';
+            const exitCode = payload?.exitCode;
+            const exitText = exitCode != null ? ` (exit ${exitCode})` : '';
+            if (tab) {
+                this.manager.updateTabProgress(tab.state.id, { state: 0, value: 0 });
+                this.app.showToast(cli, `Terminal session completed${exitText}`, exitCode === 0 ? 'success' : 'info');
+            } else {
+                this.app.showToast(cli, `Headless session completed${exitText}`, exitCode === 0 ? 'success' : 'info');
+            }
+        });
+    }
+
     refreshLayout() {
         if (!this.manager) {
             return;

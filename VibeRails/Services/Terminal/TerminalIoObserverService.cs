@@ -21,6 +21,12 @@ public interface ITerminalIoObserver
 
     ValueTask OnSessionStartAsync(TerminalSessionStartEvent startEvent, CancellationToken cancellationToken = default)
         => ValueTask.CompletedTask;
+
+    ValueTask OnSessionBusyAsync(TerminalSessionBusyEvent busyEvent, CancellationToken cancellationToken = default)
+        => ValueTask.CompletedTask;
+
+    ValueTask OnSessionCompleteAsync(TerminalSessionCompleteEvent completeEvent, CancellationToken cancellationToken = default)
+        => ValueTask.CompletedTask;
 }
 
 public interface ITerminalIoObserverService
@@ -30,6 +36,8 @@ public interface ITerminalIoObserverService
     void PublishIdle(TerminalIdleEvent idleEvent);
     void PublishRemoteCommand(TerminalRemoteCommandEvent commandEvent);
     void PublishSessionStart(TerminalSessionStartEvent startEvent);
+    void PublishSessionBusy(TerminalSessionBusyEvent busyEvent);
+    void PublishSessionComplete(TerminalSessionCompleteEvent completeEvent);
 }
 
 /// <summary>
@@ -148,6 +156,28 @@ public sealed class TerminalIoObserverService : ITerminalIoObserverService
         }
     }
 
+    public void PublishSessionBusy(TerminalSessionBusyEvent busyEvent)
+    {
+        if (_observers.Count == 0)
+            return;
+
+        foreach (var observer in _observers)
+        {
+            _ = NotifySessionBusyAsync(observer, busyEvent);
+        }
+    }
+
+    public void PublishSessionComplete(TerminalSessionCompleteEvent completeEvent)
+    {
+        if (_observers.Count == 0)
+            return;
+
+        foreach (var observer in _observers)
+        {
+            _ = NotifySessionCompleteAsync(observer, completeEvent);
+        }
+    }
+
     private static async Task NotifySessionStartAsync(ITerminalIoObserver observer, TerminalSessionStartEvent startEvent)
     {
         try
@@ -157,6 +187,30 @@ public sealed class TerminalIoObserverService : ITerminalIoObserverService
         catch (Exception ex)
         {
             Log.Error(ex, "[TerminalIoObserverService] Session start observer error");
+        }
+    }
+
+    private static async Task NotifySessionBusyAsync(ITerminalIoObserver observer, TerminalSessionBusyEvent busyEvent)
+    {
+        try
+        {
+            await observer.OnSessionBusyAsync(busyEvent, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[TerminalIoObserverService] Session busy observer error");
+        }
+    }
+
+    private static async Task NotifySessionCompleteAsync(ITerminalIoObserver observer, TerminalSessionCompleteEvent completeEvent)
+    {
+        try
+        {
+            await observer.OnSessionCompleteAsync(completeEvent, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[TerminalIoObserverService] Session complete observer error");
         }
     }
 }

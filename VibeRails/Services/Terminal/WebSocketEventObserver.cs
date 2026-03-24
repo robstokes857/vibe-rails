@@ -1,14 +1,14 @@
 namespace VibeRails.Services.Terminal;
 
 /// <summary>
-/// Publishes all terminal I/O events to the EventBus so connected WebSocket viewers
+/// Publishes all terminal I/O events to the DebugEventBus so connected WebSocket viewers
 /// at /tooling/events/terminal/ receive them in real time.
 /// </summary>
-public sealed class WebSocketEventObserver : ITerminalIoObserver
+public sealed class DebugWebSocketEventObserver : ITerminalIoObserver
 {
-    private readonly EventBus _eventBus;
+    private readonly DebugEventBus _eventBus;
 
-    public WebSocketEventObserver(EventBus eventBus)
+    public DebugWebSocketEventObserver(DebugEventBus eventBus)
     {
         _eventBus = eventBus;
     }

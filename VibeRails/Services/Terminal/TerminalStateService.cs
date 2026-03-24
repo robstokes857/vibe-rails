@@ -62,7 +62,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
                 await _dbService.RecordUserInputAsync(sessionId, inputText, _gitService, ct);
             });
             s_outputWriters[sessionId] = new SessionOutputWriter(sessionId, _dbService);
-            s_sessionActivity[sessionId] = new SessionActivityState(now);
+            s_sessionActivity[sessionId] = new SessionActivityState(now, cli);
         }
         StartIdleMonitor(sessionId);
 
@@ -94,7 +94,9 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             source,
             text,
             now));
-        MarkOutputActivity(sessionId, now);
+        var busyOutputEvent = MarkOutputActivity(sessionId, now);
+        if (busyOutputEvent.HasValue)
+            _ioObserverService.PublishSessionBusy(busyOutputEvent.Value);
 
         SessionOutputWriter? outputWriter;
         lock (s_stateLock)
@@ -122,7 +124,9 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             source,
             input,
             now));
-        MarkInputActivity(sessionId, now);
+        var busyInputEvent = MarkInputActivity(sessionId, now);
+        if (busyInputEvent.HasValue)
+            _ioObserverService.PublishSessionBusy(busyInputEvent.Value);
 
         InputAccumulator? accumulator;
         lock (s_stateLock)
@@ -242,6 +246,12 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         {
             _ = _remoteStateService.DeregisterTerminalAsync(sessionId);
         }
+
+        if (activityState != null)
+        {
+            _ioObserverService.PublishSessionComplete(new TerminalSessionCompleteEvent(
+                sessionId, activityState.Cli, exitCode, DateTimeOffset.UtcNow));
+        }
     }
 
     public void Dispose()
@@ -295,6 +305,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
                             shouldPublish = true;
                             idleEvent = new TerminalIdleEvent(
                                 sessionId,
+                                activity.Cli,
                                 idleFor,
                                 s_idleThreshold,
                                 activity.LastInputUtc,
@@ -324,29 +335,39 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         }
     }
 
-    private static void MarkInputActivity(string sessionId, DateTimeOffset now)
+    private static TerminalSessionBusyEvent? MarkInputActivity(string sessionId, DateTimeOffset now)
     {
         lock (s_stateLock)
         {
             if (!s_sessionActivity.TryGetValue(sessionId, out var activity))
-                return;
+                return null;
 
             activity.LastInputUtc = now;
             activity.LastActivityUtc = now;
+
+            if (!activity.IdleNotified)
+                return null;
+
             activity.IdleNotified = false;
+            return new TerminalSessionBusyEvent(sessionId, activity.Cli, now);
         }
     }
 
-    private static void MarkOutputActivity(string sessionId, DateTimeOffset now)
+    private static TerminalSessionBusyEvent? MarkOutputActivity(string sessionId, DateTimeOffset now)
     {
         lock (s_stateLock)
         {
             if (!s_sessionActivity.TryGetValue(sessionId, out var activity))
-                return;
+                return null;
 
             activity.LastOutputUtc = now;
             activity.LastActivityUtc = now;
+
+            if (!activity.IdleNotified)
+                return null;
+
             activity.IdleNotified = false;
+            return new TerminalSessionBusyEvent(sessionId, activity.Cli, now);
         }
     }
 
@@ -366,13 +387,15 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     {
         private readonly CancellationTokenSource _cts = new();
 
-        public SessionActivityState(DateTimeOffset now)
+        public SessionActivityState(DateTimeOffset now, string cli)
         {
             LastInputUtc = now;
             LastOutputUtc = now;
             LastActivityUtc = now;
+            Cli = cli;
         }
 
+        public string Cli { get; }
         public DateTimeOffset LastInputUtc { get; set; }
         public DateTimeOffset LastOutputUtc { get; set; }
         public DateTimeOffset LastActivityUtc { get; set; }

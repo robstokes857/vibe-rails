@@ -5,6 +5,7 @@ using Moq;
 using VibeRails.Interfaces;
 using VibeRails.Jobs;
 using VibeRails.Services;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.Terminal;
 using Xunit;
 
