@@ -5,25 +5,23 @@ using VibeRails.Interfaces;
 
 namespace VibeRails.Routes;
 
-public sealed class AppNotificationWebSocketHandler : WebSocketHandler
+public sealed class AppEventWebSocketHandler : WebSocketHandler
 {
-    private readonly IAppNotificationService _notificationService;
+    private readonly IAppEventBus _eventBus;
 
-    public AppNotificationWebSocketHandler(IAppNotificationService notificationService)
+    public AppEventWebSocketHandler(IAppEventBus eventBus)
     {
-        _notificationService = notificationService;
+        _eventBus = eventBus;
     }
 
-    protected override string RoutePath => "/api/v1/notifications/ws";
-    protected override string? RouteName => "AppNotificationStream";
+    protected override string RoutePath => "/api/v1/events/ws";
+    protected override string? RouteName => "AppEventStream";
 
     protected override IDisposable OnConnected(HttpContext context, ChannelWriter<string> writer)
     {
-        return _notificationService.SubscribeToToasts(notification =>
+        return _eventBus.Subscribe(appEvent =>
         {
-            var json = JsonSerializer.Serialize(
-                notification,
-                AppJsonSerializerContext.Default.AppToastNotification);
+            var json = JsonSerializer.Serialize(appEvent, AppJsonSerializerContext.Default.AppEvent);
             writer.TryWrite(json);
         });
     }

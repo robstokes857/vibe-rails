@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using VibeRails.Services;
 
@@ -518,7 +519,21 @@ namespace VibeRails.DTOs
 
     public record EventMessage(string Type, string Text);
 
+    // Generic typed event pushed to browser over /api/v1/events/ws
+    public record AppEvent(string Type, JsonElement Payload);
+
+    // Session state event payloads
+    public record SessionStartedPayload(string SessionId, string Cli);
+    public record SessionIdlePayload(string SessionId, string Cli, double IdleForSeconds);
+    public record SessionBusyPayload(string SessionId, string Cli);
+    public record SessionCompletedPayload(string SessionId, string Cli, int? ExitCode);
+
     [JsonSerializable(typeof(AppToastNotification))]
+    [JsonSerializable(typeof(AppEvent))]
+    [JsonSerializable(typeof(SessionStartedPayload))]
+    [JsonSerializable(typeof(SessionIdlePayload))]
+    [JsonSerializable(typeof(SessionBusyPayload))]
+    [JsonSerializable(typeof(SessionCompletedPayload))]
     [JsonSerializable(typeof(EventMessage))]
     [JsonSerializable(typeof(HealthResponse))]
     [JsonSerializable(typeof(FileResponse))]

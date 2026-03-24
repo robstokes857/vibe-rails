@@ -3,7 +3,6 @@ using Microsoft.Data.Sqlite;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace Tests;
 
@@ -60,7 +59,7 @@ public class SessionParserComparisonTests(ITestOutputHelper output)
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".vibe_rails", "state.db");
 
-        Skip.If(!File.Exists(dbPath), $"Real DB not found at {dbPath}");
+        Assert.SkipWhen(!File.Exists(dbPath), $"Real DB not found at {dbPath}");
 
         var connectionString = $"Data Source={dbPath};Mode=ReadOnly;Cache=Shared";
 
@@ -82,7 +81,7 @@ public class SessionParserComparisonTests(ITestOutputHelper output)
                 """;
             sessionId = (string?)await sessionCmd.ExecuteScalarAsync();
 
-            Skip.If(sessionId is null, "No sessions with log data found in DB.");
+            Assert.SkipWhen(sessionId is null, "No sessions with log data found in DB.");
 
             await using var chunkCmd = conn.CreateCommand();
             chunkCmd.CommandText = """

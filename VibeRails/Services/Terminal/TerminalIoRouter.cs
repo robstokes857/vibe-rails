@@ -59,10 +59,22 @@ public readonly record struct TerminalResizeEvent(
 
 public readonly record struct TerminalIdleEvent(
     string SessionId,
+    string Cli,
     TimeSpan IdleFor,
     TimeSpan IdleThreshold,
     DateTimeOffset LastInputUtc,
     DateTimeOffset LastOutputUtc,
+    DateTimeOffset TimestampUtc);
+
+public readonly record struct TerminalSessionBusyEvent(
+    string SessionId,
+    string Cli,
+    DateTimeOffset TimestampUtc);
+
+public readonly record struct TerminalSessionCompleteEvent(
+    string SessionId,
+    string Cli,
+    int? ExitCode,
     DateTimeOffset TimestampUtc);
 
 public readonly record struct TerminalRemoteCommandEvent(

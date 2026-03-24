@@ -30,7 +30,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILocalClientTracker _localClientTracker;
 #if DEBUG
-    private readonly EventBus _eventBus;
+    private readonly DebugEventBus _eventBus;
 #endif
     private readonly SemaphoreSlim _createGate = new(1, 1);
     private readonly Lock _lock = new();
@@ -46,7 +46,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         IHttpClientFactory httpClientFactory,
         ILocalClientTracker localClientTracker
 #if DEBUG
-        , EventBus eventBus
+        , DebugEventBus eventBus
 #endif
     )
     {

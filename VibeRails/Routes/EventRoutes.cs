@@ -8,16 +8,16 @@ using VibeRails.Services.Terminal;
 
 namespace VibeRails.Routes;
 
-public sealed class EventWebSocketHandler : WebSocketHandler
+public sealed class DebugEventWebSocketHandler : WebSocketHandler
 {
-    private readonly EventBus _eventBus;
+    private readonly DebugEventBus _eventBus;
 
-    public EventWebSocketHandler(EventBus eventBus)
+    public DebugEventWebSocketHandler(DebugEventBus eventBus)
     {
         _eventBus = eventBus;
     }
 
-    protected override string RoutePath => "/api/v1/events/ws";
+    protected override string RoutePath => "/tooling/events/ws";
     protected override int ChannelCapacity => 256;
 
     protected override IDisposable OnConnected(HttpContext context, ChannelWriter<string> writer)
@@ -39,7 +39,7 @@ public sealed class EventWebSocketHandler : WebSocketHandler
         return new EventSubscription(_eventBus, OnEvent);
     }
 
-    private sealed class EventSubscription(EventBus bus, Action<string, string, string?> handler) : IDisposable
+    private sealed class EventSubscription(DebugEventBus bus, Action<string, string, string?> handler) : IDisposable
     {
         public void Dispose() => bus.OnEvent -= handler;
     }

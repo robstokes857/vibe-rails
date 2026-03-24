@@ -1,11 +1,11 @@
 namespace VibeRails.Services;
 
 /// <summary>
-/// Fire-and-forget event bus. Publish type+text to all current WebSocket subscribers.
+/// Debug-only fire-and-forget event bus. Publish type+text to all current WebSocket subscribers.
 /// No buffer — if nobody is listening, the publish is a no-op.
 /// tabId is null for main-process events; child-tab relay events carry the child's tabId.
 /// </summary>
-public sealed class EventBus
+public sealed class DebugEventBus
 {
     public event Action<string, string, string?>? OnEvent;
 
