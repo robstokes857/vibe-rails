@@ -292,17 +292,11 @@ namespace VibeRails.DTOs
         string Message
     );
 
-    // App Settings DTOs
-    public record ChatHistorySettingsDto(
-        string ProcessingLlm
-    );
-
     public record AppSettingsDto(
         bool RemoteAccess,
         string ApiKey,
         bool EnablePrerelease,
-        bool DeveloperOptions,
-        ChatHistorySettingsDto? ChatHistorySettings = null
+        bool DeveloperOptions
     );
 
     // Remote PIN DTOs
@@ -413,6 +407,21 @@ namespace VibeRails.DTOs
     public record ChatSummaryResponse(
         string Summary,
         string Transcript
+    );
+
+    public record ChatHistoryTranscriptResponse(
+        string SessionId,
+        string Text
+    );
+
+    public record ChatHistoryReplayChunkResponse(
+        DateTime TimestampUtc,
+        string Content
+    );
+
+    public record ChatHistoryReplayResponse(
+        string SessionId,
+        List<ChatHistoryReplayChunkResponse> Chunks
     );
 
     public record ChatHistoryItem(
@@ -529,6 +538,10 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SessionOutputDetailResponse))]
     // Chat History DTOs
     [JsonSerializable(typeof(ChatSummaryResponse))]
+    [JsonSerializable(typeof(ChatHistoryTranscriptResponse))]
+    [JsonSerializable(typeof(ChatHistoryReplayChunkResponse))]
+    [JsonSerializable(typeof(List<ChatHistoryReplayChunkResponse>))]
+    [JsonSerializable(typeof(ChatHistoryReplayResponse))]
     [JsonSerializable(typeof(ChatHistoryItem))]
     [JsonSerializable(typeof(List<ChatHistoryItem>))]
     [JsonSerializable(typeof(ChatHistoryResponse))]
@@ -620,8 +633,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ApiVersionResponse))]
     [JsonSerializable(typeof(MessageResponse))]
     [JsonSerializable(typeof(UpdateInfo))]
-    // App Settings DTOs
-    [JsonSerializable(typeof(ChatHistorySettingsDto))]
     [JsonSerializable(typeof(AppSettingsDto))]
     // Remote PIN DTOs
     [JsonSerializable(typeof(SetPinRequest))]

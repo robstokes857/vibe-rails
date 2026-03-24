@@ -349,11 +349,7 @@ export class VibeControlApp {
     setAppSettings(settings = {}) {
         this.appSettings = this._normalizeAppSettings({
             ...this.appSettings,
-            ...settings,
-            chatHistorySettings: {
-                ...(this.appSettings?.chatHistorySettings || {}),
-                ...(settings?.chatHistorySettings || {})
-            }
+            ...settings
         });
     }
 
@@ -363,11 +359,7 @@ export class VibeControlApp {
             apiKey: '',
             enablePrerelease: false,
             developerOptions: false,
-            ...settings,
-            chatHistorySettings: {
-                processingLlm: '',
-                ...(settings?.chatHistorySettings || {})
-            }
+            ...settings
         };
     }
 

@@ -8,10 +8,10 @@ public class SessionTranscriptService(
     IDbService dbService,
     ISessionOutputParser sessionOutputParser) : ISessionTranscriptService
 {
-    public async Task<string> GetOrBuildAsync(string sessionId, CancellationToken cancellationToken)
+    public async Task<string> GetOrBuildAsync(string sessionId, CancellationToken cancellationToken, bool forceRebuild = false)
     {
         var existing = await dbService.GetSessionOutputAsync(sessionId, cancellationToken);
-        if (existing != null && !string.IsNullOrWhiteSpace(existing.Text))
+        if (!forceRebuild && existing != null && !string.IsNullOrWhiteSpace(existing.Text))
             return existing.Text;
 
         var chunks = await dbService.GetSessionLogChunksAsync(sessionId, cancellationToken);
@@ -32,10 +32,6 @@ public class SessionTranscriptService(
             return await sessionOutputParser.ParseAsync(chunks, cancellationToken);
 
         var transcript = new StringBuilder();
-        var firstInput = userInputs[0];
-        var preambleChunks = GetChunksInWindow(chunks, null, firstInput.TimestampUTC);
-        var preambleText = await ParseChunksAsync(preambleChunks, cancellationToken);
-        AppendAssistantSection(transcript, preambleText, includeWhenEmpty: false);
 
         for (var i = 0; i < userInputs.Count; i++)
         {
@@ -46,7 +42,7 @@ public class SessionTranscriptService(
 
             var windowChunks = GetChunksInWindow(chunks, currentInput.TimestampUTC, nextInputTimestamp);
             var assistantText = await ParseChunksAsync(windowChunks, cancellationToken);
-            AppendMessageSection(transcript, i + 1, currentInput.InputText, assistantText);
+            AppendMessageSection(transcript, currentInput.InputText, assistantText);
         }
 
         return transcript.ToString().TrimEnd();
@@ -83,30 +79,16 @@ public class SessionTranscriptService(
         return window;
     }
 
-    private static void AppendAssistantSection(StringBuilder transcript, string assistantText, bool includeWhenEmpty)
-    {
-        var normalizedAssistantText = NormalizeBlock(assistantText);
-        if (!includeWhenEmpty && normalizedAssistantText.Length == 0)
-            return;
-
-        AppendBlankLineIfNeeded(transcript);
-        transcript.AppendLine("Assistant said:");
-        if (normalizedAssistantText.Length > 0)
-            transcript.AppendLine(normalizedAssistantText);
-    }
-
     private static void AppendMessageSection(
         StringBuilder transcript,
-        int messageNumber,
         string userText,
         string assistantText)
     {
         AppendBlankLineIfNeeded(transcript);
-        transcript.AppendLine($">>>>>>>>> Message {messageNumber}");
-        transcript.AppendLine("User said:");
+        transcript.AppendLine("User:");
         transcript.AppendLine(NormalizeBlock(userText));
-        transcript.AppendLine($"<<<<<<<<< End Message {messageNumber}");
-        transcript.AppendLine("Assistant said:");
+        transcript.AppendLine();
+        transcript.AppendLine("Assistant:");
 
         var normalizedAssistantText = NormalizeBlock(assistantText);
         if (normalizedAssistantText.Length > 0)

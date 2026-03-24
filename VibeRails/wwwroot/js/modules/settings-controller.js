@@ -9,7 +9,7 @@ export class SettingsController {
         const content = document.getElementById('app-content');
         if (!content) return;
 
-        let settings = { remoteAccess: false, apiKey: '', enablePrerelease: false, developerOptions: false, chatHistorySettings: { processingLlm: '' } };
+        let settings = { remoteAccess: false, apiKey: '', enablePrerelease: false, developerOptions: false };
         try {
             settings = await this.app.apiCall('/api/v1/settings', 'GET');
             this.app.setAppSettings(settings);
@@ -91,10 +91,7 @@ export class SettingsController {
                 remoteAccess: remoteAccess,
                 apiKey: apiKey,
                 enablePrerelease: enablePrerelease,
-                developerOptions: developerOptions,
-                chatHistorySettings: {
-                    processingLlm: this.app.appSettings?.chatHistorySettings?.processingLlm || ''
-                }
+                developerOptions: developerOptions
             });
             this.app.setAppSettings(savedSettings);
             this.applyPrereleaseVisibility(savedSettings.enablePrerelease || false);

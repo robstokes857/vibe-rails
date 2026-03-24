@@ -441,6 +441,18 @@ namespace VibeRails.DB
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        public async Task DeleteChatSummaryBySessionAsync(string sessionId, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.DeleteChatSummaryBySession;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         #endregion
 
         #region Private Helpers

@@ -2,7 +2,6 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.Integrations.VibeCodeRemote;
-using VibeRails.Utils;
 
 namespace VibeRails.Services;
 
@@ -10,8 +9,7 @@ public class ChatHistoryService(
     IDbService dbService,
     IRepository repository,
     ISessionTranscriptService sessionTranscriptService,
-    ISummaryService summaryService,
-    ILlmParser llmParser) : IChatHistoryService
+    ISummaryService summaryService) : IChatHistoryService
 {
 
     public async Task<ChatHistoryResponse> GetHistoryAsync(int page, int pageSize, CancellationToken cancellationToken)
@@ -24,12 +22,23 @@ public class ChatHistoryService(
     public Task<bool> RenameSessionAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken)
         => dbService.UpdateChatHistorySessionNameAsync(sessionId, sessionDisplayName, cancellationToken);
 
-    public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken)
-        => dbService.DeleteChatHistorySessionAsync(sessionId, cancellationToken);
+    public async Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var deleted = await dbService.DeleteChatHistorySessionAsync(sessionId, cancellationToken);
+        if (!deleted)
+            return false;
+
+        await repository.DeleteChatSummaryBySessionAsync(sessionId, cancellationToken);
+        return true;
+    }
 
     public async Task<ChatSummaryResponse> GetSummaryAsync(string sessionId, bool regenerate, CancellationToken cancellationToken)
     {
-        var transcript = await sessionTranscriptService.GetOrBuildAsync(sessionId, cancellationToken);
+        var session = await dbService.GetSessionOutputAsync(sessionId, cancellationToken);
+        if (session is null)
+            throw new KeyNotFoundException($"Session not found: {sessionId}");
+
+        var transcript = await sessionTranscriptService.GetOrBuildAsync(sessionId, cancellationToken, forceRebuild: regenerate);
 
         if (!regenerate)
         {
