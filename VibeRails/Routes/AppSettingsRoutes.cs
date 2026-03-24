@@ -9,7 +9,7 @@ public static class AppSettingsRoutes
     public static void Map(WebApplication app)
     {
         // GET /api/v1/settings - Read current app settings
-        app.MapGet("/api/v1/settings", (ILlmParser llmParser) =>
+        app.MapGet("/api/v1/settings", () =>
         {
             var settings = Config.Load();
             var maskedKey = string.IsNullOrEmpty(settings.ApiKey)
@@ -21,13 +21,12 @@ public static class AppSettingsRoutes
                 settings.RemoteAccess,
                 maskedKey,
                 settings.EnablePrerelease,
-                settings.DeveloperOptions,
-                new ChatHistorySettingsDto(llmParser.Normalize(settings.ChatHistorySettings?.ProcessingLlm))
+                settings.DeveloperOptions
             ));
         }).WithName("GetAppSettings");
 
         // POST /api/v1/settings - Update app settings
-        app.MapPost("/api/v1/settings", (AppSettingsDto settingsDto, ILlmParser llmParser) =>
+        app.MapPost("/api/v1/settings", (AppSettingsDto settingsDto) =>
         {
             // Remote access requires a PIN — if none is set, force it off
             var remoteAccess = settingsDto.RemoteAccess && RemoteConfig.IsPinConfigured;
@@ -42,9 +41,6 @@ public static class AppSettingsRoutes
                 settings.ApiKey = settingsDto.ApiKey;
             settings.EnablePrerelease = settingsDto.EnablePrerelease;
             settings.DeveloperOptions = settingsDto.DeveloperOptions;
-            settings.ChatHistorySettings ??= new ChatHistorySettings();
-            if (settingsDto.ChatHistorySettings is not null)
-                settings.ChatHistorySettings.ProcessingLlm = llmParser.Normalize(settingsDto.ChatHistorySettings.ProcessingLlm);
 
             // Save back to settings.json
             Config.Save(settings);
@@ -57,8 +53,7 @@ public static class AppSettingsRoutes
             ParserConfigs.SetDeveloperOptions(settingsDto.DeveloperOptions);
             return Results.Ok(settingsDto with
             {
-                RemoteAccess = remoteAccess,
-                ChatHistorySettings = new ChatHistorySettingsDto(settings.ChatHistorySettings.ProcessingLlm)
+                RemoteAccess = remoteAccess
             });
         }).WithName("UpdateAppSettings");
     }

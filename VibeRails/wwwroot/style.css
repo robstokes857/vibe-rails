@@ -1381,6 +1381,7 @@ button:hover .card-nav-cog {
     --terminal-min-height: 500px;
     --terminal-header-bg: #181818;
     --terminal-body-bg: #0d0d0d;
+    --vb-terminal-tab-width: 152px;
     --vb-terminal-tab-bg: #1e1e1e;
     --vb-terminal-tab-active-bg: #0d0d0d;
     --vb-terminal-tab-hover-bg: #2a2a2a;
@@ -1612,6 +1613,8 @@ button:hover .card-nav-cog {
 }
 
 #vb-terminal-panel .vb-terminal-tab-list {
+    flex: 1 1 auto;
+    min-width: 0;
     display: flex;
     height: 100%;
     overflow-x: auto;
@@ -1632,8 +1635,10 @@ button:hover .card-nav-cog {
     background: var(--vb-terminal-tab-bg);
     color: #a6adc8;
     transition: background 0.2s, color 0.2s;
-    min-width: 100px;
-    max-width: 200px;
+    width: var(--vb-terminal-tab-width);
+    min-width: var(--vb-terminal-tab-width);
+    max-width: var(--vb-terminal-tab-width);
+    flex: 0 0 var(--vb-terminal-tab-width);
     font-size: 0.75rem;
     position: relative;
     overflow: hidden;
@@ -2149,6 +2154,10 @@ body.vb-terminal-focus-active #vb-terminal-panel #terminal-container {
 }
 
 @media (max-width: 992px) {
+    #vb-terminal-panel {
+        --vb-terminal-tab-width: 136px;
+    }
+
     #vb-terminal-panel .card-header {
         padding: 10px 12px;
         gap: 10px;
@@ -2169,8 +2178,6 @@ body.vb-terminal-focus-active #vb-terminal-panel #terminal-container {
     }
 
     #vb-terminal-panel .vb-terminal-tab-item {
-        min-width: 96px;
-        max-width: 156px;
         font-size: 0.78rem;
     }
 
@@ -2222,9 +2229,8 @@ body.vb-terminal-focus-active #vb-terminal-panel #terminal-container {
 }
 
 @media (max-width: 480px) {
-    #vb-terminal-panel .vb-terminal-tab-item {
-        min-width: 84px;
-        max-width: 132px;
+    #vb-terminal-panel {
+        --vb-terminal-tab-width: 112px;
     }
 
     #vb-terminal-panel .vb-terminal-tab-add,
@@ -4002,6 +4008,40 @@ input.form-control:disabled {
 .ch-item-live {
     color: #a6e3a1;
     font-weight: 600;
+}
+
+.ch-summary-loading {
+    color: var(--color-text-muted);
+}
+
+.ch-summary-panel {
+    padding: 0.9rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--color-text);
+    white-space: pre-wrap;
+    line-height: 1.6;
+}
+
+.ch-summary-details {
+    color: var(--color-text);
+}
+
+.ch-summary-transcript {
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-base);
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.ch-summary-transcript-text {
+    color: var(--color-text);
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 /* ── Terminal PIN Overlay ─────────────────────────────────────────────────── */

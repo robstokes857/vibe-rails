@@ -60,6 +60,36 @@ public static class ChatHistoryRoutes
         }).WithName("DeleteChatHistory");
 
 
+        app.MapGet("/api/v1/chatHistory/{sessionId}/transcript", async (
+            ISessionTranscriptService transcriptService,
+            string sessionId,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+                return Results.BadRequest(new ErrorResponse("Session id is required."));
+
+            var text = await transcriptService.GetOrBuildAsync(sessionId, cancellationToken);
+            return Results.Ok(new ChatHistoryTranscriptResponse(sessionId, text));
+        }).WithName("GetChatHistoryTranscript");
+
+        app.MapGet("/api/v1/chatHistory/{sessionId}/replay", async (
+            IDbService dbService,
+            string sessionId,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+                return Results.BadRequest(new ErrorResponse("Session id is required."));
+
+            var chunks = await dbService.GetSessionLogChunksAsync(sessionId, cancellationToken);
+            return Results.Ok(new ChatHistoryReplayResponse(
+                sessionId,
+                chunks.Select(c => new ChatHistoryReplayChunkResponse(
+                    c.TimestampUtc,
+                    Convert.ToBase64String(c.Content)
+                )).ToList()
+            ));
+        }).WithName("GetChatHistoryReplay");
+
         app.MapGet("/api/v1/chatHistory/{sessionId}/Summary", async (
            IChatHistoryService chatHistoryService,
            string sessionId,
@@ -69,8 +99,15 @@ public static class ChatHistoryRoutes
            if (string.IsNullOrWhiteSpace(sessionId))
                return Results.BadRequest(new ErrorResponse("Session id is required."));
 
-           var result = await chatHistoryService.GetSummaryAsync(sessionId, regenerate == true, cancellationToken);
-           return Results.Ok(result);
+           try
+           {
+               var result = await chatHistoryService.GetSummaryAsync(sessionId, regenerate == true, cancellationToken);
+               return Results.Ok(result);
+           }
+           catch (KeyNotFoundException)
+           {
+               return Results.NotFound(new ErrorResponse("Chat history entry not found."));
+           }
        }).WithName("GetChatHistorySummary");
     }
 }

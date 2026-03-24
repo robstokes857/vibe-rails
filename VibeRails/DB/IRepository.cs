@@ -36,5 +36,6 @@ namespace VibeRails.DB
         Task<List<ChatSummary>> GetChatSummariesBySessionAsync(string sessionId, CancellationToken cancellationToken = default);
         Task<List<ChatSummary>> GetAllChatSummariesAsync(CancellationToken cancellationToken = default);
         Task DeleteChatSummaryAsync(int id, CancellationToken cancellationToken = default);
+        Task DeleteChatSummaryBySessionAsync(string sessionId, CancellationToken cancellationToken = default);
     }
 }

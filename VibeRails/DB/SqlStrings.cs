@@ -222,5 +222,6 @@ namespace VibeRails.DB
             ORDER BY Date DESC;
             """;
         public const string DeleteChatSummary = "DELETE FROM ChatSummary WHERE Id = $id;";
+        public const string DeleteChatSummaryBySession = "DELETE FROM ChatSummary WHERE SessionId = $sessionId;";
     }
 }
