@@ -13,8 +13,11 @@ public sealed class AppEventBus : IAppEventBus
     public void Publish<T>(string type, T payload, JsonTypeInfo<T> typeInfo)
     {
         var element = JsonSerializer.SerializeToElement(payload, typeInfo);
-        var appEvent = new AppEvent(type, element);
+        Publish(new AppEvent(type, element));
+    }
 
+    public void Publish(AppEvent appEvent)
+    {
         Action<AppEvent>[] listeners;
         lock (_lock)
         {

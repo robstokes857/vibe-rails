@@ -5,6 +5,7 @@ import {
     parseLlmSelection,
     populateLlmSelectionSelect
 } from './utils.js';
+import { TabStatusController } from './terminal-tab-status.js';
 
 const RESIZE_PREFIX = '__resize__:';
 const DEFAULT_SELECTION = null;
@@ -53,6 +54,7 @@ class TerminalTab {
         this.lastResizeSignature = null;
         this._initialConnectActive = false;
         this._connectFocusTimeouts = [];
+        this.statusController = null;
     }
 
     hasOpenSocket() {
@@ -83,6 +85,7 @@ class TerminalTab {
         this.installInputFocusHandlers();
 
         this.onDataDispose = this.vibeTerminal.onData((data) => {
+            this.statusController?.onTerminalData(data);
             if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                 this.socket.send(data);
             }
@@ -286,6 +289,8 @@ class TerminalTab {
     dispose() {
         this.disconnect({ disposeTerminal: true, preserveStatus: true });
         this.teardownInputFocusHandlers();
+        this.statusController?.dispose();
+        this.statusController = null;
     }
 
     setActive(active) {
@@ -485,6 +490,7 @@ class TerminalTab {
 
                 opened = true;
                 this.state.status = 'connected';
+                this.statusController?.onSocketOpen();
                 this.manager.updateUi();
 
                 if (this.isActive) {
@@ -581,6 +587,9 @@ class TerminalTab {
                 this.lastResizeSignature = null;
 
                 this.state.status = this.state.hasActiveSession ? 'disconnected' : 'not-started';
+                if (this.state.hasActiveSession) {
+                    this.statusController?.onSocketClose();
+                }
                 if (this.terminal && this.state.hasActiveSession) {
                     const reason = event.reason || 'Terminal disconnected';
                     const color = reason.includes('taken over') ? '33' : '90';
@@ -1078,6 +1087,14 @@ class TerminalManager {
         state.ui = { item, button, close, panel, terminalElement };
 
         const instance = new TerminalTab(this, state);
+        instance.statusController = new TabStatusController(state, state.ui, {
+            getCliKey: () => {
+                const meta = this.getSelectionMeta(state.selection);
+                return meta.cli || null;
+            },
+            isActiveTab: () => this.activeTabId === state.id,
+            setProgress: (progress) => this.updateTabProgress(state.id, progress)
+        });
         const tab = { state, instance };
 
         this.tabs.set(state.id, tab);
@@ -1506,6 +1523,12 @@ class TerminalManager {
     }
 
     renderTabButton(tab) {
+        if (tab?.instance?.statusController) {
+            tab.instance.statusController.render();
+            return;
+        }
+
+        // Fallback: legacy rendering for tabs without a status controller
         const button = tab?.state?.ui?.button;
         if (!button) return;
 
@@ -1521,6 +1544,11 @@ class TerminalManager {
         labelSpan.className = 'vb-terminal-tab-label';
         labelSpan.textContent = shorten(tab.state.label || 'Terminal');
         button.appendChild(labelSpan);
+
+        const status = document.createElement('span');
+        status.className = 'vb-terminal-tab-status';
+        button.appendChild(status);
+
         button.title = tab.state.label || 'Terminal';
     }
 
@@ -2497,43 +2525,71 @@ export class TerminalController {
      * Safe to call before the manager is created — handlers null-check this.manager.
      */
     bindSessionEvents(appEventClient) {
-        const findTab = (sessionId) => {
+        const findTab = (payload) => {
             if (!this.manager) return null;
-            for (const tab of this.manager.tabs.values()) {
-                if (tab.state.sessionId === sessionId) return tab;
+            // Fast path: use tabId injected by parent relay
+            if (payload?.tabId) {
+                return this.manager.tabs.get(payload.tabId) || null;
+            }
+            // Fallback: search by sessionId
+            if (payload?.sessionId) {
+                for (const tab of this.manager.tabs.values()) {
+                    if (tab.state.sessionId === payload.sessionId) return tab;
+                }
             }
             return null;
         };
 
+        const setSessionState = (tab, state) => {
+            const item = tab.state.ui.item;
+            item.classList.remove('tab-idle', 'tab-busy', 'tab-completed');
+            if (state) item.classList.add(state);
+            // Re-trigger flash animation on idle entry
+            if (state === 'tab-idle') {
+                const el = item.querySelector('.vb-terminal-tab-status');
+                if (el) {
+                    el.style.animation = 'none';
+                    el.offsetHeight;
+                    el.style.animation = '';
+                }
+            }
+        };
+
         appEventClient.on('session_started', (payload) => {
-            const tab = findTab(payload?.sessionId);
+            const tab = findTab(payload);
             if (!tab) return;
-            this.manager.updateTabProgress(tab.state.id, { state: 3, value: 0 });
+            setSessionState(tab, 'tab-busy');
+            tab.instance?.statusController?.onSessionBusy();
         });
 
         appEventClient.on('session_busy', (payload) => {
-            const tab = findTab(payload?.sessionId);
+            const tab = findTab(payload);
             if (!tab) return;
-            this.manager.updateTabProgress(tab.state.id, { state: 3, value: 0 });
+            setSessionState(tab, 'tab-busy');
+            tab.instance?.statusController?.onSessionBusy();
         });
 
         appEventClient.on('session_idle', (payload) => {
-            const tab = findTab(payload?.sessionId);
+            const tab = findTab(payload);
             const cli = payload?.cli || 'Session';
             if (tab) {
-                this.manager.updateTabProgress(tab.state.id, { state: 4, value: 0 });
+                setSessionState(tab, 'tab-idle');
+                tab.instance?.statusController?.onSessionIdle();
             } else {
                 this.app.showToast(cli, 'Terminal is idle', 'info');
             }
         });
 
         appEventClient.on('session_completed', (payload) => {
-            const tab = findTab(payload?.sessionId);
+            const tab = findTab(payload);
             const cli = payload?.cli || 'Session';
             const exitCode = payload?.exitCode;
             const exitText = exitCode != null ? ` (exit ${exitCode})` : '';
             if (tab) {
-                this.manager.updateTabProgress(tab.state.id, { state: 0, value: 0 });
+                setSessionState(tab, 'tab-completed');
+                tab.instance?.statusController?.onSessionCompleted();
+                // Flash for ~1.4s (4 × 0.35s) then settle to Ready
+                setTimeout(() => setSessionState(tab, 'tab-idle'), 1400);
                 this.app.showToast(cli, `Terminal session completed${exitText}`, exitCode === 0 ? 'success' : 'info');
             } else {
                 this.app.showToast(cli, `Headless session completed${exitText}`, exitCode === 0 ? 'success' : 'info');
@@ -2575,7 +2631,7 @@ export class TerminalController {
 
         content.innerHTML = `
             <div class="view vb-terminal-focus-view" data-view="terminal-focus">
-                <div class="vb-terminal-focus-layout">
+                <div class="vb-terminal-focus-layout vb-history-under">
                     ${ChatHistorySidebar.renderHtml()}
                     <div class="vb-terminal-focus-body" data-terminal-focus-content></div>
                 </div>
@@ -2606,10 +2662,7 @@ export class TerminalController {
         const isFocusView = options.focusView === true;
         const focusButtonHtml = isFocusView ? '' : `
                             <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-popout-btn" title="Open in fullscreen" aria-label="Open in fullscreen">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
-                                    <path d="M6 3a2 2 0 0 0-2 2v7a1 1 0 0 0 1 1h7a2 2 0 0 0 2-2V6h-1v5a1 1 0 0 1-1 1H5V5a1 1 0 0 1 1-1z"/>
-                                    <path d="M8.5 1a.5.5 0 0 0 0 1h4.793L6.146 9.146a.5.5 0 1 0 .708.708L14 2.707V7.5a.5.5 0 0 0 1 0V1z"/>
-                                </svg>
+                                <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
                                 <span class="vb-terminal-control-text">Open In Fullscreen</span>
                             </button>
         `;
@@ -2626,7 +2679,10 @@ export class TerminalController {
                         </span>
                         <span class="badge bg-secondary d-none" id="terminal-status-badge"></span>
                     </div>
-                    <div class="d-flex gap-2 align-items-center" id="terminal-actions">                        
+                    <div class="d-flex gap-2 align-items-center" id="terminal-actions">
+                        <button type="button" class="vb-terminal-history-toggle" id="terminal-history-btn" title="Chat History">
+                            <i class="fa-solid fa-clock-rotate-left"></i>
+                        </button>                        
                         <button class="btn btn-sm btn-outline-danger d-none d-inline-flex align-items-center gap-1" id="terminal-stop-btn" title="Disconnect terminal session">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>

@@ -3,9 +3,10 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Serilog;
 using VibeRails.DTOs;
-using VibeRails.Services;
+using VibeRails.Interfaces;
 
 namespace VibeRails.Services.Terminal;
 
@@ -29,8 +30,9 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILocalClientTracker _localClientTracker;
+    private readonly IAppEventBus _appEventBus;
 #if DEBUG
-    private readonly DebugEventBus _eventBus;
+    private readonly DebugEventBus _debugEventBus;
 #endif
     private readonly SemaphoreSlim _createGate = new(1, 1);
     private readonly Lock _lock = new();
@@ -44,16 +46,18 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     public TerminalTabHostService(
         IHttpClientFactory httpClientFactory,
-        ILocalClientTracker localClientTracker
+        ILocalClientTracker localClientTracker,
+        IAppEventBus appEventBus
 #if DEBUG
-        , DebugEventBus eventBus
+        , DebugEventBus debugEventBus
 #endif
     )
     {
         _httpClientFactory = httpClientFactory;
         _localClientTracker = localClientTracker;
+        _appEventBus = appEventBus;
 #if DEBUG
-        _eventBus = eventBus;
+        _debugEventBus = debugEventBus;
 #endif
         _launchDirectory = Directory.GetCurrentDirectory();
         _tabsOwnerId = $"terminal-tabs:{Environment.ProcessId}";
@@ -97,16 +101,15 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             lock (_lock)
             {
                 _tabs[child.TabId] = child;
-#if DEBUG
                 var relayCts = new CancellationTokenSource();
                 _tabRelayCts[child.TabId] = relayCts;
-#endif
                 EnsureTabsOwnerLocked();
             }
 
-#if DEBUG
             var relayToken = _tabRelayCts[child.TabId].Token;
-            _ = RelayChildEventsAsync(child, relayToken);
+            _ = RelayChildAppEventsAsync(child, relayToken);
+#if DEBUG
+            _ = RelayChildDebugEventsAsync(child, relayToken);
 #endif
             return await BuildTabStatusAsync(child, cancellationToken);
         }
@@ -212,8 +215,11 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         await CloseWebSocketAsync(browserSocket, cancellationToken);
     }
 
-#if DEBUG
-    private async Task RelayChildEventsAsync(TerminalChildProcess child, CancellationToken ct)
+    /// <summary>
+    /// Relays AppEvent messages from a child process to the parent's IAppEventBus,
+    /// enriching each event payload with the child's tabId.
+    /// </summary>
+    private async Task RelayChildAppEventsAsync(TerminalChildProcess child, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested && !child.Process.HasExited)
         {
@@ -223,10 +229,73 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 ws.Options.AddSubProtocol(child.SessionToken);
                 ws.Options.AddSubProtocol(child.TabToken);
 
-                await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{child.Port}/api/v1/events/ws"), ct);
+                var uri = new Uri($"ws://127.0.0.1:{child.Port}/api/v1/events/ws");
+                await ws.ConnectAsync(uri, ct);
 
                 var buffer = new byte[8192];
-                using var frameAccumulator = new System.IO.MemoryStream();
+                using var frameAccumulator = new MemoryStream();
+                while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
+                {
+                    var result = await ws.ReceiveAsync(buffer, ct);
+                    if (result.MessageType == WebSocketMessageType.Close)
+                        break;
+                    if (result.MessageType != WebSocketMessageType.Text)
+                        continue;
+
+                    frameAccumulator.Write(buffer, 0, result.Count);
+
+                    if (!result.EndOfMessage)
+                        continue;
+
+                    var json = Encoding.UTF8.GetString(frameAccumulator.GetBuffer(), 0, (int)frameAccumulator.Length);
+                    frameAccumulator.SetLength(0);
+
+                    try
+                    {
+                        var appEvent = JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.AppEvent);
+                        if (appEvent != null)
+                        {
+                            var enriched = EnrichPayloadWithTabId(appEvent, child.TabId);
+                            _appEventBus.Publish(enriched);
+                        }
+                    }
+                    catch (Exception) { /* skip malformed messages, keep relaying */ }
+                }
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex) { }            
+        }
+    }
+
+    private static AppEvent EnrichPayloadWithTabId(AppEvent appEvent, string tabId)
+    {
+        var node = JsonNode.Parse(appEvent.Payload.GetRawText());
+        if (node is JsonObject obj)
+        {
+            obj["tabId"] = tabId;
+            var enrichedJson = obj.ToJsonString();
+            using var doc = JsonDocument.Parse(enrichedJson);
+            return new AppEvent(appEvent.Type, doc.RootElement.Clone());
+        }
+
+        return appEvent;
+    }
+
+#if DEBUG
+    private async Task RelayChildDebugEventsAsync(TerminalChildProcess child, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested && !child.Process.HasExited)
+        {
+            try
+            {
+                using var ws = new ClientWebSocket();
+                ws.Options.AddSubProtocol(child.SessionToken);
+                ws.Options.AddSubProtocol(child.TabToken);
+
+                await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{child.Port}/tooling/events/ws"), ct);
+
+                var buffer = new byte[8192];
+                using var frameAccumulator = new MemoryStream();
                 while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
                 {
                     var result = await ws.ReceiveAsync(buffer, ct);
@@ -247,9 +316,9 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                     {
                         var msg = JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.EventMessage);
                         if (msg != null)
-                            _eventBus.Publish(msg.Type, msg.Text, child.TabId);
+                            _debugEventBus.Publish(msg.Type, msg.Text, child.TabId);
                     }
-                    catch { }
+                    catch (Exception) { /* skip malformed messages, keep relaying */ }
                 }
             }
             catch (OperationCanceledException) { return; }
@@ -268,7 +337,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         upstream.Options.AddSubProtocol(child.SessionToken);
         upstream.Options.AddSubProtocol(child.TabToken);
 
-        var upstreamUri = new Uri($"ws://127.0.0.1:{child.Port}/api/v1/events/ws");
+        var upstreamUri = new Uri($"ws://127.0.0.1:{child.Port}/tooling/events/ws");
         await upstream.ConnectAsync(upstreamUri, cancellationToken);
 
         var childToBrowser = RelayWebSocketAsync(upstream, browserSocket, cancellationToken);
