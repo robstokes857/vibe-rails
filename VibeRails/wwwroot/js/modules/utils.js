@@ -47,36 +47,45 @@ export function getCliBrand(cli) {
         codex: {
             label: 'Codex',
             logo: getAssetPath('assets/img/openai.svg'),
-            className: 'badge-cli-codex'
+            className: 'badge-cli-codex',
+            accentColor: '#70a597',
+            logoFilter: 'brightness(0) invert(1)'
         },
         chatgpt: {
             label: 'ChatGPT',
             logo: getAssetPath('assets/img/openai.svg'),
-            className: 'badge-cli-codex'
+            className: 'badge-cli-codex',
+            accentColor: '#70a597',
+            logoFilter: 'brightness(0) invert(1)'
         },
         openai: {
             label: 'OpenAI',
             logo: getAssetPath('assets/img/openai.svg'),
-            className: 'badge-cli-codex'
+            className: 'badge-cli-codex',
+            accentColor: '#70a597',
+            logoFilter: 'brightness(0) invert(1)'
         },
         claude: {
             label: 'Claude',
             logo: getAssetPath('assets/img/claude-color.svg'),
-            className: 'badge-cli-claude'
+            className: 'badge-cli-claude',
+            accentColor: '#c15f3c'
         },
         gemini: {
             label: 'Gemini',
             logo: getAssetPath('assets/img/gemini-color.svg'),
-            className: 'badge-cli-gemini'
+            className: 'badge-cli-gemini',
+            accentColor: '#568be0'
         },
         copilot: {
             label: 'Copilot',
             logo: getAssetPath('assets/img/copilot.svg'),
-            className: 'badge-cli-copilot'
+            className: 'badge-cli-copilot',
+            accentColor: '#199fd7'
         }
     };
 
-    return brands[key] || { label: cli || 'Unknown', logo: '', className: '' };
+    return brands[key] || { label: cli || 'Unknown', logo: '', className: '', accentColor: null };
 }
 
 const BASE_LLM_CHOICES = Object.freeze([

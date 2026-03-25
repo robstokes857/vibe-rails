@@ -6,5 +6,6 @@ namespace VibeRails.Interfaces;
 public interface IAppEventBus
 {
     void Publish<T>(string type, T payload, JsonTypeInfo<T> typeInfo);
+    void Publish(AppEvent appEvent);
     IDisposable Subscribe(Action<AppEvent> listener);
 }

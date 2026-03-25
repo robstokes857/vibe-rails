@@ -61,7 +61,7 @@ body.vb-terminal-scroll-locked {
     left: 0;
     right: 0;
     width: 100%;
-    overflow-y: scroll;
+    overflow-y: hidden;
 }
 
 body.vb-terminal-focus-active {
@@ -1398,7 +1398,7 @@ button:hover .card-nav-cog {
     --terminal-min-height: 500px;
     --terminal-header-bg: #181818;
     --terminal-body-bg: #0d0d0d;
-    --vb-terminal-tab-width: 152px;
+    --vb-terminal-tab-width: 250px;
     --vb-terminal-tab-bg: #1e1e1e;
     --vb-terminal-tab-active-bg: #0d0d0d;
     --vb-terminal-tab-hover-bg: #2a2a2a;
@@ -1444,6 +1444,34 @@ button:hover .card-nav-cog {
     padding: 0.35rem 0.8rem;
     font-size: 0.85rem;
     line-height: 1.2;
+}
+
+/* History toggle button in card header */
+#vb-terminal-panel .vb-terminal-history-toggle {
+    border: 1px solid var(--terminal-border, rgba(255,255,255,0.1));
+    border-radius: 6px;
+    background: transparent;
+    color: #a6adc8;
+    cursor: pointer;
+    padding: 0.4rem 0.7rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    transition: all 0.2s;
+    line-height: 1;
+}
+
+#vb-terminal-panel .vb-terminal-history-toggle:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(154, 198, 197, 0.45);
+    color: #cdd6f4;
+}
+
+#vb-terminal-panel .vb-terminal-history-toggle.active {
+    border-color: var(--terminal-accent);
+    color: var(--terminal-accent);
+    background: rgba(154, 198, 197, 0.1);
 }
 
 /* Controls bar — dark background matching card header */
@@ -1560,7 +1588,7 @@ button:hover .card-nav-cog {
     padding: 0 12px;
     display: flex;
     align-items: center;
-    height: 42px;
+    height: 50px;
     border-bottom: 1px solid var(--terminal-border);
     user-select: none;
 }
@@ -1591,8 +1619,8 @@ button:hover .card-nav-cog {
 }
 
 #vb-terminal-panel .vb-terminal-control-dot {
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     border: none;
     cursor: pointer;
@@ -1622,7 +1650,8 @@ button:hover .card-nav-cog {
 
 /* Tab strip */
 #vb-terminal-panel .vb-terminal-tab-strip {
-    flex: 1;
+    flex: 1 1 auto;
+    min-width: 0;
     display: flex;
     align-items: center;
     height: 100%;
@@ -1630,12 +1659,14 @@ button:hover .card-nav-cog {
 }
 
 #vb-terminal-panel .vb-terminal-tab-list {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
+    max-width: 100%;
     display: flex;
     height: 100%;
     overflow-x: auto;
     overflow-y: hidden;
+    scrollbar-width: none;
     gap: 1px;
     background: var(--terminal-border);
 }
@@ -1692,70 +1723,17 @@ button:hover .card-nav-cog {
     background: var(--vb-terminal-tab-hover-bg);
 }
 
-/* Status dot — shown before the tab label via ::before */
-#vb-terminal-panel .vb-terminal-tab-item.is-connected::before,
-#vb-terminal-panel .vb-terminal-tab-item.is-disconnected::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    margin-left: 10px;
-    margin-right: 2px;
-    flex-shrink: 0;
-    transition: background 0.3s ease;
-}
-
-#vb-terminal-panel .vb-terminal-tab-item.is-connected::before {
-    background: #a6e3a1;
-    box-shadow: 0 0 6px rgba(166, 227, 161, 0.4);
-    animation: tab-status-breath 3s infinite ease-in-out;
-}
-
-#vb-terminal-panel .vb-terminal-tab-item.is-disconnected::before {
-    background: #f38ba8;
-    box-shadow: 0 0 6px rgba(243, 139, 168, 0.4);
-    animation: tab-status-alert 1s infinite ease-in-out;
-}
-
-@keyframes tab-status-breath {
-
-    0%,
-    100% {
-        opacity: 0.5;
-        transform: scale(0.9);
-    }
-
-    50% {
-        opacity: 1;
-        transform: scale(1.1);
-    }
-}
-
-@keyframes tab-status-alert {
-
-    0%,
-    100% {
-        opacity: 0.4;
-        transform: scale(1);
-    }
-
-    50% {
-        opacity: 1;
-        transform: scale(1.2);
-        filter: brightness(1.2);
-    }
-}
-
-/* Progress bar — thin strip at top of tab, driven by OSC 9;4 */
+/* Progress bar — thin strip at bottom of tab, driven by OSC 9;4 and session events */
 #vb-terminal-panel .vb-terminal-tab-item[data-progress]::before {
     content: '';
     position: absolute;
-    top: 0;
+    bottom: 0;
     left: 0;
     width: var(--tab-progress, 0%);
     height: 2px;
-    border-radius: 0 1px 1px 0;
+    border-radius: 1px 1px 0 0;
     transition: width 0.3s ease;
+    z-index: 1;
 }
 
 #vb-terminal-panel .vb-terminal-tab-item[data-progress="normal"]::before {
@@ -1771,30 +1749,87 @@ button:hover .card-nav-cog {
 }
 
 #vb-terminal-panel .vb-terminal-tab-item[data-progress="indeterminate"]::before {
-    width: 40%;
-    background: var(--color-primary);
-    animation: tab-progress-indeterminate 1.4s infinite ease-in-out;
+    width: 30%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #0d0d0d, #0d0d0d, transparent);
+    animation: tab-loading-slide 1.6s infinite ease-in-out;
 }
 
-@keyframes tab-progress-indeterminate {
+@keyframes tab-loading-slide {
     0% {
-        left: -40%;
-        width: 40%;
+        left: -30%;
     }
 
     100% {
         left: 100%;
-        width: 40%;
     }
 }
 
-/* Subtle tint on the active tab */
-#vb-terminal-panel .vb-terminal-tab-item.is-connected.active {
-    background: rgba(166, 227, 161, 0.05);
+/* Inline session status text — muted text after the tab label */
+#vb-terminal-panel .vb-terminal-tab-status {
+    display: none;
+    opacity: 0.5;
+    font-size: 0.65rem;
+    font-weight: 400;
+    margin-left: 5px;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
-#vb-terminal-panel .vb-terminal-tab-item.is-disconnected.active {
-    background: rgba(243, 139, 168, 0.05);
+/* Idle / ready — muted green "Ready ✔" */
+#vb-terminal-panel .tab-idle .vb-terminal-tab-status {
+    display: inline;
+    color: #a6e3a1;
+    animation: tab-status-flash 0.4s ease 4;
+}
+
+#vb-terminal-panel .tab-idle .vb-terminal-tab-status::after {
+    content: 'Ready ✔';
+}
+
+/* Busy / thinking — shimmer gradient text */
+#vb-terminal-panel .tab-busy .vb-terminal-tab-status {
+    display: inline;
+    background: linear-gradient(90deg, #6c7086 0%, #cdd6f4 50%, #6c7086 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: tab-shimmer 2s linear infinite;
+}
+
+#vb-terminal-panel .tab-busy .vb-terminal-tab-status::after {
+    content: 'thinking';
+}
+
+/* Disconnected — amber "disconnected" */
+#vb-terminal-panel .is-disconnected .vb-terminal-tab-status {
+    display: inline;
+    color: #fab387;
+}
+
+#vb-terminal-panel .is-disconnected .vb-terminal-tab-status::after {
+    content: 'disconnected';
+}
+
+/* Completed — entire tab background flashes then transitions to idle */
+#vb-terminal-panel .vb-terminal-tab-item.tab-completed {
+    animation: tab-complete-flash 0.35s ease 4;
+}
+
+@keyframes tab-status-flash {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.15; }
+}
+
+@keyframes tab-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+@keyframes tab-complete-flash {
+    0%, 100% { background: var(--vb-terminal-tab-bg); }
+    50% { background: rgba(166, 227, 161, 0.15); }
 }
 
 #vb-terminal-panel .vb-terminal-tab-button {
@@ -1830,25 +1865,24 @@ button:hover .card-nav-cog {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-/* When status dot is present, remove the button's left gap (dot provides the spacing) */
-#vb-terminal-panel .vb-terminal-tab-item.is-connected .vb-terminal-tab-button,
-#vb-terminal-panel .vb-terminal-tab-item.is-disconnected .vb-terminal-tab-button {
-    padding-left: 0;
+    font-size: 0.82rem;
+    font-weight: 600;
 }
 
 #vb-terminal-panel .vb-terminal-tab-close {
     border: none;
     background: transparent;
     color: #6c7086;
-    padding: 4px;
+    padding: 6px 8px;
     margin-left: 2px;
     border-radius: 4px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     line-height: 1;
+    font-size: 1.4rem;
+    min-width: 30px;
+    min-height: 30px;
     transition: background 0.2s, color 0.2s;
     flex-shrink: 0;
     cursor: pointer;
@@ -1858,6 +1892,137 @@ button:hover .card-nav-cog {
     background: rgba(255, 255, 255, 0.1);
     color: #cdd6f4;
 }
+
+/* ═══════════ Tab Status Overhaul ═══════════ */
+
+/* Identity section (left side of tab) */
+#vb-terminal-panel .vb-tab-identity {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+    flex: 1 1 auto;
+}
+
+#vb-terminal-panel .vb-tab-brand-logo {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    object-fit: contain;
+}
+
+#vb-terminal-panel .vb-tab-brand-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #6c7086;
+    font-family: monospace;
+}
+
+/* Status section (right side of tab) */
+#vb-terminal-panel .vb-tab-status-section {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding-left: 6px;
+}
+
+#vb-terminal-panel .vb-tab-status-text {
+    font-size: 0.6rem;
+    font-weight: 400;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    letter-spacing: 0.02em;
+    opacity: 0.5;
+    white-space: nowrap;
+}
+
+/* State-specific status text colors */
+#vb-terminal-panel .tab-status-connected .vb-tab-status-text {
+    color: #94a3b8;
+}
+
+#vb-terminal-panel .tab-status-thinking .vb-tab-status-text {
+    background: linear-gradient(90deg, #6c7086 0%, #cdd6f4 50%, #6c7086 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: tab-shimmer 2s linear infinite;
+}
+
+#vb-terminal-panel .tab-status-ready .vb-tab-status-text {
+    color: #94a3b8;
+}
+
+#vb-terminal-panel .tab-status-disconnected .vb-tab-status-text {
+    color: #fab387;
+}
+
+/* Status icon — FA icons for static states, emoji for thinking */
+#vb-terminal-panel .vb-tab-status-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    line-height: 1;
+    width: 1.4em;
+    height: 1.4em;
+    overflow: hidden;
+}
+
+#vb-terminal-panel .vb-tab-status-icon i {
+    font-size: 0.6rem;
+    opacity: 0.5;
+}
+
+#vb-terminal-panel .tab-status-connected .vb-tab-status-icon i {
+    color: #94a3b8;
+}
+
+#vb-terminal-panel .tab-status-ready .vb-tab-status-icon i {
+    color: #94a3b8;
+}
+
+#vb-terminal-panel .tab-status-disconnected .vb-tab-status-icon i {
+    color: #fab387;
+}
+
+/* Thinking emoji — quick drop-in / drop-out */
+#vb-terminal-panel .vb-tab-status-icon.vb-emoji-enter {
+    animation: emoji-drop-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+#vb-terminal-panel .vb-tab-status-icon.vb-emoji-exit {
+    animation: emoji-drop-out 0.2s cubic-bezier(0.55, 0, 1, 0.45) forwards;
+}
+
+@keyframes emoji-drop-in {
+    0%   { transform: translateY(-120%); opacity: 0; }
+    100% { transform: translateY(0);     opacity: 1; }
+}
+
+@keyframes emoji-drop-out {
+    0%   { transform: translateY(0);     opacity: 1; }
+    100% { transform: translateY(120%);  opacity: 0; }
+}
+
+/* Ready gradient flash — background tab notification */
+#vb-terminal-panel .vb-terminal-tab-item.tab-status-ready-flash {
+    animation: tab-ready-gradient-flash 1.2s ease 5;
+}
+
+@keyframes tab-ready-gradient-flash {
+    0%, 100% { background: var(--vb-terminal-tab-bg); }
+    40%, 60% { background: linear-gradient(135deg, rgba(166, 227, 161, 0.28), rgba(116, 199, 236, 0.2)); }
+}
+
+/* ═══════════ End Tab Status Overhaul ═══════════ */
 
 #vb-terminal-panel .vb-terminal-tab-action-group {
     display: flex;
@@ -1936,11 +2101,11 @@ button:hover .card-nav-cog {
     background: transparent;
     color: #a6adc8;
     cursor: pointer;
-    padding: 0.35rem 0.8rem;
+    padding: 0.4rem 0.9rem;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     white-space: nowrap;
     transition: all 0.2s;
 }
@@ -2184,7 +2349,12 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
 
 @media (max-width: 992px) {
     #vb-terminal-panel {
-        --vb-terminal-tab-width: 136px;
+        --vb-terminal-tab-width: 200px;
+    }
+
+    /* Hide status text on tablet, keep icon */
+    #vb-terminal-panel .vb-tab-status-text {
+        display: none;
     }
 
     #vb-terminal-panel .card-header {
@@ -2275,7 +2445,24 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
 
 @media (max-width: 480px) {
     #vb-terminal-panel {
-        --vb-terminal-tab-width: 112px;
+        --vb-terminal-tab-width: 100px;
+    }
+
+    /* Show only icon + first ~5 chars */
+    #vb-terminal-panel .vb-terminal-tab-label {
+        max-width: 3.5em;
+    }
+
+    /* Hide entire status section */
+    #vb-terminal-panel .vb-tab-status-section {
+        display: none;
+    }
+
+    #vb-terminal-panel .vb-terminal-tab-close {
+        min-width: 22px;
+        min-height: 22px;
+        padding: 3px 5px;
+        font-size: 1.1rem;
     }
 
     #vb-terminal-panel .vb-terminal-tab-add,

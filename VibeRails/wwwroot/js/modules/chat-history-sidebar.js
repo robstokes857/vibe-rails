@@ -29,7 +29,7 @@ export class ChatHistorySidebar {
 
     static renderHtml() {
         return `
-            <div class="ch-sidebar" id="ch-sidebar">
+            <div class="ch-sidebar ch-sidebar-collapsed" id="ch-sidebar">
                 <div class="ch-sidebar-header">
                     <span class="ch-sidebar-title">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16" style="opacity:0.7">
@@ -242,6 +242,11 @@ export class ChatHistorySidebar {
             if (this.filterText && this.hasMore && !this.isLoadingForSearch) {
                 void this._loadRemainingPagesForSearch();
             }
+
+            // If visible items don't fill the container, keep loading
+            if (this._shouldLoadNextPage()) {
+                void this._loadNextPage();
+            }
         }
     }
 
@@ -273,8 +278,9 @@ export class ChatHistorySidebar {
             return false;
         }
 
+        // If content doesn't fill the container, load more to fill it
         if (this.body.scrollHeight <= this.body.clientHeight) {
-            return false;
+            return true;
         }
 
         return this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - SCROLL_LOAD_THRESHOLD_PX;
