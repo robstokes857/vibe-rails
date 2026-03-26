@@ -42,10 +42,8 @@ export class ChatHistorySidebar {
                         <button class="ch-sidebar-refresh-btn" id="ch-sidebar-refresh-btn" title="Refresh history" aria-label="Refresh history">
                             <i class="fa-solid fa-arrows-rotate"></i>
                         </button>
-                        <button class="ch-sidebar-hide-btn" id="ch-sidebar-hide-btn" title="Hide history">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
-                                <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/>
-                            </svg>
+                        <button class="ch-sidebar-close-btn" id="ch-sidebar-close-btn" title="Close" aria-label="Close chat history">
+                            <i class="fa-solid fa-xmark"></i>
                         </button>
                     </div>
                 </div>
@@ -91,12 +89,22 @@ export class ChatHistorySidebar {
         this.body = body;
         this.contextMenu = contextMenu;
         this.refreshButton = root.querySelector('#ch-sidebar-refresh-btn');
+        this.closeButton = root.querySelector('#ch-sidebar-close-btn');
         const emitToggleState = () => onToggle?.(!sidebar?.classList.contains('ch-sidebar-collapsed'));
 
-        root.querySelector('#ch-sidebar-hide-btn')?.addEventListener('click', () => {
-            this._closeContextMenu();
-            sidebar?.classList.toggle('ch-sidebar-collapsed');
-            emitToggleState();
+        // Close button collapses the sidebar
+        this.closeButton?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            onToggle?.(false);
+        });
+
+        // Clicking the collapsed sidebar peek strip re-opens it
+        sidebar?.addEventListener('click', (e) => {
+            if (!sidebar.classList.contains('ch-sidebar-collapsed')) return;
+            // Only respond to clicks on the sidebar itself or its header when collapsed
+            const clickedInteractive = e.target.closest('button, input, a, .ch-item');
+            if (clickedInteractive) return;
+            onToggle?.(true);
         });
 
         this.refreshButton?.addEventListener('click', async (e) => {

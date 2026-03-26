@@ -1,3 +1,4 @@
+using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using System.Text;
@@ -5,20 +6,20 @@ using System.Text;
 namespace VibeRails.Services;
 
 public class SessionTranscriptService(
-    IDbService dbService,
+    IRepository repository,
     ISessionOutputParser sessionOutputParser) : ISessionTranscriptService
 {
     public async Task<string> GetOrBuildAsync(string sessionId, CancellationToken cancellationToken, bool forceRebuild = false)
     {
-        var existing = await dbService.GetSessionOutputAsync(sessionId, cancellationToken);
+        var existing = await repository.GetSessionOutputAsync(sessionId, cancellationToken);
         if (!forceRebuild && existing != null && !string.IsNullOrWhiteSpace(existing.Text))
             return existing.Text;
 
-        var chunks = await dbService.GetSessionLogChunksAsync(sessionId, cancellationToken);
-        var userInputs = await dbService.GetUserInputsForSessionAsync(sessionId, cancellationToken);
+        var chunks = await repository.GetSessionLogChunksAsync(sessionId, cancellationToken);
+        var userInputs = await repository.GetUserInputsForSessionAsync(sessionId, cancellationToken);
         var text = await BuildTranscriptAsync(chunks, userInputs, cancellationToken);
 
-        await dbService.SaveSessionOutputAndMarkProcessedAsync(sessionId, text, cancellationToken);
+        await repository.SaveSessionOutputAndMarkProcessedAsync(sessionId, text, cancellationToken);
 
         return text;
     }

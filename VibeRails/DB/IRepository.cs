@@ -1,10 +1,37 @@
 using VibeRails.DTOs;
+using VibeRails.Interfaces;
 using VibeRails.Services;
 
 namespace VibeRails.DB
 {
     public interface IRepository
     {
+        void InitializeDatabase();
+
+        // Session lifecycle
+        Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir);
+        Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false);
+        Task CompleteSessionAsync(string sessionId, int exitCode);
+
+        // Session retrieval
+        Task<SessionWithLogsResponse?> GetSessionWithLogsAsync(string sessionId, CancellationToken cancellationToken);
+        Task<List<SessionResponse>> GetRecentSessionsAsync(int limit, CancellationToken cancellationToken);
+        Task<SessionOutputDetailResponse?> GetSessionOutputAsync(string sessionId, CancellationToken cancellationToken);
+        Task<List<string>> GetEndedUnprocessedSessionIdsAsync(int limit, CancellationToken cancellationToken);
+        Task<List<SessionLogChunkRecord>> GetSessionLogChunksAsync(string sessionId, CancellationToken cancellationToken);
+        Task<List<UserInputRecord>> GetUserInputsForSessionAsync(string sessionId, CancellationToken cancellationToken);
+        Task SaveSessionOutputAndMarkProcessedAsync(string sessionId, string text, CancellationToken cancellationToken);
+        Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, CancellationToken cancellationToken);
+        Task<bool> UpdateChatHistorySessionNameAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken);
+        Task<bool> DeleteChatHistorySessionAsync(string sessionId, CancellationToken cancellationToken);
+        Task<List<string>> GetOpenSessionIdsAsync(DateTime olderThan, CancellationToken cancellationToken);
+
+        // User input tracking
+        Task<UserInputRecord?> GetLastUserInputAsync(string sessionId);
+        Task<long> InsertUserInputAsync(string sessionId, int sequence, string inputText, string? gitCommitHash);
+        Task InsertFileChangesAsync(long userInputId, long? previousInputId, List<FileChangeInfo> changes);
+        Task RecordUserInputAsync(string sessionId, string inputText, IGitService gitService, CancellationToken cancellationToken = default);
+
         // Environment operations (global, not project-scoped)
         Task<LLM_Environment?> GetEnvironmentByNameAndLlmAsync(string name, LLM llm, CancellationToken cancellationToken = default);
         Task<LLM_Environment?> FindEnvironmentByNameAsync(string name, CancellationToken cancellationToken = default);

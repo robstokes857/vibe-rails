@@ -1,3 +1,4 @@
+using VibeRails.DB;
 using VibeRails.Interfaces;
 using VibeRails.Utils;
 
@@ -27,8 +28,8 @@ namespace VibeRails
             fileService.InitGlobalSave();
 
             // Initialize SQLite database
-            var dbService = scope.ServiceProvider.GetRequiredService<IDbService>();
-            dbService.InitializeDatabase();
+            var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
+            repository.InitializeDatabase();
 
 
             var isLocal = fileService.TryGetProjectRootPath();

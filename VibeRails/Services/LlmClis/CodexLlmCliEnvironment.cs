@@ -8,7 +8,7 @@ namespace VibeRails.Services.LlmClis
 {
     public class CodexLlmCliEnvironment : BaseLlmCliEnvironment, ICodexLlmCliEnvironment
     {
-        public CodexLlmCliEnvironment(IDbService dbService, IFileService fileService) : base(dbService, fileService) { }
+        public CodexLlmCliEnvironment(IFileService fileService) : base(fileService) { }
 
         public override string GetConfigSubdirectory() => "codex";
 

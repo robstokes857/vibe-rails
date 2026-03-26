@@ -6,7 +6,6 @@ using VibeRails.Services.Integrations.VibeCodeRemote;
 namespace VibeRails.Services;
 
 public class ChatHistoryService(
-    IDbService dbService,
     IRepository repository,
     ISessionTranscriptService sessionTranscriptService,
     ISummaryService summaryService) : IChatHistoryService
@@ -15,16 +14,16 @@ public class ChatHistoryService(
     public async Task<ChatHistoryResponse> GetHistoryAsync(int page, int pageSize, CancellationToken cancellationToken)
     {
         var offset = (page - 1) * pageSize;
-        var items = await dbService.GetChatHistoryPageAsync(pageSize, offset, cancellationToken);
+        var items = await repository.GetChatHistoryPageAsync(pageSize, offset, cancellationToken);
         return new ChatHistoryResponse(items, page, pageSize);
     }
 
     public Task<bool> RenameSessionAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken)
-        => dbService.UpdateChatHistorySessionNameAsync(sessionId, sessionDisplayName, cancellationToken);
+        => repository.UpdateChatHistorySessionNameAsync(sessionId, sessionDisplayName, cancellationToken);
 
     public async Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken)
     {
-        var deleted = await dbService.DeleteChatHistorySessionAsync(sessionId, cancellationToken);
+        var deleted = await repository.DeleteChatHistorySessionAsync(sessionId, cancellationToken);
         if (!deleted)
             return false;
 
@@ -34,7 +33,7 @@ public class ChatHistoryService(
 
     public async Task<ChatSummaryResponse> GetSummaryAsync(string sessionId, bool regenerate, CancellationToken cancellationToken)
     {
-        var session = await dbService.GetSessionOutputAsync(sessionId, cancellationToken);
+        var session = await repository.GetSessionOutputAsync(sessionId, cancellationToken);
         if (session is null)
             throw new KeyNotFoundException($"Session not found: {sessionId}");
 

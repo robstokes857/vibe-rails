@@ -1,5 +1,5 @@
 using VibeRails.DTOs;
-using VibeRails.Interfaces;
+using VibeRails.DB;
 
 namespace VibeRails.Routes;
 
@@ -8,11 +8,11 @@ public static class SessionRoutes
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/v1/sessions/{sessionId}/logs", async (
-            IDbService dbService,
+            IRepository repository,
             string sessionId,
             CancellationToken cancellationToken) =>
         {
-            var result = await dbService.GetSessionWithLogsAsync(sessionId, cancellationToken);
+            var result = await repository.GetSessionWithLogsAsync(sessionId, cancellationToken);
             if (result == null)
             {
                 return Results.NotFound(new ErrorResponse($"Session not found: {sessionId}"));
@@ -21,20 +21,20 @@ public static class SessionRoutes
         }).WithName("GetSessionLogs");
 
         app.MapGet("/api/v1/sessions/recent", async (
-            IDbService dbService,
+            IRepository repository,
             int? limit,
             CancellationToken cancellationToken) =>
         {
-            var sessions = await dbService.GetRecentSessionsAsync(limit ?? 10, cancellationToken);
+            var sessions = await repository.GetRecentSessionsAsync(limit ?? 10, cancellationToken);
             return Results.Ok(sessions);
         }).WithName("GetRecentSessions");
 
         app.MapGet("/api/v1/sessions/{sessionId}/output", async (
-            IDbService dbService,
+            IRepository repository,
             string sessionId,
             CancellationToken cancellationToken) =>
         {
-            var result = await dbService.GetSessionOutputAsync(sessionId, cancellationToken);
+            var result = await repository.GetSessionOutputAsync(sessionId, cancellationToken);
             if (result == null)
             {
                 return Results.NotFound(new ErrorResponse($"Session not found: {sessionId}"));

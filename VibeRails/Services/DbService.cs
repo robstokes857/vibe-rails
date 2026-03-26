@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Serilog;
+using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.Bert;
@@ -29,116 +30,20 @@ namespace VibeRails.Services
             using var connection = new SqliteConnection(_connectionString);
             connection.Open();
 
-            // Enable WAL mode for better concurrent access
             using (var walCmd = connection.CreateCommand())
             {
-                walCmd.CommandText = "PRAGMA journal_mode=WAL;";
+                walCmd.CommandText = SqlStrings.PragmaWal;
                 walCmd.ExecuteNonQuery();
             }
 
-            // Execute each CREATE TABLE separately to ensure all tables are created
-            var statements = new[]
-            {
-                """
-                CREATE TABLE IF NOT EXISTS Sessions (
-                    Id TEXT PRIMARY KEY,
-                    Cli TEXT NOT NULL,
-                    EnvironmentName TEXT,
-                    WorkingDirectory TEXT NOT NULL,
-                    StartedUTC TEXT NOT NULL,
-                    EndedUTC TEXT,
-                    ExitCode INTEGER,
-                    Processed INTEGER NOT NULL DEFAULT 0,
-                    ParentSessionId TEXT DEFAULT '',
-                    SessionDisplayName TEXT DEFAULT ''
-                )
-                """,
-                "CREATE INDEX IF NOT EXISTS idx_sessions_started ON Sessions(StartedUTC DESC)",
-                """
-                CREATE TABLE IF NOT EXISTS SessionLogs (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    SessionId TEXT NOT NULL,
-                    Timestamp TEXT NOT NULL,
-                    Content BLOB NOT NULL,
-                    IsError INTEGER NOT NULL DEFAULT 0,
-                    FOREIGN KEY (SessionId) REFERENCES Sessions(Id)
-                )
-                """,
-                "CREATE INDEX IF NOT EXISTS idx_session_logs_session ON SessionLogs(SessionId)",
-                """
-                CREATE TABLE IF NOT EXISTS sessionOutPut (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    SessionId TEXT NOT NULL,
-                    Text TEXT NOT NULL,
-                    FOREIGN KEY (SessionId) REFERENCES Sessions(Id) ON DELETE CASCADE
-                )
-                """,
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_session_output_session ON sessionOutPut(SessionId)",
-                // User Input tracking tables
-                """
-                CREATE TABLE IF NOT EXISTS UserInputs (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    SessionId TEXT NOT NULL,
-                    Sequence INTEGER NOT NULL,
-                    InputText TEXT NOT NULL,
-                    GitCommitHash TEXT,
-                    TimestampUTC TEXT NOT NULL,
-                    FOREIGN KEY (SessionId) REFERENCES Sessions(Id)
-                )
-                """,
-                "CREATE INDEX IF NOT EXISTS idx_user_inputs_session ON UserInputs(SessionId)",
-                "CREATE INDEX IF NOT EXISTS idx_user_inputs_session_seq ON UserInputs(SessionId, Sequence)",
-                """
-                CREATE TABLE IF NOT EXISTS InputFileChanges (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    UserInputId INTEGER NOT NULL,
-                    PreviousInputId INTEGER,
-                    FilePath TEXT NOT NULL,
-                    ChangeType TEXT NOT NULL,
-                    LinesAdded INTEGER,
-                    LinesDeleted INTEGER,
-                    DiffContent TEXT,
-                    FOREIGN KEY (UserInputId) REFERENCES UserInputs(Id),
-                    FOREIGN KEY (PreviousInputId) REFERENCES UserInputs(Id)
-                )
-                """,
-                "CREATE INDEX IF NOT EXISTS idx_input_file_changes_input ON InputFileChanges(UserInputId)",
-                "CREATE INDEX IF NOT EXISTS idx_input_file_changes_filepath ON InputFileChanges(FilePath)",
-                // Claude Plans tracking table
-                """
-                CREATE TABLE IF NOT EXISTS ClaudePlans (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    SessionId TEXT NOT NULL,
-                    UserInputId INTEGER,
-                    PlanFilePath TEXT,
-                    PlanContent TEXT NOT NULL,
-                    PlanSummary TEXT,
-                    Status TEXT NOT NULL DEFAULT 'created',
-                    CreatedUTC TEXT NOT NULL,
-                    CompletedUTC TEXT,
-                    FOREIGN KEY (SessionId) REFERENCES Sessions(Id),
-                    FOREIGN KEY (UserInputId) REFERENCES UserInputs(Id)
-                )
-                """,
-                "CREATE INDEX IF NOT EXISTS idx_claude_plans_session ON ClaudePlans(SessionId)",
-                "CREATE INDEX IF NOT EXISTS idx_claude_plans_status ON ClaudePlans(Status)",
-                "CREATE INDEX IF NOT EXISTS idx_claude_plans_created ON ClaudePlans(CreatedUTC DESC)"
-            };
-
-            foreach (var sql in statements)
+            foreach (var sql in SqlStrings.InitStatements)
             {
                 using var cmd = connection.CreateCommand();
                 cmd.CommandText = sql;
                 cmd.ExecuteNonQuery();
             }
 
-            // Schema migrations — silently skip if column already exists
-            foreach (var migration in new[]
-            {
-                "ALTER TABLE Sessions ADD COLUMN Processed INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE Sessions ADD COLUMN ParentSessionId TEXT DEFAULT ''",
-                "ALTER TABLE Sessions ADD COLUMN SessionDisplayName TEXT DEFAULT ''",
-            })
+            foreach (var migration in SqlStrings.MigrationStatements)
             {
                 try
                 {
@@ -149,7 +54,7 @@ namespace VibeRails.Services
                     if (migration.Contains("Processed", StringComparison.Ordinal))
                     {
                         using var seedCmd = connection.CreateCommand();
-                        seedCmd.CommandText = "UPDATE Sessions SET Processed = 1";
+                        seedCmd.CommandText = SqlStrings.SeedProcessedColumn;
                         seedCmd.ExecuteNonQuery();
                     }
                 }
@@ -170,10 +75,7 @@ namespace VibeRails.Services
             await connection.OpenAsync();
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO Sessions (Id, Cli, EnvironmentName, WorkingDirectory, StartedUTC)
-                VALUES ($id, $cli, $envName, $workDir, $startedUTC);
-                """;
+            cmd.CommandText = SqlStrings.InsertSession;
 
             cmd.Parameters.AddWithValue("$id", sessionId);
             cmd.Parameters.AddWithValue("$cli", cli);
@@ -190,10 +92,7 @@ namespace VibeRails.Services
             await connection.OpenAsync();
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO SessionLogs (SessionId, Timestamp, Content, IsError)
-                VALUES ($sessionId, $timestamp, $content, $isError);
-                """;
+            cmd.CommandText = SqlStrings.InsertSessionLog;
 
             cmd.Parameters.AddWithValue("$sessionId", sessionId);
             cmd.Parameters.AddWithValue("$timestamp", DateTime.UtcNow.ToString("O"));
@@ -209,17 +108,7 @@ namespace VibeRails.Services
             await connection.OpenAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT s.Id
-                FROM Sessions s
-                WHERE s.EndedUTC IS NULL
-                  AND s.StartedUTC < $cutoff
-                  AND MAX(
-                        COALESCE((SELECT MAX(l.Timestamp) FROM SessionLogs l WHERE l.SessionId = s.Id), ''),
-                        COALESCE((SELECT MAX(u.TimestampUTC) FROM UserInputs u WHERE u.SessionId = s.Id), ''),
-                        s.StartedUTC
-                      ) < $cutoff;
-                """;
+            cmd.CommandText = SqlStrings.SelectOpenSessionIds;
             cmd.Parameters.AddWithValue("$cutoff", olderThan.ToString("O"));
 
             var ids = new List<string>();
@@ -236,11 +125,7 @@ namespace VibeRails.Services
             await connection.OpenAsync();
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                UPDATE Sessions
-                SET EndedUTC = $endedUTC, ExitCode = $exitCode
-                WHERE Id = $id;
-                """;
+            cmd.CommandText = SqlStrings.UpdateSessionEnd;
 
             cmd.Parameters.AddWithValue("$id", sessionId);
             cmd.Parameters.AddWithValue("$endedUTC", DateTime.UtcNow.ToString("O"));
@@ -256,11 +141,7 @@ namespace VibeRails.Services
 
             // Get session
             await using var sessionCmd = connection.CreateCommand();
-            sessionCmd.CommandText = """
-                SELECT Id, Cli, EnvironmentName, WorkingDirectory, StartedUTC, EndedUTC, ExitCode
-                FROM Sessions
-                WHERE Id = $id;
-                """;
+            sessionCmd.CommandText = SqlStrings.SelectSessionById;
             sessionCmd.Parameters.AddWithValue("$id", sessionId);
 
             SessionResponse? session = null;
@@ -286,12 +167,7 @@ namespace VibeRails.Services
             // Get logs
             var logs = new List<SessionLogResponse>();
             await using var logsCmd = connection.CreateCommand();
-            logsCmd.CommandText = """
-                SELECT Id, SessionId, Timestamp, Content, IsError
-                FROM SessionLogs
-                WHERE SessionId = $sessionId
-                ORDER BY Id ASC;
-                """;
+            logsCmd.CommandText = SqlStrings.SelectSessionLogsBySession;
             logsCmd.Parameters.AddWithValue("$sessionId", sessionId);
 
             await using (var reader = await logsCmd.ExecuteReaderAsync(cancellationToken))
@@ -319,12 +195,7 @@ namespace VibeRails.Services
             await connection.OpenAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT Id, Cli, EnvironmentName, WorkingDirectory, StartedUTC, EndedUTC, ExitCode
-                FROM Sessions
-                ORDER BY StartedUTC DESC
-                LIMIT $limit;
-                """;
+            cmd.CommandText = SqlStrings.SelectRecentSessions;
             cmd.Parameters.AddWithValue("$limit", limit);
 
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -350,13 +221,7 @@ namespace VibeRails.Services
             await connection.OpenAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT s.Id, s.Cli, s.EnvironmentName, s.WorkingDirectory, s.StartedUTC, s.EndedUTC, s.Processed,
-                       COALESCE(o.Text, '')
-                FROM Sessions s
-                LEFT JOIN sessionOutPut o ON o.SessionId = s.Id
-                WHERE s.Id = $sessionId;
-                """;
+            cmd.CommandText = SqlStrings.SelectSessionOutput;
             cmd.Parameters.AddWithValue("$sessionId", sessionId);
 
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -383,14 +248,7 @@ namespace VibeRails.Services
             await connection.OpenAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT Id
-                FROM Sessions
-                WHERE EndedUTC IS NOT NULL
-                  AND Processed = 0
-                ORDER BY EndedUTC ASC
-                LIMIT $limit;
-                """;
+            cmd.CommandText = SqlStrings.SelectEndedUnprocessedSessions;
             cmd.Parameters.AddWithValue("$limit", limit);
 
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -410,12 +268,7 @@ namespace VibeRails.Services
             await connection.OpenAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT Id, Timestamp, Content
-                FROM SessionLogs
-                WHERE SessionId = $sessionId
-                ORDER BY Id ASC;
-                """;
+            cmd.CommandText = SqlStrings.SelectSessionLogChunks;
             cmd.Parameters.AddWithValue("$sessionId", sessionId);
 
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -438,12 +291,7 @@ namespace VibeRails.Services
             await connection.OpenAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT Id, SessionId, Sequence, InputText, GitCommitHash, TimestampUTC
-                FROM UserInputs
-                WHERE SessionId = $sessionId
-                ORDER BY Sequence ASC;
-                """;
+            cmd.CommandText = SqlStrings.SelectUserInputsBySession;
             cmd.Parameters.AddWithValue("$sessionId", sessionId);
 
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -473,12 +321,7 @@ namespace VibeRails.Services
                 await using (var outputCmd = connection.CreateCommand())
                 {
                     outputCmd.Transaction = transaction;
-                    outputCmd.CommandText = """
-                        INSERT INTO sessionOutPut (SessionId, Text)
-                        VALUES ($sessionId, $text)
-                        ON CONFLICT(SessionId) DO UPDATE SET
-                            Text = excluded.Text;
-                        """;
+                    outputCmd.CommandText = SqlStrings.UpsertSessionOutput;
                     outputCmd.Parameters.AddWithValue("$sessionId", sessionId);
                     outputCmd.Parameters.AddWithValue("$text", text);
                     await outputCmd.ExecuteNonQueryAsync(cancellationToken);
@@ -487,11 +330,7 @@ namespace VibeRails.Services
                 await using (var sessionCmd = connection.CreateCommand())
                 {
                     sessionCmd.Transaction = transaction;
-                    sessionCmd.CommandText = """
-                        UPDATE Sessions
-                        SET Processed = 1
-                        WHERE Id = $sessionId;
-                        """;
+                    sessionCmd.CommandText = SqlStrings.UpdateSessionProcessed;
                     sessionCmd.Parameters.AddWithValue("$sessionId", sessionId);
                     await sessionCmd.ExecuteNonQueryAsync(cancellationToken);
                 }
@@ -512,16 +351,7 @@ namespace VibeRails.Services
 
             var items = new List<ChatHistoryItem>();
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT s.Id, s.Cli, s.EnvironmentName, s.WorkingDirectory, s.StartedUTC, s.EndedUTC, s.ExitCode, s.ParentSessionId, s.SessionDisplayName,
-                       u.Sequence, SUBSTR(u.InputText, 1, 120)
-                FROM Sessions s
-                LEFT JOIN UserInputs u ON u.Id = (
-                    SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
-                )
-                ORDER BY s.StartedUTC DESC
-                LIMIT $limit OFFSET $offset;
-                """;
+            cmd.CommandText = SqlStrings.SelectChatHistoryPage;
             cmd.Parameters.AddWithValue("$limit", limit);
             cmd.Parameters.AddWithValue("$offset", offset);
 
@@ -552,11 +382,7 @@ namespace VibeRails.Services
             await connection.OpenAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                UPDATE Sessions
-                SET SessionDisplayName = $sessionDisplayName
-                WHERE Id = $sessionId;
-                """;
+            cmd.CommandText = SqlStrings.UpdateSessionDisplayName;
             cmd.Parameters.AddWithValue("$sessionId", sessionId);
             cmd.Parameters.AddWithValue("$sessionDisplayName", sessionDisplayName);
 
@@ -572,42 +398,8 @@ namespace VibeRails.Services
 
             try
             {
-                var commands = new[]
-                {
-                    """
-                    UPDATE Sessions
-                    SET ParentSessionId = ''
-                    WHERE ParentSessionId = $sessionId;
-                    """,
-                    """
-                    DELETE FROM InputFileChanges
-                    WHERE UserInputId IN (SELECT Id FROM UserInputs WHERE SessionId = $sessionId)
-                       OR PreviousInputId IN (SELECT Id FROM UserInputs WHERE SessionId = $sessionId);
-                    """,
-                    """
-                    DELETE FROM ClaudePlans
-                    WHERE SessionId = $sessionId;
-                    """,
-                    """
-                    DELETE FROM sessionOutPut
-                    WHERE SessionId = $sessionId;
-                    """,
-                    """
-                    DELETE FROM SessionLogs
-                    WHERE SessionId = $sessionId;
-                    """,
-                    """
-                    DELETE FROM UserInputs
-                    WHERE SessionId = $sessionId;
-                    """,
-                    """
-                    DELETE FROM Sessions
-                    WHERE Id = $sessionId;
-                    """
-                };
-
                 var deletedSession = false;
-                foreach (var sql in commands)
+                foreach (var sql in SqlStrings.DeleteSessionCommands)
                 {
                     await using var cmd = connection.CreateCommand();
                     cmd.Transaction = transaction;
@@ -639,13 +431,7 @@ namespace VibeRails.Services
             await connection.OpenAsync();
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT Id, SessionId, Sequence, InputText, GitCommitHash, TimestampUTC
-                FROM UserInputs
-                WHERE SessionId = $sessionId
-                ORDER BY Sequence DESC
-                LIMIT 1;
-                """;
+            cmd.CommandText = SqlStrings.SelectLastUserInput;
             cmd.Parameters.AddWithValue("$sessionId", sessionId);
 
             await using var reader = await cmd.ExecuteReaderAsync();
@@ -669,11 +455,7 @@ namespace VibeRails.Services
             await connection.OpenAsync();
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO UserInputs (SessionId, Sequence, InputText, GitCommitHash, TimestampUTC)
-                VALUES ($sessionId, $sequence, $inputText, $gitCommitHash, $timestampUTC)
-                RETURNING Id;
-                """;
+            cmd.CommandText = SqlStrings.InsertUserInput;
             cmd.Parameters.AddWithValue("$sessionId", sessionId);
             cmd.Parameters.AddWithValue("$sequence", sequence);
             cmd.Parameters.AddWithValue("$inputText", inputText);
@@ -698,10 +480,7 @@ namespace VibeRails.Services
                 {
                     await using var cmd = connection.CreateCommand();
                     cmd.Transaction = (SqliteTransaction)transaction;
-                    cmd.CommandText = """
-                        INSERT INTO InputFileChanges (UserInputId, PreviousInputId, FilePath, ChangeType, LinesAdded, LinesDeleted, DiffContent)
-                        VALUES ($userInputId, $previousInputId, $filePath, $changeType, $linesAdded, $linesDeleted, $diffContent);
-                        """;
+                    cmd.CommandText = SqlStrings.InsertFileChange;
                     cmd.Parameters.AddWithValue("$userInputId", userInputId);
                     cmd.Parameters.AddWithValue("$previousInputId", previousInputId ?? (object)DBNull.Value);
                     cmd.Parameters.AddWithValue("$filePath", change.FilePath);

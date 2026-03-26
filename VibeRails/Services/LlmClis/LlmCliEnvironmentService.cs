@@ -10,7 +10,6 @@ namespace VibeRails.Services.LlmClis
         private readonly ICodexLlmCliEnvironment _codexLlmCliEnvironment;
         private readonly IGeminiLlmCliEnvironment _geminiLlmCliEnvironment;
         private readonly ICopilotLlmCliEnvironment _copilotLlmCliEnvironment;
-        private readonly IDbService _dbService;
         private readonly IFileService _fileService;
 
         public LlmCliEnvironmentService(
@@ -18,14 +17,12 @@ namespace VibeRails.Services.LlmClis
             ICodexLlmCliEnvironment codexLlmCliEnvironment,
             IGeminiLlmCliEnvironment geminiLlmCliEnvironment,
             ICopilotLlmCliEnvironment copilotLlmCliEnvironment,
-            IDbService dbService,
             IFileService fileService)
         {
             _claudeLlmCliEnvironment = claudeLlmCliEnvironment;
             _codexLlmCliEnvironment = codexLlmCliEnvironment;
             _geminiLlmCliEnvironment = geminiLlmCliEnvironment;
             _copilotLlmCliEnvironment = copilotLlmCliEnvironment;
-            _dbService = dbService;
             _fileService = fileService;
         }
 

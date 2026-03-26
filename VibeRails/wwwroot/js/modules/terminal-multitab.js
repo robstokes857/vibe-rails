@@ -3,7 +3,8 @@ import { ChatHistorySidebar } from './chat-history-sidebar.js';
 import {
     buildLlmSelectionValue,
     parseLlmSelection,
-    populateLlmSelectionSelect
+    populateLlmSelectionSelect,
+    getCliBrand
 } from './utils.js';
 import { TabStatusController } from './terminal-tab-status.js';
 
@@ -793,7 +794,7 @@ class TerminalManager {
         this.settingsBtn   = this.container.querySelector('#terminal-settings-btn');
         this.settingsPanel = this.container.querySelector('#vb-terminal-settings-panel');
         this.settingsClose = this.container.querySelector('#terminal-settings-close');
-        this.historyBtn    = document.getElementById('terminal-history-btn');
+        this.historyBtn    = null; // moved to chat history sidebar header
 
         this.populateSelect();
         this.bindActions();
@@ -963,7 +964,6 @@ class TerminalManager {
 
         this.settingsBtn?.addEventListener('click',   () => this.toggleSettingsPanel());
         this.settingsClose?.addEventListener('click', () => this.toggleSettingsPanel(false));
-        this.historyBtn?.addEventListener('click',    () => this.toggleHistoryPanel());
         this.container.querySelector('#terminal-settings-font-size')
             ?.addEventListener('change', (e) => this.adjustFontSize(0, parseInt(e.target.value, 10)));
         this.container.querySelector('#terminal-settings-font-family')
@@ -1095,6 +1095,15 @@ class TerminalManager {
             isActiveTab: () => this.activeTabId === state.id,
             setProgress: (progress) => this.updateTabProgress(state.id, progress)
         });
+        // Sync status controller with restored tab state (e.g. page reload
+        // where the tab had an active session — state.status is 'disconnected'
+        // but the controller was just created with _status = null).
+        if (state.status === 'disconnected') {
+            instance.statusController.onSocketClose();
+        } else if (state.status === 'connected') {
+            instance.statusController.onSocketOpen();
+        }
+
         const tab = { state, instance };
 
         this.tabs.set(state.id, tab);
@@ -1504,6 +1513,13 @@ class TerminalManager {
         const meta = this.getSelectionMeta(selection);
         tab.state.selection = selection;
         tab.state.label = meta.displayName;
+
+        // Update accent color from brand
+        const brand = getCliBrand(meta.cli);
+        if (brand.accentColor) {
+            tab.state.accentColor = brand.accentColor;
+        }
+
         this.saveTabSelection(tab.state.id, selection);
         this.saveTabMeta(tab.state.id, {
             label: tab.state.label,
@@ -1511,6 +1527,8 @@ class TerminalManager {
             accentColor: tab.state.accentColor,
             taskKey: tab.state.taskKey
         });
+        this.renderTabButton(tab);
+        this.applyTabAccent(tab);
         this.updateUi();
     }
 
@@ -2368,7 +2386,6 @@ class TerminalManager {
 
         sidebar.classList.toggle('ch-sidebar-collapsed', !open);
         layout?.classList.toggle('vb-history-under', !open);
-        this.historyBtn?.classList.toggle('active', open);
         this.updateFocusContainerHeight();
 
         if (!open) {
@@ -2680,9 +2697,6 @@ export class TerminalController {
                         <span class="badge bg-secondary d-none" id="terminal-status-badge"></span>
                     </div>
                     <div class="d-flex gap-2 align-items-center" id="terminal-actions">
-                        <button type="button" class="vb-terminal-history-toggle" id="terminal-history-btn" title="Chat History">
-                            <i class="fa-solid fa-clock-rotate-left"></i>
-                        </button>                        
                         <button class="btn btn-sm btn-outline-danger d-none d-inline-flex align-items-center gap-1" id="terminal-stop-btn" title="Disconnect terminal session">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>

@@ -1,4 +1,4 @@
-using VibeRails.Interfaces;
+using VibeRails.DB;
 using VibeRails.Services;
 using VibeRails.Services.Terminal;
 using VibeRails.Services.Integrations.VibeCodeRemote;
@@ -29,9 +29,9 @@ public sealed class StaleSessionCleanupJob(
 
         var cutoff = DateTime.UtcNow.AddMinutes(-5);
         using var scope = scopeFactory.CreateScope();
-        var dbService = scope.ServiceProvider.GetRequiredService<IDbService>();
+        var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
 
-        var staleIds = await dbService.GetOpenSessionIdsAsync(cutoff, cancellationToken);
+        var staleIds = await repository.GetOpenSessionIdsAsync(cutoff, cancellationToken);
 
         if (staleIds.Count == 0)
             return;
@@ -40,7 +40,7 @@ public sealed class StaleSessionCleanupJob(
 
         foreach (var id in staleIds)
         {
-            await dbService.CompleteSessionAsync(id, -1);
+            await repository.CompleteSessionAsync(id, -1);
             await remoteStateService.DeregisterTerminalAsync(id);
         }
     }
