@@ -5,7 +5,7 @@ namespace VibeRails.Services.LlmClis
 {
     public class CopilotLlmCliEnvironment : BaseLlmCliEnvironment, ICopilotLlmCliEnvironment
     {
-        public CopilotLlmCliEnvironment(IDbService dbService, IFileService fileService) : base(dbService, fileService) { }
+        public CopilotLlmCliEnvironment(IFileService fileService) : base(fileService) { }
 
         public override string GetConfigSubdirectory() => "copilot";
 

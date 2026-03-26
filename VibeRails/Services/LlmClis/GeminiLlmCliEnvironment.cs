@@ -8,8 +8,8 @@ namespace VibeRails.Services.LlmClis
 {
     public class GeminiLlmCliEnvironment : BaseLlmCliEnvironment, IGeminiLlmCliEnvironment
     {
-        public GeminiLlmCliEnvironment(IDbService dbService, IFileService fileService)
-            : base(dbService, fileService)
+        public GeminiLlmCliEnvironment(IFileService fileService)
+            : base(fileService)
         {
         }
 

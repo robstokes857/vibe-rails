@@ -1,3 +1,4 @@
+using VibeRails.DB;
 using VibeRails.Interfaces;
 using VibeRails.DTOs;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -73,14 +74,14 @@ public static class ChatHistoryRoutes
         }).WithName("GetChatHistoryTranscript");
 
         app.MapGet("/api/v1/chatHistory/{sessionId}/replay", async (
-            IDbService dbService,
+            IRepository repository,
             string sessionId,
             CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(sessionId))
                 return Results.BadRequest(new ErrorResponse("Session id is required."));
 
-            var chunks = await dbService.GetSessionLogChunksAsync(sessionId, cancellationToken);
+            var chunks = await repository.GetSessionLogChunksAsync(sessionId, cancellationToken);
             return Results.Ok(new ChatHistoryReplayResponse(
                 sessionId,
                 chunks.Select(c => new ChatHistoryReplayChunkResponse(

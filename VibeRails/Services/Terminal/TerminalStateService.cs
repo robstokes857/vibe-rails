@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 using Serilog;
-using VibeRails.Interfaces;
+using VibeRails.DB;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Utils;
 
@@ -22,7 +22,7 @@ public interface ITerminalStateService
 
 public class TerminalStateService : ITerminalStateService, IDisposable
 {
-    private readonly IDbService _dbService;
+    private readonly IRepository _repository;
     private readonly IGitService _gitService;
     private readonly IRemoteStateService _remoteStateService;
     private readonly ITerminalIoObserverService _ioObserverService;
@@ -38,12 +38,12 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private static readonly TimeSpan s_idleCheckInterval = TimeSpan.FromSeconds(2);
 
     public TerminalStateService(
-        IDbService dbService,
+        IRepository repository,
         IGitService gitService,
         IRemoteStateService remoteStateService,
         ITerminalIoObserverService ioObserverService)
     {
-        _dbService = dbService;
+        _repository = repository;
         _gitService = gitService;
         _remoteStateService = remoteStateService;
         _ioObserverService = ioObserverService;
@@ -52,16 +52,16 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     public async Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default)
     {
         var sessionId = Guid.NewGuid().ToString();
-        await _dbService.CreateSessionAsync(sessionId, cli, envName, workDir);
+        await _repository.CreateSessionAsync(sessionId, cli, envName, workDir);
 
         var now = DateTimeOffset.UtcNow;
         lock (s_stateLock)
         {
             s_inputAccumulators[sessionId] = new InputAccumulator(async inputText =>
             {
-                await _dbService.RecordUserInputAsync(sessionId, inputText, _gitService, ct);
+                await _repository.RecordUserInputAsync(sessionId, inputText, _gitService, ct);
             });
-            s_outputWriters[sessionId] = new SessionOutputWriter(sessionId, _dbService);
+            s_outputWriters[sessionId] = new SessionOutputWriter(sessionId, _repository);
             s_sessionActivity[sessionId] = new SessionActivityState(now, cli);
         }
         StartIdleMonitor(sessionId);
@@ -224,7 +224,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             await accumulatorToDispose.DisposeAsync();
         }
 
-        await _dbService.CompleteSessionAsync(sessionId, exitCode);
+        await _repository.CompleteSessionAsync(sessionId, exitCode);
 
         activityState?.Dispose();
 
@@ -412,16 +412,16 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private sealed class SessionOutputWriter : IAsyncDisposable
     {
         private readonly string _sessionId;
-        private readonly IDbService _dbService;
+        private readonly IRepository _repository;
         private readonly Channel<byte[]> _channel = Channel.CreateUnbounded<byte[]>(
             new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
         private readonly Task _worker;
         private int _disposed;
 
-        public SessionOutputWriter(string sessionId, IDbService dbService)
+        public SessionOutputWriter(string sessionId, IRepository repository)
         {
             _sessionId = sessionId;
-            _dbService = dbService;
+            _repository = repository;
             _worker = Task.Run(DrainAsync);
         }
 
@@ -456,7 +456,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             {
                 try
                 {
-                    await _dbService.LogSessionOutputAsync(_sessionId, payload, false).ConfigureAwait(false);
+                    await _repository.LogSessionOutputAsync(_sessionId, payload, false).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Hosting;
 using VibeRails.Cli;
 using VibeRails.DB;
 using VibeRails.DTOs;
-using VibeRails.Interfaces;
+
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
@@ -90,9 +90,8 @@ public static class CliLoop
         using var scope = services.CreateScope();
         var scopedServices = scope.ServiceProvider;
 
-        var dbService = scopedServices.GetRequiredService<IDbService>();
-        var envService = scopedServices.GetRequiredService<LlmCliEnvironmentService>();
         var repository = scopedServices.GetRequiredService<IRepository>();
+        var envService = scopedServices.GetRequiredService<LlmCliEnvironmentService>();
         var sessionService = scopedServices.GetRequiredService<ITerminalSessionService>();
         var ioObserverService = scopedServices.GetRequiredService<ITerminalIoObserverService>();
         var appLifetime = scopedServices.GetRequiredService<IHostApplicationLifetime>();
@@ -135,7 +134,7 @@ public static class CliLoop
         var gitServiceForSession = new GitService(workingDirectory);
         var remoteStateService = scopedServices.GetRequiredService<IRemoteStateService>();
         var terminalStateService = new TerminalStateService(
-            dbService,
+            repository,
             gitServiceForSession,
             remoteStateService,
             ioObserverService);

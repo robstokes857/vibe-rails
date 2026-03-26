@@ -5,12 +5,10 @@ namespace VibeRails.Services.LlmClis
 {
     public abstract class BaseLlmCliEnvironment : IBaseLlmCliEnvironment
     {
-        protected readonly IDbService _dbService;
         protected readonly IFileService _fileService;
 
-        public BaseLlmCliEnvironment(IDbService dbService, IFileService fileService)
+        public BaseLlmCliEnvironment(IFileService fileService)
         {
-            _dbService = dbService;
             _fileService = fileService;
         }
 

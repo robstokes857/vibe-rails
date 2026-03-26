@@ -69,7 +69,7 @@ export function getCliBrand(cli) {
             label: 'Claude',
             logo: getAssetPath('assets/img/claude-color.svg'),
             className: 'badge-cli-claude',
-            accentColor: '#c15f3c'
+            accentColor: '#c47055'
         },
         gemini: {
             label: 'Gemini',

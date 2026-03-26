@@ -8,7 +8,7 @@ namespace VibeRails.Services.LlmClis
 {
     public class ClaudeLlmCliEnvironment : BaseLlmCliEnvironment, IClaudeLlmCliEnvironment
     {
-        public ClaudeLlmCliEnvironment(IDbService dbService, IFileService fileService) : base(dbService, fileService) { }
+        public ClaudeLlmCliEnvironment(IFileService fileService) : base(fileService) { }
 
         public override string GetConfigSubdirectory() => "claude";
 

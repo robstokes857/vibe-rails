@@ -29,13 +29,6 @@ const THINKING_EMOJI = [
     '\u{1F916}', // robot
     '\u{1F3AF}', // bullseye
     '\u{1F525}', // fire
-    '\u{1F30A}', // wave
-    '\u{1F4AB}', // dizzy/stars
-    '\u{1F31F}', // glowing star
-    '\u{269B}\uFE0F',  // atom
-    '\u{1F9EA}', // test tube
-    '\u{1F4DA}', // books
-    '\u{1F3B2}', // dice
 ];
 
 // Font Awesome icon classes per state
@@ -257,7 +250,7 @@ export class TabStatusController {
 
     _startEmojiCycle() {
         this._showNextEmoji();
-        this._emojiTimer = setInterval(() => this._showNextEmoji(), 1200);
+        this._emojiTimer = setInterval(() => this._showNextEmoji(), 2000);
     }
 
     _stopEmojiCycle() {
@@ -286,7 +279,7 @@ export class TabStatusController {
             setTimeout(() => {
                 el.textContent = emoji;
                 el.className = 'vb-tab-status-icon vb-emoji-enter';
-            }, 200);
+            }, 300);
         } else {
             el.textContent = emoji;
             el.className = 'vb-tab-status-icon vb-emoji-enter';

@@ -32,14 +32,15 @@ namespace VibeRails
             serviceCollection.AddSingleton<IBertInputCaptureService, BertInputCaptureService>();
             serviceCollection.AddSingleton<IBertExplorerService, BertExplorerService>();
             serviceCollection.AddSingleton<ILlmParser, LlmParser>();
-            serviceCollection.AddScoped<IDbService, DbService>();
-            serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
-            serviceCollection.AddSingleton<ISessionOutputParser, SessionOutputParser>();
             serviceCollection.AddScoped<IRepository>(sp =>
             {
                 var connectionString = $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
-                return new Repository(connectionString);
+                var bert = sp.GetService<IBertInputCaptureService>();
+                var logger = sp.GetService<ILogger<Repository>>();
+                return new Repository(connectionString, bert, logger);
             });
+            serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
+            serviceCollection.AddSingleton<ISessionOutputParser, SessionOutputParser>();
             serviceCollection.AddScoped<IGitService, GitService>();
 
             // Rules and Agent File services
