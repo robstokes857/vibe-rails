@@ -82,12 +82,17 @@ public static class ChatHistoryRoutes
                 return Results.BadRequest(new ErrorResponse("Session id is required."));
 
             var chunks = await repository.GetSessionLogChunksAsync(sessionId, cancellationToken);
+            var totalLength = chunks.Sum(c => c.Content.Length);
+            var combined = new byte[totalLength];
+            var offset = 0;
+            foreach (var chunk in chunks)
+            {
+                chunk.Content.CopyTo(combined, offset);
+                offset += chunk.Content.Length;
+            }
             return Results.Ok(new ChatHistoryReplayResponse(
                 sessionId,
-                chunks.Select(c => new ChatHistoryReplayChunkResponse(
-                    c.TimestampUtc,
-                    Convert.ToBase64String(c.Content)
-                )).ToList()
+                Convert.ToBase64String(combined)
             ));
         }).WithName("GetChatHistoryReplay");
 

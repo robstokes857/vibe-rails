@@ -4,12 +4,12 @@ using Xunit;
 
 namespace Tests;
 
-public class SessionOutputParserTests
+public class SessionParseV3Tests
 {
     private static readonly string FixturesDir =
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures"));
 
-    private readonly SessionOutputParser _parser = new();
+    private readonly SessionParseV3 _parser = new();
 
     [Theory]
     [InlineData(
