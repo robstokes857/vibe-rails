@@ -115,12 +115,9 @@ export async function showReplayModal(sessionId) {
 
     try {
         const json = await fetchJson(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/replay`);
-        const chunks = json.chunks ?? [];
         term.reset();
-        for (const chunk of chunks) {
-            const bytes = Uint8Array.from(atob(chunk.content), c => c.charCodeAt(0));
-            term.write(bytes);
-        }
+        const bytes = Uint8Array.from(atob(json.content), c => c.charCodeAt(0));
+        term.write(bytes);
     } catch (err) {
         term.write(`\r\nError: ${err.message}\r\n`);
     }

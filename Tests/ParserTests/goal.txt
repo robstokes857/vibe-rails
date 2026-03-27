@@ -1,0 +1,20 @@
+                                                                                                                                                          
+User: Hi! How are you today?                                                                                                                                   
+                                                                                                                                                           
+Agent: Hi! I'm doing well, thanks for asking. How can I help you today?                                                                                         
+                                                                                                                                                           
+User: I am doing some testing. This is part of my testing.                                                                                                     
+                                                                                                                                                           
+Agent: Sounds good — let me know if you need anything!                                                                                                          
+                                                                                                                                                           
+User: How many file have been changed but are not commited?                                                                                                    
+                                                                                                                                                           
+Agent: Based on the git status from the start of this conversation, there are 5 files with uncommitted changes:                                                 
+                                                                                                                                                           
+  1. DTOs/ResponseRecords.cs — modified (staged)                                                                                                           
+  2. MapRegisterServices.cs — modified (unstaged)                                                                                                          
+  3. Routes/ChatHistoryRoutes.cs — modified (unstaged)                                                                                                     
+  4. Services/SessionOutputParser.cs — deleted (unstaged)                                                                                                  
+  5. wwwroot/js/modules/session-viewer.js — modified (unstaged)                                                                                            
+                                                                                                                                                           
+  Want me to check the current status in case anything has changed since the conversation started?                                  

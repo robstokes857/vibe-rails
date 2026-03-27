@@ -415,14 +415,9 @@ namespace VibeRails.DTOs
         string Text
     );
 
-    public record ChatHistoryReplayChunkResponse(
-        DateTime TimestampUtc,
-        string Content
-    );
-
     public record ChatHistoryReplayResponse(
         string SessionId,
-        List<ChatHistoryReplayChunkResponse> Chunks
+        string Content
     );
 
     public record ChatHistoryItem(
@@ -554,8 +549,6 @@ namespace VibeRails.DTOs
     // Chat History DTOs
     [JsonSerializable(typeof(ChatSummaryResponse))]
     [JsonSerializable(typeof(ChatHistoryTranscriptResponse))]
-    [JsonSerializable(typeof(ChatHistoryReplayChunkResponse))]
-    [JsonSerializable(typeof(List<ChatHistoryReplayChunkResponse>))]
     [JsonSerializable(typeof(ChatHistoryReplayResponse))]
     [JsonSerializable(typeof(ChatHistoryItem))]
     [JsonSerializable(typeof(List<ChatHistoryItem>))]

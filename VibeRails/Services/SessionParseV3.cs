@@ -7,71 +7,62 @@ using VibeTerminal = VibeRails.Services.Terminal.Terminal;
 
 namespace VibeRails.Services;
 
-public sealed class SessionOutputParser : ISessionOutputParser
+/// <summary>
+/// Replays raw PTY bytes through the terminal emulator, then extracts a readable transcript
+/// from the final rendered lines. When a structured chat layout is not detected, falls back
+/// to V1-style noise filtering over the stable rendered output.
+/// </summary>
+public sealed class SessionParseV3 : ISessionOutputParser
 {
-    private const int ScrollbackSize = 20000;
+    private const int ScrollbackSize = 20_000;
     private const int RecentLineWindow = 32;
     private const string UiOnlyChars = " -_=~|:<>[](){}./\\`'\"─━│┃┌┐└┘├┤┬┴┼╭╮╰╯╞╡╪╫╬═║╒╓╔╕╖╗╘╙╚╛╜╝▀▄▁▂▃▅▆▇█▉▊▋▌▍▎▏▐▔▕▖▗▘▙▚▛▜▝▞▟";
 
     public Task<string> ParseAsync(IReadOnlyList<SessionLogChunkRecord> chunks, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var lines = ReplayRenderedLines(chunks, cancellationToken);
+        var transcript = TryBuildStructuredTranscript(lines);
+        if (!string.IsNullOrEmpty(transcript))
+            return Task.FromResult(transcript);
+
+        return Task.FromResult(BuildFilteredText(lines));
+    }
+
+    private static List<string> ReplayRenderedLines(
+        IReadOnlyList<SessionLogChunkRecord> chunks,
+        CancellationToken cancellationToken)
     {
         var terminal = new EmulatorTerminal(
             cols: VibeTerminal.DefaultCols,
             rows: VibeTerminal.DefaultRows,
             scrollbackSize: ScrollbackSize);
 
-        var alternateLines = new List<string>();
-        var previousAlternateScreen = Array.Empty<string>();
-        var sawAlternateScreen = false;
-        var wasAlternateScreen = false;
-
         foreach (var chunk in chunks)
         {
             cancellationToken.ThrowIfCancellationRequested();
-
             if (chunk.Content.Length == 0)
                 continue;
 
             terminal.Write(chunk.Content.AsSpan());
-
-            if (terminal.IsAlternateScreen)
-            {
-                sawAlternateScreen = true;
-                if (!wasAlternateScreen)
-                    previousAlternateScreen = Array.Empty<string>();
-
-                AppendStableAlternateRows(terminal, previousAlternateScreen, alternateLines);
-                previousAlternateScreen = terminal.GetScreenText();
-            }
-            else if (wasAlternateScreen)
-            {
-                previousAlternateScreen = Array.Empty<string>();
-            }
-
-            wasAlternateScreen = terminal.IsAlternateScreen;
         }
 
-        if (sawAlternateScreen)
-        {
-            foreach (var line in terminal.GetScreenText())
-                alternateLines.Add(line);
-        }
-
-        var candidateLines = sawAlternateScreen
-            ? alternateLines
-            : GetNormalScreenLines(terminal);
-
-        return Task.FromResult(BuildOutputText(candidateLines));
-    }
-
-    private static List<string> GetNormalScreenLines(EmulatorTerminal terminal)
-    {
-        var lines = new List<string>();
+        var lines = new List<string>(terminal.Rows + ScrollbackSize);
 
         foreach (var row in terminal.GetScrollback())
             lines.Add(ConvertRowToText(row));
 
-        lines.AddRange(terminal.GetScreenText());
+        var screen = terminal.GetSnapshot();
+        var rowBuffer = new TerminalCell[terminal.Cols];
+        for (var row = 0; row < terminal.Rows; row++)
+        {
+            for (var col = 0; col < terminal.Cols; col++)
+                rowBuffer[col] = screen[row, col];
+
+            lines.Add(ConvertRowToText(rowBuffer));
+        }
+
         return lines;
     }
 
@@ -79,39 +70,147 @@ public sealed class SessionOutputParser : ISessionOutputParser
     {
         var builder = new StringBuilder(row.Length);
         foreach (var cell in row)
+        {
+            if (cell.IsWideContinuation)
+                continue;
+
             cell.AppendText(builder, replaceControlWithSpace: true);
+        }
+
+        return NormalizeLine(builder.ToString());
+    }
+
+    private static string TryBuildStructuredTranscript(IReadOnlyList<string> rawLines)
+    {
+        var entries = new List<TranscriptEntry>();
+        TranscriptEntry? currentAssistant = null;
+        var sawPreludeChrome = false;
+        var preserveLeadingBlank = false;
+        var sawFirstMessage = false;
+
+        foreach (var rawLine in rawLines)
+        {
+            var line = NormalizeLine(rawLine);
+            var trimmed = line.Trim();
+
+            if (trimmed.Length == 0)
+            {
+                if (!sawFirstMessage)
+                {
+                    if (sawPreludeChrome)
+                        preserveLeadingBlank = true;
+
+                    continue;
+                }
+
+                currentAssistant?.Lines.Add(string.Empty);
+                continue;
+            }
+
+            if (ShouldSkipChromeLine(trimmed))
+            {
+                if (!sawFirstMessage)
+                    sawPreludeChrome = true;
+
+                continue;
+            }
+
+            if (TryParseUserPrompt(line, out var userText))
+            {
+                if (userText.Length == 0 || IsUiDecoration(userText))
+                    continue;
+
+                TrimTrailingBlankLines(currentAssistant);
+                currentAssistant = null;
+
+                entries.Add(new TranscriptEntry("User", userText));
+                sawFirstMessage = true;
+                continue;
+            }
+
+            if (TryParseAssistantPrompt(line, out var assistantText))
+            {
+                if (assistantText.Length == 0 || ShouldSkipChromeLine(assistantText))
+                    continue;
+
+                TrimTrailingBlankLines(currentAssistant);
+
+                currentAssistant = new TranscriptEntry("Agent", assistantText);
+                entries.Add(currentAssistant);
+                sawFirstMessage = true;
+                continue;
+            }
+
+            if (!sawFirstMessage || currentAssistant is null || ShouldSkipChromeLine(trimmed))
+                continue;
+
+            currentAssistant.Lines.Add(line);
+        }
+
+        TrimTrailingBlankLines(currentAssistant);
+
+        if (entries.Count == 0)
+            return string.Empty;
+
+        var builder = new StringBuilder();
+        if (preserveLeadingBlank)
+            builder.AppendLine();
+
+        for (var index = 0; index < entries.Count; index++)
+        {
+            if (index > 0)
+                builder.AppendLine().AppendLine();
+
+            var entry = entries[index];
+            builder.Append(entry.Role).Append(": ").AppendLine(entry.Lines[0]);
+
+            for (var lineIndex = 1; lineIndex < entry.Lines.Count; lineIndex++)
+                builder.AppendLine(entry.Lines[lineIndex]);
+        }
 
         return builder.ToString().TrimEnd();
     }
 
-    private static void AppendStableAlternateRows(
-        EmulatorTerminal terminal,
-        IReadOnlyList<string> previousScreen,
-        ICollection<string> output)
+    private static bool TryParseUserPrompt(string line, out string content)
     {
-        var currentScreen = terminal.GetScreenText();
-        var stableRowCount = terminal.CursorCol == 0
-            ? terminal.CursorRow
-            : Math.Max(terminal.CursorRow, 0);
-
-        stableRowCount = Math.Min(stableRowCount, currentScreen.Length);
-
-        for (var row = 0; row < stableRowCount; row++)
+        var trimmed = line.TrimStart();
+        if (trimmed.StartsWith("> ", StringComparison.Ordinal)
+            || trimmed.StartsWith(">\u00A0", StringComparison.Ordinal)
+            || string.Equals(trimmed, ">", StringComparison.Ordinal)
+            || trimmed.StartsWith("› ", StringComparison.Ordinal))
         {
-            var currentLine = currentScreen[row];
-            var previousLine = row < previousScreen.Count ? previousScreen[row] : string.Empty;
-
-            if (string.Equals(currentLine, previousLine, StringComparison.Ordinal))
-                continue;
-
-            if (string.IsNullOrWhiteSpace(currentLine))
-                continue;
-
-            output.Add(currentLine);
+            content = trimmed[1..].Trim();
+            return true;
         }
+
+        content = string.Empty;
+        return false;
     }
 
-    private static string BuildOutputText(IEnumerable<string> rawLines)
+    private static bool TryParseAssistantPrompt(string line, out string content)
+    {
+        var trimmed = line.TrimStart();
+        if (trimmed.StartsWith("● ", StringComparison.Ordinal)
+            || trimmed.StartsWith("• ", StringComparison.Ordinal))
+        {
+            content = trimmed[1..].Trim();
+            return true;
+        }
+
+        content = string.Empty;
+        return false;
+    }
+
+    private static void TrimTrailingBlankLines(TranscriptEntry? entry)
+    {
+        if (entry is null)
+            return;
+
+        while (entry.Lines.Count > 1 && entry.Lines[^1].Length == 0)
+            entry.Lines.RemoveAt(entry.Lines.Count - 1);
+    }
+
+    private static string BuildFilteredText(IEnumerable<string> rawLines)
     {
         var output = new List<string>();
         var recentCounts = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -121,28 +220,29 @@ public sealed class SessionOutputParser : ISessionOutputParser
         foreach (var rawLine in rawLines)
         {
             var line = NormalizeLine(rawLine);
-            if (line.Length == 0)
+            if (string.IsNullOrWhiteSpace(line))
             {
                 pendingBlankLine = output.Count > 0;
                 continue;
             }
 
-            if (ShouldSkipLine(line))
+            var trimmed = line.Trim();
+            if (ShouldSkipFilteredLine(trimmed))
                 continue;
 
-            line = StripLeadMarker(line);
-            if (line.Length == 0 || ShouldSkipLine(line))
+            var stripped = StripLeadMarker(trimmed);
+            if (stripped.Length == 0 || ShouldSkipFilteredLine(stripped))
                 continue;
 
-            if (recentCounts.ContainsKey(line))
+            if (recentCounts.ContainsKey(stripped))
                 continue;
 
             if (pendingBlankLine && output.Count > 0 && output[^1].Length > 0)
                 output.Add(string.Empty);
 
             pendingBlankLine = false;
-            output.Add(line);
-            RememberRecentLine(line, recentQueue, recentCounts);
+            output.Add(stripped);
+            RememberRecentLine(stripped, recentQueue, recentCounts);
         }
 
         while (output.Count > 0 && output[^1].Length == 0)
@@ -153,7 +253,7 @@ public sealed class SessionOutputParser : ISessionOutputParser
 
     private static string NormalizeLine(string rawLine)
     {
-        if (string.IsNullOrWhiteSpace(rawLine))
+        if (string.IsNullOrEmpty(rawLine))
             return string.Empty;
 
         return rawLine
@@ -162,7 +262,7 @@ public sealed class SessionOutputParser : ISessionOutputParser
             .Replace("\u200C", string.Empty, StringComparison.Ordinal)
             .Replace("\u200D", string.Empty, StringComparison.Ordinal)
             .Replace("\uFEFF", string.Empty, StringComparison.Ordinal)
-            .Trim();
+            .TrimEnd();
     }
 
     private static string StripLeadMarker(string line)
@@ -198,11 +298,20 @@ public sealed class SessionOutputParser : ISessionOutputParser
         }
     }
 
-    private static bool ShouldSkipLine(string line)
+    private static bool ShouldSkipFilteredLine(string line)
     {
         return IsUiDecoration(line)
             || IsShellNoise(line)
-            || IsUserPrompt(line)
+            || IsUserPromptLine(line)
+            || IsCliChrome(line)
+            || IsToolNoise(line)
+            || IsProgressNoise(line);
+    }
+
+    private static bool ShouldSkipChromeLine(string line)
+    {
+        return IsUiDecoration(line)
+            || IsShellNoise(line)
             || IsCliChrome(line)
             || IsToolNoise(line)
             || IsProgressNoise(line);
@@ -251,7 +360,7 @@ public sealed class SessionOutputParser : ISessionOutputParser
             "$ copilot");
     }
 
-    private static bool IsUserPrompt(string line)
+    private static bool IsUserPromptLine(string line)
     {
         return line.StartsWith("› ", StringComparison.Ordinal)
             || line.StartsWith("> ", StringComparison.Ordinal)
@@ -260,6 +369,15 @@ public sealed class SessionOutputParser : ISessionOutputParser
 
     private static bool IsCliChrome(string line)
     {
+        var trimmed = line.TrimStart();
+
+        if (trimmed.StartsWith("▐", StringComparison.Ordinal)
+            || trimmed.StartsWith("▝", StringComparison.Ordinal)
+            || trimmed.StartsWith("▘▘", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
         if (line.Equals("Claude Code", StringComparison.OrdinalIgnoreCase))
             return true;
 
@@ -273,6 +391,12 @@ public sealed class SessionOutputParser : ISessionOutputParser
 
         if (line.Contains("Sonnet ", StringComparison.OrdinalIgnoreCase)
             && line.Contains("Claude Pro", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (line.Contains("high effort", StringComparison.OrdinalIgnoreCase)
+            && line.Contains("Claude Max", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -297,7 +421,8 @@ public sealed class SessionOutputParser : ISessionOutputParser
             "MCP issues detected",
             "weekly limit left",
             "GEMINI.md file | ",
-            " /mcp");
+            " /mcp",
+            "? for shortcuts");
     }
 
     private static bool IsToolNoise(string line)
@@ -330,7 +455,7 @@ public sealed class SessionOutputParser : ISessionOutputParser
         if (line.Length == 0)
             return false;
 
-        if (line[0] is '✻' or '◐' or '◑' or '◒' or '◓')
+        if (line[0] is '✻' or '✽' or '✶' or '◐' or '◑' or '◒' or '◓')
             return true;
 
         if (line.StartsWith("⚠ ", StringComparison.Ordinal) || line.StartsWith("ℹ ", StringComparison.Ordinal))
@@ -363,5 +488,18 @@ public sealed class SessionOutputParser : ISessionOutputParser
         }
 
         return false;
+    }
+
+    private sealed class TranscriptEntry
+    {
+        public TranscriptEntry(string role, string firstLine)
+        {
+            Role = role;
+            Lines = [firstLine];
+        }
+
+        public string Role { get; }
+
+        public List<string> Lines { get; }
     }
 }

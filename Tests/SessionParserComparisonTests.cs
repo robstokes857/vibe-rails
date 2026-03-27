@@ -7,8 +7,8 @@ using Xunit;
 namespace Tests;
 
 /// <summary>
-/// Compares SessionOutputParser (V1, noise-filtered) vs SessionParseV2 (raw terminal dump)
-/// using the same input so the behavioral difference is clear.
+/// Compares SessionParseV3 (structured transcript extraction) vs SessionParseV2
+/// (raw terminal dump) using the same input so the behavioral difference is clear.
 /// </summary>
 public class SessionParserComparisonTests(ITestOutputHelper output)
 {
@@ -19,9 +19,9 @@ public class SessionParserComparisonTests(ITestOutputHelper output)
         "Here is the answer to your question.\r\n");
 
     [Fact]
-    public async Task SessionOutputParser_FiltersShellNoiseAndKeepsAssistantContent()
+    public async Task SessionParseV3_FiltersShellNoiseAndKeepsAssistantContent()
     {
-        var parser = new SessionOutputParser();
+        var parser = new SessionParseV3();
         var chunks = new List<SessionLogChunkRecord>
         {
             new(1, DateTime.UtcNow, SampleSession)
@@ -105,9 +105,9 @@ public class SessionParserComparisonTests(ITestOutputHelper output)
         output.WriteLine($"Session: {sessionId}  ({chunks.Count} chunks)");
         output.WriteLine(new string('=', 60));
 
-        var v1Result = await new SessionOutputParser().ParseAsync(chunks, CancellationToken.None);
-        output.WriteLine("--- SessionOutputParser (V1 / noise-filtered) ---");
-        output.WriteLine(v1Result);
+        var v3Result = await new SessionParseV3().ParseAsync(chunks, CancellationToken.None);
+        output.WriteLine("--- SessionParseV3 (structured transcript) ---");
+        output.WriteLine(v3Result);
         output.WriteLine(new string('=', 60));
 
         var v2Result = await new SessionParseV2().ParseAsync(chunks, CancellationToken.None);

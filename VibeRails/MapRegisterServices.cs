@@ -40,7 +40,7 @@ namespace VibeRails
                 return new Repository(connectionString, bert, logger);
             });
             serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
-            serviceCollection.AddSingleton<ISessionOutputParser, SessionOutputParser>();
+            serviceCollection.AddSingleton<ISessionOutputParser, SessionParseV3>();
             serviceCollection.AddScoped<IGitService, GitService>();
 
             // Rules and Agent File services
