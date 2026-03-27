@@ -794,7 +794,7 @@ class TerminalManager {
         this.settingsBtn   = this.container.querySelector('#terminal-settings-btn');
         this.settingsPanel = this.container.querySelector('#vb-terminal-settings-panel');
         this.settingsClose = this.container.querySelector('#terminal-settings-close');
-        this.historyBtn    = null; // moved to chat history sidebar header
+        this.historyBtn    = null; // toggle lives on collapsed sidebar strip
 
         this.populateSelect();
         this.bindActions();
