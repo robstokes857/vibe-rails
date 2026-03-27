@@ -2605,8 +2605,8 @@ export class TerminalController {
             if (tab) {
                 setSessionState(tab, 'tab-completed');
                 tab.instance?.statusController?.onSessionCompleted();
-                // Flash for ~1.4s (4 × 0.35s) then settle to Ready
-                setTimeout(() => setSessionState(tab, 'tab-idle'), 1400);
+                // Flash for ~5s (10 × 0.5s) then settle to Ready
+                setTimeout(() => setSessionState(tab, 'tab-idle'), 5000);
                 this.app.showToast(cli, `Terminal session completed${exitText}`, exitCode === 0 ? 'success' : 'info');
             } else {
                 this.app.showToast(cli, `Headless session completed${exitText}`, exitCode === 0 ? 'success' : 'info');

@@ -192,19 +192,21 @@ namespace VibeRails.DB
             CreateClaudePlansCreatedIndex
         ];
 
+        public const string AddProcessedColumn = "ALTER TABLE Sessions ADD COLUMN Processed INTEGER NOT NULL DEFAULT 0";
+
         public static readonly string[] MigrationStatements =
         [
             "ALTER TABLE Sandboxes ADD COLUMN RemoteUrl TEXT;",
             "ALTER TABLE Sandboxes ADD COLUMN SourceBranch TEXT;",
             "ALTER TABLE ChatSummary DROP COLUMN SummaryBy;",
-            "ALTER TABLE Sessions ADD COLUMN Processed INTEGER NOT NULL DEFAULT 0",
+            AddProcessedColumn,
             "ALTER TABLE Sessions ADD COLUMN ParentSessionId TEXT DEFAULT ''",
             "ALTER TABLE Sessions ADD COLUMN SessionDisplayName TEXT DEFAULT ''"
         ];
 
         /// <summary>
         /// Seed migration: after adding the Processed column, mark all existing sessions as processed.
-        /// Keyed by the migration it depends on — only runs once when that migration succeeds.
+        /// Only runs when the AddProcessedColumn migration succeeds.
         /// </summary>
         public const string SeedProcessedColumn = "UPDATE Sessions SET Processed = 1";
 

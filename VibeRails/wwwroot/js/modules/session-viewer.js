@@ -92,25 +92,24 @@ export async function showReplayModal(sessionId) {
         return;
     }
 
+    // Use the same dimensions the PTY was recorded at (Terminal.DefaultCols/DefaultRows)
+    // to avoid cursor-positioning misalignment that causes double-printing.
+    const replayCols = 120;
+    const replayRows = 30;
+
     term = new window.Terminal({
-        cols: 220,
-        rows: 50,
+        cols: replayCols,
+        rows: replayRows,
         fontFamily: '"Fira Code","JetBrains Mono",Consolas,monospace',
         fontSize: 13,
         disableStdin: true,
         convertEol: false,
         allowProposedApi: true,
+        scrollback: 20000,
         theme: { background: '#1e1e1e', foreground: '#d4d4d4' }
     });
 
-    if (window.FitAddon?.FitAddon) {
-        const fit = new window.FitAddon.FitAddon();
-        term.loadAddon(fit);
-        term.open(termEl);
-        fit.fit();
-    } else {
-        term.open(termEl);
-    }
+    term.open(termEl);
 
     term.write('Loading session data\u2026\r\n');
 
