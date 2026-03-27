@@ -64,17 +64,42 @@ async function fetchJson(endpoint) {
 export async function showTranscriptModal(sessionId) {
     const { body } = createModal(`Transcript — ${sessionId}`);
 
+    const toolbar = document.createElement('div');
+    toolbar.style.cssText = 'display:flex;justify-content:flex-end;padding:4px 12px;border-bottom:1px solid #333;flex-shrink:0;';
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = 'Export .txt';
+    exportBtn.style.cssText = 'background:#2d2d2d;border:1px solid #555;color:#ccc;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-family:monospace;';
+    exportBtn.disabled = true;
+    toolbar.appendChild(exportBtn);
+
     const pre = document.createElement('pre');
-    pre.style.cssText = 'margin:0;padding:12px;color:#d4d4d4;font-size:12px;line-height:1.5;overflow:auto;height:100%;box-sizing:border-box;white-space:pre-wrap;word-break:break-word;';
+    pre.style.cssText = 'margin:0;padding:12px;color:#d4d4d4;font-size:12px;line-height:1.5;overflow:auto;flex:1;box-sizing:border-box;white-space:pre-wrap;word-break:break-word;';
     pre.textContent = 'Loading\u2026';
-    body.appendChild(pre);
+
+    body.style.cssText += 'display:flex;flex-direction:column;';
+    body.append(toolbar, pre);
+
+    let transcriptText = null;
 
     try {
         const json = await fetchJson(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/transcript`);
-        pre.textContent = json.text ?? '(no transcript)';
+        transcriptText = json.text ?? '(no transcript)';
+        pre.textContent = transcriptText;
+        exportBtn.disabled = false;
     } catch (err) {
         pre.textContent = `Error: ${err.message}`;
     }
+
+    exportBtn.addEventListener('click', () => {
+        if (!transcriptText) return;
+        const blob = new Blob([transcriptText], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${sessionId}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
 }
 
 export async function showReplayModal(sessionId) {
