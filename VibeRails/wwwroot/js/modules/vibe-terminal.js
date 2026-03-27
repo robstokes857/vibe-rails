@@ -273,6 +273,16 @@ export class VibeTerminal {
                 return true;
             }
 
+            if (key === 'c' && !event.shiftKey) {
+                const selected = this._terminal?.getSelection();
+                if (selected) {
+                    navigator.clipboard?.writeText(selected).catch(() => {});
+                    this._terminal.clearSelection();
+                    return false;
+                }
+                return true; // no selection — send SIGINT
+            }
+
             if (key === 'c' && event.shiftKey) {
                 const selected = this._terminal?.getSelection();
                 if (selected) {

@@ -65,7 +65,7 @@ namespace VibeRails.DB
                         cmd.CommandText = migration;
                         cmd.ExecuteNonQuery();
 
-                        if (migration.Contains("Processed", StringComparison.Ordinal))
+                        if (ReferenceEquals(migration, SqlStrings.AddProcessedColumn))
                         {
                             using var seedCmd = connection.CreateCommand();
                             seedCmd.CommandText = SqlStrings.SeedProcessedColumn;

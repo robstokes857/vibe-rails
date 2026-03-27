@@ -12,6 +12,9 @@ public static class SessionRoutes
             string sessionId,
             CancellationToken cancellationToken) =>
         {
+            if (string.IsNullOrWhiteSpace(sessionId))
+                return Results.BadRequest(new ErrorResponse("Session id is required."));
+
             var result = await repository.GetSessionWithLogsAsync(sessionId, cancellationToken);
             if (result == null)
             {
@@ -34,6 +37,9 @@ public static class SessionRoutes
             string sessionId,
             CancellationToken cancellationToken) =>
         {
+            if (string.IsNullOrWhiteSpace(sessionId))
+                return Results.BadRequest(new ErrorResponse("Session id is required."));
+
             var result = await repository.GetSessionOutputAsync(sessionId, cancellationToken);
             if (result == null)
             {

@@ -30,6 +30,7 @@ export class ChatHistorySidebar {
     static renderHtml() {
         return `
             <div class="ch-sidebar ch-sidebar-collapsed" id="ch-sidebar">
+                <div class="ch-sidebar-collapsed-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
                 <div class="ch-sidebar-header">
                     <span class="ch-sidebar-title">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16" style="opacity:0.7">
@@ -160,6 +161,17 @@ export class ChatHistorySidebar {
 
             void this._loadNextPage();
         }, { passive: true });
+
+        // When the sidebar expands (or the window/screen changes), the body
+        // dimensions change.  Items that filled the collapsed peek strip may
+        // leave empty space at full width — trigger a load check.
+        if (body) {
+            new ResizeObserver(() => {
+                if (this._shouldLoadNextPage()) {
+                    void this._loadNextPage();
+                }
+            }).observe(body);
+        }
 
         // Close menu on click outside
         document.addEventListener('click', (e) => {
@@ -477,8 +489,9 @@ export class ChatHistorySidebar {
             const name = rawName.length > 52 ? rawName.slice(0, 52) + '…' : rawName;
             const time = formatRelativeTime(item.startedUTC);
             const isActive = !item.endedUTC;
+            const logoStyle = brand.logoFilter ? ` style="filter: ${brand.logoFilter}"` : '';
             const logoHtml = brand.logo
-                ? `<img src="${escapeHtml(brand.logo)}" alt="${escapeHtml(brand.label)}" class="ch-item-logo">`
+                ? `<img src="${escapeHtml(brand.logo)}" alt="${escapeHtml(brand.label)}" class="ch-item-logo"${logoStyle}>`
                 : `<span class="ch-item-logo-fallback">${escapeHtml((brand.label || '?')[0])}</span>`;
             return `
                 <div class="ch-item${isActive ? ' ch-item-active' : ''}" data-id="${escapeHtml(item.id)}">

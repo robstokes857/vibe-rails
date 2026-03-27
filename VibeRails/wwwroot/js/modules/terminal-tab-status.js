@@ -154,6 +154,8 @@ export class TabStatusController {
         if (data === '\r' &&
             (this._status === TAB_STATUS.CONNECTED || this._status === TAB_STATUS.READY)) {
             this._transitionTo(TAB_STATUS.THINKING);
+        } else if (data === '\x1b' && this._status === TAB_STATUS.THINKING) {
+            this._transitionTo(TAB_STATUS.CONNECTED);
         }
     }
 
