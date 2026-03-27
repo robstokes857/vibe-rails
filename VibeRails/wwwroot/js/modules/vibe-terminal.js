@@ -116,6 +116,7 @@ export class VibeTerminal {
             disableStdin,
             convertEol: false,
             minimumContrastRatio: 3,
+            rightClickSelectsWord: true,
             cursorBlink,
             cursorStyle,
             cursorInactiveStyle,
@@ -183,6 +184,14 @@ export class VibeTerminal {
         this._loadLigaturesAddon();
 
         this._terminal.open(this._outputEl);
+
+        // When right-clicking the terminal (especially with WebGL, where a canvas
+        // overlays the hidden textarea), ensure the textarea has focus so that the
+        // browser's context-menu "Paste" fires the paste event on the textarea
+        // where our listener lives.
+        this._outputEl.addEventListener('contextmenu', () => {
+            this._terminal?.textarea?.focus();
+        });
 
         const useWebgl = (() => {
             try {

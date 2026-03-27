@@ -30,7 +30,7 @@ export class ChatHistorySidebar {
     static renderHtml() {
         return `
             <div class="ch-sidebar ch-sidebar-collapsed" id="ch-sidebar">
-                <div class="ch-sidebar-collapsed-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
+                <div class="ch-sidebar-collapsed-icon" title="Open chat history"><i class="fa-solid fa-clock-rotate-left"></i></div>
                 <div class="ch-sidebar-header">
                     <span class="ch-sidebar-title">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16" style="opacity:0.7">
@@ -91,12 +91,32 @@ export class ChatHistorySidebar {
         this.contextMenu = contextMenu;
         this.refreshButton = root.querySelector('#ch-sidebar-refresh-btn');
         this.closeButton = root.querySelector('#ch-sidebar-close-btn');
+        const syncCloseButtonState = () => {
+            if (!sidebar || !this.closeButton) {
+                return;
+            }
+
+            const isOpen = !sidebar.classList.contains('ch-sidebar-collapsed');
+            const icon = this.closeButton.querySelector('i');
+            const label = isOpen ? 'Collapse chat history' : 'Expand chat history';
+
+            this.closeButton.setAttribute('title', label);
+            this.closeButton.setAttribute('aria-label', label);
+            this.closeButton.setAttribute('aria-expanded', String(isOpen));
+
+            if (icon) {
+                icon.className = isOpen
+                    ? 'fa-solid fa-chevron-left'
+                    : 'fa-solid fa-chevron-right';
+            }
+        };
         const emitToggleState = () => onToggle?.(!sidebar?.classList.contains('ch-sidebar-collapsed'));
 
-        // Close button collapses the sidebar
+        // Toggle button stays visible in both states.
         this.closeButton?.addEventListener('click', (e) => {
             e.stopPropagation();
-            onToggle?.(false);
+            const willOpen = sidebar?.classList.contains('ch-sidebar-collapsed') ?? false;
+            onToggle?.(willOpen);
         });
 
         // Clicking the collapsed sidebar peek strip re-opens it
@@ -184,6 +204,12 @@ export class ChatHistorySidebar {
             }
         });
 
+        if (sidebar && this.closeButton && typeof MutationObserver === 'function') {
+            new MutationObserver(() => syncCloseButtonState())
+                .observe(sidebar, { attributes: true, attributeFilter: ['class'] });
+        }
+
+        syncCloseButtonState();
         emitToggleState();
         void this._load();
     }
