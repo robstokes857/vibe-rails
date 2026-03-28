@@ -1,5 +1,6 @@
 import {
     buildLlmSelectionOptions,
+    parseLlmSelection,
     formatRelativeTime,
     escapeHtml
 } from './utils.js';
@@ -71,7 +72,6 @@ export class ChatHistorySidebar {
                     </div>
                     <div class="ch-context-menu-divider"></div>
                     <div class="ch-context-menu-item" data-action="rename">Rename</div>
-                    <div class="ch-context-menu-item" data-action="summarize">Summarize</div>
                     <div class="ch-context-menu-item text-danger" data-action="delete">Delete</div>
                     <div class="ch-context-menu-divider"></div>
                     <div class="ch-context-menu-item" data-action="get-transcript">Get Transcript</div>
@@ -141,11 +141,6 @@ export class ChatHistorySidebar {
         contextMenu?.querySelector('[data-action="rename"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             void this._showRenameModal();
-        });
-
-        contextMenu?.querySelector('[data-action="summarize"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            void this._showSummaryModal();
         });
 
         contextMenu?.querySelector('[data-action="delete"]')?.addEventListener('click', (e) => {
@@ -567,81 +562,129 @@ export class ChatHistorySidebar {
         `;
     }
 
-    async _showSummaryModal() {
-        if (!this.activeItem) {
-            return;
-        }
+    async _showResumeModal(parsedLlm, llmDisplayLabel) {
+        if (!this.activeItem) return;
 
+        const CHAR_LIMIT = 6000;
         const sessionId = this.activeItem.id;
         const chatName = this._getDisplayName(this.activeItem);
+        const activeItemSnapshot = this.activeItem;
         this._closeContextMenu();
 
-        this.app.showModal('Chat Summary', `
-            <div class="text-muted small mb-3">${escapeHtml(chatName)}</div>
-            <div id="ch-summary-body">
-                <div class="d-flex flex-column gap-2 py-2 text-muted ch-summary-loading">
+        this.app.showModal(`Sending to ${escapeHtml(llmDisplayLabel)}`, `
+            <div class="text-muted small mb-3">${escapeHtml(sessionId)}</div>
+            <div id="ch-resume-body">
+                <div class="d-flex flex-column gap-2 py-2 text-muted">
                     <div class="d-flex align-items-center gap-2">
                         <div class="spinner-border spinner-border-sm flex-shrink-0" role="status"></div>
-                        <span>Generating summary…</span>
+                        <span>Generating summary&hellip;</span>
                     </div>
-                    <div class="small" style="padding-left:1.75rem;">This might take a while. You can navigate away and come back when it is done.</div>
+                    <div class="small" style="padding-left:1.75rem;">This might take a moment.</div>
                 </div>
             </div>
-            <div class="d-flex justify-content-end gap-2 mt-3">
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="ch-summary-regenerate-btn" disabled>
+            <div class="d-flex justify-content-between align-items-center mt-3" id="ch-resume-actions" style="display:none !important;">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="ch-resume-regenerate-btn" disabled>
                     <i class="fa-solid fa-rotate-right me-1"></i>Regenerate
                 </button>
-                <button type="button" class="btn btn-secondary btn-sm" data-action="close-modal">Close</button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="ch-resume-launch-btn" disabled>
+                        <i class="fa-solid fa-terminal me-1"></i>Launch Terminal
+                    </button>
+                </div>
             </div>
         `);
 
-        const loadSummary = async (regenerate) => {
-            const summaryBody = document.getElementById('ch-summary-body');
-            const regenerateBtn = document.getElementById('ch-summary-regenerate-btn');
-            if (!summaryBody) return;
-
-            summaryBody.innerHTML = `
-                <div class="d-flex flex-column gap-2 py-2 text-muted ch-summary-loading">
+        const showSpinner = (container) => {
+            container.innerHTML = `
+                <div class="d-flex flex-column gap-2 py-2 text-muted">
                     <div class="d-flex align-items-center gap-2">
                         <div class="spinner-border spinner-border-sm flex-shrink-0" role="status"></div>
-                        <span>Generating summary…</span>
+                        <span>Generating summary&hellip;</span>
                     </div>
-                    <div class="small" style="padding-left:1.75rem;">This might take a while. You can navigate away and come back when it is done.</div>
+                    <div class="small" style="padding-left:1.75rem;">This might take a moment.</div>
                 </div>`;
+        };
+
+        const loadSummary = async (regenerate) => {
+            const resumeBody = document.getElementById('ch-resume-body');
+            const actionsBar = document.getElementById('ch-resume-actions');
+            const regenerateBtn = document.getElementById('ch-resume-regenerate-btn');
+            const launchBtn = document.getElementById('ch-resume-launch-btn');
+            if (!resumeBody) return;
+
+            showSpinner(resumeBody);
+            if (actionsBar) actionsBar.style.cssText = 'display:none !important;';
             if (regenerateBtn) regenerateBtn.disabled = true;
+            if (launchBtn) launchBtn.disabled = true;
 
             try {
                 const url = `/api/v1/chatHistory/${encodeURIComponent(sessionId)}/Summary${regenerate ? '?regenerate=true' : ''}`;
                 const result = await this.app.apiCall(url, 'GET', null, { showLoading: false });
 
                 const summary = result?.summary ?? '';
-                const transcript = result?.transcript ?? '';
-                const cleanTranscript = this._stripAnsi(transcript);
+                const transcript = this._stripAnsi(result?.transcript ?? '');
 
-                if (summaryBody) {
-                    summaryBody.innerHTML = `
-                        <div class="mb-3">
-                            <div class="fw-semibold small text-muted mb-1 text-uppercase" style="letter-spacing:.05em;">Summary</div>
-                            <div class="ch-summary-panel">${escapeHtml(summary)}</div>
+                resumeBody.innerHTML = `
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold small text-muted text-uppercase mb-1" style="letter-spacing:.05em;">Summary</label>
+                        <textarea class="form-control" id="ch-resume-summary" rows="8"
+                            style="font-size:0.85rem;resize:vertical;">${escapeHtml(summary)}</textarea>
+                        <div class="d-flex justify-content-end mt-1">
+                            <small id="ch-resume-char-count" class="${summary.length > CHAR_LIMIT ? 'text-danger' : 'text-muted'}">${summary.length} / ${CHAR_LIMIT}</small>
                         </div>
-                        <details class="ch-summary-details">
-                            <summary class="fw-semibold small text-muted mb-1 text-uppercase" style="letter-spacing:.05em;cursor:pointer;">Raw Transcript</summary>
-                            <div class="ch-summary-transcript">
-                                <pre class="mb-0 small ch-summary-transcript-text">${escapeHtml(cleanTranscript || '(empty)')}</pre>
-                            </div>
-                        </details>`;
-                }
+                    </div>
+                    <details class="mb-2">
+                        <summary class="fw-semibold small text-muted text-uppercase" style="letter-spacing:.05em;cursor:pointer;">
+                            Raw Transcript
+                        </summary>
+                        <textarea class="form-control mt-2" id="ch-resume-transcript" rows="6"
+                            style="font-size:0.8rem;resize:vertical;">${escapeHtml(transcript || '(empty)')}</textarea>
+                    </details>`;
+
+                // Wire character counter + validation
+                const summaryTextarea = document.getElementById('ch-resume-summary');
+                const charCount = document.getElementById('ch-resume-char-count');
+                const updateCharCount = () => {
+                    const len = summaryTextarea.value.length;
+                    charCount.textContent = `${len} / ${CHAR_LIMIT}`;
+                    const overLimit = len > CHAR_LIMIT;
+                    charCount.classList.toggle('text-danger', overLimit);
+                    charCount.classList.toggle('text-muted', !overLimit);
+                    if (launchBtn) launchBtn.disabled = len === 0 || overLimit;
+                };
+                summaryTextarea?.addEventListener('input', updateCharCount);
+
+                if (actionsBar) actionsBar.style.cssText = '';
                 if (regenerateBtn) regenerateBtn.disabled = false;
-                this.app.showToast('Chat Summary', `Summary ready for "${chatName}"`, 'success');
+                if (launchBtn) launchBtn.disabled = summary.length === 0 || summary.length > CHAR_LIMIT;
             } catch (error) {
-                if (summaryBody) {
-                    summaryBody.innerHTML = `<div class="text-danger small">Failed to generate summary: ${escapeHtml(error.message)}</div>`;
-                }
+                resumeBody.innerHTML = `<div class="text-danger small">Failed to generate summary: ${escapeHtml(error.message)}</div>`;
+                if (actionsBar) actionsBar.style.cssText = '';
                 if (regenerateBtn) regenerateBtn.disabled = false;
             }
         };
 
-        document.getElementById('ch-summary-regenerate-btn')?.addEventListener('click', () => loadSummary(true));
+        // Wire buttons
+        document.getElementById('ch-resume-regenerate-btn')?.addEventListener('click', () => loadSummary(true));
+        document.getElementById('ch-resume-launch-btn')?.addEventListener('click', () => {
+            const summaryText = document.getElementById('ch-resume-summary')?.value?.trim() || '';
+            if (!summaryText || summaryText.length > CHAR_LIMIT) return;
+
+            this.app.closeModal();
+
+            const manager = this.app.terminalController.manager;
+            if (!manager || manager.isDestroyed()) return;
+
+            manager.startWithOptions({
+                cli: parsedLlm.cli,
+                environmentName: parsedLlm.environmentName || null,
+                resumeSummary: summaryText,
+                resumeSessionId: sessionId,
+                title: this._getDisplayName(activeItemSnapshot),
+                forceNewTab: true
+            });
+        });
 
         await loadSummary(false);
     }
@@ -678,13 +721,13 @@ export class ChatHistorySidebar {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const value = item.dataset.value;
-                console.log(`Send session ${this.activeItem?.id} to ${value}`);
-                // Implement actual send logic here
-                const menu = submenu.closest('.ch-context-menu');
-                menu.classList.remove('show');
-                
-                const sidebar = menu.closest('.ch-sidebar');
-                sidebar?.querySelectorAll('.ch-item-menu-active').forEach(el => el.classList.remove('ch-item-menu-active'));
+                if (!this.activeItem || !value) return;
+
+                const parsed = parseLlmSelection(value, this.app.data.environments || []);
+                if (!parsed.cli) return;
+
+                const label = item.textContent.trim();
+                this._showResumeModal(parsed, label);
             });
         });
     }

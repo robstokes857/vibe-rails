@@ -263,7 +263,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 }
             }
             catch (OperationCanceledException) { return; }
-            catch (Exception ex) { }            
+            catch (Exception) { }            
         }
     }
 

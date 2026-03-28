@@ -350,6 +350,15 @@ namespace VibeRails.DB
             INSERT INTO Sessions (Id, Cli, EnvironmentName, WorkingDirectory, StartedUTC)
             VALUES ($id, $cli, $envName, $workDir, $startedUTC);
             """;
+        public const string SetParentSessionId = """
+            UPDATE Sessions SET ParentSessionId = $parentSessionId WHERE Id = $id;
+            """;
+        public const string SetSessionDisplayName = """
+            UPDATE Sessions SET SessionDisplayName = $displayName WHERE Id = $id;
+            """;
+        public const string SelectSessionDisplayInfo = """
+            SELECT Cli, SessionDisplayName FROM Sessions WHERE Id = $id;
+            """;
         public const string InsertSessionLog = """
             INSERT INTO SessionLogs (SessionId, Timestamp, Content, IsError)
             VALUES ($sessionId, $timestamp, $content, $isError);

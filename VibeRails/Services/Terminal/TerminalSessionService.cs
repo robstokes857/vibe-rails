@@ -27,7 +27,7 @@ public interface ITerminalSessionService
     bool HasActiveSession { get; }
     string? ActiveSessionId { get; }
     bool IsExternallyOwned { get; }
-    Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null);
+    Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null, string summary = "");
     Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken, int? cols = null, int? rows = null);
     Task StopSessionAsync();
     void RegisterExternalTerminal(Terminal terminal, string sessionId, string? cliName = null);
@@ -89,7 +89,7 @@ public class TerminalSessionService : ITerminalSessionService
         _localClientTracker = localClientTracker;
     }
 
-    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null)
+    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null, string summary = "")
     {
         await s_lifecycleGate.WaitAsync();
 
@@ -110,6 +110,7 @@ public class TerminalSessionService : ITerminalSessionService
                 title,
                 makeRemote,
                 initialPrompt,
+                summary: summary,
                 onRemoteTakeoverAuthorized: trigger =>
                 {
                     Log.Information(

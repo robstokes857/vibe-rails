@@ -21,6 +21,7 @@ public static class TerminalRoutes
             ITerminalSessionService terminalService,
             ILlmParser llmParser,
             IRepository repository,
+            ISessionResumeService sessionResumeService,
             StartTerminalRequest? request,
             CancellationToken cancellationToken) =>
         {
@@ -62,14 +63,33 @@ public static class TerminalRoutes
                 }
             }
 
+            // Resolve resume session summary
+            var summary = "";
+            if (!string.IsNullOrEmpty(request.ResumeSummary))
+            {
+                if (request.ResumeSummary.Length > 6000)
+                    return Results.BadRequest(new ErrorResponse("Resume summary exceeds 6000 character limit."));
+                summary = request.ResumeSummary;
+            }
+            else if (!string.IsNullOrEmpty(request.ResumeSessionId))
+            {
+                summary = await sessionResumeService.GetResumeSummaryAsync(request.ResumeSessionId, cancellationToken);
+            }
+
             // Start the terminal session with the LLM CLI
             try
             {
-                var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote, request.InitialPrompt);
+                var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote, request.InitialPrompt, summary);
 
                 if (!success)
                 {
                     return Results.BadRequest(new ErrorResponse("Failed to start terminal session"));
+                }
+
+                // Link parent session if this was resumed from a previous session
+                if (!string.IsNullOrEmpty(request.ResumeSessionId) && !string.IsNullOrEmpty(terminalService.ActiveSessionId))
+                {
+                    await sessionResumeService.LinkParentSessionAsync(terminalService.ActiveSessionId, request.ResumeSessionId, llm.ToString(), cancellationToken);
                 }
 
                 return Results.Ok(new TerminalStatusResponse(true, terminalService.ActiveSessionId));

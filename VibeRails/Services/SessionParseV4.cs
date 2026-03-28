@@ -22,7 +22,7 @@ public sealed class SessionParseV4 : ISessionOutputParser
 
     public Task<string> ParseAsync(IReadOnlyList<SessionLogChunkRecord> chunks, CancellationToken cancellationToken = default)
     {
-        var lines = ReplayRenderedLines(chunks, cancellationToken);
+        var (lines, _) = ReplayRenderedLines(chunks, cancellationToken);
         return Task.FromResult(BuildCleanText(lines));
     }
 
@@ -31,19 +31,19 @@ public sealed class SessionParseV4 : ISessionOutputParser
         IReadOnlyList<UserInputRecord> userInputs,
         CancellationToken cancellationToken = default)
     {
-        var lines = ReplayRenderedLines(chunks, cancellationToken);
-
         if (userInputs.Count == 0)
-            return Task.FromResult(BuildCleanText(lines));
+            throw new InvalidOperationException("This session has no user messages.");
 
-        var anchors = FindUserInputAnchors(lines, userInputs);
-        if (anchors.Count == 0)
-            return Task.FromResult(BuildCleanText(lines));
 
-        return Task.FromResult(BuildTranscript(lines, anchors));
+        // Take snapshots of the screen at each user-input boundary.
+        // The screen is always correct (scrollback can contain garbled TUI animation states).
+        var orderedInputs = userInputs.OrderBy(u => u.Sequence).ToList();
+        var snapshots = ReplayWithSnapshots(chunks, orderedInputs, cancellationToken);
+
+        return Task.FromResult(BuildTranscriptFromSnapshots(orderedInputs, snapshots));
     }
 
-    private static List<string> ReplayRenderedLines(
+    private static (List<string> Lines, int ScreenStartIndex) ReplayRenderedLines(
         IReadOnlyList<SessionLogChunkRecord> chunks,
         CancellationToken cancellationToken)
     {
@@ -65,6 +65,8 @@ public sealed class SessionParseV4 : ISessionOutputParser
         foreach (var row in terminal.GetScrollback())
             lines.Add(RowToText(row));
 
+        var screenStart = lines.Count;
+
         var screen = terminal.GetSnapshot();
         var rowBuf = new TerminalCell[terminal.Cols];
         for (var r = 0; r < terminal.Rows; r++)
@@ -74,7 +76,7 @@ public sealed class SessionParseV4 : ISessionOutputParser
             lines.Add(RowToText(rowBuf));
         }
 
-        return lines;
+        return (lines, screenStart);
     }
 
     private static string RowToText(TerminalCell[] row)
@@ -103,24 +105,154 @@ public sealed class SessionParseV4 : ISessionOutputParser
     }
 
     /// <summary>
-    /// Searches rendered lines for each user input text (in sequence order), returning
-    /// the line index and input record for each match. Searches forward from the previous
-    /// match to avoid false positives from agents quoting the user.
+    /// Replays chunks through the emulator, snapshotting the screen state at each user-input
+    /// timestamp boundary. Returns one snapshot per user input (the state AFTER the agent
+    /// finished responding) plus a final snapshot after all bytes.
+    /// Key insight: the screen is always correct; scrollback may have garbled TUI animations.
     /// </summary>
-    private static List<(int LineIndex, UserInputRecord Input)> FindUserInputAnchors(
+    private static List<string[]> ReplayWithSnapshots(
+        IReadOnlyList<SessionLogChunkRecord> chunks,
+        IReadOnlyList<UserInputRecord> orderedInputs,
+        CancellationToken cancellationToken)
+    {
+        var terminal = new EmulatorTerminal(
+            cols: VibeTerminal.DefaultCols,
+            rows: VibeTerminal.DefaultRows,
+            scrollbackSize: ScrollbackSize);
+
+        var snapshots = new List<string[]>();
+        var inputIndex = 0;
+
+        foreach (var chunk in chunks)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Before feeding this chunk, check if we've crossed a user input timestamp.
+            // The snapshot captures the screen BEFORE the user's next input — i.e., the
+            // agent's response to the previous input is complete.
+            while (inputIndex < orderedInputs.Count
+                   && chunk.TimestampUtc >= orderedInputs[inputIndex].TimestampUTC)
+            {
+                snapshots.Add(terminal.GetScreenText());
+                inputIndex++;
+            }
+
+            if (chunk.Content.Length > 0)
+                terminal.Write(chunk.Content.AsSpan());
+        }
+
+        // Remaining inputs that had no later chunks
+        while (inputIndex < orderedInputs.Count)
+        {
+            snapshots.Add(terminal.GetScreenText());
+            inputIndex++;
+        }
+
+        // Final snapshot: screen state after all bytes (agent response to last input)
+        snapshots.Add(terminal.GetScreenText());
+
+        return snapshots;
+    }
+
+    private static string BuildTranscriptFromSnapshots(
+        IReadOnlyList<UserInputRecord> orderedInputs,
+        IReadOnlyList<string[]> snapshots)
+    {
+        // snapshots[0..N-1] = screen before each user input
+        // snapshots[N] = final screen after all bytes
+        // Agent response to input i = new content between snapshots[i] and snapshots[i+1]
+
+        var turns = new List<(List<string> UserTexts, List<string> AgentLines)>();
+
+        for (var i = 0; i < orderedInputs.Count; i++)
+        {
+            var afterSnapshot = snapshots[i + 1]; // screen after agent responded
+            var agentLines = ExtractAgentFromSnapshot(afterSnapshot);
+
+            if (agentLines.Count == 0 && turns.Count > 0)
+            {
+                // No agent response — merge into previous turn (multi-line paste)
+                turns[^1].UserTexts.Add(orderedInputs[i].InputText.Trim());
+            }
+            else
+            {
+                turns.Add(([orderedInputs[i].InputText.Trim()], agentLines));
+            }
+        }
+
+        return FormatTurns(turns);
+    }
+
+    /// <summary>
+    /// Extracts agent response text from a screen snapshot by finding the LAST agent
+    /// marker (● • ✦) on the screen and taking everything from that point down.
+    /// </summary>
+    private static List<string> ExtractAgentFromSnapshot(string[] screenRows)
+    {
+        // Find the last agent bullet marker on screen — that's the most recent response
+        var lastAgentRow = -1;
+        for (var i = screenRows.Length - 1; i >= 0; i--)
+        {
+            var trimmed = screenRows[i].Trim();
+            if (TryStripAgentMarker(trimmed, out _))
+            {
+                lastAgentRow = i;
+                break;
+            }
+        }
+
+        if (lastAgentRow < 0)
+            return [];
+
+        var lines = new List<string>();
+        for (var i = lastAgentRow; i < screenRows.Length; i++)
+            lines.Add(screenRows[i]);
+
+        return CleanAgentLines(lines);
+    }
+
+    private static string FormatTurns(List<(List<string> UserTexts, List<string> AgentLines)> turns)
+    {
+        if (turns.Count == 0)
+            return "(empty chat)";
+
+        var sb = new StringBuilder();
+
+        foreach (var (userTexts, agentLines) in turns)
+        {
+            if (sb.Length > 0)
+                sb.AppendLine();
+
+            sb.Append("User: ").AppendLine(string.Join("\n", userTexts));
+
+            if (agentLines.Count > 0)
+            {
+                sb.AppendLine();
+                sb.Append("Agent: ").AppendLine(agentLines[0]);
+                for (var i = 1; i < agentLines.Count; i++)
+                    sb.AppendLine(agentLines[i]);
+            }
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static List<(int LineIndex, UserInputRecord Input)> FindAnchorsInRange(
         IReadOnlyList<string> lines,
-        IReadOnlyList<UserInputRecord> userInputs)
+        IReadOnlyList<UserInputRecord> orderedInputs,
+        int rangeStart,
+        int rangeEnd)
     {
         var anchors = new List<(int, UserInputRecord)>();
-        var searchFrom = 0;
+        var searchFrom = rangeStart;
 
-        foreach (var input in userInputs.OrderBy(u => u.Sequence))
+        foreach (var input in orderedInputs)
         {
             var text = input.InputText.Trim();
             if (string.IsNullOrEmpty(text))
                 continue;
 
-            for (var i = searchFrom; i < lines.Count; i++)
+            for (var i = searchFrom; i < rangeEnd; i++)
             {
                 if (lines[i].Contains(text, StringComparison.Ordinal))
                 {
@@ -134,30 +266,55 @@ public sealed class SessionParseV4 : ISessionOutputParser
         return anchors;
     }
 
-    private static string BuildTranscript(
+    /// <summary>
+    /// Groups anchors into turns. Consecutive user inputs with no agent content
+    /// between them are merged into a single user turn (handles multi-line pastes).
+    /// </summary>
+    private static List<(List<string> UserTexts, List<string> AgentLines)> GroupIntoTurns(
         IReadOnlyList<string> lines,
         IReadOnlyList<(int LineIndex, UserInputRecord Input)> anchors)
     {
-        var sb = new StringBuilder();
+        var turns = new List<(List<string> UserTexts, List<string> AgentLines)>();
 
         for (var a = 0; a < anchors.Count; a++)
         {
             var (userLineIdx, input) = anchors[a];
             var nextUserLineIdx = a + 1 < anchors.Count ? anchors[a + 1].LineIndex : lines.Count;
 
-            // Collect agent response lines between this user input and the next
-            var agentLines = new List<string>();
+            var rawAgentLines = new List<string>();
             for (var i = userLineIdx + 1; i < nextUserLineIdx; i++)
-                agentLines.Add(lines[i]);
+                rawAgentLines.Add(lines[i]);
 
-            // Strip chrome/noise from agent lines
-            agentLines = CleanAgentLines(agentLines);
+            var agentLines = CleanAgentLines(rawAgentLines);
 
-            // Append user turn
+            if (agentLines.Count == 0 && turns.Count > 0)
+            {
+                // No agent response for this input — merge into previous turn
+                // (handles multi-line pastes where each line is a separate DB record)
+                turns[^1].UserTexts.Add(input.InputText.Trim());
+            }
+            else
+            {
+                turns.Add(([input.InputText.Trim()], agentLines));
+            }
+        }
+
+        return turns;
+    }
+
+    private static string BuildTranscript(
+        IReadOnlyList<string> lines,
+        IReadOnlyList<(int LineIndex, UserInputRecord Input)> anchors)
+    {
+        var turns = GroupIntoTurns(lines, anchors);
+        var sb = new StringBuilder();
+
+        foreach (var (userTexts, agentLines) in turns)
+        {
             if (sb.Length > 0)
                 sb.AppendLine();
 
-            sb.Append("User: ").AppendLine(input.InputText.Trim());
+            sb.Append("User: ").AppendLine(string.Join("\n", userTexts));
 
             if (agentLines.Count > 0)
             {
@@ -290,6 +447,23 @@ public sealed class SessionParseV4 : ISessionOutputParser
         // Directory info lines (often in CLI headers)
         if (line.StartsWith("directory:", StringComparison.OrdinalIgnoreCase)
             || line.StartsWith("model:", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Status bar / footer chrome (Gemini, Claude, Codex, Copilot)
+        if (line.Contains("Shift+Tab to accept", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("shift+tab to accept", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("no sandbox", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("GEMINI.md file", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("CLAUDE.md file", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("accept edits on", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Codex turn delimiters and role labels
+        if (line.StartsWith(">>>>>>>>> ", StringComparison.Ordinal)
+            || line.StartsWith("<<<<<<<<< ", StringComparison.Ordinal)
+            || line == "Assistant said:"
+            || line == "User said:"
+            || line.StartsWith("Working (", StringComparison.Ordinal))
             return true;
 
         return false;

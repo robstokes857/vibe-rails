@@ -12,6 +12,9 @@ namespace VibeRails.DB
         Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir);
         Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false);
         Task CompleteSessionAsync(string sessionId, int exitCode);
+        Task<(string? Cli, string? DisplayName)> GetSessionDisplayInfoAsync(string sessionId);
+        Task SetParentSessionIdAsync(string sessionId, string parentSessionId);
+        Task SetSessionDisplayNameAsync(string sessionId, string displayName);
 
         // Session retrieval
         Task<SessionWithLogsResponse?> GetSessionWithLogsAsync(string sessionId, CancellationToken cancellationToken);
