@@ -272,7 +272,9 @@ namespace VibeRails.DTOs
         string? EnvironmentName = null,
         string? Title = null,
         bool MakeRemote = false,
-        string? InitialPrompt = null
+        string? InitialPrompt = null,
+        string? ResumeSessionId = null,
+        string? ResumeSummary = null
     );
 
     public record BootstrapCommandResponse(

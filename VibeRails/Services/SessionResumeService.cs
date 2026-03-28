@@ -1,0 +1,103 @@
+using VibeRails.DB;
+using VibeRails.DTOs;
+using VibeRails.Interfaces;
+using VibeRails.Services.Integrations.VibeCodeRemote;
+
+namespace VibeRails.Services;
+
+public interface ISessionResumeService
+{
+    /// <summary>
+    /// Given a previous session ID, builds its transcript, summarises it,
+    /// and returns the summary text ready for injection into a CLI prompt.
+    /// Throws KeyNotFoundException if the session does not exist.
+    /// Returns empty string if the session has no usable transcript.
+    /// </summary>
+    Task<string> GetResumeSummaryAsync(string sessionId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sets ParentSessionId on the child session to link it to the session it was resumed from.
+    /// </summary>
+    Task LinkParentSessionAsync(string childSessionId, string parentSessionId, string childCli, CancellationToken cancellationToken);
+}
+
+public class SessionResumeService(
+    IRepository repository,
+    ISessionTranscriptService transcriptService,
+    ISummaryService summaryService) : ISessionResumeService
+{
+    public async Task<string> GetResumeSummaryAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var session = await repository.GetSessionWithLogsAsync(sessionId, cancellationToken);
+        if (session is null)
+            throw new KeyNotFoundException($"Session '{sessionId}' not found.");
+
+        // Check DB cache first
+        var cached = (await repository.GetChatSummariesBySessionAsync(sessionId, cancellationToken))
+            ?.OrderByDescending(s => s.Date)
+            .FirstOrDefault();
+        if (cached != null && !string.IsNullOrWhiteSpace(cached.SummaryText))
+            return SanitizeForShell(cached.SummaryText);
+
+        var transcript = await transcriptService.GetOrBuildAsync(sessionId, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(transcript))
+            return "";
+
+        var summary = await summaryService.GetSummaryAsync(transcript, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(summary))
+            throw new InvalidOperationException("Summary service returned an empty summary.");
+
+        if (summary.Length > 6000)
+            throw new InvalidOperationException($"Summary is too long ({summary.Length} chars). Max allowed is 6000.");
+
+        // Save to DB cache
+        await repository.SaveChatSummaryAsync(new ChatSummary
+        {
+            SessionId = sessionId,
+            SummaryText = summary,
+            Date = DateTime.UtcNow
+        }, cancellationToken);
+
+        return SanitizeForShell(summary);
+    }
+
+    public async Task LinkParentSessionAsync(string childSessionId, string parentSessionId, string childCli, CancellationToken cancellationToken)
+    {
+        var (parentCli, parentDisplayName) = await repository.GetSessionDisplayInfoAsync(parentSessionId);
+
+        var parentLabel = !string.IsNullOrWhiteSpace(parentDisplayName)
+            ? parentDisplayName
+            : parentSessionId[..Math.Min(8, parentSessionId.Length)];
+        var childDisplayName = $"Chat from {parentCli ?? "Unknown"} -> {childCli} {parentLabel}";
+
+        await repository.SetParentSessionIdAsync(childSessionId, parentSessionId);
+        await repository.SetSessionDisplayNameAsync(childSessionId, childDisplayName);
+    }
+
+    /// <summary>
+    /// Collapses the summary to a single line and strips any characters that
+    /// could break shell quoting. The caller wraps the result in single quotes,
+    /// which are literal in both bash and pwsh — but we still strip control
+    /// chars and null bytes as defense-in-depth.
+    /// </summary>
+    private static string SanitizeForShell(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "";
+
+        // Collapse to single line
+        var oneLine = text
+            .Replace("\r\n", " ")
+            .Replace("\r", " ")
+            .Replace("\n", " ");
+
+        // Strip null bytes and other control characters (except space)
+        var cleaned = new string(oneLine
+            .Where(c => !char.IsControl(c) || c == ' ')
+            .ToArray());
+
+        return cleaned.Trim();
+    }
+}

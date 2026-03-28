@@ -556,6 +556,49 @@ namespace VibeRails.DB
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task<(string? Cli, string? DisplayName)> GetSessionDisplayInfoAsync(string sessionId)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectSessionDisplayInfo;
+            cmd.Parameters.AddWithValue("$id", sessionId);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+                return (null, null);
+
+            return (
+                reader.IsDBNull(0) ? null : reader.GetString(0),
+                reader.IsDBNull(1) ? null : reader.GetString(1)
+            );
+        }
+
+        public async Task SetParentSessionIdAsync(string sessionId, string parentSessionId)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SetParentSessionId;
+            cmd.Parameters.AddWithValue("$id", sessionId);
+            cmd.Parameters.AddWithValue("$parentSessionId", parentSessionId);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task SetSessionDisplayNameAsync(string sessionId, string displayName)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SetSessionDisplayName;
+            cmd.Parameters.AddWithValue("$id", sessionId);
+            cmd.Parameters.AddWithValue("$displayName", displayName);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
         public async Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false)
         {
             await using var connection = new SqliteConnection(_connectionString);

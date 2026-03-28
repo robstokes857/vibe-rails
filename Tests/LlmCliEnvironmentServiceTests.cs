@@ -1,5 +1,6 @@
 using Moq;
 using VibeRails.DTOs;
+using VibeRails.DB;
 using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
@@ -77,13 +78,11 @@ public class LlmCliEnvironmentServiceTests
 
     private static LlmCliEnvironmentService CreateService(IFileService fileService)
     {
-        var dbService = Mock.Of<IDbService>();
         return new LlmCliEnvironmentService(
-            new ClaudeLlmCliEnvironment(dbService, fileService),
-            new CodexLlmCliEnvironment(dbService, fileService),
-            new GeminiLlmCliEnvironment(dbService, fileService),
-            new CopilotLlmCliEnvironment(dbService, fileService),
-            dbService,
+            new ClaudeLlmCliEnvironment(fileService),
+            new CodexLlmCliEnvironment(fileService),
+            new GeminiLlmCliEnvironment(fileService),
+            new CopilotLlmCliEnvironment(fileService),
             fileService);
     }
 }

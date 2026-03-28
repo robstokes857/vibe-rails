@@ -1340,7 +1340,8 @@ class TerminalManager {
         }
 
         if (!tab) {
-            tab = this.getActiveTab();
+            const forceNew = options?.forceNewTab === true;
+            tab = forceNew ? null : this.getActiveTab();
             if (!tab || tab.state.hasActiveSession) {
                 tab = await this.createAndActivateTab({
                     selection,
@@ -1386,7 +1387,9 @@ class TerminalManager {
             cli: lower(options.cli),
             environmentName: options.environmentName || null,
             workingDirectory: options.workingDirectory || null,
-            title: options.title || null
+            title: options.title || null,
+            resumeSessionId: options.resumeSessionId || null,
+            resumeSummary: options.resumeSummary || null
         };
 
         const started = await tab.instance.startSession(body);

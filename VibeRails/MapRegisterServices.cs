@@ -113,6 +113,7 @@ namespace VibeRails
             serviceCollection.AddHostedService<UpdateCheckJob>();
             serviceCollection.AddHostedService<StaleSessionCleanupJob>();
             serviceCollection.AddScoped<ISessionTranscriptService, SessionTranscriptService>();
+            serviceCollection.AddScoped<ISessionResumeService, SessionResumeService>();
 
 #if DEBUG
             // Debug event bus — fire-and-forget publish to connected WebSocket viewers

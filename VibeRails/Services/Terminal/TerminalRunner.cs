@@ -1,6 +1,4 @@
-using Microsoft.Extensions.Hosting;
 using Serilog;
-using VibeRails.DTOs;
 using VibeRails.Services.Terminal.Consumers;
 
 using VibeRails.Utils;
@@ -37,6 +35,7 @@ public class TerminalRunner
         string? title = null,
         bool makeRemote = false,
         string? initialPrompt = null,
+        string summary = "",
         Func<string, Task>? onRemoteTakeoverAuthorized = null,
         bool isNativeCli = false)
     {
@@ -47,7 +46,7 @@ public class TerminalRunner
 
         try
         {
-            var preparedSession = _commandService.PrepareSession(llm, envName, extraArgs, initialPrompt);
+            var preparedSession = _commandService.PrepareSession(llm, envName, extraArgs, initialPrompt, summary);
             _stateService.PublishSessionStart(sessionId, llm.ToString(), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
 
             terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: title, ct: ct);

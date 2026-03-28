@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using VibeRails.DB;
 using VibeRails.Interfaces;
 using VibeRails.Jobs;
 using VibeRails.Services;
@@ -16,7 +17,7 @@ public class StaleSessionCleanupJobTests
     [Fact]
     public async Task ExecuteJob_CompletesAndDeregistersEachStaleSession()
     {
-        var dbService = new Mock<IDbService>();
+        var dbService = new Mock<IRepository>();
         dbService
             .Setup(x => x.GetOpenSessionIdsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<string> { "session-1", "session-2" });
@@ -43,7 +44,7 @@ public class StaleSessionCleanupJobTests
     [Fact]
     public async Task ExecuteJob_DoesNothingWhenNoStaleSessionsExist()
     {
-        var dbService = new Mock<IDbService>();
+        var dbService = new Mock<IRepository>();
         dbService
             .Setup(x => x.GetOpenSessionIdsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<string>());

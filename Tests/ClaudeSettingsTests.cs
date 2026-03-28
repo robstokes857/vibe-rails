@@ -1,4 +1,6 @@
+using Moq;
 using VibeRails.DTOs;
+using VibeRails.DB;
 using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
@@ -11,7 +13,6 @@ public class ClaudeSettingsTests : IDisposable
     private readonly string _testDirectory;
     private readonly ClaudeLlmCliEnvironment _service;
     private readonly MockFileService _mockFileService;
-    private readonly MockDbService _mockDbService;
 
     public ClaudeSettingsTests()
     {
@@ -22,9 +23,8 @@ public class ClaudeSettingsTests : IDisposable
         Environment.SetEnvironmentVariable("VIBE_CONTROL_ENVPATH", _testDirectory);
 
         _mockFileService = new MockFileService();
-        _mockDbService = new MockDbService();
 
-        _service = new ClaudeLlmCliEnvironment(_mockDbService, _mockFileService);
+        _service = new ClaudeLlmCliEnvironment(_mockFileService);
     }
 
     public void Dispose()
@@ -312,80 +312,4 @@ public class ClaudeSettingsTests : IDisposable
         public string GetUserProfilePath() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
 
-    private class MockDbService : IDbService
-    {
-        public void InitializeDatabase() { }
-
-        public Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir)
-            => Task.CompletedTask;
-
-        public Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false)
-            => Task.CompletedTask;
-
-        public Task CompleteSessionAsync(string sessionId, int exitCode)
-            => Task.CompletedTask;
-
-        public Task<SessionWithLogsResponse?> GetSessionWithLogsAsync(string sessionId, CancellationToken cancellationToken)
-            => Task.FromResult<SessionWithLogsResponse?>(null);
-
-        public Task<List<SessionResponse>> GetRecentSessionsAsync(int limit, CancellationToken cancellationToken)
-            => Task.FromResult(new List<SessionResponse>());
-
-        public Task<SessionOutputDetailResponse?> GetSessionOutputAsync(string sessionId, CancellationToken cancellationToken)
-            => Task.FromResult<SessionOutputDetailResponse?>(null);
-
-        public Task<List<string>> GetEndedUnprocessedSessionIdsAsync(int limit, CancellationToken cancellationToken)
-            => Task.FromResult(new List<string>());
-
-        public Task<List<SessionLogChunkRecord>> GetSessionLogChunksAsync(string sessionId, CancellationToken cancellationToken)
-            => Task.FromResult(new List<SessionLogChunkRecord>());
-
-        public Task<List<UserInputRecord>> GetUserInputsForSessionAsync(string sessionId, CancellationToken cancellationToken)
-            => Task.FromResult(new List<UserInputRecord>());
-
-        public Task SaveSessionOutputAndMarkProcessedAsync(string sessionId, string text, CancellationToken cancellationToken)
-            => Task.CompletedTask;
-
-        public Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, CancellationToken cancellationToken)
-            => Task.FromResult(new List<ChatHistoryItem>());
-
-        public Task<bool> UpdateChatHistorySessionNameAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken)
-            => Task.FromResult(false);
-
-        public Task<bool> DeleteChatHistorySessionAsync(string sessionId, CancellationToken cancellationToken)
-            => Task.FromResult(false);
-
-        public Task<List<string>> GetOpenSessionIdsAsync(DateTime olderThan, CancellationToken cancellationToken)
-            => Task.FromResult(new List<string>());
-
-        public Task<UserInputRecord?> GetLastUserInputAsync(string sessionId)
-            => Task.FromResult<UserInputRecord?>(null);
-
-        public Task<long> InsertUserInputAsync(string sessionId, int sequence, string inputText, string? gitCommitHash)
-            => Task.FromResult(0L);
-
-        public Task InsertFileChangesAsync(long userInputId, long? previousInputId, List<FileChangeInfo> changes)
-            => Task.CompletedTask;
-
-        public Task RecordUserInputAsync(string sessionId, string inputText, IGitService gitService, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
-
-        public Task<long> CreateClaudePlanAsync(string sessionId, long? userInputId, string? planFilePath, string planContent, string? summary)
-            => Task.FromResult(0L);
-
-        public Task<ClaudePlanRecord?> GetClaudePlanAsync(long planId, CancellationToken cancellationToken)
-            => Task.FromResult<ClaudePlanRecord?>(null);
-
-        public Task<List<ClaudePlanRecord>> GetClaudePlansForSessionAsync(string sessionId, CancellationToken cancellationToken)
-            => Task.FromResult(new List<ClaudePlanRecord>());
-
-        public Task<List<ClaudePlanRecord>> GetRecentClaudePlansAsync(int limit, CancellationToken cancellationToken)
-            => Task.FromResult(new List<ClaudePlanRecord>());
-
-        public Task UpdateClaudePlanStatusAsync(long planId, string status)
-            => Task.CompletedTask;
-
-        public Task CompleteClaudePlanAsync(long planId)
-            => Task.CompletedTask;
-    }
 }

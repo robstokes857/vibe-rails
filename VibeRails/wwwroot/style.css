@@ -4241,7 +4241,8 @@ input.form-control:disabled {
     position: absolute;
     left: 100%;
     top: -6px;
-    margin-left: 5px;
+    margin-left: 0;
+    padding-left: 5px;
     background: #1e1e2e;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
