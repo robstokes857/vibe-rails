@@ -60,8 +60,8 @@ public class CommandService : ICommandService
 
             cliCommand = llm switch
             {
-                LLM.Claude => $"{cliCommand} {quoted}",
-                _ => throw new NotImplementedException($"Resume session is not yet supported for {llm}.")
+                LLM.Copilot => $"{cliCommand} --interactive={quoted}",
+                _ => $"{cliCommand} {quoted}"
             };
         }
 
