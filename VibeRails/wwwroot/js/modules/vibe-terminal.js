@@ -195,10 +195,10 @@ export class VibeTerminal {
 
         const useWebgl = (() => {
             try {
-                // WebGL has shown paint artifacts for some users; keep it opt-in.
-                return localStorage.getItem('viberails_terminal_webgl') === 'true';
+                // WebGL is preferred for GPU-accelerated rendering; fall back to canvas if explicitly disabled.
+                return localStorage.getItem('viberails_terminal_webgl') !== 'false';
             } catch {
-                return false;
+                return true;
             }
         })();
 

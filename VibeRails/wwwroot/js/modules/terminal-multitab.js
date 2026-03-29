@@ -707,9 +707,9 @@ class TerminalManager {
 
     _loadRendererPreference() {
         try {
-            return localStorage.getItem('viberails_terminal_webgl') === 'true' ? 'webgl' : 'canvas';
+            return localStorage.getItem('viberails_terminal_webgl') === 'false' ? 'canvas' : 'webgl';
         } catch {
-            return 'canvas';
+            return 'webgl';
         }
     }
 
@@ -771,6 +771,8 @@ class TerminalManager {
 
         this.panel = this.container.querySelector('#vb-terminal-panel');
         this.tabList = this.container.querySelector('#vb-terminal-tab-list');
+        this.tabScrollLeft = this.container.querySelector('#vb-terminal-tab-scroll-left');
+        this.tabScrollRight = this.container.querySelector('#vb-terminal-tab-scroll-right');
         this.tabAdd = this.container.querySelector('#vb-terminal-tab-add-btn');
         this.tabSelect = this.container.querySelector('#vb-terminal-tab-select-btn');
         this.tabPanels = this.container.querySelector('#vb-terminal-tab-panels');
@@ -801,6 +803,7 @@ class TerminalManager {
 
         this.populateSelect();
         this.bindActions();
+        this._initTabScrollArrows();
         this._initSettingsPanel();
         await this.restoreTabs();
 
@@ -837,6 +840,8 @@ class TerminalManager {
         }
 
         this._destroyed = true;
+        this._tabScrollRO?.disconnect();
+        this._tabScrollRO = null;
         this.removeFocusLayoutHandler();
         this.disableLockedLayout(this.lockedPanel);
         if (this.downloadMenuDismissHandler) {
@@ -1177,6 +1182,7 @@ class TerminalManager {
 
         this.applyPanelState();
         this.updateUi();
+        this._scrollActiveTabIntoView();
     }
 
     async createAndActivateTab(options = {}) {
@@ -1770,6 +1776,7 @@ class TerminalManager {
 
         this.updateWindowControlState();
         this.updateAddButtonState();
+        this._updateTabScrollArrows();
     }
 
     getBadge(state) {
@@ -1866,6 +1873,47 @@ class TerminalManager {
                 this.headerSelect.value = '';
             }
         }
+    }
+
+    _initTabScrollArrows() {
+        if (!this.tabList) return;
+
+        const scrollAmount = 200;
+
+        this.tabScrollLeft?.addEventListener('click', () => {
+            this.tabList.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+        });
+        this.tabScrollRight?.addEventListener('click', () => {
+            this.tabList.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+        });
+
+        this.tabList.addEventListener('scroll', () => this._updateTabScrollArrows(), { passive: true });
+
+        this._tabScrollRO = new ResizeObserver(() => this._updateTabScrollArrows());
+        this._tabScrollRO.observe(this.tabList);
+    }
+
+    _updateTabScrollArrows() {
+        if (!this.tabList) return;
+
+        const { scrollLeft, scrollWidth, clientWidth } = this.tabList;
+        const overflows = scrollWidth > clientWidth + 1;
+        const canScrollLeft = scrollLeft > 1;
+        const canScrollRight = scrollLeft + clientWidth < scrollWidth - 1;
+
+        if (this.tabScrollLeft) {
+            this.tabScrollLeft.hidden = !(overflows && canScrollLeft);
+        }
+        if (this.tabScrollRight) {
+            this.tabScrollRight.hidden = !(overflows && canScrollRight);
+        }
+    }
+
+    _scrollActiveTabIntoView() {
+        const active = this.getActiveTab();
+        if (!active?.state?.ui?.item || !this.tabList) return;
+
+        active.state.ui.item.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
     }
 
     focusActiveTerminalInput() {
@@ -2735,7 +2783,13 @@ export class TerminalController {
                 <div class="vb-terminal-window-shell">
                     <div class="vb-terminal-window-header">
                         <div class="vb-terminal-tab-strip" id="vb-terminal-tab-strip">
+                            <button type="button" class="vb-terminal-tab-scroll vb-terminal-tab-scroll-left" id="vb-terminal-tab-scroll-left" aria-label="Scroll tabs left" hidden>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/></svg>
+                            </button>
                             <div class="vb-terminal-tab-list" id="vb-terminal-tab-list"></div>
+                            <button type="button" class="vb-terminal-tab-scroll vb-terminal-tab-scroll-right" id="vb-terminal-tab-scroll-right" aria-label="Scroll tabs right" hidden>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708"/></svg>
+                            </button>
                             <button type="button" class="vb-terminal-tab-add" id="vb-terminal-tab-add-btn" title="Open a new terminal tab" aria-label="Open a new terminal tab">+</button>
                             <button type="button" class="vb-terminal-tab-select" id="vb-terminal-tab-select-btn" title="Select CLI/environment for active tab" aria-label="Select CLI/environment">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708"/></svg>
@@ -2786,8 +2840,8 @@ export class TerminalController {
                                 <div class="vb-terminal-settings-row">
                                     <label>Renderer</label>
                                     <select id="terminal-settings-renderer">
-                                        <option value="canvas">Canvas (Preferred)</option>
-                                        <option value="webgl">WebGL (GPU)</option>
+                                        <option value="webgl">WebGL (Preferred)</option>
+                                        <option value="canvas">Canvas</option>
                                     </select>
                                 </div>
                             </div>

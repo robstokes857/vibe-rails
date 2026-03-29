@@ -46,7 +46,7 @@ export class BackendManager {
         this.outputChannel.show(true);
 
         return new Promise((resolve, reject) => {
-            this.process = cp.spawn(this.exePath, ['--vs-code-v1'], {
+            this.process = cp.spawn(this.exePath, this.buildLaunchArgs(), {
                 cwd,
                 stdio: ['pipe', 'pipe', 'pipe'],
                 shell: false,
@@ -55,6 +55,7 @@ export class BackendManager {
             const child = this.process;
 
             let resolved = false;
+            let stdoutBuffer = '';
 
             child.stdout?.on('data', (data: Buffer) => {
                 const text = data.toString();
@@ -62,10 +63,15 @@ export class BackendManager {
 
                 if (resolved) { return; }
 
+                stdoutBuffer += text;
+                const lines = stdoutBuffer.split(/\r?\n/);
+                stdoutBuffer = lines.pop() ?? '';
+
                 // Parse structured line: vs-code-v1=<bootstrapUrl>
-                for (const line of text.split('\n')) {
+                for (const rawLine of lines) {
+                    const line = rawLine.trim();
                     if (!line.startsWith('vs-code-v1=')) { continue; }
-                    const bootstrapUrl = line.trim().slice('vs-code-v1='.length).trim();
+                    const bootstrapUrl = line.slice('vs-code-v1='.length).trim();
                     this.bootstrapUrl = bootstrapUrl;
                     this.port = parseInt(new URL(bootstrapUrl).port, 10);
                     resolved = true;
@@ -99,6 +105,35 @@ export class BackendManager {
                 }
             }, 30000);
         });
+    }
+
+    private buildLaunchArgs(): string[] {
+        const args = ['--vs-code-v1'];
+        const parentPid = typeof process.pid === 'number' ? process.pid : 0;
+        if (parentPid > 0) {
+            args.push('--parent-pid', String(parentPid));
+
+            const parentStartTicks = this.getCurrentProcessStartTimeTicks();
+            if (parentStartTicks) {
+                args.push('--parent-start-ticks', parentStartTicks);
+            }
+        }
+
+        return args;
+    }
+
+    private getCurrentProcessStartTimeTicks(): string | null {
+        try {
+            const startMs = Date.now() - Math.floor(process.uptime() * 1000);
+            if (!Number.isFinite(startMs) || startMs <= 0) {
+                return null;
+            }
+
+            const unixEpochTicks = 621355968000000000n;
+            return (BigInt(startMs) * 10000n + unixEpochTicks).toString();
+        } catch {
+            return null;
+        }
     }
 
     public async stop(): Promise<void> {
