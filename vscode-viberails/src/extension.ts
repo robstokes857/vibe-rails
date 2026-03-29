@@ -115,11 +115,11 @@ async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
         progress.report({ message: 'Creating dashboard...' });
 
         const bootstrapUrl = backendManager!.getBootstrapUrl();
-        let sessionToken: string | null = null;
-        let tabToken: string | null = null;
-        if (bootstrapUrl) {
-            ({ sessionToken, tabToken } = await fetchTokens(bootstrapUrl));
+        if (!bootstrapUrl) {
+            throw new Error('Backend started but bootstrap URL was not available');
         }
+
+        const { sessionToken, tabToken } = await fetchTokens(bootstrapUrl);
 
         webviewManager = new WebviewPanelManager(bundledAssets.wwwrootPath);
 
@@ -131,6 +131,14 @@ async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
 }
 
 function getCurrentWorkspaceFolder(): string | null {
+    const activeUri = vscode.window.activeTextEditor?.document?.uri;
+    if (activeUri) {
+        const activeFolder = vscode.workspace.getWorkspaceFolder(activeUri);
+        if (activeFolder) {
+            return activeFolder.uri.fsPath;
+        }
+    }
+
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (workspaceFolders && workspaceFolders.length > 0) {
         return workspaceFolders[0].uri.fsPath;
@@ -179,10 +187,16 @@ function getSupportedExtensionTarget(): string {
     throw new Error(`Unsupported platform for bundled VibeRails backend: ${process.platform}-${process.arch}`);
 }
 
-function fetchTokens(bootstrapUrl: string): Promise<{ sessionToken: string | null, tabToken: string | null }> {
-    return new Promise((resolve) => {
+function fetchTokens(bootstrapUrl: string): Promise<{ sessionToken: string, tabToken: string }> {
+    return new Promise((resolve, reject) => {
         const req = http.get(bootstrapUrl, (res) => {
             res.resume();
+
+            const statusCode = res.statusCode ?? 0;
+            if (statusCode < 200 || statusCode >= 300) {
+                reject(new Error(`Bootstrap request failed with status ${statusCode}`));
+                return;
+            }
 
             let sessionToken: string | null = null;
             const setCookie = res.headers['set-cookie'];
@@ -202,11 +216,25 @@ function fetchTokens(bootstrapUrl: string): Promise<{ sessionToken: string | nul
                 }
             }
 
-            const tabToken = (res.headers['viberails_tab'] as string) || null;
+            const tabHeader = res.headers['viberails_tab'];
+            const tabToken = Array.isArray(tabHeader) ? (tabHeader[0] ?? null) : (tabHeader ?? null);
+
+            if (!sessionToken) {
+                reject(new Error('Bootstrap did not return a session token'));
+                return;
+            }
+
+            if (!tabToken) {
+                reject(new Error('Bootstrap did not return a tab token'));
+                return;
+            }
+
             resolve({ sessionToken, tabToken });
         });
-        req.on('error', () => resolve({ sessionToken: null, tabToken: null }));
-        req.setTimeout(5000, () => { req.destroy(); resolve({ sessionToken: null, tabToken: null }); });
+        req.on('error', (error) => reject(error));
+        req.setTimeout(5000, () => {
+            req.destroy(new Error('Bootstrap request timed out'));
+        });
     });
 }
 

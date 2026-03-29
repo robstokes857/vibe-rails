@@ -186,6 +186,7 @@ public sealed class SessionParseV4 : ISessionOutputParser
     /// <summary>
     /// Extracts agent response text from a screen snapshot by finding the LAST agent
     /// marker (● • ✦) on the screen and taking everything from that point down.
+    /// If no marker found, takes all screen content and lets CleanAgentLines filter.
     /// </summary>
     private static List<string> ExtractAgentFromSnapshot(string[] screenRows)
     {
@@ -201,8 +202,9 @@ public sealed class SessionParseV4 : ISessionOutputParser
             }
         }
 
+        // No marker found — take all screen content and let CleanAgentLines filter
         if (lastAgentRow < 0)
-            return [];
+            lastAgentRow = 0;
 
         var lines = new List<string>();
         for (var i = lastAgentRow; i < screenRows.Length; i++)
@@ -372,7 +374,9 @@ public sealed class SessionParseV4 : ISessionOutputParser
     private static bool TryStripAgentMarker(string line, out string content)
     {
         // Common agent markers across CLIs: ● • ✦
-        if (line.Length >= 2 && line[0] is '●' or '•' or '✦' && char.IsWhiteSpace(line[1]))
+        // Lenient on the char after the bullet — TUI overwrites can garble the space
+        // (e.g. "●a2 Explore..." instead of "● 2 Explore...")
+        if (line.Length >= 2 && line[0] is '●' or '•' or '✦')
         {
             content = line[1..].TrimStart();
             return true;
@@ -386,12 +390,23 @@ public sealed class SessionParseV4 : ISessionOutputParser
         if (line.Length == 0)
             return false;
 
+        var nonDecorativeCount = 0;
         foreach (var ch in line)
         {
             if (!DecorativeChars.Contains(ch))
-                return false;
+                nonDecorativeCount++;
         }
-        return true;
+
+        // Pure decorative
+        if (nonDecorativeCount == 0)
+            return true;
+
+        // Mostly decorative: lines like "───────────>" (scroll indicators, borders with markers).
+        // Allow up to 2 non-decorative chars if the line is long enough to be a border.
+        if (line.Length >= 10 && nonDecorativeCount <= 2)
+            return true;
+
+        return false;
     }
 
     /// <summary>
@@ -435,6 +450,20 @@ public sealed class SessionParseV4 : ISessionOutputParser
             || line.Contains("Copilot CLI", StringComparison.OrdinalIgnoreCase))
             return true;
 
+        // Claude Code model/banner lines (e.g. "▝▜█████▛▘  Opus 4.6 (1M context) ...")
+        if (line.Contains("context)", StringComparison.OrdinalIgnoreCase)
+            && (line.Contains("Opus", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Sonnet", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Haiku", StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        if (line.Contains("Claude Max", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("Claude Pro", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("Claude Free", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("with high effort", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("with low effort", StringComparison.OrdinalIgnoreCase))
+            return true;
+
         // Model/status info lines
         if (line.Contains("% left", StringComparison.OrdinalIgnoreCase)
             || line.Contains("weekly limit", StringComparison.OrdinalIgnoreCase)
@@ -466,6 +495,32 @@ public sealed class SessionParseV4 : ISessionOutputParser
             || line.StartsWith("Working (", StringComparison.Ordinal))
             return true;
 
+        // Claude Code plan mode and interactive UI chrome
+        if (line.StartsWith("⏸", StringComparison.Ordinal))
+            return true;
+
+        if (line.Contains("(ctrl+o to expand)", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("(shift+tab to cycle)", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("· esc to interrupt", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Claude Code agent/tool use status lines
+        if (line.Contains("tool uses", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("agents finished", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Running ", StringComparison.Ordinal) && line.Contains("agent", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (line.StartsWith("Searched for ", StringComparison.Ordinal)
+            || line.StartsWith("Updated plan", StringComparison.Ordinal)
+            || line.StartsWith("User approved", StringComparison.Ordinal))
+            return true;
+
+        // Tree-style UI lines (├─, └─)
+        if (line.StartsWith("├─", StringComparison.Ordinal)
+            || line.StartsWith("└─", StringComparison.Ordinal)
+            || line.StartsWith("│  ⎿", StringComparison.Ordinal))
+            return true;
+
         return false;
     }
 
@@ -480,12 +535,26 @@ public sealed class SessionParseV4 : ISessionOutputParser
         if (line.StartsWith("⎿", StringComparison.Ordinal))
             return true;
 
+        // Braille spinner characters (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ etc.) — used by Gemini/various CLIs
+        if (line.Length >= 1 && line[0] >= '\u2800' && line[0] <= '\u28FF')
+            return true;
+
+        // "esc to cancel" progress/thinking indicators
+        if (line.Contains("esc to cancel", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Claude Code shimmy/spinner status lines
+        if (line.Contains("Shimmying", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("tokens)", StringComparison.OrdinalIgnoreCase) && line.Contains("↓", StringComparison.Ordinal))
+            return true;
+
         return false;
     }
 
     /// <summary>
     /// Fallback: returns cleaned text without User/Agent structure.
-    /// Strips decorative lines and collapses excessive blank lines.
+    /// Applies the same filtering as CleanAgentLines (chrome, progress noise, etc.)
+    /// and collapses excessive blank lines.
     /// </summary>
     private static string BuildCleanText(IReadOnlyList<string> lines)
     {
@@ -506,6 +575,23 @@ public sealed class SessionParseV4 : ISessionOutputParser
 
             if (IsDecorative(trimmed))
                 continue;
+
+            if (IsChrome(trimmed))
+                continue;
+
+            if (IsProgressNoise(trimmed))
+                continue;
+
+            if (IsEchoedUserPrompt(trimmed))
+                continue;
+
+            // Strip agent bullet markers (● • ✦)
+            if (TryStripAgentMarker(trimmed, out var stripped))
+            {
+                blankCount = 0;
+                sb.AppendLine(stripped);
+                continue;
+            }
 
             blankCount = 0;
             sb.AppendLine(line);

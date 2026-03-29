@@ -1675,6 +1675,31 @@ button:hover .card-nav-cog {
     display: none;
 }
 
+/* Tab scroll arrows — appear when tabs overflow */
+#vb-terminal-panel .vb-terminal-tab-scroll {
+    background: transparent;
+    border: none;
+    color: #6c7086;
+    padding: 0 4px;
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 0.15s, background 0.15s;
+    z-index: 1;
+}
+
+#vb-terminal-panel .vb-terminal-tab-scroll:hover {
+    color: #cdd6f4;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+#vb-terminal-panel .vb-terminal-tab-scroll[hidden] {
+    display: none;
+}
+
 #vb-terminal-panel .vb-terminal-tab-item {
     display: inline-flex;
     align-items: center;
