@@ -63,18 +63,14 @@ public static class TerminalRoutes
                 }
             }
 
-            // Resolve resume session summary
-            var summary = "";
-            if (!string.IsNullOrEmpty(request.ResumeSummary))
-            {
-                if (request.ResumeSummary.Length > 6000)
-                    return Results.BadRequest(new ErrorResponse("Resume summary exceeds 6000 character limit."));
-                summary = request.ResumeSummary;
-            }
-            else if (!string.IsNullOrEmpty(request.ResumeSessionId))
-            {
+            // Resume summary: prefer the user-edited text from the modal,
+            // fall back to generating one server-side if only a session ID was sent.
+            var summary = request.ResumeSummary ?? "";
+            if (summary.Length > 6000)
+                return Results.BadRequest(new ErrorResponse("Resume summary exceeds 6000 character limit."));
+
+            if (string.IsNullOrEmpty(summary) && !string.IsNullOrEmpty(request.ResumeSessionId))
                 summary = await sessionResumeService.GetResumeSummaryAsync(request.ResumeSessionId, cancellationToken);
-            }
 
             // Start the terminal session with the LLM CLI
             try

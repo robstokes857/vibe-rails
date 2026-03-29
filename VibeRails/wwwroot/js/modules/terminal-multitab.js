@@ -624,6 +624,9 @@ class TerminalTab {
             this.state.status = 'connecting';
             this.manager.updateUi();
             this.disconnect({ disposeTerminal: true, preserveStatus: true });
+            if (body.resumeSessionId) {
+                this.statusController?.markResumedSession();
+            }
             await this.connect();
             return true;
         } catch (error) {

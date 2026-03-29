@@ -431,7 +431,17 @@ namespace VibeRails.DB
             """;
         public const string UpdateSessionProcessed = """
             UPDATE Sessions
-            SET Processed = 1
+            SET Processed = 1,
+                SessionDisplayName = CASE
+                    WHEN SessionDisplayName IS NULL OR SessionDisplayName = '' THEN (
+                        SELECT SUBSTR(u.InputText, 1, 120)
+                        FROM UserInputs u
+                        WHERE u.SessionId = $sessionId
+                        ORDER BY u.Sequence ASC
+                        LIMIT 1
+                    )
+                    ELSE SessionDisplayName
+                END
             WHERE Id = $sessionId;
             """;
         public const string SelectChatHistoryPage = """

@@ -62,6 +62,7 @@ export class TabStatusController {
 
         this._status = null;
         this._awaitingFirstIdle = false;
+        this._startAsThinking = false;
 
         // Thinking emoji animation state
         this._emojiTimer = null;
@@ -143,7 +144,16 @@ export class TabStatusController {
     }
 
     onSocketOpen() {
-        this._transitionTo(TAB_STATUS.CONNECTED);
+        if (this._startAsThinking) {
+            this._startAsThinking = false;
+            this._transitionTo(TAB_STATUS.THINKING);
+        } else {
+            this._transitionTo(TAB_STATUS.CONNECTED);
+        }
+    }
+
+    markResumedSession() {
+        this._startAsThinking = true;
     }
 
     onSocketClose() {
