@@ -91,6 +91,7 @@ export class WebviewPanelManager {
         const fetchPatch = sessionToken ? `
         const __vb_token__ = '${sessionToken}';
         const __vb_tab_token__ = ${tabToken ? `'${tabToken}'` : 'null'};
+        if (__vb_tab_token__) { sessionStorage.setItem('viberails_tab', __vb_tab_token__); }
         window.__viberails_SESSION_TOKEN__ = __vb_token__;
         const __vb_orig_fetch__ = window.fetch;
         window.fetch = function(input, init) {
@@ -108,9 +109,9 @@ export class WebviewPanelManager {
                 if (typeof nextUrl === 'string') {
                     const parsed = new URL(nextUrl, window.location.href);
                     const path = parsed.pathname || '';
-                    const isLegacyTerminalWs = path === '/api/v1/terminal/ws';
-                    const isTabTerminalWs = path.startsWith('/api/v1/terminal/tabs/') && path.endsWith('/ws');
-                    if (isLegacyTerminalWs || isTabTerminalWs) {
+                    if (path.startsWith('/api/')) {
+                        // All API WebSocket endpoints require the instance session token.
+                        // The tab token continues to flow through subprotocol negotiation.
                         parsed.searchParams.set('viberails_session', __vb_token__);
                         nextUrl = parsed.toString();
                     }
