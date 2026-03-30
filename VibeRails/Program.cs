@@ -14,7 +14,7 @@ using VibeRails.Utils;
 
 // Capture launch directory FIRST (where the user ran the command from)
 string launchDirectory = Directory.GetCurrentDirectory();
-var (parentPid, parentStartTimeTicks) = TryGetParentInfo(args);
+var parentPid = TryGetParentPid(args);
 
 // Get the executable's directory (where wwwroot lives)
 string exeDirectory = AppContext.BaseDirectory;
@@ -170,7 +170,7 @@ if (exit)
 
 // Start server in background (non-blocking)
 await app.StartAsync();
-StartParentProcessWatchdogIfNeeded(app, parentPid, parentStartTimeTicks);
+StartParentProcessWatchdogIfNeeded(app, parentPid);
 string serverUrl = $"http://localhost:{port}";
 
 if (parsedArgs.IsLMBootstrap)
@@ -192,7 +192,6 @@ string vsCodeV1Url = $"vs-code-v1={bootstrapUrl}";
 // Encode user-supplied args (strip internal flags) for pass-through to new instances
 var redirectArgs = args
     .Where(a => !a.StartsWith("--parent-pid", StringComparison.OrdinalIgnoreCase)
-             && !a.StartsWith("--parent-start-ticks", StringComparison.OrdinalIgnoreCase)
              && !a.StartsWith("--vs", StringComparison.OrdinalIgnoreCase)
              && a is not ("--open-browser" or "--launch-browser" or "--launch-web" or "--web"))
     .ToArray();
@@ -236,11 +235,8 @@ Console.WriteLine();
 // Wait for shutdown signal (Ctrl+C)
 await app.WaitForShutdownAsync(app.Lifetime.ApplicationStopping);
 
-static (int? Pid, long? StartTimeTicks) TryGetParentInfo(string[] args)
+static int? TryGetParentPid(string[] args)
 {
-    int? pid = null;
-    long? startTimeTicks = null;
-
     for (var i = 0; i < args.Length; i++)
     {
         var arg = args[i];
@@ -248,7 +244,7 @@ static (int? Pid, long? StartTimeTicks) TryGetParentInfo(string[] args)
         if (arg.Equals("--parent-pid", StringComparison.OrdinalIgnoreCase))
         {
             if (i + 1 < args.Length && int.TryParse(args[i + 1], out var nextPid) && nextPid > 0)
-                pid = nextPid;
+                return nextPid;
             continue;
         }
 
@@ -256,39 +252,21 @@ static (int? Pid, long? StartTimeTicks) TryGetParentInfo(string[] args)
         if (arg.StartsWith(pidPrefix, StringComparison.OrdinalIgnoreCase))
         {
             if (int.TryParse(arg[pidPrefix.Length..], out var inlinePid) && inlinePid > 0)
-                pid = inlinePid;
-            continue;
-        }
-
-        if (arg.Equals("--parent-start-ticks", StringComparison.OrdinalIgnoreCase))
-        {
-            if (i + 1 < args.Length && long.TryParse(args[i + 1], out var nextTicks) && nextTicks > 0)
-                startTimeTicks = nextTicks;
-            continue;
-        }
-
-        const string ticksPrefix = "--parent-start-ticks=";
-        if (arg.StartsWith(ticksPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            if (long.TryParse(arg[ticksPrefix.Length..], out var inlineTicks) && inlineTicks > 0)
-                startTimeTicks = inlineTicks;
-            continue;
+                return inlinePid;
         }
     }
 
-    return (pid, startTimeTicks);
+    return null;
 }
 
-static void StartParentProcessWatchdogIfNeeded(WebApplication app, int? parentPid, long? parentStartTimeTicks)
+static void StartParentProcessWatchdogIfNeeded(WebApplication app, int? parentPid)
 {
     if (!parentPid.HasValue || parentPid.Value <= 0)
-    {
         return;
-    }
 
     var pid = parentPid.Value;
 
-    if (!IsParentAlive(pid, parentStartTimeTicks))
+    if (!IsParentAlive(pid))
     {
         Log.Warning("[ParentWatchdog] Parent process {ParentPid} already exited. Stopping.", pid);
         app.Lifetime.StopApplication();
@@ -302,10 +280,8 @@ static void StartParentProcessWatchdogIfNeeded(WebApplication app, int? parentPi
         {
             while (await timer.WaitForNextTickAsync(app.Lifetime.ApplicationStopping))
             {
-                if (IsParentAlive(pid, parentStartTimeTicks))
-                {
+                if (IsParentAlive(pid))
                     continue;
-                }
 
                 Log.Warning("[ParentWatchdog] Parent process {ParentPid} exited. Stopping process {ProcessId}.", pid, Environment.ProcessId);
                 app.Lifetime.StopApplication();
@@ -319,36 +295,12 @@ static void StartParentProcessWatchdogIfNeeded(WebApplication app, int? parentPi
     });
 }
 
-// Checks whether the process with the given PID is still the original parent.
-// On Windows, PIDs are reused — without checking the start time, a new process
-// that inherits the same PID would be mistaken for the still-alive parent,
-// causing the watchdog to never fire and leaving an orphaned child instance.
-static bool IsParentAlive(int pid, long? expectedStartTimeTicks)
+static bool IsParentAlive(int pid)
 {
     try
     {
         using var process = Process.GetProcessById(pid);
-        if (process.HasExited)
-            return false;
-
-        // If we know the parent's start time, verify PID identity to guard against reuse.
-        if (expectedStartTimeTicks.HasValue)
-        {
-            try
-            {
-                var actualTicks = process.StartTime.ToUniversalTime().Ticks;
-                return actualTicks == expectedStartTimeTicks.Value;
-            }
-            catch
-            {
-                // StartTime can throw on Linux/macOS for cross-user processes or
-                // if the process exited between HasExited and StartTime access.
-                // Fall through: treat the process as alive only if HasExited was false.
-                return true;
-            }
-        }
-
-        return true;
+        return !process.HasExited;
     }
     catch
     {

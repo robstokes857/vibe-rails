@@ -25,9 +25,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         string TabToken,
         DateTime CreatedUtc);
 
-    // Cached once at startup to avoid repeated Process.GetCurrentProcess() calls per tab spawn.
-    private static readonly long _selfStartTimeTicks = Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks;
-
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILocalClientTracker _localClientTracker;
     private readonly IAppEventBus _appEventBus;
@@ -449,7 +446,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             StartInfo = new ProcessStartInfo
             {
                 FileName = exePath,
-                Arguments = $"--vs-code-v1 --parent-pid {Environment.ProcessId} --parent-start-ticks {_selfStartTimeTicks}",
+                Arguments = $"--vs-code-v1 --parent-pid {Environment.ProcessId}",
                 WorkingDirectory = _launchDirectory,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
