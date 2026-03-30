@@ -30,7 +30,7 @@ export class ChatHistorySidebar {
 
     static renderHtml() {
         return `
-            <div class="ch-sidebar ch-sidebar-collapsed" id="ch-sidebar">
+            <div class="ch-sidebar" id="ch-sidebar">
                 <div class="ch-sidebar-collapsed-icon" title="Open chat history"><i class="fa-solid fa-clock-rotate-left"></i></div>
                 <div class="ch-sidebar-header">
                     <span class="ch-sidebar-title">

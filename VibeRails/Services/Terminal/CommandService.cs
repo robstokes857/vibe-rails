@@ -2,6 +2,7 @@ using VibeRails.DTOs;
 using VibeRails.Services.LlmClis;
 using static VibeRails.Utils.ShellArgSanitizer;
 
+
 namespace VibeRails.Services.Terminal;
 
 public sealed record PreparedTerminalSession(
@@ -43,20 +44,7 @@ public class CommandService : ICommandService
 
         if (!string.IsNullOrEmpty(summary))
         {
-            // Defense-in-depth: sanitize even user-edited text from the frontend.
-            // Strip control chars, collapse newlines, enforce length limit.
-            summary = new string(summary
-                .Where(c => !char.IsControl(c) || c == ' ' || c == '\n' || c == '\r')
-                .ToArray())
-                .Replace("\r\n", " ")
-                .Replace("\r", " ")
-                .Replace("\n", " ")
-                .Trim();
-            if (summary.Length > 6000)
-                summary = summary[..6000];
-
-            var resumePrompt = $"This is a summary of our previous conversation, I am ready to resume this discussion: {summary}";
-            var quoted = ShellQuoteLiteral(resumePrompt);
+            var quoted = SafeShellArg(summary);
 
             cliCommand = llm switch
             {
@@ -68,8 +56,6 @@ public class CommandService : ICommandService
         var builder = new ShellCommandBuilder()
             .SetLaunchCommand(cliCommand);
         var setupCommands = new List<string>();
-
-
 
         // Register MCP server before launch
         if (!string.IsNullOrEmpty(_mcpSettings.ServerPath) && File.Exists(_mcpSettings.ServerPath))
@@ -113,16 +99,34 @@ public class CommandService : ICommandService
     }
 
     /// <summary>
-    /// Wraps text in shell single quotes so it is treated as a literal string
-    /// with zero interpretation. Works for both bash and pwsh.
-    ///   bash:  only ' needs escaping → end quote, escaped quote, reopen: '\''
-    ///   pwsh:  only ' needs escaping → doubled: ''
+    /// Sanitizes and shell-quotes text so it can be safely embedded as a
+    /// literal argument in a shell command. Strips control characters,
+    /// collapses to one line, enforces a length limit, then wraps in
+    /// platform-appropriate quotes.
     /// </summary>
-    private static string ShellQuoteLiteral(string text)
+    private static string SafeShellArg(string text, int maxLength = 6000)
     {
-        if (OperatingSystem.IsWindows())
-            return "'" + text.Replace("'", "''") + "'";
+        if (string.IsNullOrWhiteSpace(text))
+            return "\"\"";
 
-        return "'" + text.Replace("'", "'\\''") + "'";
+        var clean = text
+            .Replace("\r\n", " ")
+            .Replace("\r", " ")
+            .Replace("\n", " ");
+        clean = new string(clean.Where(c => !char.IsControl(c) || c == ' ').ToArray()).Trim();
+
+        if (clean.Length > maxLength)
+            clean = clean[..maxLength];
+
+        if (OperatingSystem.IsWindows())
+        {
+            var escaped = clean
+                .Replace("`", "``")
+                .Replace("\"", "`\"")
+                .Replace("$", "`$");
+            return "\"" + escaped + "\"";
+        }
+
+        return "'" + clean.Replace("'", "'\\''") + "'";
     }
 }

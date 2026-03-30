@@ -73,13 +73,13 @@ public static partial class ShellArgSanitizer
 
         if (OperatingSystem.IsWindows())
         {
-            // Windows cmd/PowerShell: wrap in double quotes, escape internal double quotes
-            return "\"" + arg.Replace("\"", "\\\"") + "\"";
+            var escaped = arg
+                .Replace("`", "``")
+                .Replace("\"", "`\"")
+                .Replace("$", "`$");
+            return "\"" + escaped + "\"";
         }
 
-        // Unix shells: wrap in single quotes, escape internal single quotes
-        // In single quotes, the only character that needs escaping is ' itself
-        // Done by ending the single-quoted string, adding an escaped quote, and restarting
         return "'" + arg.Replace("'", "'\\''") + "'";
     }
 
