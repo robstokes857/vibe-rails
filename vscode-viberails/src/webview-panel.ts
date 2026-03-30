@@ -118,8 +118,10 @@ export class WebviewPanelManager {
                 }
             } catch { /* use original URL */ }
             // Merge the tab token into subprotocols so the server can validate it.
+            // Deduplicate via Set — base-websocket.js already includes the tab token
+            // in its protocols array, so avoid adding it twice (browsers reject duplicates).
             const mergedProtocols = __vb_tab_token__
-                ? (protocols ? [...(Array.isArray(protocols) ? protocols : [protocols]), __vb_tab_token__] : [__vb_tab_token__])
+                ? [...new Set([...(protocols ? (Array.isArray(protocols) ? protocols : [protocols]) : []), __vb_tab_token__])]
                 : protocols;
             return mergedProtocols !== undefined ? new __vb_orig_ws__(nextUrl, mergedProtocols) : new __vb_orig_ws__(nextUrl);
         };

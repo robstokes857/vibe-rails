@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension + Backend",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-viberails"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/vscode-viberails/out/**/*.js"
+      ],
+      "preLaunchTask": "build-all"
+    }
+  ]
+}
