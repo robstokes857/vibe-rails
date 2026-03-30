@@ -112,28 +112,8 @@ export class BackendManager {
         const parentPid = typeof process.pid === 'number' ? process.pid : 0;
         if (parentPid > 0) {
             args.push('--parent-pid', String(parentPid));
-
-            const parentStartTicks = this.getCurrentProcessStartTimeTicks();
-            if (parentStartTicks) {
-                args.push('--parent-start-ticks', parentStartTicks);
-            }
         }
-
         return args;
-    }
-
-    private getCurrentProcessStartTimeTicks(): string | null {
-        try {
-            const startMs = Date.now() - Math.floor(process.uptime() * 1000);
-            if (!Number.isFinite(startMs) || startMs <= 0) {
-                return null;
-            }
-
-            const unixEpochTicks = 621355968000000000n;
-            return (BigInt(startMs) * 10000n + unixEpochTicks).toString();
-        } catch {
-            return null;
-        }
     }
 
     public async stop(): Promise<void> {
