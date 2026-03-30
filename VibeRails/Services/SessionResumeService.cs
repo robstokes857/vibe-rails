@@ -37,7 +37,7 @@ public class SessionResumeService(
             ?.OrderByDescending(s => s.Date)
             .FirstOrDefault();
         if (cached != null && !string.IsNullOrWhiteSpace(cached.SummaryText))
-            return SanitizeForShell(cached.SummaryText);
+            return cached.SummaryText;
 
         var transcript = await transcriptService.GetOrBuildAsync(sessionId, cancellationToken);
 
@@ -60,7 +60,7 @@ public class SessionResumeService(
             Date = DateTime.UtcNow
         }, cancellationToken);
 
-        return SanitizeForShell(summary);
+        return summary;
     }
 
     public async Task LinkParentSessionAsync(string childSessionId, string parentSessionId, string childCli, CancellationToken cancellationToken)
@@ -76,28 +76,4 @@ public class SessionResumeService(
         await repository.SetSessionDisplayNameAsync(childSessionId, childDisplayName);
     }
 
-    /// <summary>
-    /// Collapses the summary to a single line and strips any characters that
-    /// could break shell quoting. The caller wraps the result in single quotes,
-    /// which are literal in both bash and pwsh — but we still strip control
-    /// chars and null bytes as defense-in-depth.
-    /// </summary>
-    private static string SanitizeForShell(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-            return "";
-
-        // Collapse to single line
-        var oneLine = text
-            .Replace("\r\n", " ")
-            .Replace("\r", " ")
-            .Replace("\n", " ");
-
-        // Strip null bytes and other control characters (except space)
-        var cleaned = new string(oneLine
-            .Where(c => !char.IsControl(c) || c == ' ')
-            .ToArray());
-
-        return cleaned.Trim();
-    }
 }

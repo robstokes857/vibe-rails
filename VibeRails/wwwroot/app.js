@@ -20,8 +20,8 @@ import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, es
 
 export class VibeControlApp {
     constructor() {
-        this.currentView = 'dashboard';
-        this.navigationStack = ['dashboard'];
+        this.currentView = 'terminal-focus';
+        this.navigationStack = ['terminal-focus'];
         this.appSettings = this._normalizeAppSettings();
         this.data = {
             agents: [],
@@ -197,7 +197,9 @@ export class VibeControlApp {
                         btn.style.opacity = '';
                         btn.style.pointerEvents = '';
                     });
-                    this.loadView('dashboard');
+                    this.navigationStack = ['terminal-focus'];
+                    this.currentView = 'terminal-focus';
+                    this.loadView('terminal-focus');
                 } else {
                     showError('Git was initialized but the repository could not be detected. Please refresh.');
                 }
@@ -436,7 +438,7 @@ export class VibeControlApp {
         const url = new URL(window.location.href);
         const view = this.getDuplicateTabView();
 
-        if (view === 'dashboard') {
+        if (view === 'terminal-focus') {
             url.searchParams.delete('view');
         } else {
             url.searchParams.set('view', view);
@@ -481,7 +483,7 @@ export class VibeControlApp {
             'swarm'
         ]);
 
-        return duplicateableViews.has(normalizedView) ? normalizedView : 'dashboard';
+        return duplicateableViews.has(normalizedView) ? normalizedView : 'terminal-focus';
     }
 
     async openDuplicateTab() {
@@ -682,7 +684,13 @@ export class VibeControlApp {
 
     applyViewLayoutState(view) {
         const isTerminalFocus = view === 'terminal-focus';
-        document.body.classList.toggle('terminal-focus-active', isTerminalFocus);
+        const layoutRoots = [document.documentElement, document.body];
+
+        layoutRoots.forEach((element) => {
+            element.classList.toggle('terminal-focus-active', isTerminalFocus);
+            element.classList.toggle('vb-terminal-focus-active', isTerminalFocus);
+        });
+
         // Removed automatic collapsing of navbars in terminal focus mode
     }
 
