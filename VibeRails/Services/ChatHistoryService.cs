@@ -11,12 +11,15 @@ public class ChatHistoryService(
     ISummaryService summaryService) : IChatHistoryService
 {
 
-    public async Task<ChatHistoryResponse> GetHistoryAsync(int page, int pageSize, CancellationToken cancellationToken)
+    public async Task<ChatHistoryResponse> GetHistoryAsync(int page, int pageSize, string? preferredWorkingDirectory, string? sortBy, string? sortDirection, CancellationToken cancellationToken)
     {
         var offset = (page - 1) * pageSize;
-        var items = await repository.GetChatHistoryPageAsync(pageSize, offset, cancellationToken);
+        var items = await repository.GetChatHistoryPageAsync(pageSize, offset, preferredWorkingDirectory, sortBy, sortDirection, cancellationToken);
         return new ChatHistoryResponse(items, page, pageSize);
     }
+
+    public Task<ChatHistoryItem?> GetSessionAsync(string sessionId, CancellationToken cancellationToken)
+        => repository.GetChatHistoryItemAsync(sessionId, cancellationToken);
 
     public Task<bool> RenameSessionAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken)
         => repository.UpdateChatHistorySessionNameAsync(sessionId, sessionDisplayName, cancellationToken);

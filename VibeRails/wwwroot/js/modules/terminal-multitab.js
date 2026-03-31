@@ -176,7 +176,7 @@ class TerminalTab {
             return;
         }
 
-        this.vibeTerminal.focus();
+        this.vibeTerminal.focus({ preventScroll: true });
         this.configureInputTarget();
 
         const input = this.getHelperTextarea();

@@ -157,14 +157,17 @@ public class SessionParseV4FixtureTests
     }
 
     [Fact]
-    public async Task ParseTranscriptAsync_EmptyUserInputs_Throws()
+    public async Task ParseTranscriptAsync_EmptyUserInputs_FallsBackToCleanText()
     {
         var parser = new SessionParseV4();
         var bytes = File.ReadAllBytes(Path.Combine(FixtureDir, "test.bin"));
 
         var chunks = MakeChunks(bytes);
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => parser.ParseTranscriptAsync(chunks, Array.Empty<UserInputRecord>(), CancellationToken.None));
+        var result = await parser.ParseTranscriptAsync(chunks, Array.Empty<UserInputRecord>(), CancellationToken.None);
+
+        // Should return cleaned text (same as ParseAsync) instead of throwing
+        Assert.False(string.IsNullOrWhiteSpace(result));
+        Assert.DoesNotContain("User:", result);
     }
 
     // --- Helpers ---
