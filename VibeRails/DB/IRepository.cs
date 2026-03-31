@@ -12,6 +12,8 @@ namespace VibeRails.DB
         Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir);
         Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false);
         Task CompleteSessionAsync(string sessionId, int exitCode);
+        Task<string> GetProjectDisplayNameAsync(string path, CancellationToken cancellationToken = default);
+        Task<bool> UpdateLatestProjectDisplayNameAsync(string path, string projectDisplayName, CancellationToken cancellationToken = default);
         Task<(string? Cli, string? DisplayName)> GetSessionDisplayInfoAsync(string sessionId);
         Task SetParentSessionIdAsync(string sessionId, string parentSessionId);
         Task SetSessionDisplayNameAsync(string sessionId, string displayName);
@@ -24,7 +26,8 @@ namespace VibeRails.DB
         Task<List<SessionLogChunkRecord>> GetSessionLogChunksAsync(string sessionId, CancellationToken cancellationToken);
         Task<List<UserInputRecord>> GetUserInputsForSessionAsync(string sessionId, CancellationToken cancellationToken);
         Task SaveSessionOutputAndMarkProcessedAsync(string sessionId, string text, CancellationToken cancellationToken);
-        Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, CancellationToken cancellationToken);
+        Task<ChatHistoryItem?> GetChatHistoryItemAsync(string sessionId, CancellationToken cancellationToken);
+        Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, string? preferredWorkingDirectory, string? sortBy, string? sortDirection, CancellationToken cancellationToken);
         Task<bool> UpdateChatHistorySessionNameAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken);
         Task<bool> DeleteChatHistorySessionAsync(string sessionId, CancellationToken cancellationToken);
         Task<List<string>> GetOpenSessionIdsAsync(DateTime olderThan, CancellationToken cancellationToken);
@@ -55,10 +58,6 @@ namespace VibeRails.DB
         // Agent metadata operations
         Task<string?> GetAgentCustomNameAsync(string path, CancellationToken cancellationToken = default);
         Task SetAgentCustomNameAsync(string path, string customName, CancellationToken cancellationToken = default);
-
-        // Project metadata operations
-        Task<string?> GetProjectCustomNameAsync(string path, CancellationToken cancellationToken = default);
-        Task SetProjectCustomNameAsync(string path, string customName, CancellationToken cancellationToken = default);
 
         // ChatSummary operations
         Task<ChatSummary> SaveChatSummaryAsync(ChatSummary chatSummary, CancellationToken cancellationToken = default);

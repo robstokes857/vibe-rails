@@ -26,6 +26,9 @@ export class DashboardController {
 
         content.innerHTML = '';
         content.appendChild(this.renderUnifiedDashboard(data));
+
+        // Ensure we are at the top on load
+        window.scrollTo(0, 0);
     }
 
     renderUnifiedDashboard(data = {}) {
@@ -53,56 +56,144 @@ export class DashboardController {
                 const isSandbox = this.app.data.configs?.isSandbox === true;
 
                 headingContainer.innerHTML = `
-                    <div class="context-header-card position-relative overflow-hidden py-3 px-4" style="background: ${isSandbox ? 'rgba(20, 14, 5, 0.5)' : 'rgba(15, 23, 42, 0.4)'}; border: 1px solid ${isSandbox ? 'rgba(251, 146, 60, 0.25)' : 'rgba(255, 255, 255, 0.05)'}; border-radius: 12px; backdrop-filter: blur(10px);">
-                        ${isSandbox ? `<div style="position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, rgba(251,146,60,0.6), transparent);"></div>` : ''}
-                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+                    <div class="context-header-card position-relative overflow-hidden py-4 px-4" style="background: ${isSandbox ? 'rgba(20, 14, 5, 0.5)' : 'rgba(15, 23, 42, 0.4)'}; border: 1px solid ${isSandbox ? 'rgba(251, 146, 60, 0.25)' : 'rgba(255, 255, 255, 0.05)'}; border-radius: 16px; backdrop-filter: blur(15px); box-shadow: 0 8px 32px rgba(0,0,0,0.2);">
+                        ${isSandbox ? `<div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, rgba(251,146,60,0.8), transparent);"></div>` : ''}
+                        
+                        <!-- Top Row: Project Info & Actions -->
+                        <div class="d-flex align-items-start justify-content-between flex-wrap gap-3 mb-4">
                             <div class="d-flex align-items-center gap-3">
-                                <div class="project-logo-wrapper d-flex align-items-center justify-content-center flex-shrink-0" style="width: 48px; height: 48px; background: ${isSandbox ? 'rgba(251,146,60,0.08)' : 'rgba(59, 130, 246, 0.08)'}; border: 1px solid ${isSandbox ? 'rgba(251,146,60,0.25)' : 'rgba(59, 130, 246, 0.2)'}; border-radius: 12px; color: ${isSandbox ? '#fb923c' : 'var(--color-primary)'}; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 20px;">
-                                    <i class="fa-solid fa-folder-open"></i>
+                                <div class="project-logo-wrapper d-flex align-items-center justify-content-center flex-shrink-0" style="width: 56px; height: 56px; background: ${isSandbox ? 'rgba(251,146,60,0.1)' : 'rgba(59, 130, 246, 0.1)'}; border: 1px solid ${isSandbox ? 'rgba(251,146,60,0.3)' : 'rgba(59, 130, 246, 0.25)'}; border-radius: 14px; color: ${isSandbox ? '#fb923c' : 'var(--color-primary)'}; box-shadow: 0 4px 15px rgba(0,0,0,0.2); font-size: 24px;">
+                                    <i class="fa-solid fa-folder-tree"></i>
                                 </div>
                                 <div class="d-flex flex-column gap-1">
                                     <div class="d-flex align-items-center gap-2">
-                                        <h5 class="mb-0 text-white fw-bold" style="font-size: 1.15rem;">${this.app.escapeHtml(projectName)}</h5>
-                                        ${isSandbox ? `<span style="font-size: 0.6rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #fb923c; background: rgba(251,146,60,0.12); border: 1px solid rgba(251,146,60,0.3); border-radius: 4px; padding: 2px 6px;">Sandbox</span>` : ''}
-                                        <button class="btn btn-link btn-sm p-0 text-muted hover-accent ms-1 d-flex align-items-center" type="button" data-action="set-custom-name" title="Rename project">
-                                            <i class="fa-solid fa-pen-to-square" style="font-size: 12px;"></i>
+                                        <h4 class="mb-0 text-white fw-bold" style="letter-spacing: -0.01em;">${this.app.escapeHtml(projectName)}</h4>
+                                        ${isSandbox ? `<span class="badge" style="font-size: 0.65rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: #fb923c; background: rgba(251,146,60,0.15); border: 1px solid rgba(251,146,60,0.4); padding: 3px 8px;">Sandbox</span>` : ''}
+                                        <button class="btn btn-link btn-sm p-0 text-muted hover-accent ms-1 d-flex align-items-center opacity-75" type="button" data-action="set-custom-name" title="Rename project">
+                                            <i class="fa-solid fa-pen-to-square" style="font-size: 13px;"></i>
                                         </button>
                                     </div>
-                                    <div class="d-flex align-items-center flex-wrap gap-2">
+                                    <div class="d-flex align-items-center flex-wrap gap-4 mt-1">
                                         ${gitRemoteUrl ? `
-                                        <div class="d-flex align-items-center gap-1">
-                                            <i class="fa-brands fa-github text-muted opacity-75" style="font-size: 12px;"></i>
-                                            <span class="xx-small text-muted opacity-50 text-uppercase fw-bold" style="letter-spacing: 0.08em;">Repo</span>
-                                            <a href="${gitRemoteUrl}" target="_blank" class="text-decoration-none small text-muted hover-accent">
-                                                ${this.app.escapeHtml(repoName)}
-                                            </a>
+                                        <div class="d-flex flex-column">
+                                            <span class="xx-small text-muted text-uppercase fw-bold opacity-50" style="letter-spacing: 0.05em; margin-bottom: 2px;">Remote</span>
+                                            <div class="d-flex align-items-center gap-1">
+                                                <i class="fa-brands fa-github text-muted opacity-50" style="font-size: 12px;"></i>
+                                                <a href="${gitRemoteUrl}" target="_blank" class="text-decoration-none small text-white hover-accent opacity-75 fw-medium">
+                                                    ${this.app.escapeHtml(repoName)}
+                                                </a>
+                                            </div>
                                         </div>` : ''}
                                         ${gitBranch ? `
-                                        <div class="d-flex align-items-center gap-1">
-                                            <i class="fa-solid fa-code-branch text-muted opacity-75" style="font-size: 11px;"></i>
-                                            <span class="xx-small text-muted opacity-50 text-uppercase fw-bold" style="letter-spacing: 0.08em;">Branch</span>
-                                            <span class="small text-muted">${this.app.escapeHtml(gitBranch)}</span>
+                                        <div class="d-flex flex-column">
+                                            <span class="xx-small text-muted text-uppercase fw-bold opacity-50" style="letter-spacing: 0.05em; margin-bottom: 2px;">Branch</span>
+                                            <div class="d-flex align-items-center gap-1">
+                                                <i class="fa-solid fa-code-branch text-muted opacity-50" style="font-size: 11px;"></i>
+                                                <span class="small text-white opacity-75 fw-medium">${this.app.escapeHtml(gitBranch)}</span>
+                                            </div>
                                         </div>` : ''}
-                                        <div class="d-flex align-items-center gap-1 min-w-0">
-                                            <i class="fa-solid fa-folder text-muted opacity-75 flex-shrink-0" style="font-size: 11px;"></i>
-                                            <span class="xx-small text-muted opacity-50 text-uppercase fw-bold flex-shrink-0" style="letter-spacing: 0.08em;">Path</span>
-                                            <div class="text-muted small font-monospace text-truncate">${rootPath}</div>
-                                            <button class="btn btn-link btn-sm p-0 text-muted hover-accent opacity-50 ms-1 flex-shrink-0 d-flex align-items-center" type="button" data-action="copy-path" title="Copy path">
-                                                <i class="fa-regular fa-copy" style="font-size: 11px;"></i>
-                                            </button>
+                                        <div class="d-flex flex-column min-w-0">
+                                            <span class="xx-small text-muted text-uppercase fw-bold opacity-50" style="letter-spacing: 0.05em; margin-bottom: 2px;">Working Dir</span>
+                                            <div class="d-flex align-items-center gap-1">
+                                                <i class="fa-solid fa-location-dot text-muted opacity-50 flex-shrink-0" style="font-size: 11px;"></i>
+                                                <div class="text-white small font-monospace text-truncate opacity-75 fw-medium" style="max-width: 400px;">${rootPath}</div>
+                                                <button class="btn btn-link btn-sm p-0 text-muted hover-accent opacity-50 ms-1 flex-shrink-0 d-flex align-items-center" type="button" data-action="copy-path" title="Copy path">
+                                                    <i class="fa-regular fa-copy" style="font-size: 11px;"></i>
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <div class="d-flex gap-2">
-                                <div class="d-flex align-items-center gap-2 px-3 py-2 rounded" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
-                                    <span class="text-muted xx-small text-uppercase fw-bold" style="letter-spacing: 0.1em;">Agents</span>
-                                    <span class="fw-bold mb-0" style="color: var(--color-accent); font-size: 1rem;">${agentCount}</span>
+                            <div class="d-flex gap-2 align-items-center">
+                                <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2 px-3" type="button" data-action="navigate" data-view="swarm">
+                                    <i class="fa-solid fa-bolt"></i>
+                                    <span>Quick Swarm</span>
+                                </button>
+                                <div class="vr mx-2 opacity-25" style="height: 24px;"></div>
+                                <div class="dropdown">
+                                    <button class="btn btn-sm btn-dark bg-opacity-50 border-secondary border-opacity-25 rounded-circle p-0 d-flex align-items-center justify-content-center" style="width: 32px; height: 32px;" type="button" data-bs-toggle="dropdown">
+                                        <i class="fa-solid fa-ellipsis-vertical text-muted"></i>
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark border-secondary border-opacity-25 shadow">
+                                        <li><a class="dropdown-item d-flex align-items-center gap-2" href="#" data-action="launch-vscode"><i class="fa-solid fa-code opacity-50"></i> VS Code</a></li>
+                                        <li><a class="dropdown-item d-flex align-items-center gap-2" href="#" data-action="navigate" data-view="settings"><i class="fa-solid fa-sliders opacity-50"></i> Settings</a></li>
+                                        <li><hr class="dropdown-divider opacity-10"></li>
+                                        <li><a class="dropdown-item d-flex align-items-center gap-2 text-danger" href="#" id="exit-btn-alt"><i class="fa-solid fa-power-off opacity-50"></i> Exit VibeRails</a></li>
+                                    </ul>
                                 </div>
-                                <div class="d-flex align-items-center gap-2 px-3 py-2 rounded" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
-                                    <span class="text-muted xx-small text-uppercase fw-bold" style="letter-spacing: 0.1em;">Sandboxes</span>
-                                    <span class="fw-bold mb-0" style="color: var(--color-primary); font-size: 1rem;">${sandboxCount}</span>
+                            </div>
+                        </div>
+
+                        <!-- Bottom Row: Insight Cards -->
+                        <div class="row g-3">
+                            <!-- Project Health -->
+                            <div class="col-md-2">
+                                <div class="insight-card p-3 rounded-3" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
+                                    <div class="text-muted xx-small text-uppercase fw-bold mb-1 opacity-50" style="letter-spacing: 0.1em;">Health Score</div>
+                                    <div class="d-flex align-items-baseline gap-2">
+                                        <span class="fw-bold text-success" style="font-size: 1.25rem;">94%</span>
+                                        <span class="xx-small text-muted opacity-50">Placeholder data</span>
+                                    </div>
+                                    <div class="progress mt-2" style="height: 4px; background: rgba(255,255,255,0.05);">
+                                        <div class="progress-bar bg-success" role="progressbar" style="width: 94%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- VCA Violations -->
+                            <div class="col-md-2">
+                                <div class="insight-card p-3 rounded-3" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
+                                    <div class="text-muted xx-small text-uppercase fw-bold mb-1 opacity-50" style="letter-spacing: 0.1em;">VCA Status</div>
+                                    <div class="d-flex align-items-baseline gap-2">
+                                        <span class="fw-bold text-info" style="font-size: 1.25rem;">Clean</span>
+                                        <span class="xx-small text-muted opacity-50">Placeholder data</span>
+                                    </div>
+                                    <div class="text-muted xx-small mt-1 opacity-50">0 active violations</div>
+                                </div>
+                            </div>
+                            <!-- Agents -->
+                            <div class="col-md-2">
+                                <div class="insight-card p-3 rounded-3" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
+                                    <div class="text-muted xx-small text-uppercase fw-bold mb-1 opacity-50" style="letter-spacing: 0.1em;">Active Agents</div>
+                                    <div class="d-flex align-items-baseline gap-2">
+                                        <span class="fw-bold text-accent" style="font-size: 1.25rem;">${agentCount}</span>
+                                        <span class="xx-small text-muted opacity-50">Live</span>
+                                    </div>
+                                    <div class="text-muted xx-small mt-1 opacity-50">Managing project rules</div>
+                                </div>
+                            </div>
+                            <!-- Sandboxes -->
+                            <div class="col-md-2">
+                                <div class="insight-card p-3 rounded-3" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
+                                    <div class="text-muted xx-small text-uppercase fw-bold mb-1 opacity-50" style="letter-spacing: 0.1em;">Sandboxes</div>
+                                    <div class="d-flex align-items-baseline gap-2">
+                                        <span class="fw-bold text-primary" style="font-size: 1.25rem;">${sandboxCount}</span>
+                                        <span class="xx-small text-muted opacity-50">Live</span>
+                                    </div>
+                                    <div class="text-muted xx-small mt-1 opacity-50">Isolated environments</div>
+                                </div>
+                            </div>
+                            <!-- Open Tasks -->
+                            <div class="col-md-2">
+                                <div class="insight-card p-3 rounded-3" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
+                                    <div class="text-muted xx-small text-uppercase fw-bold mb-1 opacity-50" style="letter-spacing: 0.1em;">Open Tasks</div>
+                                    <div class="d-flex align-items-baseline gap-2">
+                                        <span class="fw-bold text-warning" style="font-size: 1.25rem;">12</span>
+                                        <span class="xx-small text-muted opacity-50">Placeholder data</span>
+                                    </div>
+                                    <div class="text-muted xx-small mt-1 opacity-50">From AGENTS.md files</div>
+                                </div>
+                            </div>
+                            <!-- Activity -->
+                            <div class="col-md-2">
+                                <div class="insight-card p-3 rounded-3" style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);">
+                                    <div class="text-muted xx-small text-uppercase fw-bold mb-1 opacity-50" style="letter-spacing: 0.1em;">Last Activity</div>
+                                    <div class="d-flex align-items-baseline gap-2">
+                                        <span class="fw-bold text-white opacity-75" style="font-size: 1rem;">2h ago</span>
+                                        <span class="xx-small text-muted opacity-50">Placeholder data</span>
+                                    </div>
+                                    <div class="text-muted xx-small mt-1 opacity-50">Git commit: "Fix dashboard UI"</div>
                                 </div>
                             </div>
                         </div>
@@ -114,6 +205,13 @@ export class DashboardController {
                     navigator.clipboard.writeText(rootPath);
                     this.app.showToast('Copied', 'Path copied to clipboard', 'info');
                 });
+                this.app.bindAction(headingContainer, '#exit-btn-alt', () => {
+                    if (confirm('Are you sure you want to exit VibeRails?')) {
+                        this.app.apiCall('/api/v1/app/exit', 'POST').catch(() => {});
+                        window.close();
+                    }
+                });
+
             } else {
                 headingContainer.innerHTML = `
                     <div class="context-header-card position-relative overflow-hidden py-3 px-4" style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 12px; backdrop-filter: blur(10px);">

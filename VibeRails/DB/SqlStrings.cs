@@ -32,16 +32,6 @@ namespace VibeRails.DB
             """;
         public const string CreateAgentMetadataPathIndex = "CREATE INDEX IF NOT EXISTS idx_agent_metadata_path ON AgentMetadata(Path)";
 
-        // ProjectMetadata Table
-        public const string CreateProjectMetadataTable = """
-            CREATE TABLE IF NOT EXISTS ProjectMetadata (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                Path TEXT NOT NULL UNIQUE,
-                CustomName TEXT NOT NULL
-            )
-            """;
-        public const string CreateProjectMetadataPathIndex = "CREATE INDEX IF NOT EXISTS idx_project_metadata_path ON ProjectMetadata(Path)";
-
         // ChatSummary Table
         public const string CreateChatSummaryTable = """
             CREATE TABLE IF NOT EXISTS ChatSummary (
@@ -76,6 +66,7 @@ namespace VibeRails.DB
                 Cli TEXT NOT NULL,
                 EnvironmentName TEXT,
                 WorkingDirectory TEXT NOT NULL,
+                ProjectDisplayName TEXT NOT NULL DEFAULT '',
                 StartedUTC TEXT NOT NULL,
                 EndedUTC TEXT,
                 ExitCode INTEGER,
@@ -169,8 +160,6 @@ namespace VibeRails.DB
             CreateEnvironmentsIndex,
             CreateAgentMetadataTable,
             CreateAgentMetadataPathIndex,
-            CreateProjectMetadataTable,
-            CreateProjectMetadataPathIndex,
             CreateSandboxesTable,
             CreateSandboxesIndex,
             CreateChatSummaryTable,
@@ -201,7 +190,8 @@ namespace VibeRails.DB
             "ALTER TABLE ChatSummary DROP COLUMN SummaryBy;",
             AddProcessedColumn,
             "ALTER TABLE Sessions ADD COLUMN ParentSessionId TEXT DEFAULT ''",
-            "ALTER TABLE Sessions ADD COLUMN SessionDisplayName TEXT DEFAULT ''"
+            "ALTER TABLE Sessions ADD COLUMN SessionDisplayName TEXT DEFAULT ''",
+            "ALTER TABLE Sessions ADD COLUMN ProjectDisplayName TEXT NOT NULL DEFAULT ''"
         ];
 
         /// <summary>
@@ -302,21 +292,6 @@ namespace VibeRails.DB
 
         public const string DeleteAgentMetadata = "DELETE FROM AgentMetadata WHERE Path = $path;";
 
-        // ProjectMetadata CRUD
-        public const string UpsertProjectMetadata = """
-            INSERT INTO ProjectMetadata (Path, CustomName)
-            VALUES ($path, $customName)
-            ON CONFLICT(Path) DO UPDATE SET
-                CustomName = excluded.CustomName
-            RETURNING Id;
-            """;
-
-        public const string SelectProjectMetadataByPath = """
-            SELECT Id, Path, CustomName
-            FROM ProjectMetadata
-            WHERE Path = $path;
-            """;
-
         // ChatSummary CRUD
         public const string UpsertChatSummary = """
             INSERT INTO ChatSummary (SessionId, SummaryText, Date)
@@ -347,8 +322,28 @@ namespace VibeRails.DB
 
         // Session CRUD
         public const string InsertSession = """
-            INSERT INTO Sessions (Id, Cli, EnvironmentName, WorkingDirectory, StartedUTC)
-            VALUES ($id, $cli, $envName, $workDir, $startedUTC);
+            INSERT INTO Sessions (Id, Cli, EnvironmentName, WorkingDirectory, ProjectDisplayName, StartedUTC)
+            VALUES ($id, $cli, $envName, $workDir, $projectDisplayName, $startedUTC);
+            """;
+        public const string SelectLatestProjectDisplayNameByWorkingDirectory = """
+            SELECT ProjectDisplayName
+            FROM Sessions
+            WHERE WorkingDirectory = $workingDirectory
+              AND ProjectDisplayName IS NOT NULL
+              AND ProjectDisplayName != ''
+            ORDER BY StartedUTC DESC
+            LIMIT 1;
+            """;
+        public const string UpdateLatestProjectDisplayNameByWorkingDirectory = """
+            UPDATE Sessions
+            SET ProjectDisplayName = $projectDisplayName
+            WHERE Id = (
+                SELECT Id
+                FROM Sessions
+                WHERE WorkingDirectory = $workingDirectory
+                ORDER BY StartedUTC DESC
+                LIMIT 1
+            );
             """;
         public const string SetParentSessionId = """
             UPDATE Sessions SET ParentSessionId = $parentSessionId WHERE Id = $id;
@@ -444,15 +439,47 @@ namespace VibeRails.DB
                 END
             WHERE Id = $sessionId;
             """;
-        public const string SelectChatHistoryPage = """
-            SELECT s.Id, s.Cli, s.EnvironmentName, s.WorkingDirectory, s.StartedUTC, s.EndedUTC, s.ExitCode, s.ParentSessionId, s.SessionDisplayName,
-                   u.Sequence, SUBSTR(u.InputText, 1, 120)
+        public const string SelectChatHistoryBase = """
+            SELECT s.Id,
+                   s.Cli,
+                   s.EnvironmentName,
+                   s.WorkingDirectory,
+                   s.ProjectDisplayName,
+                   s.StartedUTC,
+                   s.EndedUTC,
+                   s.ExitCode,
+                   s.ParentSessionId,
+                   p.Cli,
+                   s.SessionDisplayName,
+                   u.Sequence,
+                   SUBSTR(u.InputText, 1, 120)
             FROM Sessions s
             LEFT JOIN UserInputs u ON u.Id = (
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
             )
-            ORDER BY s.StartedUTC DESC
-            LIMIT $limit OFFSET $offset;
+            LEFT JOIN Sessions p ON p.Id = NULLIF(s.ParentSessionId, '')
+            """;
+        public const string SelectChatHistoryBySessionId = """
+            SELECT s.Id,
+                   s.Cli,
+                   s.EnvironmentName,
+                   s.WorkingDirectory,
+                   s.ProjectDisplayName,
+                   s.StartedUTC,
+                   s.EndedUTC,
+                   s.ExitCode,
+                   s.ParentSessionId,
+                   p.Cli,
+                   s.SessionDisplayName,
+                   u.Sequence,
+                   SUBSTR(u.InputText, 1, 120)
+            FROM Sessions s
+            LEFT JOIN UserInputs u ON u.Id = (
+                SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
+            )
+            LEFT JOIN Sessions p ON p.Id = NULLIF(s.ParentSessionId, '')
+            WHERE s.Id = $sessionId
+            LIMIT 1;
             """;
         public const string UpdateSessionDisplayName = """
             UPDATE Sessions

@@ -804,13 +804,13 @@ export class VibeControlApp {
 
     showCustomNameModal() {
         const path = this.data.configs?.rootPath || '';
-        const currentName = this.getProjectNameFromPath(path);
+        const currentName = this.dashboardController?._customProjectName || this.getProjectNameFromPath(path);
 
         this.showModal('Set Custom Project Name', `
             <form id="custom-name-form">
                 <div class="mb-3">
                     <label class="form-label">Custom Name</label>
-                    <input type="text" class="form-control" id="project-custom-name" placeholder="${currentName}" required>
+                    <input type="text" class="form-control" id="project-custom-name" value="${this.escapeHtml(currentName)}" placeholder="${this.escapeHtml(currentName)}" required>
                     <small class="form-text text-muted">Enter a friendly name to identify this project in your history.</small>
                 </div>
                 <div class="d-flex gap-2 justify-content-end">

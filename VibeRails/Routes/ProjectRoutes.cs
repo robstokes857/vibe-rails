@@ -193,7 +193,7 @@ public static class ProjectRoutes
             }
         }).WithName("GitOpenDirectory");
 
-        // PUT /api/v1/projects/name - Set custom project name (stored in AgentMetadata table)
+        // PUT /api/v1/projects/name - Set project display name on the most recent session for this path
         app.MapPut("/api/v1/projects/name", async (
             IRepository repository,
             UpdateAgentNameRequest request,
@@ -209,12 +209,16 @@ public static class ProjectRoutes
                 return Results.BadRequest(new ErrorResponse("CustomName is required"));
             }
 
-            await repository.SetProjectCustomNameAsync(request.Path, request.CustomName, cancellationToken);
+            var updated = await repository.UpdateLatestProjectDisplayNameAsync(request.Path, request.CustomName, cancellationToken);
+            if (!updated)
+            {
+                return Results.BadRequest(new ErrorResponse("Start a chat session before setting a project name."));
+            }
 
             return Results.Ok(new UpdateAgentNameResponse(request.Path, request.CustomName));
         }).WithName("UpdateProjectName");
 
-        // GET /api/v1/projects/name?path={path} - Get custom project name
+        // GET /api/v1/projects/name?path={path} - Get project display name for the current path
         app.MapGet("/api/v1/projects/name", async (
             IRepository repository,
             string path,
@@ -225,8 +229,8 @@ public static class ProjectRoutes
                 return Results.BadRequest(new ErrorResponse("Path is required"));
             }
 
-            var customName = await repository.GetProjectCustomNameAsync(path, cancellationToken);
-            return Results.Ok(new UpdateAgentNameResponse(path, customName ?? ""));
+            var projectDisplayName = await repository.GetProjectDisplayNameAsync(path, cancellationToken);
+            return Results.Ok(new UpdateAgentNameResponse(path, projectDisplayName));
         }).WithName("GetProjectName");
     }
 

@@ -14,6 +14,7 @@ export class ChatHistorySidebar {
         this.app = app;
         this.allItems = [];
         this.filterText = '';
+        this.llmFilters = new Set();
         this.activeItem = null;
         this.pageSize = DEFAULT_PAGE_SIZE;
         this.currentPage = 0;
@@ -26,6 +27,7 @@ export class ChatHistorySidebar {
         this.body = null;
         this.contextMenu = null;
         this.refreshButton = null;
+        this.llmFilterContainer = null;
     }
 
     static renderHtml() {
@@ -54,6 +56,10 @@ export class ChatHistorySidebar {
                         <div class="ch-search-input-wrapper">
                             <i class="fa-solid fa-magnifying-glass ch-search-icon"></i>
                             <input type="text" class="ch-search-input" id="ch-search-input" placeholder="Search sessions..." autocomplete="off">
+                        </div>
+                        <div class="ch-sidebar-controls">
+                            <label class="ch-filter-label">LLM</label>
+                            <div class="ch-llm-filter-group" id="ch-llm-filter-group"></div>
                         </div>
                     </div>
                     <div class="ch-sidebar-body" id="ch-sidebar-body"></div>
@@ -91,6 +97,7 @@ export class ChatHistorySidebar {
         this.contextMenu = contextMenu;
         this.refreshButton = root.querySelector('#ch-sidebar-refresh-btn');
         this.closeButton = root.querySelector('#ch-sidebar-close-btn');
+        this.llmFilterContainer = root.querySelector('#ch-llm-filter-group');
         const syncCloseButtonState = () => {
             if (!sidebar || !this.closeButton) {
                 return;
@@ -169,6 +176,34 @@ export class ChatHistorySidebar {
             }
         });
 
+        this.llmFilterContainer?.addEventListener('click', (e) => {
+            const badge = e.target.closest('[data-llm-filter]');
+            if (!badge || badge.disabled) {
+                return;
+            }
+
+            e.stopPropagation();
+            const nextFilter = (badge.dataset.llmFilter || 'all').trim().toLowerCase();
+            if (!nextFilter) {
+                return;
+            }
+
+            if (nextFilter === 'reset') {
+                if (this.llmFilters.size === 0) {
+                    return;
+                }
+                this.llmFilters.clear();
+            } else if (this.llmFilters.has(nextFilter)) {
+                this.llmFilters.delete(nextFilter);
+            } else {
+                this.llmFilters.add(nextFilter);
+            }
+
+            this._syncLlmFilterControls();
+            this._closeContextMenu();
+            this._renderItems();
+        });
+
         body?.addEventListener('scroll', () => {
             if (!this._shouldLoadNextPage()) {
                 return;
@@ -205,6 +240,7 @@ export class ChatHistorySidebar {
         }
 
         syncCloseButtonState();
+        this._syncLlmFilterControls();
         emitToggleState();
         void this._load();
     }
@@ -245,6 +281,10 @@ export class ChatHistorySidebar {
                     page: String(nextPage),
                     pageSize: String(this.pageSize)
                 });
+                const preferredWorkingDirectory = this._getPreferredWorkingDirectory();
+                if (preferredWorkingDirectory) {
+                    params.set('preferredWorkingDirectory', preferredWorkingDirectory);
+                }
                 const data = await this.app.apiCall(`/api/v1/chatHistory?${params.toString()}`, 'GET', null, { showLoading: false });
                 const fetchedItems = Array.isArray(data?.items) ? data.items : [];
 
@@ -258,7 +298,7 @@ export class ChatHistorySidebar {
 
                 const visibleItems = fetchedItems.filter(item => this._shouldDisplayItem(item));
                 if (visibleItems.length > 0) {
-                    this.allItems.push(...visibleItems);
+                    this._mergeItems(visibleItems);
                     break;
                 }
             }
@@ -342,16 +382,45 @@ export class ChatHistorySidebar {
     }
 
     _setRefreshButtonState() {
-        if (!this.refreshButton) {
+        const isBusy = this.isLoadingPage || this.isLoadingForSearch;
+        if (this.refreshButton) {
+            this.refreshButton.disabled = isBusy;
+            this.refreshButton.classList.toggle('is-loading', isBusy);
+        }
+        if (this.llmFilterContainer) {
+            this.llmFilterContainer.querySelectorAll('[data-llm-filter]').forEach((button) => {
+                button.disabled = isBusy;
+            });
+        }
+    }
+
+    _syncLlmFilterControls() {
+        if (!this.llmFilterContainer) {
             return;
         }
 
-        const isBusy = this.isLoadingPage || this.isLoadingForSearch;
-        this.refreshButton.disabled = isBusy;
-        this.refreshButton.classList.toggle('is-loading', isBusy);
+        const options = this._getLlmFilterOptions();
+        this.llmFilterContainer.innerHTML = options.map((option) => {
+            const isReset = option.value === 'reset';
+            const isActive = isReset ? false : this.llmFilters.has(option.value);
+            const isDisabled = isReset && this.llmFilters.size === 0;
+            return `
+                <button
+                    type="button"
+                    class="ch-llm-filter-badge${isActive ? ' is-active' : ''}${isReset ? ' is-reset' : ''}"
+                    data-llm-filter="${escapeHtml(option.value)}"
+                    aria-pressed="${isActive ? 'true' : 'false'}"
+                    title="${escapeHtml(option.label)}"
+                    ${isDisabled ? 'disabled' : ''}
+                >
+                    ${option.logoHtml}
+                    <span>${escapeHtml(option.label)}</span>
+                </button>
+            `;
+        }).join('');
     }
 
-    _getDisplayName(item) {
+    _getRawDisplayName(item) {
         const sessionName = item.sessionDisplayName?.trim();
         if (sessionName) {
             return sessionName;
@@ -359,6 +428,15 @@ export class ChatHistorySidebar {
 
         const inputName = item.inputText?.trim().split('\n')[0]?.trim();
         return inputName || '';
+    }
+
+    _getDisplayName(item) {
+        const rawName = this._getRawDisplayName(item);
+        if (!item?.parentSessionId || !rawName) {
+            return rawName;
+        }
+
+        return this._stripResumePrefix(rawName, item.parentCli, item.cli);
     }
 
     _shouldDisplayItem(item) {
@@ -481,13 +559,7 @@ export class ChatHistorySidebar {
             return;
         }
 
-        const filteredItems = this.filterText
-            ? this.allItems.filter(item => {
-                const rawName = this._getDisplayName(item).toLowerCase();
-                const brand = (this.app.getCliBrand(item.cli)?.label || '').toLowerCase();
-                return rawName.includes(this.filterText) || brand.includes(this.filterText);
-            })
-            : this.allItems;
+        const filteredItems = this._getFilteredItems();
 
         if (!filteredItems.length) {
             if (this.filterText && (this.isLoadingPage || this.isLoadingForSearch)) {
@@ -500,7 +572,7 @@ export class ChatHistorySidebar {
                 return;
             }
 
-            this.body.innerHTML = `<div class="ch-empty">${this.filterText ? 'No matches found.' : 'No chat history yet.'}</div>`;
+            this.body.innerHTML = `<div class="ch-empty">${(this.filterText || this.llmFilters.size > 0) ? 'No matches found.' : 'No chat history yet.'}</div>`;
             return;
         }
 
@@ -510,20 +582,40 @@ export class ChatHistorySidebar {
             const name = rawName.length > 52 ? rawName.slice(0, 52) + '…' : rawName;
             const time = formatRelativeTime(item.startedUTC);
             const isActive = !item.endedUTC;
-            const logoStyle = brand.logoFilter ? ` style="filter: ${brand.logoFilter}"` : '';
-            const logoHtml = brand.logo
-                ? `<img src="${escapeHtml(brand.logo)}" alt="${escapeHtml(brand.label)}" class="ch-item-logo"${logoStyle}>`
-                : `<span class="ch-item-logo-fallback">${escapeHtml((brand.label || '?')[0])}</span>`;
+            const logoHtml = this._renderBrandLogo(brand, 'ch-item-logo');
+            const projectDisplayName = this._getProjectDisplayName(item);
+            const metaParts = [
+                escapeHtml(projectDisplayName),
+                escapeHtml(brand.label)
+            ];
+            if (item.environmentName?.trim()) {
+                metaParts.push(escapeHtml(item.environmentName.trim()));
+            }
+            const metaHtml = isActive
+                ? `${metaParts.join(' <span class="ch-meta-separator">·</span> ')} <span class="ch-meta-separator">·</span> <span class="ch-item-live">live</span>`
+                : `${metaParts.join(' <span class="ch-meta-separator">·</span> ')} <span class="ch-meta-separator">·</span> ${escapeHtml(time)}`;
+            const relationshipHtml = item.parentSessionId
+                ? this._renderResumeRelationship(item, brand)
+                : '';
+            const parentJumpButton = item.parentSessionId
+                ? `<button class="ch-item-parent-btn" type="button" title="Jump to parent chat" aria-label="Jump to parent chat">
+                        <i class="fa-solid fa-turn-up"></i>
+                   </button>`
+                : '';
             return `
                 <div class="ch-item${isActive ? ' ch-item-active' : ''}" data-id="${escapeHtml(item.id)}">
                     <div class="ch-item-icon">${logoHtml}</div>
                     <div class="ch-item-content">
                         <div class="ch-item-name" title="${escapeHtml(rawName)}">${escapeHtml(name)}</div>
-                        <div class="ch-item-meta">${escapeHtml(brand.label)}${isActive ? ' · <span class="ch-item-live">live</span>' : ` · ${time}`}</div>
+                        ${relationshipHtml}
+                        <div class="ch-item-meta">${metaHtml}</div>
                     </div>
-                    <button class="ch-item-menu-btn" title="Actions">
-                        <i class="fa-solid fa-ellipsis-vertical"></i>
-                    </button>
+                    <div class="ch-item-actions">
+                        ${parentJumpButton}
+                        <button class="ch-item-menu-btn" title="Actions" aria-label="Actions">
+                            <i class="fa-solid fa-ellipsis-vertical"></i>
+                        </button>
+                    </div>
                 </div>`;
         }).join('')}${this._renderFooter()}`;
 
@@ -538,6 +630,13 @@ export class ChatHistorySidebar {
         }
 
         itemElements.forEach(itemEl => {
+            itemEl.querySelector('.ch-item-parent-btn')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const item = this.allItems.find(i => i.id === itemEl.dataset.id);
+                if (item) {
+                    void this._jumpToParent(item);
+                }
+            });
             itemEl.querySelector('.ch-item-menu-btn')?.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this._openContextMenu(itemEl, e.currentTarget, submenu);
@@ -729,6 +828,174 @@ export class ChatHistorySidebar {
                 const label = item.textContent.trim();
                 this._showResumeModal(parsed, label);
             });
+        });
+    }
+
+    _getPreferredWorkingDirectory() {
+        return this.app.data?.configs?.rootPath || this.app.data?.configs?.launchDirectory || '';
+    }
+
+    _getProjectDisplayName(item) {
+        const projectDisplayName = item?.projectDisplayName?.trim();
+        if (projectDisplayName) {
+            return projectDisplayName;
+        }
+
+        return this.app.getProjectNameFromPath(item?.workingDirectory || '');
+    }
+
+    _stripResumePrefix(name, parentCli, childCli) {
+        const rawName = (name || '').trim();
+        if (!rawName) {
+            return rawName;
+        }
+
+        const escapePattern = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (parentCli && childCli) {
+            const exactPattern = new RegExp(`^Chat from\\s+${escapePattern(parentCli)}\\s*->\\s*${escapePattern(childCli)}\\s+`, 'i');
+            if (exactPattern.test(rawName)) {
+                return rawName.replace(exactPattern, '').trim();
+            }
+        }
+
+        return rawName.replace(/^Chat from\s+.+?\s*->\s*.+?\s+/i, '').trim();
+    }
+
+    _renderBrandLogo(brand, className) {
+        const logoClass = className || 'ch-item-logo';
+        const logoStyle = brand.logoFilter ? ` style="filter: ${brand.logoFilter}"` : '';
+        return brand.logo
+            ? `<img src="${escapeHtml(brand.logo)}" alt="${escapeHtml(brand.label)}" class="${logoClass}"${logoStyle}>`
+            : `<span class="${logoClass} ch-item-logo-fallback">${escapeHtml((brand.label || '?')[0])}</span>`;
+    }
+
+    _renderResumeRelationship(item, brand) {
+        const parentBrand = this.app.getCliBrand(item.parentCli || '');
+        const resumeTitle = item.parentCli
+            ? `Resumed from ${parentBrand.label} into ${brand.label}`
+            : `Resumed into ${brand.label}`;
+        return `
+            <div class="ch-item-relationship" title="${escapeHtml(resumeTitle)}">
+                <span class="ch-item-relationship-flow">
+                    ${this._renderBrandLogo(parentBrand, 'ch-item-inline-logo')}
+                    <i class="fa-solid fa-arrow-right"></i>
+                    ${this._renderBrandLogo(brand, 'ch-item-inline-logo')}
+                </span>
+                <span class="ch-item-relationship-label">Resume</span>
+            </div>
+        `;
+    }
+
+    _getFilteredItems() {
+        return this.allItems.filter(item => {
+            if (this.llmFilters.size > 0 && !this.llmFilters.has((item?.cli || '').toLowerCase())) {
+                return false;
+            }
+
+            if (!this.filterText) {
+                return true;
+            }
+
+            const searchParts = [
+                this._getDisplayName(item),
+                this._getProjectDisplayName(item),
+                item.environmentName || '',
+                this.app.getCliBrand(item.cli)?.label || '',
+                this.app.getCliBrand(item.parentCli || '')?.label || ''
+            ];
+
+            return searchParts.join('\n').toLowerCase().includes(this.filterText);
+        });
+    }
+
+    _mergeItems(items) {
+        const merged = new Map(this.allItems.map(item => [item.id, item]));
+        items.forEach((item) => {
+            if (!item?.id) {
+                return;
+            }
+
+            merged.set(item.id, {
+                ...(merged.get(item.id) || {}),
+                ...item
+            });
+        });
+
+        this.allItems = Array.from(merged.values());
+        this._sortItemsInMemory();
+    }
+
+    _sortItemsInMemory() {
+        const preferredWorkingDirectory = this._getPreferredWorkingDirectory();
+
+        this.allItems.sort((left, right) => {
+            if (preferredWorkingDirectory) {
+                const leftPreferred = left.workingDirectory === preferredWorkingDirectory ? 0 : 1;
+                const rightPreferred = right.workingDirectory === preferredWorkingDirectory ? 0 : 1;
+                if (leftPreferred !== rightPreferred) {
+                    return leftPreferred - rightPreferred;
+                }
+            }
+
+            const recencyCompare = new Date(right.startedUTC).getTime() - new Date(left.startedUTC).getTime();
+            if (recencyCompare !== 0) {
+                return recencyCompare;
+            }
+
+            return (right.id || '').localeCompare(left.id || '', undefined, { sensitivity: 'base' });
+        });
+    }
+
+    _getLlmFilterOptions() {
+        return [
+            { value: 'reset', label: 'Reset', logoHtml: '<i class="fa-solid fa-rotate-left"></i>' },
+            ...['claude', 'codex', 'gemini', 'copilot'].map((cli) => {
+                const brand = this.app.getCliBrand(cli);
+                return {
+                    value: cli,
+                    label: brand.label,
+                    logoHtml: this._renderBrandLogo(brand, 'ch-llm-filter-logo')
+                };
+            })
+        ];
+    }
+
+    async _jumpToParent(item) {
+        const parentSessionId = item?.parentSessionId?.trim();
+        if (!parentSessionId || !this.body) {
+            return;
+        }
+
+        let parentItem = this.allItems.find(entry => entry.id === parentSessionId) || null;
+        if (!parentItem) {
+            try {
+                const fetched = await this.app.apiCall(`/api/v1/chatHistory/${encodeURIComponent(parentSessionId)}`, 'GET', null, { showLoading: false });
+                if (fetched) {
+                    this._mergeItems([fetched]);
+                    this._renderItems();
+                    parentItem = this.allItems.find(entry => entry.id === parentSessionId) || fetched;
+                }
+            } catch (error) {
+                this.app.showError(`Failed to load parent chat: ${error.message}`);
+                return;
+            }
+        }
+
+        const target = this.body.querySelector(`.ch-item[data-id="${CSS.escape(parentSessionId)}"]`);
+        if (!target) {
+            if (this.filterText) {
+                this.app.showToast('Parent Loaded', 'Parent chat is hidden by the current search filter.', 'info');
+            } else {
+                this.app.showError('Parent chat is not visible in the current list.');
+            }
+            return;
+        }
+
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.remove('ch-item-flash');
+        requestAnimationFrame(() => {
+            target.classList.add('ch-item-flash');
+            window.setTimeout(() => target.classList.remove('ch-item-flash'), 1800);
         });
     }
 }

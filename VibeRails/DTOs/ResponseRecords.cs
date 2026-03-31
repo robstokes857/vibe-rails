@@ -427,10 +427,12 @@ namespace VibeRails.DTOs
         string Cli,
         string? EnvironmentName,
         string WorkingDirectory,
+        string? ProjectDisplayName,
         DateTime StartedUTC,
         DateTime? EndedUTC,
         int? ExitCode,
         string? ParentSessionId,
+        string? ParentCli,
         string? SessionDisplayName,
         int? Sequence,
         string? InputText

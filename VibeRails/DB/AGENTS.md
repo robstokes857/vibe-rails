@@ -3,7 +3,7 @@
 This document describes how Environments, Sandboxes, AgentMetadata, and Sessions work at the database layer.
 
 > **Contents:**
-> [Database Overview](#database-overview) | [Environments](#environments) | [Sandboxes](#sandboxes) | [AgentMetadata](#agentmetadata) | [ProjectMetadata](#projectmetadata) | [Sessions](#sessions) | [Entity Relationships](#entity-relationships) | [Repository Patterns](#repository-patterns)
+> [Database Overview](#database-overview) | [Environments](#environments) | [Sandboxes](#sandboxes) | [AgentMetadata](#agentmetadata) | [Sessions](#sessions) | [Entity Relationships](#entity-relationships) | [Repository Patterns](#repository-patterns)
 
 ---
 
@@ -167,47 +167,6 @@ CREATE TABLE IF NOT EXISTS AgentMetadata (
 
 ---
 
-## ProjectMetadata
-
-### Business Logic
-
-**ProjectMetadata** stores user-assigned display names for projects (identified by their root directory path). This allows users to set a custom name for the current project via the dashboard "Edit name" button.
-
-| Rule | Details |
-|---|---|
-| **Keyed by path** | Each project is identified by its absolute filesystem root path. |
-| **Upsert behavior** | Setting a custom name for a path that already has one overwrites the previous name. |
-| **Path normalization** | Paths are normalized via `Path.GetFullPath()` before storage to ensure consistent lookups. |
-
-### Technical Details
-
-**Schema:**
-```sql
-CREATE TABLE IF NOT EXISTS ProjectMetadata (
-    Id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    Path       TEXT    NOT NULL UNIQUE,
-    CustomName TEXT    NOT NULL
-);
-```
-
-**Index:** `idx_project_metadata_path` on `Path`
-
-**Key operations:**
-
-| Method | Behavior |
-|---|---|
-| `GetProjectCustomNameAsync(path)` | Lookup by full path, returns `CustomName` or `null` |
-| `SetProjectCustomNameAsync(path, customName)` | `INSERT ... ON CONFLICT(Path) DO UPDATE SET CustomName` |
-
-**API endpoints:**
-
-| Endpoint | Method | Behavior |
-|---|---|---|
-| `/api/v1/projects/name?path={path}` | GET | Returns the custom name for a project path |
-| `/api/v1/projects/name` | PUT | Sets a custom project name (body: `{ path, customName }`) |
-
----
-
 ## Sessions
 
 > Managed by `DbService`, not the `Repository`. Sessions track CLI session history for logging purposes.
@@ -222,6 +181,7 @@ CREATE TABLE IF NOT EXISTS Sessions (
     Cli              TEXT NOT NULL,
     EnvironmentName  TEXT,
     WorkingDirectory TEXT NOT NULL,
+    ProjectDisplayName TEXT NOT NULL DEFAULT '',
     StartedUTC       TEXT NOT NULL,
     EndedUTC         TEXT,
     ExitCode         INTEGER
@@ -242,6 +202,8 @@ CREATE TABLE IF NOT EXISTS SessionLogs (
 | Method | Behavior |
 |---|---|
 | `CreateSessionAsync(sessionId, cli, envName, workDir)` | Insert new session when CLI launches |
+| `GetProjectDisplayNameAsync(path)` | Reads the latest project display name for a working directory, falling back to the folder name |
+| `UpdateLatestProjectDisplayNameAsync(path, projectDisplayName)` | Updates the newest session for that working directory |
 | `LogSessionOutputAsync(sessionId, content, isError)` | Append terminal output line |
 | `CompleteSessionAsync(sessionId, exitCode)` | Mark session as ended |
 | `GetRecentSessionsAsync(limit)` | Recent sessions ordered by `StartedUTC DESC` |
@@ -339,17 +301,17 @@ CREATE TABLE IF NOT EXISTS InputFileChanges (
 
 ## Entity Relationships
 
-Environments, Sandboxes, AgentMetadata, and ProjectMetadata have **no foreign key relationships** — they are fully independent tables.
+Environments, Sandboxes, and AgentMetadata have **no foreign key relationships** — they are fully independent tables.
 Sessions reference environments and working directories by string value only — no FK constraints.
 Sandboxes reference projects by `ProjectPath` string value — no FK to any project table.
 
 ```
-Environments              AgentMetadata         ProjectMetadata
-+--------------+          +-------------+       +-----------------+
-| Id (PK)      |          | Id (PK)     |       | Id (PK)         |
-| CustomName   |          | Path (UQ)   |       | Path (UQ)       |
-| LLM          |          | CustomName  |       | CustomName      |
-| Path         |          +-------------+       +-----------------+
+Environments              AgentMetadata
++--------------+          +-------------+
+| Id (PK)      |          | Id (PK)     |
+| CustomName   |          | Path (UQ)   |
+| LLM          |          | CustomName  |
+| Path         |          +-------------+
 | CustomArgs   |
 | CustomPrompt |          Sandboxes
 | CreatedUTC   |          +-------------------+
@@ -369,6 +331,7 @@ UQ(CustomName, LLM)      | Path              |
 +--------------+          | Cli               |
 UQ(CustomName, LLM)      | EnvironmentName   |  <-- string, not FK
                           | WorkingDirectory  |  <-- string, not FK
+                          | ProjectDisplayName|
                           | StartedUTC        |
 SessionLogs               | EndedUTC          |
 +-------------------+     | ExitCode          |

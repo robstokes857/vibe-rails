@@ -5,6 +5,7 @@ using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.Bert;
+using System.Text;
 
 namespace VibeRails.DB
 {
@@ -336,41 +337,6 @@ namespace VibeRails.DB
 
         #endregion
 
-        #region Project Metadata
-
-        public async Task<string?> GetProjectCustomNameAsync(string path, CancellationToken cancellationToken = default)
-        {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
-
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = SqlStrings.SelectProjectMetadataByPath;
-            cmd.Parameters.AddWithValue("$path", Path.GetFullPath(path));
-
-            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-            if (await reader.ReadAsync(cancellationToken))
-            {
-                return reader.GetString(2); // CustomName is at index 2
-            }
-
-            return null;
-        }
-
-        public async Task SetProjectCustomNameAsync(string path, string customName, CancellationToken cancellationToken = default)
-        {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
-
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = SqlStrings.UpsertProjectMetadata;
-            cmd.Parameters.AddWithValue("$path", Path.GetFullPath(path));
-            cmd.Parameters.AddWithValue("$customName", customName);
-
-            await cmd.ExecuteScalarAsync(cancellationToken);
-        }
-
-        #endregion
-
         #region ChatSummary CRUD
 
         public async Task<ChatSummary> SaveChatSummaryAsync(ChatSummary chatSummary, CancellationToken cancellationToken = default)
@@ -544,16 +510,50 @@ namespace VibeRails.DB
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
+            var normalizedWorkDir = NormalizeWorkingDirectory(workDir);
+            var projectDisplayName = await GetLatestProjectDisplayNameByWorkingDirectoryAsync(connection, normalizedWorkDir)
+                ?? GetProjectDisplayNameFromPath(normalizedWorkDir);
+
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.InsertSession;
 
             cmd.Parameters.AddWithValue("$id", sessionId);
             cmd.Parameters.AddWithValue("$cli", cli);
             cmd.Parameters.AddWithValue("$envName", envName ?? (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("$workDir", workDir);
+            cmd.Parameters.AddWithValue("$workDir", normalizedWorkDir);
+            cmd.Parameters.AddWithValue("$projectDisplayName", projectDisplayName);
             cmd.Parameters.AddWithValue("$startedUTC", DateTime.UtcNow.ToString("O"));
 
             await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<string> GetProjectDisplayNameAsync(string path, CancellationToken cancellationToken = default)
+        {
+            var normalizedPath = NormalizeWorkingDirectory(path);
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            var projectDisplayName = await GetLatestProjectDisplayNameByWorkingDirectoryAsync(connection, normalizedPath, cancellationToken);
+            return !string.IsNullOrWhiteSpace(projectDisplayName)
+                ? projectDisplayName
+                : GetProjectDisplayNameFromPath(normalizedPath);
+        }
+
+        public async Task<bool> UpdateLatestProjectDisplayNameAsync(string path, string projectDisplayName, CancellationToken cancellationToken = default)
+        {
+            var normalizedPath = NormalizeWorkingDirectory(path);
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.UpdateLatestProjectDisplayNameByWorkingDirectory;
+            cmd.Parameters.AddWithValue("$workingDirectory", normalizedPath);
+            cmd.Parameters.AddWithValue("$projectDisplayName", projectDisplayName.Trim());
+
+            var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            return rowsAffected > 0;
         }
 
         public async Task<(string? Cli, string? DisplayName)> GetSessionDisplayInfoAsync(string sessionId)
@@ -863,33 +863,43 @@ namespace VibeRails.DB
 
         #region Chat History
 
-        public async Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, CancellationToken cancellationToken)
+        public async Task<ChatHistoryItem?> GetChatHistoryItemAsync(string sessionId, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectChatHistoryBySessionId;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return ReadChatHistoryItem(reader);
+        }
+
+        public async Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, string? preferredWorkingDirectory, string? sortBy, string? sortDirection, CancellationToken cancellationToken)
         {
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
             var items = new List<ChatHistoryItem>();
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = SqlStrings.SelectChatHistoryPage;
+            cmd.CommandText = BuildChatHistoryPageQuery(preferredWorkingDirectory, sortBy, sortDirection);
             cmd.Parameters.AddWithValue("$limit", limit);
             cmd.Parameters.AddWithValue("$offset", offset);
+            if (!string.IsNullOrWhiteSpace(preferredWorkingDirectory))
+            {
+                cmd.Parameters.AddWithValue("$preferredWorkingDirectory", NormalizeWorkingDirectory(preferredWorkingDirectory));
+            }
 
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                items.Add(new ChatHistoryItem(
-                    Id: reader.GetString(0),
-                    Cli: reader.GetString(1),
-                    EnvironmentName: reader.IsDBNull(2) ? null : reader.GetString(2),
-                    WorkingDirectory: reader.GetString(3),
-                    StartedUTC: DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
-                    EndedUTC: reader.IsDBNull(5) ? null : DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind),
-                    ExitCode: reader.IsDBNull(6) ? null : reader.GetInt32(6),
-                    ParentSessionId: reader.IsDBNull(7) ? null : reader.GetString(7),
-                    SessionDisplayName: reader.IsDBNull(8) ? null : reader.GetString(8),
-                    Sequence: reader.IsDBNull(9) ? null : reader.GetInt32(9),
-                    InputText: reader.IsDBNull(10) ? null : reader.GetString(10)
-                ));
+                items.Add(ReadChatHistoryItem(reader));
             }
 
             return items;
@@ -943,6 +953,128 @@ namespace VibeRails.DB
         }
 
         #endregion
+
+        private static ChatHistoryItem ReadChatHistoryItem(SqliteDataReader reader)
+        {
+            var projectDisplayName = reader.IsDBNull(4) ? null : reader.GetString(4);
+            var parentSessionId = reader.IsDBNull(8) ? null : reader.GetString(8);
+            if (string.IsNullOrWhiteSpace(parentSessionId))
+            {
+                parentSessionId = null;
+            }
+
+            return new ChatHistoryItem(
+                Id: reader.GetString(0),
+                Cli: reader.GetString(1),
+                EnvironmentName: reader.IsDBNull(2) ? null : reader.GetString(2),
+                WorkingDirectory: reader.GetString(3),
+                ProjectDisplayName: string.IsNullOrWhiteSpace(projectDisplayName) ? null : projectDisplayName,
+                StartedUTC: DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                EndedUTC: reader.IsDBNull(6) ? null : DateTime.Parse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                ExitCode: reader.IsDBNull(7) ? null : reader.GetInt32(7),
+                ParentSessionId: parentSessionId,
+                ParentCli: reader.IsDBNull(9) ? null : reader.GetString(9),
+                SessionDisplayName: reader.IsDBNull(10) ? null : reader.GetString(10),
+                Sequence: reader.IsDBNull(11) ? null : reader.GetInt32(11),
+                InputText: reader.IsDBNull(12) ? null : reader.GetString(12)
+            );
+        }
+
+        private static string BuildChatHistoryPageQuery(string? preferredWorkingDirectory, string? sortBy, string? sortDirection)
+        {
+            var sql = new StringBuilder(SqlStrings.SelectChatHistoryBase);
+            sql.AppendLine();
+            sql.Append("ORDER BY ");
+            sql.Append(BuildChatHistoryOrderClause(preferredWorkingDirectory, sortBy, sortDirection));
+            sql.AppendLine();
+            sql.Append("LIMIT $limit OFFSET $offset;");
+            return sql.ToString();
+        }
+
+        private static string BuildChatHistoryOrderClause(string? preferredWorkingDirectory, string? sortBy, string? sortDirection)
+        {
+            var clauses = new List<string>();
+            if (!string.IsNullOrWhiteSpace(preferredWorkingDirectory))
+            {
+                clauses.Add("CASE WHEN s.WorkingDirectory = $preferredWorkingDirectory THEN 0 ELSE 1 END ASC");
+            }
+
+            var normalizedSortBy = (sortBy ?? "recent").Trim().ToLowerInvariant();
+            var normalizedDirection = string.Equals(sortDirection, "asc", StringComparison.OrdinalIgnoreCase) ? "ASC" : "DESC";
+            var ascending = normalizedDirection == "ASC";
+
+            switch (normalizedSortBy)
+            {
+                case "llm":
+                case "cli":
+                    clauses.Add($"LOWER(COALESCE(s.Cli, '')) {normalizedDirection}");
+                    break;
+                case "env":
+                case "environment":
+                    clauses.Add($"LOWER(COALESCE(s.EnvironmentName, '')) {normalizedDirection}");
+                    break;
+                case "project":
+                    clauses.Add($"LOWER(COALESCE(s.ProjectDisplayName, '')) {normalizedDirection}");
+                    break;
+                case "name":
+                    clauses.Add($"LOWER(COALESCE(NULLIF(s.SessionDisplayName, ''), SUBSTR(u.InputText, 1, 120), '')) {normalizedDirection}");
+                    break;
+                case "recent":
+                default:
+                    clauses.Add($"s.StartedUTC {normalizedDirection}");
+                    break;
+            }
+
+            clauses.Add(ascending && normalizedSortBy == "recent"
+                ? "s.Id DESC"
+                : "s.StartedUTC DESC");
+            clauses.Add("s.Id DESC");
+
+            return string.Join(", ", clauses.Distinct(StringComparer.Ordinal));
+        }
+
+        private static async Task<string?> GetLatestProjectDisplayNameByWorkingDirectoryAsync(SqliteConnection connection, string workingDirectory, CancellationToken cancellationToken = default)
+        {
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectLatestProjectDisplayNameByWorkingDirectory;
+            cmd.Parameters.AddWithValue("$workingDirectory", workingDirectory);
+
+            var scalar = await cmd.ExecuteScalarAsync(cancellationToken);
+            var projectDisplayName = scalar == null || scalar == DBNull.Value
+                ? null
+                : Convert.ToString(scalar);
+
+            return string.IsNullOrWhiteSpace(projectDisplayName) ? null : projectDisplayName;
+        }
+
+        private static string NormalizeWorkingDirectory(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            var fullPath = Path.GetFullPath(path);
+            return fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+
+        private static string GetProjectDisplayNameFromPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return "Unknown Project";
+            }
+
+            var fileName = Path.GetFileName(path);
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                return fileName;
+            }
+
+            var normalized = path.Replace('\\', '/').TrimEnd('/');
+            var parts = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            return parts.LastOrDefault() ?? "Unknown Project";
+        }
 
         #region User Input Tracking
 

@@ -13,13 +13,38 @@ public static class ChatHistoryRoutes
             IChatHistoryService chatHistoryService,
             int? page,
             int? pageSize,
+            string? preferredWorkingDirectory,
+            string? sortBy,
+            string? sortDirection,
             CancellationToken cancellationToken) =>
         {
             var clampedPage = Math.Max(1, page ?? 1);
             var clampedPageSize = Math.Clamp(pageSize ?? 20, 1, 100);
-            var result = await chatHistoryService.GetHistoryAsync(clampedPage, clampedPageSize, cancellationToken);
+            var result = await chatHistoryService.GetHistoryAsync(
+                clampedPage,
+                clampedPageSize,
+                preferredWorkingDirectory,
+                sortBy,
+                sortDirection,
+                cancellationToken);
             return Results.Ok(result);
         }).WithName("GetChatHistory");
+
+        app.MapGet("/api/v1/chatHistory/{sessionId}", async (
+            IChatHistoryService chatHistoryService,
+            string sessionId,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                return Results.BadRequest(new ErrorResponse("Session id is required."));
+            }
+
+            var item = await chatHistoryService.GetSessionAsync(sessionId, cancellationToken);
+            return item is null
+                ? Results.NotFound(new ErrorResponse("Chat history entry not found."))
+                : Results.Ok(item);
+        }).WithName("GetChatHistorySession");
 
         app.MapPatch("/api/v1/chatHistory/{sessionId}", async (
             IChatHistoryService chatHistoryService,

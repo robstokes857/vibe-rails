@@ -32,7 +32,7 @@ public sealed class SessionParseV4 : ISessionOutputParser
         CancellationToken cancellationToken = default)
     {
         if (userInputs.Count == 0)
-            throw new InvalidOperationException("This session has no user messages.");
+            return ParseAsync(chunks, cancellationToken);
 
 
         // Take snapshots of the screen at each user-input boundary.
