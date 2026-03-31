@@ -680,17 +680,119 @@ button:hover .card-nav-cog {
 
 /* Enhanced Top Card (context-header-card) */
 .context-header-card {
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    padding: 1rem 1.5rem;
-    box-shadow: var(--shadow-soft);
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    backdrop-filter: blur(15px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
     transition: all var(--transition-speed);
 }
 
 .context-header-card:hover {
     border-color: var(--color-primary);
     box-shadow: var(--shadow-hover);
+}
+
+.context-header-sandbox {
+    background: rgba(20, 14, 5, 0.5);
+    border-color: rgba(251, 146, 60, 0.25);
+}
+
+.context-header-accent-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, rgba(251, 146, 60, 0.8), transparent);
+}
+
+.dash-project-icon {
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    border-radius: 14px;
+    color: var(--color-primary);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    font-size: 24px;
+}
+
+.dash-project-icon-sandbox {
+    background: rgba(251, 146, 60, 0.1);
+    border-color: rgba(251, 146, 60, 0.3);
+    color: #fb923c;
+}
+
+.dash-sandbox-badge {
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #fb923c;
+    background: rgba(251, 146, 60, 0.15);
+    border: 1px solid rgba(251, 146, 60, 0.4);
+    padding: 3px 8px;
+    border-radius: 4px;
+}
+
+.dash-meta-label {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--color-text-muted);
+    opacity: 0.5;
+    letter-spacing: 0.05em;
+    margin-bottom: 2px;
+}
+
+.dash-insight-card {
+    padding: 0.75rem;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.dash-insight-label {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--color-text-muted);
+    opacity: 0.5;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.25rem;
+}
+
+.dash-insight-value {
+    font-weight: 700;
+    font-size: 1.25rem;
+}
+
+.dash-insight-sub {
+    font-size: 0.6rem;
+    color: var(--color-text-muted);
+    opacity: 0.5;
+}
+
+.dash-insight-link {
+    display: inline-flex;
+    align-items: center;
+    background: none;
+    border: none;
+    padding: 0;
+    margin-top: 0.25rem;
+    font-size: 0.6rem;
+    color: var(--color-text-muted);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.dash-insight-link:hover {
+    color: var(--color-primary);
 }
 
 .quick-action-group {
@@ -1510,6 +1612,35 @@ button:hover .card-nav-cog {
 #vb-terminal-panel .card-header .text-muted {
     color: #585b70 !important;
     font-size: 0.72rem;
+}
+
+/* Project path in terminal header — right-aligned, truncated, hidden on small screens */
+.vb-terminal-project-path {
+    margin-left: auto;
+    color: #6c7086;
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 350px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    direction: rtl;
+    text-align: left;
+}
+.vb-terminal-project-path i {
+    direction: ltr;
+    font-size: 0.7rem;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+    .vb-terminal-project-path {
+        display: none;
+    }
 }
 
 /* Keep terminal heading controls compact like other UI action buttons */
@@ -4583,13 +4714,18 @@ input.form-control:disabled {
     color: #555f80;
 }
 
+.ch-meta-label {
+    color: #555f80;
+    font-weight: 600;
+}
+
 .ch-item-live {
     color: #a6e3a1;
     font-weight: 600;
 }
 
 .ch-item-flash {
-    animation: ch-item-flash-highlight 1.6s ease;
+    animation: ch-item-flash-highlight 3s ease;
 }
 
 @keyframes ch-item-flash-highlight {

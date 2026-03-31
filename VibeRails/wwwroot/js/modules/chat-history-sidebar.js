@@ -67,7 +67,7 @@ export class ChatHistorySidebar {
                 
                 <!-- Floating Context Menu -->
                 <div class="ch-context-menu" id="ch-context-menu">
-                  <div class="ch-context-menu-item" data-action="resume">Resume</div>
+                  <div class="ch-context-menu-item" data-action="jump-to-parent"><i class="fa-solid fa-turn-up me-1"></i>Jump to parent</div>
                    <div class="ch-context-menu-divider"></div>
                     <div class="ch-context-menu-item ch-has-submenu" id="ch-menu-send-to">
                         <span>Send to...</span>
@@ -143,6 +143,12 @@ export class ChatHistorySidebar {
 
             this._closeContextMenu();
             await this._load();
+        });
+
+        contextMenu?.querySelector('[data-action="jump-to-parent"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._closeContextMenu();
+            if (this.activeItem) void this._jumpToParent(this.activeItem);
         });
 
         contextMenu?.querySelector('[data-action="rename"]')?.addEventListener('click', (e) => {
@@ -546,6 +552,12 @@ export class ChatHistorySidebar {
         this.contextMenu.classList.add('show');
 
         itemEl.classList.add('ch-item-menu-active');
+
+        const jumpToParentItem = this.contextMenu.querySelector('[data-action="jump-to-parent"]');
+        if (jumpToParentItem) {
+            jumpToParentItem.style.display = this.activeItem?.parentSessionId ? '' : 'none';
+        }
+
         this._populateLlmSubmenu(submenu);
     }
 
@@ -585,11 +597,11 @@ export class ChatHistorySidebar {
             const logoHtml = this._renderBrandLogo(brand, 'ch-item-logo');
             const projectDisplayName = this._getProjectDisplayName(item);
             const metaParts = [
-                escapeHtml(projectDisplayName),
-                escapeHtml(brand.label)
+                `<span class="ch-meta-label">Project:</span> ${escapeHtml(projectDisplayName)}`,
+                `<span class="ch-meta-label">CLI:</span> ${escapeHtml(brand.label)}`
             ];
             if (item.environmentName?.trim()) {
-                metaParts.push(escapeHtml(item.environmentName.trim()));
+                metaParts.push(`<span class="ch-meta-label">Env:</span> ${escapeHtml(item.environmentName.trim())}`);
             }
             const metaHtml = isActive
                 ? `${metaParts.join(' <span class="ch-meta-separator">·</span> ')} <span class="ch-meta-separator">·</span> <span class="ch-item-live">live</span>`
@@ -995,7 +1007,7 @@ export class ChatHistorySidebar {
         target.classList.remove('ch-item-flash');
         requestAnimationFrame(() => {
             target.classList.add('ch-item-flash');
-            window.setTimeout(() => target.classList.remove('ch-item-flash'), 1800);
+            window.setTimeout(() => target.classList.remove('ch-item-flash'), 3500);
         });
     }
 }

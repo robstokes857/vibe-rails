@@ -171,6 +171,8 @@ if (exit)
 // Start server in background (non-blocking)
 await app.StartAsync();
 StartParentProcessWatchdogIfNeeded(app, parentPid);
+
+
 string serverUrl = $"http://localhost:{port}";
 
 if (parsedArgs.IsLMBootstrap)
@@ -232,9 +234,15 @@ Console.WriteLine("(Link expires in 2 minutes and can only be used once)");
 Console.WriteLine("Press Ctrl+C to stop the server.");
 Console.WriteLine();
 
-// Wait for shutdown signal (Ctrl+C)
-await app.WaitForShutdownAsync(app.Lifetime.ApplicationStopping);
 
+// When launched from VS Code, stdin is piped — detect the pipe closing so
+// the server shuts down immediately instead of waiting for the parent-PID
+// watchdog polling interval.
+if (args.Any(a => a.Equals("--vs-code-v1", StringComparison.OrdinalIgnoreCase)))
+    StartStdinShutdownMonitor(app);
+
+// Wait for shutdown signal (Ctrl+C, stdin EOF, or parent-PID watchdog)
+await app.WaitForShutdownAsync(app.Lifetime.ApplicationStopping);
 static int? TryGetParentPid(string[] args)
 {
     for (var i = 0; i < args.Length; i++)
@@ -306,4 +314,26 @@ static bool IsParentAlive(int pid)
     {
         return false;
     }
+}
+
+static void StartStdinShutdownMonitor(WebApplication app)
+{
+    _ = Task.Run(() =>
+    {
+        try
+        {
+            // Blocks until stdin reaches EOF (pipe closed by the VS Code extension).
+            while (Console.In.Read() != -1) { }
+        }
+        catch
+        {
+            // stdin may already be closed or redirected.
+        }
+
+        if (!app.Lifetime.ApplicationStopping.IsCancellationRequested)
+        {
+            Log.Information("[StdinWatchdog] stdin closed \u2014 stopping server.");
+            app.Lifetime.StopApplication();
+        }
+    });
 }

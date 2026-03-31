@@ -2738,6 +2738,13 @@ export class TerminalController {
                             </button>
         `;
 
+        const rootPath = this.app.data.configs?.rootPath || '';
+        const projectDirHtml = rootPath ? `
+                    <span class="vb-terminal-project-path" title="${this.app.escapeHtml(rootPath)}">
+                        <i class="fa-solid fa-folder-open"></i>
+                        ${this.app.escapeHtml(rootPath)}
+                    </span>` : '';
+
         return `
             <div class="card ${isFocusView ? 'vb-terminal-page-mode vb-terminal-expanded vb-terminal-focus-card' : 'mb-4'}" id="vb-terminal-panel">
                 <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
@@ -2750,6 +2757,7 @@ export class TerminalController {
                         </span>
                         <span class="badge bg-secondary d-none" id="terminal-status-badge"></span>
                     </div>
+                    ${projectDirHtml}
                     <div class="d-flex gap-2 align-items-center" id="terminal-actions">
                         <button class="btn btn-sm btn-outline-danger d-none d-inline-flex align-items-center gap-1" id="terminal-stop-btn" title="Disconnect terminal session">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VibeRails MCP Explorer</title>
+<style>
+:root{--bg:#08111a;--bg2:#0d1725;--panel:#0f1d2f;--panel2:#13233a;--line:#24405f;--text:#edf5ff;--muted:#91a6c5;--accent:#70e6ff;--accent2:#65a6ff;--ok:#7cf0b3;--warn:#ffc86d;--bad:#ff9696}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%}body{font-family:"Cascadia Code","JetBrains Mono",Consolas,monospace;color:var(--text);background:radial-gradient(circle at top left,rgba(101,166,255,.22),transparent 28%),linear-gradient(180deg,#07111a,#0a1320 45%,#060a11)}
+.shell{max-width:1600px;margin:0 auto;padding:20px;display:grid;gap:16px;min-height:100vh}.hero,.panel{border:1px solid var(--line);border-radius:20px;background:rgba(12,21,34,.92);box-shadow:0 20px 60px rgba(0,0,0,.32)}.hero{padding:22px;display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.hero h1{margin:6px 0;font-size:clamp(24px,3vw,38px);line-height:1.08}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--accent)}.hero p{margin:0;color:var(--muted);line-height:1.6}.counts{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}.count{min-width:130px;padding:12px 14px;border-radius:14px;background:rgba(17,30,49,.8);border:1px solid var(--line);display:grid;gap:3px}.count span{font-size:11px;color:var(--muted);text-transform:uppercase}.count strong{font-size:28px}
+.main{display:grid;grid-template-columns:340px 1fr;gap:16px;min-height:0}.panel{display:flex;flex-direction:column;min-height:0}.head{padding:15px 16px;border-bottom:1px solid rgba(145,166,197,.14);display:flex;justify-content:space-between;gap:10px;align-items:center;background:linear-gradient(180deg,var(--panel2),var(--panel))}.head strong{font-size:13px;text-transform:uppercase;letter-spacing:.08em}.subtitle{margin:0;color:var(--muted);line-height:1.6;font-size:11px}.body{padding:16px;overflow:auto;min-height:0}.body::-webkit-scrollbar{width:10px;height:10px}.body::-webkit-scrollbar-thumb{background:rgba(112,230,255,.18);border-radius:999px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card{padding:12px;border-radius:14px;border:1px solid rgba(112,230,255,.12);background:rgba(10,18,30,.88);display:grid;gap:4px}.card span{font-size:11px;color:var(--muted);text-transform:uppercase}.card strong{font-size:22px}
+.pill{display:inline-flex;align-items:center;padding:5px 8px;border-radius:999px;font-size:11px;border:1px solid transparent}.pill.ok{background:var(--ok);color:#04120b}.pill.warn{background:var(--warn);color:#2d1b00}.pill.bad{background:var(--bad);color:#350d0d}.chip{display:inline-flex;align-items:center;padding:5px 8px;border-radius:999px;font-size:11px;border:1px solid rgba(112,230,255,.16);background:rgba(10,17,28,.84);color:var(--text)}
+.tool-list{display:grid;gap:10px}.tool-item{padding:14px;border-radius:16px;border:1px solid rgba(101,166,255,.12);background:linear-gradient(180deg,rgba(16,28,46,.92),rgba(10,18,30,.92));cursor:pointer;transition:border-color .15s}.tool-item:hover{border-color:rgba(112,230,255,.35)}.tool-item.sel{border-color:rgba(112,230,255,.46);background:linear-gradient(180deg,rgba(20,38,61,.96),rgba(11,20,33,.96))}.tool-name{font-weight:700;font-size:14px;margin-bottom:4px}.tool-desc{font-size:12px;color:var(--muted);line-height:1.5}
+.call-form{display:grid;gap:12px;margin-top:8px}.arg-row{display:grid;grid-template-columns:1fr 2fr;gap:10px;align-items:center}.arg-row label{font-size:12px;color:var(--muted)}.control{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#09121e;color:var(--text);font:inherit;font-size:13px}.control:focus{outline:none;border-color:var(--accent2)}.button{padding:10px 16px;border-radius:12px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(18,33,54,.92),rgba(11,19,32,.92));color:var(--text);font:inherit;cursor:pointer}.button.primary{background:linear-gradient(180deg,rgba(101,166,255,.25),rgba(45,89,151,.3));border-color:rgba(101,166,255,.45)}.button:disabled{opacity:.55;cursor:default}
+.result-panel{margin-top:12px}pre{margin:0;padding:15px;border-radius:16px;border:1px solid rgba(101,166,255,.14);background:#08111c;color:#dbe9ff;white-space:pre-wrap;word-break:break-word;line-height:1.6;overflow:auto;font-size:13px}
+.empty{display:grid;place-items:center;min-height:100px;padding:28px;text-align:center;color:var(--muted);border:1px dashed rgba(145,166,197,.18);border-radius:16px;background:rgba(8,14,24,.55);line-height:1.7}
+.banner{color:var(--muted);font-size:12px;margin-top:8px}.banner.error{color:var(--bad)}.banner.success{color:var(--ok)}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center;color:var(--text);font-size:12px;margin-top:10px}
+.paths{padding:0 14px 14px;display:grid;gap:10px}.paths label{font-size:11px;color:var(--muted);text-transform:uppercase}.paths code{display:block;padding:10px 11px;border-radius:12px;background:#08111c;border:1px solid rgba(101,166,255,.12);white-space:pre-wrap;word-break:break-word;color:#dbe9ff;line-height:1.5}
+details{margin-top:14px;border:1px solid rgba(101,166,255,.14);border-radius:14px;background:rgba(10,17,28,.76)}summary{cursor:pointer;padding:13px 14px;color:var(--text);list-style:none}summary::-webkit-details-marker{display:none}
+@media (max-width:1180px){.main{grid-template-columns:1fr}}@media (max-width:820px){.shell{padding:14px}.hero{padding:18px;flex-direction:column}.grid{grid-template-columns:1fr}.counts{justify-content:flex-start}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header class="hero">
+<div>
+<div class="eyebrow">MCP Explorer</div>
+<h1>Inspect and call tools on the local MCP server.</h1>
+<p>This page connects to the VibeRails MCP server, lists available tools, and lets you call them with custom arguments.</p>
+</div>
+<div class="counts">
+<div class="count"><span>Server</span><strong id="server-status">—</strong></div>
+<div class="count"><span>Tools</span><strong id="tool-count">0</strong></div>
+</div>
+</header>
+<div class="main">
+<aside class="panel">
+<div class="head"><div><strong>Status</strong><div class="subtitle">MCP server health</div></div><button class="button" id="refresh" type="button" style="padding:6px 12px;font-size:11px;">Refresh</button></div>
+<div class="body">
+<div class="grid" id="status-grid"></div>
+<details open><summary>Server Path</summary><div class="paths"><div><label>Executable</label><code id="server-path">—</code></div></div></details>
+</div>
+</aside>
+<section class="panel" style="min-height:400px;">
+<div class="head"><div><strong>Tools</strong><div class="subtitle">Available MCP tools on the server</div></div></div>
+<div class="body" style="display:grid;grid-template-columns:280px 1fr;gap:16px;min-height:0;">
+<div class="tool-list" id="tool-list"><div class="empty">Loading tools...</div></div>
+<div id="tool-detail"><div class="empty">Select a tool from the list to inspect and call it.</div></div>
+</div>
+</section>
+</div>
+</div>
+<script>
+const state = { status: null, tools: [], selectedTool: null };
+const el = id => document.getElementById(id);
+const esc = v => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+
+const TAB_TOKEN_KEY = 'viberails_tab';
+function getTabToken() { try { return sessionStorage.getItem(TAB_TOKEN_KEY) || '' } catch { return '' } }
+function buildHeaders(overrides) {
+    const headers = new Headers();
+    if (overrides) { if (overrides instanceof Headers) { overrides.forEach((v, k) => headers.set(k, v)) } else { for (const [k, v] of Object.entries(overrides)) { if (v != null) headers.set(k, String(v)) } } }
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    const tab = getTabToken(); if (tab) headers.set('viberails_tab', tab);
+    return headers;
+}
+
+async function fetchJson(url, init) {
+    const res = await fetch(url, { credentials: 'include', cache: 'no-store', ...init, headers: buildHeaders(init?.headers) });
+    const text = await res.text();
+    let data = {};
+    if (text) { try { data = JSON.parse(text) } catch { data = { message: text } } }
+    if (!res.ok) throw new Error(data.error || data.message || 'Request failed.');
+    return data;
+}
+
+function renderStatus() {
+    const s = state.status;
+    const grid = el('status-grid');
+    const path = el('server-path');
+    const serverEl = el('server-status');
+    if (!s) { grid.innerHTML = ''; serverEl.textContent = '—'; return; }
+    serverEl.textContent = s.serverAvailable ? '✓' : '✗';
+    serverEl.style.color = s.serverAvailable ? 'var(--ok)' : 'var(--bad)';
+    path.textContent = s.serverPath || 'Not configured';
+    grid.innerHTML = `
+        <div class="card"><span>Available</span><strong><span class="pill ${s.serverAvailable ? 'ok' : 'bad'}">${s.serverAvailable ? 'Yes' : 'No'}</span></strong></div>
+        <div class="card"><span>Tools Loaded</span><strong>${state.tools.length}</strong></div>
+    `;
+}
+
+function renderToolList() {
+    const list = el('tool-list');
+    el('tool-count').textContent = String(state.tools.length);
+    if (!state.tools.length) {
+        list.innerHTML = '<div class="empty">No tools found. Is the MCP server built and configured?</div>';
+        return;
+    }
+    list.innerHTML = state.tools.map(t => `
+        <div class="tool-item${state.selectedTool === t.name ? ' sel' : ''}" data-tool="${esc(t.name)}">
+            <div class="tool-name">${esc(t.name)}</div>
+            <div class="tool-desc">${esc(t.description || 'No description')}</div>
+        </div>
+    `).join('');
+}
+
+function renderToolDetail() {
+    const detail = el('tool-detail');
+    if (!state.selectedTool) {
+        detail.innerHTML = '<div class="empty">Select a tool from the list to inspect and call it.</div>';
+        return;
+    }
+    const tool = state.tools.find(t => t.name === state.selectedTool);
+    if (!tool) { detail.innerHTML = '<div class="empty">Tool not found.</div>'; return; }
+
+    detail.innerHTML = `
+        <h3 style="margin:0 0 4px;font-size:16px;color:var(--accent);">${esc(tool.name)}</h3>
+        <p style="margin:0 0 16px;color:var(--muted);font-size:13px;line-height:1.5;">${esc(tool.description || 'No description')}</p>
+        <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Arguments (JSON)</div>
+        <textarea class="control" id="tool-args" rows="6" placeholder='{"key": "value"}' style="resize:vertical;font-size:13px;">{}</textarea>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+            <button class="button primary" id="call-btn" type="button">Call Tool</button>
+            <span class="banner" id="call-banner"></span>
+        </div>
+        <div class="result-panel" id="call-result"></div>
+    `;
+
+    el('call-btn').addEventListener('click', () => callTool(tool.name));
+}
+
+async function callTool(name) {
+    const btn = el('call-btn');
+    const banner = el('call-banner');
+    const result = el('call-result');
+    let args = {};
+    try {
+        const raw = el('tool-args').value.trim();
+        if (raw) args = JSON.parse(raw);
+    } catch {
+        banner.textContent = 'Invalid JSON in arguments.';
+        banner.className = 'banner error';
+        return;
+    }
+    btn.disabled = true;
+    banner.textContent = 'Calling...';
+    banner.className = 'banner';
+    result.innerHTML = '';
+    try {
+        const res = await fetchJson(`/api/v1/mcp/tools/${encodeURIComponent(name)}`, {
+            method: 'POST',
+            body: JSON.stringify({ arguments: args })
+        });
+        banner.textContent = res.success ? 'Call succeeded.' : 'Call failed.';
+        banner.className = res.success ? 'banner success' : 'banner error';
+        const output = res.error || res.result || '(empty response)';
+        result.innerHTML = `<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 6px;">Result</div><pre>${esc(typeof output === 'string' ? output : JSON.stringify(output, null, 2))}</pre>`;
+    } catch (err) {
+        banner.textContent = err.message;
+        banner.className = 'banner error';
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function loadStatus() {
+    try {
+        state.status = await fetchJson('/api/v1/mcp/status');
+    } catch {
+        state.status = { serverAvailable: false, serverPath: '', message: 'Failed to reach API' };
+    }
+    renderStatus();
+}
+
+async function loadTools() {
+    try {
+        state.tools = await fetchJson('/api/v1/mcp/tools');
+    } catch {
+        state.tools = [];
+    }
+    renderToolList();
+    renderStatus();
+}
+
+async function refreshAll() {
+    el('refresh').disabled = true;
+    await loadStatus();
+    if (state.status?.serverAvailable) await loadTools();
+    else { state.tools = []; renderToolList(); renderStatus(); }
+    el('refresh').disabled = false;
+}
+
+el('tool-list').addEventListener('click', e => {
+    const item = e.target.closest('[data-tool]');
+    if (!item) return;
+    state.selectedTool = item.getAttribute('data-tool');
+    renderToolList();
+    renderToolDetail();
+});
+
+el('refresh').addEventListener('click', refreshAll);
+refreshAll();
+</script>
+</body>
+</html>
