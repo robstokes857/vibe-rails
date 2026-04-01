@@ -16,6 +16,14 @@ export function getProjectNameFromPath(path) {
     return parts[parts.length - 1] || 'Unknown Project';
 }
 
+export function formatDuration(totalSeconds) {
+    if (totalSeconds < 60) return `${totalSeconds}s`;
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+    return `${minutes}m`;
+}
+
 export function formatRelativeTime(dateString) {
     if (!dateString) return '';
     const date = new Date(dateString);

@@ -1,8 +1,8 @@
 using System;
-using System.Diagnostics;
 using System.Text.Json;
 using System.Threading;
 using Microsoft.Extensions.Configuration;
+using Serilog;
 using VibeRails.Interfaces;
 using VibeRails.Utils;
 
@@ -10,6 +10,7 @@ namespace VibeRails.Services
 {
     public class FileService : IFileService
     {
+        private static readonly TimeSpan GitRootTimeout = TimeSpan.FromSeconds(5);
         private readonly string _hiddenDir;
         private const string EMPTY_JSON = @"{}";
 
@@ -70,37 +71,36 @@ namespace VibeRails.Services
             }
         }
 
-        public (bool inGet, string projectRoot) TryGetProjectRootPath()
+        public async Task<(bool inGet, string projectRoot)> TryGetProjectRootPathAsync(
+            string? workingDirectory = null,
+            CancellationToken cancellationToken = default)
         {
+            var cwd = workingDirectory ?? Directory.GetCurrentDirectory();
+            Log.Information("[GitDetect] TryGetProjectRootPath called with workingDirectory={WorkDir}, resolved cwd={Cwd}", workingDirectory, cwd);
 
             try
             {
-                var process = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "git",
-                        Arguments = "rev-parse --show-toplevel",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        WorkingDirectory = Directory.GetCurrentDirectory()
-                    }
-                };
+                var result = await GitProcessRunner.RunAsync(
+                    "rev-parse --show-toplevel",
+                    cwd,
+                    GitRootTimeout,
+                    cancellationToken);
 
-                process.Start();
-                var output = process.StandardOutput.ReadToEnd().Trim();
-                process.WaitForExit(2000);
+                Log.Information(
+                    "[GitDetect] git exit={ExitCode}, timedOut={TimedOut}, stdout={Output}, stderr={Stderr}",
+                    result.ExitCode,
+                    result.TimedOut,
+                    result.StdOut,
+                    result.StdErr);
 
-                if (process.ExitCode == 0 && !string.IsNullOrEmpty(output))
+                if (!result.TimedOut && result.ExitCode == 0 && !string.IsNullOrEmpty(result.StdOut))
                 {
-                    return (true, output);
+                    return (true, result.StdOut);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                return (false, string.Empty);
+                Log.Warning(ex, "[GitDetect] Failed to run git rev-parse");
             }
 
             return (false, string.Empty);

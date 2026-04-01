@@ -976,7 +976,9 @@ namespace VibeRails.DB
                 ParentCli: reader.IsDBNull(9) ? null : reader.GetString(9),
                 SessionDisplayName: reader.IsDBNull(10) ? null : reader.GetString(10),
                 Sequence: reader.IsDBNull(11) ? null : reader.GetInt32(11),
-                InputText: reader.IsDBNull(12) ? null : reader.GetString(12)
+                InputText: reader.IsDBNull(12) ? null : reader.GetString(12),
+                UserInputCount: reader.GetInt32(13),
+                DurationSeconds: reader.IsDBNull(14) ? null : reader.GetInt64(14)
             );
         }
 

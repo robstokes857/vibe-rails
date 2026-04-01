@@ -64,6 +64,11 @@ export class WebviewPanelManager {
 
         const nonce = crypto.randomBytes(16).toString('hex');
         const wwwrootUri = vscode.Uri.file(this.wwwrootPath);
+        // VS Code's portMapping only proxies "localhost", not "127.0.0.1".
+        // The webview is sandboxed — requests to 127.0.0.1 bypass port mapping
+        // and silently fail. Always use localhost here.
+        const loopbackHttpOrigin = `http://localhost:${port}`;
+        const loopbackWsOrigin = `ws://localhost:${port}`;
 
         // Avoid external CDN dependency inside VS Code webview.
         html = html.replace(
@@ -81,7 +86,7 @@ export class WebviewPanelManager {
             `style-src ${webview.cspSource} 'unsafe-inline' https://fonts.googleapis.com`,
             `img-src ${webview.cspSource} https: data:`,
             `font-src ${webview.cspSource} https://fonts.gstatic.com`,
-            `connect-src http://localhost:${port} ws://localhost:${port} ${webview.cspSource}`,
+            `connect-src ${loopbackHttpOrigin} ${loopbackWsOrigin} http://localhost:${port} ws://localhost:${port} ${webview.cspSource}`,
             `form-action 'none'`,
             `base-uri ${webview.cspSource} 'self'`,
         ].join('; ');
@@ -215,7 +220,7 @@ export class WebviewPanelManager {
     <meta http-equiv="Content-Security-Policy" content="${csp}">
     <base href="${assetsBaseUri}/">
     <script nonce="${nonce}">
-        window.__viberails_API_BASE__ = 'http://localhost:${port}';
+        window.__viberails_API_BASE__ = '${loopbackHttpOrigin}';
         window.__viberails_VSCODE__ = true;
         window.__viberails_ASSETS_BASE__ = '${assetsBaseUri}';
         window.__viberails_NONCE__ = '${nonce}';

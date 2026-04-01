@@ -435,7 +435,9 @@ namespace VibeRails.DTOs
         string? ParentCli,
         string? SessionDisplayName,
         int? Sequence,
-        string? InputText
+        string? InputText,
+        int UserInputCount,
+        long? DurationSeconds
     );
 
     public record ChatHistoryResponse(
@@ -560,6 +562,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateChatHistorySessionRequest))]
     // User Input tracking DTOs
     [JsonSerializable(typeof(UserInputRecord))]
+    [JsonSerializable(typeof(List<UserInputRecord>))]
     [JsonSerializable(typeof(FileChangeInfo))]
     [JsonSerializable(typeof(List<FileChangeInfo>))]
     // MCP DTOs

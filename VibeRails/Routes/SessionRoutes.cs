@@ -32,6 +32,18 @@ public static class SessionRoutes
             return Results.Ok(sessions);
         }).WithName("GetRecentSessions");
 
+        app.MapGet("/api/v1/sessions/{sessionId}/inputs", async (
+            IRepository repository,
+            string sessionId,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+                return Results.BadRequest(new ErrorResponse("Session id is required."));
+
+            var inputs = await repository.GetUserInputsForSessionAsync(sessionId, cancellationToken);
+            return Results.Ok(inputs);
+        }).WithName("GetSessionInputs");
+
         app.MapGet("/api/v1/sessions/{sessionId}/output", async (
             IRepository repository,
             string sessionId,

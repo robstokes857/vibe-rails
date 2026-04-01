@@ -16,6 +16,9 @@ namespace VibeRails.Services
 
     public class GitService : IGitService
     {
+        private static readonly TimeSpan RootCommandTimeout = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan StatusCommandTimeout = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan DiffCommandTimeout = TimeSpan.FromSeconds(15);
         private readonly string? _workingDirectory;
 
         public GitService() { }
@@ -27,7 +30,7 @@ namespace VibeRails.Services
 
         public async Task<string> GetRootPathAsync(CancellationToken cancellationToken = default)
         {
-            var rootPath = await RunGitCommandAsync("rev-parse --show-toplevel", cancellationToken);
+            var rootPath = await RunGitCommandAsync("rev-parse --show-toplevel", RootCommandTimeout, cancellationToken);
             return rootPath;
         }
 
@@ -35,7 +38,7 @@ namespace VibeRails.Services
         {
             try
             {
-                var remote = await RunGitCommandAsync("remote get-url origin", cancellationToken);
+                var remote = await RunGitCommandAsync("remote get-url origin", RootCommandTimeout, cancellationToken);
                 return string.IsNullOrWhiteSpace(remote) ? null : remote.Trim();
             }
             catch
@@ -49,6 +52,7 @@ namespace VibeRails.Services
 
             var output = await RunGitCommandAsync(
                 "status --porcelain=v1 --untracked-files=all --ignore-submodules",
+                StatusCommandTimeout,
                 cancellationToken);
 
             var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -80,6 +84,7 @@ namespace VibeRails.Services
         {
             var output = await RunGitCommandAsync(
                 "diff --cached --name-only",
+                StatusCommandTimeout,
                 cancellationToken);
 
             return SplitLines(output)
@@ -92,7 +97,7 @@ namespace VibeRails.Services
         {
             try
             {
-                var hash = await RunGitCommandAsync("rev-parse HEAD", cancellationToken);
+                var hash = await RunGitCommandAsync("rev-parse HEAD", RootCommandTimeout, cancellationToken);
                 return string.IsNullOrWhiteSpace(hash) ? null : hash.Trim();
             }
             catch
@@ -105,7 +110,7 @@ namespace VibeRails.Services
         {
             try
             {
-                var branch = await RunGitCommandAsync("rev-parse --abbrev-ref HEAD", cancellationToken);
+                var branch = await RunGitCommandAsync("rev-parse --abbrev-ref HEAD", RootCommandTimeout, cancellationToken);
                 return string.IsNullOrWhiteSpace(branch) ? null : branch.Trim();
             }
             catch
@@ -124,11 +129,13 @@ namespace VibeRails.Services
                 // Using diff against the commit to see what changed in working directory
                 var numstatOutput = await RunGitCommandAsync(
                     $"diff --numstat {commitHash}",
+                    DiffCommandTimeout,
                     cancellationToken);
 
                 // Also get status to detect new untracked files
                 var statusOutput = await RunGitCommandAsync(
                     "status --porcelain=v1 --untracked-files=all",
+                    StatusCommandTimeout,
                     cancellationToken);
 
                 var processedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -203,6 +210,7 @@ namespace VibeRails.Services
             {
                 var diff = await RunGitCommandAsync(
                     $"diff {commitHash} -- \"{filePath}\"",
+                    DiffCommandTimeout,
                     cancellationToken);
 
                 // Limit diff content to 50KB
@@ -228,33 +236,29 @@ namespace VibeRails.Services
                    .Where(x => x.Length > 0)
                    .ToList();
 
-        private async Task<string> RunGitCommandAsync(string arguments, CancellationToken cancellationToken)
+        private async Task<string> RunGitCommandAsync(
+            string arguments,
+            TimeSpan timeout,
+            CancellationToken cancellationToken)
         {
-            using var process = new System.Diagnostics.Process
+            var workingDirectory = _workingDirectory ?? Directory.GetCurrentDirectory();
+            var result = await GitProcessRunner.RunAsync(
+                $"--no-pager {arguments}",
+                workingDirectory,
+                timeout,
+                cancellationToken);
+
+            if (result.TimedOut)
             {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "git",
-                    Arguments = $"--no-pager {arguments}",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    WorkingDirectory = _workingDirectory ?? Directory.GetCurrentDirectory()
-                }
-            };
+                Log.Warning(
+                    "[Git] Timed out after {TimeoutSeconds}s: git {Arguments} (cwd: {WorkingDirectory})",
+                    timeout.TotalSeconds,
+                    arguments,
+                    workingDirectory);
+                return string.Empty;
+            }
 
-            process.Start();
-
-            // Read both stdout and stderr before waiting
-            var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-
-            await process.WaitForExitAsync(cancellationToken);
-
-            var output = await outputTask;
-            var error = await errorTask;
-            return output.Trim();
+            return result.StdOut;
         }
     }
 }

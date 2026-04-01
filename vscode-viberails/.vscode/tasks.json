@@ -2,6 +2,22 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "build-backend",
+      "type": "shell",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "${workspaceFolder}/../VibeRails/VibeRails.csproj",
+        "-o",
+        "${workspaceFolder}/bin/win32-x64"
+      ],
+      "problemMatcher": "$msCompile",
+      "presentation": {
+        "reveal": "silent"
+      }
+    },
+    {
+      "label": "compile-extension",
       "type": "npm",
       "script": "compile",
       "problemMatcher": "$tsc",
@@ -13,6 +29,12 @@
         "kind": "build",
         "isDefault": true
       }
+    },
+    {
+      "label": "build-all",
+      "dependsOn": ["build-backend", "compile-extension"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
     }
   ]
 }

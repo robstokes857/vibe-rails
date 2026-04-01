@@ -291,7 +291,8 @@ public class ClaudeSettingsTests : IDisposable
         }
 
         // Unused interface methods - minimal implementations
-        public (bool inGet, string projectRoot) TryGetProjectRootPath() => (false, "");
+        public Task<(bool inGet, string projectRoot)> TryGetProjectRootPathAsync(string? workingDirectory = null, CancellationToken cancellationToken = default)
+            => Task.FromResult((false, ""));
         public void InitGlobalSave() { }
         public void InitLocal(string rootPath) { }
         public Task AppendAllTextAsync(string path, string content, CancellationToken cancellationToken) => Task.CompletedTask;
