@@ -113,8 +113,12 @@ app.Lifetime.ApplicationStopping.Register(() =>
     }
 });
 
-// Run startup checks
-StartUpStatus status = await Init.StartUpChecks(app.Services);
+// Run startup checks (synchronous: DB, settings, global save)
+Init.StartUpChecks(app.Services);
+
+// Git detection runs in the background — the server starts immediately.
+// The /api/v1/context endpoint reads ParserConfigs which updates when detection completes.
+var gitDetectionTask = Init.StartGitDetectionAsync(app.Services, launchDirectory);
 
 // Check for updates (async, non-blocking)
 _ = Task.Run(async () =>
@@ -204,24 +208,29 @@ if (redirectArgs.Length > 0)
     bootstrapUrl = $"{bootstrapUrl}&redirectArgs={encodedArgs}";
 }
 
-if (status == StartUpStatus.RequirementsNotMet_NotInGIT)
-{
-    // Not in a git repo — always open the browser so the user can fix it via the UI
-    Console.WriteLine($"[VibeRails] Not in a git repository. Opening browser to fix...");
-    LaunchBrowser.Launch(bootstrapUrl);
+var isVsCodeMode = args.Any(a => a.Contains("--vs"));
 
-    if (args.Any(a => a.Contains("--vs")))
-        Console.WriteLine($"vs-code-v1={bootstrapUrl}");
+// VS Code mode: emit bootstrap URL immediately, then flush so the extension picks it up.
+// Don't wait for git detection — the frontend handles the "not in git" state dynamically.
+if (isVsCodeMode)
+{
+    Console.WriteLine($"vs-code-v1={bootstrapUrl}");
+    Console.Out.Flush();
 }
 else
 {
-    // Standard web-only mode
-    if (args.Any(a => a.Contains("--vs")))
-        Console.WriteLine($"vs-code-v1={bootstrapUrl}");
+    // Terminal/browser mode: wait for git detection so we can decide whether to launch the browser.
+    var status = await gitDetectionTask;
 
-    // Launch browser if any browser flag is passed
-    if (args.Any(a => a is "--open-browser" or "--launch-browser" or "--launch-web" or "--web"))
+    if (status == StartUpStatus.RequirementsNotMet_NotInGIT)
+    {
+        Console.WriteLine($"[VibeRails] Not in a git repository. Opening browser to fix...");
         LaunchBrowser.Launch(bootstrapUrl);
+    }
+    else if (args.Any(a => a is "--open-browser" or "--launch-browser" or "--launch-web" or "--web"))
+    {
+        LaunchBrowser.Launch(bootstrapUrl);
+    }
 }
 
 Console.WriteLine($"Vibe Rails server running on {serverUrl}");
@@ -235,13 +244,7 @@ Console.WriteLine("Press Ctrl+C to stop the server.");
 Console.WriteLine();
 
 
-// When launched from VS Code, stdin is piped — detect the pipe closing so
-// the server shuts down immediately instead of waiting for the parent-PID
-// watchdog polling interval.
-if (args.Any(a => a.Equals("--vs-code-v1", StringComparison.OrdinalIgnoreCase)))
-    StartStdinShutdownMonitor(app);
-
-// Wait for shutdown signal (Ctrl+C, stdin EOF, or parent-PID watchdog)
+// Wait for shutdown signal (Ctrl+C or parent-PID watchdog)
 await app.WaitForShutdownAsync(app.Lifetime.ApplicationStopping);
 static int? TryGetParentPid(string[] args)
 {
@@ -316,24 +319,3 @@ static bool IsParentAlive(int pid)
     }
 }
 
-static void StartStdinShutdownMonitor(WebApplication app)
-{
-    _ = Task.Run(() =>
-    {
-        try
-        {
-            // Blocks until stdin reaches EOF (pipe closed by the VS Code extension).
-            while (Console.In.Read() != -1) { }
-        }
-        catch
-        {
-            // stdin may already be closed or redirected.
-        }
-
-        if (!app.Lifetime.ApplicationStopping.IsCancellationRequested)
-        {
-            Log.Information("[StdinWatchdog] stdin closed \u2014 stopping server.");
-            app.Lifetime.StopApplication();
-        }
-    });
-}

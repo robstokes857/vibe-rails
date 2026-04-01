@@ -1,6 +1,7 @@
 import {
     buildLlmSelectionOptions,
     parseLlmSelection,
+    formatDuration,
     formatRelativeTime,
     escapeHtml
 } from './utils.js';
@@ -555,7 +556,12 @@ export class ChatHistorySidebar {
 
         const jumpToParentItem = this.contextMenu.querySelector('[data-action="jump-to-parent"]');
         if (jumpToParentItem) {
-            jumpToParentItem.style.display = this.activeItem?.parentSessionId ? '' : 'none';
+            const show = !!this.activeItem?.parentSessionId;
+            jumpToParentItem.style.display = show ? '' : 'none';
+            const dividerAfter = jumpToParentItem.nextElementSibling;
+            if (dividerAfter?.classList.contains('ch-context-menu-divider')) {
+                dividerAfter.style.display = show ? '' : 'none';
+            }
         }
 
         this._populateLlmSubmenu(submenu);
@@ -596,16 +602,23 @@ export class ChatHistorySidebar {
             const isActive = !item.endedUTC;
             const logoHtml = this._renderBrandLogo(brand, 'ch-item-logo');
             const projectDisplayName = this._getProjectDisplayName(item);
-            const metaParts = [
-                `<span class="ch-meta-label">Project:</span> ${escapeHtml(projectDisplayName)}`,
-                `<span class="ch-meta-label">CLI:</span> ${escapeHtml(brand.label)}`
-            ];
+            const metaLines = [];
             if (item.environmentName?.trim()) {
-                metaParts.push(`<span class="ch-meta-label">Env:</span> ${escapeHtml(item.environmentName.trim())}`);
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Env:</span> ${escapeHtml(item.environmentName.trim())}</div>`);
             }
-            const metaHtml = isActive
-                ? `${metaParts.join(' <span class="ch-meta-separator">·</span> ')} <span class="ch-meta-separator">·</span> <span class="ch-item-live">live</span>`
-                : `${metaParts.join(' <span class="ch-meta-separator">·</span> ')} <span class="ch-meta-separator">·</span> ${escapeHtml(time)}`;
+            if (item.userInputCount > 0) {
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Lines typed by user:</span> ${item.userInputCount}</div>`);
+            }
+            if (item.durationSeconds != null && item.durationSeconds > 0) {
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Session length:</span> ${formatDuration(item.durationSeconds)}</div>`);
+            }
+            if (isActive) {
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Started:</span> ${escapeHtml(time)}</div>`);
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-item-live">live</span></div>`);
+            } else {
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Ended:</span> ${escapeHtml(time)}</div>`);
+            }
+            const metaHtml = metaLines.join('');
             const relationshipHtml = item.parentSessionId
                 ? this._renderResumeRelationship(item, brand)
                 : '';
@@ -618,7 +631,10 @@ export class ChatHistorySidebar {
                 <div class="ch-item${isActive ? ' ch-item-active' : ''}" data-id="${escapeHtml(item.id)}">
                     <div class="ch-item-icon">${logoHtml}</div>
                     <div class="ch-item-content">
-                        <div class="ch-item-name" title="${escapeHtml(rawName)}">${escapeHtml(name)}</div>
+                        <div class="ch-item-header">
+                            <div class="ch-item-name" title="${escapeHtml(rawName)}">${escapeHtml(name)}</div>
+                            <div class="ch-item-project" title="${escapeHtml(item.workingDirectory || '')}">Project: ${escapeHtml(projectDisplayName)}</div>
+                        </div>
                         ${relationshipHtml}
                         <div class="ch-item-meta">${metaHtml}</div>
                     </div>

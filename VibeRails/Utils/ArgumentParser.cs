@@ -114,6 +114,10 @@ namespace VibeRails.Utils
                     parsed.MakeRemote = true;
                     return true;
 
+                case "--vs-code-v1":
+                    parsed.IsVsCodeMode = true;
+                    return true;
+
                 default:
                     return false;
             }

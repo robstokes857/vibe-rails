@@ -60,6 +60,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "test": "node ./out/test/runTest.js",
+    "smoke": "node ./out/test/runTest.js",
     "pretest": "npm run compile",
     "prepare-binaries": "pwsh -ExecutionPolicy Bypass -File ../deploy/prepare-binaries.ps1",
     "package": "npm run package:all",
@@ -73,8 +75,11 @@
     "marketplace:publish-only": "pwsh -ExecutionPolicy Bypass -File ../deploy/test-vscode-marketplace.ps1 -Publish"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.5.2",
+    "mocha": "^11.7.4",
     "typescript": "^6.0.2"
   }
 }

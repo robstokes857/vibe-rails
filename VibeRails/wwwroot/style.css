@@ -4463,7 +4463,7 @@ input.form-control:disabled {
 
 .ch-item {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
     padding: 12px 12px;
     cursor: default;
@@ -4515,27 +4515,27 @@ input.form-control:disabled {
 .ch-item-menu-btn {
     background: transparent;
     border: none;
-    color: #45475a;
+    color: #555f80;
     padding: 6px;
     cursor: pointer;
     border-radius: 4px;
     transition: opacity 0.15s, color 0.15s, background 0.15s;
-    font-size: 0.75rem;
+    font-size: 0.95rem;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
 .ch-item-parent-btn {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     opacity: 0.72;
 }
 
 .ch-item-menu-btn {
-    width: 28px;
-    height: 28px;
-    opacity: 0;
+    width: 32px;
+    height: 32px;
+    opacity: 0.6;
 }
 
 .ch-item-parent-btn:hover,
@@ -4662,6 +4662,12 @@ input.form-control:disabled {
     gap: 3px;
 }
 
+.ch-item-header {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
 .ch-item-name {
     font-size: 0.79rem;
     color: #cdd6f4;
@@ -4670,6 +4676,15 @@ input.form-control:disabled {
     text-overflow: ellipsis;
     font-weight: 600;
     line-height: 1.3;
+    min-width: 0;
+}
+
+.ch-item-project {
+    font-size: 0.64rem;
+    color: #666f8f;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .ch-item-relationship {
@@ -4707,11 +4722,13 @@ input.form-control:disabled {
 .ch-item-meta {
     font-size: 0.67rem;
     color: #666f8f;
-    line-height: 1.3;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
 }
 
-.ch-meta-separator {
-    color: #555f80;
+.ch-meta-row {
+    line-height: 1.3;
 }
 
 .ch-meta-label {

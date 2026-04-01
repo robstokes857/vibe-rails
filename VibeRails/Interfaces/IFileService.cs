@@ -2,7 +2,7 @@ namespace VibeRails.Interfaces
 {
     public interface IFileService
     {
-        public (bool inGet, string projectRoot) TryGetProjectRootPath();
+        Task<(bool inGet, string projectRoot)> TryGetProjectRootPathAsync(string? workingDirectory = null, CancellationToken cancellationToken = default);
         void InitGlobalSave();
         void InitLocal(string rootPath);
         Task AppendAllTextAsync(string path, string content, CancellationToken cancellationToken);

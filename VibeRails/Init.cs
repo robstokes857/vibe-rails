@@ -1,3 +1,4 @@
+using Serilog;
 using VibeRails.DB;
 using VibeRails.Interfaces;
 using VibeRails.Utils;
@@ -15,11 +16,14 @@ namespace VibeRails
 
     public static class Init
     {
-        public static async Task<StartUpStatus> StartUpChecks(IServiceProvider serviceProvider)
+        /// <summary>
+        /// Synchronous startup: DB init, app settings, global save.
+        /// Git detection runs in the background via <see cref="StartGitDetectionAsync"/>.
+        /// </summary>
+        public static void StartUpChecks(IServiceProvider serviceProvider)
         {
             var configuration = serviceProvider.GetRequiredService<IConfiguration>();
 
-            // Initialize version info and app settings
             VersionInfo.Initialize(configuration);
             InitAppSettings(configuration);
 
@@ -27,34 +31,47 @@ namespace VibeRails
             var fileService = scope.ServiceProvider.GetRequiredService<IFileService>();
             fileService.InitGlobalSave();
 
-            // Initialize SQLite database
             var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
             repository.InitializeDatabase();
+        }
 
-
-            var isLocal = fileService.TryGetProjectRootPath();
-            ParserConfigs.SetRootPath(isLocal.projectRoot);
-
-            //Launch for global context only
-            if (!isLocal.inGet)
+        /// <summary>
+        /// Runs git detection in the background. Updates <see cref="ParserConfigs"/> when done.
+        /// Returns a task that resolves to the startup status.
+        /// </summary>
+        public static Task<StartUpStatus> StartGitDetectionAsync(IServiceProvider serviceProvider, string? launchDirectory = null)
+        {
+            return Task.Run(async () =>
             {
-                return StartUpStatus.RequirementsNotMet_NotInGIT;
-            }
+                try
+                {
+                    using var scope = serviceProvider.CreateScope();
+                    var fileService = scope.ServiceProvider.GetRequiredService<IFileService>();
 
-            fileService.InitLocal(isLocal.projectRoot);
+                    var isLocal = await fileService.TryGetProjectRootPathAsync(launchDirectory);
+                    ParserConfigs.SetRootPath(isLocal.projectRoot);
 
-            // TODO: Re-enable hook auto-install once Windows security blocking is resolved (upcoming story)
-            // await TryInstallPreCommitHookAsync(scope.ServiceProvider, isLocal.projectRoot);
-            return StartUpStatus.Success;
+                    if (!isLocal.inGet)
+                    {
+                        return StartUpStatus.RequirementsNotMet_NotInGIT;
+                    }
+
+                    fileService.InitLocal(isLocal.projectRoot);
+                    return StartUpStatus.Success;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "[Init] Background git detection failed");
+                    return StartUpStatus.RequirementsNotMet_NotInGIT;
+                }
+            });
         }
 
         public static void InitAppSettings(IConfiguration configuration)
         {
-            // Load FrontendUrl from appsettings.json
             var frontendUrl = configuration["VibeRails:FrontendUrl"] ?? throw new InvalidOperationException("VibeRails:FrontendUrl is not configured in appsettings.json");
             ParserConfigs.SetFrontendUrl(frontendUrl);
 
-            // Load app settings from settings.json in ~/.vibe_rails/
             var settings = Config.Load();
             ParserConfigs.SetRemoteAccess(settings.RemoteAccess);
             ParserConfigs.SetApiKey(settings.ApiKey);

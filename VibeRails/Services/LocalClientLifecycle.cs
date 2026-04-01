@@ -101,7 +101,8 @@ public sealed class LocalClientLifecycleWatchdogService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // In --env mode, lifetime is controlled by the foreground CLI loop.
-        if (ParserConfigs.GetArguments().IsLMBootstrap)
+        var args = ParserConfigs.GetArguments();
+        if (args.IsLMBootstrap || args.IsVsCodeMode)
         {
             return;
         }

@@ -11,11 +11,20 @@ interface BundledAssets {
     wwwrootPath: string;
 }
 
+interface TestConnectionInfo {
+    port: number | null;
+    sessionToken: string | null;
+    tabToken: string | null;
+    webviewVisible: boolean;
+}
+
 let backendManager: BackendManager | null = null;
 let webviewManager: WebviewPanelManager | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
 let stopBarItem: vscode.StatusBarItem | null = null;
 let closingPromise: Promise<void> | null = null;
+let currentSessionToken: string | null = null;
+let currentTabToken: string | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
@@ -48,6 +57,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(openCommand);
     context.subscriptions.push(stopCommand);
+    registerTestCommands(context);
     context.subscriptions.push({
         dispose: () => {
             void closeDashboard(false, true);
@@ -78,6 +88,9 @@ async function closeDashboard(showMessage: boolean, shutdownBackend: boolean): P
         if (showMessage) {
             vscode.window.showInformationMessage('VibeRails closed');
         }
+
+        currentSessionToken = null;
+        currentTabToken = null;
     })();
 
     try {
@@ -120,6 +133,8 @@ async function openDashboard(context: vscode.ExtensionContext): Promise<void> {
         }
 
         const { sessionToken, tabToken } = await fetchTokens(bootstrapUrl);
+        currentSessionToken = sessionToken;
+        currentTabToken = tabToken;
 
         webviewManager = new WebviewPanelManager(bundledAssets.wwwrootPath);
 
@@ -143,6 +158,12 @@ function getCurrentWorkspaceFolder(): string | null {
     if (workspaceFolders && workspaceFolders.length > 0) {
         return workspaceFolders[0].uri.fsPath;
     }
+
+    const testWorkspace = process.env.VIBERAILS_SMOKE_WORKSPACE?.trim();
+    if (testWorkspace && fs.existsSync(testWorkspace)) {
+        return testWorkspace;
+    }
+
     return null;
 }
 
@@ -242,4 +263,22 @@ export async function deactivate(): Promise<void> {
     await closeDashboard(false, true);
     webviewManager = null;
     backendManager = null;
+}
+
+function registerTestCommands(context: vscode.ExtensionContext): void {
+    if (context.extensionMode === vscode.ExtensionMode.Production) {
+        return;
+    }
+
+    const getConnectionInfo = vscode.commands.registerCommand(
+        'viberails._test.getConnectionInfo',
+        (): TestConnectionInfo => ({
+            port: backendManager?.getPort() ?? null,
+            sessionToken: currentSessionToken,
+            tabToken: currentTabToken,
+            webviewVisible: webviewManager?.isVisible() ?? false
+        })
+    );
+
+    context.subscriptions.push(getConnectionInfo);
 }

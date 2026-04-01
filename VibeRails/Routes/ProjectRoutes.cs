@@ -35,17 +35,13 @@ public static class ProjectRoutes
 
     public static void Map(WebApplication app, string launchDirectory)
     {
-        app.MapGet("/api/v1/context", async (IGitService gitService, CancellationToken cancellationToken) =>
+        app.MapGet("/api/v1/context", (IGitService gitService) =>
         {
+            // Return immediately with whatever git state is known.
+            // Git detection runs in the background during startup — ParserConfigs
+            // is updated when it completes. The frontend polls or re-fetches as needed.
             var rootPath = Utils.ParserConfigs.GetRootPath();
             var isInGit = !string.IsNullOrEmpty(rootPath);
-            string? gitBranch = null;
-            string? gitRemoteUrl = null;
-            if (isInGit)
-            {
-                gitBranch = await gitService.GetCurrentBranchAsync(cancellationToken);
-                gitRemoteUrl = await gitService.GetRemoteUrlAsync(cancellationToken);
-            }
 
             var sandboxesDir = Path.Combine(Utils.PathConstants.GetInstallDirPath(), Utils.PathConstants.SANDBOXES_SUBDIR);
             var isSandbox = launchDirectory.StartsWith(sandboxesDir, StringComparison.OrdinalIgnoreCase);
@@ -54,8 +50,8 @@ public static class ProjectRoutes
                 IsInGit: isInGit,
                 LaunchDirectory: launchDirectory,
                 RootPath: rootPath,
-                GitBranch: gitBranch,
-                GitRemoteUrl: gitRemoteUrl,
+                GitBranch: null,
+                GitRemoteUrl: null,
                 IsSandbox: isSandbox
             ));
         }).WithName("GetContext");
@@ -95,7 +91,7 @@ public static class ProjectRoutes
             await RunGitCommandAsync("commit -m \"Initial commit\"", launchDirectory);
 
             // Re-detect git root and update state
-            var detected = fileService.TryGetProjectRootPath();
+            var detected = await fileService.TryGetProjectRootPathAsync(cancellationToken: cancellationToken);
             Utils.ParserConfigs.SetRootPath(detected.projectRoot);
 
             if (!detected.inGet)

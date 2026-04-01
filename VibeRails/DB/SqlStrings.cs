@@ -452,7 +452,9 @@ namespace VibeRails.DB
                    p.Cli,
                    s.SessionDisplayName,
                    u.Sequence,
-                   SUBSTR(u.InputText, 1, 120)
+                   SUBSTR(u.InputText, 1, 120),
+                   (SELECT COUNT(*) FROM UserInputs WHERE SessionId = s.Id),
+                   CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END
             FROM Sessions s
             LEFT JOIN UserInputs u ON u.Id = (
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
@@ -472,7 +474,9 @@ namespace VibeRails.DB
                    p.Cli,
                    s.SessionDisplayName,
                    u.Sequence,
-                   SUBSTR(u.InputText, 1, 120)
+                   SUBSTR(u.InputText, 1, 120),
+                   (SELECT COUNT(*) FROM UserInputs WHERE SessionId = s.Id),
+                   CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END
             FROM Sessions s
             LEFT JOIN UserInputs u ON u.Id = (
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
