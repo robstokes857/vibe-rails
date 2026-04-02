@@ -378,12 +378,18 @@ public sealed class TerminalBuffer
         _usingAlternate = true;
         FillWithEmpty(_alternate);
         _alternateCursor = new CursorState();
+        // VT spec: scroll region resets to full screen on alt-screen enter
+        _scrollTop = 0;
+        _scrollBottom = Rows - 1;
     }
 
     public void ExitAlternateScreen()
     {
         if (!_usingAlternate) return;
         _usingAlternate = false;
+        // VT spec: scroll region resets to full screen on alt-screen exit
+        _scrollTop = 0;
+        _scrollBottom = Rows - 1;
     }
 
     public bool IsAlternateScreen => _usingAlternate;

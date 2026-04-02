@@ -1,13 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using VibeRails.Cli;
 using VibeRails.DB;
 using VibeRails.DTOs;
 
 using VibeRails.Services;
-using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
-using VibeRails.Services.Integrations.VibeCodeRemote;
 
 using VibeRails.Utils;
 
@@ -91,10 +88,8 @@ public static class CliLoop
         var scopedServices = scope.ServiceProvider;
 
         var repository = scopedServices.GetRequiredService<IRepository>();
-        var envService = scopedServices.GetRequiredService<LlmCliEnvironmentService>();
         var sessionService = scopedServices.GetRequiredService<ITerminalSessionService>();
-        var ioObserverService = scopedServices.GetRequiredService<ITerminalIoObserverService>();
-        var appLifetime = scopedServices.GetRequiredService<IHostApplicationLifetime>();
+        var runner = scopedServices.GetRequiredService<TerminalRunner>();
 
         // Resolve LLM type (smart resolution: LLM enum name → base CLI, otherwise → DB lookup)
         LLM llm;
@@ -129,18 +124,6 @@ public static class CliLoop
                 workingDirectory = Directory.GetCurrentDirectory();
             }
         }
-
-        // Create runner and run with web access
-        var gitServiceForSession = new GitService(workingDirectory);
-        var remoteStateService = scopedServices.GetRequiredService<IRemoteStateService>();
-        var terminalStateService = new TerminalStateService(
-            repository,
-            gitServiceForSession,
-            remoteStateService,
-            ioObserverService);
-        var mcpSettings = scopedServices.GetRequiredService<McpSettings>();
-        var commandService = new CommandService(envService, mcpSettings);
-        var runner = new TerminalRunner(terminalStateService, commandService, appLifetime);
 
         var exitCode = await runner.RunCliWithWebAsync(llm, workingDirectory, environmentName, parsedArgs.ExtraArgs, sessionService, parsedArgs.MakeRemote, CancellationToken.None);
         Environment.ExitCode = exitCode;

@@ -337,6 +337,72 @@ namespace VibeRails.DB
 
         #endregion
 
+        #region ProjectCache
+
+        public async Task<string?> GetProjectCacheValueAsync(string projectPath, string key, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectProjectCacheByKey;
+            cmd.Parameters.AddWithValue("$projectPath", NormalizeWorkingDirectory(projectPath));
+            cmd.Parameters.AddWithValue("$key", key);
+
+            var result = await cmd.ExecuteScalarAsync(cancellationToken);
+            return result == null || result == DBNull.Value ? null : Convert.ToString(result);
+        }
+
+        public async Task SetProjectCacheValueAsync(string projectPath, string key, string value, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.UpsertProjectCache;
+            cmd.Parameters.AddWithValue("$projectPath", NormalizeWorkingDirectory(projectPath));
+            cmd.Parameters.AddWithValue("$key", key);
+            cmd.Parameters.AddWithValue("$value", value);
+            cmd.Parameters.AddWithValue("$updatedUTC", DateTime.UtcNow.ToString("O"));
+
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        public async Task<Dictionary<string, string>> GetAllProjectCacheAsync(string projectPath, CancellationToken cancellationToken = default)
+        {
+            var result = new Dictionary<string, string>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectAllProjectCache;
+            cmd.Parameters.AddWithValue("$projectPath", NormalizeWorkingDirectory(projectPath));
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                result[reader.GetString(0)] = reader.GetString(1);
+            }
+
+            return result;
+        }
+
+        public async Task RemoveProjectCacheValueAsync(string projectPath, string key, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.DeleteProjectCacheByKey;
+            cmd.Parameters.AddWithValue("$projectPath", NormalizeWorkingDirectory(projectPath));
+            cmd.Parameters.AddWithValue("$key", key);
+
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        #endregion
+
         #region ChatSummary CRUD
 
         public async Task<ChatSummary> SaveChatSummaryAsync(ChatSummary chatSummary, CancellationToken cancellationToken = default)
@@ -613,6 +679,53 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$isError", isError ? 1 : 0);
 
             await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task InsertTerminalSessionLogAsync(string sessionId, int sequence, byte[] data, bool isAlternateScreen, int cols, int rows)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.InsertTerminalSessionLog;
+
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+            cmd.Parameters.AddWithValue("$sequence", sequence);
+            cmd.Parameters.AddWithValue("$isAlternateScreen", isAlternateScreen ? 1 : 0);
+            cmd.Parameters.Add(new SqliteParameter("$data", SqliteType.Blob) { Value = data });
+            cmd.Parameters.AddWithValue("$cols", cols);
+            cmd.Parameters.AddWithValue("$rows", rows);
+            cmd.Parameters.AddWithValue("$timestamp", DateTime.UtcNow.ToString("O"));
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<List<TerminalSessionLogRecord>> GetTerminalSessionLogsAsync(string sessionId, CancellationToken cancellationToken)
+        {
+            var logs = new List<TerminalSessionLogRecord>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectTerminalSessionLogsBySession;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                logs.Add(new TerminalSessionLogRecord(
+                    Id: reader.GetInt64(0),
+                    SessionId: reader.GetString(1),
+                    Sequence: reader.GetInt32(2),
+                    IsAlternateScreen: reader.GetInt32(3) != 0,
+                    Data: (byte[])reader[4],
+                    Cols: reader.GetInt32(5),
+                    Rows: reader.GetInt32(6),
+                    TimestampUtc: DateTime.Parse(reader.GetString(7))));
+            }
+
+            return logs;
         }
 
         public async Task CompleteSessionAsync(string sessionId, int exitCode)

@@ -134,6 +134,39 @@ namespace VibeRails.DB
         public const string CreateInputFileChangesInputIndex = "CREATE INDEX IF NOT EXISTS idx_input_file_changes_input ON InputFileChanges(UserInputId)";
         public const string CreateInputFileChangesPathIndex = "CREATE INDEX IF NOT EXISTS idx_input_file_changes_filepath ON InputFileChanges(FilePath)";
 
+        // TerminalSessionLogs Table — enriched per-chunk replay data (cols, rows, alternate screen)
+        public const string CreateTerminalSessionLogsTable = """
+            CREATE TABLE IF NOT EXISTS TerminalSessionLogs (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                SessionId TEXT NOT NULL,
+                Sequence INTEGER NOT NULL,
+                IsAlternateScreen INTEGER NOT NULL DEFAULT 0,
+                Data BLOB NOT NULL,
+                Cols INTEGER NOT NULL DEFAULT 80,
+                Rows INTEGER NOT NULL DEFAULT 24,
+                Timestamp TEXT NOT NULL,
+                FOREIGN KEY (SessionId) REFERENCES Sessions(Id)
+            )
+            """;
+        public const string CreateTerminalSessionLogsIndex = "CREATE INDEX IF NOT EXISTS idx_terminal_session_logs_session ON TerminalSessionLogs(SessionId, Sequence)";
+
+        public const string InsertTerminalSessionLog = """
+            INSERT INTO TerminalSessionLogs (SessionId, Sequence, IsAlternateScreen, Data, Cols, Rows, Timestamp)
+            VALUES ($sessionId, $sequence, $isAlternateScreen, $data, $cols, $rows, $timestamp);
+            """;
+
+        public const string SelectTerminalSessionLogsBySession = """
+            SELECT Id, SessionId, Sequence, IsAlternateScreen, Data, Cols, Rows, Timestamp
+            FROM TerminalSessionLogs
+            WHERE SessionId = $sessionId
+            ORDER BY Sequence ASC;
+            """;
+
+        public const string DeleteSession_TerminalSessionLogs = """
+            DELETE FROM TerminalSessionLogs
+            WHERE SessionId = $sessionId;
+            """;
+
         // ClaudePlans Table
         public const string CreateClaudePlansTable = """
             CREATE TABLE IF NOT EXISTS ClaudePlans (
@@ -178,7 +211,10 @@ namespace VibeRails.DB
             CreateClaudePlansTable,
             CreateClaudePlansSessionIndex,
             CreateClaudePlansStatusIndex,
-            CreateClaudePlansCreatedIndex
+            CreateClaudePlansCreatedIndex,
+            CreateTerminalSessionLogsTable,
+            CreateTerminalSessionLogsIndex,
+            CreateProjectCacheTable
         ];
 
         public const string AddProcessedColumn = "ALTER TABLE Sessions ADD COLUMN Processed INTEGER NOT NULL DEFAULT 0";
@@ -530,6 +566,7 @@ namespace VibeRails.DB
             DeleteSession_ClaudePlans,
             DeleteSession_SessionOutput,
             DeleteSession_SessionLogs,
+            DeleteSession_TerminalSessionLogs,
             DeleteSession_UserInputs,
             DeleteSession_Session
         ];
@@ -550,6 +587,39 @@ namespace VibeRails.DB
         public const string InsertFileChange = """
             INSERT INTO InputFileChanges (UserInputId, PreviousInputId, FilePath, ChangeType, LinesAdded, LinesDeleted, DiffContent)
             VALUES ($userInputId, $previousInputId, $filePath, $changeType, $linesAdded, $linesDeleted, $diffContent);
+            """;
+
+        // ProjectCache Table — generic key-value store scoped per project
+        public const string CreateProjectCacheTable = """
+            CREATE TABLE IF NOT EXISTS ProjectCache (
+                ProjectPath TEXT NOT NULL,
+                Key TEXT NOT NULL,
+                Value TEXT NOT NULL DEFAULT '',
+                UpdatedUTC TEXT NOT NULL,
+                PRIMARY KEY (ProjectPath, Key)
+            )
+            """;
+
+        public const string UpsertProjectCache = """
+            INSERT INTO ProjectCache (ProjectPath, Key, Value, UpdatedUTC)
+            VALUES ($projectPath, $key, $value, $updatedUTC)
+            ON CONFLICT(ProjectPath, Key) DO UPDATE SET
+                Value = excluded.Value,
+                UpdatedUTC = excluded.UpdatedUTC;
+            """;
+        public const string SelectProjectCacheByKey = """
+            SELECT Value
+            FROM ProjectCache
+            WHERE ProjectPath = $projectPath AND Key = $key;
+            """;
+        public const string SelectAllProjectCache = """
+            SELECT Key, Value
+            FROM ProjectCache
+            WHERE ProjectPath = $projectPath;
+            """;
+        public const string DeleteProjectCacheByKey = """
+            DELETE FROM ProjectCache
+            WHERE ProjectPath = $projectPath AND Key = $key;
             """;
     }
 }

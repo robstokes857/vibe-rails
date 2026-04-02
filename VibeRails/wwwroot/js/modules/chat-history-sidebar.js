@@ -23,6 +23,7 @@ export class ChatHistorySidebar {
         this.isLoadingPage = false;
         this.isLoadingForSearch = false;
         this.loadFailed = false;
+        this.projectFilter = null;
         this.sidebar = null;
         this.search = null;
         this.body = null;
@@ -262,6 +263,7 @@ export class ChatHistorySidebar {
         this.currentPage = 0;
         this.hasMore = true;
         this.loadFailed = false;
+        this.projectFilter = null;
         this._closeContextMenu();
         this._setRefreshButtonState();
         this.body.innerHTML = '<div class="ch-loading"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>';
@@ -439,11 +441,12 @@ export class ChatHistorySidebar {
 
     _getDisplayName(item) {
         const rawName = this._getRawDisplayName(item);
-        if (!item?.parentSessionId || !rawName) {
+        if (!rawName) {
             return rawName;
         }
 
-        return this._stripResumePrefix(rawName, item.parentCli, item.cli);
+        const stripped = this._stripResumePrefix(rawName, item.parentCli, item.cli);
+        return stripped || rawName;
     }
 
     _shouldDisplayItem(item) {
@@ -590,14 +593,14 @@ export class ChatHistorySidebar {
                 return;
             }
 
-            this.body.innerHTML = `<div class="ch-empty">${(this.filterText || this.llmFilters.size > 0) ? 'No matches found.' : 'No chat history yet.'}</div>`;
+            this.body.innerHTML = `<div class="ch-empty">${(this.filterText || this.llmFilters.size > 0 || this.projectFilter) ? 'No matches found.' : 'No chat history yet.'}</div>`;
             return;
         }
 
         this.body.innerHTML = `${filteredItems.map(item => {
             const brand = this.app.getCliBrand(item.cli);
             const rawName = this._getDisplayName(item);
-            const name = rawName.length > 52 ? rawName.slice(0, 52) + '…' : rawName;
+            const name = rawName.length > 80 ? rawName.slice(0, 80) + '…' : rawName;
             const time = formatRelativeTime(item.startedUTC);
             const isActive = !item.endedUTC;
             const logoHtml = this._renderBrandLogo(brand, 'ch-item-logo');
@@ -606,7 +609,7 @@ export class ChatHistorySidebar {
             if (item.environmentName?.trim()) {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Env:</span> ${escapeHtml(item.environmentName.trim())}</div>`);
             }
-            if (item.userInputCount > 0) {
+            if (item.userInputCount != null) {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Lines typed by user:</span> ${item.userInputCount}</div>`);
             }
             if (item.durationSeconds != null && item.durationSeconds > 0) {
@@ -633,7 +636,7 @@ export class ChatHistorySidebar {
                     <div class="ch-item-content">
                         <div class="ch-item-header">
                             <div class="ch-item-name" title="${escapeHtml(rawName)}">${escapeHtml(name)}</div>
-                            <div class="ch-item-project" title="${escapeHtml(item.workingDirectory || '')}">Project: ${escapeHtml(projectDisplayName)}</div>
+                            <span class="ch-project-badge${this.projectFilter === projectDisplayName ? ' ch-project-badge-active' : ''}" data-project="${escapeHtml(projectDisplayName)}" title="${escapeHtml(item.workingDirectory || '')}"><i class="fa-solid fa-folder-open"></i> ${escapeHtml(projectDisplayName)}</span>
                         </div>
                         ${relationshipHtml}
                         <div class="ch-item-meta">${metaHtml}</div>
@@ -668,6 +671,20 @@ export class ChatHistorySidebar {
             itemEl.querySelector('.ch-item-menu-btn')?.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this._openContextMenu(itemEl, e.currentTarget, submenu);
+            });
+            itemEl.querySelector('.ch-project-badge')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const project = e.currentTarget.dataset.project;
+                if (this.projectFilter === project) {
+                    this.projectFilter = null;
+                } else {
+                    this.projectFilter = project;
+                }
+                this._closeContextMenu();
+                this._renderItems();
+                if (this.projectFilter && this.hasMore) {
+                    void this._loadRemainingPagesForSearch();
+                }
             });
         });
     }
@@ -917,6 +934,10 @@ export class ChatHistorySidebar {
     _getFilteredItems() {
         return this.allItems.filter(item => {
             if (this.llmFilters.size > 0 && !this.llmFilters.has((item?.cli || '').toLowerCase())) {
+                return false;
+            }
+
+            if (this.projectFilter && this._getProjectDisplayName(item) !== this.projectFilter) {
                 return false;
             }
 

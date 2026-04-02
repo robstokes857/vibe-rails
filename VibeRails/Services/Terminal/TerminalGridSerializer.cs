@@ -24,7 +24,8 @@ internal static class TerminalGridSerializer
         int rows, int cols,
         int cursorRow, int cursorCol,
         bool cursorVisible = true,
-        int cursorShape = 0)
+        int cursorShape = 0,
+        bool isAlternateScreen = false)
     {
         int scrollbackCount = scrollback.Length;
         // Rough capacity: reset(4) + per-row(cols*8 avg + newline) for scrollback + screen
@@ -38,11 +39,20 @@ internal static class TerminalGridSerializer
         sb.Append("\x1b[3J");    // clear scrollback
         sb.Append("\x1b[H");     // home cursor (1,1)
 
-        // Scrollback rows (plain ANSI, newline-terminated — pushes into xterm scrollback)
-        foreach (var row in scrollback)
+        if (isAlternateScreen)
         {
-            SerializeRow(sb, row, Math.Min(row.Length, cols));
-            sb.Append("\r\n");
+            // Terminal is in alt-screen — put xterm.js into alt-screen mode before
+            // rendering content. Skip scrollback (alt-screen has none per VT spec).
+            sb.Append("\x1b[?1049h");
+        }
+        else
+        {
+            // Normal screen — replay scrollback rows (plain ANSI, newline-terminated)
+            foreach (var row in scrollback)
+            {
+                SerializeRow(sb, row, Math.Min(row.Length, cols));
+                sb.Append("\r\n");
+            }
         }
 
         // Current screen rows — use absolute CUP addressing per row to prevent

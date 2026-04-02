@@ -384,9 +384,9 @@ class TerminalTab {
             return;
         }
 
-        const shouldReseedDisplay = this.isActive && this.hasOpenSocket();
-        if (shouldReseedDisplay) {
-            this.vibeTerminal.resetDisplayOnly();
+        // Reset resize signature so the next fit sends a fresh resize to the PTY.
+        // Do NOT clear the display — xterm.js reflow engine preserves scrollback on resize.
+        if (this.isActive && this.hasOpenSocket()) {
             this.lastResizeSignature = null;
         }
 
@@ -403,9 +403,9 @@ class TerminalTab {
             return;
         }
 
-        const shouldReseedDisplay = this.isActive && this.hasOpenSocket();
-        if (shouldReseedDisplay) {
-            this.vibeTerminal.resetDisplayOnly();
+        // Reset resize signature so the next fit sends a fresh resize to the PTY.
+        // Do NOT clear the display — xterm.js reflow engine preserves scrollback on resize.
+        if (this.isActive && this.hasOpenSocket()) {
             this.lastResizeSignature = null;
         }
 
@@ -2756,8 +2756,8 @@ export class TerminalController {
                             VibeRails Sessions
                         </span>
                         <span class="badge bg-secondary d-none" id="terminal-status-badge"></span>
+                        ${projectDirHtml}
                     </div>
-                    ${projectDirHtml}
                     <div class="d-flex gap-2 align-items-center" id="terminal-actions">
                         <button class="btn btn-sm btn-outline-danger d-none d-inline-flex align-items-center gap-1" id="terminal-stop-btn" title="Disconnect terminal session">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">

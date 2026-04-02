@@ -24,6 +24,8 @@ namespace VibeRails.DB
         Task<SessionOutputDetailResponse?> GetSessionOutputAsync(string sessionId, CancellationToken cancellationToken);
         Task<List<string>> GetEndedUnprocessedSessionIdsAsync(int limit, CancellationToken cancellationToken);
         Task<List<SessionLogChunkRecord>> GetSessionLogChunksAsync(string sessionId, CancellationToken cancellationToken);
+        Task InsertTerminalSessionLogAsync(string sessionId, int sequence, byte[] data, bool isAlternateScreen, int cols, int rows);
+        Task<List<TerminalSessionLogRecord>> GetTerminalSessionLogsAsync(string sessionId, CancellationToken cancellationToken);
         Task<List<UserInputRecord>> GetUserInputsForSessionAsync(string sessionId, CancellationToken cancellationToken);
         Task SaveSessionOutputAndMarkProcessedAsync(string sessionId, string text, CancellationToken cancellationToken);
         Task<ChatHistoryItem?> GetChatHistoryItemAsync(string sessionId, CancellationToken cancellationToken);
@@ -58,6 +60,12 @@ namespace VibeRails.DB
         // Agent metadata operations
         Task<string?> GetAgentCustomNameAsync(string path, CancellationToken cancellationToken = default);
         Task SetAgentCustomNameAsync(string path, string customName, CancellationToken cancellationToken = default);
+
+        // ProjectCache operations (key-value store per project)
+        Task<string?> GetProjectCacheValueAsync(string projectPath, string key, CancellationToken cancellationToken = default);
+        Task SetProjectCacheValueAsync(string projectPath, string key, string value, CancellationToken cancellationToken = default);
+        Task<Dictionary<string, string>> GetAllProjectCacheAsync(string projectPath, CancellationToken cancellationToken = default);
+        Task RemoveProjectCacheValueAsync(string projectPath, string key, CancellationToken cancellationToken = default);
 
         // ChatSummary operations
         Task<ChatSummary> SaveChatSummaryAsync(ChatSummary chatSummary, CancellationToken cancellationToken = default);
