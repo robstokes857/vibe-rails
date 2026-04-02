@@ -50,14 +50,14 @@ public static class ProjectRoutes
                 IsInGit: isInGit,
                 LaunchDirectory: launchDirectory,
                 RootPath: rootPath,
-                GitBranch: null,
-                GitRemoteUrl: null,
+                GitBranch: Utils.ParserConfigs.GetGitBranch(),
+                GitRemoteUrl: Utils.ParserConfigs.GetGitRemoteUrl(),
                 IsSandbox: isSandbox
             ));
         }).WithName("GetContext");
 
         // POST /api/v1/git/init — initialize git in the launch directory
-        app.MapPost("/api/v1/git/init", async (IFileService fileService, CancellationToken cancellationToken) =>
+        app.MapPost("/api/v1/git/init", async (IFileService fileService, IRepository repository, CancellationToken cancellationToken) =>
         {
             // Sanity check: don't allow git init in dangerous directories
             var normalizedPath = Path.GetFullPath(launchDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -101,10 +101,33 @@ public static class ProjectRoutes
 
             fileService.InitLocal(detected.projectRoot);
 
+            // Update ProjectCache with new git state
+            await repository.SetProjectCacheValueAsync(launchDirectory, Services.ProjectCacheKeys.IsGitRepo, "True");
+            await repository.SetProjectCacheValueAsync(launchDirectory, Services.ProjectCacheKeys.GitRootPath, detected.projectRoot);
+
+            // Fetch and cache branch info
+            try
+            {
+                var gitService = new Services.GitService(detected.projectRoot);
+                var branch = await gitService.GetCurrentBranchAsync(cancellationToken);
+                var remoteUrl = await gitService.GetRemoteUrlAsync(cancellationToken);
+
+                Utils.ParserConfigs.SetGitBranch(branch);
+                Utils.ParserConfigs.SetGitRemoteUrl(remoteUrl);
+
+                if (branch != null)
+                    await repository.SetProjectCacheValueAsync(launchDirectory, Services.ProjectCacheKeys.GitBranch, branch);
+                if (remoteUrl != null)
+                    await repository.SetProjectCacheValueAsync(launchDirectory, Services.ProjectCacheKeys.GitRemoteUrl, remoteUrl);
+            }
+            catch { /* non-critical */ }
+
             return Results.Ok(new ContextResponse(
                 IsInGit: true,
                 LaunchDirectory: launchDirectory,
-                RootPath: detected.projectRoot
+                RootPath: detected.projectRoot,
+                GitBranch: Utils.ParserConfigs.GetGitBranch(),
+                GitRemoteUrl: Utils.ParserConfigs.GetGitRemoteUrl()
             ));
         }).WithName("GitInit");
 

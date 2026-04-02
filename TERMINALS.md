@@ -1,5 +1,47 @@
 # Terminal Known Issues & Notes
 
+## Open Bugs
+
+### Font size change causes incomplete TUI rendering / double print
+
+**Status:** Open — 2026-04-01
+
+**Symptom:** Changing xterm.js font size via the +/- buttons can cause two related rendering failures:
+1. **Double print:** At the original font size, ConPTY emits a redundant full redraw, causing text to appear twice.
+2. **Partial TUI rendering:** After a font size change clears and redraws, some font sizes produce a complete TUI (all conversation content visible), while others show only the header chrome (logo, version, model, workdir) and prompt — the conversation body is blank.
+
+Observed with Claude Code's Ink/React TUI. Font size 10 renders fully; font size 11 renders only header + prompt. Increasing font size from the initial (broken) state cleared the double print but exposed the partial rendering issue.
+
+**Reproduction:**
+1. Launch Claude Code in VibeRails web terminal
+2. Have an active conversation with tool calls visible
+3. Click font size +/- buttons to change size
+4. Observe: some sizes render the full TUI, others show only the top chrome and prompt area with blank space where conversation content should be
+
+**Root cause (suspected):** The font-size-change flow in `applyFontSize()` (terminal-multitab.js:382) calls `resetDisplayOnly()` which calls `terminal.clear()` — wiping the xterm.js buffer — then sends `__resize__:cols,rows` to the backend. `TerminalResizeCoordinator.ApplyResize()` resizes the ConPTY, which triggers SIGWINCH to the TUI app. The TUI re-renders at new dimensions and that output flows back through PTY → WebSocket → xterm.js.
+
+The problem is **ConPTY's redraw after `ResizePseudoConsole` is not always complete**. At certain col/row dimensions, the TUI content doesn't fully repaint. At others it works fine. The codebase already acknowledges ConPTY redraw unreliability: `TerminalResizeCoordinator` has "calling ResizePseudoConsole with the same size triggers a full ConPTY redraw, which produces duplicate output."
+
+`EnableDebouncedRedrawOnResize` is `false`, so there is no Ctrl+L safety net to force a full TUI repaint after resize settles.
+
+**Key files:**
+- `VibeRails/wwwroot/js/modules/terminal-multitab.js` — `applyFontSize()`, `resetDisplayOnly()`, `sendResizeToPty()`
+- `VibeRails/wwwroot/js/modules/vibe-terminal.js` — `clearDisplay()`, `setFontSize()`, `fit()`
+- `VibeRails/Services/Terminal/TerminalResizeCoordinator.cs` — `ApplyResize()`, `EnableDebouncedRedrawOnResize`
+- `VibeRails/Services/Terminal/Terminal.cs` — `Resize()` → `_pty.Resize()` + `_emulator.Resize()`
+
+**Current test:** Enabled `EnableDebouncedRedrawOnResize = true` in `TerminalResizeCoordinator.cs` (2026-04-01) to see if the debounced Ctrl+L forces a complete TUI repaint after font size changes.
+
+**Possible fix directions:**
+- Enable `EnableDebouncedRedrawOnResize = true` so a debounced Ctrl+L forces a full TUI repaint after resize settles. This already exists in `TerminalResizeCoordinator` — **now enabled for testing**.
+- Remove or defer the `terminal.clear()` in the font-size path — let the ConPTY redraw overwrite stale content rather than clearing first and risking an incomplete repaint.
+- Combine both: skip the preemptive clear and send a debounced Ctrl+L after resize, so the TUI app gets a chance to fully redraw without the user seeing a blank flash.
+- Investigate whether the issue is ConPTY-specific (likely) or Ink/React layout-dependent at certain column widths.
+
+---
+
+## Closed / Informational
+
 ## Codex: Cannot scroll back during live session
 
 **Symptom:** When a Codex terminal is running, scrolling up in xterm.js does nothing — prior output is inaccessible.

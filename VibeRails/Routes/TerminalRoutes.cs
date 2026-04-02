@@ -44,8 +44,10 @@ public static class TerminalRoutes
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {request.Cli}"));
             }
 
-            // Resolve working directory
-            var workDir = request.WorkingDirectory ?? launchDirectory;
+            // Working directory is always the git root (project PK) — never user-overridable
+            var workDir = ParserConfigs.GetRootPath();
+            if (string.IsNullOrEmpty(workDir))
+                workDir = launchDirectory;
 
             // Get custom args if environment specified
             string[]? extraArgs = null;
@@ -156,7 +158,9 @@ public static class TerminalRoutes
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {cli}"));
 
             var exePath = Environment.ProcessPath ?? "vb";
-            var workDir = launchDirectory;
+            var workDir = ParserConfigs.GetRootPath();
+            if (string.IsNullOrEmpty(workDir))
+                workDir = launchDirectory;
             var extraArgs = new List<string>();
 
             // Determine the --env value: custom env name or base CLI name

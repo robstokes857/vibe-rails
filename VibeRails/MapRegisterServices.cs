@@ -39,6 +39,7 @@ namespace VibeRails
                 var logger = sp.GetService<ILogger<Repository>>();
                 return new Repository(connectionString, bert, logger);
             });
+            serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
             serviceCollection.AddSingleton<ISessionOutputParser, SessionParseV4>();
             serviceCollection.AddScoped<IGitService, GitService>();
@@ -100,6 +101,9 @@ namespace VibeRails
             serviceCollection.AddScoped<ITerminalIoObserver, DebugWebSocketEventObserver>();
 #endif
             serviceCollection.AddScoped<ITerminalIoObserverService, TerminalIoObserverService>();
+            serviceCollection.AddScoped<ITerminalStateService, TerminalStateService>();
+            serviceCollection.AddScoped<ICommandService, CommandService>();
+            serviceCollection.AddScoped<TerminalRunner>();
             serviceCollection.AddScoped<ITerminalSessionService, TerminalSessionService>();
             serviceCollection.AddSingleton<ITerminalTabHostService, TerminalTabHostService>();
             serviceCollection.AddSingleton<ILocalClientTracker, LocalClientTracker>();
@@ -112,6 +116,7 @@ namespace VibeRails
 
             serviceCollection.AddHostedService<UpdateCheckJob>();
             serviceCollection.AddHostedService<StaleSessionCleanupJob>();
+            serviceCollection.AddHostedService<ProjectCacheRefreshJob>();
             serviceCollection.AddScoped<ISessionTranscriptService, SessionTranscriptService>();
             serviceCollection.AddScoped<ISessionResumeService, SessionResumeService>();
 

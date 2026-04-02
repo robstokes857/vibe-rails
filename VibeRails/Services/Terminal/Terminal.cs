@@ -182,7 +182,7 @@ public sealed class Terminal : IAsyncDisposable
         TerminalEmulator.TerminalCell[][] scrollback;
         TerminalEmulator.TerminalCell[,] snap;
         int rows, cols, cursorRow, cursorCol, cursorShape;
-        bool cursorVisible, syncOutputActive;
+        bool cursorVisible, syncOutputActive, isAlternateScreen;
         lock (_emulatorLock)
         {
             scrollback = _emulator.GetScrollback();
@@ -194,12 +194,13 @@ public sealed class Terminal : IAsyncDisposable
             cursorVisible = _emulator.CursorVisible;
             cursorShape = _emulator.CursorShape;
             syncOutputActive = _emulator.SyncOutputActive;
+            isAlternateScreen = _emulator.IsAlternateScreen;
         }
 
         if (syncOutputActive)
             Log.Warning("[Terminal] Snapshot taken during synchronized output — replay may capture mid-frame state");
 
-        return TerminalGridSerializer.Serialize(scrollback, snap, rows, cols, cursorRow, cursorCol, cursorVisible, cursorShape);
+        return TerminalGridSerializer.Serialize(scrollback, snap, rows, cols, cursorRow, cursorCol, cursorVisible, cursorShape, isAlternateScreen);
     }
 
     /// <summary>

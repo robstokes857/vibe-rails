@@ -149,6 +149,14 @@ namespace VibeRails.Utils
             _rootPath = path;
         }
 
+        private static string? _gitBranch;
+        private static string? _gitRemoteUrl;
+
+        public static string? GetGitBranch() => _gitBranch;
+        public static void SetGitBranch(string? value) => _gitBranch = value;
+        public static string? GetGitRemoteUrl() => _gitRemoteUrl;
+        public static void SetGitRemoteUrl(string? value) => _gitRemoteUrl = value;
+
         private static bool _remoteAccess = false;
         private static string _apiKey = string.Empty;
         private static bool _enablePrerelease = false;

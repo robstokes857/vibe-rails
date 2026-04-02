@@ -1616,23 +1616,27 @@ button:hover .card-nav-cog {
 
 /* Project path in terminal header — right-aligned, truncated, hidden on small screens */
 .vb-terminal-project-path {
-    margin-left: auto;
-    color: #6c7086;
-    font-size: 0.75rem;
-    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: #555f80;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    padding: 1px 7px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 350px;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+    line-height: 1.5;
     direction: rtl;
     text-align: left;
 }
 .vb-terminal-project-path i {
     direction: ltr;
-    font-size: 0.7rem;
+    font-size: 0.55rem;
     opacity: 0.7;
     flex-shrink: 0;
 }
@@ -3897,7 +3901,7 @@ input.form-control:disabled {
 /* ── Chat History Sidebar ─────────────────────────────────────────────────── */
 .vb-terminal-focus-layout {
     --ch-sidebar-width: 268px;
-    --ch-sidebar-peek: 58px;
+    --ch-sidebar-peek: 46px;
     display: grid;
     grid-template-columns: var(--ch-sidebar-width) minmax(0, 1fr);
     column-gap: 0.5rem;
@@ -3976,7 +3980,7 @@ input.form-control:disabled {
 }
 
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar::after {
-    opacity: 1;
+    opacity: 0;
 }
 
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar-header {
@@ -4373,7 +4377,7 @@ input.form-control:disabled {
     display: none;
     position: absolute;
     top: 8px;
-    left: 12px;
+    left: 6px;
     width: 34px;
     height: 34px;
     border-radius: 8px;
@@ -4413,6 +4417,28 @@ input.form-control:disabled {
     pointer-events: none;
     -webkit-mask-image: linear-gradient(90deg, rgba(0, 0, 0, 1) 0, rgba(0, 0, 0, 1) 40px, rgba(0, 0, 0, 0.92) 56px, rgba(0, 0, 0, 0.25) 88px, rgba(0, 0, 0, 0) 116px);
     mask-image: linear-gradient(90deg, rgba(0, 0, 0, 1) 0, rgba(0, 0, 0, 1) 40px, rgba(0, 0, 0, 0.92) 56px, rgba(0, 0, 0, 0.25) 88px, rgba(0, 0, 0, 0) 116px);
+}
+
+/* Collapsed rows – shrink to just the icon */
+.vb-terminal-focus-layout.vb-history-under .ch-item {
+    padding: 6px;
+    gap: 0;
+    justify-content: center;
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-item-content,
+.vb-terminal-focus-layout.vb-history-under .ch-item-actions {
+    display: none;
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-item-active {
+    border-left: none;
+    padding-left: 6px;
+    background: rgba(59, 130, 246, 0.12);
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-item-active .ch-item-icon {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
 }
 
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar-settings-panel {
@@ -4671,20 +4697,59 @@ input.form-control:disabled {
 .ch-item-name {
     font-size: 0.79rem;
     color: #cdd6f4;
-    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     font-weight: 600;
     line-height: 1.3;
     min-width: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    word-break: break-word;
 }
 
-.ch-item-project {
-    font-size: 0.64rem;
-    color: #666f8f;
-    white-space: nowrap;
+.ch-project-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: #555f80;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    padding: 1px 7px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.5;
+}
+
+.ch-project-badge i {
+    font-size: 0.55rem;
+    opacity: 0.7;
+}
+
+.ch-project-badge:hover {
+    color: #8993b6;
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.ch-project-badge-active {
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+.ch-project-badge-active:hover {
+    color: #93bbfd;
+    background: rgba(59, 130, 246, 0.18);
+    border-color: rgba(59, 130, 246, 0.4);
 }
 
 .ch-item-relationship {

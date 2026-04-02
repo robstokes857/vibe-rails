@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using Xunit;
@@ -6,8 +7,10 @@ namespace Tests.ParserTests;
 
 public class SessionParseV4FixtureTests
 {
-    private static readonly string FixtureDir =
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Tests", "ParserTests"));
+    private static readonly string FixtureDir = GetFixtureDir();
+
+    private static string GetFixtureDir([CallerFilePath] string? callerPath = null)
+        => Path.GetDirectoryName(callerPath)!;
 
     // --- Claude session (test.bin / goal.txt) ---
 

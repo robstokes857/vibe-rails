@@ -422,6 +422,27 @@ namespace VibeRails.DTOs
         string Content
     );
 
+    public record TerminalReplayChunk(
+        int Sequence,
+        bool IsAlternateScreen,
+        string Data,
+        int Cols,
+        int Rows
+    );
+
+    public record TerminalReplayFrame(
+        string Data,
+        long DelayMs
+    );
+
+    public record TerminalReplayResponse(
+        string SessionId,
+        int InitialCols,
+        int InitialRows,
+        List<TerminalReplayChunk> Chunks,
+        List<TerminalReplayFrame> Frames
+    );
+
     public record ChatHistoryItem(
         string Id,
         string Cli,
@@ -556,6 +577,11 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ChatSummaryResponse))]
     [JsonSerializable(typeof(ChatHistoryTranscriptResponse))]
     [JsonSerializable(typeof(ChatHistoryReplayResponse))]
+    [JsonSerializable(typeof(TerminalReplayChunk))]
+    [JsonSerializable(typeof(TerminalReplayFrame))]
+    [JsonSerializable(typeof(TerminalReplayResponse))]
+    [JsonSerializable(typeof(List<TerminalReplayChunk>))]
+    [JsonSerializable(typeof(List<TerminalReplayFrame>))]
     [JsonSerializable(typeof(ChatHistoryItem))]
     [JsonSerializable(typeof(List<ChatHistoryItem>))]
     [JsonSerializable(typeof(ChatHistoryResponse))]

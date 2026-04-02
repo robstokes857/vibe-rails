@@ -112,7 +112,14 @@ public class CommandService : ICommandService
         var clean = text
             .Replace("\r\n", " ")
             .Replace("\r", " ")
-            .Replace("\n", " ");
+            .Replace("\n", " ")
+            // Normalize Unicode smart/curly quotes to ASCII equivalents
+            .Replace("\u201c", "\"")  // "
+            .Replace("\u201d", "\"")  // "
+            .Replace("\u201e", "\"")  // „
+            .Replace("\u2018", "'")   // '
+            .Replace("\u2019", "'")   // '
+            .Replace("\u201a", "'");  // ‚
         clean = new string(clean.Where(c => !char.IsControl(c) || c == ' ').ToArray()).Trim();
 
         if (clean.Length > maxLength)

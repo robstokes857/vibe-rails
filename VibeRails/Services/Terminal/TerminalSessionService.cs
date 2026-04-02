@@ -1,10 +1,6 @@
 using System.Net.WebSockets;
-using Microsoft.Extensions.Hosting;
 using Serilog;
 using VibeRails.DTOs;
-using VibeRails.DB;
-using VibeRails.Services.Integrations.VibeCodeRemote;
-using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal.Consumers;
 
 
@@ -74,18 +70,12 @@ public class TerminalSessionService : ITerminalSessionService
     public bool IsExternallyOwned { get { lock (s_lock) return s_externallyOwned; } }
 
     public TerminalSessionService(
-        IRepository repository,
-        LlmCliEnvironmentService envService,
-        IGitService gitService,
-        McpSettings mcpSettings,
-        IRemoteStateService remoteStateService,
-        ITerminalIoObserverService ioObserverService,
-        IHostApplicationLifetime appLifetime,
+        ITerminalStateService stateService,
+        TerminalRunner runner,
         ILocalClientTracker localClientTracker)
     {
-        _stateService = new TerminalStateService(repository, gitService, remoteStateService, ioObserverService);
-        var commandService = new CommandService(envService, mcpSettings);
-        _runner = new TerminalRunner(_stateService, commandService, appLifetime);
+        _stateService = stateService;
+        _runner = runner;
         _localClientTracker = localClientTracker;
     }
 

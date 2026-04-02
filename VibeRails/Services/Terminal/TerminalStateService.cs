@@ -1,24 +1,9 @@
-using System.Threading.Channels;
 using Serilog;
 using VibeRails.DB;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
-
-public interface ITerminalStateService
-{
-    Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default);
-    void PublishSessionStart(string sessionId, string cli, string workDir, string? envName, IReadOnlyList<string> setupCommands, string launchCommand);
-    void LogOutput(string sessionId, ReadOnlyMemory<byte> data, TerminalIoSource source = TerminalIoSource.Pty);
-    void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown);
-    void RecordResize(string sessionId, int cols, int rows, TerminalIoSource source);
-    void RecordRemoteCommand(string sessionId, string command, string? payload, TerminalIoSource source = TerminalIoSource.RemoteWebUi);
-    void TrackRemoteConnection(string sessionId, IRemoteTerminalConnection connection);
-    Task<bool> SendRemoteCommandAsync(string sessionId, string command, string? payload = null, CancellationToken ct = default);
-    Task RequestRemoteViewerDisconnectAsync(string sessionId, string reason);
-    Task CompleteSessionAsync(string sessionId, int exitCode);
-}
 
 public class TerminalStateService : ITerminalStateService, IDisposable
 {
@@ -30,7 +15,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     // Shared across scoped TerminalStateService instances so terminal state remains
     // consistent across start/WS/reconnect/stop requests.
     private static readonly Dictionary<string, InputAccumulator> s_inputAccumulators = new();
-    private static readonly Dictionary<string, SessionOutputWriter> s_outputWriters = new();
+    private static readonly Dictionary<string, ISessionOutputWriter> s_outputWriters = new();
     private static readonly Dictionary<string, IRemoteTerminalConnection> s_remoteConnections = new();
     private static readonly Dictionary<string, SessionActivityState> s_sessionActivity = new();
     private static readonly Lock s_stateLock = new();
@@ -55,13 +40,15 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         await _repository.CreateSessionAsync(sessionId, cli, envName, workDir);
 
         var now = DateTimeOffset.UtcNow;
+        var outputWriter = new SessionOutputWriter(_repository);
+        outputWriter.Initialize(sessionId, Terminal.DefaultCols, Terminal.DefaultRows);
         lock (s_stateLock)
         {
             s_inputAccumulators[sessionId] = new InputAccumulator(async inputText =>
             {
                 await _repository.RecordUserInputAsync(sessionId, inputText, _gitService, ct);
             });
-            s_outputWriters[sessionId] = new SessionOutputWriter(sessionId, _repository);
+            s_outputWriters[sessionId] = outputWriter;
             s_sessionActivity[sessionId] = new SessionActivityState(now, cli);
         }
         StartIdleMonitor(sessionId);
@@ -98,7 +85,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         if (busyOutputEvent.HasValue)
             _ioObserverService.PublishSessionBusy(busyOutputEvent.Value);
 
-        SessionOutputWriter? outputWriter;
+        ISessionOutputWriter? outputWriter;
         lock (s_stateLock)
         {
             s_outputWriters.TryGetValue(sessionId, out outputWriter);
@@ -142,6 +129,14 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     {
         var now = DateTimeOffset.UtcNow;
         MarkGenericActivity(sessionId, now);
+
+        ISessionOutputWriter? outputWriter;
+        lock (s_stateLock)
+        {
+            s_outputWriters.TryGetValue(sessionId, out outputWriter);
+        }
+        outputWriter?.NotifyResize(cols, rows);
+
         _ioObserverService.PublishResize(new TerminalResizeEvent(
             sessionId,
             source,
@@ -201,7 +196,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
 
     public async Task CompleteSessionAsync(string sessionId, int exitCode)
     {
-        SessionOutputWriter? outputWriter;
+        ISessionOutputWriter? outputWriter;
         InputAccumulator? accumulatorToDispose;
         SessionActivityState? activityState;
         lock (s_stateLock)
@@ -380,89 +375,6 @@ public class TerminalStateService : ITerminalStateService, IDisposable
 
             activity.LastActivityUtc = now;
             activity.IdleNotified = false;
-        }
-    }
-
-    private sealed class SessionActivityState : IDisposable
-    {
-        private readonly CancellationTokenSource _cts = new();
-
-        public SessionActivityState(DateTimeOffset now, string cli)
-        {
-            LastInputUtc = now;
-            LastOutputUtc = now;
-            LastActivityUtc = now;
-            Cli = cli;
-        }
-
-        public string Cli { get; }
-        public DateTimeOffset LastInputUtc { get; set; }
-        public DateTimeOffset LastOutputUtc { get; set; }
-        public DateTimeOffset LastActivityUtc { get; set; }
-        public bool IdleNotified { get; set; }
-        public CancellationToken Token => _cts.Token;
-
-        public void Dispose()
-        {
-            _cts.Cancel();
-            _cts.Dispose();
-        }
-    }
-
-    private sealed class SessionOutputWriter : IAsyncDisposable
-    {
-        private readonly string _sessionId;
-        private readonly IRepository _repository;
-        private readonly Channel<byte[]> _channel = Channel.CreateUnbounded<byte[]>(
-            new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
-        private readonly Task _worker;
-        private int _disposed;
-
-        public SessionOutputWriter(string sessionId, IRepository repository)
-        {
-            _sessionId = sessionId;
-            _repository = repository;
-            _worker = Task.Run(DrainAsync);
-        }
-
-        public void Enqueue(byte[] payload)
-        {
-            if (payload.Length == 0 || Volatile.Read(ref _disposed) == 1)
-                return;
-
-            _channel.Writer.TryWrite(payload);
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 1)
-                return;
-
-            _channel.Writer.TryComplete();
-
-            try
-            {
-                await _worker.ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[TerminalState] Output writer shutdown failed for session {SessionId}", _sessionId);
-            }
-        }
-
-        private async Task DrainAsync()
-        {
-            await foreach (var payload in _channel.Reader.ReadAllAsync().ConfigureAwait(false))
-            {
-                try
-                {
-                    await _repository.LogSessionOutputAsync(_sessionId, payload, false).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error(ex, "[TerminalState] Failed to persist terminal output for session {SessionId}", _sessionId);
-                }
-            }
         }
     }
 }

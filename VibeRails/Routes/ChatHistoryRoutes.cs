@@ -121,6 +121,43 @@ public static class ChatHistoryRoutes
             ));
         }).WithName("GetChatHistoryReplay");
 
+        app.MapGet("/api/v1/chatHistory/{sessionId}/terminal-replay", async (
+            IRepository repository,
+            string sessionId,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+                return Results.BadRequest(new ErrorResponse("Session id is required."));
+
+            // Legacy SessionLogs — fine-grained per-chunk with timestamps, used for animated replay
+            var legacyChunks = await repository.GetSessionLogChunksAsync(sessionId, cancellationToken);
+            if (legacyChunks.Count == 0)
+                return Results.NotFound(new ErrorResponse("No session replay data found."));
+
+            // Build frames with relative timing from legacy chunks
+            var startTime = legacyChunks[0].TimestampUtc;
+            var frames = legacyChunks.Select(c => new TerminalReplayFrame(
+                Convert.ToBase64String(c.Content),
+                (long)(c.TimestampUtc - startTime).TotalMilliseconds
+            )).ToList();
+
+            // Enriched TerminalSessionLogs — buffered with cols/rows/alt screen metadata
+            var enrichedLogs = await repository.GetTerminalSessionLogsAsync(sessionId, cancellationToken);
+            var enrichedChunks = enrichedLogs.Select(l => new TerminalReplayChunk(
+                l.Sequence,
+                l.IsAlternateScreen,
+                Convert.ToBase64String(l.Data),
+                l.Cols,
+                l.Rows
+            )).ToList();
+
+            // Use enriched chunk dimensions for initial terminal size (fall back to 120x40)
+            var initialCols = enrichedChunks.Count > 0 ? enrichedChunks[0].Cols : 120;
+            var initialRows = enrichedChunks.Count > 0 ? enrichedChunks[0].Rows : 40;
+
+            return Results.Ok(new TerminalReplayResponse(sessionId, initialCols, initialRows, enrichedChunks, frames));
+        }).WithName("GetTerminalReplay");
+
         app.MapGet("/api/v1/chatHistory/{sessionId}/Summary", async (
            IChatHistoryService chatHistoryService,
            string sessionId,
