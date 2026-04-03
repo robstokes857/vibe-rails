@@ -1310,8 +1310,6 @@ class TerminalManager {
         tab.state.title = `${meta.displayName} Terminal`;
         this.saveTabTitle(tab.state.id, tab.state.title);
         this.updateUi();
-
-        this.app.showToast('Terminal Started', `Launching ${meta.displayName}...`, 'success');
     }
 
     async startWithOptions(options) {
@@ -1420,7 +1418,6 @@ class TerminalManager {
         });
         this.updateUi();
 
-        this.app.showToast('Terminal Started', `Launching ${requestedLabel || meta.displayName}...`, 'success');
         return {
             tabId: tab.state.id,
             started: true,
@@ -1485,7 +1482,6 @@ class TerminalManager {
         }
 
         this.updateUi();
-        this.app.showToast('Terminal Reconnected', 'Successfully reconnected to terminal session', 'success');
     }
 
     getSelectionMeta(selection) {

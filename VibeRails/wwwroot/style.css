@@ -1321,6 +1321,7 @@ button:hover .card-nav-cog {
 }
 
 
+
 .project-logo-wrapper {
     width: 56px;
     height: 56px;
@@ -3901,7 +3902,7 @@ input.form-control:disabled {
 /* ── Chat History Sidebar ─────────────────────────────────────────────────── */
 .vb-terminal-focus-layout {
     --ch-sidebar-width: 268px;
-    --ch-sidebar-peek: 46px;
+    --ch-sidebar-peek: 56px;
     display: grid;
     grid-template-columns: var(--ch-sidebar-width) minmax(0, 1fr);
     column-gap: 0.5rem;
@@ -4096,13 +4097,61 @@ input.form-control:disabled {
     gap: 6px;
 }
 
-.ch-filter-label {
-    display: block;
+.ch-filter-drawer-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: 1px solid rgba(121, 141, 198, 0.12);
+    border-radius: 6px;
+    padding: 5px 8px;
+    cursor: pointer;
+    color: #7d86a5;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.ch-filter-drawer-toggle:hover {
+    color: #aeb9da;
+    border-color: rgba(121, 141, 198, 0.28);
+}
+
+.ch-filter-drawer-label {
     font-size: 0.64rem;
     font-weight: 700;
-    color: #7d86a5;
     letter-spacing: 0.08em;
     text-transform: uppercase;
+}
+
+.ch-filter-drawer-chevron {
+    font-size: 0.55rem;
+    transition: transform 0.2s ease;
+}
+
+.ch-filter-drawer-toggle[aria-expanded="true"] .ch-filter-drawer-chevron {
+    transform: rotate(180deg);
+}
+
+.ch-filter-drawer-content {
+    display: none;
+}
+
+.ch-filter-drawer-content.is-open {
+    display: block;
+}
+
+.ch-filter-count-badge {
+    font-size: 0.58rem;
+    font-weight: 700;
+    background: rgba(89, 132, 255, 0.42);
+    color: #fff;
+    border-radius: 999px;
+    min-width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    margin-left: auto;
 }
 
 .ch-llm-filter-group {
@@ -4376,8 +4425,8 @@ input.form-control:disabled {
 .ch-sidebar-collapsed-icon {
     display: none;
     position: absolute;
-    top: 8px;
-    left: 6px;
+    top: 12px;
+    left: 10px;
     width: 34px;
     height: 34px;
     border-radius: 8px;
@@ -4421,9 +4470,14 @@ input.form-control:disabled {
 
 /* Collapsed rows – shrink to just the icon */
 .vb-terminal-focus-layout.vb-history-under .ch-item {
-    padding: 6px;
+    padding: 8px 10px;
     gap: 0;
-    justify-content: center;
+    justify-content: flex-start;
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-item-active {
+    border-left: 2px solid #a6e3a1;
+    padding-left: 8px;
 }
 
 .vb-terminal-focus-layout.vb-history-under .ch-item-content,
@@ -4431,15 +4485,7 @@ input.form-control:disabled {
     display: none;
 }
 
-.vb-terminal-focus-layout.vb-history-under .ch-item-active {
-    border-left: none;
-    padding-left: 6px;
-    background: rgba(59, 130, 246, 0.12);
-}
 
-.vb-terminal-focus-layout.vb-history-under .ch-item-active .ch-item-icon {
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
-}
 
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar-settings-panel {
     opacity: 0;
@@ -4653,7 +4699,7 @@ input.form-control:disabled {
 }
 
 .ch-item-active {
-    border-left: 2px solid #3b82f6;
+    border-left: 2px solid #a6e3a1;
     padding-left: 10px;
 }
 
@@ -5950,6 +5996,4 @@ input.form-control:disabled {
         width: calc(100vw - 1rem) !important;
     }
 }
-
-
 

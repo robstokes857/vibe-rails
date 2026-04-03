@@ -8,8 +8,9 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
 {
     private const int FlushThreshold = 5 * 1024 * 1024; // 5MB
 
-    // Longest alt-screen sequence is ESC[?1049h = 8 bytes; an incomplete prefix is at most 7.
-    private const int MaxResidualLength = 7;
+    // Max bytes a partial CSI private-mode sequence can span (e.g. ESC[?1049;2004;25
+    // without the trailing h/l). Multi-mode sequences can be longer than standalone ones.
+    private const int MaxResidualLength = 30;
 
     private readonly IRepository _repository;
     private readonly Channel<WriterMessage> _channel = Channel.CreateUnbounded<WriterMessage>(
@@ -177,7 +178,7 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
                     // Flush main buffer so it gets a sequence number BEFORE the alt content
                     await FlushBufferAsync(_mainBuffer, false).ConfigureAwait(false);
 
-                    // The enter sequence (ESC[?1049h) goes to the alt buffer so replay
+                    // The enter sequence goes to the alt buffer so replay
                     // properly enters alt-screen from the alt chunk
                     _altBuffer.Write(workData, transitionOffset, transitionLength);
                     _inAltScreen = true;
@@ -239,39 +240,64 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
     /// <summary>
     /// Finds the next alternate screen transition in the data starting from offset.
     /// Returns (offset of ESC, length of full sequence, true=entering alt / false=exiting alt), or null.
-    /// Sequences: ESC[?1049h/l (8 bytes), ESC[?47h/l (6 bytes)
+    /// Handles both standalone (ESC[?1049h) and multi-mode (ESC[?1049;25h) sequences.
+    /// Recognised alt-screen modes: 47, 1047, 1049.
     /// </summary>
     private static (int Offset, int Length, bool EnteringAlt)? FindNextAltScreenTransition(byte[] data, int start)
     {
         for (var i = start; i < data.Length - 2; i++)
         {
+            // Look for ESC [ ?
             if (data[i] != 0x1B || data[i + 1] != 0x5B)
                 continue;
+            if (i + 2 >= data.Length || data[i + 2] != 0x3F) // '?'
+                continue;
 
-            // ESC[?1049h / ESC[?1049l  (8 bytes total)
-            if (i + 7 < data.Length &&
-                data[i + 2] == 0x3F && // ?
-                data[i + 3] == 0x31 && // 1
-                data[i + 4] == 0x30 && // 0
-                data[i + 5] == 0x34 && // 4
-                data[i + 6] == 0x39)   // 9
-            {
-                if (data[i + 7] == 0x68) // h — enter
-                    return (i, 8, true);
-                if (data[i + 7] == 0x6C) // l — exit
-                    return (i, 8, false);
-            }
+            // Parse the CSI parameter list: semicolon-separated decimal numbers
+            // ending with a final byte in the 0x40-0x7E range (we care about 'h'/'l').
+            var paramStart = i + 3;
+            var pos = paramStart;
+            var hasAltMode = false;
+            var currentParam = 0;
+            var hadDigit = false;
 
-            // ESC[?47h / ESC[?47l  (6 bytes total)
-            if (i + 5 < data.Length &&
-                data[i + 2] == 0x3F && // ?
-                data[i + 3] == 0x34 && // 4
-                data[i + 4] == 0x37)   // 7
+            while (pos < data.Length)
             {
-                if (data[i + 5] == 0x68) // h — enter
-                    return (i, 6, true);
-                if (data[i + 5] == 0x6C) // l — exit
-                    return (i, 6, false);
+                var b = data[pos];
+                if (b >= 0x30 && b <= 0x39) // digit
+                {
+                    currentParam = currentParam * 10 + (b - 0x30);
+                    hadDigit = true;
+                    pos++;
+                }
+                else if (b == 0x3B) // ';' — parameter separator
+                {
+                    if (hadDigit && (currentParam == 47 || currentParam == 1047 || currentParam == 1049))
+                        hasAltMode = true;
+                    currentParam = 0;
+                    hadDigit = false;
+                    pos++;
+                }
+                else if (b >= 0x40 && b <= 0x7E) // final byte
+                {
+                    // Check the last accumulated parameter
+                    if (hadDigit && (currentParam == 47 || currentParam == 1047 || currentParam == 1049))
+                        hasAltMode = true;
+
+                    if (hasAltMode && (b == 0x68 || b == 0x6C)) // 'h' or 'l'
+                    {
+                        var seqLen = pos - i + 1;
+                        return (i, seqLen, b == 0x68);
+                    }
+
+                    // Valid CSI but no alt-screen mode — stop parsing this sequence
+                    break;
+                }
+                else
+                {
+                    // Unexpected byte — malformed sequence, stop
+                    break;
+                }
             }
         }
 
@@ -280,12 +306,12 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
 
     /// <summary>
     /// Checks if the tail of data[offset..] could be the start of an incomplete
-    /// alt-screen escape sequence. Returns how many trailing bytes to hold back.
+    /// CSI private-mode sequence that might contain an alt-screen mode (47/1047/1049).
+    /// Returns how many trailing bytes to hold back.
     /// </summary>
     private static int GetTailResidualLength(byte[] data, int offset)
     {
         // Look backwards from the end for an ESC byte (0x1B) within the last MaxResidualLength bytes.
-        // If found, check whether the bytes after it are a valid prefix of our target sequences.
         var searchStart = Math.Max(offset, data.Length - MaxResidualLength);
         for (var escPos = data.Length - 1; escPos >= searchStart; escPos--)
         {
@@ -302,36 +328,33 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
             // ESC[ — could be our sequence, check prefix validity
             if (remaining == 2) return 2;
 
-            // ESC[? — required prefix for our sequences
+            // ESC[? — required prefix for private-mode sequences
             if (data[escPos + 2] != 0x3F) continue;
             if (remaining == 3) return 3;
 
-            // ESC[?1... or ESC[?4... — valid prefixes for ?1049 or ?47
-            var d3 = data[escPos + 3];
-            if (d3 == 0x31) // '1' — prefix of ?1049
+            // After ESC[?, check if the remaining bytes are valid CSI params
+            // (digits and semicolons) without a final byte. If so, this is an
+            // incomplete private-mode sequence — hold it back.
+            var allParamChars = true;
+            for (var k = escPos + 3; k < data.Length; k++)
             {
-                // ESC[?1, ESC[?10, ESC[?104, ESC[?1049 (need h/l)
-                if (remaining <= 7) // up to ESC[?1049 (7 bytes, missing final h/l)
+                var b = data[k];
+                if ((b >= 0x30 && b <= 0x39) || b == 0x3B) // digit or ';'
+                    continue;
+                if (b >= 0x40 && b <= 0x7E) // final byte — sequence is complete, no residual
                 {
-                    // Validate each byte in the prefix: 0, 4, 9
-                    ReadOnlySpan<byte> expected = [0x30, 0x34, 0x39]; // '0', '4', '9'
-                    for (var k = 0; k < remaining - 4 && k < expected.Length; k++)
-                    {
-                        if (data[escPos + 4 + k] != expected[k])
-                            goto nextEsc; // not a valid ?1049 prefix
-                    }
-                    return remaining;
+                    allParamChars = false;
+                    break;
                 }
-            }
-            else if (d3 == 0x34) // '4' — prefix of ?47
-            {
-                // ESC[?4, ESC[?47 (need h/l)
-                if (remaining == 4) return 4;
-                if (remaining == 5 && data[escPos + 4] == 0x37) return 5; // ESC[?47
+                // Unexpected byte — not a valid CSI sequence
+                allParamChars = false;
+                break;
             }
 
-            // Not a valid prefix of our target sequences
-            nextEsc:;
+            if (allParamChars)
+                return remaining; // incomplete CSI ?... sequence, hold it back
+
+            continue; // complete or invalid — try earlier ESC
         }
 
         return 0;

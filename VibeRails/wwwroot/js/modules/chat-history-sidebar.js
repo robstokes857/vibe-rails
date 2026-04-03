@@ -60,8 +60,13 @@ export class ChatHistorySidebar {
                             <input type="text" class="ch-search-input" id="ch-search-input" placeholder="Search sessions..." autocomplete="off">
                         </div>
                         <div class="ch-sidebar-controls">
-                            <label class="ch-filter-label">LLM</label>
-                            <div class="ch-llm-filter-group" id="ch-llm-filter-group"></div>
+                            <button class="ch-filter-drawer-toggle" id="ch-filter-drawer-toggle" type="button" aria-expanded="false">
+                                <span class="ch-filter-drawer-label">Filters</span>
+                                <i class="fa-solid fa-chevron-down ch-filter-drawer-chevron"></i>
+                            </button>
+                            <div class="ch-filter-drawer-content" id="ch-filter-drawer-content">
+                                <div class="ch-llm-filter-group" id="ch-llm-filter-group"></div>
+                            </div>
                         </div>
                     </div>
                     <div class="ch-sidebar-body" id="ch-sidebar-body"></div>
@@ -100,6 +105,12 @@ export class ChatHistorySidebar {
         this.refreshButton = root.querySelector('#ch-sidebar-refresh-btn');
         this.closeButton = root.querySelector('#ch-sidebar-close-btn');
         this.llmFilterContainer = root.querySelector('#ch-llm-filter-group');
+        this.filterDrawerToggle = root.querySelector('#ch-filter-drawer-toggle');
+        this.filterDrawerContent = root.querySelector('#ch-filter-drawer-content');
+        this.filterDrawerToggle?.addEventListener('click', () => {
+            const isOpen = this.filterDrawerContent.classList.toggle('is-open');
+            this.filterDrawerToggle.setAttribute('aria-expanded', String(isOpen));
+        });
         const syncCloseButtonState = () => {
             if (!sidebar || !this.closeButton) {
                 return;
@@ -409,6 +420,21 @@ export class ChatHistorySidebar {
         }
 
         const options = this._getLlmFilterOptions();
+        // Update drawer toggle badge count
+        if (this.filterDrawerToggle) {
+            let badge = this.filterDrawerToggle.querySelector('.ch-filter-count-badge');
+            if (this.llmFilters.size > 0) {
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'ch-filter-count-badge';
+                    this.filterDrawerToggle.appendChild(badge);
+                }
+                badge.textContent = this.llmFilters.size;
+            } else if (badge) {
+                badge.remove();
+            }
+        }
+
         this.llmFilterContainer.innerHTML = options.map((option) => {
             const isReset = option.value === 'reset';
             const isActive = isReset ? false : this.llmFilters.has(option.value);
