@@ -183,8 +183,9 @@ public sealed class AnsiParser
                 FullReset();
                 _state = ParserState.Ground;
                 break;
-            case 0x5C: // \ -> ST (string terminator after DCS/OSC/etc)
-                if (_state == ParserState.OscString) DispatchOsc();
+            case 0x5C: // \ -> ST (string terminator)
+                // OSC/DCS already dispatched when ESC was seen (in ProcessOsc/DcsPassthrough),
+                // so this just completes the ESC \ sequence by returning to ground.
                 _state = ParserState.Ground;
                 break;
             default:
@@ -218,8 +219,11 @@ public sealed class AnsiParser
 
         if (b == 0x3B) // ;
         {
-            _paramCount++;
-            if (_paramCount < _params.Length) _params[_paramCount] = 0;
+            if (_paramCount + 1 < _params.Length)
+            {
+                _paramCount++;
+                _params[_paramCount] = 0;
+            }
             _paramHadDigit = false;
             _state = ParserState.CsiParam;
             return;
@@ -228,8 +232,11 @@ public sealed class AnsiParser
         if (b == 0x3A) // : (sub-param separator, used in extended color)
         {
             // Treat same as ; for our purposes
-            _paramCount++;
-            if (_paramCount < _params.Length) _params[_paramCount] = 0;
+            if (_paramCount + 1 < _params.Length)
+            {
+                _paramCount++;
+                _params[_paramCount] = 0;
+            }
             _paramHadDigit = false;
             _state = ParserState.CsiParam;
             return;
@@ -254,8 +261,8 @@ public sealed class AnsiParser
         // Final byte 0x40-0x7E
         if (b >= 0x40 && b <= 0x7E)
         {
-            // Finalise current param count
-            if (_paramHadDigit || _paramCount > 0)
+            // Finalise current param count (clamp to array size)
+            if ((_paramHadDigit || _paramCount > 0) && _paramCount < _params.Length)
                 _paramCount++; // total filled params
 
             DispatchCsi(b, _intermediate);
@@ -392,6 +399,7 @@ public sealed class AnsiParser
             case 12:   break; // cursor blink
             case 25:   _buffer.SetCursorVisible(enable); break;
             case 47:   // alternate screen (old)
+            case 1047: // alternate screen with clear (xterm)
                 if (enable) _buffer.EnterAlternateScreen(); else _buffer.ExitAlternateScreen(); break;
             case 1000: break; // mouse tracking
             case 1002: break;

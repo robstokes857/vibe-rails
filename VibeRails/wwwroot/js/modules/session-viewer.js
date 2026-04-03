@@ -130,11 +130,15 @@ export async function showReplayModal(sessionId) {
         speedSelect.appendChild(opt);
     }
 
+    const altBadge = document.createElement('span');
+    altBadge.style.cssText = 'display:none;background:#5a3e8e;color:#e0d0ff;font-size:10px;font-family:monospace;padding:2px 6px;border-radius:3px;white-space:nowrap;';
+    altBadge.textContent = 'ALT';
+
     const progress = document.createElement('span');
     progress.style.cssText = 'color:#888;font-size:11px;font-family:monospace;margin-left:auto;';
     progress.textContent = '';
 
-    toolbar.append(playBtn, speedSelect, progress);
+    toolbar.append(playBtn, speedSelect, altBadge, progress);
 
     // Terminal container
     const termEl = document.createElement('div');
@@ -171,6 +175,7 @@ export async function showReplayModal(sessionId) {
 
     let frames = [];
     let resizeEvents = []; // [{afterFrameIndex, cols, rows}]
+    let altScreenEvents = []; // [{afterFrameIndex, isAlt}]
     let initialCols = 120;
     let initialRows = 40;
     try {
@@ -182,16 +187,20 @@ export async function showReplayModal(sessionId) {
             delayMs: f.delayMs
         }));
 
-        // Build resize timeline from enriched chunks — when cols/rows change between
-        // consecutive non-alt chunks, we need to resize the replay terminal.
+        // Build resize + alt-screen timelines from enriched chunks.
         // Map each enriched chunk to a byte offset in the combined legacy output so we
-        // can figure out which legacy frame index corresponds to each resize.
+        // can figure out which legacy frame index corresponds to each event.
         const chunks = json.chunks || [];
         let prevCols = initialCols, prevRows = initialRows;
+        let prevAlt = false;
         let chunkByteOffset = 0;
         for (const chunk of chunks) {
             const chunkBytes = atob(chunk.data).length;
-            if (chunk.cols !== prevCols || chunk.rows !== prevRows) {
+
+            const colsChanged = chunk.cols !== prevCols || chunk.rows !== prevRows;
+            const altChanged = !!chunk.isAlternateScreen !== prevAlt;
+
+            if (colsChanged || altChanged) {
                 // Find the legacy frame closest to this byte offset
                 let accumulated = 0;
                 let frameIdx = 0;
@@ -199,9 +208,15 @@ export async function showReplayModal(sessionId) {
                     accumulated += frames[i].data.length;
                     if (accumulated >= chunkByteOffset) { frameIdx = i; break; }
                 }
-                resizeEvents.push({ afterFrameIndex: frameIdx, cols: chunk.cols, rows: chunk.rows });
-                prevCols = chunk.cols;
-                prevRows = chunk.rows;
+                if (colsChanged) {
+                    resizeEvents.push({ afterFrameIndex: frameIdx, cols: chunk.cols, rows: chunk.rows });
+                    prevCols = chunk.cols;
+                    prevRows = chunk.rows;
+                }
+                if (altChanged) {
+                    altScreenEvents.push({ afterFrameIndex: frameIdx, isAlt: !!chunk.isAlternateScreen });
+                    prevAlt = !!chunk.isAlternateScreen;
+                }
             }
             chunkByteOffset += chunkBytes;
         }
@@ -222,22 +237,37 @@ export async function showReplayModal(sessionId) {
     let frameIndex = 0;
     let playing = false;
     let nextResizeIdx = 0; // index into resizeEvents
+    let nextAltIdx = 0;    // index into altScreenEvents
+    let currentCols = initialCols;
+    let currentRows = initialRows;
     const maxIdleMs = 500;
 
     function getSpeed() {
         return Number.parseInt(speedSelect.value, 10);
     }
 
-    function updateProgress() {
-        progress.textContent = `${frameIndex} / ${frames.length}`;
+    function updateDimensions(cols, rows) {
+        currentCols = cols;
+        currentRows = rows;
+        updateProgress();
     }
 
-    // Apply any pending resize events up to the given frame index
+    function updateProgress() {
+        progress.textContent = `${currentCols}\u00d7${currentRows}  ${frameIndex} / ${frames.length}`;
+    }
+
+    // Apply any pending resize/alt-screen events up to the given frame index
     function applyPendingResizes(idx) {
         while (nextResizeIdx < resizeEvents.length && resizeEvents[nextResizeIdx].afterFrameIndex <= idx) {
             const ev = resizeEvents[nextResizeIdx];
             term.resize(ev.cols, ev.rows);
+            updateDimensions(ev.cols, ev.rows);
             nextResizeIdx++;
+        }
+        while (nextAltIdx < altScreenEvents.length && altScreenEvents[nextAltIdx].afterFrameIndex <= idx) {
+            const ev = altScreenEvents[nextAltIdx];
+            altBadge.style.display = ev.isAlt ? '' : 'none';
+            nextAltIdx++;
         }
     }
 
@@ -293,8 +323,11 @@ export async function showReplayModal(sessionId) {
             // Restart
             frameIndex = 0;
             nextResizeIdx = 0;
+            nextAltIdx = 0;
+            altBadge.style.display = 'none';
             term.reset();
             term.resize(initialCols, initialRows);
+            updateDimensions(initialCols, initialRows);
         }
         playing = true;
         playBtn.textContent = '\u23F8';
@@ -316,6 +349,6 @@ export async function showReplayModal(sessionId) {
     // Auto-start — reset and size to recording dimensions
     term.reset();
     term.resize(initialCols, initialRows);
-    updateProgress();
+    updateDimensions(initialCols, initialRows);
     play();
 }

@@ -851,6 +851,19 @@ public class EscapeSequenceTests
     }
 
     [Fact]
+    public void DECSET_1047_AlternateScreen()
+    {
+        var t = Make(cols: 5, rows: 2);
+        Write(t, "HELLO");
+        Write(t, "\u001B[?1047h");
+        Assert.True(t.IsAlternateScreen);
+        Assert.Equal(E, Char(t, 0, 0)); // alt screen is cleared
+        Write(t, "\u001B[?1047l");
+        Assert.False(t.IsAlternateScreen);
+        Assert.Equal('H', Char(t, 0, 0)); // main screen restored
+    }
+
+    [Fact]
     public void DECSET_1049_AltScreen_SaveRestoreCursor()
     {
         var t = Make(cols: 5, rows: 5);
@@ -1336,5 +1349,47 @@ public class EscapeSequenceTests
 
         Write(t, "\u001B[?2026l");
         Assert.False(t.SyncOutputActive);
+    }
+
+    // ------------------------------------------------------------------
+    // Parser robustness — malformed input must not crash
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void CSI_ExcessiveParams_DoesNotCrash()
+    {
+        // 20 params exceeds the 16-element _params array.
+        // Parser must clamp gracefully, not throw IndexOutOfRangeException.
+        var t = Make();
+        Write(t, "\u001B[1;2;3;4;5;6;7;8;9;10;11;12;13;14;15;16;17;18;19;20m");
+        // No assertion on result — the point is it must not crash.
+    }
+
+    [Fact]
+    public void CSI_ExcessiveParams_SGR_ProcessesValidPrefix()
+    {
+        // First 16 params should still be processed correctly
+        var t = Make();
+        Write(t, "\u001B[1;2;3;4;5;6;7;8;9;10;11;12;13;14;15;16;17;18;19;20mA");
+        // Bold (param 1) should have been applied to the character
+        Assert.True(t.GetSnapshot()[0, 0].Attributes.HasFlag(CellAttributes.Bold));
+    }
+
+    [Fact]
+    public void OSC_TerminatedByEscBackslash_ReturnsToGround()
+    {
+        // ESC ] 0 ; t i t l e ESC \  — then normal text should print
+        var t = Make();
+        Write(t, "\u001B]0;hello\u001B\\A");
+        Assert.Equal('A', Char(t, 0, 0));
+    }
+
+    [Fact]
+    public void DCS_TerminatedByEscBackslash_ReturnsToGround()
+    {
+        // ESC P ... ESC \  — then normal text should print
+        var t = Make();
+        Write(t, "\u001BPsome dcs data\u001B\\B");
+        Assert.Equal('B', Char(t, 0, 0));
     }
 }
