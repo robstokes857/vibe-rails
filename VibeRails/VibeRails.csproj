@@ -70,6 +70,7 @@
       <Link>scripts\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </Content>
   </ItemGroup>
+
   <ItemGroup>
     <TrimmerRootAssembly Include="Microsoft.ML.OnnxRuntime" />
   </ItemGroup>

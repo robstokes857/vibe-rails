@@ -17,7 +17,7 @@ internal static class TerminalResizeCoordinator
     /// When enabled, a debounced Ctrl+L is sent after resize settles.
     /// Enabled to fix incomplete ConPTY redraws on font-size change — see TERMINALS.md open bug.
     /// </summary>
-    public static bool EnableDebouncedRedrawOnResize { get; set; } = true;
+    public static bool EnableDebouncedRedrawOnResize { get; set; } = false;
 
     public static void ApplyResize(
         Terminal terminal,
