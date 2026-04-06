@@ -1,6 +1,4 @@
 using System.Text;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 using VibeRails.DTOs;
 using VibeRails.Utils;
 

@@ -3,6 +3,11 @@
 ###############################################################################
 * text=auto
 
+# Shell scripts must always check out with LF endings, regardless of platform.
+# Without this, Git for Windows can normalize them to CRLF on checkout, which
+# breaks the shebang line on Linux/macOS ("bad interpreter: bash\r").
+*.sh text eol=lf
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

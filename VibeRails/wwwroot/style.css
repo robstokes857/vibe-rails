@@ -4203,6 +4203,72 @@ input.form-control:disabled {
     object-fit: contain;
 }
 
+.ch-project-filter-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(121, 141, 198, 0.08);
+}
+
+.ch-project-filter-group:empty {
+    display: none;
+}
+
+.ch-project-filter-badge {
+    border: 1px solid rgba(121, 141, 198, 0.16);
+    border-radius: 999px;
+    background: rgba(10, 13, 20, 0.64);
+    color: #aeb9da;
+    padding: 5px 10px;
+    min-height: 29px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.69rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    max-width: 140px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.ch-project-filter-badge span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ch-project-filter-badge:hover {
+    color: #eef3ff;
+    border-color: rgba(121, 141, 198, 0.34);
+    background: rgba(20, 25, 38, 0.88);
+    transform: translateY(-1px);
+}
+
+.ch-project-filter-badge.is-active {
+    color: #ffffff;
+    border-color: rgba(89, 132, 255, 0.42);
+    background: linear-gradient(180deg, rgba(45, 70, 134, 0.9), rgba(29, 48, 99, 0.92));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.ch-project-filter-badge.is-reset {
+    color: #c7cee5;
+}
+
+.ch-project-filter-badge:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.ch-project-filter-badge i {
+    font-size: 0.55rem;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
 .ch-sidebar-settings-panel {
     position: absolute;
     inset: 0;
@@ -4766,8 +4832,7 @@ input.form-control:disabled {
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 4px;
     padding: 1px 7px;
-    cursor: pointer;
-    transition: all 0.15s ease;
+    cursor: default;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4778,24 +4843,6 @@ input.form-control:disabled {
 .ch-project-badge i {
     font-size: 0.55rem;
     opacity: 0.7;
-}
-
-.ch-project-badge:hover {
-    color: #8993b6;
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.12);
-}
-
-.ch-project-badge-active {
-    color: #60a5fa;
-    background: rgba(59, 130, 246, 0.12);
-    border-color: rgba(59, 130, 246, 0.3);
-}
-
-.ch-project-badge-active:hover {
-    color: #93bbfd;
-    background: rgba(59, 130, 246, 0.18);
-    border-color: rgba(59, 130, 246, 0.4);
 }
 
 .ch-item-relationship {

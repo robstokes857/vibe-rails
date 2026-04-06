@@ -14,6 +14,7 @@ namespace VibeRails.Utils
         public const string ENVS_SUBDIR = "envs";
         public const string SANDBOXES_SUBDIR = "sandboxes";
         public const string HISTORY_SUBDIR = "history";
+        public const string MODELS_SUBDIR = "models";
         public const string VECTOR_SUBDIR = "vector";
 
         // File names

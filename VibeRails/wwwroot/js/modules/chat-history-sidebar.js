@@ -23,13 +23,14 @@ export class ChatHistorySidebar {
         this.isLoadingPage = false;
         this.isLoadingForSearch = false;
         this.loadFailed = false;
-        this.projectFilter = null;
+        this.projectFilters = new Set();
         this.sidebar = null;
         this.search = null;
         this.body = null;
         this.contextMenu = null;
         this.refreshButton = null;
         this.llmFilterContainer = null;
+        this.projectFilterContainer = null;
     }
 
     static renderHtml() {
@@ -66,6 +67,7 @@ export class ChatHistorySidebar {
                             </button>
                             <div class="ch-filter-drawer-content" id="ch-filter-drawer-content">
                                 <div class="ch-llm-filter-group" id="ch-llm-filter-group"></div>
+                                <div class="ch-project-filter-group" id="ch-project-filter-group"></div>
                             </div>
                         </div>
                     </div>
@@ -105,6 +107,7 @@ export class ChatHistorySidebar {
         this.refreshButton = root.querySelector('#ch-sidebar-refresh-btn');
         this.closeButton = root.querySelector('#ch-sidebar-close-btn');
         this.llmFilterContainer = root.querySelector('#ch-llm-filter-group');
+        this.projectFilterContainer = root.querySelector('#ch-project-filter-group');
         this.filterDrawerToggle = root.querySelector('#ch-filter-drawer-toggle');
         this.filterDrawerContent = root.querySelector('#ch-filter-drawer-content');
         this.filterDrawerToggle?.addEventListener('click', () => {
@@ -191,7 +194,7 @@ export class ChatHistorySidebar {
             this._renderItems();
 
             if (this.filterText && this.hasMore) {
-                void this._loadRemainingPagesForSearch();
+                void this._loadRemainingPagesForFilters();
             }
         });
 
@@ -219,8 +222,46 @@ export class ChatHistorySidebar {
             }
 
             this._syncLlmFilterControls();
+            this._syncFilterCountBadge();
             this._closeContextMenu();
             this._renderItems();
+
+            if (this._hasActiveFilters() && this.hasMore) {
+                void this._loadRemainingPagesForFilters();
+            }
+        });
+
+        this.projectFilterContainer?.addEventListener('click', (e) => {
+            const badge = e.target.closest('[data-project-filter]');
+            if (!badge || badge.disabled) {
+                return;
+            }
+
+            e.stopPropagation();
+            const project = (badge.dataset.projectFilter || '').trim();
+            if (!project) {
+                return;
+            }
+
+            if (project === 'reset') {
+                if (this.projectFilters.size === 0) {
+                    return;
+                }
+                this.projectFilters.clear();
+            } else if (this.projectFilters.has(project)) {
+                this.projectFilters.delete(project);
+            } else {
+                this.projectFilters.add(project);
+            }
+
+            this._syncProjectFilterControls();
+            this._syncFilterCountBadge();
+            this._closeContextMenu();
+            this._renderItems();
+
+            if (this._hasActiveFilters() && this.hasMore) {
+                void this._loadRemainingPagesForFilters();
+            }
         });
 
         body?.addEventListener('scroll', () => {
@@ -274,7 +315,7 @@ export class ChatHistorySidebar {
         this.currentPage = 0;
         this.hasMore = true;
         this.loadFailed = false;
-        this.projectFilter = null;
+        this.projectFilters.clear();
         this._closeContextMenu();
         this._setRefreshButtonState();
         this.body.innerHTML = '<div class="ch-loading"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>';
@@ -340,8 +381,8 @@ export class ChatHistorySidebar {
             this._setRefreshButtonState();
             this._renderItems();
 
-            if (this.filterText && this.hasMore && !this.isLoadingForSearch) {
-                void this._loadRemainingPagesForSearch();
+            if (this._hasActiveFilters() && this.hasMore && !this.isLoadingForSearch) {
+                void this._loadRemainingPagesForFilters();
             }
 
             // If visible items don't fill the container, keep loading
@@ -351,8 +392,8 @@ export class ChatHistorySidebar {
         }
     }
 
-    async _loadRemainingPagesForSearch() {
-        if (this.isLoadingForSearch || !this.filterText || !this.hasMore) {
+    async _loadRemainingPagesForFilters() {
+        if (this.isLoadingForSearch || !this._hasActiveFilters() || !this.hasMore) {
             return;
         }
 
@@ -412,6 +453,11 @@ export class ChatHistorySidebar {
                 button.disabled = isBusy;
             });
         }
+        if (this.projectFilterContainer) {
+            this.projectFilterContainer.querySelectorAll('[data-project-filter]').forEach((button) => {
+                button.disabled = isBusy;
+            });
+        }
     }
 
     _syncLlmFilterControls() {
@@ -420,20 +466,7 @@ export class ChatHistorySidebar {
         }
 
         const options = this._getLlmFilterOptions();
-        // Update drawer toggle badge count
-        if (this.filterDrawerToggle) {
-            let badge = this.filterDrawerToggle.querySelector('.ch-filter-count-badge');
-            if (this.llmFilters.size > 0) {
-                if (!badge) {
-                    badge = document.createElement('span');
-                    badge.className = 'ch-filter-count-badge';
-                    this.filterDrawerToggle.appendChild(badge);
-                }
-                badge.textContent = this.llmFilters.size;
-            } else if (badge) {
-                badge.remove();
-            }
-        }
+        this._syncFilterCountBadge();
 
         this.llmFilterContainer.innerHTML = options.map((option) => {
             const isReset = option.value === 'reset';
@@ -453,6 +486,91 @@ export class ChatHistorySidebar {
                 </button>
             `;
         }).join('');
+    }
+
+    _syncFilterCountBadge() {
+        if (!this.filterDrawerToggle) {
+            return;
+        }
+
+        let badge = this.filterDrawerToggle.querySelector('.ch-filter-count-badge');
+        const totalActive = this.llmFilters.size + this.projectFilters.size;
+        if (totalActive > 0) {
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'ch-filter-count-badge';
+                this.filterDrawerToggle.appendChild(badge);
+            }
+            badge.textContent = totalActive;
+        } else if (badge) {
+            badge.remove();
+        }
+    }
+
+    _syncProjectFilterControls() {
+        if (!this.projectFilterContainer) {
+            return;
+        }
+
+        // Map: workingDirectory (unique key) -> display label
+        const projectMap = new Map();
+        for (const item of this.allItems) {
+            const key = this._getProjectFilterKey(item);
+            if (!key) {
+                continue;
+            }
+            if (!projectMap.has(key)) {
+                projectMap.set(key, this._getProjectDisplayName(item));
+            }
+        }
+
+        if (projectMap.size === 0) {
+            this.projectFilterContainer.innerHTML = '';
+            return;
+        }
+
+        // Prune stale selections (selections are keyed by path)
+        for (const selected of this.projectFilters) {
+            if (!projectMap.has(selected)) {
+                this.projectFilters.delete(selected);
+            }
+        }
+
+        // Sort: current directory first, then alphabetical by label
+        const preferredDir = (this._getPreferredWorkingDirectory() || '').trim();
+        const sorted = [...projectMap.entries()].sort(([keyA, labelA], [keyB, labelB]) => {
+            if (keyA === preferredDir && keyB !== preferredDir) return -1;
+            if (keyB === preferredDir && keyA !== preferredDir) return 1;
+            return labelA.localeCompare(labelB, undefined, { sensitivity: 'base' });
+        });
+
+        const options = [
+            { value: 'reset', label: 'Reset', logoHtml: '<i class="fa-solid fa-rotate-left"></i>' },
+            ...sorted.map(([key, label]) => ({
+                value: key,
+                label,
+                logoHtml: '<i class="fa-solid fa-folder-open"></i>'
+            }))
+        ];
+
+        this.projectFilterContainer.innerHTML = options.map(option => {
+            const isReset = option.value === 'reset';
+            const isActive = isReset ? false : this.projectFilters.has(option.value);
+            const isDisabled = isReset && this.projectFilters.size === 0;
+            const tooltip = isReset ? option.label : option.value;
+            return `
+                <button type="button"
+                    class="ch-project-filter-badge${isActive ? ' is-active' : ''}${isReset ? ' is-reset' : ''}"
+                    data-project-filter="${escapeHtml(option.value)}"
+                    aria-pressed="${isActive ? 'true' : 'false'}"
+                    title="${escapeHtml(tooltip)}"
+                    ${isDisabled ? 'disabled' : ''}>
+                    ${option.logoHtml}
+                    <span>${escapeHtml(option.label)}</span>
+                </button>`;
+        }).join('');
+
+        this._syncFilterCountBadge();
     }
 
     _getRawDisplayName(item) {
@@ -601,6 +719,8 @@ export class ChatHistorySidebar {
             return;
         }
 
+        this._syncProjectFilterControls();
+
         if (this.loadFailed && this.allItems.length === 0) {
             this.body.innerHTML = '<div class="ch-empty">Failed to load history.</div>';
             return;
@@ -619,7 +739,7 @@ export class ChatHistorySidebar {
                 return;
             }
 
-            this.body.innerHTML = `<div class="ch-empty">${(this.filterText || this.llmFilters.size > 0 || this.projectFilter) ? 'No matches found.' : 'No chat history yet.'}</div>`;
+            this.body.innerHTML = `<div class="ch-empty">${(this.filterText || this.llmFilters.size > 0 || this.projectFilters.size > 0) ? 'No matches found.' : 'No chat history yet.'}</div>`;
             return;
         }
 
@@ -636,7 +756,7 @@ export class ChatHistorySidebar {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Env:</span> ${escapeHtml(item.environmentName.trim())}</div>`);
             }
             if (item.userInputCount != null) {
-                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Lines typed by user:</span> ${item.userInputCount}</div>`);
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">User messages:</span> ${item.userInputCount}</div>`);
             }
             if (item.durationSeconds != null && item.durationSeconds > 0) {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Session length:</span> ${formatDuration(item.durationSeconds)}</div>`);
@@ -662,7 +782,7 @@ export class ChatHistorySidebar {
                     <div class="ch-item-content">
                         <div class="ch-item-header">
                             <div class="ch-item-name" title="${escapeHtml(rawName)}">${escapeHtml(name)}</div>
-                            <span class="ch-project-badge${this.projectFilter === projectDisplayName ? ' ch-project-badge-active' : ''}" data-project="${escapeHtml(projectDisplayName)}" title="${escapeHtml(item.workingDirectory || '')}"><i class="fa-solid fa-folder-open"></i> ${escapeHtml(projectDisplayName)}</span>
+                            <span class="ch-project-badge" title="${escapeHtml(item.workingDirectory || '')}"><i class="fa-solid fa-folder-open"></i> ${escapeHtml(projectDisplayName)}</span>
                         </div>
                         ${relationshipHtml}
                         <div class="ch-item-meta">${metaHtml}</div>
@@ -698,20 +818,6 @@ export class ChatHistorySidebar {
                 e.stopPropagation();
                 this._openContextMenu(itemEl, e.currentTarget, submenu);
             });
-            itemEl.querySelector('.ch-project-badge')?.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const project = e.currentTarget.dataset.project;
-                if (this.projectFilter === project) {
-                    this.projectFilter = null;
-                } else {
-                    this.projectFilter = project;
-                }
-                this._closeContextMenu();
-                this._renderItems();
-                if (this.projectFilter && this.hasMore) {
-                    void this._loadRemainingPagesForSearch();
-                }
-            });
         });
     }
 
@@ -721,6 +827,8 @@ export class ChatHistorySidebar {
         }
 
         const label = this.filterText
+            || this.llmFilters.size > 0
+            || this.projectFilters.size > 0
             ? 'Searching older sessions...'
             : 'Loading more sessions...';
 
@@ -906,6 +1014,12 @@ export class ChatHistorySidebar {
         return this.app.data?.configs?.rootPath || this.app.data?.configs?.launchDirectory || '';
     }
 
+    _hasActiveFilters() {
+        return Boolean(this.filterText)
+            || this.llmFilters.size > 0
+            || this.projectFilters.size > 0;
+    }
+
     _getProjectDisplayName(item) {
         const projectDisplayName = item?.projectDisplayName?.trim();
         if (projectDisplayName) {
@@ -913,6 +1027,10 @@ export class ChatHistorySidebar {
         }
 
         return this.app.getProjectNameFromPath(item?.workingDirectory || '');
+    }
+
+    _getProjectFilterKey(item) {
+        return (item?.workingDirectory || '').trim();
     }
 
     _stripResumePrefix(name, parentCli, childCli) {
@@ -963,7 +1081,7 @@ export class ChatHistorySidebar {
                 return false;
             }
 
-            if (this.projectFilter && this._getProjectDisplayName(item) !== this.projectFilter) {
+            if (this.projectFilters.size > 0 && !this.projectFilters.has(this._getProjectFilterKey(item))) {
                 return false;
             }
 
@@ -1002,21 +1120,33 @@ export class ChatHistorySidebar {
 
     _sortItemsInMemory() {
         const preferredWorkingDirectory = this._getPreferredWorkingDirectory();
+        const prefDir = (preferredWorkingDirectory || '').toLowerCase();
 
         this.allItems.sort((left, right) => {
-            if (preferredWorkingDirectory) {
-                const leftPreferred = left.workingDirectory === preferredWorkingDirectory ? 0 : 1;
-                const rightPreferred = right.workingDirectory === preferredWorkingDirectory ? 0 : 1;
+            const leftDir = (left.workingDirectory || '').toLowerCase();
+            const rightDir = (right.workingDirectory || '').toLowerCase();
+
+            // 1. Preferred working directory first
+            if (prefDir) {
+                const leftPreferred = leftDir === prefDir ? 0 : 1;
+                const rightPreferred = rightDir === prefDir ? 0 : 1;
                 if (leftPreferred !== rightPreferred) {
                     return leftPreferred - rightPreferred;
                 }
             }
 
+            // 2. Group by working directory path (alphabetical)
+            if (leftDir !== rightDir) {
+                return leftDir.localeCompare(rightDir, undefined, { sensitivity: 'base' });
+            }
+
+            // 3. Within same directory: sort by recency
             const recencyCompare = new Date(right.startedUTC).getTime() - new Date(left.startedUTC).getTime();
             if (recencyCompare !== 0) {
                 return recencyCompare;
             }
 
+            // 4. Tiebreaker: by ID
             return (right.id || '').localeCompare(left.id || '', undefined, { sensitivity: 'base' });
         });
     }

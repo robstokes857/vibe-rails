@@ -9,6 +9,46 @@ set -euo pipefail
 GITHUB_REPO="robstokes857/vibe-rails"
 INSTALL_DIR="$HOME/.vibe_rails"
 
+install_bertv2_assets() {
+    local root_dir="$1"
+    local bundled_dir="$root_dir/Models/BertV2"
+    local bundled_model_archive="$bundled_dir/model.onnx.gz"
+    local bundled_vocab="$bundled_dir/vocab.txt"
+
+    local runtime_dir="$root_dir/models/bertv2"
+    local runtime_model="$runtime_dir/model.onnx"
+    local runtime_vocab="$runtime_dir/vocab.txt"
+
+    if [ -f "$runtime_model" ] && [ -f "$runtime_vocab" ]; then
+        echo -e "${GREEN}BertV2 model assets already installed, skipping.${NC}"
+        return
+    fi
+
+    if [ ! -f "$bundled_model_archive" ]; then
+        echo -e "${RED}Error: Bundled BertV2 model archive not found at $bundled_model_archive. The release package is incomplete.${NC}" >&2
+        exit 1
+    fi
+    if [ ! -f "$bundled_vocab" ]; then
+        echo -e "${RED}Error: Bundled BertV2 vocab not found at $bundled_vocab. The release package is incomplete.${NC}" >&2
+        exit 1
+    fi
+
+    mkdir -p "$runtime_dir"
+
+    if [ ! -f "$runtime_vocab" ]; then
+        echo -e "${CYAN}Installing BertV2 vocab...${NC}"
+        cp "$bundled_vocab" "$runtime_vocab"
+    fi
+
+    if [ ! -f "$runtime_model" ]; then
+        require_cmd gzip
+        echo -e "${CYAN}Extracting BertV2 model...${NC}"
+        gzip -dc "$bundled_model_archive" > "$runtime_model"
+    fi
+
+    echo -e "${GREEN}BertV2 model assets installed to $runtime_dir${NC}"
+}
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -180,6 +220,8 @@ mkdir -p "$INSTALL_DIR"
 # Extract (overwrites app files, preserves user data like state.db, envs/, etc.)
 echo -e "${CYAN}Extracting to $INSTALL_DIR...${NC}"
 tar -xzf "$TAR_PATH" -C "$INSTALL_DIR"
+
+install_bertv2_assets "$INSTALL_DIR"
 
 # Make binary executable
 chmod +x "$INSTALL_DIR/vb"

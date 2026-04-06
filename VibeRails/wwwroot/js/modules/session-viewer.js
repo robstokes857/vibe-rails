@@ -206,7 +206,7 @@ export async function showReplayModal(sessionId) {
                 let frameIdx = 0;
                 for (let i = 0; i < frames.length; i++) {
                     accumulated += frames[i].data.length;
-                    if (accumulated >= chunkByteOffset) { frameIdx = i; break; }
+                    if (accumulated > chunkByteOffset) { frameIdx = i; break; }
                 }
                 if (colsChanged) {
                     resizeEvents.push({ afterFrameIndex: frameIdx, cols: chunk.cols, rows: chunk.rows });

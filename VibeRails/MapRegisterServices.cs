@@ -14,6 +14,7 @@ using VibeRails.Services.Terminal;
 using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Validators;
 using VibeRails.Utils;
+using VibeRails.Services.BertV2;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 
 namespace VibeRails
