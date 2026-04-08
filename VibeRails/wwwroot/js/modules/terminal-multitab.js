@@ -677,6 +677,8 @@ class TerminalManager {
         this.terminalContainer = null;
         this.statusBadge = null;
         this.windowTitle = null;
+        this.windowSession = null;
+        this.windowSessionValue = null;
 
         this.startBtn = null;
         this.reconnectBtn = null;
@@ -780,6 +782,8 @@ class TerminalManager {
         this.terminalContainer = this.container.querySelector('#terminal-container');
         this.statusBadge = this.container.querySelector('#terminal-status-badge');
         this.windowTitle = this.container.querySelector('#vb-terminal-window-title');
+        this.windowSession = this.container.querySelector('#vb-terminal-window-session');
+        this.windowSessionValue = this.container.querySelector('#vb-terminal-window-session-value');
 
         this.startBtn = this.container.querySelector('#terminal-start-btn');
         this.reconnectBtn = this.container.querySelector('#terminal-reconnect-btn');
@@ -1743,6 +1747,7 @@ class TerminalManager {
         });
 
         if (!active) {
+            this.updateWindowTitleBar(null);
             this.keyboardBtn?.classList.add('d-none');
             this.setBadge('Not Started', 'bg-secondary');
             this.updateActionButtons({ start: true, reconnect: false, stop: false });
@@ -1770,9 +1775,26 @@ class TerminalManager {
             this.showPlaceholder();
         }
 
+        this.updateWindowTitleBar(active.state);
         this.updateWindowControlState();
         this.updateAddButtonState();
         this._updateTabScrollArrows();
+    }
+
+    updateWindowTitleBar(state) {
+        if (this.windowTitle) {
+            this.windowTitle.textContent = 'Terminals run safely in the background even if you navigate away.';
+        }
+
+        if (!this.windowSession || !this.windowSessionValue) {
+            return;
+        }
+
+        const sessionId = cleanString(state?.sessionId);
+        const showSession = state?.hasActiveSession === true && !!sessionId;
+        this.windowSession.classList.toggle('d-none', !showSession);
+        this.windowSession.title = showSession ? `Active session ID: ${sessionId}` : '';
+        this.windowSessionValue.textContent = showSession ? sessionId : '';
     }
 
     getBadge(state) {
@@ -2820,7 +2842,13 @@ export class TerminalController {
                         </div>
                     </div>
                     <div class="vb-terminal-window-title-bar">
-                        <div class="vb-terminal-window-title" id="vb-terminal-window-title">Terminals run safely in the background even if you navigate away.</div>
+                        <div class="vb-terminal-window-title-row">
+                            <div class="vb-terminal-window-title" id="vb-terminal-window-title">Terminals run safely in the background even if you navigate away.</div>
+                            <div class="vb-terminal-window-session d-none" id="vb-terminal-window-session" aria-live="polite">
+                                <span class="vb-terminal-window-session-label">Session ID</span>
+                                <span class="vb-terminal-window-session-value" id="vb-terminal-window-session-value"></span>
+                            </div>
+                        </div>
                     </div>
                     <div class="card-body p-0" id="terminal-container" style="display: none; overflow: hidden;">
                         <div id="vb-terminal-tab-panels" class="vb-terminal-tab-panels"></div>

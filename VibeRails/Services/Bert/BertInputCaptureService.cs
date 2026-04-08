@@ -1,26 +1,23 @@
-using System.Text;
-using VibeRails.DTOs;
+using VibeRails.Services.BertV2;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Bert;
 
 /// <summary>
-/// Captures user inputs and file-change context into a BERT vector index.
+/// Captures the user's prose into a BERT vector index. Only the user's
+/// input text is embedded — session/user-input/git/file metadata lives in
+/// state.db and is joined back at query time by BertExplorerService.
 /// </summary>
 public sealed class BertInputCaptureService : IBertInputCaptureService, IDisposable
 {
-    private const int DefaultMaxDiffCharsPerFile = 2000;
-    private const int MaxFilesPerCapture = 40;
-
     private readonly ILogger<BertInputCaptureService> _logger;
     private readonly bool _enabled;
     private readonly string _modelDirectory;
     private readonly string _dataDirectory;
-    private readonly int _maxDiffCharsPerFile;
 
     private readonly Lock _stateLock = new();
     private bool _initAttempted;
-    private BertEmbedder? _embedder;
+    private BertV2BgeEmbedder? _embedder;
     private BertSqliteVectorStore? _store;
 
     public BertInputCaptureService(IConfiguration configuration, ILogger<BertInputCaptureService> logger)
@@ -33,21 +30,14 @@ public sealed class BertInputCaptureService : IBertInputCaptureService, IDisposa
         var installRoot = PathConstants.GetInstallDirPath();
 
         var configuredModelDirectory = section["ModelDirectory"];
-        var bundledModelDirectory = Path.Combine(AppContext.BaseDirectory, "Models");
         _modelDirectory = string.IsNullOrWhiteSpace(configuredModelDirectory)
-            ? (Directory.Exists(bundledModelDirectory)
-                ? bundledModelDirectory
-                : Path.Combine(installRoot, "models", "bert"))
+            ? Path.Combine(installRoot, PathConstants.MODELS_SUBDIR, "bertv2")
             : configuredModelDirectory;
 
         var configuredDataDirectory = section["DataDirectory"];
         _dataDirectory = string.IsNullOrWhiteSpace(configuredDataDirectory)
             ? Path.Combine(installRoot, PathConstants.VECTOR_SUBDIR, "bert")
             : configuredDataDirectory;
-
-        _maxDiffCharsPerFile = section.GetValue<int?>("MaxDiffCharsPerFile") ?? DefaultMaxDiffCharsPerFile;
-        if (_maxDiffCharsPerFile < 256)
-            _maxDiffCharsPerFile = 256;
 
         if (!_enabled)
         {
@@ -59,8 +49,6 @@ public sealed class BertInputCaptureService : IBertInputCaptureService, IDisposa
         string sessionId,
         long userInputId,
         string inputText,
-        string? gitCommitHash,
-        IReadOnlyList<FileChangeInfo> fileChanges,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -71,7 +59,10 @@ public sealed class BertInputCaptureService : IBertInputCaptureService, IDisposa
         if (!EnsureInitialized())
             return Task.CompletedTask;
 
-        var captureText = BuildCaptureText(sessionId, userInputId, inputText, gitCommitHash, fileChanges);
+        var captureText = SanitizeText(inputText);
+        if (string.IsNullOrWhiteSpace(captureText))
+            return Task.CompletedTask;
+
         var documentId = $"{sessionId}:{userInputId}";
 
         try
@@ -121,8 +112,8 @@ public sealed class BertInputCaptureService : IBertInputCaptureService, IDisposa
 
                 Directory.CreateDirectory(_dataDirectory);
 
-                var dbPath = Path.Combine(_dataDirectory, "bert_input_vectors.db");
-                _embedder = new BertEmbedder(modelPath, vocabPath);
+                var dbPath = Path.Combine(_dataDirectory, "bert_user_text_vectors.db");
+                _embedder = new BertV2BgeEmbedder(modelPath, vocabPath);
                 _store = new BertSqliteVectorStore(dbPath);
 
                 _logger.LogInformation("[BERT] Input capture initialized. ModelDir={ModelDir}, DataDir={DataDir}", _modelDirectory, _dataDirectory);
@@ -140,61 +131,6 @@ public sealed class BertInputCaptureService : IBertInputCaptureService, IDisposa
         }
     }
 
-    private string BuildCaptureText(
-        string sessionId,
-        long userInputId,
-        string inputText,
-        string? gitCommitHash,
-        IReadOnlyList<FileChangeInfo> fileChanges)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine($"session_id: {sessionId}");
-        sb.AppendLine($"user_input_id: {userInputId}");
-
-        if (!string.IsNullOrWhiteSpace(gitCommitHash))
-            sb.AppendLine($"git_commit: {gitCommitHash}");
-
-        sb.AppendLine("user_text:");
-        sb.AppendLine(SanitizeText(inputText));
-
-        if (fileChanges.Count == 0)
-        {
-            sb.AppendLine("file_changes: none");
-            return sb.ToString();
-        }
-
-        sb.AppendLine("file_changes:");
-
-        var changeCount = Math.Min(fileChanges.Count, MaxFilesPerCapture);
-        for (int i = 0; i < changeCount; i++)
-        {
-            var change = fileChanges[i];
-            sb.Append("- ").Append(change.FilePath)
-                .Append(" | type=").Append(change.ChangeType);
-
-            if (change.LinesAdded.HasValue || change.LinesDeleted.HasValue)
-            {
-                sb.Append(" | +").Append(change.LinesAdded ?? 0)
-                    .Append(" -").Append(change.LinesDeleted ?? 0);
-            }
-
-            sb.AppendLine();
-
-            if (!string.IsNullOrWhiteSpace(change.DiffContent))
-            {
-                sb.AppendLine("diff:");
-                sb.AppendLine(Truncate(change.DiffContent, _maxDiffCharsPerFile));
-            }
-        }
-
-        if (fileChanges.Count > MaxFilesPerCapture)
-        {
-            sb.AppendLine($"... {fileChanges.Count - MaxFilesPerCapture} additional file changes omitted");
-        }
-
-        return sb.ToString();
-    }
-
     private static string SanitizeText(string value)
     {
         var normalized = value.Replace("\0", string.Empty)
@@ -203,14 +139,6 @@ public sealed class BertInputCaptureService : IBertInputCaptureService, IDisposa
             .Trim();
 
         return normalized.Length == 0 ? string.Empty : normalized;
-    }
-
-    private static string Truncate(string value, int maxChars)
-    {
-        if (value.Length <= maxChars)
-            return value;
-
-        return value[..maxChars] + "\n... [truncated]";
     }
 
     public void Dispose()
@@ -224,6 +152,3 @@ public sealed class BertInputCaptureService : IBertInputCaptureService, IDisposa
         }
     }
 }
-
-
-

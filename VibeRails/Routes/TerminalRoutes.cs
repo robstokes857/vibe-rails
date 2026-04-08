@@ -44,8 +44,11 @@ public static class TerminalRoutes
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {request.Cli}"));
             }
 
-            // Working directory is always the git root (project PK) — never user-overridable
-            var workDir = ParserConfigs.GetRootPath();
+            // Prefer an explicit working directory from the request (e.g. sandbox path);
+            // otherwise fall back to the git root (project PK), then the launch directory.
+            var workDir = request.WorkingDirectory;
+            if (string.IsNullOrEmpty(workDir))
+                workDir = ParserConfigs.GetRootPath();
             if (string.IsNullOrEmpty(workDir))
                 workDir = launchDirectory;
 

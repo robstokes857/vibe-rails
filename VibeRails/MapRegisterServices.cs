@@ -32,13 +32,15 @@ namespace VibeRails
             serviceCollection.AddScoped<IFileService, FileService>();
             serviceCollection.AddSingleton<IBertInputCaptureService, BertInputCaptureService>();
             serviceCollection.AddSingleton<IBertExplorerService, BertExplorerService>();
+            serviceCollection.AddSingleton<IGitDiffCaptureService, GitDiffCaptureService>();
             serviceCollection.AddSingleton<ILlmParser, LlmParser>();
             serviceCollection.AddScoped<IRepository>(sp =>
             {
                 var connectionString = $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
                 var bert = sp.GetService<IBertInputCaptureService>();
+                var gitDiff = sp.GetService<IGitDiffCaptureService>();
                 var logger = sp.GetService<ILogger<Repository>>();
-                return new Repository(connectionString, bert, logger);
+                return new Repository(connectionString, bert, gitDiff, logger);
             });
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
@@ -97,6 +99,7 @@ namespace VibeRails
             // Terminal Session Service (scoped to work with other scoped services)
             serviceCollection.AddScoped<ITerminalIoObserver, MyTerminalObserver>();
             serviceCollection.AddScoped<ITerminalIoObserver, SessionStateEventObserver>();
+            serviceCollection.AddScoped<ITerminalIoObserver, GitDiffIdleCaptureObserver>();
 
 #if DEBUG
             serviceCollection.AddScoped<ITerminalIoObserver, DebugWebSocketEventObserver>();

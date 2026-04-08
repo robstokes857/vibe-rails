@@ -15,12 +15,18 @@ namespace VibeRails.DB
         private static readonly object _initLock = new();
         private readonly string _connectionString;
         private readonly IBertInputCaptureService? _bertInputCaptureService;
+        private readonly IGitDiffCaptureService? _gitDiffCaptureService;
         private readonly ILogger<Repository>? _logger;
 
-        public Repository(string connectionString, IBertInputCaptureService? bertInputCaptureService = null, ILogger<Repository>? logger = null)
+        public Repository(
+            string connectionString,
+            IBertInputCaptureService? bertInputCaptureService = null,
+            IGitDiffCaptureService? gitDiffCaptureService = null,
+            ILogger<Repository>? logger = null)
         {
             _connectionString = connectionString;
             _bertInputCaptureService = bertInputCaptureService;
+            _gitDiffCaptureService = gitDiffCaptureService;
             _logger = logger;
             EnsureInitialized();
         }
@@ -1234,6 +1240,9 @@ namespace VibeRails.DB
             return (long)result!;
         }
 
+        // NOTE: new code should use ReplaceFileChangesAsync — this append-only
+        // method is no longer called from the live capture path. Kept for
+        // interface back-compat; cleanup pass can remove it later.
         public async Task InsertFileChangesAsync(long userInputId, long? previousInputId, List<FileChangeInfo> changes)
         {
             if (changes.Count == 0) return;
@@ -1267,6 +1276,58 @@ namespace VibeRails.DB
             }
         }
 
+        public async Task<string?> GetSessionWorkingDirectoryAsync(string sessionId, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectSessionWorkingDirectory;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+            var result = await cmd.ExecuteScalarAsync(cancellationToken);
+            return result as string;
+        }
+
+        public async Task ReplaceFileChangesAsync(long userInputId, List<FileChangeInfo> changes, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await using (var del = connection.CreateCommand())
+                {
+                    del.Transaction = (SqliteTransaction)transaction;
+                    del.CommandText = SqlStrings.DeleteFileChangesForUserInput;
+                    del.Parameters.AddWithValue("$userInputId", userInputId);
+                    await del.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                foreach (var change in changes)
+                {
+                    await using var cmd = connection.CreateCommand();
+                    cmd.Transaction = (SqliteTransaction)transaction;
+                    cmd.CommandText = SqlStrings.InsertFileChange;
+                    cmd.Parameters.AddWithValue("$userInputId", userInputId);
+                    cmd.Parameters.AddWithValue("$previousInputId", DBNull.Value);
+                    cmd.Parameters.AddWithValue("$filePath", change.FilePath);
+                    cmd.Parameters.AddWithValue("$changeType", change.ChangeType);
+                    cmd.Parameters.AddWithValue("$linesAdded", change.LinesAdded ?? (object)DBNull.Value);
+                    cmd.Parameters.AddWithValue("$linesDeleted", change.LinesDeleted ?? (object)DBNull.Value);
+                    cmd.Parameters.AddWithValue("$diffContent", change.DiffContent ?? (object)DBNull.Value);
+                    await cmd.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
         public async Task RecordUserInputAsync(string sessionId, string inputText, IGitService gitService, CancellationToken cancellationToken = default)
         {
             try
@@ -1276,17 +1337,27 @@ namespace VibeRails.DB
                 var lastInput = await GetLastUserInputAsync(sessionId);
                 var sequence = (lastInput?.Sequence ?? 0) + 1;
 
-                var fileChanges = new List<FileChangeInfo>();
-                if (lastInput != null && !string.IsNullOrEmpty(lastInput.GitCommitHash))
-                {
-                    fileChanges = await gitService.GetFileChangesSinceAsync(lastInput.GitCommitHash, cancellationToken);
-                }
-
                 var userInputId = await InsertUserInputAsync(sessionId, sequence, inputText, currentCommitHash);
 
-                if (fileChanges.Count > 0)
+                // Open a git-diff capture window for this input. The idle
+                // observer re-runs the diff every time the session goes idle
+                // and replaces the stored file changes, until the next user
+                // input finalizes the window. The previous input's window
+                // (if any) is finalized synchronously inside
+                // BeginCaptureWindowAsync so late writes are captured against
+                // the correct userInputId.
+                if (_gitDiffCaptureService != null)
                 {
-                    await InsertFileChangesAsync(userInputId, lastInput?.Id, fileChanges);
+                    var workingDirectory = await GetSessionWorkingDirectoryAsync(sessionId, cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(workingDirectory))
+                    {
+                        await _gitDiffCaptureService.BeginCaptureWindowAsync(
+                            sessionId,
+                            userInputId,
+                            currentCommitHash,
+                            workingDirectory,
+                            cancellationToken);
+                    }
                 }
 
                 if (_bertInputCaptureService != null)
@@ -1295,8 +1366,6 @@ namespace VibeRails.DB
                         sessionId,
                         userInputId,
                         inputText,
-                        currentCommitHash,
-                        fileChanges,
                         cancellationToken);
                 }
             }

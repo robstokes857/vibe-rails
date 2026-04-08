@@ -1,7 +1,6 @@
 import {
     buildLlmSelectionOptions,
     parseLlmSelection,
-    formatDuration,
     formatRelativeTime,
     escapeHtml
 } from './utils.js';
@@ -23,14 +22,14 @@ export class ChatHistorySidebar {
         this.isLoadingPage = false;
         this.isLoadingForSearch = false;
         this.loadFailed = false;
-        this.projectFilters = new Set();
+        this.currentDirOnly = false;
         this.sidebar = null;
         this.search = null;
         this.body = null;
         this.contextMenu = null;
         this.refreshButton = null;
         this.llmFilterContainer = null;
-        this.projectFilterContainer = null;
+        this.currentDirToggle = null;
     }
 
     static renderHtml() {
@@ -61,13 +60,18 @@ export class ChatHistorySidebar {
                             <input type="text" class="ch-search-input" id="ch-search-input" placeholder="Search sessions..." autocomplete="off">
                         </div>
                         <div class="ch-sidebar-controls">
-                            <button class="ch-filter-drawer-toggle" id="ch-filter-drawer-toggle" type="button" aria-expanded="false">
-                                <span class="ch-filter-drawer-label">Filters</span>
-                                <i class="fa-solid fa-chevron-down ch-filter-drawer-chevron"></i>
-                            </button>
+                            <div class="ch-filter-row">
+                                <button class="ch-filter-drawer-toggle" id="ch-filter-drawer-toggle" type="button" aria-expanded="false">
+                                    <span class="ch-filter-drawer-label">Filters</span>
+                                    <i class="fa-solid fa-chevron-down ch-filter-drawer-chevron"></i>
+                                </button>
+                                <button class="ch-current-dir-toggle" id="ch-current-dir-toggle" type="button" aria-pressed="false" title="Only show chats started from the current working directory">
+                                    <i class="fa-solid fa-folder-open"></i>
+                                    <span class="ch-current-dir-toggle-label">This folder</span>
+                                </button>
+                            </div>
                             <div class="ch-filter-drawer-content" id="ch-filter-drawer-content">
                                 <div class="ch-llm-filter-group" id="ch-llm-filter-group"></div>
-                                <div class="ch-project-filter-group" id="ch-project-filter-group"></div>
                             </div>
                         </div>
                     </div>
@@ -107,7 +111,7 @@ export class ChatHistorySidebar {
         this.refreshButton = root.querySelector('#ch-sidebar-refresh-btn');
         this.closeButton = root.querySelector('#ch-sidebar-close-btn');
         this.llmFilterContainer = root.querySelector('#ch-llm-filter-group');
-        this.projectFilterContainer = root.querySelector('#ch-project-filter-group');
+        this.currentDirToggle = root.querySelector('#ch-current-dir-toggle');
         this.filterDrawerToggle = root.querySelector('#ch-filter-drawer-toggle');
         this.filterDrawerContent = root.querySelector('#ch-filter-drawer-content');
         this.filterDrawerToggle?.addEventListener('click', () => {
@@ -231,36 +235,19 @@ export class ChatHistorySidebar {
             }
         });
 
-        this.projectFilterContainer?.addEventListener('click', (e) => {
-            const badge = e.target.closest('[data-project-filter]');
-            if (!badge || badge.disabled) {
+        this.currentDirToggle?.addEventListener('click', (e) => {
+            if (this.currentDirToggle.disabled) {
                 return;
             }
 
             e.stopPropagation();
-            const project = (badge.dataset.projectFilter || '').trim();
-            if (!project) {
-                return;
-            }
-
-            if (project === 'reset') {
-                if (this.projectFilters.size === 0) {
-                    return;
-                }
-                this.projectFilters.clear();
-            } else if (this.projectFilters.has(project)) {
-                this.projectFilters.delete(project);
-            } else {
-                this.projectFilters.add(project);
-            }
-
-            this._syncProjectFilterControls();
-            this._syncFilterCountBadge();
+            this.currentDirOnly = !this.currentDirOnly;
+            this._syncCurrentDirToggle();
             this._closeContextMenu();
             this._renderItems();
 
-            if (this._hasActiveFilters() && this.hasMore) {
-                void this._loadRemainingPagesForFilters();
+            if (this.currentDirOnly && this.hasMore && this._shouldLoadNextPage()) {
+                void this._loadNextPage();
             }
         });
 
@@ -301,6 +288,7 @@ export class ChatHistorySidebar {
 
         syncCloseButtonState();
         this._syncLlmFilterControls();
+        this._syncCurrentDirToggle();
         emitToggleState();
         void this._load();
     }
@@ -315,7 +303,6 @@ export class ChatHistorySidebar {
         this.currentPage = 0;
         this.hasMore = true;
         this.loadFailed = false;
-        this.projectFilters.clear();
         this._closeContextMenu();
         this._setRefreshButtonState();
         this.body.innerHTML = '<div class="ch-loading"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>';
@@ -342,10 +329,6 @@ export class ChatHistorySidebar {
                     page: String(nextPage),
                     pageSize: String(this.pageSize)
                 });
-                const preferredWorkingDirectory = this._getPreferredWorkingDirectory();
-                if (preferredWorkingDirectory) {
-                    params.set('preferredWorkingDirectory', preferredWorkingDirectory);
-                }
                 const data = await this.app.apiCall(`/api/v1/chatHistory?${params.toString()}`, 'GET', null, { showLoading: false });
                 const fetchedItems = Array.isArray(data?.items) ? data.items : [];
 
@@ -453,10 +436,9 @@ export class ChatHistorySidebar {
                 button.disabled = isBusy;
             });
         }
-        if (this.projectFilterContainer) {
-            this.projectFilterContainer.querySelectorAll('[data-project-filter]').forEach((button) => {
-                button.disabled = isBusy;
-            });
+        if (this.currentDirToggle) {
+            const hasPreferredDir = Boolean((this._getPreferredWorkingDirectory() || '').trim());
+            this.currentDirToggle.disabled = isBusy || !hasPreferredDir;
         }
     }
 
@@ -494,7 +476,7 @@ export class ChatHistorySidebar {
         }
 
         let badge = this.filterDrawerToggle.querySelector('.ch-filter-count-badge');
-        const totalActive = this.llmFilters.size + this.projectFilters.size;
+        const totalActive = this.llmFilters.size;
         if (totalActive > 0) {
             if (!badge) {
                 badge = document.createElement('span');
@@ -507,70 +489,27 @@ export class ChatHistorySidebar {
         }
     }
 
-    _syncProjectFilterControls() {
-        if (!this.projectFilterContainer) {
+    _syncCurrentDirToggle() {
+        if (!this.currentDirToggle) {
             return;
         }
 
-        // Map: workingDirectory (unique key) -> display label
-        const projectMap = new Map();
-        for (const item of this.allItems) {
-            const key = this._getProjectFilterKey(item);
-            if (!key) {
-                continue;
-            }
-            if (!projectMap.has(key)) {
-                projectMap.set(key, this._getProjectDisplayName(item));
-            }
-        }
-
-        if (projectMap.size === 0) {
-            this.projectFilterContainer.innerHTML = '';
-            return;
-        }
-
-        // Prune stale selections (selections are keyed by path)
-        for (const selected of this.projectFilters) {
-            if (!projectMap.has(selected)) {
-                this.projectFilters.delete(selected);
-            }
-        }
-
-        // Sort: current directory first, then alphabetical by label
         const preferredDir = (this._getPreferredWorkingDirectory() || '').trim();
-        const sorted = [...projectMap.entries()].sort(([keyA, labelA], [keyB, labelB]) => {
-            if (keyA === preferredDir && keyB !== preferredDir) return -1;
-            if (keyB === preferredDir && keyA !== preferredDir) return 1;
-            return labelA.localeCompare(labelB, undefined, { sensitivity: 'base' });
-        });
+        const hasPreferredDir = Boolean(preferredDir);
 
-        const options = [
-            { value: 'reset', label: 'Reset', logoHtml: '<i class="fa-solid fa-rotate-left"></i>' },
-            ...sorted.map(([key, label]) => ({
-                value: key,
-                label,
-                logoHtml: '<i class="fa-solid fa-folder-open"></i>'
-            }))
-        ];
+        // Can't filter to "current" if we don't know what current is.
+        if (!hasPreferredDir && this.currentDirOnly) {
+            this.currentDirOnly = false;
+        }
 
-        this.projectFilterContainer.innerHTML = options.map(option => {
-            const isReset = option.value === 'reset';
-            const isActive = isReset ? false : this.projectFilters.has(option.value);
-            const isDisabled = isReset && this.projectFilters.size === 0;
-            const tooltip = isReset ? option.label : option.value;
-            return `
-                <button type="button"
-                    class="ch-project-filter-badge${isActive ? ' is-active' : ''}${isReset ? ' is-reset' : ''}"
-                    data-project-filter="${escapeHtml(option.value)}"
-                    aria-pressed="${isActive ? 'true' : 'false'}"
-                    title="${escapeHtml(tooltip)}"
-                    ${isDisabled ? 'disabled' : ''}>
-                    ${option.logoHtml}
-                    <span>${escapeHtml(option.label)}</span>
-                </button>`;
-        }).join('');
+        this.currentDirToggle.classList.toggle('is-active', this.currentDirOnly);
+        this.currentDirToggle.setAttribute('aria-pressed', this.currentDirOnly ? 'true' : 'false');
+        this.currentDirToggle.disabled = !hasPreferredDir || this.isLoadingPage || this.isLoadingForSearch;
 
-        this._syncFilterCountBadge();
+        const tooltip = hasPreferredDir
+            ? `Only show chats from ${preferredDir}`
+            : 'Current directory unknown';
+        this.currentDirToggle.setAttribute('title', tooltip);
     }
 
     _getRawDisplayName(item) {
@@ -719,7 +658,7 @@ export class ChatHistorySidebar {
             return;
         }
 
-        this._syncProjectFilterControls();
+        this._syncCurrentDirToggle();
 
         if (this.loadFailed && this.allItems.length === 0) {
             this.body.innerHTML = '<div class="ch-empty">Failed to load history.</div>';
@@ -739,7 +678,7 @@ export class ChatHistorySidebar {
                 return;
             }
 
-            this.body.innerHTML = `<div class="ch-empty">${(this.filterText || this.llmFilters.size > 0 || this.projectFilters.size > 0) ? 'No matches found.' : 'No chat history yet.'}</div>`;
+            this.body.innerHTML = `<div class="ch-empty">${(this.filterText || this.llmFilters.size > 0 || this.currentDirOnly) ? 'No matches found.' : 'No chat history yet.'}</div>`;
             return;
         }
 
@@ -754,12 +693,6 @@ export class ChatHistorySidebar {
             const metaLines = [];
             if (item.environmentName?.trim()) {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Env:</span> ${escapeHtml(item.environmentName.trim())}</div>`);
-            }
-            if (item.userInputCount != null) {
-                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">User messages:</span> ${item.userInputCount}</div>`);
-            }
-            if (item.durationSeconds != null && item.durationSeconds > 0) {
-                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Session length:</span> ${formatDuration(item.durationSeconds)}</div>`);
             }
             if (isActive) {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Started:</span> ${escapeHtml(time)}</div>`);
@@ -828,7 +761,7 @@ export class ChatHistorySidebar {
 
         const label = this.filterText
             || this.llmFilters.size > 0
-            || this.projectFilters.size > 0
+            || this.currentDirOnly
             ? 'Searching older sessions...'
             : 'Loading more sessions...';
 
@@ -1017,7 +950,7 @@ export class ChatHistorySidebar {
     _hasActiveFilters() {
         return Boolean(this.filterText)
             || this.llmFilters.size > 0
-            || this.projectFilters.size > 0;
+            || this.currentDirOnly;
     }
 
     _getProjectDisplayName(item) {
@@ -1029,7 +962,7 @@ export class ChatHistorySidebar {
         return this.app.getProjectNameFromPath(item?.workingDirectory || '');
     }
 
-    _getProjectFilterKey(item) {
+    _getItemWorkingDirectoryKey(item) {
         return (item?.workingDirectory || '').trim();
     }
 
@@ -1076,13 +1009,20 @@ export class ChatHistorySidebar {
     }
 
     _getFilteredItems() {
+        const preferredDir = this.currentDirOnly
+            ? (this._getPreferredWorkingDirectory() || '').trim().toLowerCase()
+            : '';
+
         return this.allItems.filter(item => {
             if (this.llmFilters.size > 0 && !this.llmFilters.has((item?.cli || '').toLowerCase())) {
                 return false;
             }
 
-            if (this.projectFilters.size > 0 && !this.projectFilters.has(this._getProjectFilterKey(item))) {
-                return false;
+            if (this.currentDirOnly && preferredDir) {
+                const itemDir = this._getItemWorkingDirectoryKey(item).toLowerCase();
+                if (itemDir !== preferredDir) {
+                    return false;
+                }
             }
 
             if (!this.filterText) {
@@ -1119,34 +1059,23 @@ export class ChatHistorySidebar {
     }
 
     _sortItemsInMemory() {
-        const preferredWorkingDirectory = this._getPreferredWorkingDirectory();
-        const prefDir = (preferredWorkingDirectory || '').toLowerCase();
+        const getTimestamp = (item) => {
+            const parsed = Date.parse(item?.startedUTC || '');
+            return Number.isFinite(parsed) ? parsed : 0;
+        };
 
         this.allItems.sort((left, right) => {
-            const leftDir = (left.workingDirectory || '').toLowerCase();
-            const rightDir = (right.workingDirectory || '').toLowerCase();
-
-            // 1. Preferred working directory first
-            if (prefDir) {
-                const leftPreferred = leftDir === prefDir ? 0 : 1;
-                const rightPreferred = rightDir === prefDir ? 0 : 1;
-                if (leftPreferred !== rightPreferred) {
-                    return leftPreferred - rightPreferred;
-                }
-            }
-
-            // 2. Group by working directory path (alphabetical)
-            if (leftDir !== rightDir) {
-                return leftDir.localeCompare(rightDir, undefined, { sensitivity: 'base' });
-            }
-
-            // 3. Within same directory: sort by recency
-            const recencyCompare = new Date(right.startedUTC).getTime() - new Date(left.startedUTC).getTime();
+            const recencyCompare = getTimestamp(right) - getTimestamp(left);
             if (recencyCompare !== 0) {
                 return recencyCompare;
             }
 
-            // 4. Tiebreaker: by ID
+            const leftDir = (left.workingDirectory || '').toLowerCase();
+            const rightDir = (right.workingDirectory || '').toLowerCase();
+            if (leftDir !== rightDir) {
+                return leftDir.localeCompare(rightDir, undefined, { sensitivity: 'base' });
+            }
+
             return (right.id || '').localeCompare(left.id || '', undefined, { sensitivity: 'base' });
         });
     }
