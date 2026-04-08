@@ -130,15 +130,7 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
         includeDefaultSuffix = true
     } = options;
 
-    const items = BASE_LLM_CHOICES.map((baseCli) => ({
-        group: includeGroups ? 'Base CLIs' : null,
-        value: buildLlmSelectionValue(baseCli.cli),
-        label: includeDefaultSuffix ? `${baseCli.label} (default)` : baseCli.label,
-        cli: baseCli.cli,
-        environmentId: null,
-        environmentName: null,
-        kind: 'base'
-    }));
+    const items = [];
 
     (Array.isArray(environments) ? environments : []).forEach((environment) => {
         const cli = normalizeCliValue(environment?.cli);
@@ -157,6 +149,18 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
             environmentId,
             environmentName: environmentName || null,
             kind: 'environment'
+        });
+    });
+
+    BASE_LLM_CHOICES.forEach((baseCli) => {
+        items.push({
+            group: includeGroups ? 'Base CLIs' : null,
+            value: buildLlmSelectionValue(baseCli.cli),
+            label: includeDefaultSuffix ? `${baseCli.label} (default)` : baseCli.label,
+            cli: baseCli.cli,
+            environmentId: null,
+            environmentName: null,
+            kind: 'base'
         });
     });
 

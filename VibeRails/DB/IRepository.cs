@@ -38,6 +38,8 @@ namespace VibeRails.DB
         Task<UserInputRecord?> GetLastUserInputAsync(string sessionId);
         Task<long> InsertUserInputAsync(string sessionId, int sequence, string inputText, string? gitCommitHash);
         Task InsertFileChangesAsync(long userInputId, long? previousInputId, List<FileChangeInfo> changes);
+        Task ReplaceFileChangesAsync(long userInputId, List<FileChangeInfo> changes, CancellationToken cancellationToken = default);
+        Task<string?> GetSessionWorkingDirectoryAsync(string sessionId, CancellationToken cancellationToken = default);
         Task RecordUserInputAsync(string sessionId, string inputText, IGitService gitService, CancellationToken cancellationToken = default);
 
         // Environment operations (global, not project-scoped)

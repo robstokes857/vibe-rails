@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using VibeRails.DTOs;
+using VibeRails.Services.BertV2;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Bert;
@@ -31,7 +32,7 @@ public sealed class BertExplorerService : IBertExplorerService, IDisposable
     private readonly object _embedderLock = new();
 
     private bool _embedderInitAttempted;
-    private BertEmbedder? _embedder;
+    private BertV2BgeEmbedder? _embedder;
     private string? _embedderInitError;
 
     public BertExplorerService(IConfiguration configuration, ILogger<BertExplorerService> logger)
@@ -43,11 +44,8 @@ public sealed class BertExplorerService : IBertExplorerService, IDisposable
 
         var installRoot = PathConstants.GetInstallDirPath();
         var configuredModelDirectory = section["ModelDirectory"];
-        var bundledModelDirectory = Path.Combine(AppContext.BaseDirectory, "Models");
         _modelDirectory = string.IsNullOrWhiteSpace(configuredModelDirectory)
-            ? (Directory.Exists(bundledModelDirectory)
-                ? bundledModelDirectory
-                : Path.Combine(installRoot, "models", "bert"))
+            ? Path.Combine(installRoot, PathConstants.MODELS_SUBDIR, "bertv2")
             : configuredModelDirectory;
 
         var configuredDataDirectory = section["DataDirectory"];
@@ -55,7 +53,7 @@ public sealed class BertExplorerService : IBertExplorerService, IDisposable
             ? Path.Combine(installRoot, PathConstants.VECTOR_SUBDIR, "bert")
             : configuredDataDirectory;
 
-        _databasePath = Path.Combine(_dataDirectory, "bert_input_vectors.db");
+        _databasePath = Path.Combine(_dataDirectory, "bert_user_text_vectors.db");
         _fallbackStateDatabasePath = Path.Combine(installRoot, PathConstants.STATE_FILENAME);
     }
 
@@ -481,7 +479,7 @@ public sealed class BertExplorerService : IBertExplorerService, IDisposable
 
                 try
                 {
-                    _embedder = new BertEmbedder(modelPath, vocabPath);
+                    _embedder = new BertV2BgeEmbedder(modelPath, vocabPath);
                 }
                 catch (Exception ex)
                 {

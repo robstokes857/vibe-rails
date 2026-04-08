@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VibeRails BERT Explorer</title>
+<link rel="stylesheet" href="assets/xterm/xterm.css" />
 <style>
 :root{--bg:#08111a;--bg2:#0d1725;--panel:#0f1d2f;--panel2:#13233a;--line:#24405f;--text:#edf5ff;--muted:#91a6c5;--accent:#70e6ff;--accent2:#65a6ff;--ok:#7cf0b3;--warn:#ffc86d;--bad:#ff9696}
 *{box-sizing:border-box;margin:0}html,body{height:100%}
@@ -54,6 +55,8 @@ body{font-family:"Cascadia Code","JetBrains Mono",Consolas,monospace;color:var(-
 
 /* --- Detail panel --- */
 .detail{display:grid;gap:14px}
+.session-actions{display:flex;gap:10px;flex-wrap:wrap}
+.session-actions .button{padding:9px 14px;font-size:12px;display:inline-flex;align-items:center}
 .score-banner{display:flex;align-items:center;gap:14px;padding:14px;border-radius:14px;border:1px solid rgba(112,230,255,.15);background:rgba(10,18,30,.9)}
 .score-bar-track{flex:1;height:8px;border-radius:99px;background:rgba(145,166,197,.12);overflow:hidden}
 .score-bar-fill{height:100%;border-radius:99px;transition:width .3s}
@@ -129,7 +132,11 @@ details pre{border:none;border-radius:0;border-top:1px solid rgba(101,166,255,.1
 </div>
 
 </div>
-<script>
+<script src="assets/xterm/xterm.min.js"></script>
+<script src="assets/xterm/addon-fit.js"></script>
+<script type="module">
+import { showTranscriptModal, showReplayModal } from './js/modules/session-viewer.js';
+
 const state = {
   status: null, recent: [], results: [], lastSearch: null,
   selected: null, selectedId: null, queryCount: 0,
@@ -280,6 +287,14 @@ function renderDetail() {
       </div>`;
   }
 
+  // Session actions — only when we have a sessionId to query
+  const sessionActions = i.sessionId
+    ? `<div class="session-actions">
+        <button class="button" type="button" data-action="get-transcript" title="View the plain-text transcript for the session this capture came from"><i class="fa-solid fa-file-lines" style="margin-right:6px"></i>Get Transcript</button>
+        <button class="button" type="button" data-action="get-session" title="Replay the full terminal recording for the session this capture came from"><i class="fa-solid fa-play" style="margin-right:6px"></i>Get Session</button>
+      </div>`
+    : '';
+
   // User text (most important thing to show)
   const userText = i.userText || i.userTextPreview || '';
   const textLabel = i.userText ? 'User Text (full)' : 'User Text (preview)';
@@ -324,6 +339,7 @@ function renderDetail() {
 
   nodes.detail.innerHTML = `<div class="detail">
     ${scoreBanner}
+    ${sessionActions}
     ${textSection}
     <div class="section"><h3>Metadata</h3><div class="meta-grid">${meta}</div></div>
     ${fileSection}
@@ -418,6 +434,15 @@ nodes.results.addEventListener('click', e => {
 nodes.resultsSource.addEventListener('change', () => {
   state.listMode = nodes.resultsSource.value;
   renderResultsList();
+});
+nodes.detail.addEventListener('click', e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const sessionId = state.selected?.sessionId;
+  if (!sessionId) { setBanner('No session ID on this capture.', 'error'); return; }
+  const action = btn.getAttribute('data-action');
+  if (action === 'get-transcript') void showTranscriptModal(sessionId);
+  else if (action === 'get-session') void showReplayModal(sessionId);
 });
 
 // ---- Init ----

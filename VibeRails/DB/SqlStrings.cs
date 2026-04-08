@@ -588,6 +588,16 @@ namespace VibeRails.DB
             INSERT INTO InputFileChanges (UserInputId, PreviousInputId, FilePath, ChangeType, LinesAdded, LinesDeleted, DiffContent)
             VALUES ($userInputId, $previousInputId, $filePath, $changeType, $linesAdded, $linesDeleted, $diffContent);
             """;
+        public const string DeleteFileChangesForUserInput = """
+            DELETE FROM InputFileChanges
+            WHERE UserInputId = $userInputId;
+            """;
+        public const string SelectSessionWorkingDirectory = """
+            SELECT WorkingDirectory
+            FROM Sessions
+            WHERE Id = $sessionId
+            LIMIT 1;
+            """;
 
         // ProjectCache Table — generic key-value store scoped per project
         public const string CreateProjectCacheTable = """
