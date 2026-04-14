@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using VibeRails.DB;
+using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Jobs;
 using VibeRails.Services;
@@ -19,8 +20,12 @@ public class StaleSessionCleanupJobTests
     {
         var dbService = new Mock<IRepository>();
         dbService
-            .Setup(x => x.GetOpenSessionIdsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<string> { "session-1", "session-2" });
+            .Setup(x => x.GetOpenSessionCleanupCandidatesAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<OpenSessionCleanupCandidate>
+            {
+                new("session-1", int.MaxValue),
+                new("session-2", int.MaxValue - 1)
+            });
 
         using var serviceProvider = new ServiceCollection()
             .AddScoped(_ => dbService.Object)
@@ -46,8 +51,36 @@ public class StaleSessionCleanupJobTests
     {
         var dbService = new Mock<IRepository>();
         dbService
-            .Setup(x => x.GetOpenSessionIdsAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<string>());
+            .Setup(x => x.GetOpenSessionCleanupCandidatesAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<OpenSessionCleanupCandidate>());
+
+        using var serviceProvider = new ServiceCollection()
+            .AddScoped(_ => dbService.Object)
+            .BuildServiceProvider();
+
+        var remoteStateService = new Mock<IRemoteStateService>();
+        var job = new StaleSessionCleanupJob(
+            NullLogger<StaleSessionCleanupJob>.Instance,
+            Mock.Of<ISystemResourceService>(),
+            serviceProvider.GetRequiredService<IServiceScopeFactory>(),
+            remoteStateService.Object);
+
+        await InvokeExecuteJobAsync(job);
+
+        dbService.Verify(x => x.CompleteSessionAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        remoteStateService.Verify(x => x.DeregisterTerminalAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteJob_DoesNotCloseSessionsOwnedByLiveProcess()
+    {
+        var dbService = new Mock<IRepository>();
+        dbService
+            .Setup(x => x.GetOpenSessionCleanupCandidatesAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<OpenSessionCleanupCandidate>
+            {
+                new("session-1", Environment.ProcessId)
+            });
 
         using var serviceProvider = new ServiceCollection()
             .AddScoped(_ => dbService.Object)

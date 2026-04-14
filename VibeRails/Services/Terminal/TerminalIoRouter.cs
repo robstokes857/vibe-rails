@@ -1,4 +1,5 @@
 using System.Text;
+using VibeRails.Services.UserInOut;
 
 namespace VibeRails.Services.Terminal;
 
@@ -119,6 +120,8 @@ public static class TerminalIoRouter
         var input = Encoding.UTF8.GetString(inputBytes.Span);
         if (input.Length == 0)
             return;
+
+        TUI_Event_Watcher.Watch(sessionId, input);
 
         stateService.RecordInput(sessionId, input, source);
         await terminal.WriteBytesAsync(inputBytes, ct);

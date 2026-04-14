@@ -26,7 +26,7 @@ public interface ITerminalSessionService
     Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null, string summary = "");
     Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken, int? cols = null, int? rows = null);
     Task StopSessionAsync();
-    void RegisterExternalTerminal(Terminal terminal, string sessionId, string? cliName = null);
+    void RegisterExternalTerminal(Terminal terminal, string sessionId);
     Task UnregisterTerminalAsync();
     Task DisconnectLocalViewerAsync(string reason);
     Task<bool> SendRemoteCommandAsync(string command, string? payload = null, CancellationToken cancellationToken = default);
@@ -46,7 +46,6 @@ public class TerminalSessionService : ITerminalSessionService
     private static string? s_sessionId;
     private static WebSocket? s_activeWebSocket;
     private static string? s_sessionOwnerId;
-    private static string? s_activeCli;
     private static bool s_externallyOwned;
 
     public bool HasActiveSession
@@ -119,7 +118,6 @@ public class TerminalSessionService : ITerminalSessionService
                 s_terminal = terminal;
                 s_sessionId = sessionId;
                 s_sessionOwnerId = BuildSessionOwnerId(sessionId);
-                s_activeCli = llm.ToString();
             }
             _localClientTracker.AcquireOwner(BuildSessionOwnerId(sessionId));
 
@@ -141,13 +139,11 @@ public class TerminalSessionService : ITerminalSessionService
         Terminal? terminal;
         string? sessionId;
         string? ownerId = null;
-        string? activeCli;
 
         lock (s_lock)
         {
             terminal = s_terminal;
             sessionId = s_sessionId;
-            activeCli = s_activeCli;
         }
 
         if (terminal == null || sessionId == null)
@@ -171,9 +167,9 @@ public class TerminalSessionService : ITerminalSessionService
         }
 
         // If the client told us its current dimensions, resize the PTY *before*
-        // sending the replay so the replayed output is already at the correct size.
-        // Without this, the replay arrives at the old (stale) size and the subsequent
-        // SIGWINCH-triggered redraw writes content a second time ("double print" bug).
+        // subscribing so the snapshot and any subsequent live output are already
+        // at the correct size. Without this, the snapshot arrives at the old size
+        // and the subsequent SIGWINCH-triggered redraw writes content a second time.
         if (cols.HasValue && rows.HasValue)
         {
             try
@@ -188,62 +184,19 @@ public class TerminalSessionService : ITerminalSessionService
             }
             catch (Exception ex)
             {
-                Log.Warning(ex, "[Terminal] Failed to pre-resize PTY ({Cols}x{Rows}) before replay", cols, rows);
+                Log.Warning(ex, "[Terminal] Failed to pre-resize PTY ({Cols}x{Rows}) before attach", cols, rows);
             }
         }
 
-        var syncOutputActive = terminal.IsSyncOutputActive;
-        var useRedrawAttach = TerminalReplayPolicy.ShouldUseRedrawAttach(activeCli, syncOutputActive);
-        var redrawReason = TerminalReplayPolicy.DescribeReason(activeCli, syncOutputActive);
-
-        if (!useRedrawAttach)
-        {
-            // Send full emulator state (scrollback + screen) so the viewer sees content immediately.
-            // ORDERING MATTERS: snapshot must be sent before subscribing the live consumer.
-            // If the consumer is subscribed first, live PTY output can arrive at the browser
-            // while the snapshot is still in-flight, producing a concurrent-write race that
-            // causes ghost cursors and corrupted screen state.
-            var replay = terminal.GetGridReplay();
-            if (replay.Length > 0)
-            {
-                try
-                {
-                    await webSocket.SendAsync(replay, WebSocketMessageType.Binary, true, cancellationToken);
-                    Log.Information("[Terminal] Sent {Bytes} bytes of emulator state to viewer", replay.Length);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error(ex, "[Terminal] Failed to send emulator state");
-                }
-            }
-        }
-        else
-        {
-            Log.Information(
-                "[Terminal] Using redraw-first attach for {Cli} ({Reason})",
-                activeCli ?? "unknown",
-                redrawReason);
-        }
-
-        // Subscribe WebSocket as output consumer — live output only starts flowing here,
-        // after the snapshot is fully sent. Ctrl+L (below) covers the small gap between
-        // snapshot capture and subscription.
+        // Atomic attach: the snapshot is captured + delivered + the consumer is
+        // subscribed, all under the terminal's subscriber lock. The consumer sees
+        // the snapshot first and every live PTY byte after that, in order, with
+        // no gap and no duplication. No CLI-specific branches, no Ctrl+L poke —
+        // we behave like a correct PTY/VT100 terminal.
         using var wsConsumer = new WebSocketConsumer(webSocket, cancellationToken);
-        using var subscription = terminal.Subscribe(wsConsumer);
+        using var subscription = terminal.SubscribeWithSnapshot(wsConsumer);
         ownerId = $"terminal-ws:{sessionId}:{Guid.NewGuid():N}";
         _localClientTracker.AcquireOwner(ownerId);
-
-        // Send Ctrl+L after attach so TUIs redraw cleanly at the current size.
-        // This is also the reconnect fallback for Codex/Copilot and for sessions
-        // caught mid synchronized-output redraw.
-        try
-        {
-            await terminal.WriteBytesAsync(new byte[] { 0x0C }, cancellationToken); // Ctrl+L
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "[Terminal] Failed to send Ctrl+L redraw");
-        }
 
         // Run WebSocket input loop (blocks until WebSocket closes or cancellation)
         try
@@ -268,7 +221,7 @@ public class TerminalSessionService : ITerminalSessionService
         }
     }
 
-    public void RegisterExternalTerminal(Terminal terminal, string sessionId, string? cliName = null)
+    public void RegisterExternalTerminal(Terminal terminal, string sessionId)
     {
         s_lifecycleGate.Wait();
         try
@@ -280,7 +233,6 @@ public class TerminalSessionService : ITerminalSessionService
                 s_terminal = terminal;
                 s_sessionId = sessionId;
                 s_sessionOwnerId = BuildSessionOwnerId(sessionId);
-                s_activeCli = cliName;
                 s_externallyOwned = true;
             }
         }
@@ -677,7 +629,6 @@ public class TerminalSessionService : ITerminalSessionService
             s_sessionId = null;
             s_sessionOwnerId = null;
             s_activeWebSocket = null;
-            s_activeCli = null;
             s_externallyOwned = false;
             return teardown;
         }

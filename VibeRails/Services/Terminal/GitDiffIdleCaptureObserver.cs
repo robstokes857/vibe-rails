@@ -1,4 +1,4 @@
-using VibeRails.Services.Bert;
+using VibeRails.Services.BertBaseClasses;
 
 namespace VibeRails.Services.Terminal;
 

@@ -1,12 +1,83 @@
 # TERMINAL.md
 
+## 2026-04-09 Attach path unified: "be a correct terminal, no per-CLI hacks"
 
-Open issues. 
+This repo no longer contains any per-CLI attach-path branching. The design
+principle going forward:
 
-1. We made it flicker again. 
-2. In copilot only on reconnect we can't type in the console anymore.
+> **The terminal backend must behave as a correct PTY/ANSI/VT100 implementation.
+> If a CLI misbehaves, either our emulator is wrong (and the fix benefits
+> everyone) or the CLI is wrong (and it's upstream's job to fix). No
+> `if cliName == X then do Y` branches.**
 
+### What changed
 
+1. **Deleted `TerminalReplayPolicy.cs`** — the `codex → redraw-attach` carveout
+   is gone. Local and remote attach use one path for every CLI.
+2. **New atomic primitive `Terminal.SubscribeWithSnapshot(ITerminalConsumer)`**
+   captures the emulator state, delivers it to the consumer as its first
+   output, and subscribes it to live PTY bytes — all under
+   `_subscriberLock` + `_emulatorLock`. Guarantee: the consumer sees
+   `(snapshot at time T)` followed by `(every PTY byte dispatched after T)`
+   in order, with no gap and no duplication.
+3. **`Terminal.PushSnapshotTo(ITerminalConsumer)`** is the companion for
+   already-subscribed consumers (remote PIN verify, remote replay request).
+   The snapshot begins with `ED2` + `ED3` + cursor home so it is
+   self-healing — whatever the viewer had on screen is wiped and rebuilt.
+4. **`ReadLoopAsync` and `PublishOutput` now hold `_subscriberLock` across the
+   full dispatch.** Previously they snapshotted the consumer list under lock
+   then iterated outside. Holding the lock for the whole dispatch is what
+   makes `SubscribeWithSnapshot` atomic: a new subscriber can only join
+   *between* dispatches, never mid-dispatch.
+5. **Removed every `Ctrl+L`-on-attach poke.** The old "send Ctrl+L to cover
+   the gap between snapshot capture and subscription" hack is gone from both
+   `TerminalSessionService.HandleWebSocketAsync` and
+   `TerminalRunner.HandleRemoteReplayRequestAsync` /
+   `HandleRemoteInputAsync` (pin verify). There is no gap anymore, so there
+   is nothing to cover.
+6. **Removed `replayInProgress` pause flag** from `TerminalRunner` remote
+   path. `RemoteOutputConsumer.canForward` now only checks viewer
+   authorization, not replay state.
+7. **Removed unused `s_activeCli` state** from `TerminalSessionService` —
+   attach was its only reader.
+
+### Why this fixes the stacked-banner bug
+
+Claude Code (and Codex/Copilot) react to `Ctrl+L` by emitting a full TUI
+repaint that includes the banner. Because those CLIs run on the main screen
+(no `DECSET 1049`), each repaint's banner rows eventually scroll into the
+emulator's scrollback via normal scroll-up. Over multiple reconnects the
+scrollback accumulates one stacked banner per reconnect.
+
+With the Ctrl+L poke removed and the subscribe/snapshot race fixed properly,
+there is no more spurious repaint on attach — the viewer sees exactly what
+was on screen, nothing more.
+
+### Invariant that must be preserved
+
+All `ITerminalConsumer.OnOutput` implementations must be non-blocking. The
+contract is documented on the interface. If a future consumer wants to do
+blocking I/O in `OnOutput`, it must queue to a background worker (the way
+`WebSocketConsumer` and `RemoteTerminalConnection` already do via their
+internal channels). Otherwise `ReadLoopAsync` will stall and PTY output will
+back up.
+
+### What we are explicitly not doing
+
+- No workaround for Codex flicker. If flicker remains after this pass, it's
+  either a genuine emulator correctness bug (which we'll chase on its own
+  merits) or Codex's problem. Do not re-add a per-CLI branch to paper it over.
+- No poking TUIs with Ctrl+L, SIGWINCH, or any other redraw hint as a
+  synchronization mechanism. Real terminals don't do this.
+
+Validation after this pass:
+
+- `dotnet test .\TerminalEmulator.Tests\TerminalEmulator.Tests.csproj --nologo`
+  -> 764 passed
+- `dotnet test .\Tests\Tests.csproj -o /tmp/vb-tests --nologo`
+  -> 168 passed
+
+---
 
 ## 2026-03-18 follow-up audit after backend/emulator hardening
 
@@ -17,9 +88,10 @@ Status against the 2026-03-17 review:
 
 - Fixed before this pass: finding 9 (`ESC \` termination inside DCS/APC/PM/SOS passthrough).
 - Fixed in this pass: findings 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, and 17.
-- Resolved as documentation/architecture drift: finding 10. The current attach policy is unified
-  emulator replay plus post-replay redraw for all sessions; the old managed-AI "skip replay" note
-  later in this file is historical and has now been superseded.
+- Resolved as documentation/architecture drift: finding 10. The current attach policy is the
+  atomic `SubscribeWithSnapshot` primitive (see 2026-04-09 section) — one code path for every
+  CLI, with no post-attach redraw poke. The old managed-AI "skip replay" note and the
+  "codex → redraw-attach" carveout later in this file are both historical and superseded.
 - Reduced but not fully eliminated: finding 18. Stale cleanup is now activity-aware
   (`SessionLogs` / `UserInputs`) instead of age-only, but it still is not a true OS-process
   liveness check.
@@ -68,9 +140,10 @@ The current C# flow is:
    output into the session DB; `WebSocketConsumer` and `RemoteOutputConsumer` forward bytes to local
    and remote viewers.
 5. Reconnect / local attach goes through
-   `TerminalSessionService.HandleWebSocketAsync()`, which pre-resizes the PTY, serializes the full
-   emulator state via `Terminal.GetGridReplay()` + `TerminalGridSerializer.Serialize()`, sends the
-   snapshot, subscribes the live WebSocket consumer, then sends `Ctrl+L`.
+   `TerminalSessionService.HandleWebSocketAsync()`, which pre-resizes the PTY and then calls
+   `Terminal.SubscribeWithSnapshot(consumer)` — one atomic operation that captures emulator state,
+   delivers it as the consumer's first output, and subscribes the consumer to live PTY bytes, all
+   under `_subscriberLock`. No post-attach Ctrl+L poke. (See the 2026-04-09 section above.)
 6. Stop / exit / teardown is split across `TerminalSessionService.StopSessionAsync()`,
    `CleanupAsync()`, the PTY `Exited` event, `Terminal.DisposeAsync()`, and
    `TerminalStateService.CompleteSessionAsync()`.

@@ -1,41 +1,39 @@
-
-
-using VibeRails.Services.BertBaseClasses;
-
 namespace VibeRails.Services.BertV2;
 
-public class BertV2InputService : BertBase, IBertV2InputService
+public class BertV2InputService : IBertV2InputService
 {
-    private readonly BertV2BgeEmbedder _embedder;
-    private readonly BertV2VectorStore _store;
+    private readonly IBertV2BgeEmbedder _embedder;
+    private readonly IBertV2VectorStore _store;
     private readonly Lock _writeLock = new();
 
-    public BertV2InputService(IBertSettings settings)
-        : base(settings)
+    public BertV2InputService(IBertV2BgeEmbedder embedder, IBertV2VectorStore store)
     {
-        _embedder = new BertV2BgeEmbedder(ModelPath, VocabPath);
-        _store = new BertV2VectorStore(Path.Combine(DataDirectory, "vectors.db"));
+        _embedder = embedder;
+        _store = store;
     }
 
     public void Capture(string sessionId, long userInputId, string inputText)
     {
-        var embedding = _embedder.GenerateEmbedding(inputText);
+        if (string.IsNullOrWhiteSpace(inputText))
+            return;
+
+        var captureText = SanitizeText(inputText);
+        if (string.IsNullOrWhiteSpace(captureText))
+            return;
+
+        var embedding = _embedder.GenerateEmbedding(captureText);
 
         lock (_writeLock)
         {
-            _store.AddOrUpdate($"{sessionId}:{userInputId}", inputText, embedding);
+            _store.AddOrUpdate(BertDocumentId.Create(sessionId, userInputId), captureText, embedding);
         }
     }
 
-    public List<SearchResult> Search(string query, int topK = 10)
+    private static string SanitizeText(string value)
     {
-        var embedding = _embedder.GenerateEmbedding(query);
-        return _store.Search(embedding, topK);
-    }
-
-    public void Dispose()
-    {
-        _embedder.Dispose();
-        _store.Dispose();
+        return value.Replace("\0", string.Empty)
+            .Replace("\r\n", "\n")
+            .Replace('\r', '\n')
+            .Trim();
     }
 }

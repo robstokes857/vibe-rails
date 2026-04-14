@@ -15,6 +15,6 @@ public class BertV2BgeSmallEnSettings : IBertSettings
         var modelDir = Path.Combine(installRoot, PathConstants.MODELS_SUBDIR, "bertv2");
         ModelPath = Path.Combine(modelDir, "model.onnx");
         VocabPath = Path.Combine(modelDir, "vocab.txt");
-        DataDirectory = Path.Combine(installRoot, PathConstants.VECTOR_SUBDIR, "bertv2");
+        DataDirectory = Path.Combine(installRoot, PathConstants.VECTOR_SUBDIR, "bert");
     }
 }
