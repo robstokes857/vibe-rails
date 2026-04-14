@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 using VibeRails.DB;
-using VibeRails.DTOs;
+using VibeRails.Services;
 
-namespace VibeRails.Services.Bert;
+namespace VibeRails.Services.BertBaseClasses;
 
 /// <summary>
 /// Per-session capture window coordinator. Runs `git diff --numstat` against

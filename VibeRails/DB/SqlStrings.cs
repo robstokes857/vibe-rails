@@ -72,7 +72,9 @@ namespace VibeRails.DB
                 ExitCode INTEGER,
                 Processed INTEGER NOT NULL DEFAULT 0,
                 ParentSessionId TEXT DEFAULT '',
-                SessionDisplayName TEXT DEFAULT ''
+                SessionDisplayName TEXT DEFAULT '',
+                OwnerPid INTEGER,
+                OwnershipTracked INTEGER NOT NULL DEFAULT 1
             )
             """;
         public const string CreateSessionsIndex = "CREATE INDEX IF NOT EXISTS idx_sessions_started ON Sessions(StartedUTC DESC)";
@@ -115,6 +117,43 @@ namespace VibeRails.DB
             """;
         public const string CreateUserInputsIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_session ON UserInputs(SessionId)";
         public const string CreateUserInputsSeqIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_session_seq ON UserInputs(SessionId, Sequence)";
+
+        // TUI_Event Table
+        public const string CreateTuiEventTable = """
+            CREATE TABLE IF NOT EXISTS TUI_Event (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                SessionId TEXT NOT NULL,
+                TimestampUTC TEXT NOT NULL,
+                TriggerString TEXT NOT NULL,
+                EventType TEXT NOT NULL,
+                FOREIGN KEY (SessionId) REFERENCES Sessions(Id) ON DELETE CASCADE
+            )
+            """;
+        public const string CreateTuiEventSessionTimestampIndex = "CREATE INDEX IF NOT EXISTS idx_tui_event_session_timestamp ON TUI_Event(SessionId, TimestampUTC)";
+
+        // CleanedUserInput Table — ETL-filtered, normalized version of UserInputs.InputText.
+        // Strict 1:1 with UserInputs via dual FKs: UserInputs.CleanedId → CleanedUserInput.Id
+        // and CleanedUserInput.UserInputId → UserInputs.Id.
+        public const string CreateCleanedUserInputTable = """
+            CREATE TABLE IF NOT EXISTS CleanedUserInput (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                SessionId TEXT NOT NULL,
+                UserInputId INTEGER NOT NULL UNIQUE,
+                CleanedText TEXT NOT NULL,
+                CreatedUTC TEXT NOT NULL,
+                BertEmbeddedUTC TEXT,
+                FOREIGN KEY (SessionId) REFERENCES Sessions(Id),
+                FOREIGN KEY (UserInputId) REFERENCES UserInputs(Id) ON DELETE CASCADE
+            )
+            """;
+        public const string CreateCleanedUserInputSessionIndex = "CREATE INDEX IF NOT EXISTS idx_cleaned_user_input_session ON CleanedUserInput(SessionId)";
+        public const string CreateCleanedUserInputUserInputIdIndex = "CREATE UNIQUE INDEX IF NOT EXISTS idx_cleaned_user_input_user_input_id ON CleanedUserInput(UserInputId)";
+        public const string CreateCleanedUserInputUnembeddedIndex = "CREATE INDEX IF NOT EXISTS idx_cleaned_user_input_unembedded ON CleanedUserInput(Id) WHERE BertEmbeddedUTC IS NULL AND CleanedText != ''";
+        // Migration: add CleanedId FK column to UserInputs (nullable — null means uncleaned).
+        public const string MigrateUserInputsAddCleanedId = "ALTER TABLE UserInputs ADD COLUMN CleanedId INTEGER REFERENCES CleanedUserInput(Id)";
+        public const string CreateUserInputsCleanedIdIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_cleaned_id ON UserInputs(CleanedId)";
+        // Partial index for fast uncleaned scans.
+        public const string CreateUserInputsUncleanedIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_uncleaned ON UserInputs(SessionId, Id) WHERE CleanedId IS NULL";
 
         // InputFileChanges Table
         public const string CreateInputFileChangesTable = """
@@ -205,6 +244,10 @@ namespace VibeRails.DB
             CreateUserInputsTable,
             CreateUserInputsIndex,
             CreateUserInputsSeqIndex,
+            CreateTuiEventTable,
+            CreateTuiEventSessionTimestampIndex,
+            CreateCleanedUserInputTable,
+            CreateCleanedUserInputSessionIndex,
             CreateInputFileChangesTable,
             CreateInputFileChangesInputIndex,
             CreateInputFileChangesPathIndex,
@@ -227,7 +270,16 @@ namespace VibeRails.DB
             AddProcessedColumn,
             "ALTER TABLE Sessions ADD COLUMN ParentSessionId TEXT DEFAULT ''",
             "ALTER TABLE Sessions ADD COLUMN SessionDisplayName TEXT DEFAULT ''",
-            "ALTER TABLE Sessions ADD COLUMN ProjectDisplayName TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE Sessions ADD COLUMN ProjectDisplayName TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE Sessions ADD COLUMN OwnerPid INTEGER",
+            "ALTER TABLE Sessions ADD COLUMN OwnershipTracked INTEGER",
+            MigrateUserInputsAddCleanedId,
+            "ALTER TABLE CleanedUserInput ADD COLUMN UserInputId INTEGER REFERENCES UserInputs(Id)",
+            CreateCleanedUserInputUserInputIdIndex,
+            CreateUserInputsCleanedIdIndex,
+            CreateUserInputsUncleanedIndex,
+            "ALTER TABLE CleanedUserInput ADD COLUMN BertEmbeddedUTC TEXT",
+            CreateCleanedUserInputUnembeddedIndex
         ];
 
         /// <summary>
@@ -358,8 +410,8 @@ namespace VibeRails.DB
 
         // Session CRUD
         public const string InsertSession = """
-            INSERT INTO Sessions (Id, Cli, EnvironmentName, WorkingDirectory, ProjectDisplayName, StartedUTC)
-            VALUES ($id, $cli, $envName, $workDir, $projectDisplayName, $startedUTC);
+            INSERT INTO Sessions (Id, Cli, EnvironmentName, WorkingDirectory, ProjectDisplayName, StartedUTC, OwnerPid, OwnershipTracked)
+            VALUES ($id, $cli, $envName, $workDir, $projectDisplayName, $startedUTC, $ownerPid, 1);
             """;
         public const string SelectLatestProjectDisplayNameByWorkingDirectory = """
             SELECT ProjectDisplayName
@@ -394,10 +446,11 @@ namespace VibeRails.DB
             INSERT INTO SessionLogs (SessionId, Timestamp, Content, IsError)
             VALUES ($sessionId, $timestamp, $content, $isError);
             """;
-        public const string SelectOpenSessionIds = """
-            SELECT s.Id
+        public const string SelectOpenSessionCleanupCandidates = """
+            SELECT s.Id, s.OwnerPid
             FROM Sessions s
             WHERE s.EndedUTC IS NULL
+              AND COALESCE(s.OwnershipTracked, 0) = 1
               AND s.StartedUTC < $cutoff
               AND MAX(
                     COALESCE((SELECT MAX(l.Timestamp) FROM SessionLogs l WHERE l.SessionId = s.Id), ''),
@@ -550,6 +603,10 @@ namespace VibeRails.DB
             DELETE FROM SessionLogs
             WHERE SessionId = $sessionId;
             """;
+        public const string DeleteSession_TuiEvents = """
+            DELETE FROM TUI_Event
+            WHERE SessionId = $sessionId;
+            """;
         public const string DeleteSession_UserInputs = """
             DELETE FROM UserInputs
             WHERE SessionId = $sessionId;
@@ -557,6 +614,10 @@ namespace VibeRails.DB
         public const string DeleteSession_Session = """
             DELETE FROM Sessions
             WHERE Id = $sessionId;
+            """;
+
+        public const string DeleteSession_NullOutCleanedIds = """
+            UPDATE UserInputs SET CleanedId = NULL WHERE SessionId = $sessionId;
             """;
 
         public static readonly string[] DeleteSessionCommands =
@@ -567,6 +628,9 @@ namespace VibeRails.DB
             DeleteSession_SessionOutput,
             DeleteSession_SessionLogs,
             DeleteSession_TerminalSessionLogs,
+            DeleteSession_TuiEvents,
+            DeleteSession_NullOutCleanedIds,
+            DeleteSession_CleanedUserInput,
             DeleteSession_UserInputs,
             DeleteSession_Session
         ];
@@ -597,6 +661,81 @@ namespace VibeRails.DB
             FROM Sessions
             WHERE Id = $sessionId
             LIMIT 1;
+            """;
+
+        public const string SelectUserInputById = """
+            SELECT Id, SessionId, Sequence, InputText, GitCommitHash, TimestampUTC
+            FROM UserInputs
+            WHERE Id = $id
+            LIMIT 1;
+            """;
+
+        // TUI event tracking
+        public const string InsertTuiEvent = """
+            INSERT INTO TUI_Event (SessionId, TimestampUTC, TriggerString, EventType)
+            VALUES ($sessionId, $timestampUTC, $triggerString, $eventType);
+            """;
+
+        // CleanedUserInput CRUD — 1:1 with UserInputs via dual FKs.
+        public const string InsertCleanedUserInputAndLink = """
+            INSERT INTO CleanedUserInput (SessionId, UserInputId, CleanedText, CreatedUTC)
+            VALUES ($sessionId, $userInputId, $cleanedText, $createdUTC)
+            RETURNING Id;
+            """;
+        public const string UpdateUserInputCleanedId = """
+            UPDATE UserInputs SET CleanedId = $cleanedId WHERE Id = $userInputId;
+            """;
+        public const string SelectCleanedTextForInputId = """
+            SELECT c.CleanedText
+            FROM UserInputs u
+            INNER JOIN CleanedUserInput c ON u.CleanedId = c.Id
+            WHERE u.Id = $inputId
+            LIMIT 1;
+            """;
+        public const string SelectSessionCleanedTextOrdered = """
+            SELECT c.CleanedText
+            FROM UserInputs u
+            INNER JOIN CleanedUserInput c ON u.CleanedId = c.Id
+            WHERE u.SessionId = $sessionId
+            ORDER BY u.Sequence ASC;
+            """;
+        public const string SelectUncleanedInputsForSession = """
+            SELECT u.Id, u.SessionId, u.Sequence, u.InputText, u.GitCommitHash, u.TimestampUTC
+            FROM UserInputs u
+            WHERE u.SessionId = $sessionId
+              AND u.CleanedId IS NULL
+            ORDER BY u.Id ASC;
+            """;
+        public const string SelectUncleanedInputsForClosedSessions = """
+            SELECT u.Id, u.SessionId, u.Sequence, u.InputText, u.GitCommitHash, u.TimestampUTC
+            FROM UserInputs u
+            INNER JOIN Sessions s ON u.SessionId = s.Id
+            WHERE u.CleanedId IS NULL
+              AND s.EndedUTC IS NOT NULL
+              AND datetime(s.EndedUTC) < datetime('now', '-5 minutes')
+            ORDER BY u.Id ASC
+            LIMIT $batchSize;
+            """;
+        public const string SelectIsInputCleaned = """
+            SELECT CleanedId FROM UserInputs WHERE Id = $inputId LIMIT 1;
+            """;
+        // BERT embedding tracking
+        public const string SelectUnembeddedCleanedInputs = """
+            SELECT c.Id, c.SessionId, c.UserInputId, c.CleanedText
+            FROM CleanedUserInput c
+            WHERE c.BertEmbeddedUTC IS NULL
+              AND c.UserInputId IS NOT NULL
+              AND c.CleanedText != ''
+            ORDER BY c.Id ASC
+            LIMIT $batchSize;
+            """;
+        public const string MarkCleanedInputEmbedded = """
+            UPDATE CleanedUserInput SET BertEmbeddedUTC = $embeddedUTC WHERE Id = $cleanedId;
+            """;
+
+        public const string DeleteSession_CleanedUserInput = """
+            DELETE FROM CleanedUserInput
+            WHERE SessionId = $sessionId;
             """;
 
         // ProjectCache Table — generic key-value store scoped per project

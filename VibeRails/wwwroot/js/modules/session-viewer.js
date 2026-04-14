@@ -61,6 +61,59 @@ async function fetchJson(endpoint) {
     return response.json();
 }
 
+async function downloadFile(endpoint, fallbackFileName) {
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(baseUrl + endpoint, {
+        method: 'GET',
+        headers: getApiHeaders(),
+        credentials: 'include',
+        cache: 'no-store'
+    });
+
+    if (response.status === 401) {
+        if (window.__viberails_VSCODE__) {
+            throw new Error('Session expired. Close and reopen the VibeRails panel to re-authenticate.');
+        }
+        window.location.href = `${baseUrl}/auth/bootstrap`;
+        throw new Error('Unauthorized');
+    }
+
+    if (!response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            const payload = await response.json();
+            throw new Error(payload?.error || payload?.message || `HTTP ${response.status}`);
+        }
+
+        const message = await response.text();
+        throw new Error(message || `HTTP ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') || '';
+    const fileNameMatch = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^"]+)"?/i);
+    let fileName = fallbackFileName;
+    try {
+        fileName = decodeURIComponent(fileNameMatch?.[1] || fileNameMatch?.[2] || fallbackFileName);
+    } catch { /* malformed percent-encoding — use fallback */ }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+export async function downloadRawSession(sessionId) {
+    await downloadFile(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/raw-session`, `${sessionId}-raw-session.zip`);
+}
+
+export async function downloadUserText(sessionId) {
+    await downloadFile(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/user-text`, `${sessionId}-user-text.txt`);
+}
+
 export async function showTranscriptModal(sessionId) {
     const { body } = createModal(`Transcript — ${sessionId}`);
 

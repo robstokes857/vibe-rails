@@ -1,10 +1,9 @@
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 using Serilog;
 using VibeRails.DTOs;
-using VibeRails.Interfaces;
 using VibeRails.Services;
-using VibeRails.Services.Bert;
+using VibeRails.Services.BertBaseClasses;
+using VibeRails.Services.UserInOut;
 using System.Text;
 
 namespace VibeRails.DB
@@ -14,18 +13,15 @@ namespace VibeRails.DB
         private static bool _initialized;
         private static readonly object _initLock = new();
         private readonly string _connectionString;
-        private readonly IBertInputCaptureService? _bertInputCaptureService;
         private readonly IGitDiffCaptureService? _gitDiffCaptureService;
         private readonly ILogger<Repository>? _logger;
 
         public Repository(
             string connectionString,
-            IBertInputCaptureService? bertInputCaptureService = null,
             IGitDiffCaptureService? gitDiffCaptureService = null,
             ILogger<Repository>? logger = null)
         {
             _connectionString = connectionString;
-            _bertInputCaptureService = bertInputCaptureService;
             _gitDiffCaptureService = gitDiffCaptureService;
             _logger = logger;
             EnsureInitialized();
@@ -577,7 +573,7 @@ namespace VibeRails.DB
 
         #region Session Lifecycle
 
-        public async Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir)
+        public async Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir, int ownerPid)
         {
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
@@ -595,6 +591,7 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$workDir", normalizedWorkDir);
             cmd.Parameters.AddWithValue("$projectDisplayName", projectDisplayName);
             cmd.Parameters.AddWithValue("$startedUTC", DateTime.UtcNow.ToString("O"));
+            cmd.Parameters.AddWithValue("$ownerPid", ownerPid);
 
             await cmd.ExecuteNonQueryAsync();
         }
@@ -961,21 +958,25 @@ namespace VibeRails.DB
             }
         }
 
-        public async Task<List<string>> GetOpenSessionIdsAsync(DateTime olderThan, CancellationToken cancellationToken)
+        public async Task<List<OpenSessionCleanupCandidate>> GetOpenSessionCleanupCandidatesAsync(DateTime olderThan, CancellationToken cancellationToken)
         {
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = SqlStrings.SelectOpenSessionIds;
+            cmd.CommandText = SqlStrings.SelectOpenSessionCleanupCandidates;
             cmd.Parameters.AddWithValue("$cutoff", olderThan.ToString("O"));
 
-            var ids = new List<string>();
+            var sessions = new List<OpenSessionCleanupCandidate>();
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
-                ids.Add(reader.GetString(0));
+            {
+                sessions.Add(new OpenSessionCleanupCandidate(
+                    SessionId: reader.GetString(0),
+                    OwnerPid: reader.IsDBNull(1) ? null : reader.GetInt32(1)));
+            }
 
-            return ids;
+            return sessions;
         }
 
         #endregion
@@ -1360,14 +1361,8 @@ namespace VibeRails.DB
                     }
                 }
 
-                if (_bertInputCaptureService != null)
-                {
-                    await _bertInputCaptureService.CaptureAsync(
-                        sessionId,
-                        userInputId,
-                        inputText,
-                        cancellationToken);
-                }
+                // BertV2 embedding moved to post-idle cleaning pipeline (CleanedInputIdleObserver).
+                // The idle observer cleans the input, then embeds via IUserTextOutput.
             }
             catch (Exception ex)
             {
@@ -1380,6 +1375,229 @@ namespace VibeRails.DB
                     Log.Warning(ex, "[VibeRails] Error recording user input for session {SessionId}", sessionId);
                 }
             }
+        }
+
+        public async Task InsertTuiEventAsync(
+            string sessionId,
+            DateTimeOffset timestampUtc,
+            string triggerString,
+            TUI_Event_Watcher_Type eventType,
+            CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.InsertTuiEvent;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+            cmd.Parameters.AddWithValue("$timestampUTC", timestampUtc.ToString("O"));
+            cmd.Parameters.AddWithValue("$triggerString", triggerString);
+            cmd.Parameters.AddWithValue("$eventType", eventType.ToString());
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        public async Task<UserInputRecord?> GetUserInputByIdAsync(long userInputId, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectUserInputById;
+            cmd.Parameters.AddWithValue("$id", userInputId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                return new UserInputRecord(
+                    Id: reader.GetInt64(0),
+                    SessionId: reader.GetString(1),
+                    Sequence: reader.GetInt32(2),
+                    InputText: reader.GetString(3),
+                    GitCommitHash: reader.IsDBNull(4) ? null : reader.GetString(4),
+                    TimestampUTC: DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind)
+                );
+            }
+            return null;
+        }
+
+        public async Task<long> CreateCleanedAndLinkAsync(
+            string sessionId,
+            long userInputId,
+            string cleanedText,
+            DateTime createdUtc,
+            CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                long cleanedId;
+                await using (var insertCmd = connection.CreateCommand())
+                {
+                    insertCmd.Transaction = (SqliteTransaction)transaction;
+                    insertCmd.CommandText = SqlStrings.InsertCleanedUserInputAndLink;
+                    insertCmd.Parameters.AddWithValue("$sessionId", sessionId);
+                    insertCmd.Parameters.AddWithValue("$userInputId", userInputId);
+                    insertCmd.Parameters.AddWithValue("$cleanedText", cleanedText);
+                    insertCmd.Parameters.AddWithValue("$createdUTC", createdUtc.ToString("O"));
+                    var result = await insertCmd.ExecuteScalarAsync(cancellationToken);
+                    cleanedId = Convert.ToInt64(result);
+                }
+
+                await using (var linkCmd = connection.CreateCommand())
+                {
+                    linkCmd.Transaction = (SqliteTransaction)transaction;
+                    linkCmd.CommandText = SqlStrings.UpdateUserInputCleanedId;
+                    linkCmd.Parameters.AddWithValue("$cleanedId", cleanedId);
+                    linkCmd.Parameters.AddWithValue("$userInputId", userInputId);
+                    await linkCmd.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+                return cleanedId;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
+        public async Task<bool> IsInputCleanedAsync(long userInputId, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectIsInputCleaned;
+            cmd.Parameters.AddWithValue("$inputId", userInputId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+                return !reader.IsDBNull(0);
+            return false;
+        }
+
+        public async Task<string?> GetCleanedTextForInputIdAsync(long inputId, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectCleanedTextForInputId;
+            cmd.Parameters.AddWithValue("$inputId", inputId);
+
+            var result = await cmd.ExecuteScalarAsync(cancellationToken);
+            return result as string;
+        }
+
+        public async Task<List<string>> GetSessionCleanedTextOrderedAsync(string sessionId, CancellationToken cancellationToken = default)
+        {
+            var texts = new List<string>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectSessionCleanedTextOrdered;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                texts.Add(reader.GetString(0));
+            }
+            return texts;
+        }
+
+        public async Task<List<UserInputRecord>> GetUncleanedInputsForSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+        {
+            var rows = new List<UserInputRecord>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectUncleanedInputsForSession;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(new UserInputRecord(
+                    Id: reader.GetInt64(0),
+                    SessionId: reader.GetString(1),
+                    Sequence: reader.GetInt32(2),
+                    InputText: reader.GetString(3),
+                    GitCommitHash: reader.IsDBNull(4) ? null : reader.GetString(4),
+                    TimestampUTC: DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind)
+                ));
+            }
+            return rows;
+        }
+
+        public async Task<List<UserInputRecord>> GetUncleanedInputsForClosedSessionsAsync(int batchSize, CancellationToken cancellationToken = default)
+        {
+            var rows = new List<UserInputRecord>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectUncleanedInputsForClosedSessions;
+            cmd.Parameters.AddWithValue("$batchSize", batchSize);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(new UserInputRecord(
+                    Id: reader.GetInt64(0),
+                    SessionId: reader.GetString(1),
+                    Sequence: reader.GetInt32(2),
+                    InputText: reader.GetString(3),
+                    GitCommitHash: reader.IsDBNull(4) ? null : reader.GetString(4),
+                    TimestampUTC: DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind)
+                ));
+            }
+            return rows;
+        }
+
+        public async Task<List<UnembeddedCleanedInput>> GetUnembeddedCleanedInputsAsync(int batchSize, CancellationToken cancellationToken = default)
+        {
+            var rows = new List<UnembeddedCleanedInput>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectUnembeddedCleanedInputs;
+            cmd.Parameters.AddWithValue("$batchSize", batchSize);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(new UnembeddedCleanedInput(
+                    CleanedId: reader.GetInt64(0),
+                    SessionId: reader.GetString(1),
+                    UserInputId: reader.GetInt64(2),
+                    CleanedText: reader.GetString(3)
+                ));
+            }
+            return rows;
+        }
+
+        public async Task MarkCleanedInputEmbeddedAsync(long cleanedId, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.MarkCleanedInputEmbedded;
+            cmd.Parameters.AddWithValue("$cleanedId", cleanedId);
+            cmd.Parameters.AddWithValue("$embeddedUTC", DateTime.UtcNow.ToString("O"));
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
         #endregion

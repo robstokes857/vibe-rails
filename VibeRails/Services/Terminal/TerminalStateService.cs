@@ -1,6 +1,7 @@
 using Serilog;
 using VibeRails.DB;
 using VibeRails.Services.Integrations.VibeCodeRemote;
+using VibeRails.Services.UserInOut;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
@@ -37,7 +38,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     public async Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default)
     {
         var sessionId = Guid.NewGuid().ToString();
-        await _repository.CreateSessionAsync(sessionId, cli, envName, workDir);
+        await _repository.CreateSessionAsync(sessionId, cli, envName, workDir, Environment.ProcessId);
 
         var now = DateTimeOffset.UtcNow;
         var outputWriter = new SessionOutputWriter(_repository);
@@ -81,9 +82,12 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             source,
             text,
             now));
-        var busyOutputEvent = MarkOutputActivity(sessionId, now);
-        if (busyOutputEvent.HasValue)
-            _ioObserverService.PublishSessionBusy(busyOutputEvent.Value);
+        if (!Utils.TerminalOutputFilter.IsSpinnerNoise(text))
+        {
+            var busyOutputEvent = MarkOutputActivity(sessionId, now);
+            if (busyOutputEvent.HasValue)
+                _ioObserverService.PublishSessionBusy(busyOutputEvent.Value);
+        }
 
         ISessionOutputWriter? outputWriter;
         lock (s_stateLock)
@@ -218,6 +222,8 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         {
             await accumulatorToDispose.DisposeAsync();
         }
+
+        TUI_Event_Watcher.ClearSession(sessionId);
 
         await _repository.CompleteSessionAsync(sessionId, exitCode);
 

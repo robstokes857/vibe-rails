@@ -1,7 +1,11 @@
+using System.IO.Compression;
+using System.Text;
+using System.Text.Json;
 using VibeRails.DB;
 using VibeRails.Interfaces;
 using VibeRails.DTOs;
 using Microsoft.AspNetCore.Http.HttpResults;
+using VibeRails.Services.UserInOut;
 
 namespace VibeRails.Routes;
 
@@ -97,6 +101,103 @@ public static class ChatHistoryRoutes
             var text = await transcriptService.GetOrBuildAsync(sessionId, cancellationToken);
             return Results.Ok(new ChatHistoryTranscriptResponse(sessionId, text));
         }).WithName("GetChatHistoryTranscript");
+
+        app.MapGet("/api/v1/chatHistory/{sessionId}/raw-session", async (
+            IRepository repository,
+            string sessionId,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+                return Results.BadRequest(new ErrorResponse("Session id is required."));
+
+            var sessionWithLogs = await repository.GetSessionWithLogsAsync(sessionId, cancellationToken);
+            if (sessionWithLogs is null)
+                return Results.NotFound(new ErrorResponse($"Session not found: {sessionId}"));
+
+            var chunks = await repository.GetSessionLogChunksAsync(sessionId, cancellationToken);
+            if (chunks.Count == 0)
+                return Results.NotFound(new ErrorResponse("No raw session data found."));
+
+            var userInputs = await repository.GetUserInputsForSessionAsync(sessionId, cancellationToken);
+
+            var totalLength = chunks.Sum(chunk => chunk.Content.Length);
+            var combinedBytes = new byte[totalLength];
+            var offset = 0;
+            foreach (var chunk in chunks)
+            {
+                chunk.Content.CopyTo(combinedBytes, offset);
+                offset += chunk.Content.Length;
+            }
+
+            // Prepend UTF-8 BOM to the raw bytes (no decode/re-encode round-trip
+            // that would replace invalid sequences with U+FFFD).
+            var bom = new byte[] { 0xEF, 0xBB, 0xBF };
+            var utf8FileBytes = new byte[bom.Length + combinedBytes.Length];
+            Buffer.BlockCopy(bom, 0, utf8FileBytes, 0, bom.Length);
+            Buffer.BlockCopy(combinedBytes, 0, utf8FileBytes, bom.Length, combinedBytes.Length);
+
+            var base64Bytes = Encoding.UTF8.GetBytes(Convert.ToBase64String(combinedBytes));
+            var archivePayload = new ChatHistoryRawSessionArchiveResponse(
+                sessionId,
+                sessionWithLogs.Logs,
+                userInputs);
+            var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(
+                archivePayload,
+                AppJsonSerializerContext.Default.ChatHistoryRawSessionArchiveResponse);
+
+            using var archiveStream = new MemoryStream();
+            using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                var utf8Entry = archive.CreateEntry("InUTF8.txt", CompressionLevel.Fastest);
+                await using (var entryStream = utf8Entry.Open())
+                {
+                    await entryStream.WriteAsync(utf8FileBytes, cancellationToken);
+                }
+
+                var base64Entry = archive.CreateEntry("bytesBase64.txt", CompressionLevel.Fastest);
+                await using (var entryStream = base64Entry.Open())
+                {
+                    await entryStream.WriteAsync(base64Bytes, cancellationToken);
+                }
+
+                var jsonEntry = archive.CreateEntry("sessionLogsAndInputs.json", CompressionLevel.Fastest);
+                await using (var entryStream = jsonEntry.Open())
+                {
+                    await entryStream.WriteAsync(jsonBytes, cancellationToken);
+                }
+            }
+
+            return Results.File(archiveStream.ToArray(), "application/zip", $"{sessionId}-raw-session.zip");
+        }).WithName("GetChatHistoryRawSession");
+
+        app.MapGet("/api/v1/chatHistory/{sessionId}/user-text", async (
+            IChatHistoryService chatHistoryService,
+            IUserTextOutput userTextOutput,
+            string sessionId,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+                return Results.BadRequest(new ErrorResponse("Session id is required."));
+
+            var session = await chatHistoryService.GetSessionAsync(sessionId, cancellationToken);
+            if (session is null)
+                return Results.NotFound(new ErrorResponse($"Session not found: {sessionId}"));
+
+            var userText = await userTextOutput.GetSessionTextAsync(sessionId, cancellationToken);
+            if (string.IsNullOrEmpty(userText))
+                return Results.NotFound(new ErrorResponse("No cleaned user text found."));
+
+            var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
+            var utf8TextBytes = utf8.GetBytes(userText);
+            var utf8FileBytes = new byte[utf8.GetPreamble().Length + utf8TextBytes.Length];
+            Buffer.BlockCopy(utf8.GetPreamble(), 0, utf8FileBytes, 0, utf8.GetPreamble().Length);
+            Buffer.BlockCopy(utf8TextBytes, 0, utf8FileBytes, utf8.GetPreamble().Length, utf8TextBytes.Length);
+
+            return Results.File(
+                utf8FileBytes,
+                "text/plain; charset=utf-8",
+                $"{sessionId}-user-text.txt");
+        }).WithName("GetChatHistoryUserText");
 
         app.MapGet("/api/v1/chatHistory/{sessionId}/replay", async (
             IRepository repository,

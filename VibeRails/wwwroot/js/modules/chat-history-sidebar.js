@@ -8,6 +8,8 @@ import * as SessionDebug from './session-viewer.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 const SCROLL_LOAD_THRESHOLD_PX = 48;
+// Standard dashed GUID (8-4-4-4-12) or "N" format (32 hex chars), case-insensitive.
+const SESSION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[0-9a-f]{32}$/i;
 
 export class ChatHistorySidebar {
     constructor(app) {
@@ -60,17 +62,16 @@ export class ChatHistorySidebar {
                             <input type="text" class="ch-search-input" id="ch-search-input" placeholder="Search sessions..." autocomplete="off">
                         </div>
                         <div class="ch-sidebar-controls">
-                            <div class="ch-filter-row">
-                                <button class="ch-filter-drawer-toggle" id="ch-filter-drawer-toggle" type="button" aria-expanded="false">
-                                    <span class="ch-filter-drawer-label">Filters</span>
-                                    <i class="fa-solid fa-chevron-down ch-filter-drawer-chevron"></i>
-                                </button>
+                            <button class="ch-filter-drawer-toggle" id="ch-filter-drawer-toggle" type="button" aria-expanded="false">
+                                <i class="fa-solid fa-filter ch-filter-icon"></i>
+                                <span class="ch-filter-drawer-label">Filters</span>
+                                <i class="fa-solid fa-chevron-down ch-filter-drawer-chevron"></i>
+                            </button>
+                            <div class="ch-filter-drawer-content" id="ch-filter-drawer-content">
                                 <button class="ch-current-dir-toggle" id="ch-current-dir-toggle" type="button" aria-pressed="false" title="Only show chats started from the current working directory">
                                     <i class="fa-solid fa-folder-open"></i>
                                     <span class="ch-current-dir-toggle-label">This folder</span>
                                 </button>
-                            </div>
-                            <div class="ch-filter-drawer-content" id="ch-filter-drawer-content">
                                 <div class="ch-llm-filter-group" id="ch-llm-filter-group"></div>
                             </div>
                         </div>
@@ -95,6 +96,8 @@ export class ChatHistorySidebar {
                     <div class="ch-context-menu-divider"></div>
                     <div class="ch-context-menu-item" data-action="get-transcript">Get Transcript</div>
                     <div class="ch-context-menu-item" data-action="get-session">Get Session</div>
+                    <div class="ch-context-menu-item" data-action="get-raw-session">Get Raw Session</div>
+                    <div class="ch-context-menu-item" data-action="get-user-text">Get User Text</div>
                 </div>
             </div>`;
     }
@@ -132,9 +135,8 @@ export class ChatHistorySidebar {
             this.closeButton.setAttribute('aria-expanded', String(isOpen));
 
             if (icon) {
-                icon.className = isOpen
-                    ? 'fa-solid fa-chevron-left'
-                    : 'fa-solid fa-chevron-right';
+                // Use a single base class; rotation is handled in CSS via .vb-history-under
+                icon.className = 'fa-solid fa-chevron-left';
             }
         };
         const emitToggleState = () => onToggle?.(!sidebar?.classList.contains('ch-sidebar-collapsed'));
@@ -191,11 +193,40 @@ export class ChatHistorySidebar {
             this._closeContextMenu();
             if (this.activeItem) void SessionDebug.showReplayModal(this.activeItem.id);
         });
+        contextMenu?.querySelector('[data-action="get-raw-session"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._closeContextMenu();
+            if (this.activeItem) {
+                void SessionDebug.downloadRawSession(this.activeItem.id).catch(error => {
+                    const message = error?.message || 'Unknown error';
+                    this.app.showError(`Failed to download raw session: ${message}`);
+                });
+            }
+        });
+        contextMenu?.querySelector('[data-action="get-user-text"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._closeContextMenu();
+            if (this.activeItem) {
+                void SessionDebug.downloadUserText(this.activeItem.id).catch(error => {
+                    const message = error?.message || 'Unknown error';
+                    this.app.showError(`Failed to download user text: ${message}`);
+                });
+            }
+        });
 
         const searchInput = root.querySelector('#ch-search-input');
         searchInput?.addEventListener('input', (e) => {
             this.filterText = e.target.value.toLowerCase().trim();
             this._renderItems();
+
+            // If the user typed/pasted a full session id, look it up directly
+            // (faster than scanning every page) and merge the result so the
+            // existing filter pipeline highlights it.
+            if (this._looksLikeSessionId(this.filterText)
+                && !this.allItems.some(item => (item.id || '').toLowerCase() === this.filterText)) {
+                void this._fetchSessionByIdIntoList(this.filterText);
+                return;
+            }
 
             if (this.filterText && this.hasMore) {
                 void this._loadRemainingPagesForFilters();
@@ -947,10 +978,61 @@ export class ChatHistorySidebar {
         return this.app.data?.configs?.rootPath || this.app.data?.configs?.launchDirectory || '';
     }
 
+    _normalizeDirectoryKey(path) {
+        // Git (rev-parse --show-toplevel) returns forward slashes on Windows,
+        // but Repository.NormalizeWorkingDirectory stores sessions using
+        // Path.GetFullPath which yields backslashes. Fold both to a common
+        // form so the "This folder" filter actually matches.
+        if (!path) {
+            return '';
+        }
+        return path
+            .trim()
+            .replace(/\\/g, '/')
+            .replace(/\/+$/, '')
+            .toLowerCase();
+    }
+
     _hasActiveFilters() {
         return Boolean(this.filterText)
             || this.llmFilters.size > 0
             || this.currentDirOnly;
+    }
+
+    _looksLikeSessionId(text) {
+        return SESSION_ID_REGEX.test((text || '').trim());
+    }
+
+    async _fetchSessionByIdIntoList(sessionId) {
+        if (!sessionId) {
+            return;
+        }
+
+        // Show the searching spinner while we hit the backend.
+        this.isLoadingForSearch = true;
+        this._setRefreshButtonState();
+        this._renderItems();
+
+        try {
+            const fetched = await this.app.apiCall(
+                `/api/v1/chatHistory/${encodeURIComponent(sessionId)}`,
+                'GET',
+                null,
+                { showLoading: false }
+            );
+            if (fetched) {
+                this._mergeItems([fetched]);
+            }
+        } catch (error) {
+            // 404 just means no such session — leave the empty state alone.
+            if (!/not\s*found/i.test(error?.message || '')) {
+                this.app.showError(`Failed to look up session: ${error.message}`);
+            }
+        } finally {
+            this.isLoadingForSearch = false;
+            this._setRefreshButtonState();
+            this._renderItems();
+        }
     }
 
     _getProjectDisplayName(item) {
@@ -1010,7 +1092,7 @@ export class ChatHistorySidebar {
 
     _getFilteredItems() {
         const preferredDir = this.currentDirOnly
-            ? (this._getPreferredWorkingDirectory() || '').trim().toLowerCase()
+            ? this._normalizeDirectoryKey(this._getPreferredWorkingDirectory())
             : '';
 
         return this.allItems.filter(item => {
@@ -1019,7 +1101,7 @@ export class ChatHistorySidebar {
             }
 
             if (this.currentDirOnly && preferredDir) {
-                const itemDir = this._getItemWorkingDirectoryKey(item).toLowerCase();
+                const itemDir = this._normalizeDirectoryKey(this._getItemWorkingDirectoryKey(item));
                 if (itemDir !== preferredDir) {
                     return false;
                 }
@@ -1030,6 +1112,7 @@ export class ChatHistorySidebar {
             }
 
             const searchParts = [
+                item.id || '',
                 this._getDisplayName(item),
                 this._getProjectDisplayName(item),
                 item.environmentName || '',

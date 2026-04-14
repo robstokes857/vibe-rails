@@ -37,6 +37,11 @@ namespace VibeRails.DTOs
         int? ExitCode
     );
 
+    public record OpenSessionCleanupCandidate(
+        string SessionId,
+        int? OwnerPid
+    );
+
     public record SessionLogResponse(
         long Id,
         string SessionId,
@@ -58,6 +63,20 @@ namespace VibeRails.DTOs
         string InputText,
         string? GitCommitHash,
         DateTime TimestampUTC
+    );
+
+    public record CleanedUserInputRow(
+        long Id,
+        string SessionId,
+        string CleanedText,
+        DateTime CreatedUTC
+    );
+
+    public record UnembeddedCleanedInput(
+        long CleanedId,
+        string SessionId,
+        long UserInputId,
+        string CleanedText
     );
 
     public record FileChangeInfo(
@@ -315,7 +334,6 @@ namespace VibeRails.DTOs
 
     // BERT Explorer DTOs
     public record BertStatusResponse(
-        bool CaptureEnabled,
         bool DatabaseExists,
         bool StateDatabaseExists,
         bool ModelAvailable,
@@ -420,6 +438,12 @@ namespace VibeRails.DTOs
     public record ChatHistoryReplayResponse(
         string SessionId,
         string Content
+    );
+
+    public record ChatHistoryRawSessionArchiveResponse(
+        string SessionId,
+        List<SessionLogResponse> SessionLogs,
+        List<UserInputRecord> UserInputs
     );
 
     public record TerminalReplayChunk(
@@ -577,6 +601,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(ChatSummaryResponse))]
     [JsonSerializable(typeof(ChatHistoryTranscriptResponse))]
     [JsonSerializable(typeof(ChatHistoryReplayResponse))]
+    [JsonSerializable(typeof(ChatHistoryRawSessionArchiveResponse))]
     [JsonSerializable(typeof(TerminalReplayChunk))]
     [JsonSerializable(typeof(TerminalReplayFrame))]
     [JsonSerializable(typeof(TerminalReplayResponse))]

@@ -8,6 +8,12 @@ namespace VibeRails.Utils;
 /// Accumulates keystrokes from the terminal and fires a callback when the user presses Enter.
 /// Designed for command-line logging: completed lines only, with control/escape
 /// sequences filtered so cursor navigation/edit keys do not pollute captured text.
+///
+/// Bracketed-paste support: when the CSI parser sees <c>ESC[200~</c>, subsequent
+/// embedded newlines are buffered as literal characters instead of terminating a line.
+/// The full paste is flushed as a single completed line when <c>ESC[201~</c> arrives.
+/// This prevents SHIFT+Enter / multi-line paste content from splitting across multiple
+/// <c>UserInputs</c> rows.
 /// </summary>
 public sealed class InputAccumulator : IAsyncDisposable, IDisposable
 {
@@ -15,6 +21,7 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
     private const char Escape = '\x1B';
 
     private readonly StringBuilder _lineBuffer = new();
+    private readonly StringBuilder _csiParams = new();
     private readonly Func<string, Task> _onInputComplete;
     private readonly object _lock = new();
     private readonly Channel<string> _completedLines = Channel.CreateUnbounded<string>(
@@ -23,6 +30,7 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
 
     private EscapeParseState _escapeState = EscapeParseState.None;
     private bool _escapeStringSawEsc;
+    private bool _inBracketedPaste;
     private bool _disposed;
 
     public InputAccumulator(Func<string, Task> onInputComplete)
@@ -47,8 +55,10 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
 
             foreach (var c in input)
             {
-                // First consume any active escape sequence state.
-                if (ConsumeEscapeSequenceChar(c))
+                // First consume any active escape sequence state. ConsumeEscapeSequenceChar
+                // may flip _inBracketedPaste on ESC[200~ / ESC[201~ and enqueue a completed
+                // line when a paste block closes.
+                if (ConsumeEscapeSequenceChar(c, completed))
                     continue;
 
                 if (c == Escape)
@@ -59,6 +69,25 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
 
                 if (c == '\r' || c == '\n')
                 {
+                    if (_inBracketedPaste)
+                    {
+                        // Inside a paste — preserve the newline as a literal character so the
+                        // whole pasted block becomes one logical line. Normalize \r to \n.
+                        TryAppend('\n');
+
+                        // Safety cap: if a paste never closes (dropped ESC[201~), force-flush
+                        // once the buffer exceeds MaxLineLength and drop out of paste mode.
+                        if (_lineBuffer.Length >= MaxLineLength)
+                        {
+                            var forced = _lineBuffer.ToString();
+                            _lineBuffer.Clear();
+                            _inBracketedPaste = false;
+                            if (!string.IsNullOrEmpty(forced))
+                                completed.Add(forced);
+                        }
+                        continue;
+                    }
+
                     var completedLine = _lineBuffer.ToString();
                     _lineBuffer.Clear();
                     if (!string.IsNullOrEmpty(completedLine))
@@ -112,8 +141,10 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
         lock (_lock)
         {
             _lineBuffer.Clear();
+            _csiParams.Clear();
             _escapeState = EscapeParseState.None;
             _escapeStringSawEsc = false;
+            _inBracketedPaste = false;
         }
     }
 
@@ -170,7 +201,7 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
         // If the line exceeds MaxLineLength, silently truncate for safety.
     }
 
-    private bool ConsumeEscapeSequenceChar(char c)
+    private bool ConsumeEscapeSequenceChar(char c, List<string> completed)
     {
         switch (_escapeState)
         {
@@ -192,12 +223,43 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
                     'P' or '^' or '_' => EscapeParseState.EscString,
                     _ => EscapeParseState.None
                 };
+                if (_escapeState == EscapeParseState.Csi)
+                {
+                    _csiParams.Clear();
+                }
                 _escapeStringSawEsc = false;
                 return true;
 
             case EscapeParseState.Csi:
                 if (IsEscapeFinalByte(c))
+                {
+                    // Bracketed-paste markers: ESC[200~ opens, ESC[201~ closes.
+                    // At this point the CSI parameter bytes are in _csiParams and `c` is the final byte.
+                    if (c == '~')
+                    {
+                        var parameters = _csiParams.ToString();
+                        if (parameters == "200")
+                        {
+                            _inBracketedPaste = true;
+                        }
+                        else if (parameters == "201")
+                        {
+                            // Flush the pasted block as a single completed line.
+                            _inBracketedPaste = false;
+                            var pastedLine = _lineBuffer.ToString();
+                            _lineBuffer.Clear();
+                            if (!string.IsNullOrEmpty(pastedLine))
+                                completed.Add(pastedLine);
+                        }
+                    }
+                    _csiParams.Clear();
                     _escapeState = EscapeParseState.None;
+                }
+                else
+                {
+                    // Collect parameter/intermediate bytes so we can recognize the full sequence.
+                    _csiParams.Append(c);
+                }
                 return true;
 
             case EscapeParseState.Ss3:

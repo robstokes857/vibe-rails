@@ -74,12 +74,10 @@ public class TerminalRunner
                     var remoteTakeoverNotified = false;
                     var lockPromptSent = false;
                     var failedPinAttempts = 0;
-                    var replayInProgress = 0; // 1 while GetGridReplay snapshot is being sent; live forward paused
-                    terminal.Subscribe(new RemoteOutputConsumer(
+                    var remoteOutputConsumer = new RemoteOutputConsumer(
                         remoteConn,
-                        canForward: () =>
-                            System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 1 &&
-                            System.Threading.Volatile.Read(ref replayInProgress) == 0));
+                        canForward: () => System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 1);
+                    terminal.Subscribe(remoteOutputConsumer);
 
                     async Task NotifyRemoteTakeoverAsync(string trigger)
                     {
@@ -108,12 +106,6 @@ public class TerminalRunner
                             Log.Error(ex, "[Terminal] Remote takeover callback failed");
                         }
                     }
-
-                    Task RequestTerminalRedrawAsync()
-                        => terminal.WriteBytesAsync(new byte[] { 0x0C }, CancellationToken.None);
-
-                    bool ShouldUseRedrawAttach()
-                        => TerminalReplayPolicy.ShouldUseRedrawAttach(llm.ToString(), terminal.IsSyncOutputActive);
 
                     async Task SendLockedAsync(bool force = false)
                     {
@@ -161,29 +153,11 @@ public class TerminalRunner
 
                                             await remoteConn.SendControlAsync(TerminalControlProtocol.Unlocked);
                                             await NotifyRemoteTakeoverAsync("pin");
-                                            if (ShouldUseRedrawAttach())
-                                            {
-                                                Log.Information(
-                                                    "[Remote] Using redraw-first attach for {Cli} ({Reason})",
-                                                    llm,
-                                                    TerminalReplayPolicy.DescribeReason(llm.ToString(), terminal.IsSyncOutputActive));
-                                            }
-                                            else
-                                            {
-                                                System.Threading.Volatile.Write(ref replayInProgress, 1);
-                                                try
-                                                {
-                                                    var pinReplay = terminal.GetGridReplay();
-                                                    if (pinReplay.Length > 0)
-                                                        await remoteConn.SendOutputAsync(pinReplay);
-                                                }
-                                                finally
-                                                {
-                                                    System.Threading.Volatile.Write(ref replayInProgress, 0);
-                                                }
-                                            }
-
-                                            await RequestTerminalRedrawAsync();
+                                            // Atomic snapshot delivery: the remote consumer is already
+                                            // subscribed, so PushSnapshotTo hands it a fresh state dump
+                                            // under the subscriber lock — no live bytes interleave, no
+                                            // TUI poking required.
+                                            terminal.PushSnapshotTo(remoteOutputConsumer);
                                             return;
                                         }
 
@@ -245,31 +219,12 @@ public class TerminalRunner
                                 }
 
                                 await NotifyRemoteTakeoverAsync("replay");
-                                if (ShouldUseRedrawAttach())
-                                {
-                                    Log.Information(
-                                        "[Remote] Using redraw-first attach for {Cli} ({Reason})",
-                                        llm,
-                                        TerminalReplayPolicy.DescribeReason(llm.ToString(), terminal.IsSyncOutputActive));
-                                }
-                                else
-                                {
-                                    // Pause live forwarding so the replay snapshot is not interleaved
-                                    // with PTY output that arrived after the snapshot was taken.
-                                    System.Threading.Volatile.Write(ref replayInProgress, 1);
-                                    try
-                                    {
-                                        var replay = terminal.GetGridReplay();
-                                        if (replay.Length > 0)
-                                            await remoteConn.SendOutputAsync(replay);
-                                    }
-                                    finally
-                                    {
-                                        System.Threading.Volatile.Write(ref replayInProgress, 0);
-                                    }
-                                }
-
-                                await RequestTerminalRedrawAsync();
+                                // Atomic snapshot delivery: PushSnapshotTo captures emulator state
+                                // and hands it to the already-subscribed remote consumer under the
+                                // terminal's subscriber lock, so no live bytes can interleave. The
+                                // snapshot begins with ED2 + ED3 + cursor home so whatever the remote
+                                // had on screen is wiped and rebuilt from ground truth.
+                                terminal.PushSnapshotTo(remoteOutputConsumer);
                             }
                             finally
                             {
@@ -548,7 +503,7 @@ public class TerminalRunner
             terminal.StartReadLoop();
 
             // Register so web UI can find this terminal
-            sessionService.RegisterExternalTerminal(terminal, sessionId, llm.ToString());
+            sessionService.RegisterExternalTerminal(terminal, sessionId);
 
             try
             {

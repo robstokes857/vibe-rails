@@ -1,9 +1,9 @@
 # DB Layer — Business Logic & Technical Reference
 
-This document describes how Environments, Sandboxes, AgentMetadata, and Sessions work at the database layer.
+This document describes how Environments, Sandboxes, AgentMetadata, Sessions, and TUI events work at the database layer.
 
 > **Contents:**
-> [Database Overview](#database-overview) | [Environments](#environments) | [Sandboxes](#sandboxes) | [AgentMetadata](#agentmetadata) | [Sessions](#sessions) | [Entity Relationships](#entity-relationships) | [Repository Patterns](#repository-patterns)
+> [Database Overview](#database-overview) | [Environments](#environments) | [Sandboxes](#sandboxes) | [AgentMetadata](#agentmetadata) | [Sessions](#sessions) | [TUI Events](#tui-events) | [Entity Relationships](#entity-relationships) | [Repository Patterns](#repository-patterns)
 
 ---
 
@@ -299,6 +299,43 @@ CREATE TABLE IF NOT EXISTS InputFileChanges (
 
 ---
 
+## TUI Events
+
+### Business Logic
+
+`TUI_Event` stores parsed terminal-control input events emitted by `TUI_Event_Watcher`, such as `Escape`, arrow keys, `ShiftTab`, and bracketed paste markers.
+
+| Rule | Details |
+|---|---|
+| **Source of truth** | Events are parsed in `TUI_Event_Watcher.Watch(...)` from raw terminal input bytes before the input is written to the PTY. |
+| **Persistence** | `TuiEventPersistenceService` subscribes once at app startup and inserts rows asynchronously so terminal input stays non-blocking. |
+| **Scope** | Each event belongs to a session via `SessionId`. |
+| **Stored payload** | Only the trigger sequence and event type are stored. The optional watcher payload is not persisted in this table. |
+| **Cleanup** | Rows are deleted when the parent session is deleted. |
+
+### Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS TUI_Event (
+    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    SessionId     TEXT    NOT NULL,
+    TimestampUTC  TEXT    NOT NULL,
+    TriggerString TEXT    NOT NULL,
+    EventType     TEXT    NOT NULL,
+    FOREIGN KEY (SessionId) REFERENCES Sessions(Id) ON DELETE CASCADE
+);
+```
+
+**Index:** `idx_tui_event_session_timestamp` on `(SessionId, TimestampUTC)`
+
+### Key Operations
+
+| Method | Behavior |
+|---|---|
+| `InsertTuiEventAsync(sessionId, timestampUtc, triggerString, eventType)` | Appends one parsed TUI event row |
+
+---
+
 ## Entity Relationships
 
 Environments, Sandboxes, and AgentMetadata have **no foreign key relationships** — they are fully independent tables.
@@ -353,6 +390,15 @@ UserInputs                InputFileChanges
 +-------------------+     | LinesDeleted      |
                           | DiffContent       |
                           +-------------------+
+
+TUI_Event
++-------------------+
+| Id (PK)           |
+| SessionId (FK) ---|---> Sessions.Id
+| TimestampUTC      |
+| TriggerString     |
+| EventType         |
++-------------------+
 ```
 
 ---
