@@ -1,6 +1,7 @@
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
+using VibeRails.Services.UserInOut;
 
 namespace VibeRails.DB
 {
@@ -9,7 +10,7 @@ namespace VibeRails.DB
         void InitializeDatabase();
 
         // Session lifecycle
-        Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir);
+        Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir, int ownerPid);
         Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false);
         Task CompleteSessionAsync(string sessionId, int exitCode);
         Task<string> GetProjectDisplayNameAsync(string path, CancellationToken cancellationToken = default);
@@ -32,15 +33,29 @@ namespace VibeRails.DB
         Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, string? preferredWorkingDirectory, string? sortBy, string? sortDirection, CancellationToken cancellationToken);
         Task<bool> UpdateChatHistorySessionNameAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken);
         Task<bool> DeleteChatHistorySessionAsync(string sessionId, CancellationToken cancellationToken);
-        Task<List<string>> GetOpenSessionIdsAsync(DateTime olderThan, CancellationToken cancellationToken);
+        Task<List<OpenSessionCleanupCandidate>> GetOpenSessionCleanupCandidatesAsync(DateTime olderThan, CancellationToken cancellationToken);
 
         // User input tracking
         Task<UserInputRecord?> GetLastUserInputAsync(string sessionId);
+        Task<UserInputRecord?> GetUserInputByIdAsync(long userInputId, CancellationToken cancellationToken = default);
         Task<long> InsertUserInputAsync(string sessionId, int sequence, string inputText, string? gitCommitHash);
         Task InsertFileChangesAsync(long userInputId, long? previousInputId, List<FileChangeInfo> changes);
         Task ReplaceFileChangesAsync(long userInputId, List<FileChangeInfo> changes, CancellationToken cancellationToken = default);
         Task<string?> GetSessionWorkingDirectoryAsync(string sessionId, CancellationToken cancellationToken = default);
         Task RecordUserInputAsync(string sessionId, string inputText, IGitService gitService, CancellationToken cancellationToken = default);
+        Task InsertTuiEventAsync(string sessionId, DateTimeOffset timestampUtc, string triggerString, TUI_Event_Watcher_Type eventType, CancellationToken cancellationToken = default);
+
+        // Cleaned user input (1:1 with UserInputs via dual FKs)
+        Task<long> CreateCleanedAndLinkAsync(string sessionId, long userInputId, string cleanedText, DateTime createdUtc, CancellationToken cancellationToken = default);
+        Task<bool> IsInputCleanedAsync(long userInputId, CancellationToken cancellationToken = default);
+        Task<string?> GetCleanedTextForInputIdAsync(long inputId, CancellationToken cancellationToken = default);
+        Task<List<string>> GetSessionCleanedTextOrderedAsync(string sessionId, CancellationToken cancellationToken = default);
+        Task<List<UserInputRecord>> GetUncleanedInputsForSessionAsync(string sessionId, CancellationToken cancellationToken = default);
+        Task<List<UserInputRecord>> GetUncleanedInputsForClosedSessionsAsync(int batchSize, CancellationToken cancellationToken = default);
+
+        // BERT embedding tracking
+        Task<List<UnembeddedCleanedInput>> GetUnembeddedCleanedInputsAsync(int batchSize, CancellationToken cancellationToken = default);
+        Task MarkCleanedInputEmbeddedAsync(long cleanedId, CancellationToken cancellationToken = default);
 
         // Environment operations (global, not project-scoped)
         Task<LLM_Environment?> GetEnvironmentByNameAndLlmAsync(string name, LLM llm, CancellationToken cancellationToken = default);

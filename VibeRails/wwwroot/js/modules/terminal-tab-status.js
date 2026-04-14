@@ -13,6 +13,7 @@ export const TAB_STATUS = Object.freeze({
     CONNECTED:    'connected',
     THINKING:     'thinking',
     READY:        'ready',
+    ACTIVE:       'active',
     DISCONNECTED: 'disconnected'
 });
 
@@ -35,6 +36,7 @@ const THINKING_EMOJI = [
 const STATUS_FA_ICON = {
     [TAB_STATUS.CONNECTED]:    'fa-solid fa-link',
     [TAB_STATUS.READY]:        'fa-solid fa-circle-check',
+    [TAB_STATUS.ACTIVE]:       'fa-solid fa-keyboard',
     [TAB_STATUS.DISCONNECTED]: 'fa-solid fa-plug-circle-xmark',
 };
 
@@ -42,6 +44,7 @@ const STATUS_TEXT = {
     [TAB_STATUS.CONNECTED]:    'Connected',
     [TAB_STATUS.THINKING]:     'Thinking',
     [TAB_STATUS.READY]:        'Ready',
+    [TAB_STATUS.ACTIVE]:       'Active',
     [TAB_STATUS.DISCONNECTED]: 'Disconnected'
 };
 
@@ -161,12 +164,44 @@ export class TabStatusController {
     }
 
     onTerminalData(data) {
+        // xterm focus in/out reports (mode 1004). When a TUI enables focus
+        // tracking, xterm emits \x1b[I on focus and \x1b[O on blur via onData.
+        // Clicking into a tab would otherwise be seen as "printable input" (the
+        // `[` and `I` bytes) and flip a READY tab straight into ACTIVE.
+        if (data === '\x1b[I' || data === '\x1b[O') return;
+
         if (data === '\r' &&
-            (this._status === TAB_STATUS.CONNECTED || this._status === TAB_STATUS.READY)) {
+            (this._status === TAB_STATUS.CONNECTED ||
+             this._status === TAB_STATUS.READY ||
+             this._status === TAB_STATUS.ACTIVE)) {
             this._transitionTo(TAB_STATUS.THINKING);
-        } else if (data === '\x1b' && this._status === TAB_STATUS.THINKING) {
-            this._transitionTo(TAB_STATUS.CONNECTED);
+            return;
         }
+        if (data === '\x1b' && this._status === TAB_STATUS.THINKING) {
+            this._transitionTo(TAB_STATUS.CONNECTED);
+            return;
+        }
+        // Printable typed input means the user is composing — show ACTIVE
+        // until they press Enter. This also fires during THINKING (the
+        // follow-up-message case): the user typing is a clear signal they're
+        // past waiting on the previous turn, so drop the loading indicator
+        // and let them compose. DISCONNECTED is the only state that ignores
+        // typed input.
+        if (this._status !== TAB_STATUS.ACTIVE &&
+            this._status !== TAB_STATUS.DISCONNECTED &&
+            this._hasPrintableChar(data)) {
+            this._transitionTo(TAB_STATUS.ACTIVE);
+        }
+    }
+
+    _hasPrintableChar(data) {
+        if (!data) return false;
+        for (let i = 0; i < data.length; i++) {
+            const code = data.charCodeAt(i);
+            // Printable ASCII (space..~) or any non-control Unicode char.
+            if (code >= 0x20 && code !== 0x7f) return true;
+        }
+        return false;
     }
 
     onSessionIdle() {
@@ -177,8 +212,9 @@ export class TabStatusController {
 
     onSessionBusy() {
         // No-op. Enter detection via onTerminalData is the sole trigger for
-        // THINKING. The backend fires session_busy on any PTY activity (including
-        // initial prompt output), so we cannot use it to infer user intent.
+        // entering THINKING. The backend fires session_busy on any PTY activity
+        // (including initial prompt output), so we cannot use it to infer user
+        // intent. Typed input drops us back to READY (see onTerminalData).
     }
 
     onSessionCompleted() {
@@ -208,6 +244,10 @@ export class TabStatusController {
         } else if (newStatus === TAB_STATUS.READY) {
             this._awaitingFirstIdle = false;
         } else if (newStatus === TAB_STATUS.CONNECTED) {
+            this._awaitingFirstIdle = false;
+        } else if (newStatus === TAB_STATUS.ACTIVE) {
+            // User is composing — don't auto-pop to READY on the next idle;
+            // wait for them to press Enter (THINKING) on their own terms.
             this._awaitingFirstIdle = false;
         }
 

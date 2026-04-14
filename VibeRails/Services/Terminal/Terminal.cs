@@ -109,6 +109,88 @@ public sealed class Terminal : IAsyncDisposable
     }
 
     /// <summary>
+    /// Atomically captures the current emulator state, delivers it to the consumer
+    /// as its first output, and subscribes it for live PTY bytes.
+    ///
+    /// Guarantee: the consumer's view equals (snapshot at time T) followed by
+    /// (every PTY byte dispatched after T). No bytes lost, no bytes duplicated,
+    /// no need for any TUI-poking redraw hint on reconnect.
+    ///
+    /// The whole operation runs under <see cref="_subscriberLock"/> so the read
+    /// loop cannot be mid-dispatch while we add the new consumer, and under
+    /// <see cref="_emulatorLock"/> so the emulator state cannot change while we
+    /// serialize it. Consumers' OnOutput implementations must be non-blocking
+    /// per the <see cref="ITerminalConsumer"/> contract.
+    /// </summary>
+    public IDisposable SubscribeWithSnapshot(ITerminalConsumer consumer)
+    {
+        lock (_subscriberLock)
+        {
+            var snapshot = CaptureSnapshotLocked();
+            DeliverSnapshot(consumer, snapshot);
+            _consumers.Add(consumer);
+        }
+        return new Unsubscriber(this, consumer);
+    }
+
+    /// <summary>
+    /// Delivers a fresh emulator snapshot to an already-subscribed consumer.
+    /// Used by the remote path on replay-request / post-pin-verify so the viewer
+    /// sees an immediate self-healing repaint (the snapshot begins with ED2 + ED3
+    /// + cursor home, so any prior state on the remote side is wiped).
+    ///
+    /// Atomic with respect to the read loop, so no live bytes interleave with
+    /// the snapshot. Any bytes dispatched after the snapshot arrive in-order
+    /// via the consumer's normal channel.
+    /// </summary>
+    public void PushSnapshotTo(ITerminalConsumer consumer)
+    {
+        lock (_subscriberLock)
+        {
+            var snapshot = CaptureSnapshotLocked();
+            DeliverSnapshot(consumer, snapshot);
+        }
+    }
+
+    // Must be called with _subscriberLock held. Takes _emulatorLock internally
+    // so the serializer sees a consistent emulator state.
+    private byte[] CaptureSnapshotLocked()
+    {
+        TerminalEmulator.TerminalCell[][] scrollback;
+        TerminalEmulator.TerminalCell[,] snap;
+        int rows, cols, cursorRow, cursorCol, cursorShape;
+        bool cursorVisible, isAlternateScreen;
+        lock (_emulatorLock)
+        {
+            scrollback = _emulator.GetScrollback();
+            snap = _emulator.GetSnapshot();
+            rows = _emulator.Rows;
+            cols = _emulator.Cols;
+            cursorRow = _emulator.CursorRow;
+            cursorCol = _emulator.CursorCol;
+            cursorVisible = _emulator.CursorVisible;
+            cursorShape = _emulator.CursorShape;
+            isAlternateScreen = _emulator.IsAlternateScreen;
+        }
+        return TerminalGridSerializer.Serialize(
+            scrollback, snap, rows, cols,
+            cursorRow, cursorCol, cursorVisible, cursorShape, isAlternateScreen);
+    }
+
+    private static void DeliverSnapshot(ITerminalConsumer consumer, byte[] snapshot)
+    {
+        if (snapshot.Length == 0) return;
+        try
+        {
+            consumer.OnOutput(snapshot);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[Terminal] Consumer error while delivering snapshot");
+        }
+    }
+
+    /// <summary>
     /// Remove a consumer. Thread-safe.
     /// </summary>
     public void Unsubscribe(ITerminalConsumer consumer)
@@ -156,51 +238,36 @@ public sealed class Terminal : IAsyncDisposable
     public void PublishOutput(ReadOnlyMemory<byte> data)
     {
         if (data.IsEmpty) return;
-        ITerminalConsumer[] snapshot;
+        // Same lock discipline as ReadLoopAsync — hold _subscriberLock across
+        // dispatch so injected output is ordered correctly with PTY output and
+        // with new subscribers joining via SubscribeWithSnapshot.
         lock (_subscriberLock)
-            snapshot = [.. _consumers];
-        foreach (var c in snapshot)
         {
-            try
+            foreach (var c in _consumers)
             {
-                c.OnOutput(data);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[Terminal] Consumer error while publishing synthetic output");
+                try
+                {
+                    c.OnOutput(data);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "[Terminal] Consumer error while publishing synthetic output");
+                }
             }
         }
     }
 
     /// <summary>
     /// Serializes the full emulator state (scrollback + current screen) to an ANSI byte stream.
-    /// On reconnect, xterm.js gets a hard reset then the complete history — scroll up to see
-    /// everything, current screen is at the bottom. No DB, no animation, instant.
+    /// Prefer <see cref="SubscribeWithSnapshot"/> or <see cref="PushSnapshotTo"/> for attach
+    /// flows — they capture + deliver atomically so live bytes cannot interleave with the
+    /// snapshot. This raw accessor is kept for diagnostics and out-of-band callers that
+    /// handle ordering themselves.
     /// </summary>
     public byte[] GetGridReplay()
     {
-        TerminalEmulator.TerminalCell[][] scrollback;
-        TerminalEmulator.TerminalCell[,] snap;
-        int rows, cols, cursorRow, cursorCol, cursorShape;
-        bool cursorVisible, syncOutputActive, isAlternateScreen;
-        lock (_emulatorLock)
-        {
-            scrollback = _emulator.GetScrollback();
-            snap = _emulator.GetSnapshot();
-            rows = _emulator.Rows;
-            cols = _emulator.Cols;
-            cursorRow = _emulator.CursorRow;
-            cursorCol = _emulator.CursorCol;
-            cursorVisible = _emulator.CursorVisible;
-            cursorShape = _emulator.CursorShape;
-            syncOutputActive = _emulator.SyncOutputActive;
-            isAlternateScreen = _emulator.IsAlternateScreen;
-        }
-
-        if (syncOutputActive)
-            Log.Warning("[Terminal] Snapshot taken during synchronized output — replay may capture mid-frame state");
-
-        return TerminalGridSerializer.Serialize(scrollback, snap, rows, cols, cursorRow, cursorCol, cursorVisible, cursorShape, isAlternateScreen);
+        lock (_subscriberLock)
+            return CaptureSnapshotLocked();
     }
 
     /// <summary>
@@ -272,22 +339,25 @@ public sealed class Terminal : IAsyncDisposable
 
                 var data = new ReadOnlyMemory<byte>(buffer, 0, bytesRead);
 
-                // Snapshot consumers under lock, iterate outside
-                ITerminalConsumer[] snapshot;
+                // Hold _subscriberLock for the entire dispatch so a new subscriber
+                // joining via SubscribeWithSnapshot can only join BETWEEN dispatches,
+                // never in the middle of one. That's what makes the snapshot atomic:
+                // the new consumer's snapshot reflects emulator state *after* the
+                // previous dispatch and *before* the next, and it will receive every
+                // subsequent batch in-order. All consumers' OnOutput must be
+                // non-blocking per the ITerminalConsumer contract.
                 lock (_subscriberLock)
                 {
-                    snapshot = [.. _consumers];
-                }
-
-                foreach (var consumer in snapshot)
-                {
-                    try
+                    foreach (var consumer in _consumers)
                     {
-                        consumer.OnOutput(data);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error(ex, "[Terminal] Consumer error");
+                        try
+                        {
+                            consumer.OnOutput(data);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error(ex, "[Terminal] Consumer error");
+                        }
                     }
                 }
             }

@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using VibeRails.DB;
+using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Terminal;
 using VibeRails.Services.Integrations.VibeCodeRemote;
@@ -31,17 +33,51 @@ public sealed class StaleSessionCleanupJob(
         using var scope = scopeFactory.CreateScope();
         var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
 
-        var staleIds = await repository.GetOpenSessionIdsAsync(cutoff, cancellationToken);
+        var staleSessions = await repository.GetOpenSessionCleanupCandidatesAsync(cutoff, cancellationToken);
 
-        if (staleIds.Count == 0)
+        if (staleSessions.Count == 0)
             return;
 
-        _logger.LogInformation("[StaleSessionCleanupJob] Closing {Count} stale session(s)", staleIds.Count);
+        var orphanedSessions = new List<OpenSessionCleanupCandidate>();
 
-        foreach (var id in staleIds)
+        foreach (var session in staleSessions)
         {
-            await repository.CompleteSessionAsync(id, -1);
-            await remoteStateService.DeregisterTerminalAsync(id);
+            if (!session.OwnerPid.HasValue)
+            {
+                _logger.LogWarning(
+                    "[StaleSessionCleanupJob] Skipping tracked stale session {SessionId} with no owner PID",
+                    session.SessionId);
+                continue;
+            }
+
+            if (IsProcessAlive(session.OwnerPid.Value))
+                continue;
+
+            orphanedSessions.Add(session);
+        }
+
+        if (orphanedSessions.Count == 0)
+            return;
+
+        _logger.LogInformation("[StaleSessionCleanupJob] Closing {Count} stale orphaned session(s)", orphanedSessions.Count);
+
+        foreach (var session in orphanedSessions)
+        {
+            await repository.CompleteSessionAsync(session.SessionId, -1);
+            await remoteStateService.DeregisterTerminalAsync(session.SessionId);
+        }
+    }
+
+    private static bool IsProcessAlive(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch
+        {
+            return false;
         }
     }
 }

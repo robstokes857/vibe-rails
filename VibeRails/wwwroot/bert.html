@@ -110,6 +110,14 @@ details pre{border:none;border-radius:0;border-top:1px solid rgba(101,166,255,.1
   <div class="banner" id="banner"></div>
 </form>
 
+<!-- Session lookup bar -->
+<div class="query-bar" id="session-bar">
+  <label style="font-size:12px;color:var(--muted);white-space:nowrap">Session ID</label>
+  <input class="control" id="session-id" type="text" placeholder="Paste a session ID to see all its captures..." autocomplete="off" style="flex:1;min-width:200px">
+  <button class="button primary" id="session-search" type="button">Lookup</button>
+  <div class="banner" id="session-banner"></div>
+</div>
+
 <!-- Main split: results list | detail -->
 <div class="main">
   <section class="panel" id="results-panel">
@@ -118,6 +126,7 @@ details pre{border:none;border-radius:0;border-top:1px solid rgba(101,166,255,.1
       <select class="control" id="results-source" style="padding:5px 8px;font-size:11px;border-radius:8px">
         <option value="search">Search Hits</option>
         <option value="recent">Recent Captures</option>
+        <option value="session">Session Captures</option>
       </select>
     </div>
     <div class="body"><div class="list" id="results"></div></div>
@@ -138,7 +147,7 @@ details pre{border:none;border-radius:0;border-top:1px solid rgba(101,166,255,.1
 import { showTranscriptModal, showReplayModal } from './js/modules/session-viewer.js';
 
 const state = {
-  status: null, recent: [], results: [], lastSearch: null,
+  status: null, recent: [], results: [], sessionCaptures: [], lastSearch: null,
   selected: null, selectedId: null, queryCount: 0,
   detailLoading: false, listMode: 'search'
 };
@@ -149,6 +158,7 @@ const nodes = {
   statusPills: el('status-pills'),
   query: el('query'), mode: el('mode'), topk: el('topk'),
   search: el('search'), refresh: el('refresh'), banner: el('banner'),
+  sessionId: el('session-id'), sessionSearch: el('session-search'), sessionBanner: el('session-banner'),
   results: el('results'), resultsSub: el('results-sub'),
   resultsSource: el('results-source'),
   detail: el('detail'), detailSub: el('detail-sub')
@@ -205,7 +215,6 @@ function renderStatus() {
   nodes.docs.textContent = String(s.documentCount || 0);
   nodes.sessions.textContent = String(s.sessionCount || 0);
   nodes.statusPills.innerHTML =
-    `<span class="pill ${s.captureEnabled ? 'ok' : 'warn'}" title="Capture">${s.captureEnabled ? 'Capture On' : 'Capture Off'}</span>` +
     `<span class="pill ${s.databaseExists ? 'ok' : 'bad'}" title="Database">${s.databaseExists ? 'DB OK' : 'DB Missing'}</span>` +
     `<span class="pill ${s.semanticSearchAvailable ? 'ok' : 'warn'}" title="Semantic search">${s.semanticSearchAvailable ? 'Semantic Ready' : 'Semantic N/A'}</span>`;
   nodes.mode.querySelector('option[value="semantic"]').disabled = !s.semanticSearchAvailable;
@@ -214,12 +223,14 @@ function renderStatus() {
 
 // ---- Render: results list ----
 function renderResultsList() {
-  const items = state.listMode === 'search' ? state.results : state.recent;
+  const items = state.listMode === 'search' ? state.results : state.listMode === 'session' ? state.sessionCaptures : state.recent;
   const showScore = state.listMode === 'search';
 
   if (!items || items.length === 0) {
     const msg = state.listMode === 'search'
       ? (state.lastSearch ? `No results for "${state.lastSearch.query}".` : 'Run a search to see results.')
+      : state.listMode === 'session'
+      ? 'No captures found for this session. Enter a session ID above.'
       : 'No recent captures found.';
     nodes.results.innerHTML = `<div class="empty">${esc(msg)}</div>`;
     if (state.listMode === 'search' && state.lastSearch) {
@@ -233,7 +244,7 @@ function renderResultsList() {
   if (state.listMode === 'search' && state.lastSearch) {
     nodes.resultsSub.textContent = `${state.lastSearch.results.length} hit(s) in ${state.lastSearch.searchTimeMs}ms`;
   } else {
-    nodes.resultsSub.textContent = `${items.length} loaded`;
+    nodes.resultsSub.textContent = `${items.length} capture(s)`;
   }
 
   nodes.results.innerHTML = items.map(item => {
@@ -392,6 +403,41 @@ async function refreshAll() {
   finally { setBusy(false); }
 }
 
+function setSessionBanner(msg, tone) {
+  nodes.sessionBanner.textContent = msg || '';
+  nodes.sessionBanner.className = 'banner' + (tone ? ' ' + tone : '');
+}
+
+async function runSessionLookup() {
+  const sid = nodes.sessionId.value.trim();
+  if (!sid) { setSessionBanner('Enter a session ID.', 'error'); nodes.sessionId.focus(); return; }
+  setBusy(true);
+  nodes.sessionSearch.disabled = true;
+  setSessionBanner('');
+  state.sessionCaptures = [];
+  state.selected = null;
+  state.selectedId = null;
+  state.listMode = 'session';
+  nodes.resultsSource.value = 'session';
+  renderResultsList();
+  renderDetail();
+  try {
+    const p = await fetchJson(`/api/v1/bert/captures/by-session/${encodeURIComponent(sid)}`);
+    state.sessionCaptures = p.captures || [];
+    renderResultsList();
+    if (state.sessionCaptures.length) {
+      await loadCapture(state.sessionCaptures[0].documentId, 'session');
+      setSessionBanner(`${state.sessionCaptures.length} capture(s) found.`, 'success');
+    } else {
+      setSessionBanner('No captures for this session.', 'error');
+    }
+  } catch (err) {
+    state.sessionCaptures = [];
+    renderResultsList();
+    setSessionBanner(err.message, 'error');
+  } finally { setBusy(false); nodes.sessionSearch.disabled = false; }
+}
+
 async function runSearch() {
   const query = nodes.query.value.trim();
   if (!query) { setBanner('Enter a query first.', 'error'); nodes.query.focus(); return; }
@@ -426,6 +472,8 @@ async function runSearch() {
 
 // ---- Event listeners ----
 el('form').addEventListener('submit', e => { e.preventDefault(); runSearch(); });
+nodes.sessionSearch.addEventListener('click', runSessionLookup);
+nodes.sessionId.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); runSessionLookup(); } });
 nodes.refresh.addEventListener('click', refreshAll);
 nodes.results.addEventListener('click', e => {
   const b = e.target.closest('[data-doc-id]');

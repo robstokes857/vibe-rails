@@ -1,4 +1,4 @@
-namespace VibeRails.Services.Bert;
+namespace VibeRails.Services.BertBaseClasses;
 
 /// <summary>
 /// Coordinates per-session git-diff capture windows. A window opens when a

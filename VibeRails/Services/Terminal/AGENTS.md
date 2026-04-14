@@ -44,6 +44,7 @@ Design invariants:
 3. Consumers must be non-blocking.
 4. Replay buffer is always maintained by `Terminal`.
 5. All input and output routing should pass through `TerminalIoRouter`.
+6. Attach/reconnect currently uses atomic emulator snapshots as an active experiment and is not yet a permanent guardrail for all AI CLIs.
 
 ## Control Protocol
 Defined in `TerminalControlProtocol.cs`.
@@ -128,7 +129,6 @@ Shared static fields (single active session model):
 - `s_sessionId`
 - `s_activeWebSocket` (current local viewer)
 - `s_sessionOwnerId` (lifecycle owner while session is active)
-- `s_activeCli` (used for reconnect behavior decisions, e.g. Codex replay)
 - `s_externallyOwned` (CLI-owned session flag)
 
 Key behavior:
@@ -139,15 +139,17 @@ Key behavior:
   2. local takeover: closes previous local viewer socket
   3. requests remote viewer disconnect (`RequestRemoteViewerDisconnectAsync`)
   4. reconnect bootstrap:
-     - all current managed AI CLIs: skip replay and request PTY redraw (`Ctrl+L`)
-     - replay should only be re-enabled for future plain shell / line-oriented sessions
+     - current branch uses `SubscribeWithSnapshot(...)` for atomic snapshot + live attach
+     - this is an intentional trial replacement for the previous redraw-first reconnect path
+     - if AI CLIs regress, fall back to redraw-first attach and re-test before keeping snapshot attach enabled
   5. subscribes `WebSocketConsumer`
   6. runs input loop (supports fragmentation, size guard, resize control) and routes user input through `TerminalIoRouter`
 - `DisconnectLocalViewerAsync(reason)` closes local viewer with provided reason.
 - `StopSessionAsync` is blocked for externally owned sessions.
 
 Important current behavior:
-- All current managed AI CLIs use redraw-first reconnect instead of replay.
+- Local and remote attach currently use atomic emulator snapshots instead of the previous redraw-first reconnect path.
+- This is a trial change intended to eliminate snapshot/live interleaving races and must be re-validated against the managed AI CLIs.
 - Local reconnect/takeover does not dispose PTY.
 - Session activity acquires a lifecycle owner so idle local-browser watchdog does not terminate active remote sessions.
 
@@ -268,12 +270,13 @@ From `Routes/TerminalRoutes.cs`:
 2. One active local web viewer at a time.
 3. Replay buffer is byte-based (16KB), not line-aware.
 4. Input/output are raw terminal bytes; rendering correctness depends on xterm configuration and PTY dimensions.
-5. `ITerminalIoObserverService` dispatch is in-process only (no persisted stream by default).
+5. `ITerminalIoObserverService` dispatch is in-process only.
+6. Parsed TUI control-key events are persisted separately through `TUI_Event_Watcher` + `TuiEventPersistenceService`.
 
 ## Common Failure Points
 1. Concurrent `SendAsync` on same WebSocket (avoided by channel-backed send loops).
 2. Shared buffer reuse corruption (avoided by copying before async send queueing).
-3. Reconnect duplication from replaying partial AI CLI terminal history (mitigated by redraw-first reconnect policy for all current managed AI CLIs).
+3. Reconnect duplication from replaying partial AI CLI terminal history (previously mitigated by redraw-first reconnect policy for all current managed AI CLIs; the current branch is intentionally trialing atomic snapshot attach instead).
 4. Oversized control/input payloads (guarded at 256KB).
 
 ## Regression Notes (2026-03)
@@ -296,6 +299,9 @@ These issues regressed in production-like usage and should be treated as guardra
   - local reconnect path skips replay for all current managed AI CLIs and requests redraw (`Ctrl+L`) after WebSocket consumer subscription.
 - Guardrail:
   - if replay is ever reintroduced, limit it to plain shell / line-oriented sessions and re-test every AI CLI separately.
+- Current experiment:
+  - this branch is intentionally trying atomic snapshot attach (`SubscribeWithSnapshot` / `PushSnapshotTo`) to see whether removing snapshot/live interleaving fixes the duplication without redraw pokes.
+  - treat that behavior as experimental until Claude/Codex/Gemini/Copilot reconnect and takeover flows are re-tested.
 
 3. **Font size / font family changes duplicated full-screen UI blocks**
 - Symptom: changing terminal text size or font could leave several historical full-screen redraws visible in the browser.

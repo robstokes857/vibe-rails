@@ -2,7 +2,10 @@ using VibeRails.Auth;
 using VibeRails.Jobs;
 using VibeRails.Routes;
 using VibeRails.Services;
-using VibeRails.Services.Bert;
+using VibeRails.Services.BertBaseClasses;
+using VibeRails.Services.BertV2;
+using VibeRails.Services.CleanedInput;
+using VibeRails.Services.UserInOut;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
@@ -14,7 +17,6 @@ using VibeRails.Services.Terminal;
 using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Validators;
 using VibeRails.Utils;
-using VibeRails.Services.BertV2;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 
 namespace VibeRails
@@ -30,18 +32,40 @@ namespace VibeRails
                 });
 
             serviceCollection.AddScoped<IFileService, FileService>();
-            serviceCollection.AddSingleton<IBertInputCaptureService, BertInputCaptureService>();
-            serviceCollection.AddSingleton<IBertExplorerService, BertExplorerService>();
+
+            // BERT (V2) — write path, read path, and search strategies are registered separately.
+            serviceCollection.AddSingleton<IBertSettings, BertV2BgeSmallEnSettings>();
+            serviceCollection.AddSingleton<IBertV2BgeEmbedder>(sp =>
+            {
+                var settings = sp.GetRequiredService<IBertSettings>();
+                return new BertV2BgeEmbedder(settings.ModelPath, settings.VocabPath);
+            });
+            serviceCollection.AddSingleton<IBertV2VectorStore>(sp =>
+            {
+                var settings = sp.GetRequiredService<IBertSettings>();
+                return new BertV2VectorStore(Path.Combine(settings.DataDirectory, BertSearchSchema.DatabaseFileName));
+            });
+            serviceCollection.AddSingleton<IBertV2InputService, BertV2InputService>();
+            serviceCollection.AddScoped<IBertV2InputDBService, BertV2InputDBService>();
+            serviceCollection.AddSingleton<IBertSearchDbService, BertSearchDbService>();
+            serviceCollection.AddSingleton<IBertDocumentResponseMapper, BertDocumentResponseMapper>();
+            serviceCollection.AddSingleton<IBertCaptureQueryService, BertCaptureQueryService>();
+            serviceCollection.AddSingleton<IBertSearchStrategy, SemanticBertSearchStrategy>();
+            serviceCollection.AddSingleton<IBertSearchStrategy, TextBertSearchStrategy>();
+            serviceCollection.AddSingleton<IBertSearchServiceV2, BertSearchServiceV2>();
+
             serviceCollection.AddSingleton<IGitDiffCaptureService, GitDiffCaptureService>();
             serviceCollection.AddSingleton<ILlmParser, LlmParser>();
             serviceCollection.AddScoped<IRepository>(sp =>
             {
                 var connectionString = $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
-                var bert = sp.GetService<IBertInputCaptureService>();
                 var gitDiff = sp.GetService<IGitDiffCaptureService>();
                 var logger = sp.GetService<ILogger<Repository>>();
-                return new Repository(connectionString, bert, gitDiff, logger);
+                return new Repository(connectionString, gitDiff, logger);
             });
+            serviceCollection.AddSingleton<ITuiTextExtractor, TuiTextExtractor>();
+            serviceCollection.AddScoped<ICleanedUserInputService, CleanedUserInputService>();
+            serviceCollection.AddScoped<IUserTextOutput, UserTextOutput>();
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
             serviceCollection.AddSingleton<ISessionOutputParser, SessionParseV4>();
@@ -100,6 +124,7 @@ namespace VibeRails
             serviceCollection.AddScoped<ITerminalIoObserver, MyTerminalObserver>();
             serviceCollection.AddScoped<ITerminalIoObserver, SessionStateEventObserver>();
             serviceCollection.AddScoped<ITerminalIoObserver, GitDiffIdleCaptureObserver>();
+            serviceCollection.AddScoped<ITerminalIoObserver, CleanedInputIdleObserver>();
 
 #if DEBUG
             serviceCollection.AddScoped<ITerminalIoObserver, DebugWebSocketEventObserver>();
@@ -121,6 +146,9 @@ namespace VibeRails
             serviceCollection.AddHostedService<UpdateCheckJob>();
             serviceCollection.AddHostedService<StaleSessionCleanupJob>();
             serviceCollection.AddHostedService<ProjectCacheRefreshJob>();
+            serviceCollection.AddHostedService<CleanedUserInputBackfillJob>();
+            serviceCollection.AddHostedService<BertEmbeddingBackfillJob>();
+            serviceCollection.AddHostedService<TuiEventPersistenceService>();
             serviceCollection.AddScoped<ISessionTranscriptService, SessionTranscriptService>();
             serviceCollection.AddScoped<ISessionResumeService, SessionResumeService>();
 

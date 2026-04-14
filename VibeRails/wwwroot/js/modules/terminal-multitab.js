@@ -9,6 +9,9 @@ import {
 import { TabStatusController } from './terminal-tab-status.js';
 
 const RESIZE_PREFIX = '__resize__:';
+// Collapse layout-settle/font-load fit bursts into one PTY resize so ConPTY does not
+// redraw the full TUI multiple times while the browser is still stabilizing.
+const RESIZE_SYNC_DEBOUNCE_MS = 140;
 const DEFAULT_SELECTION = null;
 const ACTIVE_TAB_KEY = 'viberails_terminal_active_tab_id';
 const TAB_SELECTION_PREFIX = 'viberails_terminal_tab_selection_';
@@ -53,6 +56,7 @@ class TerminalTab {
         this.inputFocusHandler = null;
         this.isActive = false;
         this.lastResizeSignature = null;
+        this._pendingResizeSyncTimeoutId = null;
         this._initialConnectActive = false;
         this._connectFocusTimeouts = [];
         this.statusController = null;
@@ -77,7 +81,7 @@ class TerminalTab {
             desktopLineHeight: 1.12,
             mobileLineHeight: 1.2
         });
-        this.vibeTerminal.onFitChange = () => this.sendResizeToPty();
+        this.vibeTerminal.onFitChange = () => this.scheduleResizeToPty();
         this.vibeTerminal.onProgress = (progress) => this.manager.updateTabProgress(this.state.id, progress);
         this.terminal = this.vibeTerminal.terminal;
         this.manager.applySavedTerminalSettingsForTab(this.state.id);
@@ -219,6 +223,7 @@ class TerminalTab {
 
     disconnectSocketOnly() {
         this.clearConnectFocusTimeouts();
+        this.clearPendingResizeToPty();
         this._initialConnectActive = false;
         if (!this.socket) {
             return;
@@ -309,7 +314,27 @@ class TerminalTab {
             return;
         }
 
+        this.clearPendingResizeToPty();
         this.teardownResizeHandling();
+    }
+
+    clearPendingResizeToPty() {
+        if (this._pendingResizeSyncTimeoutId) {
+            clearTimeout(this._pendingResizeSyncTimeoutId);
+            this._pendingResizeSyncTimeoutId = null;
+        }
+    }
+
+    scheduleResizeToPty({ force = false, delayMs = RESIZE_SYNC_DEBOUNCE_MS } = {}) {
+        if (!this.isActive || !this.vibeTerminal || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
+            return;
+        }
+
+        this.clearPendingResizeToPty();
+        this._pendingResizeSyncTimeoutId = window.setTimeout(() => {
+            this._pendingResizeSyncTimeoutId = null;
+            this.sendResizeToPty({ force });
+        }, delayMs);
     }
 
     sendResizeToPty({ force = false } = {}) {
