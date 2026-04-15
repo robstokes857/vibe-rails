@@ -2290,6 +2290,11 @@ button:hover .card-nav-cog {
     color: #fab387;
 }
 
+#vb-terminal-panel .tab-status-waiting .vb-tab-status-text {
+    color: #f9e2af;
+    opacity: 0.9;
+}
+
 /* Status icon — FA icons for static states, emoji for thinking */
 #vb-terminal-panel .vb-tab-status-icon {
     display: inline-flex;
@@ -2324,6 +2329,17 @@ button:hover .card-nav-cog {
     color: #fab387;
 }
 
+#vb-terminal-panel .tab-status-waiting .vb-tab-status-icon i {
+    color: #f9e2af;
+    opacity: 1;
+    animation: tab-waiting-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tab-waiting-pulse {
+    0%, 100% { transform: scale(1);   opacity: 0.7; }
+    50%      { transform: scale(1.2); opacity: 1;   }
+}
+
 /* Thinking emoji — quick drop-in / drop-out */
 #vb-terminal-panel .vb-tab-status-icon.vb-emoji-enter {
     animation: emoji-drop-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
@@ -2351,6 +2367,18 @@ button:hover .card-nav-cog {
 @keyframes tab-ready-gradient-flash {
     0%, 100% { background: var(--vb-terminal-tab-bg); }
     40%, 60% { background: color-mix(in srgb, var(--vb-terminal-tab-accent, #a6e3a1) 28%, transparent); }
+}
+
+/* Waiting-for-user gradient flash — background tab notification.
+   Uses a neutral yellow (not the brand accent) so "waiting for you"
+   reads the same across every CLI. */
+#vb-terminal-panel .vb-terminal-tab-item.tab-status-waiting-flash {
+    animation: tab-waiting-gradient-flash 1.2s ease 5;
+}
+
+@keyframes tab-waiting-gradient-flash {
+    0%, 100% { background: var(--vb-terminal-tab-bg); }
+    40%, 60% { background: color-mix(in srgb, #f9e2af 32%, transparent); }
 }
 
 /* ═══════════ End Tab Status Overhaul ═══════════ */

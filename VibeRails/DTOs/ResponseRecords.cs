@@ -572,6 +572,7 @@ namespace VibeRails.DTOs
     public record SessionStartedPayload(string SessionId, string Cli);
     public record SessionIdlePayload(string SessionId, string Cli, double IdleForSeconds);
     public record SessionBusyPayload(string SessionId, string Cli);
+    public record SessionWaitingForUserPayload(string SessionId, string Cli);
     public record SessionCompletedPayload(string SessionId, string Cli, int? ExitCode);
 
     [JsonSerializable(typeof(AppToastNotification))]
@@ -579,6 +580,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SessionStartedPayload))]
     [JsonSerializable(typeof(SessionIdlePayload))]
     [JsonSerializable(typeof(SessionBusyPayload))]
+    [JsonSerializable(typeof(SessionWaitingForUserPayload))]
     [JsonSerializable(typeof(SessionCompletedPayload))]
     [JsonSerializable(typeof(EventMessage))]
     [JsonSerializable(typeof(HealthResponse))]

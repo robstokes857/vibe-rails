@@ -380,54 +380,34 @@ export class VibeControlApp {
         }
 
         this.brandClickTimestamps = [];
-        this.showDeveloperTracerModal();
+        this.showAppVersionModal();
     }
 
-    showDeveloperTracerModal() {
-        const payloadText = JSON.stringify(this.buildDeveloperTracerPayload(), null, 2);
-        this.showModal('Developer Tracer Payload', `
+    async showAppVersionModal() {
+        this.showModal('App Version', `
             <div class="d-flex flex-column gap-3">
-                <p class="text-muted mb-0">Copy this JSON into the tracer. The auth session stays in an <code>HttpOnly</code> cookie, so only the tab token is exported here.</p>
-                <pre
-                    id="developer-tracer-payload"
-                    class="developer-tracer-payload font-monospace"
-                    tabindex="0"
-                ></pre>
-                <div class="d-flex justify-content-end gap-2">
+                <div class="d-flex align-items-baseline gap-2">
+                    <span class="text-muted">Version</span>
+                    <span id="app-version-value" class="font-monospace fs-5">Loading…</span>
+                </div>
+                <div class="d-flex justify-content-end">
                     <button type="button" class="btn btn-secondary" data-action="close-modal">Close</button>
-                    <button type="button" class="btn btn-outline-light" id="open-duplicate-tab">Duplicate Tab</button>
-                    <button type="button" class="btn btn-primary" id="copy-developer-tracer-payload">Copy JSON</button>
                 </div>
             </div>
         `);
 
-        const payloadOutput = document.getElementById('developer-tracer-payload');
-        if (payloadOutput) {
-            payloadOutput.textContent = payloadText;
-            payloadOutput.focus();
-        }
-
-        document.getElementById('copy-developer-tracer-payload')?.addEventListener('click', async () => {
-            const copied = await this.copyTextToClipboard(payloadText);
-            if (copied) {
-                this.showToast('Tracer Payload', 'Copied JSON to clipboard', 'success');
-                return;
+        const versionOutput = document.getElementById('app-version-value');
+        try {
+            const response = await this.apiCall('/api/v1/update/version', 'GET', null, { showLoading: false });
+            if (versionOutput) {
+                versionOutput.textContent = response?.version || 'Unknown';
             }
-
-            this.selectElementContents(payloadOutput);
-            this.showToast('Tracer Payload', 'Clipboard copy failed. The JSON is selected and ready to copy.', 'warning');
-        });
-
-        document.getElementById('open-duplicate-tab')?.addEventListener('click', async () => {
-            await this.openDuplicateTab();
-        });
-    }
-
-    buildDeveloperTracerPayload() {
-        return {
-            portNumber: this.getCurrentPortNumber(),
-            viberails_tab: this.getSessionStorageValue('viberails_tab')
-        };
+        } catch (error) {
+            console.error('Failed to fetch app version:', error);
+            if (versionOutput) {
+                versionOutput.textContent = 'Unavailable';
+            }
+        }
     }
 
     getDuplicateTabView() {

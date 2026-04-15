@@ -22,8 +22,7 @@ const DEFAULT_THEME = {
     brightWhite: '#ffffff'
 };
 
-const DEFAULT_TERMINAL_FONT_FAMILY = '"Fira Code", "JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace';
-const LIGATURES_ADDON_MODULE_PATH = '../../assets/xterm/addon-ligatures.js';
+const DEFAULT_TERMINAL_FONT_FAMILY = 'Menlo, Monaco, Consolas, "Cascadia Mono", "Liberation Mono", "Courier New", monospace';
 
 function buildTerminalTheme(theme = null) {
     return {
@@ -110,7 +109,7 @@ export class VibeTerminal {
             fontFamily: this._fontFamily,
             fontSize: metrics.fontSize,
             lineHeight: metrics.lineHeight,
-            fontLigatures: true,
+            fontLigatures: false,
             allowProposedApi: true,
             unicodeVersion: '11',
             disableStdin,
@@ -125,10 +124,7 @@ export class VibeTerminal {
 
         this._searchAddon = null;
         this._webLinksAddon = null;
-        this._ligaturesAddon = null;
-        this._webFontsAddon = null;
         this._progressAddon = null;
-        this._ligaturesLoadPromise = null;
 
         this._terminal.attachCustomKeyEventHandler((event) => this._runCustomKeyEventHandlers(event));
 
@@ -158,13 +154,6 @@ export class VibeTerminal {
             this._terminal.loadAddon(this._webLinksAddon);
         }
 
-        if (window.WebFontsAddon?.WebFontsAddon) {
-            this._webFontsAddon = new window.WebFontsAddon.WebFontsAddon({
-                onLoaded: () => this.scheduleFitPasses()
-            });
-            this._terminal.loadAddon(this._webFontsAddon);
-        }
-
         if (window.UnicodeGraphemesAddon?.UnicodeGraphemesAddon) {
             this._terminal.loadAddon(new window.UnicodeGraphemesAddon.UnicodeGraphemesAddon());
             this._terminal.unicode.activeVersion = '15-graphemes';
@@ -181,7 +170,6 @@ export class VibeTerminal {
         }
 
         this._bindSearchShortcuts();
-        this._loadLigaturesAddon();
 
         this._terminal.open(this._outputEl);
 
@@ -323,33 +311,6 @@ export class VibeTerminal {
 
             return true;
         });
-    }
-
-    _loadLigaturesAddon() {
-        // LigaturesAddon calls queryLocalFonts() which is blocked by VS Code webview Permissions Policy
-        if (window.__viberails_VSCODE__) { return; }
-        if (this._ligaturesLoadPromise || !this._terminal) {
-            return;
-        }
-
-        this._ligaturesLoadPromise = import(LIGATURES_ADDON_MODULE_PATH)
-            .then((module) => {
-                if (!this._terminal) {
-                    return;
-                }
-
-                const LigaturesAddon = module?.LigaturesAddon;
-                if (typeof LigaturesAddon !== 'function') {
-                    return;
-                }
-
-                this._ligaturesAddon = new LigaturesAddon();
-                this._terminal.loadAddon(this._ligaturesAddon);
-                this.scheduleFitPasses();
-            })
-            .catch(() => {
-                // no-op
-            });
     }
 
     get terminal() {
@@ -834,10 +795,7 @@ export class VibeTerminal {
         this._fitAddon = null;
         this._searchAddon = null;
         this._webLinksAddon = null;
-        this._ligaturesAddon = null;
-        this._webFontsAddon = null;
         this._progressAddon = null;
-        this._ligaturesLoadPromise = null;
         this._onFitChange = null;
         this._onProgress = null;
         this._lastCols = null;

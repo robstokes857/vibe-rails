@@ -423,25 +423,6 @@ class TerminalTab {
         }
     }
 
-    applyFontFamily(family) {
-        if (!this.vibeTerminal) {
-            return;
-        }
-
-        // Reset resize signature so the next fit sends a fresh resize to the PTY.
-        // Do NOT clear the display — xterm.js reflow engine preserves scrollback on resize.
-        if (this.isActive && this.hasOpenSocket()) {
-            this.lastResizeSignature = null;
-        }
-
-        this.vibeTerminal.setFontFamily(family, { fit: false });
-
-        if (this.isActive) {
-            this.fitAndSyncTerminal();
-            this.scheduleFitPasses();
-        }
-    }
-
     scheduleFitPasses() {
         if (!this.vibeTerminal || !this.isActive) {
             return;
@@ -1003,8 +984,6 @@ class TerminalManager {
         this.settingsClose?.addEventListener('click', () => this.toggleSettingsPanel(false));
         this.container.querySelector('#terminal-settings-font-size')
             ?.addEventListener('change', (e) => this.adjustFontSize(0, parseInt(e.target.value, 10)));
-        this.container.querySelector('#terminal-settings-font-family')
-            ?.addEventListener('change', (e) => this.applyFontFamily(e.target.value));
         this.container.querySelector('#terminal-settings-renderer')
             ?.addEventListener('change', (e) => this.applyRendererPreference(e.target.value));
         this.container.querySelector('#terminal-settings-cursor-blink')
@@ -2433,18 +2412,6 @@ class TerminalManager {
             }
         }
 
-        const familySelect = this.container.querySelector('#terminal-settings-font-family');
-        if (familySelect && window.CXL_FONTS) {
-            for (const [, font] of Object.entries(window.CXL_FONTS)) {
-                const opt = document.createElement('option');
-                opt.value = font.value;
-                opt.textContent = font.name;
-                familySelect.appendChild(opt);
-            }
-            const saved = localStorage.getItem('viberails_terminal_fontFamily');
-            if (saved) familySelect.value = saved;
-        }
-
         const rendererSelect = this.container.querySelector('#terminal-settings-renderer');
         if (rendererSelect) rendererSelect.value = this._loadRendererPreference();
 
@@ -2511,13 +2478,6 @@ class TerminalManager {
             }
         });
         this._themeItems?.forEach(s => s.classList.toggle('active', s.dataset.theme === key));
-    }
-
-    applyFontFamily(family) {
-        try { localStorage.setItem('viberails_terminal_fontFamily', family); } catch {}
-        this.tabs.forEach((tab) => {
-            tab.instance.applyFontFamily(family);
-        });
     }
 
     applyRendererPreference(renderer) {
@@ -2681,6 +2641,13 @@ export class TerminalController {
             if (!tab) return;
             setSessionState(tab, 'tab-busy');
             tab.instance?.statusController?.onSessionBusy();
+        });
+
+        appEventClient.on('session_waiting_for_user', (payload) => {
+            const tab = findTab(payload);
+            if (!tab) return;
+            setSessionState(tab, 'tab-idle');
+            tab.instance?.statusController?.onWaitingForUserSelection();
         });
 
         appEventClient.on('session_idle', (payload) => {
@@ -2904,10 +2871,6 @@ export class TerminalController {
                             </div>
                             <div class="vb-terminal-settings-section">
                                 <div class="vb-terminal-settings-section-title">Font</div>
-                                <div class="vb-terminal-settings-row">
-                                    <label>Family</label>
-                                    <select id="terminal-settings-font-family"></select>
-                                </div>
                                 <div class="vb-terminal-settings-row">
                                     <label>Size</label>
                                     <input type="number" id="terminal-settings-font-size" min="6" max="72">

@@ -42,6 +42,44 @@ The problem is **ConPTY's redraw after `ResizePseudoConsole` is not always compl
 
 ## Closed / Informational
 
+## Startup prompt triple-print — WebFontsAddon / LigaturesAddon post-connect reflow
+
+**Status:** Fixed — 2026-04-15
+
+**Symptom:** On opening a fresh Web UI terminal, the initial shell prompt flashed 2–3 times within ~1.8s before the CLI took over. Reproduced in session `4a3386aa-a1e7-4337-8a34-f253f2ed75ac` where `SessionLogs` chunks 891 / 892 / 894 were byte-identical full-screen redraws of the PowerShell prompt at +0.09s / +1.31s / +1.81s. Only chunk 891 carried the ConPTY resize report `\e[8;31;122t`; the other two were pure redraws with no resize cause in the byte stream.
+
+**Root cause:** `VibeTerminal` in `wwwroot/js/modules/vibe-terminal.js` loaded two xterm addons that each fired `scheduleFitPasses()` *after* their async load completed — after the PTY was already connected and the TUI running:
+- `WebFontsAddon({ onLoaded: () => this.scheduleFitPasses() })` — fires when web fonts finish downloading
+- `_loadLigaturesAddon()` dynamic import — fires when the ligatures module resolves
+
+Each callback shifted xterm cell metrics (a real font is narrower/taller than the fallback), `fit()` recomputed cols/rows, a new `__resize__` went to the backend, ConPTY SIGWINCHed the shell, and PSReadLine redrew its entire prompt. Two addons → two extra full redraws.
+
+Per the xterm.js docs: because xterm renders to `<canvas>` / WebGL, the browser does not download web fonts automatically, so custom fonts require the `addon-web-fonts` machinery specifically. Custom fonts and this bug are two faces of the same thing.
+
+**Fix:** Switched the terminal to a cross-platform system monospace stack and removed the whole web-font pipeline.
+- Default `fontFamily` now `Menlo, Monaco, Consolas, "Cascadia Mono", "Liberation Mono", "Courier New", monospace` (`vibe-terminal.js`)
+- `fontLigatures: true` → `false` on the xterm `Terminal` constructor
+- Removed `WebFontsAddon` loader + `<script src="addon-web-fonts.js">` from `index.html`
+- Removed `_loadLigaturesAddon()` and the dynamic import
+- Removed the font-family picker from Terminal Settings UI + its `localStorage` persistence (`terminal-multitab.js`)
+- Removed `window.CXL_FONTS` from `terminal-themes.js`
+- `session-viewer.js` (replay modal) updated to the same stack for consistency
+
+Left on disk deliberately (may be used elsewhere in the app): all `.woff`/`.woff2`/`.ttf`/`.otf` asset files, all `@font-face` CSS rules, Monaco editor fonts. Backend has no font preference (confirmed).
+
+**Key files touched:**
+- `VibeRails/wwwroot/js/modules/vibe-terminal.js`
+- `VibeRails/wwwroot/js/modules/terminal-multitab.js`
+- `VibeRails/wwwroot/js/modules/session-viewer.js`
+- `VibeRails/wwwroot/assets/xterm/terminal-themes.js`
+- `VibeRails/wwwroot/index.html`
+
+**Cross-reference:** The *existing* open bug "Font size change causes incomplete TUI rendering / double print" (above) is separate — that one is about the +/- font-size buttons triggering ConPTY resize partial redraws. It remains open, but this fix removes one compounding factor (no more font/ligature-load reflow firing on top of a user-initiated size change).
+
+**Debug tool used:** `python-scripts/decode_session.py` + `python-scripts/analyze_doubleprint.py` — dump a session's raw `SessionLogs` BLOBs with ANSI escapes spelled out, then fingerprint chunks to detect identical full-screen redraws within a time window.
+
+---
+
 ## Codex: Cannot scroll back during live session
 
 **Symptom:** When a Codex terminal is running, scrolling up in xterm.js does nothing — prior output is inaccessible.

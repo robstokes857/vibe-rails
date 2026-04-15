@@ -12,6 +12,7 @@ tab button (e.g. `Connected`, `Thinking`, `Ready`, `Active`, `Disconnected`).
 | `ACTIVE`       | User is composing input (typing printable characters). Not yet submitted.                | keyboard          | green `#a6e3a1`  |
 | `THINKING`     | User pressed Enter; backend is working. Animated emoji cycle + indeterminate progress.   | cycling emoji     | shimmer gradient |
 | `READY`        | Backend signaled idle/completion after a `THINKING` turn. Background tabs get a flash.   | circle-check      | slate `#94a3b8`  |
+| `WAITING`      | Backend detected an interactive selection prompt (e.g. `•`/`◦` menu). Pulsing icon; background tabs get a yellow flash. | hand-point-up     | yellow `#f9e2af` |
 | `DISCONNECTED` | WebSocket closed.                                                                        | plug-circle-xmark | peach `#fab387`  |
 
 ## Transitions
@@ -53,6 +54,10 @@ tab button (e.g. `Connected`, `Thinking`, `Ready`, `Active`, `Disconnected`).
 
 And on socket close from *any* state: → `DISCONNECTED`.
 
+`onWaitingForUserSelection()` can move us into `WAITING` from any state
+except `ACTIVE` and `DISCONNECTED`. From `WAITING`, Enter (`\r`) → `THINKING`
+and typing a printable char → `ACTIVE`, same as from `READY`.
+
 ## Triggers
 
 User input is routed into `onTerminalData(data)` from `terminal-multitab.js`,
@@ -62,8 +67,8 @@ events are routed into `onSessionIdle()` / `onSessionCompleted()` /
 
 ### `onTerminalData(data)`
 
-1. `data === '\r'` (bare Enter) while in `CONNECTED` / `READY` / `ACTIVE`
-   → `THINKING`.
+1. `data === '\r'` (bare Enter) while in `CONNECTED` / `READY` / `ACTIVE` /
+   `WAITING` → `THINKING`.
 2. `data === '\x1b'` (bare Escape) while in `THINKING`
    → `CONNECTED` (treated as abort).
 3. Otherwise, if `_hasPrintableChar(data)` is true and we're not already in
@@ -96,6 +101,14 @@ No-op. The backend fires `session_busy` on *any* PTY activity (including
 initial prompt output), so we can't use it to infer user intent. Enter
 detection via `onTerminalData` is the only trigger for entering `THINKING`.
 
+### `onWaitingForUserSelection()`
+
+Fired when the backend detects an interactive selection prompt in PTY output
+(currently: a chunk containing both `•` and `◦`, via `UserWaiting.Check`).
+The backend debounces this to at most once per 30 seconds per session so a
+redrawing menu doesn't spam events. Moves the tab into `WAITING` unless we're
+already `ACTIVE` (user is composing) or `DISCONNECTED`.
+
 ## The `_awaitingFirstIdle` flag
 
 `_awaitingFirstIdle` is the bookkeeping bit that gates whether the next
@@ -109,6 +122,7 @@ Set/cleared in `_transitionTo`:
 | `READY`        | `false`              |
 | `CONNECTED`    | `false`              |
 | `ACTIVE`       | `false`              |
+| `WAITING`      | `false`              |
 
 Why `ACTIVE` clears it: see next section.
 
@@ -139,6 +153,12 @@ Beyond updating `_status` and calling `_applyVisuals`:
   `_flashReady()` adds a one-shot `tab-status-ready-flash` class so the tab
   pulses with its accent color — notifying the user that a different tab
   has finished its turn.
+- **Waiting flash.** When transitioning to `WAITING` on a *background* tab
+  only, `_flashWaiting()` adds a one-shot `tab-status-waiting-flash` class.
+  Unlike the ready flash, this uses a literal yellow `#f9e2af` (not the brand
+  accent) so "waiting for you" looks the same on every tab — it's a
+  per-user-attention signal, not a per-CLI one. The active tab gets the
+  pulsing `hand-point-up` icon instead.
 - **Thinking emoji cycle.** `_applyVisuals` stops any running emoji timer
   and, if the new state is `THINKING`, starts a 2-second cycle picking a
   random emoji from `THINKING_EMOJI` (never repeating the previous one
