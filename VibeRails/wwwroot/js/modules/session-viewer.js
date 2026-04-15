@@ -207,7 +207,7 @@ export async function showReplayModal(sessionId) {
     }
 
     term = new window.Terminal({
-        fontFamily: '"Fira Code","JetBrains Mono",Consolas,monospace',
+        fontFamily: 'Menlo, Monaco, Consolas, "Cascadia Mono", "Liberation Mono", "Courier New", monospace',
         fontSize: 13,
         disableStdin: true,
         convertEol: false,

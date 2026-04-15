@@ -1,8 +1,7 @@
 /**
- * core_xterm_themes.js — Theme & font definitions for ClaudeTerminal
+ * core_xterm_themes.js — Theme definitions for ClaudeTerminal
  *
  * To add a new theme: add a new key to CXL_THEMES below.
- * To add a new font:  add a new key to CXL_FONTS below.
  */
 
 window.CXL_THEMES = {
@@ -170,10 +169,3 @@ window.CXL_THEMES = {
     },
 };
 
-window.CXL_FONTS = {
-    cascadia:  { name: 'Cascadia Code',  value: '"Cascadia Code", Consolas, monospace' },
-    firacode:  { name: 'Fira Code',      value: '"Fira Code", Consolas, monospace' },
-    jetbrains: { name: 'JetBrains Mono', value: '"JetBrains Mono", Consolas, monospace' },
-    consolas:  { name: 'Consolas',       value: 'Consolas, "Courier New", monospace' },
-    courier:   { name: 'Courier New',    value: '"Courier New", monospace' },
-};

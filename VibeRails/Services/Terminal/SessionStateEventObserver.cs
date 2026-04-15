@@ -47,6 +47,15 @@ public sealed class SessionStateEventObserver : ITerminalIoObserver
         return ValueTask.CompletedTask;
     }
 
+    public ValueTask OnWaitingForUserAsync(TerminalWaitingForUserEvent waitingEvent, CancellationToken cancellationToken = default)
+    {
+        _eventBus.Publish(
+            "session_waiting_for_user",
+            new SessionWaitingForUserPayload(waitingEvent.SessionId, waitingEvent.Cli),
+            AppJsonSerializerContext.Default.SessionWaitingForUserPayload);
+        return ValueTask.CompletedTask;
+    }
+
     public ValueTask OnSessionCompleteAsync(TerminalSessionCompleteEvent completeEvent, CancellationToken cancellationToken = default)
     {
         _eventBus.Publish(

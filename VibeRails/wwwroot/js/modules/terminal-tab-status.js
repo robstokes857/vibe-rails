@@ -14,6 +14,7 @@ export const TAB_STATUS = Object.freeze({
     THINKING:     'thinking',
     READY:        'ready',
     ACTIVE:       'active',
+    WAITING:      'waiting',
     DISCONNECTED: 'disconnected'
 });
 
@@ -37,6 +38,7 @@ const STATUS_FA_ICON = {
     [TAB_STATUS.CONNECTED]:    'fa-solid fa-link',
     [TAB_STATUS.READY]:        'fa-solid fa-circle-check',
     [TAB_STATUS.ACTIVE]:       'fa-solid fa-keyboard',
+    [TAB_STATUS.WAITING]:      'fa-solid fa-hand-point-up',
     [TAB_STATUS.DISCONNECTED]: 'fa-solid fa-plug-circle-xmark',
 };
 
@@ -45,6 +47,7 @@ const STATUS_TEXT = {
     [TAB_STATUS.THINKING]:     'Thinking',
     [TAB_STATUS.READY]:        'Ready',
     [TAB_STATUS.ACTIVE]:       'Active',
+    [TAB_STATUS.WAITING]:      'Waiting for user input',
     [TAB_STATUS.DISCONNECTED]: 'Disconnected'
 };
 
@@ -173,7 +176,8 @@ export class TabStatusController {
         if (data === '\r' &&
             (this._status === TAB_STATUS.CONNECTED ||
              this._status === TAB_STATUS.READY ||
-             this._status === TAB_STATUS.ACTIVE)) {
+             this._status === TAB_STATUS.ACTIVE ||
+             this._status === TAB_STATUS.WAITING)) {
             this._transitionTo(TAB_STATUS.THINKING);
             return;
         }
@@ -217,6 +221,13 @@ export class TabStatusController {
         // intent. Typed input drops us back to READY (see onTerminalData).
     }
 
+    onWaitingForUserSelection() {
+        if (this._status !== TAB_STATUS.DISCONNECTED &&
+            this._status !== TAB_STATUS.ACTIVE) {
+            this._transitionTo(TAB_STATUS.WAITING);
+        }
+    }
+
     onSessionCompleted() {
         if (this._awaitingFirstIdle) {
             this._transitionTo(TAB_STATUS.READY);
@@ -249,6 +260,9 @@ export class TabStatusController {
             // User is composing — don't auto-pop to READY on the next idle;
             // wait for them to press Enter (THINKING) on their own terms.
             this._awaitingFirstIdle = false;
+        } else if (newStatus === TAB_STATUS.WAITING) {
+            // The user (not a backend idle ping) drives the next transition.
+            this._awaitingFirstIdle = false;
         }
 
         this._applyVisuals(newStatus);
@@ -263,6 +277,12 @@ export class TabStatusController {
         // Ready flash — only for background tabs
         if (newStatus === TAB_STATUS.READY && !this._options.isActiveTab?.()) {
             this._flashReady();
+        }
+
+        // Waiting flash — only for background tabs (active tab gets the
+        // pulsing icon instead, which is enough in-view signal).
+        if (newStatus === TAB_STATUS.WAITING && !this._options.isActiveTab?.()) {
+            this._flashWaiting();
         }
     }
 
@@ -347,6 +367,18 @@ export class TabStatusController {
         item.classList.add('tab-status-ready-flash');
         item.addEventListener('animationend', () => {
             item.classList.remove('tab-status-ready-flash');
+        }, { once: true });
+    }
+
+    _flashWaiting() {
+        const item = this._ui.item;
+        if (!item) return;
+
+        item.classList.remove('tab-status-waiting-flash');
+        void item.offsetHeight;
+        item.classList.add('tab-status-waiting-flash');
+        item.addEventListener('animationend', () => {
+            item.classList.remove('tab-status-waiting-flash');
         }, { once: true });
     }
 }
