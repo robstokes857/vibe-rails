@@ -1,4 +1,4 @@
-namespace VibeRails.Services.Terminal;
+namespace VibeRails.Services.Terminal.Consumers;
 
 /// <summary>
 /// ITerminalConsumer that feeds all PTY output bytes into the headless

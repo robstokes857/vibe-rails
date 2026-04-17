@@ -3,48 +3,6 @@ using Serilog;
 namespace VibeRails.Services.Terminal;
 
 /// <summary>
-/// Implement this interface to receive terminal I/O events through DI.
-/// Register implementations in DI, e.g. AddScoped&lt;ITerminalIoObserver, MyObserver&gt;().
-/// </summary>
-public interface ITerminalIoObserver
-{
-    ValueTask OnTerminalIoAsync(TerminalIoEvent ioEvent, CancellationToken cancellationToken = default);
-
-    ValueTask OnTerminalResizeAsync(TerminalResizeEvent resizeEvent, CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
-
-    ValueTask OnTerminalIdleAsync(TerminalIdleEvent idleEvent, CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
-
-    ValueTask OnTerminalRemoteCommandAsync(TerminalRemoteCommandEvent commandEvent, CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
-
-    ValueTask OnSessionStartAsync(TerminalSessionStartEvent startEvent, CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
-
-    ValueTask OnSessionBusyAsync(TerminalSessionBusyEvent busyEvent, CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
-
-    ValueTask OnWaitingForUserAsync(TerminalWaitingForUserEvent waitingEvent, CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
-
-    ValueTask OnSessionCompleteAsync(TerminalSessionCompleteEvent completeEvent, CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
-}
-
-public interface ITerminalIoObserverService
-{
-    void Publish(TerminalIoEvent ioEvent);
-    void PublishResize(TerminalResizeEvent resizeEvent);
-    void PublishIdle(TerminalIdleEvent idleEvent);
-    void PublishRemoteCommand(TerminalRemoteCommandEvent commandEvent);
-    void PublishSessionStart(TerminalSessionStartEvent startEvent);
-    void PublishSessionBusy(TerminalSessionBusyEvent busyEvent);
-    void PublishWaitingForUser(TerminalWaitingForUserEvent waitingEvent);
-    void PublishSessionComplete(TerminalSessionCompleteEvent completeEvent);
-}
-
-/// <summary>
 /// Dispatches terminal I/O events to all registered ITerminalIoObserver implementations.
 /// Dispatch is fire-and-forget so terminal I/O flow is never blocked by observers.
 /// </summary>
