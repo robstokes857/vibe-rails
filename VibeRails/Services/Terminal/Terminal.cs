@@ -12,6 +12,7 @@ public sealed class Terminal : IAsyncDisposable
 {
     public const int DefaultCols = 120;
     public const int DefaultRows = 30;
+    private const int EmulatorScrollbackLines = 20000;
 
     private readonly IPtyConnection _pty;
     private readonly CancellationTokenSource _cts = new();
@@ -49,7 +50,7 @@ public sealed class Terminal : IAsyncDisposable
     private Terminal(IPtyConnection pty, int cols, int rows)
     {
         _pty = pty;
-        _emulator = new TerminalEmulator.Terminal(cols: cols, rows: rows);
+        _emulator = new TerminalEmulator.Terminal(cols: cols, rows: rows, scrollbackSize: EmulatorScrollbackLines);
         _cols = cols;
         _rows = rows;
     }

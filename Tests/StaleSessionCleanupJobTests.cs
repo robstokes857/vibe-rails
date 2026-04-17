@@ -20,7 +20,7 @@ public class StaleSessionCleanupJobTests
     {
         var dbService = new Mock<IRepository>();
         dbService
-            .Setup(x => x.GetOpenSessionCleanupCandidatesAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetOpenSessionCleanupCandidatesAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<OpenSessionCleanupCandidate>
             {
                 new("session-1", int.MaxValue),
@@ -51,7 +51,7 @@ public class StaleSessionCleanupJobTests
     {
         var dbService = new Mock<IRepository>();
         dbService
-            .Setup(x => x.GetOpenSessionCleanupCandidatesAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetOpenSessionCleanupCandidatesAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<OpenSessionCleanupCandidate>());
 
         using var serviceProvider = new ServiceCollection()
@@ -72,11 +72,39 @@ public class StaleSessionCleanupJobTests
     }
 
     [Fact]
+    public async Task ExecuteJob_ClosesLegacySessionsWithNullOwnerPid()
+    {
+        var dbService = new Mock<IRepository>();
+        dbService
+            .Setup(x => x.GetOpenSessionCleanupCandidatesAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<OpenSessionCleanupCandidate>
+            {
+                new("legacy-session", null)
+            });
+
+        using var serviceProvider = new ServiceCollection()
+            .AddScoped(_ => dbService.Object)
+            .BuildServiceProvider();
+
+        var remoteStateService = new Mock<IRemoteStateService>();
+        var job = new StaleSessionCleanupJob(
+            NullLogger<StaleSessionCleanupJob>.Instance,
+            Mock.Of<ISystemResourceService>(),
+            serviceProvider.GetRequiredService<IServiceScopeFactory>(),
+            remoteStateService.Object);
+
+        await InvokeExecuteJobAsync(job);
+
+        dbService.Verify(x => x.CompleteSessionAsync("legacy-session", -1), Times.Once);
+        remoteStateService.Verify(x => x.DeregisterTerminalAsync("legacy-session"), Times.Once);
+    }
+
+    [Fact]
     public async Task ExecuteJob_DoesNotCloseSessionsOwnedByLiveProcess()
     {
         var dbService = new Mock<IRepository>();
         dbService
-            .Setup(x => x.GetOpenSessionCleanupCandidatesAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetOpenSessionCleanupCandidatesAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<OpenSessionCleanupCandidate>
             {
                 new("session-1", Environment.ProcessId)

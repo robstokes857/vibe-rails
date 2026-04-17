@@ -12,6 +12,11 @@ const RESIZE_PREFIX = '__resize__:';
 // Collapse layout-settle/font-load fit bursts into one PTY resize so ConPTY does not
 // redraw the full TUI multiple times while the browser is still stabilizing.
 const RESIZE_SYNC_DEBOUNCE_MS = 140;
+// Codex often splits one visual redraw across several WebSocket message events a few
+// milliseconds apart. Use a short timer, not queueMicrotask, so adjacent events batch.
+const OUTPUT_WRITE_COALESCE_MS = 10;
+const OUTPUT_CURSOR_IDLE_MS = 90;
+const CONNECT_FOCUS_RETRY_MS = 180;
 const DEFAULT_SELECTION = null;
 const ACTIVE_TAB_KEY = 'viberails_terminal_active_tab_id';
 const TAB_SELECTION_PREFIX = 'viberails_terminal_tab_selection_';
@@ -225,6 +230,7 @@ class TerminalTab {
         this.clearConnectFocusTimeouts();
         this.clearPendingResizeToPty();
         this._initialConnectActive = false;
+        this.vibeTerminal?.restoreSuppressedCursor?.();
         if (!this.socket) {
             return;
         }
@@ -267,16 +273,14 @@ class TerminalTab {
         }
 
         this.clearConnectFocusTimeouts();
-        for (const delay of [0, 50, 150, 300, 600, 1000]) {
-            const timeoutId = window.setTimeout(() => {
-                if (!this.isActive || this.socket !== socket) {
-                    return;
-                }
+        const timeoutId = window.setTimeout(() => {
+            if (!this.isActive || this.socket !== socket) {
+                return;
+            }
 
-                this.focusInput();
-            }, delay);
-            this._connectFocusTimeouts.push(timeoutId);
-        }
+            this.focusInput();
+        }, CONNECT_FOCUS_RETRY_MS);
+        this._connectFocusTimeouts.push(timeoutId);
     }
 
     disconnect({ disposeTerminal = false, preserveStatus = false } = {}) {
@@ -516,21 +520,16 @@ class TerminalTab {
             };
 
             // Client-side write coalescing: buffer incoming binary frames and flush
-            // them into a single term.write() call via queueMicrotask. This reduces
-            // the number of distinct write() calls xterm.js sees, which in turn
-            // reduces the number of rAF render cycles. TUI apps like Codex split
-            // their screen updates across several small PTY writes (erase, ?2026h
-            // sync-on, content, ?2026l sync-off) that arrive as separate WebSocket
-            // frames a few ms apart. If each triggers its own term.write(), xterm.js
-            // may render an intermediate torn state (e.g. erased cells visible for
-            // one frame before ?2026h suppresses rendering). Batching them into one
-            // write() processes the whole sequence atomically.
+            // them into one term.write() call after a short delay. WebSocket
+            // onmessage callbacks run as separate tasks, so queueMicrotask only
+            // batches chunks that arrive in the same callback, which is too narrow
+            // for Codex's multi-frame redraw pattern.
             let replayFocusDone = false;
             let pendingChunks = [];
-            let flushScheduled = false;
+            let flushTimeoutId = null;
 
             const flushPendingChunks = () => {
-                flushScheduled = false;
+                flushTimeoutId = null;
                 if (pendingChunks.length === 0) return;
                 if (this.socket !== socket) { pendingChunks = []; return; }
 
@@ -547,6 +546,7 @@ class TerminalTab {
                 }
                 pendingChunks = [];
 
+                this.vibeTerminal?.suppressCursorDuringOutput?.(OUTPUT_CURSOR_IDLE_MS);
                 this.vibeTerminal?.write(data);
 
                 // Re-focus once after the replay renders. Scheduled here (after write)
@@ -567,9 +567,8 @@ class TerminalTab {
                 if (this.socket !== socket) return;
 
                 pendingChunks.push(new Uint8Array(event.data));
-                if (!flushScheduled) {
-                    flushScheduled = true;
-                    queueMicrotask(flushPendingChunks);
+                if (flushTimeoutId === null) {
+                    flushTimeoutId = window.setTimeout(flushPendingChunks, OUTPUT_WRITE_COALESCE_MS);
                 }
 
                 // Fire first-message init synchronously (before flush) — these actions
@@ -587,6 +586,10 @@ class TerminalTab {
             socket.onclose = (event) => {
                 if (this.socket !== socket) return;
 
+                if (flushTimeoutId !== null) {
+                    clearTimeout(flushTimeoutId);
+                    flushTimeoutId = null;
+                }
                 this.teardownResizeHandling();
                 this.clearConnectFocusTimeouts();
                 this._initialConnectActive = false;

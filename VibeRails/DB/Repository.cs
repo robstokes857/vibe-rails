@@ -958,14 +958,15 @@ namespace VibeRails.DB
             }
         }
 
-        public async Task<List<OpenSessionCleanupCandidate>> GetOpenSessionCleanupCandidatesAsync(DateTime olderThan, CancellationToken cancellationToken)
+        public async Task<List<OpenSessionCleanupCandidate>> GetOpenSessionCleanupCandidatesAsync(DateTime trackedCutoff, DateTime untrackedCutoff, CancellationToken cancellationToken)
         {
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectOpenSessionCleanupCandidates;
-            cmd.Parameters.AddWithValue("$cutoff", olderThan.ToString("O"));
+            cmd.Parameters.AddWithValue("$trackedCutoff", trackedCutoff.ToString("O"));
+            cmd.Parameters.AddWithValue("$untrackedCutoff", untrackedCutoff.ToString("O"));
 
             var sessions = new List<OpenSessionCleanupCandidate>();
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);

@@ -28,7 +28,7 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
     private int _sequence;
 
     // Holds trailing bytes from the previous payload that could be the start of an
-    // incomplete alt-screen escape sequence split across PTY reads.
+    // incomplete tracked private-mode sequence split across PTY reads.
     private byte[]? _residual;
 
     public SessionOutputWriter(IRepository repository)
@@ -142,14 +142,14 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
             workData = payload;
         }
 
-        // Process data for the buffered enriched table — split at alt screen transitions.
-        // Key invariant: flush the *current* buffer BEFORE switching screens so that
-        // sequence numbers reflect chronological order, and each chunk contains data
-        // for exactly one screen mode.
+        // Process data for the buffered enriched table — split at alt-screen transitions
+        // and at sync-output frame boundaries inside alternate screen. This keeps the
+        // replay/history path closer to real Codex/Copilot TUI frame boundaries without
+        // changing the raw SessionLogs stream used elsewhere.
         var offset = 0;
         while (offset < workData.Length)
         {
-            var transition = FindNextAltScreenTransition(workData, offset);
+            var transition = FindNextTrackedPrivateModeTransition(workData, offset);
 
             if (transition == null)
             {
@@ -166,10 +166,10 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
             }
             else
             {
-                var (transitionOffset, transitionLength, enteringAlt) = transition.Value;
+                var (transitionOffset, transitionLength, type, enabled) = transition.Value;
                 var endOfChunk = transitionOffset + transitionLength;
 
-                if (enteringAlt)
+                if (type == PrivateModeTransitionType.AlternateScreen && enabled)
                 {
                     // Write data BEFORE the enter sequence to the main buffer
                     if (transitionOffset > offset)
@@ -183,7 +183,7 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
                     _altBuffer.Write(workData, transitionOffset, transitionLength);
                     _inAltScreen = true;
                 }
-                else
+                else if (type == PrivateModeTransitionType.AlternateScreen)
                 {
                     // Write data up to AND including the exit sequence to the alt buffer
                     if (endOfChunk > offset)
@@ -192,6 +192,19 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
                     // Flush alt buffer — it now contains enter seq + alt content + exit seq
                     await FlushBufferAsync(_altBuffer, true).ConfigureAwait(false);
                     _inAltScreen = false;
+                }
+                else
+                {
+                    if (endOfChunk > offset)
+                        ActiveBuffer.Write(workData, offset, endOfChunk - offset);
+
+                    // In alternate screen, treat sync-output off as the end of one
+                    // render frame so history/replay can step through full-screen TUI
+                    // states instead of one giant undifferentiated alt-screen chunk.
+                    if (_inAltScreen && !enabled)
+                    {
+                        await FlushBufferAsync(_altBuffer, true).ConfigureAwait(false);
+                    }
                 }
 
                 offset = endOfChunk;
@@ -238,12 +251,12 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
     private MemoryStream ActiveBuffer => _inAltScreen ? _altBuffer : _mainBuffer;
 
     /// <summary>
-    /// Finds the next alternate screen transition in the data starting from offset.
-    /// Returns (offset of ESC, length of full sequence, true=entering alt / false=exiting alt), or null.
-    /// Handles both standalone (ESC[?1049h) and multi-mode (ESC[?1049;25h) sequences.
-    /// Recognised alt-screen modes: 47, 1047, 1049.
+    /// Finds the next tracked private-mode transition in the data starting from offset.
+    /// Tracks alternate-screen transitions (47, 1047, 1049) and synchronized output
+    /// transitions (2026). Alternate-screen modes take precedence if both appear in
+    /// the same sequence.
     /// </summary>
-    private static (int Offset, int Length, bool EnteringAlt)? FindNextAltScreenTransition(byte[] data, int start)
+    private static PrivateModeTransition? FindNextTrackedPrivateModeTransition(byte[] data, int start)
     {
         for (var i = start; i < data.Length - 2; i++)
         {
@@ -258,6 +271,7 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
             var paramStart = i + 3;
             var pos = paramStart;
             var hasAltMode = false;
+            var hasSyncOutputMode = false;
             var currentParam = 0;
             var hadDigit = false;
 
@@ -272,8 +286,7 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
                 }
                 else if (b == 0x3B) // ';' — parameter separator
                 {
-                    if (hadDigit && (currentParam == 47 || currentParam == 1047 || currentParam == 1049))
-                        hasAltMode = true;
+                    TrackMode(currentParam, hadDigit, ref hasAltMode, ref hasSyncOutputMode);
                     currentParam = 0;
                     hadDigit = false;
                     pos++;
@@ -281,16 +294,18 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
                 else if (b >= 0x40 && b <= 0x7E) // final byte
                 {
                     // Check the last accumulated parameter
-                    if (hadDigit && (currentParam == 47 || currentParam == 1047 || currentParam == 1049))
-                        hasAltMode = true;
+                    TrackMode(currentParam, hadDigit, ref hasAltMode, ref hasSyncOutputMode);
 
-                    if (hasAltMode && (b == 0x68 || b == 0x6C)) // 'h' or 'l'
+                    if ((hasAltMode || hasSyncOutputMode) && (b == 0x68 || b == 0x6C)) // 'h' or 'l'
                     {
                         var seqLen = pos - i + 1;
-                        return (i, seqLen, b == 0x68);
+                        var type = hasAltMode
+                            ? PrivateModeTransitionType.AlternateScreen
+                            : PrivateModeTransitionType.SyncOutput;
+                        return new PrivateModeTransition(i, seqLen, type, b == 0x68);
                     }
 
-                    // Valid CSI but no alt-screen mode — stop parsing this sequence
+                    // Valid CSI but no tracked mode — stop parsing this sequence
                     break;
                 }
                 else
@@ -304,9 +319,31 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
         return null;
     }
 
+    private static void TrackMode(
+        int currentParam,
+        bool hadDigit,
+        ref bool hasAltMode,
+        ref bool hasSyncOutputMode)
+    {
+        if (!hadDigit)
+            return;
+
+        if (currentParam == 47 || currentParam == 1047 || currentParam == 1049)
+        {
+            hasAltMode = true;
+            return;
+        }
+
+        if (currentParam == 2026)
+        {
+            hasSyncOutputMode = true;
+        }
+    }
+
     /// <summary>
     /// Checks if the tail of data[offset..] could be the start of an incomplete
-    /// CSI private-mode sequence that might contain an alt-screen mode (47/1047/1049).
+    /// CSI private-mode sequence that might contain a tracked mode (alt screen or
+    /// synchronized output).
     /// Returns how many trailing bytes to hold back.
     /// </summary>
     private static int GetTailResidualLength(byte[] data, int offset)
@@ -366,5 +403,12 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
         int NewCols = 0,
         int NewRows = 0);
 
+    private readonly record struct PrivateModeTransition(
+        int Offset,
+        int Length,
+        PrivateModeTransitionType Type,
+        bool Enabled);
+
     private enum WriterMessageKind { Data, Resize }
+    private enum PrivateModeTransitionType { AlternateScreen, SyncOutput }
 }

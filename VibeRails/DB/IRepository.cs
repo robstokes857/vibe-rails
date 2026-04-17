@@ -33,7 +33,7 @@ namespace VibeRails.DB
         Task<List<ChatHistoryItem>> GetChatHistoryPageAsync(int limit, int offset, string? preferredWorkingDirectory, string? sortBy, string? sortDirection, CancellationToken cancellationToken);
         Task<bool> UpdateChatHistorySessionNameAsync(string sessionId, string sessionDisplayName, CancellationToken cancellationToken);
         Task<bool> DeleteChatHistorySessionAsync(string sessionId, CancellationToken cancellationToken);
-        Task<List<OpenSessionCleanupCandidate>> GetOpenSessionCleanupCandidatesAsync(DateTime olderThan, CancellationToken cancellationToken);
+        Task<List<OpenSessionCleanupCandidate>> GetOpenSessionCleanupCandidatesAsync(DateTime trackedCutoff, DateTime untrackedCutoff, CancellationToken cancellationToken);
 
         // User input tracking
         Task<UserInputRecord?> GetLastUserInputAsync(string sessionId);
