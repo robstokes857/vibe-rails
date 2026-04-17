@@ -37,16 +37,10 @@ export class DashboardController {
         if (!root) return fragment;
 
         const isInGit = this.app.data.isInGit;
-        const showPrereleaseContextHeader = this.app.appSettings?.enablePrerelease === true;
 
         // Context Heading
         const headingContainer = root.querySelector('[data-context-heading-container]');
-        const headingRow = headingContainer?.closest('.row');
-        if (headingRow) {
-            headingRow.hidden = !showPrereleaseContextHeader;
-        }
-
-        if (headingContainer && showPrereleaseContextHeader) {
+        if (headingContainer) {
             if (isInGit) {
                 const rootPath = this.app.data.configs?.rootPath || 'Unknown Path';
                 const gitRemoteUrl = this.app.data.configs?.gitRemoteUrl;

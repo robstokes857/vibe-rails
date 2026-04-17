@@ -6,16 +6,18 @@ Verified against source on 2026-03-05.
 ## Scope
 This folder owns PTY lifecycle, session tracking hooks, local WebSocket viewer handling, and remote relay integration.
 
-Primary files:
-- `Services/Terminal/Terminal.cs`
-- `Services/Terminal/TerminalRunner.cs`
-- `Services/Terminal/TerminalSessionService.cs`
-- `Services/Terminal/TerminalStateService.cs`
-- `Services/Terminal/TerminalIoRouter.cs`
-- `Services/Terminal/RemoteTerminalConnection.cs`
-- `Services/Terminal/RemoteStateService.cs`
-- `Services/Terminal/TerminalControlProtocol.cs`
+Primary files (reorg'd into subdirectories):
+- `Services/Terminal/Pty/Terminal.cs`
+- `Services/Terminal/Core/TerminalRunner.cs`
+- `Services/Terminal/Core/TerminalSessionService.cs`
+- `Services/Terminal/Core/TerminalStateService.cs`
+- `Services/Terminal/Core/TerminalTabHostService.cs`
+- `Services/Terminal/Protocol/TerminalIoRouter.cs`
+- `Services/Terminal/Protocol/TerminalControlProtocol.cs`
+- `Services/Terminal/Remote/RemoteTerminalConnection.cs`
 - `Services/Terminal/Consumers/*.cs`
+- `Services/Terminal/Observers/*.cs`
+- `Services/Terminal/Interfaces/*.cs` (interface contracts, namespace stays flat)
 
 Related routes/UI:
 - `Routes/TerminalRoutes.cs`
@@ -313,7 +315,7 @@ These issues regressed in production-like usage and should be treated as guardra
 
 ## If You Modify This Area
 1. Update both control protocol helpers if command names or parsing rules change:
-   - `VibeRails/Services/Terminal/TerminalControlProtocol.cs`
+   - `VibeRails/Services/Terminal/Protocol/TerminalControlProtocol.cs`
    - `VibeRails-Front/Services/WebSockets/TerminalControlProtocol.cs`
 2. Keep takeover and replay semantics consistent between local and remote paths.
 3. Re-test these scenarios:

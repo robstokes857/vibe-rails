@@ -23,6 +23,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private static readonly TimeSpan s_idleThreshold = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan s_idleCheckInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan s_waitingForUserDebounce = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan s_workingSuppressionWindow = TimeSpan.FromSeconds(10);
 
     public TerminalStateService(
         IRepository repository,
@@ -394,6 +395,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         string sessionId, string text, DateTimeOffset now)
     {
         string cli;
+        var sawWorking = text.Contains("Working(");
         lock (s_stateLock)
         {
             if (!s_sessionActivity.TryGetValue(sessionId, out var activity))
@@ -402,6 +404,14 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             // Within the 30s window → don't even run the substring scan.
             if (activity.LastWaitingForUserUtc != default &&
                 now - activity.LastWaitingForUserUtc < s_waitingForUserDebounce)
+                return null;
+
+            if (sawWorking)
+                activity.LastWorkingSeenUtc = now;
+
+            // Codex showed "Working(" recently → it's busy, not waiting.
+            if (activity.LastWorkingSeenUtc != default &&
+                now - activity.LastWorkingSeenUtc < s_workingSuppressionWindow)
                 return null;
 
             cli = activity.Cli;

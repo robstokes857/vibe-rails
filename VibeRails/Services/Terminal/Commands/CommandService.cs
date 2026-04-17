@@ -11,16 +11,6 @@ public sealed record PreparedTerminalSession(
     IReadOnlyList<string> SetupCommands,
     Dictionary<string, string> Environment);
 
-public interface ICommandService
-{
-    /// <summary>
-    /// Build the CLI command string and environment dictionary.
-    /// Shared by both CLI and Web paths.
-    /// </summary>
-    PreparedTerminalSession PrepareSession(
-        LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "");
-}
-
 public class CommandService : ICommandService
 {
     private readonly LlmCliEnvironmentService _envService;

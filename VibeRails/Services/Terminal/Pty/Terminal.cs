@@ -1,5 +1,6 @@
 using Pty.Net;
 using Serilog;
+using VibeRails.Services.Terminal.Consumers;
 
 namespace VibeRails.Services.Terminal;
 
