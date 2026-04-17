@@ -4,6 +4,8 @@ public static class UserWaiting
     {
         if(input.Contains('•') && input.Contains('◦'))
         {
+            if (input.Contains("ing"))
+                return false;
             return true;
         }
         return false;

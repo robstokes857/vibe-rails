@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Threading.Channels;
 
@@ -9,17 +10,23 @@ namespace VibeRails.Services.Terminal.Consumers;
 /// </summary>
 public sealed class WebSocketConsumer : ITerminalConsumer, IDisposable
 {
-    private readonly Channel<byte[]> _outbound = Channel.CreateUnbounded<byte[]>(
+    private const int NormalCoalesceDelayMs = 4;
+    private const int SyncOutputPollDelayMs = 4;
+    private const int MaxSyncOutputHoldMs = 100;
+
+    private readonly Channel<OutboundFrame> _outbound = Channel.CreateUnbounded<OutboundFrame>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
     private readonly WebSocket _webSocket;
     private readonly CancellationToken _ct;
     private readonly Task _sendLoop;
+    private readonly Func<bool>? _isSyncOutputActive;
 
-    public WebSocketConsumer(WebSocket webSocket, CancellationToken ct)
+    public WebSocketConsumer(WebSocket webSocket, CancellationToken ct, Func<bool>? isSyncOutputActive = null)
     {
         _webSocket = webSocket;
         _ct = ct;
+        _isSyncOutputActive = isSyncOutputActive;
         _sendLoop = Task.Run(() => SendLoopAsync());
     }
 
@@ -28,7 +35,8 @@ public sealed class WebSocketConsumer : ITerminalConsumer, IDisposable
         if (_webSocket.State != WebSocketState.Open || _ct.IsCancellationRequested)
             return;
 
-        _outbound.Writer.TryWrite(data.ToArray());
+        var syncOutputActiveAfterFrame = _isSyncOutputActive?.Invoke() == true;
+        _outbound.Writer.TryWrite(new OutboundFrame(data.ToArray(), syncOutputActiveAfterFrame));
     }
 
     public void Dispose()
@@ -44,22 +52,41 @@ public sealed class WebSocketConsumer : ITerminalConsumer, IDisposable
 
             while (await _outbound.Reader.WaitToReadAsync(_ct))
             {
-                // Brief coalescing window: TUI apps (Codex, Copilot) split their screen
-                // updates across multiple small PTY writes that arrive 1-10ms apart —
-                // e.g. an erase sequence, then ?2026h (sync-on), then the redrawn content,
-                // then ?2026l (sync-off/render). If each arrives as a separate WebSocket
-                // frame, xterm.js may render intermediate torn states (blank cells) between
-                // the erase and the sync-on. Waiting 4ms gives the PTY reader time to
-                // enqueue related writes so they coalesce into one frame and xterm.js
-                // processes the whole sequence atomically in a single write() call.
-                await Task.Delay(4, _ct);
-
                 frames.Clear();
+                if (!_outbound.Reader.TryRead(out var frame))
+                    continue;
+
                 int totalLen = 0;
-                while (_outbound.Reader.TryRead(out var frame))
+                var syncOutputActive = false;
+                AddFrame(frame);
+                var batchStarted = Stopwatch.GetTimestamp();
+
+                while (true)
                 {
-                    frames.Add(frame);
-                    totalLen += frame.Length;
+                    var delayMs = syncOutputActive
+                        ? SyncOutputPollDelayMs
+                        : NormalCoalesceDelayMs;
+                    var waitForDataTask = _outbound.Reader.WaitToReadAsync(_ct).AsTask();
+                    var delayTask = Task.Delay(delayMs, _ct);
+                    var completed = await Task.WhenAny(waitForDataTask, delayTask);
+
+                    if (completed == waitForDataTask)
+                    {
+                        if (!await waitForDataTask.ConfigureAwait(false))
+                            break;
+
+                        while (_outbound.Reader.TryRead(out var pendingFrame))
+                            AddFrame(pendingFrame);
+
+                        if (!syncOutputActive)
+                            continue;
+                    }
+
+                    if (!syncOutputActive)
+                        break;
+
+                    if (GetElapsedMilliseconds(batchStarted) >= MaxSyncOutputHoldMs)
+                        break;
                 }
 
                 if (frames.Count == 0) continue;
@@ -82,10 +109,26 @@ public sealed class WebSocketConsumer : ITerminalConsumer, IDisposable
                 }
 
                 await _webSocket.SendAsync(payload, WebSocketMessageType.Binary, true, _ct);
+
+                void AddFrame(OutboundFrame outboundFrame)
+                {
+                    frames.Add(outboundFrame.Payload);
+                    totalLen += outboundFrame.Payload.Length;
+                    syncOutputActive = outboundFrame.SyncOutputActiveAfterFrame;
+                }
             }
         }
         catch (OperationCanceledException) { }
         catch (WebSocketException) { }
         catch (ObjectDisposedException) { }
     }
+
+    private static long GetElapsedMilliseconds(long startedTimestamp)
+    {
+        return (long)(Stopwatch.GetElapsedTime(startedTimestamp).TotalMilliseconds);
+    }
+
+    private readonly record struct OutboundFrame(
+        byte[] Payload,
+        bool SyncOutputActiveAfterFrame);
 }

@@ -2571,6 +2571,12 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     overflow: hidden;
 }
 
+.vb-terminal-element.vb-terminal-cursor-suppressed .xterm-cursor,
+.vb-terminal-element.vb-terminal-cursor-suppressed .xterm-cursor-layer {
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
 /* Selection menu */
 .vb-terminal-selection-menu {
     position: fixed;

@@ -42,6 +42,57 @@ The problem is **ConPTY's redraw after `ResizePseudoConsole` is not always compl
 
 ## Closed / Informational
 
+## Codex: Status-line cursor flash / cursor hop during TUI redraw
+
+**Status:** Improved / mitigated — 2026-04-16
+
+**Symptom:** In the Web UI terminal, Codex's visible cursor could appear to jump off the input line and flash on the bottom status/footer line while pressing arrow keys, space, or during active thinking/redraw. The flashed cursor sometimes took on the footer line's gray styling, which made it look like a browser caret or renderer bug.
+
+**Correct term:** This is best described as a **VT cursor flash** or **cursor hop during TUI redraw**. More specifically, it was a **status-line cursor flash**: Codex's TUI briefly moved the real terminal cursor to its footer/status row during intermediate redraw steps, and xterm.js rendered that transient position.
+
+**Root cause:** This turned out to be a combination of:
+1. Codex splitting one visual redraw across multiple WebSocket messages, so xterm rendered intermediate states.
+2. The server flushing some redraw fragments before synchronized output had fully settled.
+3. xterm faithfully drawing the real VT cursor even when Codex briefly parked it on the footer/status line during redraw.
+
+This was **not** the hidden helper textarea caret. That browser-caret issue had already been separately suppressed via CSS/runtime textarea patching. The remaining flash was the actual terminal cursor being shown at a transient position inside Codex's TUI.
+
+**What changed:**
+- `VibeRails/wwwroot/js/modules/terminal-multitab.js`
+  - Replaced microtask-only output batching with a short timer-based coalesce window so adjacent WebSocket frames render together instead of as torn redraw fragments.
+  - Reduced extra connect-time focus churn and follow-up fit churn that could amplify visible redraw noise.
+  - Added a short output-driven cursor suppression window so the xterm cursor is hidden during inbound redraw bursts and restored after a brief idle period.
+- `VibeRails/wwwroot/js/modules/vibe-terminal.js`
+  - Added cursor suppression / restore helpers that temporarily hide the rendered xterm cursor by theme + CSS while output is actively streaming.
+  - Increased browser-side xterm scrollback from `5000` to `20000`.
+- `VibeRails/wwwroot/style.css`
+  - Added a terminal state class that hides the xterm cursor layer during transient redraw bursts as a CSS-side fallback.
+- `VibeRails/Services/Terminal/Consumers/WebSocketConsumer.cs`
+  - Added sync-output-aware batching for terminal output (`CSI ?2026 h/l`) with a fallback timeout so Codex redraw frames are less likely to flush mid-frame.
+- `VibeRails/Services/Terminal/TerminalResizeCoordinator.cs`
+  - Defers resize application while sync-output is active to avoid extra redraw churn from resize signals landing mid-frame.
+- `VibeRails/Services/Terminal/Terminal.cs`
+  - Increased C# emulator scrollback from `5000` to `20000` so reconnect snapshots and live browser history stay aligned.
+- `VibeRails/Services/Terminal/SessionOutputWriter.cs`
+  - Added sync-output-aware alternate-screen frame boundaries to improve replay/history capture for Codex sessions.
+
+**Result:** The major visible footer/status-line cursor flash is now substantially reduced. A small residual flicker may still be visible when Codex updates its own placeholder/footer/status text during active thinking, because the TUI is still legitimately repainting that area. The mitigation here is to hide transient cursor positions, not to stop Codex from redrawing.
+
+**Renderer note:** WebGL remains the global preferred renderer in the Web UI terminal. In testing, Codex looked better in WebGL than canvas, but no Codex-specific renderer override was added.
+
+**Scrollback note:** The general Web UI terminal scrollback cap is now `20000` lines on both the browser xterm side and the C# emulator/reconnect side. However, Codex still uses the alternate screen for parts of its TUI, and alternate-screen scrollback remains inherently limited by terminal behavior.
+
+**Key files touched:**
+- `VibeRails/wwwroot/js/modules/terminal-multitab.js`
+- `VibeRails/wwwroot/js/modules/vibe-terminal.js`
+- `VibeRails/wwwroot/style.css`
+- `VibeRails/Services/Terminal/Consumers/WebSocketConsumer.cs`
+- `VibeRails/Services/Terminal/TerminalResizeCoordinator.cs`
+- `VibeRails/Services/Terminal/Terminal.cs`
+- `VibeRails/Services/Terminal/SessionOutputWriter.cs`
+
+---
+
 ## Startup prompt triple-print — WebFontsAddon / LigaturesAddon post-connect reflow
 
 **Status:** Fixed — 2026-04-15

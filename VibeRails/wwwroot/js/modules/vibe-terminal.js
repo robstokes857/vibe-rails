@@ -23,6 +23,8 @@ const DEFAULT_THEME = {
 };
 
 const DEFAULT_TERMINAL_FONT_FAMILY = 'Menlo, Monaco, Consolas, "Cascadia Mono", "Liberation Mono", "Courier New", monospace';
+const DEFAULT_TERMINAL_SCROLLBACK = 20000;
+const HIDDEN_CURSOR_COLOR = 'rgba(0, 0, 0, 0)';
 
 function buildTerminalTheme(theme = null) {
     return {
@@ -63,6 +65,7 @@ export class VibeTerminal {
         desktopLineHeight = 1.12,
         mobileLineHeight = 1.2,
         scrollOnWrite = true,
+        scrollback = DEFAULT_TERMINAL_SCROLLBACK,
         cursorBlink = true,
         cursorStyle = 'block',
         cursorInactiveStyle = 'outline'
@@ -93,7 +96,7 @@ export class VibeTerminal {
         this._resizeDebounceId = null;
         this._scrollRafId = null;
         this._fitRafId = null;
-        this._fitTimeoutId = null;
+        this._cursorRestoreTimeoutId = null;
         this._resizeObserver = null;
         this._windowResizeHandler = null;
         this._visualViewportResizeHandler = null;
@@ -101,6 +104,8 @@ export class VibeTerminal {
         this._customKeyEventHandlers = [];
         this._followOutput = true;
         this._onScrollDispose = null;
+        this._theme = buildTerminalTheme();
+        this._cursorSuppressed = false;
 
         const metrics = this._getResponsiveMetrics();
         this._terminal = new window.Terminal({
@@ -114,12 +119,13 @@ export class VibeTerminal {
             unicodeVersion: '11',
             disableStdin,
             convertEol: false,
+            scrollback,
             minimumContrastRatio: 3,
             rightClickSelectsWord: true,
             cursorBlink,
             cursorStyle,
             cursorInactiveStyle,
-            theme: buildTerminalTheme()
+            theme: this._getAppliedTheme()
         });
 
         this._searchAddon = null;
@@ -210,6 +216,7 @@ export class VibeTerminal {
             this._followOutput = this._isNearBottom(1);
         });
 
+        this._syncCursorVisibilityClass();
         this.patchTextarea();
     }
 
@@ -256,6 +263,34 @@ export class VibeTerminal {
         }
 
         return true;
+    }
+
+    _getAppliedTheme() {
+        if (!this._cursorSuppressed) {
+            return {
+                ...this._theme
+            };
+        }
+
+        return {
+            ...this._theme,
+            cursor: HIDDEN_CURSOR_COLOR,
+            cursorAccent: HIDDEN_CURSOR_COLOR
+        };
+    }
+
+    _syncCursorVisibilityClass() {
+        this._outputEl?.classList.toggle('vb-terminal-cursor-suppressed', this._cursorSuppressed);
+    }
+
+    _applyTheme() {
+        if (!this._terminal) {
+            this._syncCursorVisibilityClass();
+            return;
+        }
+
+        this._terminal.options.theme = this._getAppliedTheme();
+        this._syncCursorVisibilityClass();
     }
 
     _bindSearchShortcuts() {
@@ -585,11 +620,8 @@ export class VibeTerminal {
     }
 
     setTheme(theme) {
-        if (!this._terminal) {
-            return;
-        }
-
-        this._terminal.options.theme = buildTerminalTheme(theme);
+        this._theme = buildTerminalTheme(theme);
+        this._applyTheme();
     }
 
     setCursorBlink(blink) {
@@ -607,10 +639,47 @@ export class VibeTerminal {
         this._terminal.options.cursorInactiveStyle = style;
     }
 
+    suppressCursorDuringOutput(idleMs = 90) {
+        const clampedIdleMs = Number.isFinite(idleMs)
+            ? Math.max(16, Math.min(1000, Math.round(idleMs)))
+            : 90;
+
+        if (!this._cursorSuppressed) {
+            this._cursorSuppressed = true;
+            this._applyTheme();
+        } else {
+            this._syncCursorVisibilityClass();
+        }
+
+        if (this._cursorRestoreTimeoutId) {
+            clearTimeout(this._cursorRestoreTimeoutId);
+        }
+
+        this._cursorRestoreTimeoutId = window.setTimeout(() => {
+            this._cursorRestoreTimeoutId = null;
+            this.restoreSuppressedCursor();
+        }, clampedIdleMs);
+    }
+
+    restoreSuppressedCursor() {
+        if (this._cursorRestoreTimeoutId) {
+            clearTimeout(this._cursorRestoreTimeoutId);
+            this._cursorRestoreTimeoutId = null;
+        }
+
+        if (!this._cursorSuppressed) {
+            return;
+        }
+
+        this._cursorSuppressed = false;
+        this._applyTheme();
+    }
+
     focus() {
         if (!this._terminal) return;
         this._terminal.focus();
         this.patchTextarea();
+        this._syncCursorVisibilityClass();
     }
 
     clearDisplay() {
@@ -685,17 +754,13 @@ export class VibeTerminal {
     scheduleFitPasses() {
         if (!this._terminal) return;
 
-        if (this._fitRafId || this._fitTimeoutId) {
+        if (this._fitRafId) {
             return;
         }
 
         this._fitRafId = requestAnimationFrame(() => {
             this._fitRafId = null;
             this.fit();
-            this._fitTimeoutId = setTimeout(() => {
-                this._fitTimeoutId = null;
-                this.fit();
-            }, 120);
         });
     }
 
@@ -761,6 +826,16 @@ export class VibeTerminal {
     dispose() {
         this.stopResizeHandling();
 
+        if (this._cursorRestoreTimeoutId) {
+            clearTimeout(this._cursorRestoreTimeoutId);
+            this._cursorRestoreTimeoutId = null;
+        }
+
+        if (this._cursorSuppressed) {
+            this._cursorSuppressed = false;
+            this._syncCursorVisibilityClass();
+        }
+
         if (this._scrollRafId) {
             cancelAnimationFrame(this._scrollRafId);
             this._scrollRafId = null;
@@ -769,11 +844,6 @@ export class VibeTerminal {
         if (this._fitRafId) {
             cancelAnimationFrame(this._fitRafId);
             this._fitRafId = null;
-        }
-
-        if (this._fitTimeoutId) {
-            clearTimeout(this._fitTimeoutId);
-            this._fitTimeoutId = null;
         }
 
         if (this._terminal) {

@@ -29,11 +29,13 @@ public sealed class StaleSessionCleanupJob(
             return;
         }
 
-        var cutoff = DateTime.UtcNow.AddMinutes(-5);
+        var now = DateTime.UtcNow;
+        var trackedCutoff = now.AddMinutes(-5);
+        var untrackedCutoff = now.AddHours(-1);
         using var scope = scopeFactory.CreateScope();
         var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
 
-        var staleSessions = await repository.GetOpenSessionCleanupCandidatesAsync(cutoff, cancellationToken);
+        var staleSessions = await repository.GetOpenSessionCleanupCandidatesAsync(trackedCutoff, untrackedCutoff, cancellationToken);
 
         if (staleSessions.Count == 0)
             return;
@@ -42,11 +44,11 @@ public sealed class StaleSessionCleanupJob(
 
         foreach (var session in staleSessions)
         {
+            // No owner PID means the session was created by a pre-ownership-tracking build
+            // and can't be liveness-checked; if it survived the untracked cutoff, reap it.
             if (!session.OwnerPid.HasValue)
             {
-                _logger.LogWarning(
-                    "[StaleSessionCleanupJob] Skipping tracked stale session {SessionId} with no owner PID",
-                    session.SessionId);
+                orphanedSessions.Add(session);
                 continue;
             }
 

@@ -193,7 +193,7 @@ public class TerminalSessionService : ITerminalSessionService
         // the snapshot first and every live PTY byte after that, in order, with
         // no gap and no duplication. No CLI-specific branches, no Ctrl+L poke —
         // we behave like a correct PTY/VT100 terminal.
-        using var wsConsumer = new WebSocketConsumer(webSocket, cancellationToken);
+        using var wsConsumer = new WebSocketConsumer(webSocket, cancellationToken, () => terminal.IsSyncOutputActive);
         using var subscription = terminal.SubscribeWithSnapshot(wsConsumer);
         ownerId = $"terminal-ws:{sessionId}:{Guid.NewGuid():N}";
         _localClientTracker.AcquireOwner(ownerId);

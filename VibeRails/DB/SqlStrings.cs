@@ -450,13 +450,23 @@ namespace VibeRails.DB
             SELECT s.Id, s.OwnerPid
             FROM Sessions s
             WHERE s.EndedUTC IS NULL
-              AND COALESCE(s.OwnershipTracked, 0) = 1
-              AND s.StartedUTC < $cutoff
-              AND MAX(
-                    COALESCE((SELECT MAX(l.Timestamp) FROM SessionLogs l WHERE l.SessionId = s.Id), ''),
-                    COALESCE((SELECT MAX(u.TimestampUTC) FROM UserInputs u WHERE u.SessionId = s.Id), ''),
-                    s.StartedUTC
-                  ) < $cutoff;
+              AND (
+                (COALESCE(s.OwnershipTracked, 0) = 1
+                  AND s.StartedUTC < $trackedCutoff
+                  AND MAX(
+                        COALESCE((SELECT MAX(l.Timestamp) FROM SessionLogs l WHERE l.SessionId = s.Id), ''),
+                        COALESCE((SELECT MAX(u.TimestampUTC) FROM UserInputs u WHERE u.SessionId = s.Id), ''),
+                        s.StartedUTC
+                      ) < $trackedCutoff)
+                OR
+                (s.OwnerPid IS NULL
+                  AND s.StartedUTC < $untrackedCutoff
+                  AND MAX(
+                        COALESCE((SELECT MAX(l.Timestamp) FROM SessionLogs l WHERE l.SessionId = s.Id), ''),
+                        COALESCE((SELECT MAX(u.TimestampUTC) FROM UserInputs u WHERE u.SessionId = s.Id), ''),
+                        s.StartedUTC
+                      ) < $untrackedCutoff)
+              );
             """;
         public const string UpdateSessionEnd = """
             UPDATE Sessions
