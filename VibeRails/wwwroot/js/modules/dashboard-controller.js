@@ -56,116 +56,125 @@ export class DashboardController {
                 const isSandbox = this.app.data.configs?.isSandbox === true;
 
                 headingContainer.innerHTML = `
-                    <div class="context-header-card position-relative overflow-hidden py-4 px-4 ${isSandbox ? 'context-header-sandbox' : ''}">
+                    <div class="card border-secondary border-opacity-10 bg-dark bg-opacity-25 context-header-card ${isSandbox ? 'context-header-sandbox' : ''}">
                         ${isSandbox ? '<div class="context-header-accent-bar"></div>' : ''}
 
-                        <div class="d-flex align-items-center gap-3 mb-4">
-                            <div class="dash-project-icon ${isSandbox ? 'dash-project-icon-sandbox' : ''}">
-                                <i class="fa-solid fa-folder-tree"></i>
-                            </div>
-                            <div class="d-flex flex-column gap-1">
-                                <div class="d-flex align-items-center gap-2">
-                                    <h4 class="mb-0 text-white fw-bold">${this.app.escapeHtml(projectName)}</h4>
-                                    ${isSandbox ? '<span class="dash-sandbox-badge">Sandbox</span>' : ''}
-                                    <button class="btn btn-link btn-sm p-0 text-muted hover-accent ms-1 d-flex align-items-center opacity-75" type="button" data-action="set-custom-name" title="Rename project">
-                                        <i class="fa-solid fa-pen-to-square" style="font-size: 13px;"></i>
-                                    </button>
-                                </div>
-                                <div class="d-flex align-items-center flex-wrap gap-4 mt-1">
-                                    ${gitRemoteUrl ? `
-                                    <div class="d-flex flex-column">
-                                        <span class="dash-meta-label">Remote</span>
-                                        <div class="d-flex align-items-center gap-1">
-                                            <i class="fa-brands fa-github text-muted opacity-50" style="font-size: 12px;"></i>
-                                            <a href="${gitRemoteUrl}" target="_blank" class="text-decoration-none small text-white hover-accent opacity-75 fw-medium">${this.app.escapeHtml(repoName)}</a>
-                                        </div>
-                                    </div>` : ''}
-                                    ${gitBranch ? `
-                                    <div class="d-flex flex-column">
-                                        <span class="dash-meta-label">Branch</span>
-                                        <div class="d-flex align-items-center gap-1">
-                                            <i class="fa-solid fa-code-branch text-muted opacity-50" style="font-size: 11px;"></i>
-                                            <span class="small text-white opacity-75 fw-medium">${this.app.escapeHtml(gitBranch)}</span>
-                                        </div>
-                                    </div>` : ''}
-                                    <div class="d-flex flex-column min-w-0">
-                                        <span class="dash-meta-label">Working Dir</span>
-                                        <div class="d-flex align-items-center gap-1">
-                                            <i class="fa-solid fa-location-dot text-muted opacity-50 flex-shrink-0" style="font-size: 11px;"></i>
-                                            <div class="text-white small font-monospace text-truncate opacity-75 fw-medium" style="max-width: 400px;">${rootPath}</div>
-                                            <button class="btn btn-link btn-sm p-0 text-muted hover-accent opacity-50 ms-1 flex-shrink-0 d-flex align-items-center" type="button" data-action="copy-path" title="Copy path">
-                                                <i class="fa-regular fa-copy" style="font-size: 11px;"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                        <div class="card-header border-0 bg-transparent py-1 d-flex align-items-center">
+                            <span class="x-small text-muted text-uppercase fw-bold">
+                                <i class="fa-solid fa-folder-tree me-2" style="font-size: 11px;"></i>
+                                ${isSandbox ? 'Sandbox Context' : 'Project Context'}
+                            </span>
                         </div>
 
-                        <div class="row g-3">
-                            <div class="col-md-2">
-                                <div class="dash-insight-card">
-                                    <div class="dash-insight-label">Environments</div>
-                                    <div class="d-flex align-items-baseline gap-2">
-                                        <span class="dash-insight-value text-accent" data-env-count>${this.app.data.environments?.length || 0}</span>
-                                        <span class="dash-insight-sub">Custom</span>
+                        <div class="card-body p-3 p-lg-4">
+                            <div class="d-flex align-items-center gap-3 mb-4">
+                                <div class="dash-project-icon ${isSandbox ? 'dash-project-icon-sandbox' : ''}">
+                                    <i class="fa-solid fa-folder-tree"></i>
+                                </div>
+                                <div class="d-flex flex-column gap-1">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <h4 class="mb-0 text-white fw-bold">${this.app.escapeHtml(projectName)}</h4>
+                                        ${isSandbox ? '<span class="dash-sandbox-badge">Sandbox</span>' : ''}
+                                        <button class="btn btn-link btn-sm p-0 text-muted hover-accent ms-1 d-flex align-items-center opacity-75" type="button" data-action="set-custom-name" title="Rename project">
+                                            <i class="fa-solid fa-pen-to-square" style="font-size: 13px;"></i>
+                                        </button>
                                     </div>
-                                    <button class="dash-insight-link" data-action="navigate" data-view="environments">
-                                        <i class="fa-solid fa-arrow-right me-1" style="font-size: 9px;"></i>Manage
-                                    </button>
+                                    <div class="d-flex align-items-center flex-wrap gap-4 mt-1">
+                                        ${gitRemoteUrl ? `
+                                        <div class="d-flex flex-column">
+                                            <span class="dash-meta-label">Remote</span>
+                                            <div class="d-flex align-items-center gap-1">
+                                                <i class="fa-brands fa-github text-muted opacity-50" style="font-size: 12px;"></i>
+                                                <a href="${gitRemoteUrl}" target="_blank" class="text-decoration-none small text-white hover-accent opacity-75 fw-medium">${this.app.escapeHtml(repoName)}</a>
+                                            </div>
+                                        </div>` : ''}
+                                        ${gitBranch ? `
+                                        <div class="d-flex flex-column">
+                                            <span class="dash-meta-label">Branch</span>
+                                            <div class="d-flex align-items-center gap-1">
+                                                <i class="fa-solid fa-code-branch text-muted opacity-50" style="font-size: 11px;"></i>
+                                                <span class="small text-white opacity-75 fw-medium">${this.app.escapeHtml(gitBranch)}</span>
+                                            </div>
+                                        </div>` : ''}
+                                        <div class="d-flex flex-column min-w-0">
+                                            <span class="dash-meta-label">Working Dir</span>
+                                            <div class="d-flex align-items-center gap-1">
+                                                <i class="fa-solid fa-location-dot text-muted opacity-50 flex-shrink-0" style="font-size: 11px;"></i>
+                                                <div class="text-white small font-monospace text-truncate opacity-75 fw-medium" style="max-width: 400px;">${rootPath}</div>
+                                                <button class="btn btn-link btn-sm p-0 text-muted hover-accent opacity-50 ms-1 flex-shrink-0 d-flex align-items-center" type="button" data-action="copy-path" title="Copy path">
+                                                    <i class="fa-regular fa-copy" style="font-size: 11px;"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="col-md-2">
-                                <div class="dash-insight-card">
-                                    <div class="dash-insight-label">Sandboxes</div>
-                                    <div class="d-flex align-items-baseline gap-2">
-                                        <span class="dash-insight-value text-primary">${sandboxCount}</span>
-                                        <span class="dash-insight-sub">Live</span>
+
+                            <div class="row g-3">
+                                <div class="col-md-2">
+                                    <div class="dash-insight-card">
+                                        <div class="dash-insight-label">Environments</div>
+                                        <div class="d-flex align-items-baseline gap-2">
+                                            <span class="dash-insight-value text-accent" data-env-count>${this.app.data.environments?.length || 0}</span>
+                                            <span class="dash-insight-sub">Custom</span>
+                                        </div>
+                                        <button class="dash-insight-link" data-action="navigate" data-view="environments">
+                                            <i class="fa-solid fa-arrow-right me-1" style="font-size: 9px;"></i>Manage
+                                        </button>
                                     </div>
-                                    <div class="dash-insight-sub mt-1">Isolated environments</div>
                                 </div>
-                            </div>
-                            <div class="col-md-2">
-                                <div class="dash-insight-card">
-                                    <div class="dash-insight-label">Active Agents</div>
-                                    <div class="d-flex align-items-baseline gap-2">
-                                        <span class="dash-insight-value text-accent">${agentCount}</span>
-                                        <span class="dash-insight-sub">Live</span>
+                                <div class="col-md-2">
+                                    <div class="dash-insight-card">
+                                        <div class="dash-insight-label">Sandboxes</div>
+                                        <div class="d-flex align-items-baseline gap-2">
+                                            <span class="dash-insight-value text-primary">${sandboxCount}</span>
+                                            <span class="dash-insight-sub">Live</span>
+                                        </div>
+                                        <div class="dash-insight-sub mt-1">Isolated environments</div>
                                     </div>
-                                    <div class="dash-insight-sub mt-1">Managing project rules</div>
                                 </div>
-                            </div>
-                            <div class="col-md-2">
-                                <div class="dash-insight-card">
-                                    <div class="dash-insight-label">VCA Status</div>
-                                    <div class="d-flex align-items-baseline gap-2">
-                                        <span class="dash-insight-value text-info">Clean</span>
+                                <div class="col-md-2">
+                                    <div class="dash-insight-card">
+                                        <div class="dash-insight-label">Active Agents</div>
+                                        <div class="d-flex align-items-baseline gap-2">
+                                            <span class="dash-insight-value text-accent">${agentCount}</span>
+                                            <span class="dash-insight-sub">Live</span>
+                                        </div>
+                                        <div class="dash-insight-sub mt-1">Managing project rules</div>
                                     </div>
-                                    <div class="dash-insight-sub mt-1">0 active violations</div>
                                 </div>
-                            </div>
-                            <div class="col-md-2">
-                                <div class="dash-insight-card">
-                                    <div class="dash-insight-label">Shared AI Learning</div>
-                                    <div class="d-flex align-items-baseline gap-2">
-                                        <span class="dash-insight-value text-warning"><i class="fa-solid fa-brain"></i></span>
-                                        <span class="dash-insight-sub">Local embeddings</span>
+                                <div class="col-md-2">
+                                    <div class="dash-insight-card">
+                                        <div class="dash-insight-label">VCA Status</div>
+                                        <div class="d-flex align-items-baseline gap-2">
+                                            <span class="dash-insight-value text-info">Clean</span>
+                                        </div>
+                                        <div class="dash-insight-sub mt-1">0 active violations</div>
                                     </div>
-                                    <a href="/bert.html" target="_blank" class="dash-insight-link">
-                                        <i class="fa-solid fa-arrow-right me-1" style="font-size: 9px;"></i>Explorer
-                                    </a>
                                 </div>
-                            </div>
-                            <div class="col-md-2">
-                                <div class="dash-insight-card">
-                                    <div class="dash-insight-label">MCP Server</div>
-                                    <div class="d-flex align-items-baseline gap-2">
-                                        <span class="dash-insight-value text-accent"><i class="fa-solid fa-plug"></i></span>
-                                        <span class="dash-insight-sub">Tool server</span>
+                                <div class="col-md-2">
+                                    <div class="dash-insight-card">
+                                        <div class="dash-insight-label">Shared AI Learning</div>
+                                        <div class="d-flex align-items-baseline gap-2">
+                                            <span class="dash-insight-value text-warning"><i class="fa-solid fa-brain"></i></span>
+                                            <span class="dash-insight-sub">Local embeddings</span>
+                                        </div>
+                                        <a href="/bert.html" target="_blank" class="dash-insight-link">
+                                            <i class="fa-solid fa-arrow-right me-1" style="font-size: 9px;"></i>Explorer
+                                        </a>
                                     </div>
-                                    <a href="/mcp.html" target="_blank" class="dash-insight-link">
-                                        <i class="fa-solid fa-arrow-right me-1" style="font-size: 9px;"></i>Explorer
-                                    </a>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="dash-insight-card">
+                                        <div class="dash-insight-label">MCP Server</div>
+                                        <div class="d-flex align-items-baseline gap-2">
+                                            <span class="dash-insight-value text-accent"><i class="fa-solid fa-plug"></i></span>
+                                            <span class="dash-insight-sub">Tool server</span>
+                                        </div>
+                                        <a href="/mcp.html" target="_blank" class="dash-insight-link">
+                                            <i class="fa-solid fa-arrow-right me-1" style="font-size: 9px;"></i>Explorer
+                                        </a>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -180,14 +189,22 @@ export class DashboardController {
 
             } else {
                 headingContainer.innerHTML = `
-                    <div class="context-header-card position-relative overflow-hidden py-3 px-4" style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 12px; backdrop-filter: blur(10px);">
-                        <div class="d-flex align-items-center gap-3">
-                            <div class="project-logo-wrapper d-flex align-items-center justify-content-center flex-shrink-0" style="width: 48px; height: 48px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 12px; color: var(--color-primary); box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 20px;">
-                                <i class="fa-solid fa-globe"></i>
-                            </div>
-                            <div>
-                                <h4 class="mb-0 text-white fw-semibold">Global Context</h4>
-                                <span class="text-muted">Manage settings and view history across all projects</span>
+                    <div class="card border-secondary border-opacity-10 bg-dark bg-opacity-25 context-header-card">
+                        <div class="card-header border-0 bg-transparent py-1 d-flex align-items-center">
+                            <span class="x-small text-muted text-uppercase fw-bold">
+                                <i class="fa-solid fa-globe me-2" style="font-size: 11px;"></i>
+                                Global Context
+                            </span>
+                        </div>
+                        <div class="card-body p-3">
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="project-logo-wrapper d-flex align-items-center justify-content-center flex-shrink-0 context-header-global-icon">
+                                    <i class="fa-solid fa-globe"></i>
+                                </div>
+                                <div>
+                                    <h4 class="mb-0 text-white fw-semibold">Global Context</h4>
+                                    <span class="text-muted">Manage settings and view history across all projects</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -269,19 +286,6 @@ export class DashboardController {
             const view = element.dataset.view;
             if (view) {
                 this.app.navigate(view);
-            }
-        });
-
-        // Add handler for navigate-to-sandboxes
-        this.app.bindAction(root, '[data-action="navigate-to-sandboxes"]', () => {
-            const sandboxSection = document.querySelector('[data-sandbox-section]');
-            if (sandboxSection) {
-                sandboxSection.scrollIntoView({ behavior: 'smooth' });
-                // Add a temporary highlight effect
-                sandboxSection.querySelector('.card')?.classList.add('border-primary');
-                setTimeout(() => {
-                    sandboxSection.querySelector('.card')?.classList.remove('border-primary');
-                }, 2000);
             }
         });
 

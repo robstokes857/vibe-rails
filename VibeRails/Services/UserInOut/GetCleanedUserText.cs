@@ -2,11 +2,11 @@ using VibeRails.DB;
 
 namespace VibeRails.Services.UserInOut;
 
-public class UserTextOutput : IUserTextOutput
+public class GetCleanedUserText : IGetCleanedUserText
 {
     private readonly IRepository _repository;
 
-    public UserTextOutput(IRepository repository)
+    public GetCleanedUserText(IRepository repository)
     {
         _repository = repository;
     }

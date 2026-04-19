@@ -572,7 +572,7 @@ namespace VibeRails.DTOs
     public record SessionStartedPayload(string SessionId, string Cli);
     public record SessionIdlePayload(string SessionId, string Cli, double IdleForSeconds);
     public record SessionBusyPayload(string SessionId, string Cli);
-    public record SessionWaitingForUserPayload(string SessionId, string Cli);
+    public record SessionWaitingForUserPayload(string SessionId);
     public record SessionCompletedPayload(string SessionId, string Cli, int? ExitCode);
 
     [JsonSerializable(typeof(AppToastNotification))]

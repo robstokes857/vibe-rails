@@ -11,9 +11,11 @@ namespace VibeRails.Utils;
 ///
 /// Bracketed-paste support: when the CSI parser sees <c>ESC[200~</c>, subsequent
 /// embedded newlines are buffered as literal characters instead of terminating a line.
-/// The full paste is flushed as a single completed line when <c>ESC[201~</c> arrives.
-/// This prevents SHIFT+Enter / multi-line paste content from splitting across multiple
-/// <c>UserInputs</c> rows.
+/// When <c>ESC[201~</c> arrives, paste mode closes but the buffer is NOT flushed —
+/// the pasted content merges with surrounding keystrokes and is only released when
+/// the user presses Enter outside paste mode. This keeps TUI-driven inline pastes
+/// (e.g. Claude Code's @-file autocomplete, which pastes the selected path into the
+/// middle of the prompt) from producing premature <c>UserInputs</c> rows.
 /// </summary>
 public sealed class InputAccumulator : IAsyncDisposable, IDisposable
 {
@@ -234,7 +236,10 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
                 if (IsEscapeFinalByte(c))
                 {
                     // Bracketed-paste markers: ESC[200~ opens, ESC[201~ closes.
-                    // At this point the CSI parameter bytes are in _csiParams and `c` is the final byte.
+                    // Paste content is kept in the same line buffer; closing the paste does NOT
+                    // flush. Callers that submit a paste standalone will follow it with \r or \n,
+                    // which flushes normally. Callers that paste inline (autocomplete) keep typing,
+                    // and the subsequent Enter still flushes the combined buffer as one line.
                     if (c == '~')
                     {
                         var parameters = _csiParams.ToString();
@@ -244,12 +249,7 @@ public sealed class InputAccumulator : IAsyncDisposable, IDisposable
                         }
                         else if (parameters == "201")
                         {
-                            // Flush the pasted block as a single completed line.
                             _inBracketedPaste = false;
-                            var pastedLine = _lineBuffer.ToString();
-                            _lineBuffer.Clear();
-                            if (!string.IsNullOrEmpty(pastedLine))
-                                completed.Add(pastedLine);
                         }
                     }
                     _csiParams.Clear();

@@ -50,9 +50,14 @@ public static class InputEtlFilter
     ];
 
     // --- Prompt prefix pattern ---
+    //
+    // Matches any leading run of prompt glyphs followed by whitespace.
+    // `›` (U+203A) is Claude Code's submitted-prompt marker in its chat history view.
+    // A run of `>` catches both `>>` (quoted-quote) and `>>>>>>>>> Message` echo blocks
+    // that the previous single-char / `>>>`-only pattern did not strip.
 
     private static readonly Regex PromptPrefix = new(
-        @"^(?:[>$%#]|>>>)\s",
+        @"^[›>$%#]+\s",
         RegexOptions.Compiled);
 
     /// <summary>

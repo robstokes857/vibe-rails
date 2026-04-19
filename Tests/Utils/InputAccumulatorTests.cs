@@ -57,8 +57,9 @@ public class InputAccumulatorTests
         var capture = new CaptureCallback();
         await using var acc = new InputAccumulator(capture.AsCallback);
 
-        // ESC[200~ line1 \n line2 ESC[201~
-        acc.Append($"{ESC}[200~line1\nline2{ESC}[201~");
+        // ESC[200~ line1 \n line2 ESC[201~ Enter
+        // Paste close no longer auto-flushes; the trailing Enter is what completes the line.
+        acc.Append($"{ESC}[200~line1\nline2{ESC}[201~\n");
 
         var lines = await DrainAsync(acc, capture, expected: 1);
         Assert.Single(lines);
@@ -71,7 +72,7 @@ public class InputAccumulatorTests
         var capture = new CaptureCallback();
         await using var acc = new InputAccumulator(capture.AsCallback);
 
-        acc.Append($"{ESC}[200~line1\nline2\n{ESC}[201~");
+        acc.Append($"{ESC}[200~line1\nline2\n{ESC}[201~\n");
 
         var lines = await DrainAsync(acc, capture, expected: 1);
         Assert.Single(lines);
@@ -84,8 +85,9 @@ public class InputAccumulatorTests
         var capture = new CaptureCallback();
         await using var acc = new InputAccumulator(capture.AsCallback);
 
-        // Paste first, then a separate regular line entry
-        acc.Append($"{ESC}[200~line1\nline2{ESC}[201~");
+        // Paste, Enter, then a separate line. Paste close no longer flushes — the
+        // explicit Enter after it is what terminates the first line.
+        acc.Append($"{ESC}[200~line1\nline2{ESC}[201~\n");
         acc.Append("regular\n");
 
         var lines = await DrainAsync(acc, capture, expected: 2);
@@ -100,7 +102,7 @@ public class InputAccumulatorTests
         var capture = new CaptureCallback();
         await using var acc = new InputAccumulator(capture.AsCallback);
 
-        acc.Append($"{ESC}[200~line1\nline2\nline3{ESC}[201~");
+        acc.Append($"{ESC}[200~line1\nline2\nline3{ESC}[201~\n");
 
         var lines = await DrainAsync(acc, capture, expected: 1);
         Assert.Single(lines);
@@ -115,15 +117,30 @@ public class InputAccumulatorTests
         var capture = new CaptureCallback();
         await using var acc = new InputAccumulator(capture.AsCallback);
 
-        acc.Append($"{ESC}[200~line1\r\nline2{ESC}[201~");
+        acc.Append($"{ESC}[200~line1\r\nline2{ESC}[201~\n");
 
         var lines = await DrainAsync(acc, capture, expected: 1);
         Assert.Single(lines);
-        // Both \r and \n normalize to \n when inside bracketed paste, so we get two \n's.
-        // Accept either "line1\nline2" (if \r is filtered by non-bracketed-paste handling)
-        // or "line1\n\nline2" — the key is that no split UserInputs rows occur.
         Assert.Contains("line1", lines[0]);
         Assert.Contains("line2", lines[0]);
+    }
+
+    [Fact]
+    public async Task Append_BracketedPaste_InlineContinuation_ProducesSingleRow()
+    {
+        // Regression test: Claude Code's @-file autocomplete delivers the selected path
+        // via bracketed paste WHILE the user has a partial prompt in the buffer. Before the
+        // fix, paste-close flushed the buffer, splitting a single submission into two rows.
+        var capture = new CaptureCallback();
+        await using var acc = new InputAccumulator(capture.AsCallback);
+
+        acc.Append("@ Wait");
+        acc.Append($"{ESC}[200~ingForUserInputObserver{ESC}[201~");
+        acc.Append(" why doesn't this code work?\r");
+
+        var lines = await DrainAsync(acc, capture, expected: 1);
+        Assert.Single(lines);
+        Assert.Equal("@ WaitingForUserInputObserver why doesn't this code work?", lines[0]);
     }
 
     [Fact]

@@ -23,9 +23,6 @@ public interface ITerminalIoObserver
     ValueTask OnSessionBusyAsync(TerminalSessionBusyEvent busyEvent, CancellationToken cancellationToken = default)
         => ValueTask.CompletedTask;
 
-    ValueTask OnWaitingForUserAsync(TerminalWaitingForUserEvent waitingEvent, CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
-
     ValueTask OnSessionCompleteAsync(TerminalSessionCompleteEvent completeEvent, CancellationToken cancellationToken = default)
         => ValueTask.CompletedTask;
 }

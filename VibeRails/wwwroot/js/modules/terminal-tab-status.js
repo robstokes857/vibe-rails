@@ -72,6 +72,7 @@ export class TabStatusController {
 
         // Thinking emoji animation state
         this._emojiTimer = null;
+        this._emojiSwapTimeout = null;
         this._lastEmojiIndex = -1;
 
         // DOM refs (populated by render())
@@ -246,7 +247,15 @@ export class TabStatusController {
 
     _transitionTo(newStatus) {
         const prev = this._status;
-        if (prev === newStatus) return;
+        if (prev === newStatus) {
+            if (newStatus === TAB_STATUS.WAITING) {
+                this._applyVisuals(newStatus);
+                if (!this._options.isActiveTab?.()) {
+                    this._flashWaiting();
+                }
+            }
+            return;
+        }
 
         this._status = newStatus;
 
@@ -330,6 +339,10 @@ export class TabStatusController {
             clearInterval(this._emojiTimer);
             this._emojiTimer = null;
         }
+        if (this._emojiSwapTimeout) {
+            clearTimeout(this._emojiSwapTimeout);
+            this._emojiSwapTimeout = null;
+        }
     }
 
     _showNextEmoji() {
@@ -348,7 +361,11 @@ export class TabStatusController {
         // If there's already content, animate it out then bring new one in
         if (el.textContent) {
             el.className = 'vb-tab-status-icon vb-emoji-exit';
-            setTimeout(() => {
+            this._emojiSwapTimeout = setTimeout(() => {
+                this._emojiSwapTimeout = null;
+                if (this._status !== TAB_STATUS.THINKING || this._statusIconEl !== el) {
+                    return;
+                }
                 el.textContent = emoji;
                 el.className = 'vb-tab-status-icon vb-emoji-enter';
             }, 300);

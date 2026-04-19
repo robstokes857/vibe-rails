@@ -1,12 +1,17 @@
 namespace VibeRails.Services.UserInOut;
 
 /// <summary>
-/// Read façade for cleaned user input text. Consumers call this to get
-/// what the user typed, cleaned of ANSI, secrets, and noise.
-/// Returns "" for inputs that haven't been cleaned yet or were filtered out.
+/// Strict read façade for cleaned user input text. Returns what the user
+/// typed, cleaned of ANSI, secrets, and noise. Returns "" for inputs that
+/// haven't been cleaned yet or were filtered out.
 /// Never triggers synchronous cleaning — that's the write pipeline's job.
+///
+/// Use when the text is going to an LLM, an embedder, or a file the user
+/// downloads — anywhere raw (potentially secret-bearing) bytes would be a
+/// problem. For UI previews / display names where an empty string is worse
+/// than a dirty one, inject <see cref="IGetUserText"/> instead.
 /// </summary>
-public interface IUserTextOutput
+public interface IGetCleanedUserText
 {
     /// <summary>
     /// Concatenated cleaned text for every cleaned input in the session,

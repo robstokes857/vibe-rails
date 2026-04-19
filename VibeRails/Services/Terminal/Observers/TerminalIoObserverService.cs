@@ -129,17 +129,6 @@ public sealed class TerminalIoObserverService : ITerminalIoObserverService
         }
     }
 
-    public void PublishWaitingForUser(TerminalWaitingForUserEvent waitingEvent)
-    {
-        if (_observers.Count == 0)
-            return;
-
-        foreach (var observer in _observers)
-        {
-            _ = NotifyWaitingForUserAsync(observer, waitingEvent);
-        }
-    }
-
     public void PublishSessionComplete(TerminalSessionCompleteEvent completeEvent)
     {
         if (_observers.Count == 0)
@@ -172,18 +161,6 @@ public sealed class TerminalIoObserverService : ITerminalIoObserverService
         catch (Exception ex)
         {
             Log.Error(ex, "[TerminalIoObserverService] Session busy observer error");
-        }
-    }
-
-    private static async Task NotifyWaitingForUserAsync(ITerminalIoObserver observer, TerminalWaitingForUserEvent waitingEvent)
-    {
-        try
-        {
-            await observer.OnWaitingForUserAsync(waitingEvent, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "[TerminalIoObserverService] Waiting-for-user observer error");
         }
     }
 

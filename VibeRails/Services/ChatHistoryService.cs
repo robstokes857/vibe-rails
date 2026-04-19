@@ -10,7 +10,6 @@ public class ChatHistoryService(
     ISessionTranscriptService sessionTranscriptService,
     ISummaryService summaryService) : IChatHistoryService
 {
-
     public async Task<ChatHistoryResponse> GetHistoryAsync(int page, int pageSize, string? preferredWorkingDirectory, string? sortBy, string? sortDirection, CancellationToken cancellationToken)
     {
         var offset = (page - 1) * pageSize;
@@ -55,11 +54,9 @@ public class ChatHistoryService(
 
         string summary = await summaryService.GetSummaryAsync(transcript, cancellationToken);
 
-
         await repository.SaveChatSummaryAsync(new ChatSummary
         {
             SessionId = sessionId,
-            
             SummaryText = summary,
             Date = DateTime.UtcNow
         }, cancellationToken);

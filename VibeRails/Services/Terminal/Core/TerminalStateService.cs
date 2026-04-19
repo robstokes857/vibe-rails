@@ -22,8 +22,6 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private static readonly Lock s_stateLock = new();
     private static readonly TimeSpan s_idleThreshold = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan s_idleCheckInterval = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan s_waitingForUserDebounce = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan s_workingSuppressionWindow = TimeSpan.FromSeconds(10);
 
     public TerminalStateService(
         IRepository repository,
@@ -84,10 +82,6 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             source,
             text,
             now));
-
-        var waitingEvent = TryMarkWaitingForUser(sessionId, text, now);
-        if (waitingEvent.HasValue)
-            _ioObserverService.PublishWaitingForUser(waitingEvent.Value);
 
         if (!Utils.TerminalOutputFilter.IsSpinnerNoise(text))
         {
@@ -389,50 +383,5 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             activity.LastActivityUtc = now;
             activity.IdleNotified = false;
         }
-    }
-
-    private static TerminalWaitingForUserEvent? TryMarkWaitingForUser(
-        string sessionId, string text, DateTimeOffset now)
-    {
-        string cli;
-        var sawWorking = text.Contains("Working(");
-        lock (s_stateLock)
-        {
-            if (!s_sessionActivity.TryGetValue(sessionId, out var activity))
-                return null;
-
-            // Within the 30s window → don't even run the substring scan.
-            if (activity.LastWaitingForUserUtc != default &&
-                now - activity.LastWaitingForUserUtc < s_waitingForUserDebounce)
-                return null;
-
-            if (sawWorking)
-                activity.LastWorkingSeenUtc = now;
-
-            // Codex showed "Working(" recently → it's busy, not waiting.
-            if (activity.LastWorkingSeenUtc != default &&
-                now - activity.LastWorkingSeenUtc < s_workingSuppressionWindow)
-                return null;
-
-            cli = activity.Cli;
-        }
-
-        if (!UserWaiting.Check(text))
-            return null;
-
-        lock (s_stateLock)
-        {
-            // Re-validate: the session may have ended, or another PTY reader
-            // may have claimed the window after we released the lock above.
-            if (!s_sessionActivity.TryGetValue(sessionId, out var activity))
-                return null;
-            if (activity.LastWaitingForUserUtc != default &&
-                now - activity.LastWaitingForUserUtc < s_waitingForUserDebounce)
-                return null;
-
-            activity.LastWaitingForUserUtc = now;
-        }
-
-        return new TerminalWaitingForUserEvent(sessionId, cli, now);
     }
 }

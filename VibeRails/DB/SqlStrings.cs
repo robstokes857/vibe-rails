@@ -551,13 +551,14 @@ namespace VibeRails.DB
                    p.Cli,
                    s.SessionDisplayName,
                    u.Sequence,
-                   SUBSTR(u.InputText, 1, 120),
+                   SUBSTR(COALESCE(c.CleanedText, u.InputText), 1, 120),
                    (SELECT COUNT(*) FROM UserInputs WHERE SessionId = s.Id),
                    CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END
             FROM Sessions s
             LEFT JOIN UserInputs u ON u.Id = (
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
             )
+            LEFT JOIN CleanedUserInput c ON c.Id = u.CleanedId
             LEFT JOIN Sessions p ON p.Id = NULLIF(s.ParentSessionId, '')
             """;
         public const string SelectChatHistoryBySessionId = """
@@ -573,13 +574,14 @@ namespace VibeRails.DB
                    p.Cli,
                    s.SessionDisplayName,
                    u.Sequence,
-                   SUBSTR(u.InputText, 1, 120),
+                   SUBSTR(COALESCE(c.CleanedText, u.InputText), 1, 120),
                    (SELECT COUNT(*) FROM UserInputs WHERE SessionId = s.Id),
                    CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END
             FROM Sessions s
             LEFT JOIN UserInputs u ON u.Id = (
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
             )
+            LEFT JOIN CleanedUserInput c ON c.Id = u.CleanedId
             LEFT JOIN Sessions p ON p.Id = NULLIF(s.ParentSessionId, '')
             WHERE s.Id = $sessionId
             LIMIT 1;
@@ -708,6 +710,22 @@ namespace VibeRails.DB
             INNER JOIN CleanedUserInput c ON u.CleanedId = c.Id
             WHERE u.SessionId = $sessionId
             ORDER BY u.Sequence ASC;
+            """;
+        // Cleaned-or-raw (used by IGetUserText for best-effort display).
+        public const string SelectTextForInputIdOrRaw = """
+            SELECT SUBSTR(COALESCE(c.CleanedText, u.InputText), 1, $maxChars)
+            FROM UserInputs u
+            LEFT JOIN CleanedUserInput c ON c.Id = u.CleanedId
+            WHERE u.Id = $inputId
+            LIMIT 1;
+            """;
+        public const string SelectFirstInputTextForSessionOrRaw = """
+            SELECT SUBSTR(COALESCE(c.CleanedText, u.InputText), 1, $maxChars)
+            FROM UserInputs u
+            LEFT JOIN CleanedUserInput c ON c.Id = u.CleanedId
+            WHERE u.SessionId = $sessionId
+            ORDER BY u.Sequence ASC
+            LIMIT 1;
             """;
         public const string SelectUncleanedInputsForSession = """
             SELECT u.Id, u.SessionId, u.Sequence, u.InputText, u.GitCommitHash, u.TimestampUTC
