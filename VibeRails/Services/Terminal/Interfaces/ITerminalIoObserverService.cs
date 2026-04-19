@@ -8,6 +8,5 @@ public interface ITerminalIoObserverService
     void PublishRemoteCommand(TerminalRemoteCommandEvent commandEvent);
     void PublishSessionStart(TerminalSessionStartEvent startEvent);
     void PublishSessionBusy(TerminalSessionBusyEvent busyEvent);
-    void PublishWaitingForUser(TerminalWaitingForUserEvent waitingEvent);
     void PublishSessionComplete(TerminalSessionCompleteEvent completeEvent);
 }

@@ -37,16 +37,17 @@ function normalizeToastType(type) {
     return TOAST_TYPES.includes(normalizedType) ? normalizedType : 'info';
 }
 
-function formatToastMessage(title, message) {
+function formatToastMessage(title, message, { compact = false } = {}) {
     const safeTitle = escapeHtml(title || 'Notification');
     const safeMessage = escapeHtml(message || '');
     const formattedMessage = safeMessage.replace(/\n/g, '<br>');
+    const modifier = compact ? ' vr-toast-compact' : '';
 
     if (!safeMessage) {
-        return `<span class="vr-toast-title vr-toast-title-only">${safeTitle}</span>`;
+        return `<span class="vr-toast-title vr-toast-title-only${modifier}">${safeTitle}</span>`;
     }
 
-    return `<span class="vr-toast-title">${safeTitle}</span><span class="vr-toast-body">${formattedMessage}</span>`;
+    return `<span class="vr-toast-title${modifier}">${safeTitle}</span><span class="vr-toast-body${modifier}">${formattedMessage}</span>`;
 }
 
 export function showAppToast(title, message, type = 'info', options = {}) {
@@ -61,30 +62,46 @@ export function showAppToast(title, message, type = 'info', options = {}) {
         animation,
         entryAnimation,
         exitAnimation,
-        position = DEFAULT_POSITION
+        position,
+        compact = false
     } = options;
 
     const toastType = normalizeToastType(type);
     const tone = DEFAULT_TONE;
     const shouldAutoClose = autoClose === false ? false : !requireDismiss;
-    const resolvedDuration = shouldAutoClose ? (duration ?? DEFAULT_DURATIONS[toastType]) : 0;
+    const baseDuration = DEFAULT_DURATIONS[toastType];
+    const compactDuration = Math.min(baseDuration, 3000);
+    const resolvedDuration = shouldAutoClose
+        ? (duration ?? (compact ? compactDuration : baseDuration))
+        : 0;
+    const resolvedPosition = position ?? (compact ? 'bottom-right' : DEFAULT_POSITION);
+    const resolvedTheme = compact ? 'minimal' : theme;
 
-    toast({
+    const toastOptions = {
         ...BASE_TOAST_OPTIONS,
-        message: formatToastMessage(title, message),
-        position,
+        message: formatToastMessage(title, message, { compact }),
+        position: resolvedPosition,
         duration: resolvedDuration,
         autoClose: shouldAutoClose,
-        theme,
+        theme: resolvedTheme,
         entryAnimation: entryAnimation ?? animation?.enter ?? DEFAULT_ENTRY_ANIMATION,
         exitAnimation: exitAnimation ?? animation?.exit ?? DEFAULT_EXIT_ANIMATION,
-        border: `1px solid ${tone.border}`,
         iconType: toastType === 'warning' ? 'warn' : toastType,
-        progressBarColor: tone.accent,
-        showProgressBar: shouldAutoClose,
-        closeButtonColor: tone.closeButtonColor,
-        ...(icon != null ? { icon, showIcon: true } : {}),
-        iconBackground: iconBackground ?? tone.iconBackground,
-        ...(iconColor != null ? { iconColor } : { iconColor: tone.accent })
-    });
+        showProgressBar: shouldAutoClose && !compact,
+        showCloseButton: !compact,
+        ...(icon != null ? { icon, showIcon: true } : {})
+    };
+
+    if (!compact) {
+        toastOptions.border = `1px solid ${tone.border}`;
+        toastOptions.progressBarColor = tone.accent;
+        toastOptions.closeButtonColor = tone.closeButtonColor;
+        toastOptions.iconBackground = iconBackground ?? tone.iconBackground;
+        toastOptions.iconColor = iconColor ?? tone.accent;
+    } else {
+        if (iconBackground != null) toastOptions.iconBackground = iconBackground;
+        if (iconColor != null) toastOptions.iconColor = iconColor;
+    }
+
+    toast(toastOptions);
 }

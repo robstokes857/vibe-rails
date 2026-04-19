@@ -680,22 +680,12 @@ button:hover .card-nav-cog {
 
 /* Enhanced Top Card (context-header-card) */
 .context-header-card {
-    background: rgba(15, 23, 42, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 16px;
-    backdrop-filter: blur(15px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-    transition: all var(--transition-speed);
-}
-
-.context-header-card:hover {
-    border-color: var(--color-primary);
-    box-shadow: var(--shadow-hover);
+    position: relative;
+    overflow: hidden;
 }
 
 .context-header-sandbox {
-    background: rgba(20, 14, 5, 0.5);
-    border-color: rgba(251, 146, 60, 0.25);
+    border-color: rgba(251, 146, 60, 0.25) !important;
 }
 
 .context-header-accent-bar {
@@ -705,6 +695,17 @@ button:hover .card-nav-cog {
     right: 0;
     height: 3px;
     background: linear-gradient(90deg, transparent, rgba(251, 146, 60, 0.8), transparent);
+}
+
+.context-header-global-icon {
+    width: 48px;
+    height: 48px;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 12px;
+    color: var(--color-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    font-size: 20px;
 }
 
 .dash-project-icon {
@@ -4585,6 +4586,14 @@ input.form-control:disabled {
     opacity: 0;
     pointer-events: none;
     transform: translateX(-16px);
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-search {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-bottom-color: transparent;
+    overflow: hidden;
 }
 
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar-close-btn {

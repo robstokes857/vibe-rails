@@ -50,6 +50,10 @@ namespace VibeRails.DB
         Task<bool> IsInputCleanedAsync(long userInputId, CancellationToken cancellationToken = default);
         Task<string?> GetCleanedTextForInputIdAsync(long inputId, CancellationToken cancellationToken = default);
         Task<List<string>> GetSessionCleanedTextOrderedAsync(string sessionId, CancellationToken cancellationToken = default);
+
+        // Cleaned-or-raw (backs IGetUserText)
+        Task<string> GetTextForInputIdOrRawAsync(long inputId, int? maxChars = null, CancellationToken cancellationToken = default);
+        Task<string> GetFirstInputTextForSessionOrRawAsync(string sessionId, int? maxChars = null, CancellationToken cancellationToken = default);
         Task<List<UserInputRecord>> GetUncleanedInputsForSessionAsync(string sessionId, CancellationToken cancellationToken = default);
         Task<List<UserInputRecord>> GetUncleanedInputsForClosedSessionsAsync(int batchSize, CancellationToken cancellationToken = default);
 

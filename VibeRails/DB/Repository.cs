@@ -1363,7 +1363,7 @@ namespace VibeRails.DB
                 }
 
                 // BertV2 embedding moved to post-idle cleaning pipeline (CleanedInputIdleObserver).
-                // The idle observer cleans the input, then embeds via IUserTextOutput.
+                // The idle observer cleans the input, then embeds via IGetCleanedUserText.
             }
             catch (Exception ex)
             {
@@ -1511,6 +1511,34 @@ namespace VibeRails.DB
                 texts.Add(reader.GetString(0));
             }
             return texts;
+        }
+
+        public async Task<string> GetTextForInputIdOrRawAsync(long inputId, int? maxChars = null, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectTextForInputIdOrRaw;
+            cmd.Parameters.AddWithValue("$inputId", inputId);
+            cmd.Parameters.AddWithValue("$maxChars", maxChars ?? int.MaxValue);
+
+            var result = await cmd.ExecuteScalarAsync(cancellationToken);
+            return result as string ?? "";
+        }
+
+        public async Task<string> GetFirstInputTextForSessionOrRawAsync(string sessionId, int? maxChars = null, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectFirstInputTextForSessionOrRaw;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+            cmd.Parameters.AddWithValue("$maxChars", maxChars ?? int.MaxValue);
+
+            var result = await cmd.ExecuteScalarAsync(cancellationToken);
+            return result as string ?? "";
         }
 
         public async Task<List<UserInputRecord>> GetUncleanedInputsForSessionAsync(string sessionId, CancellationToken cancellationToken = default)

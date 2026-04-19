@@ -73,8 +73,7 @@ public readonly record struct TerminalSessionBusyEvent(
     DateTimeOffset TimestampUtc);
 
 public readonly record struct TerminalWaitingForUserEvent(
-    string SessionId,
-    string Cli,
+    string SessionId,    
     DateTimeOffset TimestampUtc);
 
 public readonly record struct TerminalSessionCompleteEvent(

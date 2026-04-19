@@ -171,7 +171,9 @@ Each state adds the class `tab-status-<state>` to the tab item element
 `VibeRails/wwwroot/style.css` under the "Tab Status Overhaul" section.
 
 The ready-flash animation uses a separate one-shot class,
-`tab-status-ready-flash`, which is removed on `animationend`.
+`tab-status-ready-flash`, which is removed on `animationend`. The waiting-flash
+uses `tab-status-waiting-flash` the same way — one-shot, removed on
+`animationend` — but with a fixed yellow color instead of the brand accent.
 
 ## Files
 

@@ -726,8 +726,7 @@ export class ChatHistorySidebar {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Env:</span> ${escapeHtml(item.environmentName.trim())}</div>`);
             }
             if (isActive) {
-                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Started:</span> ${escapeHtml(time)}</div>`);
-                metaLines.push(`<div class="ch-meta-row"><span class="ch-item-live">live</span></div>`);
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Started:</span> ${escapeHtml(time)} · <span class="ch-item-live">live</span></div>`);
             } else {
                 metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Ended:</span> ${escapeHtml(time)}</div>`);
             }

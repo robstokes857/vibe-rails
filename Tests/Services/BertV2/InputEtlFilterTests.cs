@@ -83,6 +83,13 @@ public class InputEtlFilterTests
     [InlineData("  spaces  everywhere  ", "spaces everywhere")]
     [InlineData("null\0bytes\0here", "nullbyteshere")]
     [InlineData("cr\r\nlf", "cr lf")]
+    // Claude Code renders submitted prompts with U+203A ("›"). Must be stripped too.
+    [InlineData("\u203a Plan a fix for them!", "Plan a fix for them!")]
+    [InlineData("\u203a Can you do a code review", "Can you do a code review")]
+    // Runs of `>` from quoted-reply echoes. Previously only `>` and `>>>` were stripped;
+    // `>>` and longer runs fell through.
+    [InlineData(">> What was worked on", "What was worked on")]
+    [InlineData(">>>>>>>>> Message 1", "Message 1")]
     public void Normalize_CleansInput(string input, string expected)
     {
         Assert.Equal(expected, InputEtlFilter.Normalize(input));

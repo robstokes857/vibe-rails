@@ -8,13 +8,13 @@ namespace Tests.Services.BertV2;
 public class BertV2InputDBServiceTests
 {
     private readonly Mock<IBertV2InputService> _mockInputService;
-    private readonly Mock<IUserTextOutput> _mockUserTextOutput;
+    private readonly Mock<IGetCleanedUserText> _mockUserTextOutput;
     private readonly BertV2InputDBService _service;
 
     public BertV2InputDBServiceTests()
     {
         _mockInputService = new Mock<IBertV2InputService>();
-        _mockUserTextOutput = new Mock<IUserTextOutput>();
+        _mockUserTextOutput = new Mock<IGetCleanedUserText>();
         _service = new BertV2InputDBService(_mockInputService.Object, _mockUserTextOutput.Object);
     }
 

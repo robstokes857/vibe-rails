@@ -1938,7 +1938,20 @@ class TerminalManager {
         const active = this.getActiveTab();
         if (!active?.state?.ui?.item || !this.tabList) return;
 
-        active.state.ui.item.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+        // Scroll only the horizontal tab-list container. Using Element.scrollIntoView
+        // walks every scroll ancestor up to <html>, so when the terminal section
+        // sits below the fold it drags the whole page down to it (e.g. after
+        // navigating to Dashboard and hitting window.scrollTo(0,0)).
+        const item = active.state.ui.item;
+        const list = this.tabList;
+        const itemRect = item.getBoundingClientRect();
+        const listRect = list.getBoundingClientRect();
+
+        if (itemRect.left < listRect.left) {
+            list.scrollLeft -= (listRect.left - itemRect.left);
+        } else if (itemRect.right > listRect.right) {
+            list.scrollLeft += (itemRect.right - listRect.right);
+        }
     }
 
     focusActiveTerminalInput() {
@@ -2660,7 +2673,7 @@ export class TerminalController {
                 setSessionState(tab, 'tab-idle');
                 tab.instance?.statusController?.onSessionIdle();
             } else {
-                this.app.showToast(cli, 'Terminal is idle', 'info');
+                this.app.showToast(cli, 'Terminal is idle', 'info', { compact: true });
             }
         });
 

@@ -632,11 +632,25 @@ export class VibeControlApp {
         }
     }
 
+    scrollPageToTop() {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+    }
+
+    queueScrollPageToTop() {
+        this.scrollPageToTop();
+        requestAnimationFrame(() => {
+            this.scrollPageToTop();
+            requestAnimationFrame(() => this.scrollPageToTop());
+        });
+    }
+
     loadView(view, data = {}) {
         this.updateActiveSubNav(view);
         this.terminalController?.resetLayoutStateForNavigation();
         this.applyViewLayoutState(view);
-        window.scrollTo(0, 0);
+        this.queueScrollPageToTop();
         const views = {
             'dashboard': () => this.dashboardController.loadDashboard(data),
             'launch-cli': () => this.cliLauncher.loadLaunchCLI(),
@@ -656,7 +670,10 @@ export class VibeControlApp {
 
         const loadFunc = views[view];
         if (loadFunc) {
-            loadFunc();
+            const loadResult = loadFunc();
+            Promise.resolve(loadResult).finally(() => {
+                this.queueScrollPageToTop();
+            });
         } else {
             this.showError('View not found: ' + view);
         }

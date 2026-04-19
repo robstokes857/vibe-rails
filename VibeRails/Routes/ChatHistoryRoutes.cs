@@ -172,7 +172,7 @@ public static class ChatHistoryRoutes
 
         app.MapGet("/api/v1/chatHistory/{sessionId}/user-text", async (
             IChatHistoryService chatHistoryService,
-            IUserTextOutput userTextOutput,
+            IGetCleanedUserText cleanedUserText,
             string sessionId,
             CancellationToken cancellationToken) =>
         {
@@ -183,7 +183,7 @@ public static class ChatHistoryRoutes
             if (session is null)
                 return Results.NotFound(new ErrorResponse($"Session not found: {sessionId}"));
 
-            var userText = await userTextOutput.GetSessionTextAsync(sessionId, cancellationToken);
+            var userText = await cleanedUserText.GetSessionTextAsync(sessionId, cancellationToken);
             if (string.IsNullOrEmpty(userText))
                 return Results.NotFound(new ErrorResponse("No cleaned user text found."));
 

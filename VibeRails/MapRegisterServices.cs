@@ -65,7 +65,8 @@ namespace VibeRails
             });
             serviceCollection.AddSingleton<ITuiTextExtractor, TuiTextExtractor>();
             serviceCollection.AddScoped<ICleanedUserInputService, CleanedUserInputService>();
-            serviceCollection.AddScoped<IUserTextOutput, UserTextOutput>();
+            serviceCollection.AddScoped<IGetCleanedUserText, GetCleanedUserText>();
+            serviceCollection.AddScoped<IGetUserText, GetUserText>();
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
             serviceCollection.AddSingleton<ISessionOutputParser, SessionParseV4>();
@@ -125,6 +126,7 @@ namespace VibeRails
             serviceCollection.AddScoped<ITerminalIoObserver, SessionStateEventObserver>();
             serviceCollection.AddScoped<ITerminalIoObserver, GitDiffIdleCaptureObserver>();
             serviceCollection.AddScoped<ITerminalIoObserver, CleanedInputIdleObserver>();
+            serviceCollection.AddSingleton<ITerminalIoObserver, WaitingForUserInputObserver>();
 
 #if DEBUG
             serviceCollection.AddScoped<ITerminalIoObserver, DebugWebSocketEventObserver>();
