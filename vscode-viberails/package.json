@@ -53,6 +53,21 @@
         "key": "escape",
         "command": "-editor.action.webvieweditor.escape",
         "when": "activeWebviewPanelId == 'viberailsDashboard'"
+      },
+      {
+        "key": "shift+enter",
+        "command": "-workbench.action.chatSubmit",
+        "when": "activeWebviewPanelId == 'viberailsDashboard'"
+      },
+      {
+        "key": "shift+enter",
+        "command": "-editor.action.insertLineBefore",
+        "when": "activeWebviewPanelId == 'viberailsDashboard'"
+      },
+      {
+        "key": "shift+enter",
+        "command": "",
+        "when": "activeWebviewPanelId == 'viberailsDashboard'"
       }
     ]
   },

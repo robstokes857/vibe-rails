@@ -37,9 +37,32 @@ public sealed class CleanedUserInputService : ICleanedUserInputService
         long userInputId,
         string? sessionTuiOutput = null,
         CancellationToken cancellationToken = default)
+        => await CleanAndPersistCoreAsync(
+            userInputId,
+            sessionTuiOutput,
+            overwriteExisting: false,
+            cancellationToken);
+
+    public async Task RepairAndPersistAsync(
+        long userInputId,
+        string? sessionTuiOutput = null,
+        CancellationToken cancellationToken = default)
+        => await CleanAndPersistCoreAsync(
+            userInputId,
+            sessionTuiOutput,
+            overwriteExisting: true,
+            cancellationToken);
+
+    private async Task CleanAndPersistCoreAsync(
+        long userInputId,
+        string? sessionTuiOutput,
+        bool overwriteExisting,
+        CancellationToken cancellationToken)
     {
-        // Idempotent: skip if already cleaned
-        if (await _repository.IsInputCleanedAsync(userInputId, cancellationToken))
+        var isAlreadyCleaned = await _repository.IsInputCleanedAsync(userInputId, cancellationToken);
+
+        // Normal path is idempotent; repair path intentionally reprocesses.
+        if (isAlreadyCleaned && !overwriteExisting)
             return;
 
         var raw = await _repository.GetUserInputByIdAsync(userInputId, cancellationToken);
@@ -55,12 +78,23 @@ public sealed class CleanedUserInputService : ICleanedUserInputService
         }
 
         var cleaned = CleanText(raw.InputText, sessionTuiOutput);
+        var cleanedText = cleaned ?? "";
+
+        if (isAlreadyCleaned)
+        {
+            // Repair path: filtered-out inputs still become "" so the linked row remains processed.
+            await _repository.UpdateCleanedTextAsync(
+                userInputId,
+                cleanedText,
+                cancellationToken);
+            return;
+        }
 
         // Persist: filtered-out inputs get CleanedText = "" so they're marked as processed.
         await _repository.CreateCleanedAndLinkAsync(
             raw.SessionId,
             userInputId,
-            cleaned ?? "",
+            cleanedText,
             DateTime.UtcNow,
             cancellationToken);
     }

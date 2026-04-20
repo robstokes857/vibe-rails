@@ -26,33 +26,77 @@ public sealed class CleanedUserInputBackfillJob(
         var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
         var cleanedService = scope.ServiceProvider.GetRequiredService<ICleanedUserInputService>();
 
-        var batch = await repository.GetUncleanedInputsForClosedSessionsAsync(BatchSize, cancellationToken);
-        if (batch.Count == 0)
+        var uncleanedBatch = await repository.GetUncleanedInputsForClosedSessionsAsync(BatchSize, cancellationToken);
+        var repairBatch = await repository.GetPromptPrefixedCleanedInputsForClosedSessionsAsync(BatchSize, cancellationToken);
+        if (uncleanedBatch.Count == 0 && repairBatch.Count == 0)
             return;
 
-        _logger.LogInformation(
-            "[CleanedUserInputBackfillJob] Cleaning {Count} input(s) from closed sessions",
-            batch.Count);
+        if (uncleanedBatch.Count > 0)
+        {
+            _logger.LogInformation(
+                "[CleanedUserInputBackfillJob] Cleaning {Count} input(s) from closed sessions",
+                uncleanedBatch.Count);
+        }
 
-        foreach (var sessionGroup in batch.GroupBy(static row => row.SessionId, StringComparer.Ordinal))
+        if (repairBatch.Count > 0)
+        {
+            _logger.LogInformation(
+                "[CleanedUserInputBackfillJob] Repairing {Count} prompt-prefixed cleaned input(s)",
+                repairBatch.Count);
+        }
+
+        var uncleanedBySession = uncleanedBatch
+            .GroupBy(static row => row.SessionId, StringComparer.Ordinal)
+            .ToDictionary(static group => group.Key, static group => group.ToList(), StringComparer.Ordinal);
+        var repairBySession = repairBatch
+            .GroupBy(static row => row.SessionId, StringComparer.Ordinal)
+            .ToDictionary(static group => group.Key, static group => group.ToList(), StringComparer.Ordinal);
+
+        var sessionIds = uncleanedBySession.Keys
+            .Concat(repairBySession.Keys)
+            .Distinct(StringComparer.Ordinal);
+
+        foreach (var sessionId in sessionIds)
         {
             var sessionTuiOutput = await TryBuildSessionTuiOutputAsync(
                 repository,
-                sessionGroup.Key,
+                sessionId,
                 cancellationToken);
 
-            foreach (var row in sessionGroup)
+            if (uncleanedBySession.TryGetValue(sessionId, out var uncleanedRows))
+            {
+                foreach (var row in uncleanedRows)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try
+                    {
+                        await cleanedService.CleanAndPersistAsync(row.Id, sessionTuiOutput, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "[CleanedUserInputBackfillJob] Failed to clean UserInput {UserInputId}",
+                            row.Id);
+                    }
+                }
+            }
+
+            if (!repairBySession.TryGetValue(sessionId, out var repairRows))
+                continue;
+
+            foreach (var row in repairRows)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    await cleanedService.CleanAndPersistAsync(row.Id, sessionTuiOutput, cancellationToken);
+                    await cleanedService.RepairAndPersistAsync(row.Id, sessionTuiOutput, cancellationToken);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(
                         ex,
-                        "[CleanedUserInputBackfillJob] Failed to clean UserInput {UserInputId}",
+                        "[CleanedUserInputBackfillJob] Failed to repair UserInput {UserInputId}",
                         row.Id);
                 }
             }

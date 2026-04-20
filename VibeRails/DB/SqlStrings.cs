@@ -697,6 +697,11 @@ namespace VibeRails.DB
         public const string UpdateUserInputCleanedId = """
             UPDATE UserInputs SET CleanedId = $cleanedId WHERE Id = $userInputId;
             """;
+        public const string UpdateCleanedTextForUserInput = """
+            UPDATE CleanedUserInput
+            SET CleanedText = $cleanedText
+            WHERE UserInputId = $userInputId;
+            """;
         public const string SelectCleanedTextForInputId = """
             SELECT c.CleanedText
             FROM UserInputs u
@@ -741,6 +746,21 @@ namespace VibeRails.DB
             WHERE u.CleanedId IS NULL
               AND s.EndedUTC IS NOT NULL
               AND datetime(s.EndedUTC) < datetime('now', '-5 minutes')
+            ORDER BY u.Id ASC
+            LIMIT $batchSize;
+            """;
+        public const string SelectPromptPrefixedCleanedInputsForClosedSessions = """
+            SELECT u.Id, u.SessionId, u.Sequence, u.InputText, u.GitCommitHash, u.TimestampUTC
+            FROM UserInputs u
+            INNER JOIN CleanedUserInput c ON c.UserInputId = u.Id
+            INNER JOIN Sessions s ON u.SessionId = s.Id
+            WHERE c.CleanedText != ''
+              AND s.EndedUTC IS NOT NULL
+              AND datetime(s.EndedUTC) < datetime('now', '-5 minutes')
+              AND (
+                    LTRIM(c.CleanedText) LIKE '>%' OR
+                    LTRIM(c.CleanedText) LIKE '›%'
+                  )
             ORDER BY u.Id ASC
             LIMIT $batchSize;
             """;

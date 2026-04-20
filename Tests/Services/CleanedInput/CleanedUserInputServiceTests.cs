@@ -122,6 +122,31 @@ public class CleanedUserInputServiceTests
     }
 
     [Fact]
+    public async Task RepairAndPersistAsync_OverwritesExistingCleanedRow()
+    {
+        var repo = new Mock<IRepository>();
+        repo.Setup(r => r.IsInputCleanedAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        repo.Setup(r => r.GetUserInputByIdAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeRawInput(7, ">> What was worked on"));
+
+        var svc = CreateService(repo);
+        await svc.RepairAndPersistAsync(7);
+
+        repo.Verify(
+            r => r.UpdateCleanedTextAsync(
+                7,
+                "What was worked on",
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        repo.Verify(
+            r => r.CreateCleanedAndLinkAsync(
+                It.IsAny<string>(), It.IsAny<long>(), It.IsAny<string>(),
+                It.IsAny<DateTime>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public void CleanText_StripsPromptPrefix()
     {
         var svc = CreateService(new Mock<IRepository>());

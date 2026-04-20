@@ -25,4 +25,14 @@ public interface ICleanedUserInputService
         long userInputId,
         string? sessionTuiOutput = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Re-runs cleaning for an already-linked input and overwrites the existing
+    /// cleaned row. Used to repair historical rows that were populated before a
+    /// normalization fix landed.
+    /// </summary>
+    Task RepairAndPersistAsync(
+        long userInputId,
+        string? sessionTuiOutput = null,
+        CancellationToken cancellationToken = default);
 }

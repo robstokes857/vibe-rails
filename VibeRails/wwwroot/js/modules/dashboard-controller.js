@@ -154,12 +154,12 @@ export class DashboardController {
                                 </div>
                                 <div class="col-md-2">
                                     <div class="dash-insight-card">
-                                        <div class="dash-insight-label">Shared AI Learning</div>
+                                        <div class="dash-insight-label">Vibe Rails AI</div>
                                         <div class="d-flex align-items-baseline gap-2">
                                             <span class="dash-insight-value text-warning"><i class="fa-solid fa-brain"></i></span>
                                             <span class="dash-insight-sub">Local embeddings</span>
                                         </div>
-                                        <a href="/bert.html" target="_blank" class="dash-insight-link">
+                                        <a href="#" class="dash-insight-link" data-action="navigate" data-view="vibe-rails-ai">
                                             <i class="fa-solid fa-arrow-right me-1" style="font-size: 9px;"></i>Explorer
                                         </a>
                                     </div>
@@ -171,7 +171,7 @@ export class DashboardController {
                                             <span class="dash-insight-value text-accent"><i class="fa-solid fa-plug"></i></span>
                                             <span class="dash-insight-sub">Tool server</span>
                                         </div>
-                                        <a href="/mcp.html" target="_blank" class="dash-insight-link">
+                                        <a href="#" class="dash-insight-link" data-action="navigate" data-view="mcp">
                                             <i class="fa-solid fa-arrow-right me-1" style="font-size: 9px;"></i>Explorer
                                         </a>
                                     </div>
@@ -185,6 +185,13 @@ export class DashboardController {
                 this.app.bindAction(headingContainer, '[data-action="copy-path"]', () => {
                     navigator.clipboard.writeText(rootPath);
                     this.app.showToast('Copied', 'Path copied to clipboard', 'info');
+                });
+                headingContainer.querySelectorAll('[data-action="navigate"][data-view]').forEach((link) => {
+                    link.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const view = link.getAttribute('data-view');
+                        if (view) this.app.navigate(view);
+                    });
                 });
 
             } else {
