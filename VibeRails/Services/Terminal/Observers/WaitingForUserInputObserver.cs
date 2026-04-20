@@ -7,9 +7,13 @@ namespace VibeRails.Services.Terminal;
 
 /// <summary>
 /// Accumulates recent PTY output per session in a small rolling buffer and
-/// publishes a "session_waiting_for_user" event when the prompt glyph pattern
-/// appears. Buffering is required because PTY writes arrive in small chunks and
-/// the glyphs rarely co-occur in a single write.
+/// publishes a "session_waiting_for_user" event when one of two prompt shapes
+/// appears:
+///   * Claude Code: adjacent •/◦ bullet lines at the same indent.
+///   * Codex:       the "enter to submit ... esc to cancel" footer of a
+///                  numbered confirm menu.
+/// Buffering is required because PTY writes arrive in small chunks and neither
+/// pattern ever co-occurs in a single write.
 /// </summary>
 public sealed class WaitingForUserInputObserver : ITerminalIoObserver
 {
@@ -32,6 +36,13 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
             return ValueTask.CompletedTask;
 
         var buffer = _buffers.GetOrAdd(ioEvent.SessionId, static _ => new SessionBuffer());
+
+        // Frame-aware: a full-screen erase or alt-screen toggle resets the
+        // accumulated window so bullet-lines from the prior frame don't pair
+        // up with ones from the next frame (the main Bug #2 cause).
+        if (RawChunkHasFrameBoundary(ioEvent.Text))
+            buffer.ResetWindow();
+
         if (buffer.AppendAndCheck(ioEvent.PlainText))
         {
             _eventBus.Publish(
@@ -40,6 +51,28 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
                 AppJsonSerializerContext.Default.SessionWaitingForUserPayload);
         }
         return ValueTask.CompletedTask;
+    }
+
+    private static bool RawChunkHasFrameBoundary(string rawText)
+    {
+        if (string.IsNullOrEmpty(rawText))
+            return false;
+
+        foreach (var part in TerminalTextSanitizer.ToTextWithControl(rawText))
+        {
+            if (!part.IsControl) continue;
+            // \e[2J (EraseInDisplay with arg 2/3) or \e[?1049h/1047h (alt-screen enter)
+            // are the reliable "new frame starts here" signals.
+            if (part.ControlType == TerminalControlType.EraseInDisplay
+                && (part.Raw.Contains("[2J", StringComparison.Ordinal)
+                    || part.Raw.Contains("[3J", StringComparison.Ordinal)))
+                return true;
+            if (part.ControlType == TerminalControlType.SetMode
+                && (part.Raw.Contains("?1049h", StringComparison.Ordinal)
+                    || part.Raw.Contains("?1047h", StringComparison.Ordinal)))
+                return true;
+        }
+        return false;
     }
 
     public ValueTask OnSessionCompleteAsync(TerminalSessionCompleteEvent completeEvent, CancellationToken cancellationToken = default)
@@ -78,7 +111,7 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
                     _window.Remove(0, _window.Length - BufferCapacity);
 
                 var snapshot = _window.ToString();
-                if (ContainsWaitingPrompt(snapshot))
+                if (ContainsWaitingPrompt(snapshot) || ContainsCodexConfirmMenu(snapshot))
                 {
                     _cooldownUntilUtc = now + MatchCooldown;
                     _window.Clear();
@@ -86,6 +119,27 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
                 }
                 return false;
             }
+        }
+
+        public void ResetWindow()
+        {
+            lock (_lock)
+            {
+                _window.Clear();
+            }
+        }
+
+        // Codex (and any OpenAI-TUI-style) confirm menu always emits both a
+        // "enter to submit" affordance and an "esc to cancel" affordance in the
+        // same screen. When both appear close together in the buffer the user
+        // is being asked to pick.
+        private static bool ContainsCodexConfirmMenu(string snapshot)
+        {
+            var submitIdx = snapshot.IndexOf("enter to submit", StringComparison.OrdinalIgnoreCase);
+            if (submitIdx < 0) return false;
+            var cancelIdx = snapshot.IndexOf("esc to cancel", StringComparison.OrdinalIgnoreCase);
+            if (cancelIdx < 0) return false;
+            return Math.Abs(submitIdx - cancelIdx) <= CandidatePairMaxDistance;
         }
 
         private static bool ContainsWaitingPrompt(string snapshot)

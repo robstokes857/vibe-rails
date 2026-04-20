@@ -63,14 +63,6 @@ public class CleanedInputIdleObserver : ITerminalIoObserver
 
             var windowText = Encoding.UTF8.GetString(windowBytes);
 
-            // Fast path: if the raw output contains the input verbatim, it's already clean
-            if (windowText.Contains(input.InputText, StringComparison.Ordinal))
-            {
-                // TODO: persist as-is — input text is the cleaned text
-                continue;
-            }
-
-            // Slow path: needs actual cleaning with windowed context
             try
             {
                 await _cleanedService.CleanAndPersistAsync(input.Id, windowText, cancellationToken);

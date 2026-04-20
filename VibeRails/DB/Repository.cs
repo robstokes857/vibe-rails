@@ -1466,6 +1466,18 @@ namespace VibeRails.DB
             }
         }
 
+        public async Task UpdateCleanedTextAsync(long userInputId, string cleanedText, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.UpdateCleanedTextForUserInput;
+            cmd.Parameters.AddWithValue("$userInputId", userInputId);
+            cmd.Parameters.AddWithValue("$cleanedText", cleanedText);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         public async Task<bool> IsInputCleanedAsync(long userInputId, CancellationToken cancellationToken = default)
         {
             await using var connection = new SqliteConnection(_connectionString);
@@ -1576,6 +1588,32 @@ namespace VibeRails.DB
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = SqlStrings.SelectUncleanedInputsForClosedSessions;
+            cmd.Parameters.AddWithValue("$batchSize", batchSize);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(new UserInputRecord(
+                    Id: reader.GetInt64(0),
+                    SessionId: reader.GetString(1),
+                    Sequence: reader.GetInt32(2),
+                    InputText: reader.GetString(3),
+                    GitCommitHash: reader.IsDBNull(4) ? null : reader.GetString(4),
+                    TimestampUTC: DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind)
+                ));
+            }
+            return rows;
+        }
+
+        public async Task<List<UserInputRecord>> GetPromptPrefixedCleanedInputsForClosedSessionsAsync(int batchSize, CancellationToken cancellationToken = default)
+        {
+            var rows = new List<UserInputRecord>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectPromptPrefixedCleanedInputsForClosedSessions;
             cmd.Parameters.AddWithValue("$batchSize", batchSize);
 
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);

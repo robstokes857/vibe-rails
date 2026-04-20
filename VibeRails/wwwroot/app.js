@@ -14,6 +14,8 @@ import { TerminalController } from './js/modules/terminal-multitab.js';
 import { SandboxController } from './js/modules/sandbox-controller.js';
 import { SettingsController } from './js/modules/settings-controller.js';
 import { SwarmController } from './js/modules/swarm-controller.js';
+import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
+import { McpController } from './js/modules/mcp-controller.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
 import { showAppToast } from './js/modules/toast-service.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
@@ -46,6 +48,8 @@ export class VibeControlApp {
         this.sandboxController = new SandboxController(this);
         this.settingsController = new SettingsController(this);
         this.swarmController = new SwarmController(this);
+        this.vibeRailsAiController = new VibeRailsAiController(this);
+        this.mcpController = new McpController(this);
         this.appEventClient = new AppEventClient(this);
         this.lifecycleHeartbeatTimer = null;
         this.lifecycleClientId = this.getOrCreateLifecycleClientId();
@@ -460,7 +464,9 @@ export class VibeControlApp {
             'settings',
             'terminal-focus',
             'sandboxes',
-            'swarm'
+            'swarm',
+            'vibe-rails-ai',
+            'mcp'
         ]);
 
         return duplicateableViews.has(normalizedView) ? normalizedView : 'terminal-focus';
@@ -665,7 +671,9 @@ export class VibeControlApp {
             'settings': () => this.settingsController.loadSettings(),
             'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
             'sandboxes': () => this.sandboxController.loadSandboxes(),
-            'swarm': () => this.swarmController.loadSwarm()
+            'swarm': () => this.swarmController.loadSwarm(),
+            'vibe-rails-ai': () => this.vibeRailsAiController.loadView(),
+            'mcp': () => this.mcpController.loadView()
         };
 
         const loadFunc = views[view];

@@ -47,6 +47,7 @@ namespace VibeRails.DB
 
         // Cleaned user input (1:1 with UserInputs via dual FKs)
         Task<long> CreateCleanedAndLinkAsync(string sessionId, long userInputId, string cleanedText, DateTime createdUtc, CancellationToken cancellationToken = default);
+        Task UpdateCleanedTextAsync(long userInputId, string cleanedText, CancellationToken cancellationToken = default);
         Task<bool> IsInputCleanedAsync(long userInputId, CancellationToken cancellationToken = default);
         Task<string?> GetCleanedTextForInputIdAsync(long inputId, CancellationToken cancellationToken = default);
         Task<List<string>> GetSessionCleanedTextOrderedAsync(string sessionId, CancellationToken cancellationToken = default);
@@ -56,6 +57,7 @@ namespace VibeRails.DB
         Task<string> GetFirstInputTextForSessionOrRawAsync(string sessionId, int? maxChars = null, CancellationToken cancellationToken = default);
         Task<List<UserInputRecord>> GetUncleanedInputsForSessionAsync(string sessionId, CancellationToken cancellationToken = default);
         Task<List<UserInputRecord>> GetUncleanedInputsForClosedSessionsAsync(int batchSize, CancellationToken cancellationToken = default);
+        Task<List<UserInputRecord>> GetPromptPrefixedCleanedInputsForClosedSessionsAsync(int batchSize, CancellationToken cancellationToken = default);
 
         // BERT embedding tracking
         Task<List<UnembeddedCleanedInput>> GetUnembeddedCleanedInputsAsync(int batchSize, CancellationToken cancellationToken = default);

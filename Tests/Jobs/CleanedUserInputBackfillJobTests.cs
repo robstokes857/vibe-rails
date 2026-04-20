@@ -32,6 +32,8 @@ public class CleanedUserInputBackfillJobTests
                 MakeRawInput(2),
                 MakeRawInput(3),
             });
+        repo.Setup(r => r.GetPromptPrefixedCleanedInputsForClosedSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<UserInputRecord>());
         repo.Setup(r => r.GetSessionLogChunksAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SessionLogChunkRecord>());
 
@@ -60,6 +62,8 @@ public class CleanedUserInputBackfillJobTests
         var repo = new Mock<IRepository>();
         repo.Setup(r => r.GetUncleanedInputsForClosedSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<UserInputRecord>());
+        repo.Setup(r => r.GetPromptPrefixedCleanedInputsForClosedSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<UserInputRecord>());
         repo.Setup(r => r.GetSessionLogChunksAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SessionLogChunkRecord>());
 
@@ -80,6 +84,9 @@ public class CleanedUserInputBackfillJobTests
         cleanedSvc.Verify(
             x => x.CleanAndPersistAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
             Times.Never);
+        cleanedSvc.Verify(
+            x => x.RepairAndPersistAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -93,6 +100,8 @@ public class CleanedUserInputBackfillJobTests
                 MakeRawInput(2),
                 MakeRawInput(3),
             });
+        repo.Setup(r => r.GetPromptPrefixedCleanedInputsForClosedSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<UserInputRecord>());
         repo.Setup(r => r.GetSessionLogChunksAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<SessionLogChunkRecord>());
 
@@ -116,6 +125,40 @@ public class CleanedUserInputBackfillJobTests
         cleanedSvc.Verify(x => x.CleanAndPersistAsync(1, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         cleanedSvc.Verify(x => x.CleanAndPersistAsync(2, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         cleanedSvc.Verify(x => x.CleanAndPersistAsync(3, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExecuteJob_RepairsPromptPrefixedRows()
+    {
+        var repo = new Mock<IRepository>();
+        repo.Setup(r => r.GetUncleanedInputsForClosedSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<UserInputRecord>());
+        repo.Setup(r => r.GetPromptPrefixedCleanedInputsForClosedSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<UserInputRecord>
+            {
+                MakeRawInput(10),
+                MakeRawInput(11),
+            });
+        repo.Setup(r => r.GetSessionLogChunksAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SessionLogChunkRecord>());
+
+        var cleanedSvc = new Mock<ICleanedUserInputService>();
+
+        using var serviceProvider = new ServiceCollection()
+            .AddScoped(_ => repo.Object)
+            .AddScoped(_ => cleanedSvc.Object)
+            .BuildServiceProvider();
+
+        var job = new CleanedUserInputBackfillJob(
+            NullLogger<CleanedUserInputBackfillJob>.Instance,
+            Mock.Of<ISystemResourceService>(),
+            serviceProvider.GetRequiredService<IServiceScopeFactory>());
+
+        await InvokeExecuteJobAsync(job);
+
+        cleanedSvc.Verify(x => x.RepairAndPersistAsync(10, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        cleanedSvc.Verify(x => x.RepairAndPersistAsync(11, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        cleanedSvc.Verify(x => x.CleanAndPersistAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private static async Task InvokeExecuteJobAsync(CleanedUserInputBackfillJob job)

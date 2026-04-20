@@ -212,6 +212,14 @@ export class TabStatusController {
     onSessionIdle() {
         if (this._awaitingFirstIdle) {
             this._transitionTo(TAB_STATUS.READY);
+            return;
+        }
+        // Defensive: if we've been parked in WAITING and the backend now reports
+        // idle, the prompt that caused the match is almost certainly gone (the
+        // user dealt with it outside this tab, Codex auto-dismissed, etc.). Don't
+        // leave the tab stuck flashing WAITING forever.
+        if (this._status === TAB_STATUS.WAITING) {
+            this._transitionTo(TAB_STATUS.READY);
         }
     }
 
