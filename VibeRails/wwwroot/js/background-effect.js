@@ -10,6 +10,7 @@
         height: '100%',
         zIndex: '-1',
         pointerEvents: 'none',
+        opacity: '0.8',
         display: performanceMode?.isEnabled?.() ? 'none' : ''
     });
     document.body.prepend(canvas);
@@ -27,16 +28,20 @@
         
         // Return colors with low opacity for the "little balls"
         return [
-            primary + '44', // 0.27 opacity
-            secondary + '33', // 0.2 opacity
-            'rgba(255, 255, 255, 0.1)'
+            primary + '30',
+            secondary + '24',
+            'rgba(255, 255, 255, 0.08)'
         ];
     }
 
     const config = {
-        count: 100,
-        speed: 0.3,
-        connectDist: 100
+        count: 82,
+        speed: 0.12,
+        maxSpeed: 0.18,
+        connectDist: 86,
+        mouseDist: 115,
+        mouseForce: 0.00018,
+        lineOpacity: 0.05
     };
 
     class Particle {
@@ -49,7 +54,7 @@
             this.y = Math.random() * height;
             this.vx = (Math.random() - 0.5) * config.speed;
             this.vy = (Math.random() - 0.5) * config.speed;
-            this.radius = Math.random() * 1.5 + 1;
+            this.radius = Math.random() * 1.2 + 0.9;
             const colors = getColors();
             this.color = colors[Math.floor(Math.random() * colors.length)];
         }
@@ -62,13 +67,20 @@
             if (this.y < 0 || this.y > height) this.vy *= -1;
 
             if (mouse.x !== null) {
-                let dx = mouse.x - this.x;
-                let dy = mouse.y - this.y;
-                let dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < 150) {
-                    this.vx -= dx * 0.001;
-                    this.vy -= dy * 0.001;
+                const dx = mouse.x - this.x;
+                const dy = mouse.y - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < config.mouseDist) {
+                    this.vx -= dx * config.mouseForce;
+                    this.vy -= dy * config.mouseForce;
                 }
+            }
+
+            const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+            if (speed > config.maxSpeed) {
+                const scale = config.maxSpeed / speed;
+                this.vx *= scale;
+                this.vy *= scale;
             }
         }
 
@@ -108,7 +120,7 @@
 
                 if (dist < config.connectDist) {
                     ctx.beginPath();
-                    ctx.strokeStyle = `rgba(148, 163, 184, ${0.1 * (1 - dist / config.connectDist)})`;
+                    ctx.strokeStyle = `rgba(148, 163, 184, ${config.lineOpacity * (1 - dist / config.connectDist)})`;
                     ctx.lineWidth = 0.5;
                     ctx.moveTo(p1.x, p1.y);
                     ctx.lineTo(p2.x, p2.y);

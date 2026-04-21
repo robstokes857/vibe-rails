@@ -343,6 +343,12 @@ export class ChatHistorySidebar {
             let didLoadPage = false;
 
             while (this.hasMore) {
+                // If the sidebar has been torn down (view switched away),
+                // stop walking pages mid-loop.
+                if (!this.body?.isConnected) {
+                    return didLoadPage;
+                }
+
                 const nextPage = this.currentPage + 1;
                 const params = new URLSearchParams({
                     page: String(nextPage),
@@ -419,6 +425,13 @@ export class ChatHistorySidebar {
 
     _shouldLoadNextPage() {
         if (!this.body || this.filterText || this.isLoadingPage || !this.hasMore) {
+            return false;
+        }
+
+        // Detached from the DOM (view switched away). scrollHeight/clientHeight
+        // both read 0, which otherwise looks like "container not full" and
+        // triggers unbounded auto-pagination.
+        if (!this.body.isConnected) {
             return false;
         }
 
