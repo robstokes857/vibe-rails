@@ -37,6 +37,7 @@ public sealed class BertDocumentResponseMapper : IBertDocumentResponseMapper
             metadata?.WorkingDirectory,
             metadata?.GitCommitHash ?? ExtractGitCommit(document.RawText),
             metadata?.InputText ?? ExtractUserText(document.RawText),
+            string.Empty,
             fileChanges.ToList(),
             NormalizeNewlines(document.RawText));
     }

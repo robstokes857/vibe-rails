@@ -11,9 +11,8 @@ export class McpController {
 
         content.innerHTML = '';
         const fragment = this.app.cloneTemplate('mcp-template');
+        this.root = fragment.querySelector('[data-view="mcp"]');
         content.appendChild(fragment);
-
-        this.root = document.querySelector('[data-view="mcp"]');
         if (!this.root) return;
 
         this.state = { status: null, tools: [], selectedTool: null };

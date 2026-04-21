@@ -808,6 +808,7 @@ class TerminalManager {
 
         this.zoomInBtn     = this.container.querySelector('#terminal-zoom-in-btn');
         this.zoomOutBtn    = this.container.querySelector('#terminal-zoom-out-btn');
+        this.refreshBtn    = this.container.querySelector('#terminal-refresh-btn');
         this.fontSizeLabel = this.container.querySelector('#vb-terminal-font-size-label');
         this.settingsBtn   = this.container.querySelector('#terminal-settings-btn');
         this.settingsPanel = this.container.querySelector('#vb-terminal-settings-panel');
@@ -891,6 +892,14 @@ class TerminalManager {
         return DEFAULT_SELECTION;
     }
 
+    refreshActiveTab() {
+        const active = this.getActiveTab();
+        const socket = active?.socket;
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send('\x0c');
+        }
+    }
+
     saveActiveTerminalSession(format) {
         const active = this.getActiveTab();
         const vt = active?.instance?.vibeTerminal;
@@ -955,6 +964,7 @@ class TerminalManager {
 
         this.zoomInBtn?.addEventListener('click',  () => this.adjustFontSize(1));
         this.zoomOutBtn?.addEventListener('click', () => this.adjustFontSize(-1));
+        this.refreshBtn?.addEventListener('click', () => this.refreshActiveTab());
 
         this.downloadMenu = this.container.querySelector('#vb-terminal-download-menu');
         if (window.__viberails_VSCODE__) {
@@ -2833,6 +2843,9 @@ export class TerminalController {
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
                             <span class="vb-terminal-font-size-label" id="vb-terminal-font-size-label">14</span>
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
+                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-refresh-btn" title="Refresh (Ctrl+L)" aria-label="Refresh terminal">
+                                <i class="fa-solid fa-arrows-rotate"></i>
+                            </button>
                             <div class="vb-terminal-download-wrap" id="vb-terminal-download-wrap">
                                 <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-download-btn" title="Save session" aria-label="Save session">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">

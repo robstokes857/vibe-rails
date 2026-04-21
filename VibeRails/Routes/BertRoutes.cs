@@ -1,6 +1,7 @@
 using VibeRails.DTOs;
 using VibeRails.Services.BertBaseClasses;
 using VibeRails.Services.BertV2;
+using VibeRails.Services.UserInOut;
 
 namespace VibeRails.Routes;
 
@@ -30,11 +31,15 @@ public static class BertRoutes
             }
         }).WithName("GetBertCapturesBySession");
 
-        app.MapGet("/api/v1/bert/captures/{documentId}", (string documentId, IBertCaptureQueryService captures) =>
+        app.MapGet("/api/v1/bert/captures/{documentId}", async (string documentId, IBertCaptureQueryService captures, IGetCleanedUserText cleanedText, CancellationToken ct) =>
         {
             try
             {
-                return Results.Ok(captures.GetCapture(documentId));
+                var response = captures.GetCapture(documentId);
+                var cleaned = response.UserInputId is long userInputId
+                    ? await cleanedText.GetTextForInputIdAsync(userInputId, ct)
+                    : string.Empty;
+                return Results.Ok(response with { CleanedUserText = cleaned });
             }
             catch (KeyNotFoundException ex)
             {
@@ -64,16 +69,20 @@ public static class BertRoutes
         var databaseExists = File.Exists(searchDb.VectorDatabasePath);
         var stateDatabaseExists = File.Exists(searchDb.StateDatabasePath);
         var modelDirectory = Path.GetDirectoryName(settings.ModelPath) ?? string.Empty;
-        var modelAvailable = File.Exists(settings.ModelPath) && File.Exists(settings.VocabPath);
+        var modelFileExists = File.Exists(settings.ModelPath);
+        var vocabFileExists = File.Exists(settings.VocabPath);
+        var modelAvailable = modelFileExists && vocabFileExists;
 
         var documentCount = 0;
         var sessionCount = 0;
+        var vectorCount = 0;
         DateTime? latestCaptureUtc = null;
 
         if (databaseExists)
         {
             documentCount = searchDb.CountDocuments();
             sessionCount = searchDb.CountSessions();
+            vectorCount = searchDb.CountVectors();
 
             var latestDocumentId = searchDb.GetLatestDocumentId();
             if (!string.IsNullOrWhiteSpace(latestDocumentId))
@@ -94,8 +103,24 @@ public static class BertRoutes
             searchDb.VectorDatabasePath,
             searchDb.StateDatabasePath,
             modelDirectory,
+            settings.ModelPath,
+            settings.VocabPath,
             documentCount,
             sessionCount,
-            latestCaptureUtc);
+            latestCaptureUtc,
+            settings.ModelName,
+            settings.EmbeddingDimension,
+            settings.MaxSequenceLength,
+            vectorCount,
+            databaseExists ? SafeFileSize(searchDb.VectorDatabasePath) : 0,
+            stateDatabaseExists ? SafeFileSize(searchDb.StateDatabasePath) : 0,
+            modelFileExists ? SafeFileSize(settings.ModelPath) : 0,
+            vocabFileExists ? SafeFileSize(settings.VocabPath) : 0);
+    }
+
+    private static long SafeFileSize(string path)
+    {
+        try { return new FileInfo(path).Length; }
+        catch { return 0; }
     }
 }

@@ -11,6 +11,14 @@ const fmtDate = v => {
 const fmtScore = v => typeof v === 'number' ? (v * 100).toFixed(1) + '%' : '';
 function scoreClass(v) { return v >= 0.5 ? 'high' : v >= 0.25 ? 'mid' : 'low'; }
 function scoreColor(v) { return v >= 0.5 ? 'var(--vra-ok)' : v >= 0.25 ? 'var(--vra-warn)' : 'var(--vra-bad)'; }
+function fmtBytes(n) {
+    if (!Number.isFinite(n) || n <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    let v = n;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(v >= 100 || i === 0 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
+}
 
 export class VibeRailsAiController {
     constructor(app) {
@@ -23,23 +31,23 @@ export class VibeRailsAiController {
 
         content.innerHTML = '';
         const fragment = this.app.cloneTemplate('vibe-rails-ai-template');
-        const root = fragment.querySelector('[data-view="vibe-rails-ai"]');
+        this.root = fragment.querySelector('[data-view="vibe-rails-ai"]');
         content.appendChild(fragment);
-
-        this.root = document.querySelector('[data-view="vibe-rails-ai"]');
         if (!this.root) return;
 
         this.state = {
             status: null,
             recent: [],
+            recentSessions: [],
             results: [],
             sessionCaptures: [],
+            activeSessionId: null,
             lastSearch: null,
             selected: null,
             selectedId: null,
             queryCount: 0,
             detailLoading: false,
-            listMode: 'search'
+            listMode: 'sessions-recent'
         };
 
         const q = sel => this.root.querySelector(sel);
@@ -48,6 +56,7 @@ export class VibeRailsAiController {
             sessions: q('[data-vra-sessions]'),
             queries: q('[data-vra-queries]'),
             statusPills: q('[data-vra-status-pills]'),
+            headerGrid: q('[data-vra-header-grid]'),
             form: q('[data-vra-form]'),
             query: q('[data-vra-query]'),
             mode: q('[data-vra-mode]'),
@@ -70,11 +79,17 @@ export class VibeRailsAiController {
     }
 
     _bindEvents() {
-        this.nodes.form.addEventListener('submit', e => { e.preventDefault(); this.runSearch(); });
+        this.nodes.search.addEventListener('click', () => this.runSearch());
+        this.nodes.query.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.runSearch(); } });
         this.nodes.sessionSearch.addEventListener('click', () => this.runSessionLookup());
         this.nodes.sessionId.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.runSessionLookup(); } });
         this.nodes.refresh.addEventListener('click', () => this.refreshAll());
         this.nodes.results.addEventListener('click', e => {
+            const sessionBtn = e.target.closest('[data-session-id]');
+            if (sessionBtn) {
+                this.loadCapturesForSession(sessionBtn.getAttribute('data-session-id'));
+                return;
+            }
             const b = e.target.closest('[data-doc-id]');
             if (b) this.loadCapture(b.getAttribute('data-doc-id'), this.state.listMode);
         });
@@ -133,15 +148,45 @@ export class VibeRailsAiController {
         this.nodes.docs.textContent = String(s.documentCount || 0);
         this.nodes.sessions.textContent = String(s.sessionCount || 0);
         this.nodes.statusPills.innerHTML =
-            `<span class="vra-pill ${s.databaseExists ? 'ok' : 'bad'}" title="Database">${s.databaseExists ? 'DB OK' : 'DB Missing'}</span>` +
+            `<span class="vra-pill ${s.databaseExists ? 'ok' : 'bad'}" title="Vector database">${s.databaseExists ? 'Vector DB OK' : 'Vector DB Missing'}</span>` +
+            `<span class="vra-pill ${s.stateDatabaseExists ? 'ok' : 'warn'}" title="State database">${s.stateDatabaseExists ? 'State DB OK' : 'State DB Missing'}</span>` +
+            `<span class="vra-pill ${s.modelAvailable ? 'ok' : 'bad'}" title="ONNX model + vocab">${s.modelAvailable ? 'Model OK' : 'Model Missing'}</span>` +
             `<span class="vra-pill ${s.semanticSearchAvailable ? 'ok' : 'warn'}" title="Semantic search">${s.semanticSearchAvailable ? 'Semantic Ready' : 'Semantic N/A'}</span>`;
         const semOpt = this.nodes.mode.querySelector('option[value="semantic"]');
         if (semOpt) semOpt.disabled = !s.semanticSearchAvailable;
         if (!s.semanticSearchAvailable && this.nodes.mode.value === 'semantic') this.nodes.mode.value = 'text';
+        this._renderHeaderGrid(s);
+    }
+
+    _renderHeaderGrid(s) {
+        if (!this.nodes.headerGrid) return;
+        const cards = [
+            ['Model', s.modelName || 'n/a'],
+            ['Embedding Dim', s.embeddingDimension ? `${s.embeddingDimension}` : 'n/a'],
+            ['Max Seq Length', s.maxSequenceLength ? `${s.maxSequenceLength} tokens` : 'n/a'],
+            ['Vectors', s.vectorCount != null ? s.vectorCount.toLocaleString() : 'n/a'],
+            ['Latest Capture', s.latestCaptureUTC ? fmtDate(s.latestCaptureUTC) : 'none'],
+            ['Vector DB', `${fmtBytes(s.vectorDatabaseSizeBytes)}`, s.databasePath],
+            ['State DB', `${fmtBytes(s.stateDatabaseSizeBytes)}`, s.stateDatabasePath],
+            ['Model File', `${fmtBytes(s.modelFileSizeBytes)}`, s.modelPath],
+            ['Vocab File', `${fmtBytes(s.vocabFileSizeBytes)}`, s.vocabPath],
+            ['Data Dir', '', s.dataDirectory]
+        ];
+        this.nodes.headerGrid.innerHTML = cards.map(([label, value, path]) => {
+            const pathHtml = path ? `<code style="font-size:10px;color:var(--color-accent);word-break:break-all;display:block;margin-top:0.2rem;line-height:1.3">${esc(path)}</code>` : '';
+            const valueHtml = value ? `<div class="value">${esc(value)}</div>` : '';
+            return `<div class="vra-meta-card" title="${esc(path || '')}"><div class="label">${esc(label)}</div>${valueHtml}${pathHtml}</div>`;
+        }).join('');
     }
 
     renderResultsList() {
         const { state, nodes } = this;
+
+        if (state.listMode === 'sessions-recent') {
+            this._renderSessionsList();
+            return;
+        }
+
         const items = state.listMode === 'search' ? state.results : state.listMode === 'session' ? state.sessionCaptures : state.recent;
         const showScore = state.listMode === 'search';
 
@@ -149,16 +194,22 @@ export class VibeRailsAiController {
             const msg = state.listMode === 'search'
                 ? (state.lastSearch ? `No results for "${state.lastSearch.query}".` : 'Run a search to see results.')
                 : state.listMode === 'session'
-                    ? 'No captures found for this session. Enter a session ID above.'
+                    ? (state.activeSessionId ? `No captures found for session ${shortId(state.activeSessionId)}.` : 'Click a session from Recent Sessions, or enter an ID above.')
                     : 'No recent captures found.';
             nodes.results.innerHTML = `<div class="vra-empty">${esc(msg)}</div>`;
             nodes.resultsSub.textContent = (state.listMode === 'search' && state.lastSearch) ? '0 hits' : '';
             return;
         }
 
-        nodes.resultsSub.textContent = (state.listMode === 'search' && state.lastSearch)
-            ? `${state.lastSearch.results.length} hit(s) in ${state.lastSearch.searchTimeMs}ms`
-            : `${items.length} capture(s)`;
+        let subText;
+        if (state.listMode === 'search' && state.lastSearch) {
+            subText = `${state.lastSearch.results.length} hit(s) in ${state.lastSearch.searchTimeMs}ms`;
+        } else if (state.listMode === 'session' && state.activeSessionId) {
+            subText = `${items.length} capture(s) in ${shortId(state.activeSessionId)}`;
+        } else {
+            subText = `${items.length} capture(s)`;
+        }
+        nodes.resultsSub.textContent = subText;
 
         nodes.results.innerHTML = items.map(item => {
             const scoreHtml = showScore && typeof item.score === 'number'
@@ -168,6 +219,7 @@ export class VibeRailsAiController {
               <div class="vra-item-top">
                 <div class="vra-item-chips">
                   <span class="vra-chip" style="font-size:10px">${esc(item.cli || '?')}</span>
+                  <span class="vra-chip" style="font-size:10px">#${esc(item.sequence ?? '?')}</span>
                   <span class="vra-chip" style="font-size:10px">${esc(shortId(item.documentId))}</span>
                 </div>
                 ${scoreHtml}
@@ -179,6 +231,34 @@ export class VibeRailsAiController {
               </div>
             </button>`;
         }).join('');
+    }
+
+    _renderSessionsList() {
+        const { state, nodes } = this;
+        const sessions = state.recentSessions;
+
+        if (!sessions || sessions.length === 0) {
+            nodes.results.innerHTML = `<div class="vra-empty">${esc('No recent sessions found.')}</div>`;
+            nodes.resultsSub.textContent = '';
+            return;
+        }
+
+        nodes.resultsSub.textContent = `${sessions.length} session(s)`;
+        nodes.results.innerHTML = sessions.map(s => `
+            <button class="vra-item ${s.sessionId === state.activeSessionId ? 'sel' : ''}" type="button" data-session-id="${esc(s.sessionId)}">
+              <div class="vra-item-top">
+                <div class="vra-item-chips">
+                  <span class="vra-chip" style="font-size:10px">${esc(s.cli || '?')}</span>
+                  <span class="vra-chip" style="font-size:10px">${esc(shortId(s.sessionId))}</span>
+                </div>
+                <span class="vra-score-chip" style="color:var(--color-accent)">${s.captureCount}&times;</span>
+              </div>
+              <div class="vra-item-text">${esc(s.latestPreview || '[no text]')}</div>
+              <div class="vra-item-bottom">
+                <span>${esc(fmtDate(s.latestTimestampUTC))}</span>
+                <span>${esc(s.workingDirectory || '')}</span>
+              </div>
+            </button>`).join('');
     }
 
     renderDetail() {
@@ -223,6 +303,13 @@ export class VibeRailsAiController {
             ? `<div class="vra-section"><h3>${textLabel}</h3><pre class="vra-pre">${esc(userText)}</pre></div>`
             : '';
 
+        const cleanedText = i.cleanedUserText || '';
+        const cleanedSection = cleanedText
+            ? `<div class="vra-section"><h3>Cleaned User Text</h3><pre class="vra-pre">${esc(cleanedText)}</pre></div>`
+            : (i.userInputId != null && i.userText
+                ? `<div class="vra-section"><h3>Cleaned User Text</h3><div class="vra-empty" style="min-height:60px">No cleaned text yet for this input.</div></div>`
+                : '');
+
         const meta = [
             ['CLI', i.cli || 'Unknown'],
             ['Environment', i.environmentName || 'None'],
@@ -259,6 +346,7 @@ export class VibeRailsAiController {
             ${scoreBanner}
             ${sessionActions}
             ${textSection}
+            ${cleanedSection}
             <div class="vra-section"><h3>Metadata</h3><div class="vra-meta-grid">${meta}</div></div>
             ${fileSection}
             ${rawSection}
@@ -272,14 +360,82 @@ export class VibeRailsAiController {
     }
 
     async loadRecent() {
-        const p = await this._fetchJson('/api/v1/bert/captures?take=50');
+        const p = await this._fetchJson('/api/v1/bert/captures?take=200');
         this.state.recent = p.captures || [];
-        if (this.state.listMode === 'recent') this.renderResultsList();
+        this.state.recentSessions = this._groupBySession(this.state.recent);
+        if (this.state.listMode === 'recent' || this.state.listMode === 'sessions-recent') {
+            this.renderResultsList();
+        }
+    }
+
+    _groupBySession(captures) {
+        const map = new Map();
+        for (const c of captures) {
+            if (!c.sessionId) continue;
+            const existing = map.get(c.sessionId);
+            if (!existing) {
+                map.set(c.sessionId, {
+                    sessionId: c.sessionId,
+                    cli: c.cli,
+                    workingDirectory: c.workingDirectory,
+                    captureCount: 1,
+                    latestTimestampUTC: c.timestampUTC,
+                    latestPreview: c.userTextPreview
+                });
+            } else {
+                existing.captureCount += 1;
+                if (c.timestampUTC && (!existing.latestTimestampUTC || new Date(c.timestampUTC) > new Date(existing.latestTimestampUTC))) {
+                    existing.latestTimestampUTC = c.timestampUTC;
+                    existing.latestPreview = c.userTextPreview;
+                    existing.cli = c.cli || existing.cli;
+                    existing.workingDirectory = c.workingDirectory || existing.workingDirectory;
+                }
+            }
+        }
+        return Array.from(map.values()).sort((a, b) => {
+            const ta = a.latestTimestampUTC ? new Date(a.latestTimestampUTC).getTime() : 0;
+            const tb = b.latestTimestampUTC ? new Date(b.latestTimestampUTC).getTime() : 0;
+            return tb - ta;
+        });
+    }
+
+    async loadCapturesForSession(sessionId) {
+        if (!sessionId) return;
+        this.setBusy(true);
+        this.setSessionBanner('');
+        this.state.sessionCaptures = [];
+        this.state.activeSessionId = sessionId;
+        this.state.selected = null;
+        this.state.selectedId = null;
+        this.state.listMode = 'session';
+        this.nodes.resultsSource.value = 'session';
+        this.nodes.sessionId.value = sessionId;
+        this.renderResultsList();
+        this.renderDetail();
+        try {
+            const p = await this._fetchJson(`/api/v1/bert/captures/by-session/${encodeURIComponent(sessionId)}`);
+            this.state.sessionCaptures = p.captures || [];
+            this.renderResultsList();
+            if (this.state.sessionCaptures.length) {
+                await this.loadCapture(this.state.sessionCaptures[0].documentId, 'session');
+                this.setSessionBanner(`${this.state.sessionCaptures.length} capture(s) in session ${shortId(sessionId)}.`, 'success');
+            } else {
+                this.setSessionBanner('No captures for this session.', 'error');
+            }
+        } catch (err) {
+            this.state.sessionCaptures = [];
+            this.renderResultsList();
+            this.setSessionBanner(err.message, 'error');
+        } finally {
+            this.setBusy(false);
+        }
     }
 
     async loadCapture(id, source) {
         this.state.selectedId = id;
-        const summary = this.state.results.find(r => r.documentId === id) || this.state.recent.find(r => r.documentId === id);
+        const summary = this.state.results.find(r => r.documentId === id)
+            || this.state.sessionCaptures.find(r => r.documentId === id)
+            || this.state.recent.find(r => r.documentId === id);
         if (summary) { this.state.selected = summary; this.state.detailLoading = true; }
         this.renderResultsList();
         this.renderDetail();
@@ -302,9 +458,6 @@ export class VibeRailsAiController {
         try {
             await this.loadStatus();
             await this.loadRecent();
-            if (this.state.listMode === 'recent' && this.state.recent.length && !this.state.selectedId) {
-                await this.loadCapture(this.state.recent[0].documentId, 'recent');
-            }
             this.setBanner('Refreshed.', 'success');
         } catch (err) {
             this.setBanner(err.message, 'error');
@@ -316,32 +469,10 @@ export class VibeRailsAiController {
     async runSessionLookup() {
         const sid = this.nodes.sessionId.value.trim();
         if (!sid) { this.setSessionBanner('Enter a session ID.', 'error'); this.nodes.sessionId.focus(); return; }
-        this.setBusy(true);
         this.nodes.sessionSearch.disabled = true;
-        this.setSessionBanner('');
-        this.state.sessionCaptures = [];
-        this.state.selected = null;
-        this.state.selectedId = null;
-        this.state.listMode = 'session';
-        this.nodes.resultsSource.value = 'session';
-        this.renderResultsList();
-        this.renderDetail();
         try {
-            const p = await this._fetchJson(`/api/v1/bert/captures/by-session/${encodeURIComponent(sid)}`);
-            this.state.sessionCaptures = p.captures || [];
-            this.renderResultsList();
-            if (this.state.sessionCaptures.length) {
-                await this.loadCapture(this.state.sessionCaptures[0].documentId, 'session');
-                this.setSessionBanner(`${this.state.sessionCaptures.length} capture(s) found.`, 'success');
-            } else {
-                this.setSessionBanner('No captures for this session.', 'error');
-            }
-        } catch (err) {
-            this.state.sessionCaptures = [];
-            this.renderResultsList();
-            this.setSessionBanner(err.message, 'error');
+            await this.loadCapturesForSession(sid);
         } finally {
-            this.setBusy(false);
             this.nodes.sessionSearch.disabled = false;
         }
     }

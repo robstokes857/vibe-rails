@@ -158,9 +158,11 @@ export async function showTranscriptModal(sessionId) {
 export async function showReplayModal(sessionId) {
     let term = null;
     let playbackTimer = null;
+    let onWindowResize = null;
 
     const { body } = createModal(`Session Replay — ${sessionId}`, () => {
         if (playbackTimer) clearTimeout(playbackTimer);
+        if (onWindowResize) window.removeEventListener('resize', onWindowResize);
         term?.dispose();
     });
 
@@ -193,9 +195,9 @@ export async function showReplayModal(sessionId) {
 
     toolbar.append(playBtn, speedSelect, altBadge, progress);
 
-    // Terminal container
+    // Terminal container — xterm renders into this; the viewport is sized to fit the recorded grid.
     const termEl = document.createElement('div');
-    termEl.style.cssText = 'width:100%;flex:1;overflow:hidden;';
+    termEl.style.cssText = 'width:100%;flex:1;overflow:hidden;background:#1e1e1e;';
 
     body.style.cssText += 'display:flex;flex-direction:column;';
     body.append(toolbar, termEl);
@@ -206,9 +208,10 @@ export async function showReplayModal(sessionId) {
         return;
     }
 
+    const BASE_FONT_SIZE = 13;
     term = new window.Terminal({
         fontFamily: 'Menlo, Monaco, Consolas, "Cascadia Mono", "Liberation Mono", "Courier New", monospace',
-        fontSize: 13,
+        fontSize: BASE_FONT_SIZE,
         disableStdin: true,
         convertEol: false,
         allowProposedApi: true,
@@ -223,8 +226,31 @@ export async function showReplayModal(sessionId) {
     }
 
     term.open(termEl);
-    fitAddon?.fit();
     term.write('Loading session data\u2026\r\n');
+
+    // Scale the font so the recorded cols x rows fills the container without clipping.
+    // FitAddon.proposeDimensions() tells us how many cells fit at current fontSize;
+    // the ratio to (cols, rows) gives the fontSize that makes them match exactly.
+    function fitToGrid(cols, rows) {
+        const width = termEl.clientWidth;
+        const height = termEl.clientHeight;
+        if (!width || !height || !cols || !rows) { term.resize(cols, rows); return; }
+
+        let proposed = null;
+        try { proposed = fitAddon?.proposeDimensions?.(); } catch { proposed = null; }
+        if (!proposed || !proposed.cols || !proposed.rows) {
+            proposed = { cols: Math.max(1, Math.floor(width / 8)), rows: Math.max(1, Math.floor(height / 18)) };
+        }
+
+        const currentFont = Number(term.options.fontSize) || BASE_FONT_SIZE;
+        const scale = Math.min(proposed.cols / cols, proposed.rows / rows);
+        const newFont = Math.max(4, Math.min(32, Math.floor(currentFont * scale)));
+        if (Number.isFinite(newFont) && newFont > 0 && newFont !== currentFont) {
+            term.options.fontSize = newFont;
+        }
+        term.resize(cols, rows);
+    }
+
 
     let frames = [];
     let resizeEvents = []; // [{afterFrameIndex, cols, rows}]
@@ -283,9 +309,6 @@ export async function showReplayModal(sessionId) {
         return;
     }
 
-    // Resize xterm to match recording dimensions so alt-screen TUI content renders correctly
-    term.resize(initialCols, initialRows);
-
     // Playback state
     let frameIndex = 0;
     let playing = false;
@@ -294,6 +317,12 @@ export async function showReplayModal(sessionId) {
     let currentCols = initialCols;
     let currentRows = initialRows;
     const maxIdleMs = 500;
+
+    // Resize xterm to match recording dimensions so alt-screen TUI content renders correctly
+    fitToGrid(initialCols, initialRows);
+
+    onWindowResize = () => fitToGrid(currentCols, currentRows);
+    window.addEventListener('resize', onWindowResize);
 
     function getSpeed() {
         return Number.parseInt(speedSelect.value, 10);
@@ -313,7 +342,7 @@ export async function showReplayModal(sessionId) {
     function applyPendingResizes(idx) {
         while (nextResizeIdx < resizeEvents.length && resizeEvents[nextResizeIdx].afterFrameIndex <= idx) {
             const ev = resizeEvents[nextResizeIdx];
-            term.resize(ev.cols, ev.rows);
+            fitToGrid(ev.cols, ev.rows);
             updateDimensions(ev.cols, ev.rows);
             nextResizeIdx++;
         }
@@ -379,7 +408,7 @@ export async function showReplayModal(sessionId) {
             nextAltIdx = 0;
             altBadge.style.display = 'none';
             term.reset();
-            term.resize(initialCols, initialRows);
+            fitToGrid(initialCols, initialRows);
             updateDimensions(initialCols, initialRows);
         }
         playing = true;
@@ -401,7 +430,7 @@ export async function showReplayModal(sessionId) {
 
     // Auto-start — reset and size to recording dimensions
     term.reset();
-    term.resize(initialCols, initialRows);
+    fitToGrid(initialCols, initialRows);
     updateDimensions(initialCols, initialRows);
     play();
 }

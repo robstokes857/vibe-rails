@@ -10,6 +10,7 @@ public interface IBertSearchDbService
 
     int CountDocuments();
     int CountSessions();
+    int CountVectors();
     string? GetLatestDocumentId();
     IReadOnlyList<BertStoredDocument> GetCaptures(int skip, int take);
     IReadOnlyList<BertStoredDocument> GetCapturesBySessionId(string sessionId);

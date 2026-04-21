@@ -51,9 +51,9 @@ public class CleanedUserInputBackfillJobTests
 
         await InvokeExecuteJobAsync(job);
 
-        cleanedSvc.Verify(x => x.CleanAndPersistAsync(1, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
-        cleanedSvc.Verify(x => x.CleanAndPersistAsync(2, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
-        cleanedSvc.Verify(x => x.CleanAndPersistAsync(3, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        cleanedSvc.Verify(x => x.CleanAndPersistAsync(1, It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
+        cleanedSvc.Verify(x => x.CleanAndPersistAsync(2, It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
+        cleanedSvc.Verify(x => x.CleanAndPersistAsync(3, It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -82,10 +82,10 @@ public class CleanedUserInputBackfillJobTests
         await InvokeExecuteJobAsync(job);
 
         cleanedSvc.Verify(
-            x => x.CleanAndPersistAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.CleanAndPersistAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()),
             Times.Never);
         cleanedSvc.Verify(
-            x => x.RepairAndPersistAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.RepairAndPersistAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -107,7 +107,7 @@ public class CleanedUserInputBackfillJobTests
 
         var cleanedSvc = new Mock<ICleanedUserInputService>();
         cleanedSvc
-            .Setup(x => x.CleanAndPersistAsync(2, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.CleanAndPersistAsync(2, It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
         using var serviceProvider = new ServiceCollection()
@@ -122,9 +122,9 @@ public class CleanedUserInputBackfillJobTests
 
         await InvokeExecuteJobAsync(job);
 
-        cleanedSvc.Verify(x => x.CleanAndPersistAsync(1, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
-        cleanedSvc.Verify(x => x.CleanAndPersistAsync(2, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
-        cleanedSvc.Verify(x => x.CleanAndPersistAsync(3, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        cleanedSvc.Verify(x => x.CleanAndPersistAsync(1, It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
+        cleanedSvc.Verify(x => x.CleanAndPersistAsync(2, It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
+        cleanedSvc.Verify(x => x.CleanAndPersistAsync(3, It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -156,9 +156,9 @@ public class CleanedUserInputBackfillJobTests
 
         await InvokeExecuteJobAsync(job);
 
-        cleanedSvc.Verify(x => x.RepairAndPersistAsync(10, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
-        cleanedSvc.Verify(x => x.RepairAndPersistAsync(11, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
-        cleanedSvc.Verify(x => x.CleanAndPersistAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        cleanedSvc.Verify(x => x.RepairAndPersistAsync(10, It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
+        cleanedSvc.Verify(x => x.RepairAndPersistAsync(11, It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
+        cleanedSvc.Verify(x => x.CleanAndPersistAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private static async Task InvokeExecuteJobAsync(CleanedUserInputBackfillJob job)

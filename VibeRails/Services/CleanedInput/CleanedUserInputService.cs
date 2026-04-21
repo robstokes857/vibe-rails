@@ -33,29 +33,43 @@ public sealed class CleanedUserInputService : ICleanedUserInputService
         return InputEtlFilter.Process(extracted);
     }
 
+    /// <summary>
+    /// If another UserInput row exists within this many seconds AFTER the row
+    /// being cleaned, treat the current row as superseded (user hit ESC and
+    /// re-submitted before the LLM could process the original). 15s is tight
+    /// enough to exclude legitimate rapid back-to-back messages but long
+    /// enough to catch the typical "oops, edit, resend" pattern.
+    /// </summary>
+    internal const int SupersededWindowSeconds = 15;
+
     public async Task CleanAndPersistAsync(
         long userInputId,
         string? sessionTuiOutput = null,
+        DateTime? nextInputTimestampUtc = null,
         CancellationToken cancellationToken = default)
         => await CleanAndPersistCoreAsync(
             userInputId,
             sessionTuiOutput,
+            nextInputTimestampUtc,
             overwriteExisting: false,
             cancellationToken);
 
     public async Task RepairAndPersistAsync(
         long userInputId,
         string? sessionTuiOutput = null,
+        DateTime? nextInputTimestampUtc = null,
         CancellationToken cancellationToken = default)
         => await CleanAndPersistCoreAsync(
             userInputId,
             sessionTuiOutput,
+            nextInputTimestampUtc,
             overwriteExisting: true,
             cancellationToken);
 
     private async Task CleanAndPersistCoreAsync(
         long userInputId,
         string? sessionTuiOutput,
+        DateTime? nextInputTimestampUtc,
         bool overwriteExisting,
         CancellationToken cancellationToken)
     {
@@ -77,7 +91,11 @@ public sealed class CleanedUserInputService : ICleanedUserInputService
             sessionTuiOutput = await TryLoadSessionTuiOutputAsync(raw.SessionId, cancellationToken);
         }
 
-        var cleaned = CleanText(raw.InputText, sessionTuiOutput);
+        var isSuperseded = nextInputTimestampUtc is DateTime nextTs
+            && (nextTs - raw.TimestampUTC).TotalSeconds < SupersededWindowSeconds
+            && (nextTs - raw.TimestampUTC).TotalSeconds >= 0;
+
+        var cleaned = isSuperseded ? null : CleanText(raw.InputText, sessionTuiOutput);
         var cleanedText = cleaned ?? "";
 
         if (isAlreadyCleaned)
