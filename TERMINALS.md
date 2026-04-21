@@ -166,3 +166,45 @@ This is not a bug in VibeControl — it is standard terminal behavior. `vim`, `n
 **Possible fix directions:**
 - Intercept `\x1b[3J]` in the PTY stream before forwarding to the browser WebSocket and suppress it (fragile — could affect other apps that legitimately want to clear scrollback).
 - Not otherwise fixable without becoming a filtering proxy in the PTY pipeline.
+
+### Typing lag / stutter from WebSocket coalesce hold
+
+**Status:** Open — 2026-04-20 — investigation complete, fix deferred
+
+**Symptom:** Typing and held-down backspace feel laggy/stuttery in the xterm.js terminal. Stutter is perceptible rather than uniform — some frames pop instantly, others visibly lag.
+
+**Instrumentation added** (currently at `Log.Debug`, toggle to `Information` to re-capture):
+- `TerminalStateService.RecordInput` — `[TypingLag] RecordInput chars=N elapsedMs=...`
+- `TerminalStateService.LogOutput` — `[TypingLag] LogOutput bytes=N elapsedMs=...`
+- `WebSocketConsumer.SendLoopAsync` — `[TypingLag] WS send frames=N bytes=N coalesceRounds=N holdMs=... sendMs=... syncOut=bool`
+
+**Measurements** (2026-04-20 session, non-syncOutput path):
+| Stage | Typical elapsed |
+|---|---|
+| `RecordInput` | 0.01–0.03 ms |
+| `LogOutput` | 0.04–0.35 ms |
+| WS `sendMs` | 0.01–0.2 ms |
+| **WS `holdMs`** | **1–20 ms, clustered ~5–8 ms** |
+
+**Root cause:** `WebSocketConsumer.SendLoopAsync` has a 4 ms `Task.Delay` coalesce window (`NormalCoalesceDelayMs`) gating every non-syncOutput send. On Windows, timer resolution (~15.6 ms) makes that sleep land at 5–16 ms. Logs show `coalesceRounds=1` on nearly every frame — the delay almost never actually merges anything, we just pay the tax. That hold is added to every keystroke echo. A burst of keystrokes produces multiple PTY echo chunks each paying their own hold, which reads as stutter.
+
+**Why the delay exists** (do not remove blindly — commit `3ea2f30`):
+> TUI apps (Codex, Copilot) split their screen updates across multiple small PTY writes that arrive 1-10ms apart — e.g. an erase sequence, then `?2026h` (sync-on), then the redrawn content, then `?2026l` (sync-off/render). If each arrives as a separate WebSocket frame, xterm.js may render intermediate torn states (blank cells) between the erase and the sync-on. Waiting 4 ms gives the PTY reader time to enqueue related writes so they coalesce into one frame.
+
+The sync-output path (`?2026h`/`?2026l` bracketed) catches the *synced* portion. The 4 ms delay catches the *unsynced* preamble (e.g. an erase that lands just before sync-on).
+
+**Paste test** (2338 chars input, ~6133 bytes echoed back): The big echo burst coalesced cleanly (2 frames → 1 WS send, 5.7 ms hold). Long trickle of 20–55 byte chunks afterward each pays its own ~8 ms hold. For paste, coalescing works; per-chunk holds on the tail are minor.
+
+**Fast-typing test** (11 keys in 27 ms autorepeat burst): PTY serializes input→echo — first echo arrives ~7 ms after first keystroke with output for 1–2 keys, second echo ~40 ms later covering the rest. Each send adds a 5–17 ms hold. Cumulative hold on bursts matches the felt stutter.
+
+**Fix options considered** (none applied):
+1. **Remove the hold entirely.** Would re-introduce the Codex/Copilot tear-flicker the original commit fixed. Rejected.
+2. **Shorten to true 1–2 ms.** Use `PeriodicTimer`/`SpinWait` to bypass Windows timer granularity. Keeps tear protection, cuts typing hold from ~8 ms to ~2 ms. Low risk.
+3. **Adaptive: only coalesce while a previous `SendAsync` is in flight.** Self-tuning — idle keystrokes send instantly, burst output naturally batches during send roundtrip. Preserves tear protection under load. Most principled.
+4. **Trust `?2026h`/`?2026l` only.** Drop unsynced delay. Requires confirming Codex/Copilot always bracket writes properly.
+
+**Also missing before committing a fix:** client-side end-to-end timing (WS `onmessage` → post-`term.write` timestamps in `terminal-multitab.js`). Without that, fixing the server hold is blind to any client-side render/paint bottleneck.
+
+**Files:**
+- `VibeRails/Services/Terminal/Consumers/WebSocketConsumer.cs` — `SendLoopAsync`, `NormalCoalesceDelayMs = 4`
+- `VibeRails/Services/Terminal/Core/TerminalStateService.cs` — `RecordInput`, `LogOutput` instrumentation

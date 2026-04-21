@@ -20,10 +20,16 @@ public interface ICleanedUserInputService
     /// (inserts CleanedUserInput + updates UserInputs.CleanedId in one transaction).
     /// Idempotent — no-op if the input is already cleaned.
     /// Filtered-out inputs get a CleanedUserInput row with CleanedText = "".
+    ///
+    /// If <paramref name="nextInputTimestampUtc"/> is within a short window of
+    /// the row's own timestamp, the row is treated as SUPERSEDED (user hit ESC
+    /// and re-submitted before the LLM processed the original) and the cleaned
+    /// text is persisted as "".
     /// </summary>
     Task CleanAndPersistAsync(
         long userInputId,
         string? sessionTuiOutput = null,
+        DateTime? nextInputTimestampUtc = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -34,5 +40,6 @@ public interface ICleanedUserInputService
     Task RepairAndPersistAsync(
         long userInputId,
         string? sessionTuiOutput = null,
+        DateTime? nextInputTimestampUtc = null,
         CancellationToken cancellationToken = default);
 }

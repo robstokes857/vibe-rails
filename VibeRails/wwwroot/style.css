@@ -2283,10 +2283,6 @@ button:hover .card-nav-cog {
     color: #94a3b8;
 }
 
-#vb-terminal-panel .tab-status-active .vb-tab-status-text {
-    color: #a6e3a1;
-}
-
 #vb-terminal-panel .tab-status-disconnected .vb-tab-status-text {
     color: #fab387;
 }
@@ -2319,11 +2315,6 @@ button:hover .card-nav-cog {
 
 #vb-terminal-panel .tab-status-ready .vb-tab-status-icon i {
     color: #94a3b8;
-}
-
-#vb-terminal-panel .tab-status-active .vb-tab-status-icon i {
-    color: #a6e3a1;
-    opacity: 0.8;
 }
 
 #vb-terminal-panel .tab-status-disconnected .vb-tab-status-icon i {

@@ -72,6 +72,9 @@ public class TerminalStateService : ITerminalStateService, IDisposable
 
     public void LogOutput(string sessionId, ReadOnlyMemory<byte> data, TerminalIoSource source = TerminalIoSource.Pty)
     {
+        var __lagSw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
         var now = DateTimeOffset.UtcNow;
         // Observer gets a string (for PlainText/HasControl analysis) — UTF8 decode here is fine
         // because observers are for tracing/analysis, not for terminal state reconstruction.
@@ -105,10 +108,20 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         // DB gets the raw bytes — no encoding loss, no filtering. The per-session writer
         // serializes inserts so output order matches PTY order and shutdown can drain cleanly.
         outputWriter.Enqueue(data.ToArray());
+        }
+        finally
+        {
+            __lagSw.Stop();
+            Log.Debug("[TypingLag] LogOutput bytes={Bytes} elapsedMs={ElapsedMs:F3}",
+                data.Length, __lagSw.Elapsed.TotalMilliseconds);
+        }
     }
 
     public void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown)
     {
+        var __lagSw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
         var now = DateTimeOffset.UtcNow;
         _ioObserverService.Publish(new TerminalIoEvent(
             sessionId,
@@ -128,6 +141,13 @@ public class TerminalStateService : ITerminalStateService, IDisposable
 
         if (accumulator != null)
             accumulator.Append(input);
+        }
+        finally
+        {
+            __lagSw.Stop();
+            Log.Debug("[TypingLag] RecordInput chars={Chars} elapsedMs={ElapsedMs:F3}",
+                input.Length, __lagSw.Elapsed.TotalMilliseconds);
+        }
     }
 
     public void RecordResize(string sessionId, int cols, int rows, TerminalIoSource source)

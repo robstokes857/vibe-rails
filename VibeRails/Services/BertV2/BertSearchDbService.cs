@@ -52,6 +52,15 @@ public sealed class BertSearchDbService : IBertSearchDbService
         return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
+    public int CountVectors()
+    {
+        if (!VectorDatabaseExists) return 0;
+        using var connection = OpenVectorConnection(loadVectorExtension: true);
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM {BertSearchSchema.VectorTableName};";
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
     public string? GetLatestDocumentId()
     {
         if (!VectorDatabaseExists) return null;

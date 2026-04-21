@@ -154,5 +154,8 @@ public class BertSearchServiceV2Tests : IDisposable
         public string ModelPath { get; }
         public string VocabPath { get; }
         public string DataDirectory { get; }
+        public string ModelName => "test";
+        public int EmbeddingDimension => 384;
+        public int MaxSequenceLength => 512;
     }
 }

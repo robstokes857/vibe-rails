@@ -342,9 +342,19 @@ namespace VibeRails.DTOs
         string DatabasePath,
         string StateDatabasePath,
         string ModelDirectory,
+        string ModelPath,
+        string VocabPath,
         int DocumentCount,
         int SessionCount,
-        DateTime? LatestCaptureUTC
+        DateTime? LatestCaptureUTC,
+        string ModelName,
+        int EmbeddingDimension,
+        int MaxSequenceLength,
+        int VectorCount,
+        long VectorDatabaseSizeBytes,
+        long StateDatabaseSizeBytes,
+        long ModelFileSizeBytes,
+        long VocabFileSizeBytes
     );
 
     public record BertFileChangeResponse(
@@ -379,6 +389,7 @@ namespace VibeRails.DTOs
         string? WorkingDirectory,
         string? GitCommitHash,
         string UserText,
+        string CleanedUserText,
         List<BertFileChangeResponse> FileChanges,
         string RawText
     );

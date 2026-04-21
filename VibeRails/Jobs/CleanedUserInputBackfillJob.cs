@@ -65,12 +65,18 @@ public sealed class CleanedUserInputBackfillJob(
 
             if (uncleanedBySession.TryGetValue(sessionId, out var uncleanedRows))
             {
-                foreach (var row in uncleanedRows)
+                // Sort ascending by timestamp so adjacent-row superseded detection works.
+                uncleanedRows.Sort(static (a, b) => a.TimestampUTC.CompareTo(b.TimestampUTC));
+                for (int i = 0; i < uncleanedRows.Count; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    var row = uncleanedRows[i];
+                    var nextTs = i < uncleanedRows.Count - 1
+                        ? (DateTime?)uncleanedRows[i + 1].TimestampUTC
+                        : null;
                     try
                     {
-                        await cleanedService.CleanAndPersistAsync(row.Id, sessionTuiOutput, cancellationToken);
+                        await cleanedService.CleanAndPersistAsync(row.Id, sessionTuiOutput, nextTs, cancellationToken);
                     }
                     catch (Exception ex)
                     {
@@ -85,12 +91,17 @@ public sealed class CleanedUserInputBackfillJob(
             if (!repairBySession.TryGetValue(sessionId, out var repairRows))
                 continue;
 
-            foreach (var row in repairRows)
+            repairRows.Sort(static (a, b) => a.TimestampUTC.CompareTo(b.TimestampUTC));
+            for (int i = 0; i < repairRows.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var row = repairRows[i];
+                var nextTs = i < repairRows.Count - 1
+                    ? (DateTime?)repairRows[i + 1].TimestampUTC
+                    : null;
                 try
                 {
-                    await cleanedService.RepairAndPersistAsync(row.Id, sessionTuiOutput, cancellationToken);
+                    await cleanedService.RepairAndPersistAsync(row.Id, sessionTuiOutput, nextTs, cancellationToken);
                 }
                 catch (Exception ex)
                 {

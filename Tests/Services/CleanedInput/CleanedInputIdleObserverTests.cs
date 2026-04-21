@@ -53,6 +53,7 @@ public class CleanedInputIdleObserverTests
             s => s.CleanAndPersistAsync(
                 7,
                 It.Is<string>(text => text.Contains(">> What was worked on", StringComparison.Ordinal)),
+                It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }

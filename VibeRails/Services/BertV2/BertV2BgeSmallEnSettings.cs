@@ -8,6 +8,9 @@ public class BertV2BgeSmallEnSettings : IBertSettings
     public string ModelPath { get; }
     public string VocabPath { get; }
     public string DataDirectory { get; }
+    public string ModelName => "BGE-small-en-v1.5";
+    public int EmbeddingDimension => BertSearchSchema.EmbeddingDimension;
+    public int MaxSequenceLength => 512;
 
     public BertV2BgeSmallEnSettings()
     {

@@ -62,10 +62,13 @@ public class CleanedInputIdleObserver : ITerminalIoObserver
                 continue;
 
             var windowText = Encoding.UTF8.GetString(windowBytes);
+            var nextInputTs = i < uncleaned.Count - 1
+                ? (DateTime?)uncleaned[i + 1].TimestampUTC
+                : null;
 
             try
             {
-                await _cleanedService.CleanAndPersistAsync(input.Id, windowText, cancellationToken);
+                await _cleanedService.CleanAndPersistAsync(input.Id, windowText, nextInputTs, cancellationToken);
             }
             catch (Exception ex)
             {

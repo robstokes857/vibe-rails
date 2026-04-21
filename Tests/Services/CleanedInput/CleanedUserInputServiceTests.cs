@@ -147,6 +147,63 @@ public class CleanedUserInputServiceTests
     }
 
     [Fact]
+    public async Task CleanAndPersistAsync_PersistsEmpty_WhenSupersededByRapidNextInput()
+    {
+        // User typed a prompt, hit ESC within a few seconds, and re-submitted.
+        // The first row should be marked superseded (cleaned = "") so it doesn't
+        // pollute search results with an abandoned draft.
+        var repo = new Mock<IRepository>();
+        repo.Setup(r => r.IsInputCleanedAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        var now = DateTime.UtcNow;
+        repo.Setup(r => r.GetUserInputByIdAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UserInputRecord(
+                Id: 7,
+                SessionId: "session-1",
+                Sequence: 1,
+                InputText: "this was a mistake let me retype",
+                GitCommitHash: null,
+                TimestampUTC: now));
+
+        var svc = CreateService(repo);
+        var nextTs = now.AddSeconds(3); // within SupersededWindowSeconds (15)
+        await svc.CleanAndPersistAsync(7, sessionTuiOutput: null, nextInputTimestampUtc: nextTs);
+
+        repo.Verify(
+            r => r.CreateCleanedAndLinkAsync(
+                "session-1", 7, "",
+                It.IsAny<DateTime>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task CleanAndPersistAsync_PersistsCleanedText_WhenNextInputIsFarEnoughAway()
+    {
+        var repo = new Mock<IRepository>();
+        repo.Setup(r => r.IsInputCleanedAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        var now = DateTime.UtcNow;
+        repo.Setup(r => r.GetUserInputByIdAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UserInputRecord(
+                Id: 7,
+                SessionId: "session-1",
+                Sequence: 1,
+                InputText: "legitimate prompt text",
+                GitCommitHash: null,
+                TimestampUTC: now));
+
+        var svc = CreateService(repo);
+        var nextTs = now.AddMinutes(1); // well outside the supersede window
+        await svc.CleanAndPersistAsync(7, sessionTuiOutput: null, nextInputTimestampUtc: nextTs);
+
+        repo.Verify(
+            r => r.CreateCleanedAndLinkAsync(
+                "session-1", 7, "legitimate prompt text",
+                It.IsAny<DateTime>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
     public void CleanText_StripsPromptPrefix()
     {
         var svc = CreateService(new Mock<IRepository>());

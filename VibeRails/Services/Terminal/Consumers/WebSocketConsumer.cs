@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Threading.Channels;
+using Serilog;
 
 namespace VibeRails.Services.Terminal.Consumers;
 
@@ -36,7 +37,7 @@ public sealed class WebSocketConsumer : ITerminalConsumer, IDisposable
             return;
 
         var syncOutputActiveAfterFrame = _isSyncOutputActive?.Invoke() == true;
-        _outbound.Writer.TryWrite(new OutboundFrame(data.ToArray(), syncOutputActiveAfterFrame));
+        _outbound.Writer.TryWrite(new OutboundFrame(data.ToArray(), syncOutputActiveAfterFrame, Stopwatch.GetTimestamp()));
     }
 
     public void Dispose()
@@ -58,8 +59,10 @@ public sealed class WebSocketConsumer : ITerminalConsumer, IDisposable
 
                 int totalLen = 0;
                 var syncOutputActive = false;
+                long firstFrameEnqueuedTs = frame.EnqueuedTimestamp;
                 AddFrame(frame);
                 var batchStarted = Stopwatch.GetTimestamp();
+                var coalesceRounds = 0;
 
                 while (true)
                 {
@@ -69,6 +72,7 @@ public sealed class WebSocketConsumer : ITerminalConsumer, IDisposable
                     var waitForDataTask = _outbound.Reader.WaitToReadAsync(_ct).AsTask();
                     var delayTask = Task.Delay(delayMs, _ct);
                     var completed = await Task.WhenAny(waitForDataTask, delayTask);
+                    coalesceRounds++;
 
                     if (completed == waitForDataTask)
                     {
@@ -108,7 +112,13 @@ public sealed class WebSocketConsumer : ITerminalConsumer, IDisposable
                     }
                 }
 
+                var coalesceHoldMs = Stopwatch.GetElapsedTime(firstFrameEnqueuedTs).TotalMilliseconds;
+                var sendStartTs = Stopwatch.GetTimestamp();
                 await _webSocket.SendAsync(payload, WebSocketMessageType.Binary, true, _ct);
+                var sendMs = Stopwatch.GetElapsedTime(sendStartTs).TotalMilliseconds;
+                Log.Debug(
+                    "[TypingLag] WS send frames={Frames} bytes={Bytes} coalesceRounds={Rounds} holdMs={HoldMs:F3} sendMs={SendMs:F3} syncOut={SyncOut}",
+                    frames.Count, totalLen, coalesceRounds, coalesceHoldMs, sendMs, syncOutputActive);
 
                 void AddFrame(OutboundFrame outboundFrame)
                 {
@@ -130,5 +140,6 @@ public sealed class WebSocketConsumer : ITerminalConsumer, IDisposable
 
     private readonly record struct OutboundFrame(
         byte[] Payload,
-        bool SyncOutputActiveAfterFrame);
+        bool SyncOutputActiveAfterFrame,
+        long EnqueuedTimestamp);
 }

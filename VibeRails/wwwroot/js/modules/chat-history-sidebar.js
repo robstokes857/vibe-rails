@@ -96,8 +96,7 @@ export class ChatHistorySidebar {
                     <div class="ch-context-menu-divider"></div>
                     <div class="ch-context-menu-item" data-action="get-transcript">Get Transcript</div>
                     <div class="ch-context-menu-item" data-action="get-session">Get Session</div>
-                    <div class="ch-context-menu-item" data-action="get-raw-session">Get Raw Session</div>
-                    <div class="ch-context-menu-item" data-action="get-user-text">Get User Text</div>
+                    <div class="ch-context-menu-item" data-action="get-raw-session">Session Data Dump</div>
                 </div>
             </div>`;
     }
@@ -203,17 +202,6 @@ export class ChatHistorySidebar {
                 });
             }
         });
-        contextMenu?.querySelector('[data-action="get-user-text"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this._closeContextMenu();
-            if (this.activeItem) {
-                void SessionDebug.downloadUserText(this.activeItem.id).catch(error => {
-                    const message = error?.message || 'Unknown error';
-                    this.app.showError(`Failed to download user text: ${message}`);
-                });
-            }
-        });
-
         const searchInput = root.querySelector('#ch-search-input');
         searchInput?.addEventListener('input', (e) => {
             this.filterText = e.target.value.toLowerCase().trim();
