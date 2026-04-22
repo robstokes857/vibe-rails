@@ -140,108 +140,113 @@
                             </span>
                         </div>
                         <div class="card-body p-2">
-                            <div class="d-flex flex-wrap gap-2">
-                                <!-- VS Code -->
-                                <div class="quick-launch-card quick-launch-card-vscode">
-                                    <div class="ql-logo-container">
-                                        <img src="assets/img/vscode.svg" alt="VS Code" class="ql-logo">
-                                    </div>
-                                    <div class="ql-name">VS Code</div>
-                                    <div class="ql-actions">
-                                        <button class="btn btn-sm btn-outline-primary w-100 py-1" type="button"
-                                            data-action="launch-vscode" title="Open project in VS Code">VS Code</button>
-                                    </div>
-                                </div>
-                                <!-- Claude -->
-                                <div class="quick-launch-card">
-                                    <div class="ql-logo-container">
-                                        <img src="assets/img/claude-color.svg" alt="Claude" class="ql-logo">
-                                    </div>
-                                    <div class="ql-name">Claude</div>
-                                    <div class="ql-actions d-flex gap-1">
-                                        <button
-                                            class="btn btn-sm btn-outline-secondary flex-grow-1 d-flex align-items-center justify-content-center gap-1"
-                                            type="button" data-action="launch-native-terminal" data-cli="claude"
-                                            title="Native Terminal">
-                                            <i class="fa-solid fa-terminal"></i>
-                                            <span>Native Terminal</span>
-                                        </button>
-                                        <button
-                                            class="btn btn-sm btn-outline-success flex-grow-1 d-flex align-items-center justify-content-center gap-1"
-                                            type="button" data-action="launch-web-terminal" data-cli="claude"
-                                            title="Web Terminal">
-                                            <i class="fa-solid fa-display"></i>
-                                            <span>Web Terminal</span>
-                                        </button>
+                            <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xxl-5 g-2">
+                                <div class="col">
+                                    <div class="quick-launch-card h-100">
+                                        <div class="ql-logo-container">
+                                            <img src="assets/img/vscode.svg" alt="VS Code" class="ql-logo">
+                                        </div>
+                                        <div class="ql-name">VS Code</div>
+                                        <div class="ql-actions">
+                                            <button class="btn btn-sm btn-outline-primary w-100 py-1" type="button"
+                                                data-action="launch-vscode" title="Open project in VS Code">VS Code</button>
+                                        </div>
                                     </div>
                                 </div>
-                                <!-- Gemini -->
-                                <div class="quick-launch-card">
-                                    <div class="ql-logo-container">
-                                        <img src="assets/img/gemini-color.svg" alt="Gemini" class="ql-logo">
-                                    </div>
-                                    <div class="ql-name">Gemini</div>
-                                    <div class="ql-actions d-flex gap-1">
-                                        <button
-                                            class="btn btn-sm btn-outline-secondary flex-grow-1 d-flex align-items-center justify-content-center gap-1"
-                                            type="button" data-action="launch-native-terminal" data-cli="gemini"
-                                            title="Native Terminal">
-                                            <i class="fa-solid fa-terminal"></i>
-                                            <span>Native Terminal</span>
-                                        </button>
-                                        <button
-                                            class="btn btn-sm btn-outline-success flex-grow-1 d-flex align-items-center justify-content-center gap-1"
-                                            type="button" data-action="launch-web-terminal" data-cli="gemini"
-                                            title="Web Terminal">
-                                            <i class="fa-solid fa-display"></i>
-                                            <span>Web Terminal</span>
-                                        </button>
-                                    </div>
-                                </div>
-                                <!-- Codex -->
-                                <div class="quick-launch-card">
-                                    <div class="ql-logo-container">
-                                        <img src="assets/img/openai.svg" alt="Codex" class="ql-logo icon-light">
-                                    </div>
-                                    <div class="ql-name">Codex</div>
-                                    <div class="ql-actions d-flex gap-1">
-                                        <button
-                                            class="btn btn-sm btn-outline-secondary flex-grow-1 d-flex align-items-center justify-content-center gap-1"
-                                            type="button" data-action="launch-native-terminal" data-cli="codex"
-                                            title="Native Terminal">
-                                            <i class="fa-solid fa-terminal"></i>
-                                            <span>Native Terminal</span>
-                                        </button>
-                                        <button
-                                            class="btn btn-sm btn-outline-success flex-grow-1 d-flex align-items-center justify-content-center gap-1"
-                                            type="button" data-action="launch-web-terminal" data-cli="codex"
-                                            title="Web Terminal">
-                                            <i class="fa-solid fa-display"></i>
-                                            <span>Web Terminal</span>
-                                        </button>
+                                <div class="col">
+                                    <div class="quick-launch-card h-100">
+                                        <div class="ql-logo-container">
+                                            <img src="assets/img/claude-color.svg" alt="Claude" class="ql-logo">
+                                        </div>
+                                        <div class="ql-name">Claude</div>
+                                        <div class="ql-actions ql-actions-dual">
+                                            <button
+                                                class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1"
+                                                type="button" data-action="launch-native-terminal" data-cli="claude"
+                                                title="Native Terminal">
+                                                <i class="fa-solid fa-terminal"></i>
+                                                <span>Native Terminal</span>
+                                            </button>
+                                            <button
+                                                class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1"
+                                                type="button" data-action="launch-web-terminal" data-cli="claude"
+                                                title="Web Terminal">
+                                                <i class="fa-solid fa-display"></i>
+                                                <span>Web Terminal</span>
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
-                                <!-- Copilot -->
-                                <div class="quick-launch-card">
-                                    <div class="ql-logo-container">
-                                        <img src="assets/img/copilot.svg" alt="Copilot" class="ql-logo">
+                                <div class="col">
+                                    <div class="quick-launch-card h-100">
+                                        <div class="ql-logo-container">
+                                            <img src="assets/img/gemini-color.svg" alt="Gemini" class="ql-logo">
+                                        </div>
+                                        <div class="ql-name">Gemini</div>
+                                        <div class="ql-actions ql-actions-dual">
+                                            <button
+                                                class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1"
+                                                type="button" data-action="launch-native-terminal" data-cli="gemini"
+                                                title="Native Terminal">
+                                                <i class="fa-solid fa-terminal"></i>
+                                                <span>Native Terminal</span>
+                                            </button>
+                                            <button
+                                                class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1"
+                                                type="button" data-action="launch-web-terminal" data-cli="gemini"
+                                                title="Web Terminal">
+                                                <i class="fa-solid fa-display"></i>
+                                                <span>Web Terminal</span>
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div class="ql-name">Copilot</div>
-                                    <div class="ql-actions d-flex gap-1">
-                                        <button
-                                            class="btn btn-sm btn-outline-secondary flex-grow-1 d-flex align-items-center justify-content-center gap-1"
-                                            type="button" data-action="launch-native-terminal" data-cli="copilot"
-                                            title="Native Terminal">
-                                            <i class="fa-solid fa-terminal"></i>
-                                            <span>Native Terminal</span>
-                                        </button>
-                                        <button
-                                            class="btn btn-sm btn-outline-success flex-grow-1 d-flex align-items-center justify-content-center gap-1"
-                                            type="button" data-action="launch-web-terminal" data-cli="copilot"
-                                            title="Web Terminal">
-                                            <i class="fa-solid fa-display"></i>
-                                            <span>Web Terminal</span>
-                                        </button>
+                                </div>
+                                <div class="col">
+                                    <div class="quick-launch-card h-100">
+                                        <div class="ql-logo-container">
+                                            <img src="assets/img/openai.svg" alt="Codex" class="ql-logo icon-light">
+                                        </div>
+                                        <div class="ql-name">Codex</div>
+                                        <div class="ql-actions ql-actions-dual">
+                                            <button
+                                                class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1"
+                                                type="button" data-action="launch-native-terminal" data-cli="codex"
+                                                title="Native Terminal">
+                                                <i class="fa-solid fa-terminal"></i>
+                                                <span>Native Terminal</span>
+                                            </button>
+                                            <button
+                                                class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1"
+                                                type="button" data-action="launch-web-terminal" data-cli="codex"
+                                                title="Web Terminal">
+                                                <i class="fa-solid fa-display"></i>
+                                                <span>Web Terminal</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col">
+                                    <div class="quick-launch-card h-100">
+                                        <div class="ql-logo-container">
+                                            <img src="assets/img/copilot.svg" alt="Copilot" class="ql-logo">
+                                        </div>
+                                        <div class="ql-name">Copilot</div>
+                                        <div class="ql-actions ql-actions-dual">
+                                            <button
+                                                class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1"
+                                                type="button" data-action="launch-native-terminal" data-cli="copilot"
+                                                title="Native Terminal">
+                                                <i class="fa-solid fa-terminal"></i>
+                                                <span>Native Terminal</span>
+                                            </button>
+                                            <button
+                                                class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1"
+                                                type="button" data-action="launch-web-terminal" data-cli="copilot"
+                                                title="Web Terminal">
+                                                <i class="fa-solid fa-display"></i>
+                                                <span>Web Terminal</span>
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -332,86 +337,114 @@
                     <div class="text-muted small opacity-50" style="font-size: 0.7rem;" data-env-time></div>
                 </div>
             </div>
-            <div class="d-flex gap-2 mt-2">
-                <button
-                    class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1 flex-grow-1"
-                    type="button" data-env-launch title="Native Terminal">
-                    <i class="fa-solid fa-terminal"></i>
-                    <span data-env-launch-text>Native</span>
-                </button>
-                <button
-                    class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1 flex-grow-1"
-                    type="button" data-env-launch-webui title="Web Terminal">
-                    <i class="fa-solid fa-display"></i>
-                    <span>Web</span>
-                </button>
-                <button
-                    class="btn btn-sm btn-outline-danger d-flex align-items-center justify-content-center gap-1 flex-grow-1"
-                    type="button" data-env-delete title="Delete">
-                    <i class="fa-solid fa-trash"></i>
-                    <span>Delete</span>
-                </button>
+            <div class="row g-2 mt-2">
+                <div class="col-12 col-sm-4 d-grid">
+                    <button
+                        class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1 w-100"
+                        type="button" data-env-launch title="Native Terminal">
+                        <i class="fa-solid fa-terminal"></i>
+                        <span data-env-launch-text>Native</span>
+                    </button>
+                </div>
+                <div class="col-12 col-sm-4 d-grid">
+                    <button
+                        class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1 w-100"
+                        type="button" data-env-launch-webui title="Web Terminal">
+                        <i class="fa-solid fa-display"></i>
+                        <span>Web</span>
+                    </button>
+                </div>
+                <div class="col-12 col-sm-4 d-grid">
+                    <button
+                        class="btn btn-sm btn-outline-danger d-flex align-items-center justify-content-center gap-1 w-100"
+                        type="button" data-env-delete title="Delete">
+                        <i class="fa-solid fa-trash"></i>
+                        <span>Delete</span>
+                    </button>
+                </div>
             </div>
-        </div>
         </div>
     </template>
 
     <template id="sandbox-item-template">
         <div class="sandbox-item-card" data-sandbox-item>
-            <div class="sandbox-item-header">
-                <div class="sandbox-item-info">
+            <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2 mb-2">
+                <div class="d-flex flex-wrap align-items-center gap-2 flex-grow-1 min-w-0">
                     <span class="sandbox-item-name" data-sandbox-name></span>
                     <span class="sandbox-item-branch" data-sandbox-branch></span>
                     <span class="sandbox-item-path text-muted small" data-sandbox-path></span>
                 </div>
                 <span class="sandbox-item-time" data-sandbox-time></span>
             </div>
-            <div class="sandbox-item-actions mt-3 d-flex flex-column gap-2">
-                <!-- Row 1: Git & Code Actions -->
-                <div class="sandbox-item-git-actions d-flex gap-2">
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 flex-grow-1"
-                        type="button" data-sandbox-diff title="View Diff">
-                        <i class="fa-solid fa-code-compare"></i>
-                        <span>Diff</span>
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 flex-grow-1"
-                        type="button" data-sandbox-merge-local title="Merge into local branch">
-                        <i class="fa-solid fa-code-merge"></i>
-                        <span>Merge</span>
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 flex-grow-1"
-                        type="button" data-sandbox-push-remote title="Push to remote">
-                        <i class="fa-solid fa-cloud-arrow-up"></i>
-                        <span>Push</span>
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 flex-grow-1"
-                        type="button" data-sandbox-vscode title="Open in VS Code">
-                        <img src="assets/img/vscode.svg" alt="" class="icon-light" style="width: 13px; height: 13px;">
-                        <span>Code</span>
-                    </button>
+            <div class="row g-2 mt-3">
+                <div class="col-12">
+                    <div class="row g-2 row-cols-2 row-cols-xl-4">
+                        <div class="col d-grid">
+                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 w-100"
+                                type="button" data-sandbox-diff title="View Diff">
+                                <i class="fa-solid fa-code-compare"></i>
+                                <span>Diff</span>
+                            </button>
+                        </div>
+                        <div class="col d-grid">
+                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 w-100"
+                                type="button" data-sandbox-merge-local title="Merge into local branch">
+                                <i class="fa-solid fa-code-merge"></i>
+                                <span>Merge</span>
+                            </button>
+                        </div>
+                        <div class="col d-grid">
+                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 w-100"
+                                type="button" data-sandbox-push-remote title="Push to remote">
+                                <i class="fa-solid fa-cloud-arrow-up"></i>
+                                <span>Push</span>
+                            </button>
+                        </div>
+                        <div class="col d-grid">
+                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 w-100"
+                                type="button" data-sandbox-vscode title="Open in VS Code">
+                                <img src="assets/img/vscode.svg" alt="" class="icon-light" style="width: 13px; height: 13px;">
+                                <span>Code</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
-
-                <!-- Row 2: Launch Actions -->
-                <div class="sandbox-item-launch d-flex gap-2">
-                    <select class="form-select form-select-sm sandbox-item-cli-select flex-grow-1"
-                        data-sandbox-cli-select style="width: auto; min-width: 140px;">
-                        <option value="" disabled selected>Select LLM...</option>
-                    </select>
-                    <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 flex-grow-1"
-                        type="button" data-sandbox-launch-cli title="Native Terminal">
-                        <i class="fa-solid fa-terminal"></i>
-                        <span>Native</span>
-                    </button>
-                    <button class="btn btn-sm btn-outline-success d-flex align-items-center gap-1 flex-grow-1"
-                        type="button" data-sandbox-launch-webui title="Web Terminal">
-                        <i class="fa-solid fa-display"></i>
-                        <span>Web</span>
-                    </button>
-                    <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1 flex-grow-1"
-                        type="button" data-sandbox-delete title="Delete sandbox">
-                        <i class="fa-solid fa-trash"></i>
-                        <span>Delete</span>
-                    </button>
+                <div class="col-12">
+                    <div class="row g-2 align-items-stretch">
+                        <div class="col-12 col-lg-4">
+                            <select class="form-select form-select-sm sandbox-item-cli-select w-100"
+                                data-sandbox-cli-select>
+                                <option value="" disabled selected>Select LLM...</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-sm-4 col-lg">
+                            <div class="d-grid">
+                                <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 w-100"
+                                    type="button" data-sandbox-launch-cli title="Native Terminal">
+                                    <i class="fa-solid fa-terminal"></i>
+                                    <span>Native</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-12 col-sm-4 col-lg">
+                            <div class="d-grid">
+                                <button class="btn btn-sm btn-outline-success d-flex align-items-center gap-1 w-100"
+                                    type="button" data-sandbox-launch-webui title="Web Terminal">
+                                    <i class="fa-solid fa-display"></i>
+                                    <span>Web</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-12 col-sm-4 col-lg">
+                            <div class="d-grid">
+                                <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1 w-100"
+                                    type="button" data-sandbox-delete title="Delete sandbox">
+                                    <i class="fa-solid fa-trash"></i>
+                                    <span>Delete</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1081,7 +1114,7 @@
             <div class="row justify-content-center">
                 <div class="col-md-8 col-lg-6 mb-4">
                     <div class="sandbox-item-card mb-3 text-start">
-                        <div class="sandbox-item-header mb-3">
+                        <div class="mb-3">
                             <span class="sandbox-item-name">Remote PIN Lock</span>
                         </div>
                         <div class="pin-section-row mb-3">
@@ -1127,7 +1160,7 @@
             <div class="row justify-content-center">
                 <div class="col-md-8 col-lg-6">
                     <div class="sandbox-item-card text-start">
-                        <div class="sandbox-item-header mb-3">
+                        <div class="mb-3">
                             <span class="sandbox-item-name">Application Settings</span>
                         </div>
                         <form id="app-settings-form">

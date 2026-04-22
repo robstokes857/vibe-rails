@@ -220,6 +220,7 @@ export class WebviewPanelManager {
     <meta http-equiv="Content-Security-Policy" content="${csp}">
     <base href="${assetsBaseUri}/">
     <script nonce="${nonce}">
+        document.documentElement.dataset.viberailsHost = 'vscode';
         window.__viberails_API_BASE__ = '${loopbackHttpOrigin}';
         window.__viberails_VSCODE__ = true;
         window.__viberails_ASSETS_BASE__ = '${assetsBaseUri}';
