@@ -119,7 +119,8 @@ export class VibeRailsAiController {
         if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
         if (tabToken) headers.set('viberails_tab', tabToken);
 
-        const res = await fetch(url, { credentials: 'include', cache: 'no-store', ...init, headers });
+        const baseUrl = window.__viberails_API_BASE__ || '';
+        const res = await fetch(baseUrl + url, { credentials: 'include', cache: 'no-store', ...init, headers });
         const text = await res.text();
         let data = {};
         if (text) { try { data = JSON.parse(text); } catch { data = { message: text }; } }
