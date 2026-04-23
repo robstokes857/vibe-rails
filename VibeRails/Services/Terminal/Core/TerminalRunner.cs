@@ -386,10 +386,14 @@ public class TerminalRunner
         if (Interlocked.Exchange(ref s_emergencyShutdownRequested, 1) == 1)
             return;
 
+        ShutdownDiagnostics.RecordStopRequest(
+            "TerminalRunner.EmergencyShutdown",
+            $"message={message}; processId={Environment.ProcessId}");
         Log.Error("[PIN] {Message}", message);
 
         if (_appLifetime != null)
         {
+            Log.Error("[PIN] Requesting host shutdown for emergency stop. processId={ProcessId}", Environment.ProcessId);
             _appLifetime.StopApplication();
         }
         else
@@ -404,6 +408,7 @@ public class TerminalRunner
                 // Give graceful shutdown a brief chance, then force-kill process tree.
                 await Task.Delay(TimeSpan.FromSeconds(1.5));
                 using var currentProcess = System.Diagnostics.Process.GetCurrentProcess();
+                Log.Error("[PIN] Force-killing process tree after emergency shutdown grace period. processId={ProcessId}", currentProcess.Id);
                 try
                 {
                     currentProcess.Kill(entireProcessTree: true);

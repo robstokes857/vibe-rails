@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs';
 
 export class BackendManager {
     private process: cp.ChildProcess | null = null;
@@ -40,19 +43,40 @@ export class BackendManager {
             throw new Error('No workspace folder is open. Open a project folder in VS Code before starting VibeRails.');
         }
         const cwd = targetProjectFolder;
+        const launchArgs = this.buildLaunchArgs();
 
         this.outputChannel.appendLine(`Starting VibeRails: ${this.exePath}`);
         this.outputChannel.appendLine(`Working directory: ${cwd}`);
+        this.outputChannel.appendLine(`Extension host PID: ${process.pid}`);
+        this.outputChannel.appendLine(`Launch args: ${launchArgs.join(' ')}`);
         this.outputChannel.show(true);
 
+        // Ensure a crash dump location exists so native crashes (0xC0000005 etc.)
+        // produce a minidump we can actually debug. The .NET runtime writes
+        // DOTNET_DbgMiniDumpName at the path below; %d expands to the PID.
+        const crashDir = path.join(os.homedir(), '.vibe_rails', 'crashdumps');
+        try { fs.mkdirSync(crashDir, { recursive: true }); } catch { /* best effort */ }
+        const crashDumpPath = path.join(crashDir, 'vb-crash.%d.dmp');
+        this.outputChannel.appendLine(`Crash dump path: ${crashDumpPath}`);
+
+        const childEnv: NodeJS.ProcessEnv = {
+            ...process.env,
+            DOTNET_DbgEnableMiniDump: '1',
+            DOTNET_DbgMiniDumpType: '2',
+            DOTNET_DbgMiniDumpName: crashDumpPath,
+        };
+
         return new Promise((resolve, reject) => {
-            this.process = cp.spawn(this.exePath, this.buildLaunchArgs(), {
+            this.process = cp.spawn(this.exePath, launchArgs, {
                 cwd,
                 stdio: ['pipe', 'pipe', 'pipe'],
                 shell: false,
-                windowsHide: true
+                windowsHide: true,
+                env: childEnv
             });
             const child = this.process;
+            const launchedAt = Date.now();
+            this.outputChannel.appendLine(`[Extension] Spawned backend PID ${child.pid ?? 'unknown'}`);
 
             let resolved = false;
             let stdoutBuffer = '';
@@ -74,6 +98,9 @@ export class BackendManager {
                     const bootstrapUrl = line.slice('vs-code-v1='.length).trim();
                     this.bootstrapUrl = bootstrapUrl;
                     this.port = parseInt(new URL(bootstrapUrl).port, 10);
+                    this.outputChannel.appendLine(
+                        `[Extension] Backend ready on port ${this.port} (PID ${child.pid ?? 'unknown'})`
+                    );
                     resolved = true;
                     this._onPortDetected.fire(this.port);
                     resolve(this.port!);
@@ -86,12 +113,16 @@ export class BackendManager {
             });
 
             child.on('error', (err) => {
+                this.outputChannel.appendLine(`[Extension] Backend process error: ${err.message}`);
                 this.cleanup(child);
                 if (!resolved) { reject(err); }
             });
 
             child.on('exit', (code, signal) => {
-                this.outputChannel.appendLine(`[Extension] Process exited (code: ${code}, signal: ${signal})`);
+                const uptimeMs = Date.now() - launchedAt;
+                this.outputChannel.appendLine(
+                    `[Extension] Process exited (pid: ${child.pid ?? 'unknown'}, code: ${code}, signal: ${signal}, uptimeMs: ${uptimeMs}, lastPort: ${this.port ?? 'n/a'})`
+                );
                 this.cleanup(child);
                 if (!resolved) {
                     reject(new Error(`Backend exited before starting (code: ${code})`));
@@ -108,12 +139,11 @@ export class BackendManager {
     }
 
     private buildLaunchArgs(): string[] {
-        const args = ['--vs-code-v1'];
-        const parentPid = typeof process.pid === 'number' ? process.pid : 0;
-        if (parentPid > 0) {
-            args.push('--parent-pid', String(parentPid));
-        }
-        return args;
+        // Do not attach the root VS Code backend to the extension-host PID.
+        // VS Code can recycle that host process, and the parent watchdog will
+        // then kill a healthy vb.exe instance even while the dashboard is open.
+        // Child tab processes still opt into parent-linked cleanup separately.
+        return ['--vs-code-v1'];
     }
 
     public async stop(): Promise<void> {

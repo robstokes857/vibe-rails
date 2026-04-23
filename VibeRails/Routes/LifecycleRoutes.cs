@@ -1,5 +1,7 @@
+using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Utils;
 
 namespace VibeRails.Routes;
 
@@ -37,8 +39,13 @@ public static class LifecycleRoutes
             return Results.NoContent();
         }).WithName("LifecycleDisconnect");
 
-        app.MapPost("/api/v1/shutdown", (IHostApplicationLifetime hostApplicationLifetime) =>
+        app.MapPost("/api/v1/shutdown", (HttpContext context, IHostApplicationLifetime hostApplicationLifetime) =>
         {
+            var detail =
+                $"path={context.Request.Path}; clientId={context.Request.Query["clientId"].FirstOrDefault() ?? "n/a"}; remoteIp={context.Connection.RemoteIpAddress}; userAgent={context.Request.Headers.UserAgent.ToString()}";
+            ShutdownDiagnostics.RecordStopRequest("LifecycleRoutes.Shutdown", detail);
+            Log.Warning("[Lifecycle] Explicit shutdown requested. {Detail}", detail);
+
             // Delay stop very slightly so the HTTP response can be flushed.
             _ = Task.Run(async () =>
             {
