@@ -29,8 +29,47 @@ Log.Logger = new LoggerConfiguration()
         Path.Combine(logDir, "vb-.log"),
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 7,
+        buffered: false,
+        flushToDiskInterval: TimeSpan.FromMilliseconds(250),
         outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
+
+Log.Information(
+    "[Startup] Booting processId={ProcessId} launchDirectory={LaunchDirectory} exeDirectory={ExeDirectory} parentPid={ParentPid} argCount={ArgCount}",
+    Environment.ProcessId,
+    launchDirectory,
+    exeDirectory,
+    parentPid,
+    args.Length);
+
+AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+{
+    var typeName = eventArgs.ExceptionObject?.GetType().FullName ?? "unknown";
+    ShutdownDiagnostics.RecordStopRequest(
+        "AppDomain.UnhandledException",
+        $"type={typeName}; terminating={eventArgs.IsTerminating}; processId={Environment.ProcessId}");
+
+    if (eventArgs.ExceptionObject is Exception exception)
+    {
+        Log.Fatal(exception, "[Shutdown] Unhandled exception. terminating={IsTerminating}", eventArgs.IsTerminating);
+        return;
+    }
+
+    Log.Fatal(
+        "[Shutdown] Unhandled non-Exception object. type={Type} terminating={IsTerminating}",
+        typeName,
+        eventArgs.IsTerminating);
+};
+
+AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+{
+    var snapshot = ShutdownDiagnostics.GetSnapshot();
+    Log.Information(
+        "[Shutdown] ProcessExit observed. processId={ProcessId} diagnostics={Diagnostics}",
+        Environment.ProcessId,
+        ShutdownDiagnostics.FormatSnapshot(snapshot));
+    Log.CloseAndFlush();
+};
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
@@ -88,6 +127,12 @@ app.Lifetime.ApplicationStopping.Register(() =>
 {
     try
     {
+        var snapshot = ShutdownDiagnostics.GetSnapshot();
+        Log.Information(
+            "[Shutdown] ApplicationStopping. processId={ProcessId} diagnostics={Diagnostics}",
+            Environment.ProcessId,
+            ShutdownDiagnostics.FormatSnapshot(snapshot));
+
         var tabHost = app.Services.GetService<ITerminalTabHostService>();
         tabHost?.StopAllAsync(CancellationToken.None).GetAwaiter().GetResult();
 
@@ -146,6 +191,33 @@ _ = Task.Run(async () =>
 });
 
 // Configure middleware and routes BEFORE CliLoop so the app is ready to serve in all modes
+
+// Request logging — first in the pipeline so every request is traced on entry and exit.
+// Invaluable when the process dies silently: the last "[HTTP →]" with no matching "[HTTP ←]"
+// tells you exactly which endpoint was running at the time of death.
+app.Use(async (context, next) =>
+{
+    var sw = Stopwatch.StartNew();
+    var method = context.Request.Method;
+    var path = context.Request.Path.Value ?? string.Empty;
+    var query = context.Request.QueryString.Value ?? string.Empty;
+    var isWs = context.WebSockets.IsWebSocketRequest;
+    var tag = isWs ? "WS" : "HTTP";
+    Log.Information("[{Tag} →] {Method} {Path}{Query}", tag, method, path, query);
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        sw.Stop();
+        Log.Error(ex, "[{Tag} ✘] {Method} {Path} after {ElapsedMs}ms", tag, method, path, sw.ElapsedMilliseconds);
+        throw;
+    }
+    sw.Stop();
+    Log.Information("[{Tag} ←] {Method} {Path} → {Status} ({ElapsedMs}ms)", tag, method, path, context.Response.StatusCode, sw.ElapsedMilliseconds);
+});
+
 app.UseCors("VSCodeWebview");
 app.UseWebSockets();
 app.UseMiddleware<CookieAuthMiddleware>();  // Auth checks happen FIRST
@@ -172,9 +244,59 @@ if (exit)
     return;
 }
 
+Log.Information(
+    "[Startup] Parsed mode. processId={ProcessId} isVsCodeMode={IsVsCodeMode} isLMBootstrap={IsLMBootstrap} cli={Cli} parentPid={ParentPid}",
+    Environment.ProcessId,
+    parsedArgs.IsVsCodeMode,
+    parsedArgs.IsLMBootstrap,
+    parsedArgs.Cli ?? "n/a",
+    parentPid);
+
 // Start server in background (non-blocking)
 await app.StartAsync();
-StartParentProcessWatchdogIfNeeded(app, parentPid);
+StartParentProcessWatchdogIfNeeded(app, parentPid, parsedArgs.IsVsCodeMode);
+
+// Heartbeat — every 10s, emit uptime + resource stats. If the log has fresh heartbeats
+// right before a silent death, that proves the process was healthy until the crash
+// point, and gives a rough handle-count trend for leak detection.
+var heartbeatStart = DateTimeOffset.UtcNow;
+_ = Task.Run(async () =>
+{
+    try
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        while (await timer.WaitForNextTickAsync(app.Lifetime.ApplicationStopping))
+        {
+            try
+            {
+                using var proc = Process.GetCurrentProcess();
+                var up = DateTimeOffset.UtcNow - heartbeatStart;
+                var handles = proc.HandleCount;
+                var threads = proc.Threads.Count;
+                var wsMb = proc.WorkingSet64 / 1024 / 1024;
+                var gcMb = GC.GetTotalMemory(false) / 1024 / 1024;
+                ThreadPool.GetAvailableThreads(out var workerAvail, out var ioAvail);
+                Log.Information(
+                    "[Heartbeat] up={Uptime} handles={Handles} threads={Threads} workingSetMB={Ws} gcMB={Gc} tpAvail={WorkerAvail}/{IoAvail}",
+                    up.ToString(@"hh\:mm\:ss"),
+                    handles,
+                    threads,
+                    wsMb,
+                    gcMb,
+                    workerAvail,
+                    ioAvail);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[Heartbeat] sample failed");
+            }
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        // Normal shutdown.
+    }
+});
 
 
 string serverUrl = $"http://localhost:{port}";
@@ -195,12 +317,10 @@ string bootstrapCode = authService.GenerateBootstrapCode();
 string bootstrapUrl = $"{serverUrl}/auth/bootstrap?code={bootstrapCode}";
 string vsCodeV1Url = $"vs-code-v1={bootstrapUrl}";
 
-// Encode user-supplied args (strip internal flags) for pass-through to new instances
-var redirectArgs = args
-    .Where(a => !a.StartsWith("--parent-pid", StringComparison.OrdinalIgnoreCase)
-             && !a.StartsWith("--vs", StringComparison.OrdinalIgnoreCase)
-             && a is not ("--open-browser" or "--launch-browser" or "--launch-web" or "--web"))
-    .ToArray();
+// Encode user-supplied args (strip internal flags) for pass-through to new instances.
+// `--parent-pid` may be passed as two tokens; strip both the flag and its value so
+// internal PIDs do not leak into redirectArgs.
+var redirectArgs = GetRedirectArgs(args);
 
 if (redirectArgs.Length > 0)
 {
@@ -214,6 +334,11 @@ var isVsCodeMode = args.Any(a => a.Contains("--vs"));
 // Don't wait for git detection — the frontend handles the "not in git" state dynamically.
 if (isVsCodeMode)
 {
+    Log.Information(
+        "[Startup] Running in VS Code mode. processId={ProcessId} serverUrl={ServerUrl} parentPid={ParentPid}",
+        Environment.ProcessId,
+        serverUrl,
+        parentPid);
     Console.WriteLine($"vs-code-v1={bootstrapUrl}");
     Console.Out.Flush();
 }
@@ -246,6 +371,10 @@ Console.WriteLine();
 
 // Wait for shutdown signal (Ctrl+C or parent-PID watchdog)
 await app.WaitForShutdownAsync(app.Lifetime.ApplicationStopping);
+Log.Information(
+    "[Shutdown] WaitForShutdownAsync completed. processId={ProcessId} diagnostics={Diagnostics}",
+    Environment.ProcessId,
+    ShutdownDiagnostics.FormatSnapshot(ShutdownDiagnostics.GetSnapshot()));
 static int? TryGetParentPid(string[] args)
 {
     for (var i = 0; i < args.Length; i++)
@@ -270,31 +399,109 @@ static int? TryGetParentPid(string[] args)
     return null;
 }
 
-static void StartParentProcessWatchdogIfNeeded(WebApplication app, int? parentPid)
+static string[] GetRedirectArgs(string[] args)
+{
+    var redirectArgs = new List<string>(args.Length);
+
+    for (var i = 0; i < args.Length; i++)
+    {
+        var arg = args[i];
+
+        if (arg.Equals("--parent-pid", StringComparison.OrdinalIgnoreCase))
+        {
+            if (i + 1 < args.Length)
+            {
+                i++;
+            }
+
+            continue;
+        }
+
+        if (arg.StartsWith("--parent-pid=", StringComparison.OrdinalIgnoreCase)
+            || arg.StartsWith("--vs", StringComparison.OrdinalIgnoreCase)
+            || arg is ("--open-browser" or "--launch-browser" or "--launch-web" or "--web"))
+        {
+            continue;
+        }
+
+        redirectArgs.Add(arg);
+    }
+
+    return redirectArgs.ToArray();
+}
+
+static void StartParentProcessWatchdogIfNeeded(WebApplication app, int? parentPid, bool isVsCodeMode)
 {
     if (!parentPid.HasValue || parentPid.Value <= 0)
         return;
 
     var pid = parentPid.Value;
+    var parentDescription = DescribeProcess(pid);
+    var parentName = TryGetProcessName(pid);
+
+    // VS Code terminal-tab children are spawned by another vb.exe instance.
+    // If a root VS Code backend is accidentally launched with the extension-host PID,
+    // ignore that parent relationship so a host recycle cannot kill a healthy server.
+    if (isVsCodeMode
+        && !string.IsNullOrWhiteSpace(parentName)
+        && !IsExpectedVsCodeParentProcessName(parentName))
+    {
+        Log.Warning(
+            "[ParentWatchdog] Ignoring VS Code parent {ParentPid} because parent process is not a VibeRails host. self={ProcessId} parentName={ParentName} probe={ParentDescription}",
+            pid,
+            Environment.ProcessId,
+            parentName,
+            parentDescription);
+        return;
+    }
+
+    Log.Information(
+        "[ParentWatchdog] Starting watchdog: parent={ParentPid} self={ProcessId} probe={ParentDescription}",
+        pid,
+        Environment.ProcessId,
+        parentDescription);
 
     if (!IsParentAlive(pid))
     {
-        Log.Warning("[ParentWatchdog] Parent process {ParentPid} already exited. Stopping.", pid);
+        ShutdownDiagnostics.RecordStopRequest(
+            "ParentWatchdog.Startup",
+            $"parentPid={pid}; self={Environment.ProcessId}; probe={parentDescription}");
+        Log.Warning("[ParentWatchdog] Parent process {ParentPid} already exited at startup. Stopping. probe={ParentDescription}", pid, parentDescription);
         app.Lifetime.StopApplication();
         return;
     }
 
+    // Require two consecutive "dead" observations before stopping — guards against
+    // a single transient failure that still leaks past IsParentAlive's defenses.
     _ = Task.Run(async () =>
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        var consecutiveDeadChecks = 0;
         try
         {
             while (await timer.WaitForNextTickAsync(app.Lifetime.ApplicationStopping))
             {
                 if (IsParentAlive(pid))
+                {
+                    consecutiveDeadChecks = 0;
+                    continue;
+                }
+
+                consecutiveDeadChecks++;
+                var deadDescription = DescribeProcess(pid);
+                Log.Warning(
+                    "[ParentWatchdog] Parent {ParentPid} reported dead (check {Count}/2). probe={ParentDescription}",
+                    pid,
+                    consecutiveDeadChecks,
+                    deadDescription);
+
+                if (consecutiveDeadChecks < 2)
                     continue;
 
-                Log.Warning("[ParentWatchdog] Parent process {ParentPid} exited. Stopping process {ProcessId}.", pid, Environment.ProcessId);
+                ShutdownDiagnostics.RecordStopRequest(
+                    "ParentWatchdog.Exit",
+                    $"parentPid={pid}; self={Environment.ProcessId}; probe={deadDescription}; consecutiveDeadChecks={consecutiveDeadChecks}");
+                Log.Warning("[ParentWatchdog] Parent process {ParentPid} exited. Stopping process {ProcessId}. probe={ParentDescription}", pid, Environment.ProcessId, deadDescription);
                 app.Lifetime.StopApplication();
                 break;
             }
@@ -306,6 +513,84 @@ static void StartParentProcessWatchdogIfNeeded(WebApplication app, int? parentPi
     });
 }
 
+static string? TryGetProcessName(int pid)
+{
+    try
+    {
+        using var process = Process.GetProcessById(pid);
+        return process.ProcessName;
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+static bool IsExpectedVsCodeParentProcessName(string parentName)
+{
+    string? currentProcessName;
+    try
+    {
+        using var currentProcess = Process.GetCurrentProcess();
+        currentProcessName = currentProcess.ProcessName;
+    }
+    catch
+    {
+        currentProcessName = null;
+    }
+
+    return (!string.IsNullOrWhiteSpace(currentProcessName)
+            && parentName.Equals(currentProcessName, StringComparison.OrdinalIgnoreCase))
+        || parentName.Equals("vb", StringComparison.OrdinalIgnoreCase);
+}
+
+static string DescribeProcess(int pid)
+{
+    try
+    {
+        using var process = Process.GetProcessById(pid);
+        string processName;
+        try
+        {
+            processName = process.ProcessName;
+        }
+        catch (Exception ex)
+        {
+            processName = $"error:{ex.GetType().Name}";
+        }
+
+        string startUtc;
+        try
+        {
+            startUtc = process.StartTime.ToUniversalTime().ToString("O");
+        }
+        catch (Exception ex)
+        {
+            startUtc = $"error:{ex.GetType().Name}";
+        }
+
+        bool hasExited;
+        try
+        {
+            hasExited = process.HasExited;
+        }
+        catch (Exception ex)
+        {
+            return $"pid={pid}; name={processName}; startUtc={startUtc}; hasExited=error:{ex.GetType().Name}";
+        }
+
+        return $"pid={pid}; name={processName}; startUtc={startUtc}; hasExited={hasExited}";
+    }
+    catch (ArgumentException)
+    {
+        return $"pid={pid}; missing=true";
+    }
+    catch (Exception ex)
+    {
+        return $"pid={pid}; describeError={ex.GetType().Name}:{ex.Message}";
+    }
+}
+
 static bool IsParentAlive(int pid)
 {
     try
@@ -313,9 +598,18 @@ static bool IsParentAlive(int pid)
         using var process = Process.GetProcessById(pid);
         return !process.HasExited;
     }
-    catch
+    catch (ArgumentException)
     {
+        // PID genuinely does not exist → parent is dead.
         return false;
+    }
+    catch (Exception ex)
+    {
+        // Transient failures (permissions, race on handle, Win32 errors) must not be
+        // treated as "parent dead" — that would kill us while the parent is still alive.
+        // Log so repeated failures surface, then assume alive.
+        Log.Warning(ex, "[ParentWatchdog] Transient IsParentAlive({Pid}) failure; assuming alive", pid);
+        return true;
     }
 }
 

@@ -9,6 +9,7 @@ public interface ILocalClientTracker
     void PulseOwner(string ownerId, TimeSpan ttl);
     void ReleaseOwner(string ownerId);
     bool HasActiveOwners { get; }
+    string GetDiagnosticsSummary();
 }
 
 public sealed class LocalClientTracker : ILocalClientTracker
@@ -74,6 +75,16 @@ public sealed class LocalClientTracker : ILocalClientTracker
         }
     }
 
+    public string GetDiagnosticsSummary()
+    {
+        var now = DateTimeOffset.UtcNow;
+        lock (_lock)
+        {
+            PruneExpiredLocked(now);
+            return BuildSummaryLocked(now);
+        }
+    }
+
     private void PruneExpiredLocked(DateTimeOffset now)
     {
         if (_pulseOwners.Count == 0)
@@ -88,6 +99,27 @@ public sealed class LocalClientTracker : ILocalClientTracker
         {
             _pulseOwners.Remove(key);
         }
+    }
+
+    private string BuildSummaryLocked(DateTimeOffset now)
+    {
+        var persistent = _persistentOwners
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+
+        var pulse = _pulseOwners
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .Select(x =>
+            {
+                var remaining = x.Value - now;
+                var remainingSeconds = Math.Max(0, (int)Math.Ceiling(remaining.TotalSeconds));
+                return $"{x.Key}(ttl={remainingSeconds}s)";
+            })
+            .ToArray();
+
+        var persistentSummary = persistent.Length == 0 ? "none" : string.Join(", ", persistent);
+        var pulseSummary = pulse.Length == 0 ? "none" : string.Join(", ", pulse);
+        return $"persistent[{persistent.Length}]={persistentSummary}; pulse[{pulse.Length}]={pulseSummary}";
     }
 }
 
@@ -104,11 +136,22 @@ public sealed class LocalClientLifecycleWatchdogService(
         var args = ParserConfigs.GetArguments();
         if (args.IsLMBootstrap || args.IsVsCodeMode)
         {
+            Log.Information(
+                "[Lifecycle] Watchdog disabled for current mode. isLMBootstrap={IsLMBootstrap} isVsCodeMode={IsVsCodeMode} processId={ProcessId}",
+                args.IsLMBootstrap,
+                args.IsVsCodeMode,
+                Environment.ProcessId);
             return;
         }
 
         var idleStartedUtc = DateTimeOffset.UtcNow;
         using var timer = new PeriodicTimer(CheckInterval);
+
+        Log.Information(
+            "[Lifecycle] Watchdog started. processId={ProcessId} checkIntervalSeconds={CheckIntervalSeconds} idleShutdownSeconds={IdleShutdownSeconds}",
+            Environment.ProcessId,
+            (int)CheckInterval.TotalSeconds,
+            (int)IdleShutdownTimeout.TotalSeconds);
 
         try
         {
@@ -125,10 +168,15 @@ public sealed class LocalClientLifecycleWatchdogService(
                     continue;
                 }
 
+                var ownerSummary = localClientTracker.GetDiagnosticsSummary();
+                var detail =
+                    $"idleSeconds={(int)IdleShutdownTimeout.TotalSeconds}; processId={Environment.ProcessId}; owners={ownerSummary}";
+                ShutdownDiagnostics.RecordStopRequest("LocalClientLifecycleWatchdog", detail);
                 Log.Warning(
-                    "[Lifecycle] No active local browser/terminal owner for {IdleSeconds}s. Stopping process {ProcessId}.",
+                    "[Lifecycle] No active local browser/terminal owner for {IdleSeconds}s. Stopping process {ProcessId}. owners={OwnerSummary}",
                     (int)IdleShutdownTimeout.TotalSeconds,
-                    Environment.ProcessId);
+                    Environment.ProcessId,
+                    ownerSummary);
                 hostApplicationLifetime.StopApplication();
                 break;
             }
