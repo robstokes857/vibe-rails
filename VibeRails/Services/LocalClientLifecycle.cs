@@ -9,6 +9,7 @@ public interface ILocalClientTracker
     void PulseOwner(string ownerId, TimeSpan ttl);
     void ReleaseOwner(string ownerId);
     bool HasActiveOwners { get; }
+    bool HasActiveOwnersWithPrefix(string ownerIdPrefix);
     string GetDiagnosticsSummary();
 }
 
@@ -75,6 +76,20 @@ public sealed class LocalClientTracker : ILocalClientTracker
         }
     }
 
+    public bool HasActiveOwnersWithPrefix(string ownerIdPrefix)
+    {
+        if (string.IsNullOrEmpty(ownerIdPrefix))
+            return false;
+
+        var now = DateTimeOffset.UtcNow;
+        lock (_lock)
+        {
+            PruneExpiredLocked(now);
+            return _persistentOwners.Any(x => x.StartsWith(ownerIdPrefix, StringComparison.Ordinal))
+                   || _pulseOwners.Keys.Any(x => x.StartsWith(ownerIdPrefix, StringComparison.Ordinal));
+        }
+    }
+
     public string GetDiagnosticsSummary()
     {
         var now = DateTimeOffset.UtcNow;
@@ -127,19 +142,22 @@ public sealed class LocalClientLifecycleWatchdogService(
     ILocalClientTracker localClientTracker,
     IHostApplicationLifetime hostApplicationLifetime) : BackgroundService
 {
+    private const string BrowserOwnerPrefix = "browser:";
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan IdleShutdownTimeout = TimeSpan.FromMinutes(2);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // In --env mode, lifetime is controlled by the foreground CLI loop.
+        // In --env mode, lifetime is controlled by the foreground CLI loop. In plain
+        // web-server mode, keep running until Ctrl+C unless the user launched with --web.
         var args = ParserConfigs.GetArguments();
-        if (args.IsLMBootstrap || args.IsVsCodeMode)
+        if (args.IsLMBootstrap || args.IsVsCodeMode || !args.ShutdownOnBrowserClose)
         {
             Log.Information(
-                "[Lifecycle] Watchdog disabled for current mode. isLMBootstrap={IsLMBootstrap} isVsCodeMode={IsVsCodeMode} processId={ProcessId}",
+                "[Lifecycle] Watchdog disabled for current mode. isLMBootstrap={IsLMBootstrap} isVsCodeMode={IsVsCodeMode} shutdownOnBrowserClose={ShutdownOnBrowserClose} processId={ProcessId}",
                 args.IsLMBootstrap,
                 args.IsVsCodeMode,
+                args.ShutdownOnBrowserClose,
                 Environment.ProcessId);
             return;
         }
@@ -157,7 +175,7 @@ public sealed class LocalClientLifecycleWatchdogService(
         {
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                if (localClientTracker.HasActiveOwners)
+                if (localClientTracker.HasActiveOwnersWithPrefix(BrowserOwnerPrefix))
                 {
                     idleStartedUtc = DateTimeOffset.UtcNow;
                     continue;

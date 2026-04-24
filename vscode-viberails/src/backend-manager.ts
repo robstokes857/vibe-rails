@@ -139,10 +139,10 @@ export class BackendManager {
     }
 
     private buildLaunchArgs(): string[] {
-        // Do not attach the root VS Code backend to the extension-host PID.
-        // VS Code can recycle that host process, and the parent watchdog will
-        // then kill a healthy vb.exe instance even while the dashboard is open.
-        // Child tab processes still opt into parent-linked cleanup separately.
+        // Do not pass --parent-pid here. The root backend must not tie its lifetime
+        // to the VS Code extension host, which VS Code can recycle independently of
+        // the dashboard. Per-tab child backends get --parent-pid from the root via
+        // TerminalTabHostService.SpawnChildAsync.
         return ['--vs-code-v1'];
     }
 

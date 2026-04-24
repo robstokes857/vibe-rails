@@ -18,7 +18,7 @@ public sealed class CleanedUserInputBackfillJob(
     private const int BatchSize = 200;
 
     protected override TimeSpan Interval => TimeSpan.FromMinutes(3);
-    protected override JobPriority Priority => JobPriority.High;
+    protected override JobPriority Priority => JobPriority.Med;
 
     protected override async Task ExecuteJob(CancellationToken cancellationToken)
     {

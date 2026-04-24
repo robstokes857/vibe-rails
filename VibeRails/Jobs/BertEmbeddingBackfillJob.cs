@@ -13,22 +13,40 @@ public sealed class BertEmbeddingBackfillJob(
     ISystemResourceService resources,
     IServiceScopeFactory scopeFactory) : JobBase(logger, resources)
 {
-    private const int BatchSize = 200;
+    private const int BatchSize = 25;
 
     protected override TimeSpan Interval => TimeSpan.FromMinutes(5);
-    protected override JobPriority Priority => JobPriority.High;
+    protected override JobPriority Priority => JobPriority.Low;
 
     protected override async Task ExecuteJob(CancellationToken cancellationToken)
     {
         using var scope = scopeFactory.CreateScope();
         var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
-        var bertInputService = scope.ServiceProvider.GetRequiredService<IBertV2InputService>();
 
         var batch = await repository.GetUnembeddedCleanedInputsAsync(BatchSize, cancellationToken);
         if (batch.Count == 0)
         {
             Serilog.Log.Debug("[BertEmbeddingBackfillJob] No rows to embed.");
             return;
+        }
+
+        IBertV2InputService bertInputService;
+        try
+        {
+            bertInputService = scope.ServiceProvider.GetRequiredService<IBertV2InputService>();
+        }
+        catch (Exception ex)
+        {
+            // Rethrow with actionable context. JobBase logs uncaught exceptions at Error
+            // severity every tick, so a broken deploy (missing native onnxruntime.dll,
+            // ORT native/managed version mismatch, etc.) stays loud until fixed instead
+            // of silently disabling the job.
+            throw new InvalidOperationException(
+                $"[BERT-BROKEN] BERT embedder failed to initialize. Pending rows will not be embedded. " +
+                $"This usually means the native ONNX Runtime library is missing from the install directory " +
+                $"or mismatched with Microsoft.ML.OnnxRuntime. Check that onnxruntime.{{dll,so,dylib}} sits " +
+                $"alongside vb at '{AppContext.BaseDirectory}'. pendingRows={batch.Count} pid={Environment.ProcessId}.",
+                ex);
         }
 
         Serilog.Log.Information(

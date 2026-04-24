@@ -60,6 +60,8 @@ namespace VibeRails.Cli
                 },
                 new Dictionary<string, string>
                 {
+                    ["--web"] = "Open the browser and stop VibeRails when the browser closes",
+                    ["--open-browser"] = "Open the browser without changing server lifetime",
                     ["--env <name>"] = "Launch a CLI or custom environment directly",
                     ["--help, -h"] = "Show this help message",
                     ["--version, -v"] = "Show version information"

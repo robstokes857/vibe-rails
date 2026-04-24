@@ -383,6 +383,17 @@ namespace VibeRails.Utils
                     parsed.Trace = true;
                     return true;
 
+                case "--web":
+                case "--launch-web":
+                    parsed.OpenBrowser = true;
+                    parsed.ShutdownOnBrowserClose = true;
+                    return true;
+
+                case "--open-browser":
+                case "--launch-browser":
+                    parsed.OpenBrowser = true;
+                    return true;
+
                 default:
                     return false;
             }

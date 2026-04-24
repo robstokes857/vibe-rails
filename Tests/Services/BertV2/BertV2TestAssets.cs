@@ -1,4 +1,4 @@
-using VibeRails.Utils;
+using System.IO.Compression;
 
 namespace Tests.Services.BertV2;
 
@@ -8,9 +8,14 @@ internal static class BertV2TestAssets
     {
         var bundled = GetBundledModelDirectory();
         Directory.CreateDirectory(runtimeDir);
-        await BrotliCompression.DecompressAsync(
-            Path.Combine(bundled, "model.onnx.br"),
-            Path.Combine(runtimeDir, "model.onnx"));
+
+        await using (var source = File.OpenRead(Path.Combine(bundled, "model.onnx.gz")))
+        await using (var gzip = new GZipStream(source, CompressionMode.Decompress))
+        await using (var dest = File.Create(Path.Combine(runtimeDir, "model.onnx")))
+        {
+            await gzip.CopyToAsync(dest);
+        }
+
         File.Copy(
             Path.Combine(bundled, "vocab.txt"),
             Path.Combine(runtimeDir, "vocab.txt"),
@@ -43,7 +48,7 @@ internal static class BertV2TestAssets
     private static bool ContainsBundledModel(string directory)
     {
         return Directory.Exists(directory)
-            && File.Exists(Path.Combine(directory, "model.onnx.br"))
+            && File.Exists(Path.Combine(directory, "model.onnx.gz"))
             && File.Exists(Path.Combine(directory, "vocab.txt"));
     }
 }
