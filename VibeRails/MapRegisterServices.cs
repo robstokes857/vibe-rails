@@ -23,8 +23,10 @@ namespace VibeRails
 {
     public static class MapRegisterServices
     {
-        public static void Register(IServiceCollection serviceCollection)
+        public static void Register(IServiceCollection serviceCollection, string[]? args = null)
         {
+            var isTerminalTabChildProcess = IsTerminalTabChildProcess(args ?? Environment.GetCommandLineArgs());
+
             serviceCollection.AddHttpClient<ISummaryService, SummaryService>(
                 x =>
                 {
@@ -145,11 +147,24 @@ namespace VibeRails
             serviceCollection.AddSingleton<ISystemResourceService>(sp => sp.GetRequiredService<SystemResourceService>());
             serviceCollection.AddHostedService(sp => sp.GetRequiredService<SystemResourceService>());
 
-            serviceCollection.AddHostedService<UpdateCheckJob>();
-            serviceCollection.AddHostedService<StaleSessionCleanupJob>();
-            serviceCollection.AddHostedService<ProjectCacheRefreshJob>();
-            serviceCollection.AddHostedService<CleanedUserInputBackfillJob>();
-            serviceCollection.AddHostedService<BertEmbeddingBackfillJob>();
+            if (isTerminalTabChildProcess)
+            {
+                Serilog.Log.Information(
+                    "[Startup] Terminal tab child detected; global maintenance jobs disabled. processId={ProcessId}",
+                    Environment.ProcessId);
+                // Child-only: exit when the root backend is gone so an ungraceful root
+                // crash doesn't leave orphan tab processes running.
+                serviceCollection.AddHostedService<ChildParentWatchdogService>();
+            }
+            else
+            {
+                serviceCollection.AddHostedService<UpdateCheckJob>();
+                serviceCollection.AddHostedService<StaleSessionCleanupJob>();
+                serviceCollection.AddHostedService<ProjectCacheRefreshJob>();
+                serviceCollection.AddHostedService<CleanedUserInputBackfillJob>();
+                serviceCollection.AddHostedService<BertEmbeddingBackfillJob>();
+            }
+
             serviceCollection.AddHostedService<TuiEventPersistenceService>();
             serviceCollection.AddScoped<ISessionTranscriptService, SessionTranscriptService>();
             serviceCollection.AddScoped<ISessionResumeService, SessionResumeService>();
@@ -189,6 +204,14 @@ namespace VibeRails
             // Authentication service (singleton - one token per instance)
             serviceCollection.AddSingleton<IAuthService, AuthService>();
         }
+
+        private static bool IsTerminalTabChildProcess(IEnumerable<string> args)
+        {
+            return args.Any(static arg =>
+                arg.Equals("--parent-pid", StringComparison.OrdinalIgnoreCase) ||
+                arg.StartsWith("--parent-pid=", StringComparison.OrdinalIgnoreCase));
+        }
+
         private static McpSettings CreateMcpSettings()
         {
             // Search for MCP server executable in common locations

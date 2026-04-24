@@ -13,6 +13,8 @@ namespace VibeRails.Utils
         // LMBootstrap mode args
         public bool IsLMBootstrap { get; set; }
         public bool IsVsCodeMode { get; set; }
+        public bool OpenBrowser { get; set; }
+        public bool ShutdownOnBrowserClose { get; set; }
         public string? LMBootstrapCli { get; set; }
         public string? WorkDir { get; set; }
         public string[] ExtraArgs { get; set; } = [];

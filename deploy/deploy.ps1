@@ -230,6 +230,50 @@ function Assert-ReleaseAssetsPresent {
     Write-Host "Verified release assets for $Tag." -ForegroundColor Green
 }
 
+function Assert-VsixContainsNativeOnnxRuntime {
+    param(
+        [Parameter(Mandatory = $true)][string]$Tag,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
+
+    # Download one platform VSIX and confirm the native ONNX Runtime library
+    # is packaged inside. The prepare-binaries step also asserts this, so this
+    # is defense-in-depth against packaging regressions (like the 1.6.4 ORT
+    # 1.21 -> 1.24 bump that exposed a latent "only copy vb.exe" bug and shipped
+    # a VSIX with no native DLLs, crashing with ArgumentNull/0xC0000005).
+    $vsixName = "vscode-viberails-win32-x64-$Version.vsix"
+    $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "viberails-vsix-verify-$Version"
+    if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
+    New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+
+    try {
+        Write-Host "`nDownloading $vsixName to verify native DLL packaging..." -ForegroundColor Cyan
+        gh release download $Tag --repo $GithubRepo --pattern $vsixName --dir $tmpDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not download $vsixName from release $Tag."
+        }
+
+        $vsixPath = Join-Path $tmpDir $vsixName
+        $zipPath = Join-Path $tmpDir "$vsixName.zip"
+        Copy-Item -Path $vsixPath -Destination $zipPath -Force
+
+        $extractDir = Join-Path $tmpDir "extracted"
+        Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+
+        $ortHit = Get-ChildItem -Path $extractDir -Recurse -File |
+                  Where-Object { $_.Name -match '(?i)onnxruntime' } |
+                  Select-Object -First 1
+
+        if (-not $ortHit) {
+            throw "Released $vsixName does not contain any onnxruntime native library. The VSIX will crash at the BERT job with ArgumentNull/0xC0000005. Fix prepare-binaries.ps1 and re-release."
+        }
+
+        Write-Host "  ✓ Found native ONNX Runtime in VSIX: $($ortHit.Name)" -ForegroundColor Green
+    } finally {
+        if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue }
+    }
+}
+
 # --- Main ---
 
 $banner = @"
@@ -310,6 +354,7 @@ git push origin $tag
 $headSha = (git rev-parse HEAD).Trim()
 Wait-ForReleaseWorkflow -HeadSha $headSha -Tag $tag
 Assert-ReleaseAssetsPresent -Tag $tag
+Assert-VsixContainsNativeOnnxRuntime -Tag $tag -Version $newVersion
 
 Write-Host "`nPublished release: https://github.com/$GithubRepo/releases/tag/$tag" -ForegroundColor Green
 Write-Host "GitHub Actions built the native assets, published the VS Code extension, and uploaded the VSIX packages." -ForegroundColor Green

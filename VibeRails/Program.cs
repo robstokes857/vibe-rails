@@ -144,7 +144,7 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 // Register DI services
-MapRegisterServices.Register(builder.Services);
+MapRegisterServices.Register(builder.Services, args);
 
 // Add CORS support for localhost and VSCode webview
 builder.Services.AddCors(options =>
@@ -392,7 +392,7 @@ else
         Console.WriteLine($"[VibeRails] Not in a git repository. Opening browser to fix...");
         LaunchBrowser.Launch(bootstrapUrl);
     }
-    else if (args.Any(a => a is "--open-browser" or "--launch-browser" or "--launch-web" or "--web"))
+    else if (parsedArgs.OpenBrowser)
     {
         LaunchBrowser.Launch(bootstrapUrl);
     }

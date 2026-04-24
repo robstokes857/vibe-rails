@@ -59,6 +59,7 @@ export class VibeControlApp {
     }
 
     async init() {
+        this.startLifecycleHeartbeat();
         await this.fetchConfigs();
         await this.applyInitialSettings();
         this.appEventClient.start();
@@ -932,27 +933,9 @@ export class VibeControlApp {
     }
 
     getOrCreateLifecycleClientId() {
-        const storageKey = 'viberails_client_id';
-        try {
-            const existing = window.sessionStorage.getItem(storageKey);
-            if (existing && existing.length > 0) {
-                return existing;
-            }
-        } catch (error) {
-            // Fall through and generate a transient ID.
-        }
-
-        const generated = (window.crypto && typeof window.crypto.randomUUID === 'function')
+        return (window.crypto && typeof window.crypto.randomUUID === 'function')
             ? window.crypto.randomUUID()
             : `client-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
-        try {
-            window.sessionStorage.setItem(storageKey, generated);
-        } catch (error) {
-            // Ignore storage failures and keep generated value in-memory.
-        }
-
-        return generated;
     }
 
     getLifecycleUrl(path) {
@@ -1016,7 +999,7 @@ export class VibeControlApp {
         }, 30000);
 
         const onDisconnect = () => {
-            this.serverToastClient.stop();
+            this.appEventClient?.stop?.();
             this.sendLifecycleDisconnect();
         };
         window.addEventListener('beforeunload', onDisconnect);

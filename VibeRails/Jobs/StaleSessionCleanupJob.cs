@@ -13,22 +13,11 @@ public sealed class StaleSessionCleanupJob(
     IServiceScopeFactory scopeFactory,
     IRemoteStateService remoteStateService) : JobBase(logger, resources)
 {
-    // Tab child processes are spawned with --parent-pid; only the root parent should clean up.
-    private static readonly bool s_isTabChild =
-        Environment.GetCommandLineArgs().Any(a =>
-            a.StartsWith("--parent-pid", StringComparison.OrdinalIgnoreCase));
-
     protected override TimeSpan Interval => TimeSpan.FromMinutes(10);
     protected override JobPriority Priority => JobPriority.Lowest;
 
     protected override async Task ExecuteJob(CancellationToken cancellationToken)
     {
-        if (s_isTabChild)
-        {
-            _logger.LogDebug("[StaleSessionCleanupJob] Running as tab child — skipping cleanup");
-            return;
-        }
-
         var now = DateTime.UtcNow;
         var trackedCutoff = now.AddMinutes(-5);
         var untrackedCutoff = now.AddHours(-1);

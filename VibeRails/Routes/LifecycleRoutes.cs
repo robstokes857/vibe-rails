@@ -7,7 +7,10 @@ namespace VibeRails.Routes;
 
 public static class LifecycleRoutes
 {
+    private const string BrowserOwnerPrefix = "browser:";
     private static readonly TimeSpan BrowserPulseTtl = TimeSpan.FromSeconds(75);
+    private static readonly TimeSpan BrowserCloseShutdownDelay = TimeSpan.FromMinutes(1);
+    private static int _browserCloseShutdownRequested;
 
     public static void Map(WebApplication app)
     {
@@ -27,7 +30,8 @@ public static class LifecycleRoutes
 
         app.MapPost("/api/v1/lifecycle/disconnect", (
             HttpContext context,
-            ILocalClientTracker localClientTracker) =>
+            ILocalClientTracker localClientTracker,
+            IHostApplicationLifetime hostApplicationLifetime) =>
         {
             var ownerId = GetBrowserOwnerId(context);
             if (ownerId == null)
@@ -36,6 +40,7 @@ public static class LifecycleRoutes
             }
 
             localClientTracker.ReleaseOwner(ownerId);
+            ScheduleBrowserCloseShutdownIfNeeded(context, localClientTracker, hostApplicationLifetime, ownerId);
             return Results.NoContent();
         }).WithName("LifecycleDisconnect");
 
@@ -71,6 +76,56 @@ public static class LifecycleRoutes
             return null;
         }
 
-        return $"browser:{trimmed}";
+        return $"{BrowserOwnerPrefix}{trimmed}";
+    }
+
+    private static void ScheduleBrowserCloseShutdownIfNeeded(
+        HttpContext context,
+        ILocalClientTracker localClientTracker,
+        IHostApplicationLifetime hostApplicationLifetime,
+        string ownerId)
+    {
+        var args = ParserConfigs.GetArguments();
+        if (!args.ShutdownOnBrowserClose || args.IsLMBootstrap || args.IsVsCodeMode)
+        {
+            return;
+        }
+
+        var detailPrefix =
+            $"ownerId={ownerId}; remoteIp={context.Connection.RemoteIpAddress}; userAgent={context.Request.Headers.UserAgent.ToString()}";
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(BrowserCloseShutdownDelay);
+
+                if (localClientTracker.HasActiveOwnersWithPrefix(BrowserOwnerPrefix))
+                {
+                    Log.Information(
+                        "[Lifecycle] Browser disconnect ignored because another browser owner is active. {Detail}",
+                        detailPrefix);
+                    return;
+                }
+
+                if (Interlocked.Exchange(ref _browserCloseShutdownRequested, 1) == 1)
+                {
+                    return;
+                }
+
+                var ownerSummary = localClientTracker.GetDiagnosticsSummary();
+                var detail = $"{detailPrefix}; owners={ownerSummary}";
+                ShutdownDiagnostics.RecordStopRequest("LifecycleRoutes.BrowserDisconnected", detail);
+                Log.Warning(
+                    "[Lifecycle] Last browser disconnected in --web mode. Stopping process {ProcessId}. {Detail}",
+                    Environment.ProcessId,
+                    detail);
+                hostApplicationLifetime.StopApplication();
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[Lifecycle] Failed to process browser disconnect shutdown");
+            }
+        });
     }
 }

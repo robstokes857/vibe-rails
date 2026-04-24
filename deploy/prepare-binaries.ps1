@@ -113,6 +113,26 @@ foreach ($platform in $platforms) {
     $fileCount = (Get-ChildItem -Path $destWwwroot -Recurse -File).Count
     Write-Host "    Copied wwwroot/ ($fileCount files)" -ForegroundColor Green
 
+    # Copy remaining AOT publish artifacts (native DLLs from NuGet runtime packages:
+    # onnxruntime, e_sqlite3, vec0, winpty, plus winpty-agent.exe). NativeAOT emits
+    # these next to vb.exe; without them vb.exe falls back to the system DLL search
+    # path and can load a mismatched onnxruntime.dll, which crashes at the
+    # CompileApi cctor under ORT >= 1.24.
+    $sourceDir = Join-Path $ArtifactsDir $platform.SourceDir
+    $skipNames = @($platform.Binary, 'appsettings.json')
+    # Excluded extensions: NativeAOT PDBs are 50+ MB each; xmldoc files are
+    # runtime-irrelevant. Keeps the VSIX lean.
+    $skipExtensions = @('.pdb', '.xml')
+    $extraFiles = Get-ChildItem -Path $sourceDir -File | Where-Object {
+        $skipNames -notcontains $_.Name -and $skipExtensions -notcontains $_.Extension
+    }
+    foreach ($f in $extraFiles) {
+        Copy-Item -Path $f.FullName -Destination (Join-Path $platformDir $f.Name) -Force
+    }
+    if ($extraFiles.Count -gt 0) {
+        Write-Host "    Copied $($extraFiles.Count) additional publish files (native DLLs, etc.)" -ForegroundColor Green
+    }
+
     # Set execute permissions on Linux binary (no-op on Windows)
     if ($platform.Binary -eq "vb" -and -not $IsWindows) {
         chmod +x $destBinary
@@ -123,6 +143,16 @@ foreach ($platform in $platforms) {
     $indexHtml = Join-Path $destWwwroot "index.html"
     if (-not (Test-Path $indexHtml)) {
         Write-Host "    Warning: index.html not found in wwwroot" -ForegroundColor Yellow
+    }
+
+    # Assert native ONNX Runtime library is present. Missing this silently worked
+    # under ORT 1.21 but crashes under ORT 1.24+ because the managed cctor binds
+    # the CompileApi function-pointer table at static-init time. If the DLL isn't
+    # side-by-side, the CLR loads a mismatched one via DLL search and ArgumentNull
+    # /0xC0000005 follows. Fail the build instead of shipping a broken package.
+    $ortPresent = Get-ChildItem -Path $platformDir -File | Where-Object { $_.Name -match '(?i)onnxruntime' } | Select-Object -First 1
+    if (-not $ortPresent) {
+        throw "Native ONNX Runtime library missing from bin/$($platform.Name)/. Expected an onnxruntime.{dll,so,dylib} alongside vb. Did the AOT publish emit it into $sourceDir?"
     }
 }
 
