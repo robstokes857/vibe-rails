@@ -570,6 +570,9 @@ public class TerminalSessionService : ITerminalSessionService
 
     private void ScheduleExitCleanup(Terminal terminal, string sessionId, int exitCode)
     {
+        Log.Information(
+            "[Terminal] Session exit detected. sessionId={SessionId} exitCode={ExitCode} exitCodeHex=0x{ExitCodeHex:X8} pid={Pid}",
+            sessionId, exitCode, (uint)exitCode, Environment.ProcessId);
         _ = Task.Run(async () =>
         {
             try
@@ -579,6 +582,7 @@ public class TerminalSessionService : ITerminalSessionService
                     exitCode: exitCode,
                     closeReason: "Terminal session exited",
                     requireExternalOwnership: false);
+                Log.Information("[Terminal] Session exit cleanup complete. sessionId={SessionId}", sessionId);
             }
             catch (Exception ex)
             {

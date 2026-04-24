@@ -26,27 +26,44 @@ public sealed class BertEmbeddingBackfillJob(
 
         var batch = await repository.GetUnembeddedCleanedInputsAsync(BatchSize, cancellationToken);
         if (batch.Count == 0)
+        {
+            Serilog.Log.Debug("[BertEmbeddingBackfillJob] No rows to embed.");
             return;
+        }
 
-        _logger.LogInformation(
-            "[BertEmbeddingBackfillJob] Embedding {Count} cleaned input(s)",
-            batch.Count);
+        Serilog.Log.Information(
+            "[BertEmbeddingBackfillJob] Batch begin. count={Count} firstSessionId={FirstSessionId} lastSessionId={LastSessionId}",
+            batch.Count, batch[0].SessionId, batch[^1].SessionId);
 
+        var ok = 0;
+        var failed = 0;
+        var batchSw = System.Diagnostics.Stopwatch.StartNew();
         foreach (var row in batch)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var rowSw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                bertInputService.Capture(row.SessionId, row.UserInputId, row.CleanedText);
+                bertInputService.Capture(row.SessionId, row.UserInputId, row.CleanedText ?? string.Empty);
                 await repository.MarkCleanedInputEmbeddedAsync(row.CleanedId, cancellationToken);
+                ok++;
+                // Per-row log is at Debug to keep volume down; elevate to Information on failure below.
+                Serilog.Log.Debug(
+                    "[BertEmbeddingBackfillJob] Row embedded. sessionId={SessionId} cleanedId={CleanedId} userInputId={UserInputId} chars={Chars} durationMs={DurationMs}",
+                    row.SessionId, row.CleanedId, row.UserInputId, row.CleanedText?.Length ?? 0, rowSw.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(
+                failed++;
+                Serilog.Log.Warning(
                     ex,
-                    "[BertEmbeddingBackfillJob] Failed to embed CleanedUserInput {CleanedId}",
-                    row.CleanedId);
+                    "[BertEmbeddingBackfillJob] Row failed. sessionId={SessionId} cleanedId={CleanedId} userInputId={UserInputId} chars={Chars} durationMs={DurationMs}",
+                    row.SessionId, row.CleanedId, row.UserInputId, row.CleanedText?.Length ?? 0, rowSw.ElapsedMilliseconds);
             }
         }
+
+        Serilog.Log.Information(
+            "[BertEmbeddingBackfillJob] Batch end. count={Count} ok={Ok} failed={Failed} batchDurationMs={BatchDurationMs}",
+            batch.Count, ok, failed, batchSw.ElapsedMilliseconds);
     }
 }

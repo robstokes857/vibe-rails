@@ -193,6 +193,13 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     public async Task HandleWebSocketProxyAsync(string tabId, WebSocket browserSocket, int? cols = null, int? rows = null, CancellationToken cancellationToken = default)
     {
         var child = GetChildOrThrow(tabId);
+        var pid = -1;
+        try { pid = child.Process.Id; } catch { }
+
+        Log.Information(
+            "[TerminalTabs] WS proxy opening. tabId={TabId} pid={Pid} port={Port} cols={Cols} rows={Rows}",
+            tabId, pid, child.Port, cols, rows);
+
         using var upstream = new ClientWebSocket();
         upstream.Options.AddSubProtocol(child.SessionToken);
         upstream.Options.AddSubProtocol(child.TabToken);
@@ -202,14 +209,28 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         var query = (cols.HasValue && rows.HasValue) ? $"?cols={cols}&rows={rows}" : string.Empty;
         var upstreamUri = new Uri($"ws://127.0.0.1:{child.Port}/api/v1/terminal/ws{query}");
         await upstream.ConnectAsync(upstreamUri, cancellationToken);
+        Log.Information("[TerminalTabs] WS proxy connected to child. tabId={TabId} pid={Pid}", tabId, pid);
 
         var childToBrowser = RelayWebSocketAsync(upstream, browserSocket, cancellationToken);
         var browserToChild = RelayWebSocketAsync(browserSocket, upstream, cancellationToken);
 
-        await Task.WhenAny(childToBrowser, browserToChild);
+        var completed = await Task.WhenAny(childToBrowser, browserToChild);
+        var direction = completed == childToBrowser ? "child→browser" : "browser→child";
+        Exception? relayError = null;
+        try { await completed; } catch (Exception ex) { relayError = ex; }
+
+        Log.Information(
+            "[TerminalTabs] WS proxy relay completed (one side closed). tabId={TabId} pid={Pid} firstClosed={Direction} childAlive={ChildAlive} upstreamState={UpstreamState} browserState={BrowserState} error={Error}",
+            tabId, pid, direction,
+            !child.Process.HasExited,
+            upstream.State,
+            browserSocket.State,
+            relayError?.GetType().Name);
 
         await CloseWebSocketAsync(upstream, cancellationToken);
         await CloseWebSocketAsync(browserSocket, cancellationToken);
+
+        Log.Information("[TerminalTabs] WS proxy closed. tabId={TabId} pid={Pid} childAlive={ChildAlive}", tabId, pid, !child.Process.HasExited);
     }
 
     /// <summary>
@@ -218,8 +239,10 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     /// </summary>
     private async Task RelayChildAppEventsAsync(TerminalChildProcess child, CancellationToken ct)
     {
+        var reconnects = 0;
         while (!ct.IsCancellationRequested && !child.Process.HasExited)
         {
+            var attemptStart = DateTime.UtcNow;
             try
             {
                 using var ws = new ClientWebSocket();
@@ -228,6 +251,9 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
                 var uri = new Uri($"ws://127.0.0.1:{child.Port}/api/v1/events/ws");
                 await ws.ConnectAsync(uri, ct);
+                Log.Information(
+                    "[TerminalTabs] AppEvent relay connected to child. tabId={TabId} pid={Pid} port={Port} reconnectAttempt={Reconnects}",
+                    child.TabId, TryGetPid(child), child.Port, reconnects);
 
                 var buffer = new byte[8192];
                 using var frameAccumulator = new MemoryStream();
@@ -256,12 +282,39 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                             _appEventBus.Publish(enriched);
                         }
                     }
-                    catch (Exception) { /* skip malformed messages, keep relaying */ }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "[TerminalTabs] AppEvent deserialize failed. tabId={TabId} snippet={Snippet}",
+                            child.TabId, json.Length > 200 ? json[..200] : json);
+                    }
                 }
+
+                Log.Information(
+                    "[TerminalTabs] AppEvent relay inner loop exited. tabId={TabId} pid={Pid} wsState={WsState} childAlive={ChildAlive} sessionDuration={Duration}",
+                    child.TabId, TryGetPid(child), ws.State, !child.Process.HasExited, DateTime.UtcNow - attemptStart);
             }
-            catch (OperationCanceledException) { return; }
-            catch (Exception) { }            
+            catch (OperationCanceledException)
+            {
+                Log.Information("[TerminalTabs] AppEvent relay cancelled. tabId={TabId} pid={Pid}", child.TabId, TryGetPid(child));
+                return;
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex,
+                    "[TerminalTabs] AppEvent relay errored; will retry. tabId={TabId} pid={Pid} childAlive={ChildAlive} attemptDuration={Duration} reconnects={Reconnects}",
+                    child.TabId, TryGetPid(child), !child.Process.HasExited, DateTime.UtcNow - attemptStart, reconnects);
+            }
+            reconnects++;
         }
+
+        Log.Warning(
+            "[TerminalTabs] AppEvent relay loop exited. tabId={TabId} pid={Pid} childAlive={ChildAlive} cancelled={Cancelled} reconnects={Reconnects}",
+            child.TabId, TryGetPid(child), !child.Process.HasExited, ct.IsCancellationRequested, reconnects);
+    }
+
+    private static int TryGetPid(TerminalChildProcess child)
+    {
+        try { return child.Process.Id; } catch { return -1; }
     }
 
     private static AppEvent EnrichPayloadWithTabId(AppEvent appEvent, string tabId)
@@ -493,6 +546,24 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
             process.Exited += (_, _) =>
             {
+                int? exitCode = null;
+                string? exitCodeHex = null;
+                DateTime? exitTime = null;
+                TimeSpan? uptime = null;
+                try { exitCode = process.ExitCode; exitCodeHex = $"0x{(uint)exitCode:X8}"; } catch { }
+                try { exitTime = process.ExitTime; } catch { }
+                try { uptime = process.ExitTime - process.StartTime; } catch { }
+
+                Log.Warning(
+                    "[TerminalTabs] Child process exited. tabId={TabId} pid={Pid} exitCode={ExitCode} exitCodeHex={ExitCodeHex} exitTimeUtc={ExitTimeUtc} uptime={Uptime} bootstrapCompleted={BootstrapCompleted}",
+                    tabId,
+                    process.Id,
+                    exitCode,
+                    exitCodeHex,
+                    exitTime?.ToUniversalTime().ToString("O"),
+                    uptime,
+                    bootstrapTcs.Task.IsCompleted);
+
                 RemoveChild(tabId, process.Id);
                 if (!bootstrapTcs.Task.IsCompleted)
                 {
@@ -500,10 +571,21 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             }
         };
 
+        Log.Information(
+            "[TerminalTabs] Spawning child process. selfPid={SelfPid} exePath={ExePath} launchDir={LaunchDir}",
+            Environment.ProcessId,
+            exePath,
+            _launchDirectory);
+
         if (!process.Start())
         {
             throw new InvalidOperationException("Failed to start terminal tab process.");
         }
+
+        Log.Information(
+            "[TerminalTabs] Child process started. pid={Pid} selfPid={SelfPid}",
+            process.Id,
+            Environment.ProcessId);
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
@@ -755,10 +837,22 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     private async Task TerminateChildAsync(TerminalChildProcess child, CancellationToken cancellationToken, bool stopSessionFirst)
     {
+        var pid = -1;
+        try { pid = child.Process.Id; } catch { }
+
+        Log.Warning(
+            "[TerminalTabs] TerminateChildAsync invoked. tabId={TabId} pid={Pid} stopSessionFirst={StopSessionFirst} alreadyExited={AlreadyExited} caller={Caller}",
+            child.TabId,
+            pid,
+            stopSessionFirst,
+            child.Process.HasExited,
+            new System.Diagnostics.StackTrace(1, fNeedFileInfo: false).ToString());
+
         if (stopSessionFirst && !child.Process.HasExited)
         {
             try
             {
+                Log.Information("[TerminalTabs] Sending graceful /terminal/stop before kill. tabId={TabId} pid={Pid}", child.TabId, pid);
                 await SendTerminalStatusRequestAsync(
                     child,
                     HttpMethod.Post,
@@ -766,9 +860,9 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                     payload: null,
                     cancellationToken);
             }
-            catch
+            catch (Exception ex)
             {
-                // Best-effort.
+                Log.Warning(ex, "[TerminalTabs] Graceful stop request failed (best-effort). tabId={TabId} pid={Pid}", child.TabId, pid);
             }
         }
 
@@ -777,27 +871,34 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
     private static async Task TerminateRawProcessAsync(Process process, CancellationToken cancellationToken)
     {
+        var pid = -1;
+        try { pid = process.Id; } catch { }
+
         if (process.HasExited)
         {
+            Log.Information("[TerminalTabs] TerminateRawProcessAsync: process already exited. pid={Pid}", pid);
             return;
         }
 
+        Log.Warning("[TerminalTabs] Hard-killing child process tree. pid={Pid}", pid);
         try
         {
             process.Kill(entireProcessTree: true);
         }
-        catch
+        catch (Exception ex)
         {
-            // Fallback handled below.
+            Log.Warning(ex, "[TerminalTabs] process.Kill(entireProcessTree) failed; falling back to taskkill. pid={Pid}", pid);
         }
 
         if (await WaitForExitAsync(process, 3000, cancellationToken))
         {
+            Log.Information("[TerminalTabs] Child exited after process.Kill. pid={Pid}", pid);
             return;
         }
 
         if (OperatingSystem.IsWindows() && process.Id > 0)
         {
+            Log.Warning("[TerminalTabs] Invoking taskkill /T /F fallback. pid={Pid}", pid);
             await KillProcessTreeWindowsAsync(process.Id, cancellationToken);
             await WaitForExitAsync(process, 3000, cancellationToken);
         }
@@ -954,6 +1055,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     private void RemoveChild(string tabId, int processId)
     {
         CancellationTokenSource? relayCts = null;
+        var removed = false;
+        var remainingTabs = 0;
         lock (_lock)
         {
             if (_tabs.TryGetValue(tabId, out var child) && child.Process.Id == processId)
@@ -961,8 +1064,17 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 _tabs.Remove(tabId);
                 _tabRelayCts.Remove(tabId, out relayCts);
                 ReleaseTabsOwnerIfNeededLocked();
+                removed = true;
             }
+            remainingTabs = _tabs.Count;
         }
+
+        Log.Information(
+            "[TerminalTabs] RemoveChild. tabId={TabId} pid={Pid} removed={Removed} remainingTabs={RemainingTabs}",
+            tabId,
+            processId,
+            removed,
+            remainingTabs);
 
         if (relayCts != null)
         {
