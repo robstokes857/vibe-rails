@@ -15,16 +15,39 @@ public class BertV2BgeEmbedder : IBertV2BgeEmbedder
     private readonly InferenceSession _session;
     private readonly BertTokenizer _tokenizer;
     private readonly bool _requiresTokenTypeIds;
+    private long _invocationCount;
 
     public BertV2BgeEmbedder(string modelPath, string vocabPath)
     {
+        Serilog.Log.Information(
+            "[BertEmbedder] Constructing. modelPath={ModelPath} vocabPath={VocabPath} pid={Pid}",
+            modelPath, vocabPath, Environment.ProcessId);
+
         using var options = new Microsoft.ML.OnnxRuntime.SessionOptions
         {
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
         };
         options.AppendExecutionProvider_CPU(1);
-        _session = new InferenceSession(modelPath, options);
+
+        var loadSw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            _session = new InferenceSession(modelPath, options);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex,
+                "[BertEmbedder] InferenceSession load FAILED. modelPath={ModelPath} durationMs={DurationMs}",
+                modelPath, loadSw.ElapsedMilliseconds);
+            throw;
+        }
         _requiresTokenTypeIds = _session.InputMetadata.ContainsKey("token_type_ids");
+
+        Serilog.Log.Information(
+            "[BertEmbedder] InferenceSession loaded. durationMs={DurationMs} inputs={Inputs} requiresTokenTypeIds={RequiresTokenTypeIds}",
+            loadSw.ElapsedMilliseconds,
+            string.Join(",", _session.InputMetadata.Keys),
+            _requiresTokenTypeIds);
 
         using var vocabStream = File.OpenRead(vocabPath);
         _tokenizer = BertTokenizer.Create(vocabStream, new BertOptions
@@ -63,17 +86,42 @@ public class BertV2BgeEmbedder : IBertV2BgeEmbedder
                 new DenseTensor<long>(new long[MaxSequenceLength], [1, MaxSequenceLength])));
         }
 
-        using var results = _session.Run(inputs);
-        var lastHiddenState = results.First().AsTensor<float>();
+        var invocation = System.Threading.Interlocked.Increment(ref _invocationCount);
+        var runSw = System.Diagnostics.Stopwatch.StartNew();
+        IDisposableReadOnlyCollection<DisposableNamedOnnxValue>? results;
+        try
+        {
+            results = _session.Run(inputs);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Error(ex,
+                "[BertEmbedder] session.Run FAILED. invocation={Invocation} tokenCount={TokenCount} durationMs={DurationMs} pid={Pid}",
+                invocation, tokenCount, runSw.ElapsedMilliseconds, Environment.ProcessId);
+            throw;
+        }
 
-        // CLS pooling: the [CLS] token at position 0 captures the sentence representation
-        var hiddenSize = lastHiddenState.Dimensions[2];
-        var embedding = new float[hiddenSize];
-        for (int j = 0; j < hiddenSize; j++)
-            embedding[j] = lastHiddenState[0, 0, j];
+        // Heartbeat every 100th invocation so we can see the embedder is alive without drowning the log.
+        if (invocation == 1 || invocation % 100 == 0)
+        {
+            Serilog.Log.Information(
+                "[BertEmbedder] session.Run ok. invocation={Invocation} tokenCount={TokenCount} durationMs={DurationMs}",
+                invocation, tokenCount, runSw.ElapsedMilliseconds);
+        }
 
-        Normalize(embedding);
-        return embedding;
+        using (results)
+        {
+            var lastHiddenState = results.First().AsTensor<float>();
+
+            // CLS pooling: the [CLS] token at position 0 captures the sentence representation
+            var hiddenSize = lastHiddenState.Dimensions[2];
+            var embedding = new float[hiddenSize];
+            for (int j = 0; j < hiddenSize; j++)
+                embedding[j] = lastHiddenState[0, 0, j];
+
+            Normalize(embedding);
+            return embedding;
+        }
     }
 
     private static void Normalize(float[] vector)

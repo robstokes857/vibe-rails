@@ -49,14 +49,59 @@ AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
 
     if (eventArgs.ExceptionObject is Exception exception)
     {
-        Log.Fatal(exception, "[Shutdown] Unhandled exception. terminating={IsTerminating}", eventArgs.IsTerminating);
+        Log.Fatal(exception, "[Shutdown] Unhandled exception. terminating={IsTerminating} processId={ProcessId}", eventArgs.IsTerminating, Environment.ProcessId);
+        Log.CloseAndFlush();
         return;
     }
 
     Log.Fatal(
-        "[Shutdown] Unhandled non-Exception object. type={Type} terminating={IsTerminating}",
+        "[Shutdown] Unhandled non-Exception object. type={Type} terminating={IsTerminating} processId={ProcessId}",
         typeName,
-        eventArgs.IsTerminating);
+        eventArgs.IsTerminating,
+        Environment.ProcessId);
+    Log.CloseAndFlush();
+};
+
+// First-chance exception handler: fires for *every* managed exception, even caught/swallowed ones.
+// StackOverflowException and AccessViolationException typically can't be caught — those will still
+// kill the process silently, and we rely on the parent's process.Exited handler to log the exit code.
+// This filters out benign noise (cancellation) to keep the log readable.
+var fceLogged = 0L;
+AppDomain.CurrentDomain.FirstChanceException += (_, args) =>
+{
+    try
+    {
+        var ex = args.Exception;
+        if (ex is OperationCanceledException or System.Threading.Tasks.TaskCanceledException)
+            return;
+
+        var typeName = ex.GetType().FullName ?? "unknown";
+        // Always log native-boundary signals at high visibility.
+        var isNative = typeName.Contains("AccessViolation", StringComparison.OrdinalIgnoreCase)
+                       || typeName.Contains("SEHException", StringComparison.OrdinalIgnoreCase)
+                       || typeName.Contains("OnnxRuntime", StringComparison.OrdinalIgnoreCase)
+                       || typeName.StartsWith("Pty.Net", StringComparison.OrdinalIgnoreCase)
+                       || typeName.StartsWith("System.ComponentModel.Win32Exception", StringComparison.OrdinalIgnoreCase);
+
+        if (isNative)
+        {
+            Log.Warning(ex, "[FirstChance:NATIVE] {Type} pid={Pid}", typeName, Environment.ProcessId);
+            return;
+        }
+
+        // Rate-limit managed FCE to ~every 100th to avoid drowning the log.
+        var n = System.Threading.Interlocked.Increment(ref fceLogged);
+        if (n % 100 == 1)
+        {
+            Log.Information("[FirstChance] {Type} (n={N}) pid={Pid} msg={Msg}",
+                typeName, n, Environment.ProcessId,
+                ex.Message.Length > 160 ? ex.Message[..160] : ex.Message);
+        }
+    }
+    catch
+    {
+        // Never let FCE handler throw.
+    }
 };
 
 AppDomain.CurrentDomain.ProcessExit += (_, _) =>
