@@ -286,13 +286,12 @@ These issues regressed in production-like usage and should be treated as guardra
 
 1. **Remote session looked random/disconnected**
 - Symptom: remote terminal would drop after a while, often around idle periods.
-- Root cause: local-owner lifecycle watchdog could stop the parent process when no local browser owners existed; tab child processes then exited via parent watchdog.
+- Root cause: local-owner lifecycle watchdog could stop the parent process when no local browser owners existed; tab child processes then exited when the parent went away.
 - Fixes:
   - `TerminalTabHostService` acquires a lifecycle owner while at least one tab child exists.
   - `TerminalSessionService` acquires a lifecycle owner while an active terminal session exists.
-- Log signatures:
+- Log signature:
   - `[Lifecycle] No active local browser/terminal owner for 120s. Stopping process ...`
-  - `[ParentWatchdog] Parent process ... exited. Stopping process ...`
 
 2. **LLM terminals showed doubled/duplicated UI blocks**
 - Symptom: repeated welcome cards/prompts after reconnect/takeover sequences.
