@@ -11,6 +11,7 @@ Set-StrictMode -Version Latest
 $ScriptDir = Split-Path -Parent $PSCommandPath
 $RepoRoot = Split-Path -Parent $ScriptDir
 $AppSettingsFile = Join-Path $RepoRoot "VibeRails" "appsettings.json"
+$ProjectFile = Join-Path $RepoRoot "VibeRails" "VibeRails.csproj"
 $PackageJsonFile = Join-Path $RepoRoot "vscode-viberails" "package.json"
 $PackageLockFile = Join-Path $RepoRoot "vscode-viberails" "package-lock.json"
 $GithubRepo = "robstokes857/vibe-rails"
@@ -52,6 +53,9 @@ function Test-PreFlightChecks {
     if (-not (Test-Path $AppSettingsFile)) {
         throw "File not found: $AppSettingsFile"
     }
+    if (-not (Test-Path $ProjectFile)) {
+        throw "File not found: $ProjectFile"
+    }
     if (-not (Test-Path $PackageJsonFile)) {
         throw "File not found: $PackageJsonFile"
     }
@@ -84,6 +88,57 @@ function Update-AppSettingsVersion {
     $config.VibeRails.Version = $Version
     $config | ConvertTo-Json -Depth 100 | Set-Content $AppSettingsFile -Encoding utf8NoBOM
     Write-Host "Updated appsettings.json to version $Version" -ForegroundColor Green
+}
+
+function Set-ProjectProperty {
+    param(
+        [Parameter(Mandatory = $true)][System.Xml.XmlDocument]$Document,
+        [Parameter(Mandatory = $true)][System.Xml.XmlElement]$PropertyGroup,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Value,
+        [string]$InsertBeforeName = ""
+    )
+
+    $node = $PropertyGroup.SelectSingleNode($Name)
+    if (-not $node) {
+        $node = $Document.CreateElement($Name)
+        $insertBefore = $null
+        if ($InsertBeforeName) {
+            $insertBefore = $PropertyGroup.SelectSingleNode($InsertBeforeName)
+        }
+
+        if ($insertBefore) {
+            [void]$PropertyGroup.InsertBefore($node, $insertBefore)
+        } else {
+            [void]$PropertyGroup.AppendChild($node)
+        }
+    }
+
+    $node.InnerText = $Value
+}
+
+function Update-DotNetProjectVersion {
+    param([Parameter(Mandatory = $true)][string]$Version)
+
+    $fileVersion = "$Version.0"
+    $projectXml = [System.Xml.XmlDocument]::new()
+    $projectXml.PreserveWhitespace = $true
+    $projectXml.Load($ProjectFile)
+
+    $propertyGroup = $projectXml.SelectSingleNode("/Project/PropertyGroup[TargetFramework]")
+    if (-not $propertyGroup) {
+        $propertyGroup = $projectXml.SelectSingleNode("/Project/PropertyGroup")
+    }
+    if (-not $propertyGroup -or $propertyGroup -isnot [System.Xml.XmlElement]) {
+        throw "Could not find a PropertyGroup in $ProjectFile"
+    }
+
+    Set-ProjectProperty -Document $projectXml -PropertyGroup $propertyGroup -Name "Version" -Value $Version -InsertBeforeName "NoWarn"
+    Set-ProjectProperty -Document $projectXml -PropertyGroup $propertyGroup -Name "FileVersion" -Value $fileVersion -InsertBeforeName "NoWarn"
+    Set-ProjectProperty -Document $projectXml -PropertyGroup $propertyGroup -Name "InformationalVersion" -Value $Version -InsertBeforeName "NoWarn"
+
+    $projectXml.Save($ProjectFile)
+    Write-Host "Updated VibeRails.csproj to version $Version (FileVersion $fileVersion)" -ForegroundColor Green
 }
 
 function Sync-ExtensionVersion {
@@ -333,10 +388,12 @@ if ($confirm -and $confirm.ToLower() -ne "y") {
 }
 
 Update-AppSettingsVersion -Version $newVersion
+Update-DotNetProjectVersion -Version $newVersion
 Sync-ExtensionVersion -Version $newVersion
 
 Write-Host "`nCommitting version changes..." -ForegroundColor Cyan
 git add $AppSettingsFile
+git add $ProjectFile
 git add $PackageJsonFile
 if (Test-Path $PackageLockFile) {
     git add $PackageLockFile
