@@ -273,7 +273,6 @@ From `Routes/TerminalRoutes.cs`:
 3. Replay buffer is byte-based (16KB), not line-aware.
 4. Input/output are raw terminal bytes; rendering correctness depends on xterm configuration and PTY dimensions.
 5. `ITerminalIoObserverService` dispatch is in-process only.
-6. Parsed TUI control-key events are persisted separately through `TUI_Event_Watcher` + `TuiEventPersistenceService`.
 
 ## Common Failure Points
 1. Concurrent `SendAsync` on same WebSocket (avoided by channel-backed send loops).

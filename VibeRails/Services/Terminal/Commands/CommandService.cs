@@ -47,25 +47,25 @@ public class CommandService : ICommandService
             .SetLaunchCommand(cliCommand);
         var setupCommands = new List<string>();
 
-        // Register MCP server before launch
-        if (!string.IsNullOrEmpty(_mcpSettings.ServerPath) && File.Exists(_mcpSettings.ServerPath))
-        {
-            var mcpSetup = llm switch
-            {
-                LLM.Claude => $"claude mcp add viberails-mcp \"{_mcpSettings.ServerPath}\"",
-                LLM.Codex => $"codex mcp add viberails-mcp -- \"{_mcpSettings.ServerPath}\"",
-                LLM.Gemini => $"gemini mcp add --scope user viberails-mcp \"{_mcpSettings.ServerPath}\"",
-                _ => null
-            };
+        //// Register MCP server before launch
+        //if (!string.IsNullOrEmpty(_mcpSettings.ServerPath) && File.Exists(_mcpSettings.ServerPath))
+        //{
+        //    var mcpSetup = llm switch
+        //    {
+        //        LLM.Claude => $"claude mcp add viberails-mcp \"{_mcpSettings.ServerPath}\"",
+        //        LLM.Codex => $"codex mcp add viberails-mcp -- \"{_mcpSettings.ServerPath}\"",
+        //        LLM.Gemini => $"gemini mcp add --scope user viberails-mcp \"{_mcpSettings.ServerPath}\"",
+        //        _ => null
+        //    };
 
-            if (mcpSetup != null)
-            {
-                builder.AddSetup(mcpSetup);
-                setupCommands.Add(mcpSetup);
-                // Clear screen to hide MCP setup messages (e.g., "already added" warnings)
-                //builder.AddSetup("clear");
-            }
-        }
+        //    if (mcpSetup != null)
+        //    {
+        //        builder.AddSetup(mcpSetup);
+        //        setupCommands.Add(mcpSetup);
+        //        // Clear screen to hide MCP setup messages (e.g., "already added" warnings)
+        //        //builder.AddSetup("clear");
+        //    }
+        //}
 
         var environment = new Dictionary<string, string>
         {

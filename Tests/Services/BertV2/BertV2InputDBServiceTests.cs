@@ -25,7 +25,7 @@ public class BertV2InputDBServiceTests
             .Setup(x => x.GetTextForInputIdAsync(1, It.IsAny<CancellationToken>()))
             .ReturnsAsync("");
 
-        await _service.CaptureUserInputAsync("session-1", 1);
+        await _service.CaptureUserInputAsync("session-1", 1, TestContext.Current.CancellationToken);
 
         _mockInputService.Verify(
             x => x.Capture(It.IsAny<string>(), It.IsAny<long>(), It.IsAny<string>()),
@@ -39,7 +39,7 @@ public class BertV2InputDBServiceTests
             .Setup(x => x.GetTextForInputIdAsync(1, It.IsAny<CancellationToken>()))
             .ReturnsAsync("add search functionality");
 
-        await _service.CaptureUserInputAsync("session-1", 1);
+        await _service.CaptureUserInputAsync("session-1", 1, TestContext.Current.CancellationToken);
 
         _mockInputService.Verify(
             x => x.Capture("session-1", 1, "add search functionality"),

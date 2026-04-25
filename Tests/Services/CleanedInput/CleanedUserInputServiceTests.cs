@@ -35,7 +35,7 @@ public class CleanedUserInputServiceTests
             .ReturnsAsync(true);
 
         var svc = CreateService(repo);
-        await svc.CleanAndPersistAsync(7);
+        await svc.CleanAndPersistAsync(7, cancellationToken: TestContext.Current.CancellationToken);
 
         repo.Verify(
             r => r.CreateCleanedAndLinkAsync(
@@ -54,7 +54,7 @@ public class CleanedUserInputServiceTests
             .ReturnsAsync(MakeRawInput(7, "export ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstu"));
 
         var svc = CreateService(repo);
-        await svc.CleanAndPersistAsync(7);
+        await svc.CleanAndPersistAsync(7, cancellationToken: TestContext.Current.CancellationToken);
 
         // Secret → filtered out → persisted with empty text
         repo.Verify(
@@ -74,7 +74,7 @@ public class CleanedUserInputServiceTests
             .ReturnsAsync(MakeRawInput(7, "ls"));
 
         var svc = CreateService(repo);
-        await svc.CleanAndPersistAsync(7);
+        await svc.CleanAndPersistAsync(7, cancellationToken: TestContext.Current.CancellationToken);
 
         repo.Verify(
             r => r.CreateCleanedAndLinkAsync(
@@ -93,7 +93,7 @@ public class CleanedUserInputServiceTests
             .ReturnsAsync(MakeRawInput(7, "> add search functionality"));
 
         var svc = CreateService(repo);
-        await svc.CleanAndPersistAsync(7);
+        await svc.CleanAndPersistAsync(7, cancellationToken: TestContext.Current.CancellationToken);
 
         repo.Verify(
             r => r.CreateCleanedAndLinkAsync(
@@ -112,7 +112,7 @@ public class CleanedUserInputServiceTests
             .ReturnsAsync((UserInputRecord?)null);
 
         var svc = CreateService(repo);
-        await svc.CleanAndPersistAsync(7);
+        await svc.CleanAndPersistAsync(7, cancellationToken: TestContext.Current.CancellationToken);
 
         repo.Verify(
             r => r.CreateCleanedAndLinkAsync(
@@ -131,7 +131,7 @@ public class CleanedUserInputServiceTests
             .ReturnsAsync(MakeRawInput(7, ">> What was worked on"));
 
         var svc = CreateService(repo);
-        await svc.RepairAndPersistAsync(7);
+        await svc.RepairAndPersistAsync(7, cancellationToken: TestContext.Current.CancellationToken);
 
         repo.Verify(
             r => r.UpdateCleanedTextAsync(
@@ -167,7 +167,11 @@ public class CleanedUserInputServiceTests
 
         var svc = CreateService(repo);
         var nextTs = now.AddSeconds(3); // within SupersededWindowSeconds (15)
-        await svc.CleanAndPersistAsync(7, sessionTuiOutput: null, nextInputTimestampUtc: nextTs);
+        await svc.CleanAndPersistAsync(
+            7,
+            sessionTuiOutput: null,
+            nextInputTimestampUtc: nextTs,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         repo.Verify(
             r => r.CreateCleanedAndLinkAsync(
@@ -194,7 +198,11 @@ public class CleanedUserInputServiceTests
 
         var svc = CreateService(repo);
         var nextTs = now.AddMinutes(1); // well outside the supersede window
-        await svc.CleanAndPersistAsync(7, sessionTuiOutput: null, nextInputTimestampUtc: nextTs);
+        await svc.CleanAndPersistAsync(
+            7,
+            sessionTuiOutput: null,
+            nextInputTimestampUtc: nextTs,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         repo.Verify(
             r => r.CreateCleanedAndLinkAsync(

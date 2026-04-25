@@ -228,27 +228,28 @@ export async function showReplayModal(sessionId) {
     term.open(termEl);
     term.write('Loading session data\u2026\r\n');
 
-    // Scale the font so the recorded cols x rows fills the container without clipping.
-    // FitAddon.proposeDimensions() tells us how many cells fit at current fontSize;
-    // the ratio to (cols, rows) gives the fontSize that makes them match exactly.
-    function fitToGrid(cols, rows) {
+    // Pick a fontSize that makes (cols x rows) fit the container without clipping.
+    // FitAddon.proposeDimensions() tells us how many cells fit at the current fontSize;
+    // the ratio gives the fontSize that makes them match. Iterates twice because the
+    // first pass changes the cell metrics that the second pass measures against.
+    function fitFontToGrid(cols, rows) {
         const width = termEl.clientWidth;
         const height = termEl.clientHeight;
-        if (!width || !height || !cols || !rows) { term.resize(cols, rows); return; }
+        if (!width || !height || !cols || !rows) return;
 
-        let proposed = null;
-        try { proposed = fitAddon?.proposeDimensions?.(); } catch { proposed = null; }
-        if (!proposed || !proposed.cols || !proposed.rows) {
-            proposed = { cols: Math.max(1, Math.floor(width / 8)), rows: Math.max(1, Math.floor(height / 18)) };
-        }
+        for (let i = 0; i < 2; i++) {
+            let proposed = null;
+            try { proposed = fitAddon?.proposeDimensions?.(); } catch { proposed = null; }
+            if (!proposed || !proposed.cols || !proposed.rows) {
+                proposed = { cols: Math.max(1, Math.floor(width / 8)), rows: Math.max(1, Math.floor(height / 18)) };
+            }
 
-        const currentFont = Number(term.options.fontSize) || BASE_FONT_SIZE;
-        const scale = Math.min(proposed.cols / cols, proposed.rows / rows);
-        const newFont = Math.max(4, Math.min(32, Math.floor(currentFont * scale)));
-        if (Number.isFinite(newFont) && newFont > 0 && newFont !== currentFont) {
+            const currentFont = Number(term.options.fontSize) || BASE_FONT_SIZE;
+            const scale = Math.min(proposed.cols / cols, proposed.rows / rows);
+            const newFont = Math.max(4, Math.min(32, Math.floor(currentFont * scale)));
+            if (!Number.isFinite(newFont) || newFont <= 0 || newFont === currentFont) break;
             term.options.fontSize = newFont;
         }
-        term.resize(cols, rows);
     }
 
 
@@ -257,6 +258,8 @@ export async function showReplayModal(sessionId) {
     let altScreenEvents = []; // [{afterFrameIndex, isAlt}]
     let initialCols = 120;
     let initialRows = 40;
+    let maxCols = initialCols;
+    let maxRows = initialRows;
     try {
         const json = await fetchJson(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/terminal-replay`);
         initialCols = json.initialCols || 120;
@@ -270,11 +273,16 @@ export async function showReplayModal(sessionId) {
         // Map each enriched chunk to a byte offset in the combined legacy output so we
         // can figure out which legacy frame index corresponds to each event.
         const chunks = json.chunks || [];
+        maxCols = initialCols;
+        maxRows = initialRows;
         let prevCols = initialCols, prevRows = initialRows;
         let prevAlt = false;
         let chunkByteOffset = 0;
         for (const chunk of chunks) {
             const chunkBytes = atob(chunk.data).length;
+
+            if (chunk.cols > maxCols) maxCols = chunk.cols;
+            if (chunk.rows > maxRows) maxRows = chunk.rows;
 
             const colsChanged = chunk.cols !== prevCols || chunk.rows !== prevRows;
             const altChanged = !!chunk.isAlternateScreen !== prevAlt;
@@ -318,10 +326,16 @@ export async function showReplayModal(sessionId) {
     let currentRows = initialRows;
     const maxIdleMs = 500;
 
-    // Resize xterm to match recording dimensions so alt-screen TUI content renders correctly
-    fitToGrid(initialCols, initialRows);
+    // Size the font once for the largest geometry seen during the recording so the
+    // viewport never gets cropped. The visible grid still tracks the per-chunk dims
+    // via term.resize() in applyPendingResizes — only the font stays constant.
+    fitFontToGrid(maxCols, maxRows);
+    term.resize(initialCols, initialRows);
 
-    onWindowResize = () => fitToGrid(currentCols, currentRows);
+    onWindowResize = () => {
+        fitFontToGrid(maxCols, maxRows);
+        term.resize(currentCols, currentRows);
+    };
     window.addEventListener('resize', onWindowResize);
 
     function getSpeed() {
@@ -338,11 +352,13 @@ export async function showReplayModal(sessionId) {
         progress.textContent = `${currentCols}\u00d7${currentRows}  ${frameIndex} / ${frames.length}`;
     }
 
-    // Apply any pending resize/alt-screen events up to the given frame index
+    // Apply any pending resize/alt-screen events up to the given frame index.
+    // Only the visible grid changes — the font was sized once for maxCols x maxRows
+    // so resizing mid-playback doesn't cause font flicker.
     function applyPendingResizes(idx) {
         while (nextResizeIdx < resizeEvents.length && resizeEvents[nextResizeIdx].afterFrameIndex <= idx) {
             const ev = resizeEvents[nextResizeIdx];
-            fitToGrid(ev.cols, ev.rows);
+            term.resize(ev.cols, ev.rows);
             updateDimensions(ev.cols, ev.rows);
             nextResizeIdx++;
         }
@@ -408,7 +424,7 @@ export async function showReplayModal(sessionId) {
             nextAltIdx = 0;
             altBadge.style.display = 'none';
             term.reset();
-            fitToGrid(initialCols, initialRows);
+            term.resize(initialCols, initialRows);
             updateDimensions(initialCols, initialRows);
         }
         playing = true;
@@ -428,9 +444,10 @@ export async function showReplayModal(sessionId) {
         if (playing) pause(); else play();
     });
 
-    // Auto-start — reset and size to recording dimensions
+    // Auto-start — reset and size to recording dimensions. Font is already sized
+    // for maxCols x maxRows above, so the visible grid here uses the recorded start.
     term.reset();
-    fitToGrid(initialCols, initialRows);
+    term.resize(initialCols, initialRows);
     updateDimensions(initialCols, initialRows);
     play();
 }

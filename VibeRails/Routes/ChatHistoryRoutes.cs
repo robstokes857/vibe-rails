@@ -252,7 +252,10 @@ public static class ChatHistoryRoutes
                 l.Rows
             )).ToList();
 
-            // Use enriched chunk dimensions for initial terminal size (fall back to 120x40)
+            // Use the first chunk's dimensions for the initial visible grid. The JS
+            // replay computes max(cols) x max(rows) across all chunks separately to
+            // size the font, so the viewport fits the largest geometry seen during
+            // the run.
             var initialCols = enrichedChunks.Count > 0 ? enrichedChunks[0].Cols : 120;
             var initialRows = enrichedChunks.Count > 0 ? enrichedChunks[0].Rows : 40;
 

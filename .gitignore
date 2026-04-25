@@ -7,6 +7,11 @@
 .dotnet-home/
 .claude/
 artifacts/
+
+# Local-only BERT embedder benchmark corpus dumped from real CleanedUserInput.
+# Contains personal session content; benchmark Skip()s when these are absent.
+Tests/Services/BertV2/Fixtures/cleaned_input_corpus.jsonl
+Tests/Services/BertV2/Fixtures/cleaned_input_corpus.txt
 # User-specific files
 *.rsuser
 *.suo

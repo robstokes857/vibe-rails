@@ -472,12 +472,25 @@ class TerminalTab {
         const preConnectCols = this.vibeTerminal?.cols;
         const preConnectRows = this.vibeTerminal?.rows;
 
+        // FitAddon can return tiny pre-layout dimensions (e.g. 21x17) when the
+        // container hasn't been measured yet — observed on reconnect after the
+        // machine wakes from sleep. Sending those in the WS URL pre-resizes the
+        // PTY into a useless geometry, the snapshot replays at the wrong size,
+        // and the CLI redraws on a bad grid. If the pre-connect fit looks
+        // suspicious, skip the URL hint — the post-onopen fit + scheduleFitPasses
+        // will send a correct __resize__ once the DOM has settled.
+        const preConnectDimsLookSane = preConnectCols >= 32 && preConnectRows >= 8;
+
         // Prime the resize signature with the pre-connect dimensions. The server
         // receives these in the WebSocket URL and resizes the PTY before sending
         // the replay, so the post-connect fit in onopen must not re-send the same
         // dimensions — a redundant __resize__ triggers SIGWINCH, causing TUI apps
         // to redraw right on top of the just-loaded replay (cursor flicker).
-        this.lastResizeSignature = `${preConnectCols}x${preConnectRows}`;
+        // When the pre-connect dims aren't trustworthy we leave the signature
+        // null so the post-onopen sendResizeToPty *will* fire with real dims.
+        this.lastResizeSignature = preConnectDimsLookSane
+            ? `${preConnectCols}x${preConnectRows}`
+            : null;
 
         this.state.status = 'connecting';
         this.manager.updateUi();
@@ -485,7 +498,9 @@ class TerminalTab {
         const tabToken = this.getSafeTabTokenForWebSocket(
             sessionStorage.getItem('viberails_tab')
         );
-        const wsUrl = this.manager.getWebSocketUrl(this.state.id, preConnectCols, preConnectRows);
+        const urlCols = preConnectDimsLookSane ? preConnectCols : 0;
+        const urlRows = preConnectDimsLookSane ? preConnectRows : 0;
+        const wsUrl = this.manager.getWebSocketUrl(this.state.id, urlCols, urlRows);
         const socket = new WebSocket(wsUrl, tabToken ? [tabToken] : []);
         socket.binaryType = 'arraybuffer';
         this.socket = socket;
@@ -893,11 +908,32 @@ class TerminalManager {
     }
 
     refreshActiveTab() {
+        // Ctrl+L alone doesn't always force TUIs (Claude Code, Codex) to fully
+        // repaint after a reconnect — they ignore it or only redraw the
+        // chrome. Bumping the font by ±1 makes xterm recompute cell metrics,
+        // sends a real __resize__ to the PTY, and the SIGWINCH causes the TUI
+        // to do a complete repaint. Restore the original font 1s later so the
+        // user sees a brief size flash and a clean redraw.
         const active = this.getActiveTab();
-        const socket = active?.socket;
-        if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send('\x0c');
+        const tab = active?.instance;
+        if (!tab?.vibeTerminal) {
+            return;
         }
+
+        const originalSize = tab.vibeTerminal.getFontSize();
+        const tempSize = originalSize >= 72 ? originalSize - 1 : originalSize + 1;
+        if (tempSize === originalSize) {
+            return;
+        }
+
+        tab.applyFontSize(tempSize);
+        setTimeout(() => {
+            // applyFontSize gates the resize-to-PTY on isActive; if the user
+            // switched tabs in the 1s window, the xterm option still flips
+            // back to the original size and the next reactivation refit will
+            // re-sync the PTY.
+            tab.applyFontSize(originalSize);
+        }, 1000);
     }
 
     saveActiveTerminalSession(format) {

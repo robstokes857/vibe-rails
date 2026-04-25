@@ -57,7 +57,7 @@ public class IntegrationAgentFileTests
         Assert.Contains("Cyclomatic complexity < 20", rules);
 
         // Verify file structure is preserved
-        var content = await File.ReadAllTextAsync(_agentFilePath);
+        var content = await File.ReadAllTextAsync(_agentFilePath, TestContext.Current.CancellationToken);
         Assert.Contains("## Files", content);
         Assert.Contains("important-file.cs", content);
         Assert.Contains("## Prompts", content);
@@ -99,7 +99,7 @@ public class IntegrationAgentFileTests
         Assert.Contains("Require test coverage minimum 70%", rulesAfterDelete);
 
         // Verify file structure
-        var content = await File.ReadAllTextAsync(_agentFilePath);
+        var content = await File.ReadAllTextAsync(_agentFilePath, TestContext.Current.CancellationToken);
         Assert.Contains("# Repository Guidelines", content);
         Assert.Contains("## Development Guidelines", content);
         Assert.Contains("## Vibe Rails Rules", content);

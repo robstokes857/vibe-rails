@@ -207,7 +207,7 @@ public class AgentFileServiceTests : IDisposable
 
         await _service.AddRulesAsync(filePath, CancellationToken.None, "Log all file changes");
 
-        var content = await File.ReadAllTextAsync(filePath);
+        var content = await File.ReadAllTextAsync(filePath, TestContext.Current.CancellationToken);
         Assert.Contains("## Files", content);
         Assert.Contains("important-file.cs", content);
         Assert.Contains("another-file.cs", content);
@@ -303,7 +303,7 @@ public class AgentFileServiceTests : IDisposable
 
         await _service.DeleteRulesAsync(filePath, CancellationToken.None, "Log all file changes");
 
-        var content = await File.ReadAllTextAsync(filePath);
+        var content = await File.ReadAllTextAsync(filePath, TestContext.Current.CancellationToken);
         Assert.Contains("# Agent File Header", content);
         Assert.Contains("## Vibe Rails Rules", content);
         Assert.Contains("## Files", content);
@@ -331,7 +331,7 @@ public class AgentFileServiceTests : IDisposable
 
         await _service.DeleteRulesAsync(filePath, CancellationToken.None, "Log all file changes", "Require test coverage minimum 80%");
 
-        var content = await File.ReadAllTextAsync(filePath);
+        var content = await File.ReadAllTextAsync(filePath, TestContext.Current.CancellationToken);
         Assert.Contains("# Agent File Header", content);
         Assert.Contains("## Vibe Rails Rules", content);
         Assert.Contains("## Files", content);
@@ -378,7 +378,7 @@ public class AgentFileServiceTests : IDisposable
         Assert.Equal("Require test coverage minimum 80%", rulesAfterDelete[0]);
 
         // Verify other sections are intact
-        var content = await File.ReadAllTextAsync(filePath);
+        var content = await File.ReadAllTextAsync(filePath, TestContext.Current.CancellationToken);
         Assert.Contains("## Files", content);
         Assert.Contains("existing-file.cs", content);
         Assert.Contains("## Prompts", content);

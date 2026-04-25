@@ -47,7 +47,8 @@ public class CleanedInputIdleObserverTests
             IdleThreshold: TimeSpan.FromSeconds(5),
             LastInputUtc: DateTimeOffset.UtcNow.AddSeconds(-6),
             LastOutputUtc: DateTimeOffset.UtcNow.AddSeconds(-5),
-            TimestampUtc: DateTimeOffset.UtcNow));
+            TimestampUtc: DateTimeOffset.UtcNow),
+            TestContext.Current.CancellationToken);
 
         cleanedService.Verify(
             s => s.CleanAndPersistAsync(
