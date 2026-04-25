@@ -3,7 +3,6 @@ using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.BertBaseClasses;
-using VibeRails.Services.UserInOut;
 using System.Text;
 
 namespace VibeRails.DB
@@ -1376,25 +1375,6 @@ namespace VibeRails.DB
                     Log.Warning(ex, "[VibeRails] Error recording user input for session {SessionId}", sessionId);
                 }
             }
-        }
-
-        public async Task InsertTuiEventAsync(
-            string sessionId,
-            DateTimeOffset timestampUtc,
-            string triggerString,
-            TUI_Event_Watcher_Type eventType,
-            CancellationToken cancellationToken = default)
-        {
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
-
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = SqlStrings.InsertTuiEvent;
-            cmd.Parameters.AddWithValue("$sessionId", sessionId);
-            cmd.Parameters.AddWithValue("$timestampUTC", timestampUtc.ToString("O"));
-            cmd.Parameters.AddWithValue("$triggerString", triggerString);
-            cmd.Parameters.AddWithValue("$eventType", eventType.ToString());
-            await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
         public async Task<UserInputRecord?> GetUserInputByIdAsync(long userInputId, CancellationToken cancellationToken = default)

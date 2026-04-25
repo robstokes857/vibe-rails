@@ -77,7 +77,7 @@ exit 0
             var hookPath = Path.Combine(_hooksDir, "pre-commit");
             Assert.True(File.Exists(hookPath));
 
-            var content = await File.ReadAllTextAsync(hookPath);
+            var content = await File.ReadAllTextAsync(hookPath, TestContext.Current.CancellationToken);
             Assert.Contains("# Vibe Rails Pre-Commit Hook", content);
             Assert.Contains("# End Vibe Rails Hook", content);
         }
@@ -105,14 +105,14 @@ exit 0
 # Some other hook
 echo ""Other hook""
 ";
-            await File.WriteAllTextAsync(hookPath, existingContent);
+            await File.WriteAllTextAsync(hookPath, existingContent, TestContext.Current.CancellationToken);
 
             // Act
             var result = await _service.InstallPreCommitHookAsync(_testRepoPath, CancellationToken.None);
 
             // Assert
             Assert.True(result.Success);
-            var content = await File.ReadAllTextAsync(hookPath);
+            var content = await File.ReadAllTextAsync(hookPath, TestContext.Current.CancellationToken);
             Assert.Contains("# Some other hook", content);
             Assert.Contains("# Vibe Rails Pre-Commit Hook", content);
         }
@@ -128,14 +128,14 @@ echo ""Other hook""
 echo ""Old hook""
 # End Vibe Rails Hook
 ";
-            await File.WriteAllTextAsync(hookPath, oldContent);
+            await File.WriteAllTextAsync(hookPath, oldContent, TestContext.Current.CancellationToken);
 
             // Act
             var result = await _service.InstallPreCommitHookAsync(_testRepoPath, CancellationToken.None);
 
             // Assert
             Assert.True(result.Success);
-            var content = await File.ReadAllTextAsync(hookPath);
+            var content = await File.ReadAllTextAsync(hookPath, TestContext.Current.CancellationToken);
             Assert.Contains("# Vibe Rails Pre-Commit Hook", content);
             Assert.DoesNotContain("Old version", content);
         }
@@ -171,7 +171,7 @@ echo ""Vibe Rails hook""
 # Another hook
 echo ""Another hook""
 ";
-            await File.WriteAllTextAsync(hookPath, mixedContent);
+            await File.WriteAllTextAsync(hookPath, mixedContent, TestContext.Current.CancellationToken);
 
             // Act
             var result = await _service.UninstallPreCommitHookAsync(_testRepoPath, CancellationToken.None);
@@ -179,7 +179,7 @@ echo ""Another hook""
             // Assert
             Assert.True(result.Success);
             Assert.True(File.Exists(hookPath));
-            var content = await File.ReadAllTextAsync(hookPath);
+            var content = await File.ReadAllTextAsync(hookPath, TestContext.Current.CancellationToken);
             Assert.Contains("# Some other hook", content);
             Assert.Contains("# Another hook", content);
             Assert.DoesNotContain("# Vibe Rails Pre-Commit Hook", content);
@@ -223,7 +223,10 @@ echo ""Another hook""
         {
             // Arrange
             var hookPath = Path.Combine(_hooksDir, "pre-commit");
-            await File.WriteAllTextAsync(hookPath, "#!/bin/sh\necho \"Other hook\"");
+            await File.WriteAllTextAsync(
+                hookPath,
+                "#!/bin/sh\necho \"Other hook\"",
+                TestContext.Current.CancellationToken);
 
             // Act
             var isInstalled = _service.IsHookInstalled(_testRepoPath);

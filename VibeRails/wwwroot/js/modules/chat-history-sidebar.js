@@ -8,6 +8,7 @@ import * as SessionDebug from './session-viewer.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 const SCROLL_LOAD_THRESHOLD_PX = 48;
+const CONTEXT_MENU_VIEWPORT_MARGIN_PX = 8;
 // Standard dashed GUID (8-4-4-4-12) or "N" format (32 hex chars), case-insensitive.
 const SESSION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[0-9a-f]{32}$/i;
 
@@ -661,14 +662,7 @@ export class ChatHistorySidebar {
 
         this.activeItem = this.allItems.find(i => i.id === itemEl.dataset.id) || null;
 
-        const itemRect = itemEl.getBoundingClientRect();
-        const anchorRect = anchorEl.getBoundingClientRect();
-        const sidebarRect = this.sidebar.getBoundingClientRect();
-
-        this.contextMenu.style.top = `${itemRect.top - sidebarRect.top}px`;
-        this.contextMenu.style.left = `${anchorRect.right - sidebarRect.left + 6}px`;
         this.sidebar.classList.add('ch-sidebar-menu-open');
-        this.contextMenu.classList.add('show');
 
         itemEl.classList.add('ch-item-menu-active');
 
@@ -683,6 +677,40 @@ export class ChatHistorySidebar {
         }
 
         this._populateLlmSubmenu(submenu);
+        this._positionContextMenu(itemEl, anchorEl);
+    }
+
+    _positionContextMenu(itemEl, anchorEl) {
+        if (!this.sidebar || !this.contextMenu) {
+            return;
+        }
+
+        const itemRect = itemEl.getBoundingClientRect();
+        const anchorRect = anchorEl.getBoundingClientRect();
+        const sidebarRect = this.sidebar.getBoundingClientRect();
+        const margin = CONTEXT_MENU_VIEWPORT_MARGIN_PX;
+
+        this.contextMenu.style.visibility = 'hidden';
+        this.contextMenu.style.top = '0px';
+        this.contextMenu.style.left = `${anchorRect.right - sidebarRect.left + 6}px`;
+        this.contextMenu.classList.add('show');
+
+        const menuHeight = this.contextMenu.offsetHeight;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+        const visibleTop = Math.max(sidebarRect.top, margin);
+        const visibleBottom = Math.min(viewportHeight, sidebarRect.bottom) - margin;
+        const spaceBelow = visibleBottom - itemRect.top;
+        const spaceAbove = itemRect.bottom - visibleTop;
+        const opensUp = menuHeight > spaceBelow && spaceAbove > spaceBelow;
+        const preferredTop = opensUp
+            ? itemRect.bottom - sidebarRect.top - menuHeight
+            : itemRect.top - sidebarRect.top;
+        const minTop = visibleTop - sidebarRect.top;
+        const maxTop = Math.max(minTop, visibleBottom - sidebarRect.top - menuHeight);
+        const top = Math.min(Math.max(preferredTop, minTop), maxTop);
+
+        this.contextMenu.style.top = `${top}px`;
+        this.contextMenu.style.visibility = '';
     }
 
     _renderItems() {

@@ -244,8 +244,6 @@ public class TerminalStateService : ITerminalStateService, IDisposable
             await accumulatorToDispose.DisposeAsync();
         }
 
-        TUI_Event_Watcher.ClearSession(sessionId);
-
         await _repository.CompleteSessionAsync(sessionId, exitCode);
 
         activityState?.Dispose();

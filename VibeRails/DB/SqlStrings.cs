@@ -118,19 +118,6 @@ namespace VibeRails.DB
         public const string CreateUserInputsIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_session ON UserInputs(SessionId)";
         public const string CreateUserInputsSeqIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_session_seq ON UserInputs(SessionId, Sequence)";
 
-        // TUI_Event Table
-        public const string CreateTuiEventTable = """
-            CREATE TABLE IF NOT EXISTS TUI_Event (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                SessionId TEXT NOT NULL,
-                TimestampUTC TEXT NOT NULL,
-                TriggerString TEXT NOT NULL,
-                EventType TEXT NOT NULL,
-                FOREIGN KEY (SessionId) REFERENCES Sessions(Id) ON DELETE CASCADE
-            )
-            """;
-        public const string CreateTuiEventSessionTimestampIndex = "CREATE INDEX IF NOT EXISTS idx_tui_event_session_timestamp ON TUI_Event(SessionId, TimestampUTC)";
-
         // CleanedUserInput Table — ETL-filtered, normalized version of UserInputs.InputText.
         // Strict 1:1 with UserInputs via dual FKs: UserInputs.CleanedId → CleanedUserInput.Id
         // and CleanedUserInput.UserInputId → UserInputs.Id.
@@ -244,8 +231,6 @@ namespace VibeRails.DB
             CreateUserInputsTable,
             CreateUserInputsIndex,
             CreateUserInputsSeqIndex,
-            CreateTuiEventTable,
-            CreateTuiEventSessionTimestampIndex,
             CreateCleanedUserInputTable,
             CreateCleanedUserInputSessionIndex,
             CreateInputFileChangesTable,
@@ -615,10 +600,6 @@ namespace VibeRails.DB
             DELETE FROM SessionLogs
             WHERE SessionId = $sessionId;
             """;
-        public const string DeleteSession_TuiEvents = """
-            DELETE FROM TUI_Event
-            WHERE SessionId = $sessionId;
-            """;
         public const string DeleteSession_UserInputs = """
             DELETE FROM UserInputs
             WHERE SessionId = $sessionId;
@@ -640,7 +621,6 @@ namespace VibeRails.DB
             DeleteSession_SessionOutput,
             DeleteSession_SessionLogs,
             DeleteSession_TerminalSessionLogs,
-            DeleteSession_TuiEvents,
             DeleteSession_NullOutCleanedIds,
             DeleteSession_CleanedUserInput,
             DeleteSession_UserInputs,
@@ -680,12 +660,6 @@ namespace VibeRails.DB
             FROM UserInputs
             WHERE Id = $id
             LIMIT 1;
-            """;
-
-        // TUI event tracking
-        public const string InsertTuiEvent = """
-            INSERT INTO TUI_Event (SessionId, TimestampUTC, TriggerString, EventType)
-            VALUES ($sessionId, $timestampUTC, $triggerString, $eventType);
             """;
 
         // CleanedUserInput CRUD — 1:1 with UserInputs via dual FKs.

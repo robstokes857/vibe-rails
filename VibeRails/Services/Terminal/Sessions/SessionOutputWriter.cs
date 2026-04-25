@@ -220,12 +220,37 @@ public sealed class SessionOutputWriter : ISessionOutputWriter
 
     private async Task HandleResizeAsync(int newCols, int newRows)
     {
-        // Flush both buffers at old dimensions
+        // No-op resize: dimensions unchanged. Skip flush + marker — neither helps
+        // replay when geometry didn't actually change, and natural flush triggers
+        // (FlushThreshold, alt-screen transition, DisposeAsync) still cover
+        // durability for any in-progress buffer. NotifyResize fires on every
+        // browser fit / reconnect URL hint, many of which match the current size.
+        if (_cols == newCols && _rows == newRows)
+            return;
+
+        // Flush both buffers at the OLD dimensions before swapping geometry — any
+        // in-progress data was produced under the old (cols,rows) and must be
+        // persisted with that geometry for replay fidelity.
         await FlushBufferAsync(_mainBuffer, false).ConfigureAwait(false);
         await FlushBufferAsync(_altBuffer, true).ConfigureAwait(false);
 
         _cols = newCols;
         _rows = newRows;
+
+        // Persist a zero-byte marker so the new geometry is recoverable on replay even
+        // if no further data triggers a flush before the session ends. Without this,
+        // a resize that updates only in-memory state is lost when the buffer never
+        // reaches FlushThreshold and shutdown skips DisposeAsync.
+        try
+        {
+            await _repository.InsertTerminalSessionLogAsync(
+                _sessionId!, _sequence++, Array.Empty<byte>(), _inAltScreen, _cols, _rows
+            ).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[SessionOutputWriter] Failed to persist resize marker for session {SessionId}", _sessionId);
+        }
     }
 
     private async Task FlushBufferAsync(MemoryStream buffer, bool isAlternateScreen)

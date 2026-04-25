@@ -64,9 +64,12 @@ public class BertV2BgeEmbedder : IBertV2BgeEmbedder
     {
         var encoded = _tokenizer.EncodeToIds(text, MaxSequenceLength, addSpecialTokens: true, out _, out _);
         var tokenCount = encoded.Count;
+        // Right-sized seq dim: shape the tensor to actual token count (capped by tokenizer at MaxSequenceLength).
+        // Padding to a fixed 512 for short inputs wastes ~13x attention compute (O(seq²) per layer).
+        var seqLen = Math.Max(tokenCount, 1);
 
-        var inputIds = new long[MaxSequenceLength];
-        var attentionMask = new long[MaxSequenceLength];
+        var inputIds = new long[seqLen];
+        var attentionMask = new long[seqLen];
 
         for (int i = 0; i < tokenCount; i++)
         {
@@ -76,14 +79,14 @@ public class BertV2BgeEmbedder : IBertV2BgeEmbedder
 
         var inputs = new List<NamedOnnxValue>
         {
-            NamedOnnxValue.CreateFromTensor("input_ids", new DenseTensor<long>(inputIds, [1, MaxSequenceLength])),
-            NamedOnnxValue.CreateFromTensor("attention_mask", new DenseTensor<long>(attentionMask, [1, MaxSequenceLength])),
+            NamedOnnxValue.CreateFromTensor("input_ids", new DenseTensor<long>(inputIds, [1, seqLen])),
+            NamedOnnxValue.CreateFromTensor("attention_mask", new DenseTensor<long>(attentionMask, [1, seqLen])),
         };
 
         if (_requiresTokenTypeIds)
         {
             inputs.Add(NamedOnnxValue.CreateFromTensor("token_type_ids",
-                new DenseTensor<long>(new long[MaxSequenceLength], [1, MaxSequenceLength])));
+                new DenseTensor<long>(new long[seqLen], [1, seqLen])));
         }
 
         var invocation = System.Threading.Interlocked.Increment(ref _invocationCount);

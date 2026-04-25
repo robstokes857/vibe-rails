@@ -1,7 +1,6 @@
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
-using VibeRails.Services.UserInOut;
 
 namespace VibeRails.DB
 {
@@ -43,7 +42,6 @@ namespace VibeRails.DB
         Task ReplaceFileChangesAsync(long userInputId, List<FileChangeInfo> changes, CancellationToken cancellationToken = default);
         Task<string?> GetSessionWorkingDirectoryAsync(string sessionId, CancellationToken cancellationToken = default);
         Task RecordUserInputAsync(string sessionId, string inputText, IGitService gitService, CancellationToken cancellationToken = default);
-        Task InsertTuiEventAsync(string sessionId, DateTimeOffset timestampUtc, string triggerString, TUI_Event_Watcher_Type eventType, CancellationToken cancellationToken = default);
 
         // Cleaned user input (1:1 with UserInputs via dual FKs)
         Task<long> CreateCleanedAndLinkAsync(string sessionId, long userInputId, string cleanedText, DateTime createdUtc, CancellationToken cancellationToken = default);

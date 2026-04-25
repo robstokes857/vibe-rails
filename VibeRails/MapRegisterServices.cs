@@ -165,7 +165,6 @@ namespace VibeRails
                 serviceCollection.AddHostedService<BertEmbeddingBackfillJob>();
             }
 
-            serviceCollection.AddHostedService<TuiEventPersistenceService>();
             serviceCollection.AddScoped<ISessionTranscriptService, SessionTranscriptService>();
             serviceCollection.AddScoped<ISessionResumeService, SessionResumeService>();
 

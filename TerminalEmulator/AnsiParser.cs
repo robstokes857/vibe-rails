@@ -115,8 +115,10 @@ public sealed class AnsiParser
                 break;
 
             case ParserState.DcsPassthrough:
-                // DCS data — consume until BEL, 8-bit ST, or ESC (start of ESC \)
-                if (b == 0x07 || b == 0x9C)
+                // DCS / SOS / PM / APC data — consume until BEL or ESC (start of ESC \).
+                // 0x9C is intentionally NOT a terminator here for the same reason as OSC:
+                // it collides with UTF-8 continuation bytes.
+                if (b == 0x07)
                     _state = ParserState.Ground;
                 else if (b == 0x1B)
                 {
@@ -276,19 +278,22 @@ public sealed class AnsiParser
 
     private void ProcessOsc(byte b)
     {
-        if (b == 0x07 || b == 0x9C) // BEL or ST
+        if (b == 0x07) // BEL — primary OSC terminator
         {
             DispatchOsc();
             _state = ParserState.Ground;
             return;
         }
-        if (b == 0x1B) // might be ESC \ (ST)
+        if (b == 0x1B) // might be ESC \ (7-bit ST)
         {
-            // We'll get the \ next; set a flag via DcsPassthrough abuse
             DispatchOsc();
             _state = ParserState.Escape; // ESC seen, next byte should be '\'
             return;
         }
+        // NOTE: 0x9C (8-bit C1 String Terminator) is intentionally NOT honored here.
+        // Modern terminal output is UTF-8, and 0x9C is a valid UTF-8 continuation
+        // byte (e.g. ✳ U+2733 encodes as E2 9C B3). Treating it as ST cuts the OSC
+        // payload mid-character and the remainder leaks onto the screen.
         if (_oscLen < _oscBuf.Length)
             _oscBuf[_oscLen++] = (char)b;
     }

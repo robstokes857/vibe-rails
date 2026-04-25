@@ -26,12 +26,10 @@ Three layers:
 
 ```
 Session → UserInput ↔ CleanedUserInput  (strict 1:1 on the right side)
-Session → TUI_Event                    (parsed control-key events)
 ```
 
 - `UserInputs.CleanedId` — nullable FK → `CleanedUserInput(Id)`. Partial index `WHERE CleanedId IS NULL`.
 - `CleanedUserInput.UserInputId` — UNIQUE NOT NULL FK → `UserInputs(Id)`.
-- `TUI_Event.SessionId` — FK → `Sessions(Id)` with `ON DELETE CASCADE`.
 - `CleanedInputMapping` table deleted (was always 1:1 in practice).
 
 ## Public surface
@@ -62,7 +60,6 @@ public interface IGetUserText
 
 - **Part 2a — `CleanedInputIdleObserver : ITerminalIoObserver`** — fires on existing `TerminalIdleEvent` (5s idle). Scans own session for `UserInputs WHERE CleanedId IS NULL`, cleans each, writes `CleanedUserInput` row + updates `UserInputs.CleanedId` atomically.
 - **Part 2b — refactored `CleanedUserInputBackfillJob`** — runs every 5 min, picks up uncleaned rows in sessions ended >5 min ago.
-- **TUI event persistence — `TuiEventPersistenceService`** — subscribes to `TUI_Event_Watcher` once at startup and persists `TUI_Event` rows asynchronously (`SessionId`, `TimestampUTC`, `TriggerString`, `EventType`).
 - Both call `CleanedUserInputService.CleanAndPersistAsync`.
 - Filtered-out inputs (secrets, noise, empty) get a `CleanedUserInput` row with `CleanedText = ""`.
 
