@@ -427,6 +427,30 @@ class TerminalTab {
         }
     }
 
+    // Force a full TUI repaint by bumping the font ±1 and restoring it 1s later.
+    // The bump changes xterm cell metrics → real __resize__ to PTY → SIGWINCH →
+    // TUI redraws from scratch. Use when Ctrl+L isn't enough (Codex/Claude Code
+    // ignore it) or when ConPTY landed in a stale state (post-sleep reconnect).
+    triggerRedrawBump() {
+        if (!this.vibeTerminal) {
+            return;
+        }
+
+        const originalSize = this.vibeTerminal.getFontSize();
+        const tempSize = originalSize >= 72 ? originalSize - 1 : originalSize + 1;
+        if (tempSize === originalSize) {
+            return;
+        }
+
+        this.applyFontSize(tempSize);
+        setTimeout(() => {
+            // applyFontSize gates the resize-to-PTY on isActive; if the user
+            // switched tabs in the 1s window the xterm option still flips back
+            // and the next reactivation refit will re-sync the PTY.
+            this.applyFontSize(originalSize);
+        }, 1000);
+    }
+
     scheduleFitPasses() {
         if (!this.vibeTerminal || !this.isActive) {
             return;
@@ -909,31 +933,9 @@ class TerminalManager {
 
     refreshActiveTab() {
         // Ctrl+L alone doesn't always force TUIs (Claude Code, Codex) to fully
-        // repaint after a reconnect — they ignore it or only redraw the
-        // chrome. Bumping the font by ±1 makes xterm recompute cell metrics,
-        // sends a real __resize__ to the PTY, and the SIGWINCH causes the TUI
-        // to do a complete repaint. Restore the original font 1s later so the
-        // user sees a brief size flash and a clean redraw.
-        const active = this.getActiveTab();
-        const tab = active?.instance;
-        if (!tab?.vibeTerminal) {
-            return;
-        }
-
-        const originalSize = tab.vibeTerminal.getFontSize();
-        const tempSize = originalSize >= 72 ? originalSize - 1 : originalSize + 1;
-        if (tempSize === originalSize) {
-            return;
-        }
-
-        tab.applyFontSize(tempSize);
-        setTimeout(() => {
-            // applyFontSize gates the resize-to-PTY on isActive; if the user
-            // switched tabs in the 1s window, the xterm option still flips
-            // back to the original size and the next reactivation refit will
-            // re-sync the PTY.
-            tab.applyFontSize(originalSize);
-        }, 1000);
+        // repaint — they ignore it or only redraw the chrome. The ±1 font
+        // bump forces a real __resize__ → SIGWINCH → full TUI redraw.
+        this.getActiveTab()?.instance?.triggerRedrawBump();
     }
 
     saveActiveTerminalSession(format) {
@@ -1537,6 +1539,16 @@ class TerminalManager {
             this.app.showError('Failed to reconnect terminal session.');
             return;
         }
+
+        // Reconnect only fires from a known-disconnected state (post-sleep,
+        // network blip). The snapshot replay restores visible state, but ConPTY
+        // can still be in a stale layout where the TUI doesn't naturally
+        // repaint. Delay the font-bump so the snapshot lands first, then force
+        // a clean SIGWINCH-driven redraw on top.
+        const tabAtReconnect = tab;
+        setTimeout(() => {
+            tabAtReconnect.instance.triggerRedrawBump();
+        }, 400);
 
         this.updateUi();
     }
