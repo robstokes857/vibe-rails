@@ -76,6 +76,14 @@ export class WebviewPanelManager {
             'assets/xterm/addon-fit.js'
         );
 
+        // VS Code webviews should be self-contained. On cold VS Code starts,
+        // external font negotiation can stall behind Electron/service-worker
+        // startup work and competes with xterm rendering.
+        html = html.replace(
+            /\s*<link[^>]+href=["']https:\/\/fonts\.(?:googleapis|gstatic)\.com[^"']*["'][^>]*>\s*/gi,
+            '\n'
+        );
+
         html = this.rewriteAssetPaths(html, webview, wwwrootUri);
 
         const csp = [
