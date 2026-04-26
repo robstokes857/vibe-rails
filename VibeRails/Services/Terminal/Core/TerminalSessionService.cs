@@ -185,7 +185,7 @@ public class TerminalSessionService : ITerminalSessionService
         // Run WebSocket input loop (blocks until WebSocket closes or cancellation)
         try
         {
-            await WebSocketInputLoopAsync(terminal, webSocket, _stateService, sessionId, cancellationToken);
+            await WebSocketInputLoopAsync(terminal, webSocket, wsConsumer, _stateService, sessionId, cancellationToken);
         }
         finally
         {
@@ -318,9 +318,16 @@ public class TerminalSessionService : ITerminalSessionService
     }
 
     private static async Task WebSocketInputLoopAsync(
-        Terminal terminal, WebSocket webSocket, ITerminalStateService stateService, string sessionId, CancellationToken ct)
+        Terminal terminal,
+        WebSocket webSocket,
+        ITerminalConsumer snapshotConsumer,
+        ITerminalStateService stateService,
+        string sessionId,
+        CancellationToken ct)
     {
         var buffer = new byte[4096];
+        var lastReplayUtc = DateTimeOffset.MinValue;
+        var minReplayInterval = TimeSpan.FromMilliseconds(250);
         try
         {
             while (!ct.IsCancellationRequested && webSocket.State == WebSocketState.Open)
@@ -382,6 +389,23 @@ public class TerminalSessionService : ITerminalSessionService
                     catch (Exception ex)
                     {
                         Log.Error(ex, "[Terminal] Failed to resize PTY to {Cols}x{Rows}", cols, rows);
+                    }
+                    continue;
+                }
+
+                // Reserved browser command: refresh the viewer from the server-side
+                // emulator snapshot without sending anything to the PTY. This avoids
+                // SIGWINCH/Ctrl+L redraws that make full-screen TUIs print duplicate
+                // frames after reconnect. Throttled per-socket so a runaway client
+                // can't spin the subscriber lock.
+                if (result.MessageType == WebSocketMessageType.Text &&
+                    TerminalControlProtocol.IsReplayCommand(input))
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    if (now - lastReplayUtc >= minReplayInterval)
+                    {
+                        lastReplayUtc = now;
+                        terminal.PushSnapshotTo(snapshotConsumer);
                     }
                     continue;
                 }

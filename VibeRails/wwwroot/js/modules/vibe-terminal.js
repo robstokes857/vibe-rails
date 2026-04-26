@@ -66,7 +66,6 @@ export class VibeTerminal {
         mobileLineHeight = 1.2,
         scrollOnWrite = true,
         scrollback = DEFAULT_TERMINAL_SCROLLBACK,
-        cursorBlink = true,
         cursorStyle = 'block',
         cursorInactiveStyle = 'outline'
     } = {}) {
@@ -122,7 +121,7 @@ export class VibeTerminal {
             scrollback,
             minimumContrastRatio: 3,
             rightClickSelectsWord: true,
-            cursorBlink,
+            cursorBlink: false,
             cursorStyle,
             cursorInactiveStyle,
             theme: this._getAppliedTheme()
@@ -622,11 +621,6 @@ export class VibeTerminal {
     setTheme(theme) {
         this._theme = buildTerminalTheme(theme);
         this._applyTheme();
-    }
-
-    setCursorBlink(blink) {
-        if (!this._terminal) return;
-        this._terminal.options.cursorBlink = blink;
     }
 
     setCursorStyle(style) {
