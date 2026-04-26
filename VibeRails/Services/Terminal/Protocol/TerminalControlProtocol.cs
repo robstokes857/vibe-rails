@@ -9,11 +9,16 @@ internal static class TerminalControlProtocol
     public const int MaxControlReasonLength = 120;
     public const int MaxCommandNameLength = 64;
     public const int MaxCommandPayloadLength = 8 * 1024;
+    public const string CommandPrefix = "__cmd__:";
+    // Legacy frame kept for older remote/relay clients that haven't picked up
+    // the structured __cmd__:replay form yet. TODO: remove once the marketplace
+    // VS Code extension and any deployed relays are confirmed past 1.7.x.
     public const string ReplayCommand = "__replay__";
+    public const string ReplayCommandName = "replay";
+    public const string ReplayCommandFrame = CommandPrefix + ReplayCommandName;
     public const string BrowserDisconnectedCommand = "__browser_disconnected__";
     public const string DisconnectBrowserCommand = "__disconnect_browser__";
     public const string ResizePrefix = "__resize__:";
-    public const string CommandPrefix = "__cmd__:";
 
     // PIN challenge protocol — sent as plain text (not __cmd__:) to keep it simple
     // and match the remote app's expected message format.
@@ -77,11 +82,11 @@ internal static class TerminalControlProtocol
         var splitIndex = body.IndexOf(':');
         if (splitIndex < 0)
         {
-            command = body.Trim();
+            command = body;
         }
         else
         {
-            command = body[..splitIndex].Trim();
+            command = body[..splitIndex];
             payload = body[(splitIndex + 1)..];
         }
 
@@ -92,6 +97,16 @@ internal static class TerminalControlProtocol
             return false;
 
         return true;
+    }
+
+    public static bool IsReplayCommand(string input)
+    {
+        if (string.Equals(input, ReplayCommand, StringComparison.Ordinal))
+            return true;
+
+        return TryParseCommand(input, out var command, out var payload)
+            && payload is null
+            && string.Equals(command, ReplayCommandName, StringComparison.Ordinal);
     }
 
     private static bool IsValidCommandName(string command)

@@ -149,7 +149,7 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
                         var text = Encoding.UTF8.GetString(inputBytes);
-                        if (text == TerminalControlProtocol.ReplayCommand)
+                        if (TerminalControlProtocol.IsReplayCommand(text))
                         {
                             OnReplayRequested?.Invoke();
                             continue;

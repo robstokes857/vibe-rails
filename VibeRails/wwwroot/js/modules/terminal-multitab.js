@@ -9,6 +9,7 @@ import {
 import { TabStatusController } from './terminal-tab-status.js';
 
 const RESIZE_PREFIX = '__resize__:';
+const VIEWER_SNAPSHOT_REPLAY_COMMAND = '__cmd__:replay';
 // Collapse layout-settle/font-load fit bursts into one PTY resize so ConPTY does not
 // redraw the full TUI multiple times while the browser is still stabilizing.
 const RESIZE_SYNC_DEBOUNCE_MS = 140;
@@ -427,36 +428,25 @@ class TerminalTab {
         }
     }
 
-    // Force a full TUI repaint by bumping the font ±1 and restoring it 1s later.
-    // The bump changes xterm cell metrics → real __resize__ to PTY → SIGWINCH →
-    // TUI redraws from scratch. Use when Ctrl+L isn't enough (Codex/Claude Code
-    // ignore it) or when ConPTY landed in a stale state (post-sleep reconnect).
-    triggerRedrawBump() {
-        if (!this.vibeTerminal) {
-            return;
-        }
-
-        const originalSize = this.vibeTerminal.getFontSize();
-        const tempSize = originalSize >= 72 ? originalSize - 1 : originalSize + 1;
-        if (tempSize === originalSize) {
-            return;
-        }
-
-        this.applyFontSize(tempSize);
-        setTimeout(() => {
-            // applyFontSize gates the resize-to-PTY on isActive; if the user
-            // switched tabs in the 1s window the xterm option still flips back
-            // and the next reactivation refit will re-sync the PTY.
-            this.applyFontSize(originalSize);
-        }, 1000);
-    }
-
     scheduleFitPasses() {
         if (!this.vibeTerminal || !this.isActive) {
             return;
         }
 
         this.vibeTerminal.scheduleFitPasses();
+    }
+
+    requestViewerSnapshotReplay() {
+        if (!this.hasOpenSocket()) {
+            return false;
+        }
+
+        try {
+            this.socket.send(VIEWER_SNAPSHOT_REPLAY_COMMAND);
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     setupResizeHandling() {
@@ -771,15 +761,6 @@ class TerminalManager {
         }
     }
 
-    _loadCursorBlink() {
-        try {
-            const val = localStorage.getItem('viberails_terminal_cursorBlink');
-            return val === null ? true : val === 'true';
-        } catch {
-            return true;
-        }
-    }
-
     _loadCursorStyle() {
         try {
             return localStorage.getItem('viberails_terminal_cursorStyle') || 'block';
@@ -805,7 +786,6 @@ class TerminalManager {
             vibe.setTheme(window.CXL_THEMES[themeKey]);
         }
 
-        vibe.setCursorBlink(this._loadCursorBlink());
         vibe.setCursorStyle(this._loadCursorStyle());
         vibe.setCursorInactiveStyle(this._loadCursorInactiveStyle());
     }
@@ -932,10 +912,16 @@ class TerminalManager {
     }
 
     refreshActiveTab() {
-        // Ctrl+L alone doesn't always force TUIs (Claude Code, Codex) to fully
-        // repaint — they ignore it or only redraw the chrome. The ±1 font
-        // bump forces a real __resize__ → SIGWINCH → full TUI redraw.
-        this.getActiveTab()?.instance?.triggerRedrawBump();
+        const tab = this.getActiveTab();
+        if (!tab || !tab.state.hasActiveSession) {
+            return;
+        }
+
+        if (tab.instance.requestViewerSnapshotReplay()) {
+            return;
+        }
+
+        void this.reconnectActiveTab();
     }
 
     saveActiveTerminalSession(format) {
@@ -1037,8 +1023,6 @@ class TerminalManager {
             ?.addEventListener('change', (e) => this.adjustFontSize(0, parseInt(e.target.value, 10)));
         this.container.querySelector('#terminal-settings-renderer')
             ?.addEventListener('change', (e) => this.applyRendererPreference(e.target.value));
-        this.container.querySelector('#terminal-settings-cursor-blink')
-            ?.addEventListener('change', (e) => this.applyCursorBlink(e.target.checked));
         this.container.querySelector('#terminal-settings-cursor-style')
             ?.addEventListener('change', (e) => this.applyCursorStyle(e.target.value));
         this.container.querySelector('#terminal-settings-cursor-inactive')
@@ -1539,16 +1523,6 @@ class TerminalManager {
             this.app.showError('Failed to reconnect terminal session.');
             return;
         }
-
-        // Reconnect only fires from a known-disconnected state (post-sleep,
-        // network blip). The snapshot replay restores visible state, but ConPTY
-        // can still be in a stale layout where the TUI doesn't naturally
-        // repaint. Delay the font-bump so the snapshot lands first, then force
-        // a clean SIGWINCH-driven redraw on top.
-        const tabAtReconnect = tab;
-        setTimeout(() => {
-            tabAtReconnect.instance.triggerRedrawBump();
-        }, 400);
 
         this.updateUi();
     }
@@ -2489,9 +2463,6 @@ class TerminalManager {
         const rendererSelect = this.container.querySelector('#terminal-settings-renderer');
         if (rendererSelect) rendererSelect.value = this._loadRendererPreference();
 
-        const cursorBlinkCheck = this.container.querySelector('#terminal-settings-cursor-blink');
-        if (cursorBlinkCheck) cursorBlinkCheck.checked = this._loadCursorBlink();
-
         const cursorStyleSelect = this.container.querySelector('#terminal-settings-cursor-style');
         if (cursorStyleSelect) cursorStyleSelect.value = this._loadCursorStyle();
 
@@ -2562,13 +2533,6 @@ class TerminalManager {
             'Renderer preference saved. Restart active terminal tabs to apply.',
             'info'
         );
-    }
-
-    applyCursorBlink(blink) {
-        try { localStorage.setItem('viberails_terminal_cursorBlink', String(blink)); } catch {}
-        this.tabs.forEach((tab) => {
-            tab.instance.vibeTerminal?.setCursorBlink(blink);
-        });
     }
 
     applyCursorStyle(style) {
@@ -2891,7 +2855,7 @@ export class TerminalController {
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
                             <span class="vb-terminal-font-size-label" id="vb-terminal-font-size-label">14</span>
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
-                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-refresh-btn" title="Refresh (Ctrl+L)" aria-label="Refresh terminal">
+                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-refresh-btn" title="Refresh terminal snapshot" aria-label="Refresh terminal snapshot">
                                 <i class="fa-solid fa-arrows-rotate"></i>
                             </button>
                             <div class="vb-terminal-download-wrap" id="vb-terminal-download-wrap">
@@ -2955,10 +2919,6 @@ export class TerminalController {
                             </div>
                             <div class="vb-terminal-settings-section">
                                 <div class="vb-terminal-settings-section-title">Cursor</div>
-                                <div class="vb-terminal-settings-row">
-                                    <label>Blink</label>
-                                    <input type="checkbox" id="terminal-settings-cursor-blink">
-                                </div>
                                 <div class="vb-terminal-settings-row">
                                     <label>Active style</label>
                                     <select id="terminal-settings-cursor-style">
