@@ -256,317 +256,317 @@ export class EnvironmentController {
     }
 
     createEnvironment() {
-        this.app.showModal('Create New Environment', `
-            <form id="create-env-form">
-                <div class="mb-3">
-                    <label class="form-label">Environment Name</label>
-                    <input type="text" class="form-control" id="env-name" required>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">CLI Type</label>
-                    <select class="form-select" id="env-cli" required>
-                        <option value="codex">Codex</option>
-                        <option value="claude">Claude</option>
-                        <option value="gemini">Gemini</option>
-                        <option value="copilot">Copilot</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Custom Arguments</label>
-                    <input type="text" class="form-control" id="env-custom-args" placeholder="e.g., --yolo --sandbox">
-                    <small class="form-text text-muted">Arguments passed to the CLI when launching with this environment</small>
-                </div>
-                <button type="submit" class="btn btn-primary d-flex align-items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                        <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
-                    </svg>
-                    Create Environment
-                </button>
-            </form>
-        `);
-
-        document.getElementById('create-env-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const name = document.getElementById('env-name').value;
-            const cli = document.getElementById('env-cli').value;
-            const customArgs = document.getElementById('env-custom-args').value;
-
-            try {
-                await this.app.apiCall('/api/v1/environments', 'POST', { name, cli, customArgs });
-                this.app.closeModal();
-                await this.refreshEnvironments();
-                this.app.navigate('environments');
-            } catch (error) {
-                this.app.showError(`Failed to create environment: ${error.message}`);
-            }
-        });
+        this.showEnvironmentForm({ mode: 'create' });
     }
 
     async editEnvironment(name) {
         const env = this.app.data.environments.find(e => e.name === name);
         if (!env) return;
 
+        const cliSettings = await this.loadCliSettings(env.cli, env.name);
+        this.showEnvironmentForm({ mode: 'edit', env, cliSettings });
+    }
+
+    showEnvironmentForm({ mode, env = null, cliSettings = {} }) {
+        const isEdit = mode === 'edit';
         const escapeHtml = (text) => {
             const div = document.createElement('div');
-            div.textContent = text;
+            div.textContent = text ?? '';
             return div.innerHTML;
         };
 
-        const isGemini = env.cli.toLowerCase() === 'gemini';
-        const isCodex = env.cli.toLowerCase() === 'codex';
-        const isClaude = env.cli.toLowerCase() === 'claude';
-        let geminiSettings = null;
-        let codexSettings = null;
-        let claudeSettings = null;
+        const cliOptions = ['codex', 'claude', 'gemini', 'copilot'];
+        const initialCli = isEdit ? env.cli : cliOptions[0];
+        const title = isEdit ? `Edit Environment: ${env.name}` : 'Create New Environment';
+        const submitLabel = isEdit ? 'Save Changes' : 'Create Environment';
+        const submitIcon = isEdit
+            ? `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
+              </svg>`
+            : `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+              </svg>`;
 
-        // Fetch Gemini-specific settings if applicable
-        if (isGemini) {
-            try {
-                geminiSettings = await this.app.apiCall(`/api/v1/gemini/settings/${encodeURIComponent(name)}`, 'GET');
-            } catch (error) {
-                console.warn('Failed to load Gemini settings:', error);
-                geminiSettings = {};
-            }
-        }
+        const nameField = isEdit
+            ? `<input type="text" class="form-control" value="${escapeHtml(env.name)}" disabled>`
+            : `<input type="text" class="form-control" id="env-name" required>`;
 
-        // Fetch Codex-specific settings if applicable
-        if (isCodex) {
-            try {
-                codexSettings = await this.app.apiCall(`/api/v1/codex/settings/${encodeURIComponent(name)}`, 'GET');
-            } catch (error) {
-                console.warn('Failed to load Codex settings:', error);
-                codexSettings = {};
-            }
-        }
+        const cliField = isEdit
+            ? `<input type="text" class="form-control" value="${escapeHtml(env.cli)}" disabled>`
+            : `<select class="form-select" id="env-cli" required>
+                ${cliOptions.map(c => `<option value="${c}">${c.charAt(0).toUpperCase() + c.slice(1)}</option>`).join('')}
+              </select>`;
 
-        // Fetch Claude-specific settings if applicable
-        if (isClaude) {
-            try {
-                claudeSettings = await this.app.apiCall(`/api/v1/claude/settings/${encodeURIComponent(name)}`, 'GET');
-            } catch (error) {
-                console.warn('Failed to load Claude settings:', error);
-                claudeSettings = {};
-            }
-        }
+        const customArgsValue = isEdit ? escapeHtml(env.customArgs || '') : '';
 
-        const geminiSettingsHtml = isGemini ? `
-            <hr class="my-4">
-            <h6 class="text-muted mb-3">Gemini CLI Settings</h6>
-            <div class="mb-3">
-                <label class="form-label">Theme</label>
-                <select class="form-select" id="gemini-theme">
-                    <option value="Default" ${geminiSettings?.theme === 'Default' ? 'selected' : ''}>Default</option>
-                    <option value="Dark" ${geminiSettings?.theme === 'Dark' ? 'selected' : ''}>Dark</option>
-                    <option value="Light" ${geminiSettings?.theme === 'Light' ? 'selected' : ''}>Light</option>
-                </select>
-            </div>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="gemini-sandbox" ${geminiSettings?.sandboxEnabled ? 'checked' : ''}>
-                    <label class="form-check-label" for="gemini-sandbox">Sandbox Mode</label>
-                </div>
-                <small class="form-text text-muted">Run tools in a containerized sandbox for safety</small>
-            </div>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="gemini-auto-approve" ${geminiSettings?.autoApproveTools ? 'checked' : ''}>
-                    <label class="form-check-label" for="gemini-auto-approve">Auto-Approve Tools</label>
-                </div>
-                <small class="form-text text-muted">Automatically execute safe operations without confirmation</small>
-            </div>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="gemini-vim" ${geminiSettings?.vimMode ? 'checked' : ''}>
-                    <label class="form-check-label" for="gemini-vim">Vim Mode</label>
-                </div>
-                <small class="form-text text-muted">Enable Vim keybindings</small>
-            </div>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="gemini-updates" ${geminiSettings?.checkForUpdates ? 'checked' : ''}>
-                    <label class="form-check-label" for="gemini-updates">Check for Updates</label>
-                </div>
-                <small class="form-text text-muted">Automatically check for CLI updates</small>
-            </div>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="gemini-yolo" ${geminiSettings?.yoloMode ? 'checked' : ''}>
-                    <label class="form-check-label" for="gemini-yolo">YOLO Mode</label>
-                </div>
-                <small class="form-text text-muted text-warning">Auto-approve ALL operations (dangerous!)</small>
-            </div>
-        ` : '';
-
-        const codexSettingsHtml = isCodex ? `
-            <hr class="my-4">
-            <h6 class="text-muted mb-3">Codex CLI Settings</h6>
-            <div class="mb-3">
-                <label class="form-label">Model</label>
-                <input type="text" class="form-control" id="codex-model" value="${codexSettings?.model || ''}" placeholder="e.g., o3, gpt-5-codex">
-                <small class="form-text text-muted">Override the default model</small>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Sandbox Policy</label>
-                <select class="form-select" id="codex-sandbox">
-                    <option value="read-only" ${codexSettings?.sandbox === 'read-only' ? 'selected' : ''}>Read-Only</option>
-                    <option value="workspace-write" ${codexSettings?.sandbox === 'workspace-write' ? 'selected' : ''}>Workspace Write</option>
-                    <option value="danger-full-access" ${codexSettings?.sandbox === 'danger-full-access' ? 'selected' : ''}>Full Access (Dangerous)</option>
-                </select>
-                <small class="form-text text-muted">Controls sandbox policy for shell commands</small>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Approval Mode</label>
-                <select class="form-select" id="codex-approval">
-                    <option value="untrusted" ${codexSettings?.approval === 'untrusted' ? 'selected' : ''}>Untrusted (Always Ask)</option>
-                    <option value="on-failure" ${codexSettings?.approval === 'on-failure' ? 'selected' : ''}>On Failure</option>
-                    <option value="on-request" ${codexSettings?.approval === 'on-request' ? 'selected' : ''}>On Request</option>
-                    <option value="never" ${codexSettings?.approval === 'never' ? 'selected' : ''}>Never (Auto-approve All)</option>
-                </select>
-                <small class="form-text text-muted">When to pause for human approval</small>
-            </div>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="codex-full-auto" ${codexSettings?.fullAuto ? 'checked' : ''}>
-                    <label class="form-check-label" for="codex-full-auto">Full-Auto Mode</label>
-                </div>
-                <small class="form-text text-muted">Shortcut for approval=on-request + sandbox=workspace-write</small>
-            </div>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="codex-search" ${codexSettings?.search ? 'checked' : ''}>
-                    <label class="form-check-label" for="codex-search">Web Search</label>
-                </div>
-                <small class="form-text text-muted">Enable web search capabilities</small>
-            </div>
-        ` : '';
-
-        const claudeSettingsHtml = isClaude ? `
-            <hr class="my-4">
-            <h6 class="text-muted mb-3">Claude CLI Settings</h6>
-            <div class="mb-3">
-                <label class="form-label">Model</label>
-                <select class="form-select" id="claude-model">
-                    <option value="" ${!claudeSettings?.model ? 'selected' : ''}>(default)</option>
-                    <option value="sonnet" ${claudeSettings?.model === 'sonnet' ? 'selected' : ''}>Sonnet</option>
-                    <option value="opus" ${claudeSettings?.model === 'opus' ? 'selected' : ''}>Opus</option>
-                    <option value="haiku" ${claudeSettings?.model === 'haiku' ? 'selected' : ''}>Haiku</option>
-                </select>
-                <small class="form-text text-muted">Override the default model</small>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Permission Mode</label>
-                <select class="form-select" id="claude-permission-mode">
-                    <option value="default" ${claudeSettings?.permissionMode === 'default' ? 'selected' : ''}>Default</option>
-                    <option value="plan" ${claudeSettings?.permissionMode === 'plan' ? 'selected' : ''}>Plan Mode</option>
-                    <option value="bypassPermissions" ${claudeSettings?.permissionMode === 'bypassPermissions' ? 'selected' : ''}>Bypass Permissions (Dangerous)</option>
-                </select>
-                <small class="form-text text-muted">Controls permission handling behavior</small>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Allowed Tools</label>
-                <input type="text" class="form-control" id="claude-allowed-tools" value="${claudeSettings?.allowedTools || ''}" placeholder="e.g., Read,Glob,Grep">
-                <small class="form-text text-muted">Comma-separated list of tools to auto-approve</small>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Disallowed Tools</label>
-                <input type="text" class="form-control" id="claude-disallowed-tools" value="${claudeSettings?.disallowedTools || ''}" placeholder="e.g., Bash,Write">
-                <small class="form-text text-muted">Comma-separated list of tools to disable</small>
-            </div>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="claude-skip-permissions" ${claudeSettings?.skipPermissions ? 'checked' : ''}>
-                    <label class="form-check-label" for="claude-skip-permissions">Skip Permissions</label>
-                </div>
-                <small class="form-text text-muted text-warning">Skip all permission prompts (dangerous!)</small>
-            </div>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="claude-verbose" ${claudeSettings?.verbose ? 'checked' : ''}>
-                    <label class="form-check-label" for="claude-verbose">Verbose Logging</label>
-                </div>
-                <small class="form-text text-muted">Enable verbose logging output</small>
-            </div>
-        ` : '';
-
-        this.app.showModal(`Edit Environment: ${name}`, `
-            <form id="edit-env-form">
+        this.app.showModal(title, `
+            <form id="env-form">
                 <div class="mb-3">
                     <label class="form-label">Environment Name</label>
-                    <input type="text" class="form-control" value="${escapeHtml(env.name)}" disabled>
+                    ${nameField}
                 </div>
                 <div class="mb-3">
                     <label class="form-label">CLI Type</label>
-                    <input type="text" class="form-control" value="${escapeHtml(env.cli)}" disabled>
+                    ${cliField}
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Custom Arguments</label>
-                    <input type="text" class="form-control" id="env-custom-args" value="${escapeHtml(env.customArgs || '')}" placeholder="e.g., --yolo --sandbox">
+                    <input type="text" class="form-control" id="env-custom-args" value="${customArgsValue}" placeholder="e.g., --yolo --sandbox">
                     <small class="form-text text-muted">Arguments passed to the CLI when launching with this environment</small>
                 </div>
-                ${geminiSettingsHtml}
-                ${codexSettingsHtml}
-                ${claudeSettingsHtml}
+                <div data-cli-settings-slot>${this.buildCliSettingsHtml(initialCli, cliSettings || {})}</div>
                 <button type="submit" class="btn btn-primary d-flex align-items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                        <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
-                    </svg>
-                    Save Changes
+                    ${submitIcon}
+                    ${submitLabel}
                 </button>
             </form>
         `);
 
-        document.getElementById('edit-env-form').addEventListener('submit', async (e) => {
+        const slot = document.querySelector('[data-cli-settings-slot]');
+
+        if (!isEdit) {
+            const cliSelect = document.getElementById('env-cli');
+            cliSelect.addEventListener('change', () => {
+                slot.innerHTML = this.buildCliSettingsHtml(cliSelect.value, {});
+            });
+        }
+
+        document.getElementById('env-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const customArgs = document.getElementById('env-custom-args').value;
 
             try {
-                await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(name)}`, 'PUT', { customArgs });
-
-                // Save Gemini-specific settings if applicable
-                if (isGemini) {
-                    const geminiPayload = {
-                        theme: document.getElementById('gemini-theme').value,
-                        sandboxEnabled: document.getElementById('gemini-sandbox').checked,
-                        autoApproveTools: document.getElementById('gemini-auto-approve').checked,
-                        vimMode: document.getElementById('gemini-vim').checked,
-                        checkForUpdates: document.getElementById('gemini-updates').checked,
-                        yoloMode: document.getElementById('gemini-yolo').checked
-                    };
-                    await this.app.apiCall(`/api/v1/gemini/settings/${encodeURIComponent(name)}`, 'PUT', geminiPayload);
-                }
-
-                // Save Codex-specific settings if applicable
-                if (isCodex) {
-                    const codexPayload = {
-                        model: document.getElementById('codex-model').value,
-                        sandbox: document.getElementById('codex-sandbox').value,
-                        approval: document.getElementById('codex-approval').value,
-                        fullAuto: document.getElementById('codex-full-auto').checked,
-                        search: document.getElementById('codex-search').checked
-                    };
-                    await this.app.apiCall(`/api/v1/codex/settings/${encodeURIComponent(name)}`, 'PUT', codexPayload);
-                }
-
-                // Save Claude-specific settings if applicable
-                if (isClaude) {
-                    const claudePayload = {
-                        model: document.getElementById('claude-model').value,
-                        permissionMode: document.getElementById('claude-permission-mode').value,
-                        allowedTools: document.getElementById('claude-allowed-tools').value,
-                        disallowedTools: document.getElementById('claude-disallowed-tools').value,
-                        skipPermissions: document.getElementById('claude-skip-permissions').checked,
-                        verbose: document.getElementById('claude-verbose').checked
-                    };
-                    await this.app.apiCall(`/api/v1/claude/settings/${encodeURIComponent(name)}`, 'PUT', claudePayload);
+                if (isEdit) {
+                    await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(env.name)}`, 'PUT', { customArgs });
+                    await this.saveCliSettings(env.cli, env.name);
+                } else {
+                    const name = document.getElementById('env-name').value;
+                    const cli = document.getElementById('env-cli').value;
+                    await this.app.apiCall('/api/v1/environments', 'POST', { name, cli, customArgs });
+                    await this.saveCliSettings(cli, name);
                 }
 
                 this.app.closeModal();
                 await this.refreshEnvironments();
                 this.app.navigate('environments');
             } catch (error) {
-                this.app.showError(`Failed to update environment: ${error.message}`);
+                const verb = isEdit ? 'update' : 'create';
+                this.app.showError(`Failed to ${verb} environment: ${error.message}`);
             }
         });
+    }
+
+    cliSettingsEndpoint(cli) {
+        const cliLower = (cli || '').toLowerCase();
+        if (cliLower === 'gemini' || cliLower === 'codex' || cliLower === 'claude') {
+            return cliLower;
+        }
+        return null;
+    }
+
+    async loadCliSettings(cli, envName) {
+        const endpoint = this.cliSettingsEndpoint(cli);
+        if (!endpoint) return {};
+        try {
+            return await this.app.apiCall(`/api/v1/${endpoint}/settings/${encodeURIComponent(envName)}`, 'GET');
+        } catch (error) {
+            console.warn(`Failed to load ${cli} settings:`, error);
+            return {};
+        }
+    }
+
+    async saveCliSettings(cli, envName) {
+        const endpoint = this.cliSettingsEndpoint(cli);
+        if (!endpoint) return;
+        const payload = this.extractCliSettingsPayload(cli);
+        if (!payload) return;
+        await this.app.apiCall(`/api/v1/${endpoint}/settings/${encodeURIComponent(envName)}`, 'PUT', payload);
+    }
+
+    extractCliSettingsPayload(cli) {
+        const cliLower = (cli || '').toLowerCase();
+        if (cliLower === 'gemini') {
+            return {
+                theme: document.getElementById('gemini-theme').value,
+                sandboxEnabled: document.getElementById('gemini-sandbox').checked,
+                autoApproveTools: document.getElementById('gemini-auto-approve').checked,
+                vimMode: document.getElementById('gemini-vim').checked,
+                checkForUpdates: document.getElementById('gemini-updates').checked,
+                yoloMode: document.getElementById('gemini-yolo').checked
+            };
+        }
+        if (cliLower === 'codex') {
+            return {
+                model: document.getElementById('codex-model').value,
+                sandbox: document.getElementById('codex-sandbox').value,
+                approval: document.getElementById('codex-approval').value,
+                fullAuto: document.getElementById('codex-full-auto').checked,
+                search: document.getElementById('codex-search').checked
+            };
+        }
+        if (cliLower === 'claude') {
+            return {
+                model: document.getElementById('claude-model').value,
+                permissionMode: document.getElementById('claude-permission-mode').value,
+                allowedTools: document.getElementById('claude-allowed-tools').value,
+                disallowedTools: document.getElementById('claude-disallowed-tools').value,
+                skipPermissions: document.getElementById('claude-skip-permissions').checked,
+                verbose: document.getElementById('claude-verbose').checked
+            };
+        }
+        return null;
+    }
+
+    buildCliSettingsHtml(cli, settings) {
+        const s = settings || {};
+        const cliLower = (cli || '').toLowerCase();
+
+        if (cliLower === 'gemini') {
+            return `
+                <hr class="my-4">
+                <h6 class="text-muted mb-3">Gemini CLI Settings</h6>
+                <div class="mb-3">
+                    <label class="form-label">Theme</label>
+                    <select class="form-select" id="gemini-theme">
+                        <option value="Default" ${s.theme === 'Default' ? 'selected' : ''}>Default</option>
+                        <option value="Dark" ${s.theme === 'Dark' ? 'selected' : ''}>Dark</option>
+                        <option value="Light" ${s.theme === 'Light' ? 'selected' : ''}>Light</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="gemini-sandbox" ${s.sandboxEnabled ? 'checked' : ''}>
+                        <label class="form-check-label" for="gemini-sandbox">Sandbox Mode</label>
+                    </div>
+                    <small class="form-text text-muted">Run tools in a containerized sandbox for safety</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="gemini-auto-approve" ${s.autoApproveTools ? 'checked' : ''}>
+                        <label class="form-check-label" for="gemini-auto-approve">Auto-Approve Tools</label>
+                    </div>
+                    <small class="form-text text-muted">Automatically execute safe operations without confirmation</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="gemini-vim" ${s.vimMode ? 'checked' : ''}>
+                        <label class="form-check-label" for="gemini-vim">Vim Mode</label>
+                    </div>
+                    <small class="form-text text-muted">Enable Vim keybindings</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="gemini-updates" ${s.checkForUpdates ? 'checked' : ''}>
+                        <label class="form-check-label" for="gemini-updates">Check for Updates</label>
+                    </div>
+                    <small class="form-text text-muted">Automatically check for CLI updates</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="gemini-yolo" ${s.yoloMode ? 'checked' : ''}>
+                        <label class="form-check-label" for="gemini-yolo">YOLO Mode</label>
+                    </div>
+                    <small class="form-text text-muted text-warning">Auto-approve ALL operations (dangerous!)</small>
+                </div>
+            `;
+        }
+
+        if (cliLower === 'codex') {
+            return `
+                <hr class="my-4">
+                <h6 class="text-muted mb-3">Codex CLI Settings</h6>
+                <div class="mb-3">
+                    <label class="form-label">Model</label>
+                    <input type="text" class="form-control" id="codex-model" value="${s.model || ''}" placeholder="e.g., o3, gpt-5-codex">
+                    <small class="form-text text-muted">Override the default model</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Sandbox Policy</label>
+                    <select class="form-select" id="codex-sandbox">
+                        <option value="read-only" ${s.sandbox === 'read-only' ? 'selected' : ''}>Read-Only</option>
+                        <option value="workspace-write" ${s.sandbox === 'workspace-write' ? 'selected' : ''}>Workspace Write</option>
+                        <option value="danger-full-access" ${s.sandbox === 'danger-full-access' ? 'selected' : ''}>Full Access (Dangerous)</option>
+                    </select>
+                    <small class="form-text text-muted">Controls sandbox policy for shell commands</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Approval Mode</label>
+                    <select class="form-select" id="codex-approval">
+                        <option value="untrusted" ${s.approval === 'untrusted' ? 'selected' : ''}>Untrusted (Always Ask)</option>
+                        <option value="on-failure" ${s.approval === 'on-failure' ? 'selected' : ''}>On Failure</option>
+                        <option value="on-request" ${s.approval === 'on-request' ? 'selected' : ''}>On Request</option>
+                        <option value="never" ${s.approval === 'never' ? 'selected' : ''}>Never (Auto-approve All)</option>
+                    </select>
+                    <small class="form-text text-muted">When to pause for human approval</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="codex-full-auto" ${s.fullAuto ? 'checked' : ''}>
+                        <label class="form-check-label" for="codex-full-auto">Full-Auto Mode</label>
+                    </div>
+                    <small class="form-text text-muted">Shortcut for approval=on-request + sandbox=workspace-write</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="codex-search" ${s.search ? 'checked' : ''}>
+                        <label class="form-check-label" for="codex-search">Web Search</label>
+                    </div>
+                    <small class="form-text text-muted">Enable web search capabilities</small>
+                </div>
+            `;
+        }
+
+        if (cliLower === 'claude') {
+            return `
+                <hr class="my-4">
+                <h6 class="text-muted mb-3">Claude CLI Settings</h6>
+                <div class="mb-3">
+                    <label class="form-label">Model</label>
+                    <select class="form-select" id="claude-model">
+                        <option value="" ${!s.model ? 'selected' : ''}>(default)</option>
+                        <option value="sonnet" ${s.model === 'sonnet' ? 'selected' : ''}>Sonnet</option>
+                        <option value="opus" ${s.model === 'opus' ? 'selected' : ''}>Opus</option>
+                        <option value="haiku" ${s.model === 'haiku' ? 'selected' : ''}>Haiku</option>
+                    </select>
+                    <small class="form-text text-muted">Override the default model</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Permission Mode</label>
+                    <select class="form-select" id="claude-permission-mode">
+                        <option value="default" ${s.permissionMode === 'default' ? 'selected' : ''}>Default</option>
+                        <option value="plan" ${s.permissionMode === 'plan' ? 'selected' : ''}>Plan Mode</option>
+                        <option value="bypassPermissions" ${s.permissionMode === 'bypassPermissions' ? 'selected' : ''}>Bypass Permissions (Dangerous)</option>
+                    </select>
+                    <small class="form-text text-muted">Controls permission handling behavior</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Allowed Tools</label>
+                    <input type="text" class="form-control" id="claude-allowed-tools" value="${s.allowedTools || ''}" placeholder="e.g., Read,Glob,Grep">
+                    <small class="form-text text-muted">Comma-separated list of tools to auto-approve</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Disallowed Tools</label>
+                    <input type="text" class="form-control" id="claude-disallowed-tools" value="${s.disallowedTools || ''}" placeholder="e.g., Bash,Write">
+                    <small class="form-text text-muted">Comma-separated list of tools to disable</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="claude-skip-permissions" ${s.skipPermissions ? 'checked' : ''}>
+                        <label class="form-check-label" for="claude-skip-permissions">Skip Permissions</label>
+                    </div>
+                    <small class="form-text text-muted text-warning">Skip all permission prompts (dangerous!)</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="claude-verbose" ${s.verbose ? 'checked' : ''}>
+                        <label class="form-check-label" for="claude-verbose">Verbose Logging</label>
+                    </div>
+                    <small class="form-text text-muted">Enable verbose logging output</small>
+                </div>
+            `;
+        }
+
+        return '';
     }
 
     async removeEnvironment(name) {
