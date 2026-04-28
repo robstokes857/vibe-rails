@@ -889,7 +889,7 @@ export class ChatHistorySidebar {
             if (launchBtn) launchBtn.disabled = true;
 
             try {
-                const url = `/api/v1/chatHistory/${encodeURIComponent(sessionId)}/Summary${regenerate ? '?regenerate=true' : ''}`;
+                const url = `/api/v1/chatHistory/${encodeURIComponent(sessionId)}/summary${regenerate ? '?regenerate=true' : ''}`;
                 const result = await this.app.apiCall(url, 'GET', null, { showLoading: false });
 
                 const summary = result?.summary ?? '';

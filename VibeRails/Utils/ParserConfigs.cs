@@ -163,6 +163,7 @@ namespace VibeRails.Utils
         private static string _apiKey = string.Empty;
         private static bool _enablePrerelease = false;
         private static bool _developerOptions = false;
+        private static bool _useVsCodeTheme = false;
         private static string _frontendUrl = string.Empty;
 
         public static bool GetRemoteAccess()
@@ -196,6 +197,14 @@ namespace VibeRails.Utils
         public static void SetDeveloperOptions(bool value)
         {
             _developerOptions = value;
+        }
+        public static bool GetUseVsCodeTheme()
+        {
+            return _useVsCodeTheme;
+        }
+        public static void SetUseVsCodeTheme(bool value)
+        {
+            _useVsCodeTheme = value;
         }
         public static string GetFrontendUrl()
         {

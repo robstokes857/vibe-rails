@@ -15,6 +15,7 @@ public class Settings
     public bool RemoteAccess { get; set; } = false;
     public bool EnablePrerelease { get; set; } = false;
     public bool DeveloperOptions { get; set; } = false;
+    public bool UseVsCodeTheme { get; set; } = false;
     public string PinHash { get; set; } = string.Empty;
     public string PinSalt { get; set; } = string.Empty;
     public HookSettings Hooks { get; set; } = new();

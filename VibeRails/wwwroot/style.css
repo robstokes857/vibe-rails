@@ -43,7 +43,7 @@
     --navbar-height: 52px;
 }
 
-html[data-viberails-host="vscode"] {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] {
     --vb-vscode-bg-base: var(--vscode-editor-background, #121212);
     --vb-vscode-surface: color-mix(in srgb,
             var(--vscode-sideBar-background, var(--vb-vscode-bg-base)) 72%,
@@ -76,106 +76,106 @@ html[data-viberails-host="vscode"] {
     --color-border: var(--vb-vscode-border);
 }
 
-html[data-viberails-host="vscode"] body {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body {
     font-family: var(--vscode-font-family, 'Inter', -apple-system, sans-serif);
 }
 
-html[data-viberails-host="vscode"] body.vscode-light,
-html[data-viberails-host="vscode"] body.vscode-high-contrast-light {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body.vscode-light,
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body.vscode-high-contrast-light {
     color-scheme: light;
 }
 
-html[data-viberails-host="vscode"] body.vscode-dark,
-html[data-viberails-host="vscode"] body.vscode-high-contrast {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body.vscode-dark,
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body.vscode-high-contrast {
     color-scheme: dark;
 }
 
-html[data-viberails-host="vscode"] body .app-subnav {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .app-subnav {
     background: color-mix(in srgb,
             var(--vscode-titleBar-activeBackground, var(--color-bg-surface)) 84%,
             transparent);
     border-bottom-color: var(--color-border);
 }
 
-html[data-viberails-host="vscode"] body .app-subnav-link:hover,
-html[data-viberails-host="vscode"] body .app-subnav-link.active {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .app-subnav-link:hover,
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .app-subnav-link.active {
     background: var(--vb-vscode-surface-hover);
 }
 
-html[data-viberails-host="vscode"] body .brand-text-sm,
-html[data-viberails-host="vscode"] body .text-gradient {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .brand-text-sm,
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .text-gradient {
     background: linear-gradient(135deg, var(--color-text) 0%, var(--color-accent) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
 }
 
-html[data-viberails-host="vscode"] body code {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body code {
     background: color-mix(in srgb, var(--color-accent) 14%, transparent);
 }
 
-html[data-viberails-host="vscode"] body .btn-vscode-launch {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .btn-vscode-launch {
     background: color-mix(in srgb, var(--color-primary) 16%, transparent);
     border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border) 58%);
     color: var(--color-primary);
 }
 
-html[data-viberails-host="vscode"] body .btn-vscode-launch:hover {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .btn-vscode-launch:hover {
     background: color-mix(in srgb, var(--color-primary) 24%, transparent);
     border-color: color-mix(in srgb, var(--color-primary) 70%, var(--color-border) 30%);
     color: var(--color-primary);
 }
 
-html[data-viberails-host="vscode"] body .btn-outline-secondary:hover {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .btn-outline-secondary:hover {
     background: var(--vb-vscode-surface-hover);
     border-color: color-mix(in srgb, var(--color-text-muted) 70%, var(--color-border) 30%);
 }
 
-html[data-viberails-host="vscode"] body .btn-outline-primary:hover {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .btn-outline-primary:hover {
     background: color-mix(in srgb, var(--color-primary) 16%, transparent);
 }
 
-html[data-viberails-host="vscode"] body .btn-outline-success:hover {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .btn-outline-success:hover {
     background: color-mix(in srgb, var(--color-success) 16%, transparent);
 }
 
-html[data-viberails-host="vscode"] body .btn-outline-danger:hover {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .btn-outline-danger:hover {
     background: color-mix(in srgb, var(--color-danger) 16%, transparent);
 }
 
-html[data-viberails-host="vscode"] body .quick-launch-card,
-html[data-viberails-host="vscode"] body .sandbox-item-card {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .quick-launch-card,
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .sandbox-item-card {
     background: var(--vb-vscode-card-bg);
     border-color: color-mix(in srgb, var(--color-border) 78%, var(--color-text) 22%);
 }
 
-html[data-viberails-host="vscode"] body .project-item {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .project-item {
     background: var(--vb-vscode-card-bg) !important;
     border-color: color-mix(in srgb, var(--color-border) 78%, var(--color-text) 22%) !important;
 }
 
-html[data-viberails-host="vscode"] body .quick-launch-card:hover,
-html[data-viberails-host="vscode"] body .sandbox-item-card:hover {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .quick-launch-card:hover,
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .sandbox-item-card:hover {
     background: var(--vb-vscode-card-bg-hover);
     border-color: color-mix(in srgb, var(--color-primary) 32%, var(--color-border) 68%);
 }
 
-html[data-viberails-host="vscode"] body .project-item:hover {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .project-item:hover {
     background: var(--vb-vscode-card-bg-hover) !important;
     border-color: color-mix(in srgb, var(--color-primary) 32%, var(--color-border) 68%) !important;
 }
 
-html[data-viberails-host="vscode"] body .modal-content,
-html[data-viberails-host="vscode"] body .sandbox-diff-modal .modal-content {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .modal-content,
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body .sandbox-diff-modal .modal-content {
     background: color-mix(in srgb, var(--color-bg-surface) 88%, var(--color-bg-base) 12%);
 }
 
-html[data-viberails-host="vscode"] body.vscode-light .icon-light,
-html[data-viberails-host="vscode"] body.vscode-high-contrast-light .icon-light {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body.vscode-light .icon-light,
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body.vscode-high-contrast-light .icon-light {
     filter: none;
 }
 
-html[data-viberails-host="vscode"] body #vb-terminal-panel {
+html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body #vb-terminal-panel {
     --color-bg-base: #121212;
     --color-bg-surface: #1e1e1e;
     --color-bg-surface-hover: #2c2c2c;
@@ -189,6 +189,15 @@ html[data-viberails-host="vscode"] body #vb-terminal-panel {
     --color-warning: #f59e0b;
     --color-danger: #ef4444;
     --color-border: #334155;
+}
+
+/* VS Code already wraps the webview in its own chrome (Explorer, panel borders,
+   editor tabs). Inheriting the regular .main-container padding (2.5rem 2rem)
+   wastes horizontal space and leaves the bottom row pressed against the
+   OUTPUT/PROBLEMS panel divider. Pull the sides in tight and keep a small
+   bottom gutter so the terminal's last row never butts the panel divider. */
+html[data-viberails-host="vscode"] body .main-container {
+    padding: 0.5rem 0.5rem 0.75rem;
 }
 
 body.navbars-collapsed {

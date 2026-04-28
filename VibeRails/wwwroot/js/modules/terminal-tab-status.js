@@ -77,6 +77,7 @@ export class TabStatusController {
         this._statusIconEl = null;
         this._brandLogoEl = null;
         this._labelEl = null;
+        this._lastCliKey = undefined;
     }
 
     // ── Public API ──────────────────────────────────────────────────────
@@ -85,13 +86,36 @@ export class TabStatusController {
         const button = this._ui.button;
         if (!button) return;
 
+        const cliKey = this._options.getCliKey?.() ?? null;
+        const brand = getCliBrand(cliKey);
+
+        // Set brand accent on the tab state so applyTabAccent() preserves it
+        if (brand.accentColor && !this._tabState.accentColor) {
+            this._tabState.accentColor = brand.accentColor;
+        }
+
+        // Idempotent path: TerminalManager.updateUi() calls renderTabButton()
+        // for every tab on every UI tick. A full DOM rebuild here would tear
+        // down the in-flight emoji/shimmer animations on every tick, which
+        // looked like a flicker on the Thinking tab. Update only the bits
+        // that actually mutate (label) and leave status visuals — managed by
+        // _transitionTo / _applyVisuals on real status changes — alone.
+        if (this._labelEl && this._lastCliKey === cliKey) {
+            const nextLabel = this._tabState.label || 'Terminal';
+            if (this._labelEl.textContent !== nextLabel) {
+                this._labelEl.textContent = nextLabel;
+            }
+            button.title = nextLabel;
+            return;
+        }
+
+        this._lastCliKey = cliKey;
         button.innerHTML = '';
 
         // ── Left: Identity ──────────────────────────────────────────────
         const identity = document.createElement('span');
         identity.className = 'vb-tab-identity';
 
-        const brand = getCliBrand(this._options.getCliKey?.());
         if (brand.logo) {
             const img = document.createElement('img');
             img.className = 'vb-tab-brand-logo';
@@ -110,11 +134,6 @@ export class TabStatusController {
             fallback.textContent = '>_';
             identity.appendChild(fallback);
             this._brandLogoEl = fallback;
-        }
-
-        // Set brand accent on the tab state so applyTabAccent() preserves it
-        if (brand.accentColor && !this._tabState.accentColor) {
-            this._tabState.accentColor = brand.accentColor;
         }
 
         const label = document.createElement('span');
@@ -213,6 +232,7 @@ export class TabStatusController {
         this._statusIconEl = null;
         this._brandLogoEl = null;
         this._labelEl = null;
+        this._lastCliKey = undefined;
     }
 
     // ── Internal ────────────────────────────────────────────────────────

@@ -687,9 +687,29 @@ export class VibeTerminal {
         this._followOutput = true;
     }
 
-    reset() {
-        this.clearDisplay();
+    resetForSnapshotReplay() {
+        if (!this._terminal) return;
+        // Full xterm reset: clears buffer + scrollback AND resets parser/mode
+        // state (alt-screen, bracketed paste, application cursor, mouse
+        // tracking, scroll regions, character sets, attributes). Reconnect
+        // needs this baseline so a main-screen snapshot does not paint into a
+        // stale alt-screen buffer left over from a prior TUI run. This does not
+        // remount the DOM, so cell metrics stay settled for the next fit().
+        if (this._cursorRestoreTimeoutId) {
+            clearTimeout(this._cursorRestoreTimeoutId);
+            this._cursorRestoreTimeoutId = null;
+        }
+        this._cursorSuppressed = false;
+        this._terminal.clearSelection?.();
+        this._terminal.reset();
+        this._applyTheme();
+        this.patchTextarea();
+        this._followOutput = true;
         this._searchTerm = '';
+    }
+
+    reset() {
+        this.resetForSnapshotReplay();
     }
 
     resetDisplayOnly() {
