@@ -359,6 +359,7 @@ export class VibeControlApp {
             ...this.appSettings,
             ...settings
         });
+        this.applyVsCodeThemePreference();
     }
 
     _normalizeAppSettings(settings = {}) {
@@ -367,8 +368,22 @@ export class VibeControlApp {
             apiKey: '',
             enablePrerelease: false,
             developerOptions: false,
+            useVsCodeTheme: false,
             ...settings
         };
+    }
+
+    applyVsCodeThemePreference() {
+        if (!window.__viberails_VSCODE__) {
+            document.documentElement.removeAttribute('data-viberails-vscode-theme');
+            return;
+        }
+
+        if (this.appSettings?.useVsCodeTheme === true) {
+            document.documentElement.dataset.viberailsVscodeTheme = 'enabled';
+        } else {
+            document.documentElement.removeAttribute('data-viberails-vscode-theme');
+        }
     }
 
     isDeveloperOptionsEnabled() {

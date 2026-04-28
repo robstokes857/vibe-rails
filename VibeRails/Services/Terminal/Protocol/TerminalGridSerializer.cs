@@ -28,22 +28,19 @@ internal static class TerminalGridSerializer
         bool isAlternateScreen = false)
     {
         int scrollbackCount = scrollback.Length;
-        // Rough capacity: reset(4) + per-row(cols*8 avg + newline) for scrollback + screen
+        // Rough capacity: reset prologue + per-row(cols*8 avg + newline) for scrollback + screen
         var sb = new StringBuilder((scrollbackCount + rows) * cols * 4 + (scrollbackCount + rows) * 16 + 64);
 
-        // Hide cursor before repaint to prevent ghost-cursor artifacts during replay.
-        // Use soft clear instead of RIS (ESC c) — RIS resets terminal modes and can
-        // cause xterm.js cursor state weirdness / visual artifacts on reconnect.
-        sb.Append("\x1b[?25l");  // hide cursor
-        sb.Append("\x1b[2J");    // clear visible screen
-        sb.Append("\x1b[3J");    // clear scrollback
-        sb.Append("\x1b[H");     // home cursor (1,1)
+        AppendSnapshotResetPrologue(sb);
 
         if (isAlternateScreen)
         {
             // Terminal is in alt-screen — put xterm.js into alt-screen mode before
             // rendering content. Skip scrollback (alt-screen has none per VT spec).
             sb.Append("\x1b[?1049h");
+            sb.Append("\x1b[?25l");
+            sb.Append("\x1b[2J");
+            sb.Append("\x1b[H");
         }
         else
         {
@@ -96,6 +93,26 @@ internal static class TerminalGridSerializer
         sb.Append(" q");
 
         return Encoding.UTF8.GetBytes(sb.ToString());
+    }
+
+    private static void AppendSnapshotResetPrologue(StringBuilder sb)
+    {
+        // Snapshot replay must be self-contained. A viewer may have disconnected
+        // while xterm.js was in alt-screen, bracketed-paste, mouse tracking,
+        // synchronized-output, application-cursor, or a custom scroll region.
+        // Do not use RIS here; this explicit baseline avoids historical xterm.js
+        // cursor artifacts while still returning replay to factory-like modes.
+        sb.Append("\x1b[?1049;1047;47l"); // main screen
+        sb.Append("\x1b[?1;6;1000;1002;1003;1004;1005;1006;1007;1015;2004;2026l");
+        sb.Append("\x1b[?7h");           // autowrap on
+        sb.Append("\x1b>");              // normal keypad
+        sb.Append("\x1b(B\x1b)B");       // default G0/G1 charsets
+        sb.Append("\x1b[r");             // full-screen scroll region
+        sb.Append("\x1b[0m");            // default attributes
+        sb.Append("\x1b[?25l");          // hide cursor during repaint
+        sb.Append("\x1b[2J");            // clear visible screen
+        sb.Append("\x1b[3J");            // clear scrollback
+        sb.Append("\x1b[H");             // home cursor (1,1)
     }
 
     private static void SerializeRow(StringBuilder sb, TerminalCell[] row, int cols)

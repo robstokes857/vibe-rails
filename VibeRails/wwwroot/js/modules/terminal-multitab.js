@@ -442,6 +442,15 @@ class TerminalTab {
         }
 
         try {
+            // Do not reset the local xterm here. The socket is still open and
+            // live PTY bytes can be in flight in the WS pipe between this send
+            // and the snapshot reply. A local reset would paint those in-flight
+            // bytes onto a blank terminal until the snapshot prologue lands.
+            // The server-side snapshot prologue (1049/1047/47 off, 2J/3J/H,
+            // mode resets) is sufficient on its own for the active-socket
+            // refresh path. The reconnect path in connect() still resets
+            // locally because it has stale state that no server prologue is
+            // about to wipe.
             this.socket.send(VIEWER_SNAPSHOT_REPLAY_COMMAND);
             return true;
         } catch {
@@ -471,8 +480,17 @@ class TerminalTab {
         }
 
         this.disconnectSocketOnly();
-        this.disposeTerminalInstance();
+        // Reuse the live xterm DOM across reconnects. Recreating it remounts
+        // xterm's DOM children, and the synchronous fit() below can then
+        // measure cell metrics before the browser paints them. Reusing the DOM
+        // keeps fit stable, but we still need a full xterm protocol reset so
+        // stale modes (alt-screen, bracketed paste, app cursor, mouse tracking)
+        // do not leak into the incoming server snapshot.
+        const hadExistingTerminal = !!this.vibeTerminal;
         this.ensureTerminal();
+        if (hadExistingTerminal) {
+            this.vibeTerminal?.resetForSnapshotReplay?.();
+        }
         this.clearConnectFocusTimeouts();
         this._initialConnectActive = true;
         this.lastResizeSignature = null;

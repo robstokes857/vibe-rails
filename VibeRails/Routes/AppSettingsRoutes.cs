@@ -21,7 +21,8 @@ public static class AppSettingsRoutes
                 settings.RemoteAccess,
                 maskedKey,
                 settings.EnablePrerelease,
-                settings.DeveloperOptions
+                settings.DeveloperOptions,
+                settings.UseVsCodeTheme
             ));
         }).WithName("GetAppSettings");
 
@@ -41,6 +42,7 @@ public static class AppSettingsRoutes
                 settings.ApiKey = settingsDto.ApiKey;
             settings.EnablePrerelease = settingsDto.EnablePrerelease;
             settings.DeveloperOptions = settingsDto.DeveloperOptions;
+            settings.UseVsCodeTheme = settingsDto.UseVsCodeTheme;
 
             // Save back to settings.json
             Config.Save(settings);
@@ -51,6 +53,7 @@ public static class AppSettingsRoutes
                 ParserConfigs.SetApiKey(settingsDto.ApiKey);
             ParserConfigs.SetEnablePrerelease(settingsDto.EnablePrerelease);
             ParserConfigs.SetDeveloperOptions(settingsDto.DeveloperOptions);
+            ParserConfigs.SetUseVsCodeTheme(settingsDto.UseVsCodeTheme);
             return Results.Ok(settingsDto with
             {
                 RemoteAccess = remoteAccess

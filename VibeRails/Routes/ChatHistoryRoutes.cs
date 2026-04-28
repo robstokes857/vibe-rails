@@ -262,7 +262,7 @@ public static class ChatHistoryRoutes
             return Results.Ok(new TerminalReplayResponse(sessionId, initialCols, initialRows, enrichedChunks, frames));
         }).WithName("GetTerminalReplay");
 
-        app.MapGet("/api/v1/chatHistory/{sessionId}/Summary", async (
+        app.MapGet("/api/v1/chatHistory/{sessionId}/summary", async (
            IChatHistoryService chatHistoryService,
            string sessionId,
            bool? regenerate,

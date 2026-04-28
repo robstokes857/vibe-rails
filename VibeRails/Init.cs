@@ -198,6 +198,7 @@ namespace VibeRails
             ParserConfigs.SetRemoteAccess(settings.RemoteAccess);
             ParserConfigs.SetApiKey(settings.ApiKey);
             ParserConfigs.SetDeveloperOptions(settings.DeveloperOptions);
+            ParserConfigs.SetUseVsCodeTheme(settings.UseVsCodeTheme);
         }
     }
 }

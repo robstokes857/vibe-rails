@@ -1,5 +1,78 @@
 # TERMINAL.md
 
+## 2026-04-27 Snapshot replay state reset contract
+
+Reconnect must preserve the live xterm.js DOM node for stable fit/cell metrics,
+but must not preserve xterm protocol state. A stale browser viewer may have
+disconnected while it was in alternate screen, bracketed paste, mouse tracking,
+synchronized output, application cursor, or a custom scroll region. The next
+snapshot has to render from a known baseline.
+
+What this pass does:
+
+1. **Reconnect path** (`TerminalTab.connect()`) — preserves the existing xterm
+   DOM (no more `disposeTerminalInstance()` on every reconnect) and instead
+   calls `VibeTerminal.resetForSnapshotReplay()`. That uses xterm's full reset
+   to clear parser/mode state without remounting DOM children, then reapplies
+   VibeRails cursor/theme bookkeeping. This restores the old dispose/new-xterm
+   factory-baseline behavior without the reconnect measurement bug caused by
+   remounting xterm DOM (synchronous `fit()` could measure cell metrics before
+   the browser painted them).
+2. **Backend snapshot replay** (`TerminalGridSerializer.Serialize`) — every
+   snapshot now starts with an explicit reset prologue that exits alternate
+   screen (`?1049/1047/47 l`), disables known transient private modes
+   (`?2004`, mouse `?1000-1007/1015`, focus `?1004`, sync `?2026`, app cursor
+   `?1`, origin `?6`), enables autowrap (`?7h`), restores normal keypad
+   (`ESC >`), resets G0/G1 charsets (`ESC (B`, `ESC )B`), restores the
+   full-screen scroll region (`CSI r`), resets attributes (`SGR 0`), hides the
+   cursor (`?25l`), clears visible screen and scrollback (`2J`/`3J`), and
+   homes the cursor (`CUP 1,1`) before painting rows.
+3. If the server emulator is currently in alternate screen, the serializer
+   re-enters `?1049h` after the baseline reset and paints the alternate-screen
+   grid there. Otherwise the snapshot stays on main screen and scrollback rows
+   are replayed normally.
+
+What this pass does **not** do, intentionally:
+
+- **Active-socket refresh** (`TerminalTab.requestViewerSnapshotReplay()` —
+  the manual refresh button while the WebSocket stays open) does **not** call
+  `resetForSnapshotReplay()` locally. The socket is open and live PTY bytes
+  may already be in flight in the WS pipe between the `__cmd__:replay` send
+  and the snapshot reply. A local reset would briefly paint those in-flight
+  bytes onto a blank terminal until the snapshot prologue lands. The server
+  prologue alone is sufficient on this path because xterm.js and the C#
+  emulator have been seeing the same byte stream — there is no disconnected
+  drift to recover from. This matches the design that shipped in the
+  2026-04-26 reconnect double-print fix and is covered by
+  `Session_9e670449_ReconnectRegressionTests`.
+- The snapshot prologue does not yet serialize every active TUI mode. If
+  reconnect paste/mouse semantics need full fidelity later, the C# emulator
+  must track those modes and the serializer must reapply them after the
+  baseline reset.
+
+Regression coverage (`Tests/Services/Terminal/TerminalGridSerializerTests.cs`):
+
+- stale viewer alt-screen + server main-screen snapshot exits alt-screen
+  before painting
+- server alt-screen snapshot still re-enters alt-screen before painting
+- snapshot prologue includes resets for the known transient modes that caused
+  stale browser state leaks
+
+Guardrails for future changes:
+
+- Do not reintroduce a local `resetForSnapshotReplay()` on the active-socket
+  refresh path. The flicker window it opens is real (live in-flight bytes
+  paint on a blank terminal); the server prologue is the single source of
+  truth there.
+- Do not go back to disposing and recreating the xterm instance on reconnect.
+  Synchronous `fit()` against a freshly-remounted DOM measures stale cell
+  metrics. Reuse the DOM and reset protocol state instead.
+- If a previously-fixed bug starts showing up after a reconnect or refresh,
+  first check whether a new transient private mode escaped the prologue's
+  disable list before reaching for any kind of redraw poke.
+
+---
+
 ## 2026-04-09 Attach path unified: "be a correct terminal, no per-CLI hacks"
 
 This repo no longer contains any per-CLI attach-path branching. The design
