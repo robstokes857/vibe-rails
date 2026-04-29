@@ -142,34 +142,20 @@ export class EnvironmentController {
                                 <td><strong>${env.name}</strong></td>
                                 <td>${env.cli}</td>
                                 <td><code>${env.customArgs || '-'}</code></td>
-                                <td class="small text-muted">${env.lastUsed || 'Never'}</td>
+                                <td class="small text-muted text-nowrap">${env.lastUsed || 'Never'}</td>
                                 <td>
-                                    <div class="d-flex gap-2">
-                                        <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" type="button" data-action="launch-environment" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in external terminal">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                <path d="M6 9a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 9M2.854 4.146a.5.5 0 1 0-.708.708L4.293 7 2.146 9.146a.5.5 0 1 0 .708.708l2.5-2.5a.5.5 0 0 0 0-.708z"/>
-                                                <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
-                                            </svg>
-                                            <span>Launch in CLI</span>
+                                    <div class="d-inline-flex gap-1">
+                                        <button class="btn btn-xs btn-outline-secondary d-inline-flex align-items-center" type="button" data-action="launch-environment" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in external terminal">
+                                            <i class="fa-solid fa-terminal"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-1" type="button" data-action="launch-in-webui" data-env-id="${env.id}" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in Web Terminal">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                <path d="M2 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v1H1V3a1 1 0 0 1 1-1zm1 11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5h14z"/>
-                                                <path d="M4.146 7.146a.5.5 0 0 1 .708 0L6.707 9 4.854 10.854a.5.5 0 0 1-.708-.708L5.293 9 4.146 7.854a.5.5 0 0 1 0-.708M7.5 10.5a.5.5 0 0 1 0-1H10a.5.5 0 0 1 0 1z"/>
-                                            </svg>
-                                            <span>Launch in Web</span>
+                                        <button class="btn btn-xs btn-outline-success d-inline-flex align-items-center" type="button" data-action="launch-in-webui" data-env-id="${env.id}" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in Web Terminal">
+                                            <i class="fa-solid fa-display"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" type="button" data-action="edit-environment" data-env-name="${env.name}" title="Settings">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-1.905.928l-.34-.12c-1.353-.475-2.749.921-2.274 2.274l.12.34a1.464 1.464 0 0 1-.928 1.905l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .928 1.905l-.12.34c-.475 1.353.921 2.749 2.274 2.274l.34-.12a1.464 1.464 0 0 1 1.905.928l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 1.905-.928l.34.12c1.353.475 2.749-.921 2.274-2.274l-.12-.34a1.464 1.464 0 0 1 .928-1.905l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.928-1.905l.12-.34c.475-1.353-.921-2.749-2.274-2.274l-.34.12a1.464 1.464 0 0 1-1.905-.928zM8 10.466a2.466 2.466 0 1 1 0-4.932 2.466 2.466 0 0 1 0 4.932"/>
-                                            </svg>
-                                            <span>Settings</span>
+                                        <button class="btn btn-xs btn-outline-secondary d-inline-flex align-items-center" type="button" data-action="edit-environment" data-env-name="${env.name}" title="Settings">
+                                            <i class="fa-solid fa-sliders"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-outline-danger d-inline-flex align-items-center gap-1" type="button" data-action="remove-environment" data-env-name="${env.name}" title="Delete">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                                <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m6.53-.06a.5.5 0 0 0-.515.479l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.484-.539M8 5.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V6a.5.5 0 0 0-.5-.5"/>
-                                            </svg>
-                                            <span>Delete</span>
+                                        <button class="btn btn-xs btn-outline-danger d-inline-flex align-items-center" type="button" data-action="remove-environment" data-env-name="${env.name}" title="Delete">
+                                            <i class="fa-solid fa-trash"></i>
                                         </button>
                                     </div>
                                 </td>
