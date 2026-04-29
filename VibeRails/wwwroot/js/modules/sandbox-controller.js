@@ -175,15 +175,36 @@ export class SandboxController {
             return;
         }
 
-        const terminalContent = document.querySelector('[data-terminal-content]');
-        if (terminalContent) {
-            await this.app.terminalController.startTerminalWithOptions({
-                cli: cli,
-                environmentName: environmentName || null,
-                workingDirectory: sandbox.path,
-                title: `Sandbox: ${sandboxName}`
-            }, terminalContent);
+        // The terminal panel only exists on the dashboard. When invoked from the
+        // env page (which also renders a sandboxes table) the lookup below would
+        // silently miss and the launch would no-op. Navigate explicitly and wait
+        // for the panel to mount before handing off.
+        if (this.app.currentView !== 'dashboard') {
+            this.app.navigate('dashboard');
         }
+
+        const terminalContent = await this._waitForTerminalContent(2000);
+        if (!terminalContent) {
+            this.app.showError('Could not find the terminal panel — open the dashboard and try again.');
+            return;
+        }
+
+        await this.app.terminalController.startTerminalWithOptions({
+            cli: cli,
+            environmentName: environmentName || null,
+            workingDirectory: sandbox.path,
+            title: `Sandbox: ${sandboxName}`
+        }, terminalContent);
+    }
+
+    async _waitForTerminalContent(timeoutMs) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const el = document.querySelector('[data-terminal-content]');
+            if (el) return el;
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        return document.querySelector('[data-terminal-content]');
     }
 
     // Launch CLI in external terminal in sandbox directory

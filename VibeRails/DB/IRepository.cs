@@ -43,23 +43,9 @@ namespace VibeRails.DB
         Task<string?> GetSessionWorkingDirectoryAsync(string sessionId, CancellationToken cancellationToken = default);
         Task RecordUserInputAsync(string sessionId, string inputText, IGitService gitService, CancellationToken cancellationToken = default);
 
-        // Cleaned user input (1:1 with UserInputs via dual FKs)
-        Task<long> CreateCleanedAndLinkAsync(string sessionId, long userInputId, string cleanedText, DateTime createdUtc, CancellationToken cancellationToken = default);
-        Task UpdateCleanedTextAsync(long userInputId, string cleanedText, CancellationToken cancellationToken = default);
-        Task<bool> IsInputCleanedAsync(long userInputId, CancellationToken cancellationToken = default);
-        Task<string?> GetCleanedTextForInputIdAsync(long inputId, CancellationToken cancellationToken = default);
-        Task<List<string>> GetSessionCleanedTextOrderedAsync(string sessionId, CancellationToken cancellationToken = default);
-
-        // Cleaned-or-raw (backs IGetUserText)
+        // User input text reads (back IGetUserText)
         Task<string> GetTextForInputIdOrRawAsync(long inputId, int? maxChars = null, CancellationToken cancellationToken = default);
         Task<string> GetFirstInputTextForSessionOrRawAsync(string sessionId, int? maxChars = null, CancellationToken cancellationToken = default);
-        Task<List<UserInputRecord>> GetUncleanedInputsForSessionAsync(string sessionId, CancellationToken cancellationToken = default);
-        Task<List<UserInputRecord>> GetUncleanedInputsForClosedSessionsAsync(int batchSize, CancellationToken cancellationToken = default);
-        Task<List<UserInputRecord>> GetPromptPrefixedCleanedInputsForClosedSessionsAsync(int batchSize, CancellationToken cancellationToken = default);
-
-        // BERT embedding tracking
-        Task<List<UnembeddedCleanedInput>> GetUnembeddedCleanedInputsAsync(int batchSize, CancellationToken cancellationToken = default);
-        Task MarkCleanedInputEmbeddedAsync(long cleanedId, CancellationToken cancellationToken = default);
 
         // Environment operations (global, not project-scoped)
         Task<LLM_Environment?> GetEnvironmentByNameAndLlmAsync(string name, LLM llm, CancellationToken cancellationToken = default);

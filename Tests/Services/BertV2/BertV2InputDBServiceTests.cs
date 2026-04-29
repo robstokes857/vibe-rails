@@ -8,21 +8,21 @@ namespace Tests.Services.BertV2;
 public class BertV2InputDBServiceTests
 {
     private readonly Mock<IBertV2InputService> _mockInputService;
-    private readonly Mock<IGetCleanedUserText> _mockUserTextOutput;
+    private readonly Mock<IGetUserText> _mockUserText;
     private readonly BertV2InputDBService _service;
 
     public BertV2InputDBServiceTests()
     {
         _mockInputService = new Mock<IBertV2InputService>();
-        _mockUserTextOutput = new Mock<IGetCleanedUserText>();
-        _service = new BertV2InputDBService(_mockInputService.Object, _mockUserTextOutput.Object);
+        _mockUserText = new Mock<IGetUserText>();
+        _service = new BertV2InputDBService(_mockInputService.Object, _mockUserText.Object);
     }
 
     [Fact]
-    public async Task CaptureUserInput_SkipsEmbedding_WhenCleanedTextIsEmpty()
+    public async Task CaptureUserInput_SkipsEmbedding_WhenTextIsEmpty()
     {
-        _mockUserTextOutput
-            .Setup(x => x.GetTextForInputIdAsync(1, It.IsAny<CancellationToken>()))
+        _mockUserText
+            .Setup(x => x.GetTextForInputIdAsync(1, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("");
 
         await _service.CaptureUserInputAsync("session-1", 1, TestContext.Current.CancellationToken);
@@ -33,10 +33,10 @@ public class BertV2InputDBServiceTests
     }
 
     [Fact]
-    public async Task CaptureUserInput_EmbedsCleanedText_WhenAvailable()
+    public async Task CaptureUserInput_EmbedsText_WhenAvailable()
     {
-        _mockUserTextOutput
-            .Setup(x => x.GetTextForInputIdAsync(1, It.IsAny<CancellationToken>()))
+        _mockUserText
+            .Setup(x => x.GetTextForInputIdAsync(1, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync("add search functionality");
 
         await _service.CaptureUserInputAsync("session-1", 1, TestContext.Current.CancellationToken);

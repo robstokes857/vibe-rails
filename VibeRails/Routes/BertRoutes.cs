@@ -1,7 +1,6 @@
 using VibeRails.DTOs;
 using VibeRails.Services.BertBaseClasses;
 using VibeRails.Services.BertV2;
-using VibeRails.Services.UserInOut;
 
 namespace VibeRails.Routes;
 
@@ -31,15 +30,11 @@ public static class BertRoutes
             }
         }).WithName("GetBertCapturesBySession");
 
-        app.MapGet("/api/v1/bert/captures/{documentId}", async (string documentId, IBertCaptureQueryService captures, IGetCleanedUserText cleanedText, CancellationToken ct) =>
+        app.MapGet("/api/v1/bert/captures/{documentId}", (string documentId, IBertCaptureQueryService captures) =>
         {
             try
             {
-                var response = captures.GetCapture(documentId);
-                var cleaned = response.UserInputId is long userInputId
-                    ? await cleanedText.GetTextForInputIdAsync(userInputId, ct)
-                    : string.Empty;
-                return Results.Ok(response with { CleanedUserText = cleaned });
+                return Results.Ok(captures.GetCapture(documentId));
             }
             catch (KeyNotFoundException ex)
             {

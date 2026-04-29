@@ -8,6 +8,10 @@ namespace VibeRails.Routes;
 
 public static class EnvironmentRoutes
 {
+    // Mirrors the resume-summary cap in TerminalRoutes; keeps the launch command
+    // line tractable and matches what's already enforced for the resume path.
+    private const int MaxCustomPromptLength = 6000;
+
     public static void Map(WebApplication app)
     {
         // GET /api/v1/environments - List all custom environments (excludes defaults)
@@ -63,6 +67,11 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse(argsError));
             }
 
+            if ((request.CustomPrompt?.Length ?? 0) > MaxCustomPromptLength)
+            {
+                return Results.BadRequest(new ErrorResponse($"CustomPrompt exceeds {MaxCustomPromptLength} character limit."));
+            }
+
             var environment = new LLM_Environment
             {
                 LLM = llm,
@@ -115,6 +124,10 @@ public static class EnvironmentRoutes
 
             if (request.CustomPrompt != null)
             {
+                if (request.CustomPrompt.Length > MaxCustomPromptLength)
+                {
+                    return Results.BadRequest(new ErrorResponse($"CustomPrompt exceeds {MaxCustomPromptLength} character limit."));
+                }
                 environment.CustomPrompt = request.CustomPrompt;
             }
 

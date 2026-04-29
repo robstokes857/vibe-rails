@@ -1,6 +1,7 @@
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 
@@ -54,6 +55,7 @@ public static class TerminalRoutes
 
             // Get custom args if environment specified
             string[]? extraArgs = null;
+            string? environmentPrompt = null;
             if (!string.IsNullOrEmpty(request.EnvironmentName))
             {
                 var environment = await repository.GetEnvironmentByNameAndLlmAsync(request.EnvironmentName, llm, cancellationToken);
@@ -63,6 +65,7 @@ public static class TerminalRoutes
                     {
                         extraArgs = ShellArgSanitizer.ParseAndValidate(environment.CustomArgs);
                     }
+                    environmentPrompt = environment.CustomPrompt;
                     environment.LastUsedUTC = DateTime.UtcNow;
                     await repository.UpdateEnvironmentAsync(environment, cancellationToken);
                 }
@@ -77,10 +80,14 @@ public static class TerminalRoutes
             if (string.IsNullOrEmpty(summary) && !string.IsNullOrEmpty(request.ResumeSessionId))
                 summary = await sessionResumeService.GetResumeSummaryAsync(request.ResumeSessionId, cancellationToken);
 
+            var initialPrompt = request.InitialPrompt;
+            if (string.IsNullOrWhiteSpace(initialPrompt) && !string.IsNullOrWhiteSpace(environmentPrompt))
+                initialPrompt = environmentPrompt;
+
             // Start the terminal session with the LLM CLI
             try
             {
-                var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote, request.InitialPrompt, summary);
+                var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote, initialPrompt, summary);
 
                 if (!success)
                 {
@@ -180,6 +187,7 @@ public static class TerminalRoutes
                     {
                         extraArgs.AddRange(ShellArgSanitizer.ParseAndValidate(environment.CustomArgs));
                     }
+                    LlmPromptArgvBuilder.AppendInitialPrompt(extraArgs, llm, environment.CustomPrompt);
                     environment.LastUsedUTC = DateTime.UtcNow;
                     await repository.UpdateEnvironmentAsync(environment, cancellationToken);
                 }

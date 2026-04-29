@@ -104,17 +104,9 @@ export class SettingsController {
                 useVsCodeTheme: useVsCodeTheme
             });
             this.app.setAppSettings(savedSettings);
-            this.applyPrereleaseVisibility(savedSettings.enablePrerelease || false);
             this.app.showToast('Settings', 'Settings saved successfully', 'success');
         } catch (error) {
             this.app.showError('Failed to save settings: ' + error.message);
-        }
-    }
-
-    applyPrereleaseVisibility(enabled) {
-        const swarmBtn = document.getElementById('swarm-nav-btn');
-        if (swarmBtn) {
-            swarmBtn.style.display = enabled ? '' : 'none';
         }
     }
 

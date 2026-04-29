@@ -17,8 +17,7 @@ public static class RouteExtensions
         AgentRoutes.Map(app);
         RulesRoutes.Map(app);
         HookRoutes.Map(app);
-        LlmSettingsRoutes.Map(app);        
-        SwarmRoutes.Map(app);
+        LlmSettingsRoutes.Map(app);
         UpdateRoutes.Map(app);
         AppSettingsRoutes.Map(app);
         PinRoutes.Map(app);

@@ -13,7 +13,6 @@ import { CliLauncher } from './js/modules/cli-launcher.js';
 import { TerminalController } from './js/modules/terminal-multitab.js';
 import { SandboxController } from './js/modules/sandbox-controller.js';
 import { SettingsController } from './js/modules/settings-controller.js';
-import { SwarmController } from './js/modules/swarm-controller.js';
 import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
@@ -47,7 +46,6 @@ export class VibeControlApp {
         this.terminalController = new TerminalController(this);
         this.sandboxController = new SandboxController(this);
         this.settingsController = new SettingsController(this);
-        this.swarmController = new SwarmController(this);
         this.vibeRailsAiController = new VibeRailsAiController(this);
         this.mcpController = new McpController(this);
         this.appEventClient = new AppEventClient(this);
@@ -92,7 +90,6 @@ export class VibeControlApp {
         try {
             const settings = await this.apiCall('/api/v1/settings', 'GET');
             this.setAppSettings(settings);
-            this.settingsController.applyPrereleaseVisibility(settings.enablePrerelease || false);
         } catch (error) {
             console.error('Failed to fetch initial settings:', error);
         }
@@ -480,7 +477,6 @@ export class VibeControlApp {
             'settings',
             'terminal-focus',
             'sandboxes',
-            'swarm',
             'vibe-rails-ai',
             'mcp'
         ]);
@@ -612,9 +608,6 @@ export class VibeControlApp {
     // ============================================ 
 
     navigate(view, data = {}) {
-        if (this.currentView === 'swarm' && view !== 'swarm') {
-            this.swarmController?.persistState?.();
-        }
         this.closeModal();
 
         const currentStackItem = this.navigationStack[this.navigationStack.length - 1];
@@ -644,9 +637,6 @@ export class VibeControlApp {
 
     goBack() {
         if (this.navigationStack.length > 1) {
-            if (this.currentView === 'swarm') {
-                this.swarmController?.persistState?.();
-            }
             this.navigationStack.pop();
             const previous = this.navigationStack[this.navigationStack.length - 1];
             this.currentView = previous.view || previous;
@@ -687,7 +677,6 @@ export class VibeControlApp {
             'settings': () => this.settingsController.loadSettings(),
             'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
             'sandboxes': () => this.sandboxController.loadSandboxes(),
-            'swarm': () => this.swarmController.loadSwarm(),
             'vibe-rails-ai': () => this.vibeRailsAiController.loadView(),
             'mcp': () => this.mcpController.loadView()
         };

@@ -7,32 +7,7 @@ namespace Tests.DB;
 public class ChatHistorySqlTests
 {
     [Fact]
-    public async Task SelectChatHistoryBySessionId_UsesCleanedPreviewWhenAvailable()
-    {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        await using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync(cancellationToken);
-        await InitializeSchemaAsync(connection, cancellationToken);
-
-        var sessionId = Guid.NewGuid().ToString();
-        var startedUtc = DateTime.UtcNow.ToString("O");
-        await InsertSessionAsync(connection, sessionId, startedUtc, cancellationToken);
-
-        var userInputId = await InsertUserInputAsync(connection, sessionId, "raw preview", cancellationToken);
-        var cleanedId = await InsertCleanedInputAsync(connection, sessionId, userInputId, "cleaned preview", cancellationToken);
-        await LinkCleanedInputAsync(connection, userInputId, cleanedId, cancellationToken);
-
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = SqlStrings.SelectChatHistoryBySessionId;
-        cmd.Parameters.AddWithValue("$sessionId", sessionId);
-
-        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-        Assert.True(await reader.ReadAsync(cancellationToken));
-        Assert.Equal("cleaned preview", reader.GetString(12));
-    }
-
-    [Fact]
-    public async Task SelectChatHistoryBase_FallsBackToRawPreviewWhenInputIsUncleaned()
+    public async Task SelectChatHistoryBase_UsesRawPreview()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -115,25 +90,5 @@ public class ChatHistorySqlTests
         cmd.Parameters.AddWithValue("$gitCommitHash", DBNull.Value);
         cmd.Parameters.AddWithValue("$timestampUTC", DateTime.UtcNow.ToString("O"));
         return (long)(await cmd.ExecuteScalarAsync(cancellationToken))!;
-    }
-
-    private static async Task<long> InsertCleanedInputAsync(SqliteConnection connection, string sessionId, long userInputId, string cleanedText, CancellationToken cancellationToken)
-    {
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = SqlStrings.InsertCleanedUserInputAndLink;
-        cmd.Parameters.AddWithValue("$sessionId", sessionId);
-        cmd.Parameters.AddWithValue("$userInputId", userInputId);
-        cmd.Parameters.AddWithValue("$cleanedText", cleanedText);
-        cmd.Parameters.AddWithValue("$createdUTC", DateTime.UtcNow.ToString("O"));
-        return Convert.ToInt64(await cmd.ExecuteScalarAsync(cancellationToken));
-    }
-
-    private static async Task LinkCleanedInputAsync(SqliteConnection connection, long userInputId, long cleanedId, CancellationToken cancellationToken)
-    {
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = SqlStrings.UpdateUserInputCleanedId;
-        cmd.Parameters.AddWithValue("$cleanedId", cleanedId);
-        cmd.Parameters.AddWithValue("$userInputId", userInputId);
-        await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 }
