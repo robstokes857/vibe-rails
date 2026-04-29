@@ -1,9 +1,9 @@
 /**
  * terminal-tab-status.js
  *
- * Self-contained tab status UI: state machine, brand logos, thinking emoji
- * animation, ready-flash, and responsive rendering. Consumed by
- * terminal-multitab.js with minimal wiring.
+ * Self-contained tab status UI: state machine, brand logos, thinking spinner,
+ * ready-flash, and responsive rendering. Consumed by terminal-multitab.js with
+ * minimal wiring.
  */
 
 import { getCliBrand } from './utils.js';
@@ -18,19 +18,6 @@ export const TAB_STATUS = Object.freeze({
 });
 
 const STATUS_CLASS_PREFIX = 'tab-status-';
-
-// Large pool of thinking emoji — picked at random, never repeats back-to-back
-const THINKING_EMOJI = [
-    '\u{1F9E0}', // brain
-    '\u{1F680}', // rocket
-    '\u{26A1}',  // lightning
-    '\u{1F4A1}', // lightbulb
-    '\u{1F52E}', // crystal ball
-    '\u{2728}',  // sparkles
-    '\u{1F916}', // robot
-    '\u{1F3AF}', // bullseye
-    '\u{1F525}', // fire
-];
 
 // Font Awesome icon classes per state
 const STATUS_FA_ICON = {
@@ -67,11 +54,6 @@ export class TabStatusController {
         this._awaitingFirstIdle = false;
         this._startAsThinking = false;
 
-        // Thinking emoji animation state
-        this._emojiTimer = null;
-        this._emojiSwapTimeout = null;
-        this._lastEmojiIndex = -1;
-
         // DOM refs (populated by render())
         this._statusTextEl = null;
         this._statusIconEl = null;
@@ -96,7 +78,7 @@ export class TabStatusController {
 
         // Idempotent path: TerminalManager.updateUi() calls renderTabButton()
         // for every tab on every UI tick. A full DOM rebuild here would tear
-        // down the in-flight emoji/shimmer animations on every tick, which
+        // down the in-flight spinner/shimmer animations on every tick, which
         // looked like a flicker on the Thinking tab. Update only the bits
         // that actually mutate (label) and leave status visuals — managed by
         // _transitionTo / _applyVisuals on real status changes — alone.
@@ -227,7 +209,6 @@ export class TabStatusController {
     }
 
     dispose() {
-        this._stopEmojiCycle();
         this._statusTextEl = null;
         this._statusIconEl = null;
         this._brandLogoEl = null;
@@ -297,14 +278,17 @@ export class TabStatusController {
         }
 
         // Icon area
-        this._stopEmojiCycle();
         if (this._statusIconEl) {
+            this._statusIconEl.innerHTML = '';
+            this._statusIconEl.className = 'vb-tab-status-icon';
+
             if (status === TAB_STATUS.THINKING) {
-                this._statusIconEl.innerHTML = '';
-                this._startEmojiCycle();
+                const spinner = document.createElement('span');
+                spinner.className = 'vb-spinner vb-spinner-sm';
+                spinner.setAttribute('role', 'status');
+                spinner.setAttribute('aria-label', 'Thinking');
+                this._statusIconEl.appendChild(spinner);
             } else {
-                this._statusIconEl.innerHTML = '';
-                this._statusIconEl.className = 'vb-tab-status-icon';
                 const faClass = STATUS_FA_ICON[status];
                 if (faClass) {
                     const i = document.createElement('i');
@@ -312,54 +296,6 @@ export class TabStatusController {
                     this._statusIconEl.appendChild(i);
                 }
             }
-        }
-    }
-
-    // ── Thinking emoji cycle (JS-driven, one at a time, random) ─────────
-
-    _startEmojiCycle() {
-        this._showNextEmoji();
-        this._emojiTimer = setInterval(() => this._showNextEmoji(), 2000);
-    }
-
-    _stopEmojiCycle() {
-        if (this._emojiTimer) {
-            clearInterval(this._emojiTimer);
-            this._emojiTimer = null;
-        }
-        if (this._emojiSwapTimeout) {
-            clearTimeout(this._emojiSwapTimeout);
-            this._emojiSwapTimeout = null;
-        }
-    }
-
-    _showNextEmoji() {
-        const el = this._statusIconEl;
-        if (!el) return;
-
-        // Pick random, never same as last
-        let idx;
-        do {
-            idx = Math.floor(Math.random() * THINKING_EMOJI.length);
-        } while (idx === this._lastEmojiIndex && THINKING_EMOJI.length > 1);
-        this._lastEmojiIndex = idx;
-
-        const emoji = THINKING_EMOJI[idx];
-
-        // If there's already content, animate it out then bring new one in
-        if (el.textContent) {
-            el.className = 'vb-tab-status-icon vb-emoji-exit';
-            this._emojiSwapTimeout = setTimeout(() => {
-                this._emojiSwapTimeout = null;
-                if (this._status !== TAB_STATUS.THINKING || this._statusIconEl !== el) {
-                    return;
-                }
-                el.textContent = emoji;
-                el.className = 'vb-tab-status-icon vb-emoji-enter';
-            }, 300);
-        } else {
-            el.textContent = emoji;
-            el.className = 'vb-tab-status-icon vb-emoji-enter';
         }
     }
 

@@ -9,6 +9,8 @@ import * as SessionDebug from './session-viewer.js';
 const DEFAULT_PAGE_SIZE = 20;
 const SCROLL_LOAD_THRESHOLD_PX = 48;
 const CONTEXT_MENU_VIEWPORT_MARGIN_PX = 8;
+const HISTORY_OPEN_STORAGE_KEY = 'viberails_history_sidebar_open';
+const HISTORY_SEEN_STORAGE_KEY = 'viberails_history_sidebar_seen';
 // Standard dashed GUID (8-4-4-4-12) or "N" format (32 hex chars), case-insensitive.
 const SESSION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[0-9a-f]{32}$/i;
 
@@ -60,7 +62,8 @@ export class ChatHistorySidebar {
                     <div class="ch-sidebar-search">
                         <div class="ch-search-input-wrapper">
                             <i class="fa-solid fa-magnifying-glass ch-search-icon"></i>
-                            <input type="text" class="ch-search-input" id="ch-search-input" placeholder="Search sessions..." autocomplete="off">
+                            <input type="text" class="ch-search-input" id="ch-search-input" placeholder="search sessions, ids, projects" autocomplete="off" spellcheck="false">
+                            <kbd class="ch-search-kbd" aria-hidden="true">/</kbd>
                         </div>
                         <div class="ch-sidebar-controls">
                             <button class="ch-filter-drawer-toggle" id="ch-filter-drawer-toggle" type="button" aria-expanded="false">
@@ -139,13 +142,29 @@ export class ChatHistorySidebar {
                 icon.className = 'fa-solid fa-chevron-left';
             }
         };
-        const emitToggleState = () => onToggle?.(!sidebar?.classList.contains('ch-sidebar-collapsed'));
+        // First-time visitors: cue the peek icon with a one-time pulse so they
+        // discover the sidebar even though we default it to collapsed.
+        const isFirstVisit = (() => {
+            try { return localStorage.getItem(HISTORY_SEEN_STORAGE_KEY) !== '1'; } catch { return true; }
+        })();
+        if (isFirstVisit) {
+            sidebar?.querySelector('.ch-sidebar-collapsed-icon')?.classList.add('ch-sidebar-pulse-hint');
+        }
+
+        const persistToggle = (open) => {
+            try {
+                localStorage.setItem(HISTORY_OPEN_STORAGE_KEY, open ? '1' : '0');
+                localStorage.setItem(HISTORY_SEEN_STORAGE_KEY, '1');
+            } catch {}
+            sidebar?.querySelector('.ch-sidebar-collapsed-icon')?.classList.remove('ch-sidebar-pulse-hint');
+            onToggle?.(open);
+        };
 
         // Toggle button stays visible in both states.
         this.closeButton?.addEventListener('click', (e) => {
             e.stopPropagation();
             const willOpen = sidebar?.classList.contains('ch-sidebar-collapsed') ?? false;
-            onToggle?.(willOpen);
+            persistToggle(willOpen);
         });
 
         // Clicking the collapsed sidebar peek strip re-opens it
@@ -154,7 +173,7 @@ export class ChatHistorySidebar {
             // Only respond to clicks on the sidebar itself or its header when collapsed
             const clickedInteractive = e.target.closest('button, input, a, .ch-item');
             if (clickedInteractive) return;
-            onToggle?.(true);
+            persistToggle(true);
         });
 
         this.refreshButton?.addEventListener('click', async (e) => {
@@ -301,6 +320,21 @@ export class ChatHistorySidebar {
             }
         });
 
+        // "/" focuses the search input when the sidebar is open and the user
+        // is not already typing somewhere else.
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+            if (!sidebar || sidebar.classList.contains('ch-sidebar-collapsed')) return;
+            const active = document.activeElement;
+            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+                return;
+            }
+            if (!searchInput || !searchInput.isConnected) return;
+            e.preventDefault();
+            searchInput.focus();
+            searchInput.select?.();
+        });
+
         if (sidebar && this.closeButton && typeof MutationObserver === 'function') {
             new MutationObserver(() => syncCloseButtonState())
                 .observe(sidebar, { attributes: true, attributeFilter: ['class'] });
@@ -309,7 +343,16 @@ export class ChatHistorySidebar {
         syncCloseButtonState();
         this._syncLlmFilterControls();
         this._syncCurrentDirToggle();
-        emitToggleState();
+
+        // Initial state: first-time visitors get a collapsed sidebar (so the
+        // terminal gets full width); returning users get whatever they last
+        // had open. We propagate via onToggle without writing to storage —
+        // only actual user toggles persist.
+        let initialOpen = false;
+        if (!isFirstVisit) {
+            try { initialOpen = localStorage.getItem(HISTORY_OPEN_STORAGE_KEY) === '1'; } catch {}
+        }
+        onToggle?.(initialOpen);
         void this._load();
     }
 
@@ -325,7 +368,7 @@ export class ChatHistorySidebar {
         this.loadFailed = false;
         this._closeContextMenu();
         this._setRefreshButtonState();
-        this.body.innerHTML = '<div class="ch-loading"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>';
+        this.body.innerHTML = '<div class="ch-loading"><span class="vb-spinner vb-spinner-lg" role="status" aria-label="Loading chat history"></span></div>';
         await this._loadNextPage({ initial: true });
     }
 
@@ -721,7 +764,12 @@ export class ChatHistorySidebar {
         this._syncCurrentDirToggle();
 
         if (this.loadFailed && this.allItems.length === 0) {
-            this.body.innerHTML = '<div class="ch-empty">Failed to load history.</div>';
+            this.body.innerHTML = `
+                <div class="ch-empty">
+                    <span class="ch-empty-glyph"><i class="fa-solid fa-triangle-exclamation"></i></span>
+                    <span class="ch-empty-title">Couldn't load history</span>
+                    <span class="ch-empty-hint">Hit refresh to try again. If it keeps failing, check the VibeRails logs.</span>
+                </div>`;
             return;
         }
 
@@ -731,14 +779,24 @@ export class ChatHistorySidebar {
             if (this.filterText && (this.isLoadingPage || this.isLoadingForSearch)) {
                 this.body.innerHTML = `
                     <div class="ch-loading ch-loading-inline">
-                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                        <span class="ch-loading-label">Searching older sessions...</span>
+                        <span class="vb-spinner vb-spinner-sm" role="status" aria-label="Searching"></span>
+                        <span class="ch-loading-label">Searching older sessions</span>
                     </div>
                 `;
                 return;
             }
 
-            this.body.innerHTML = `<div class="ch-empty">${(this.filterText || this.llmFilters.size > 0 || this.currentDirOnly) ? 'No matches found.' : 'No chat history yet.'}</div>`;
+            const filtered = this.filterText || this.llmFilters.size > 0 || this.currentDirOnly;
+            const title = filtered ? 'No matches' : 'No chats yet';
+            const hint = filtered
+                ? 'Try a different search or clear your filters to widen the net.'
+                : 'New CLI sessions show up here as soon as they start.';
+            this.body.innerHTML = `
+                <div class="ch-empty">
+                    <span class="ch-empty-glyph"><i class="fa-solid fa-clock-rotate-left"></i></span>
+                    <span class="ch-empty-title">${escapeHtml(title)}</span>
+                    <span class="ch-empty-hint">${escapeHtml(hint)}</span>
+                </div>`;
             return;
         }
 
@@ -750,14 +808,16 @@ export class ChatHistorySidebar {
             const isActive = !item.endedUTC;
             const logoHtml = this._renderBrandLogo(brand, 'ch-item-logo');
             const projectDisplayName = this._getProjectDisplayName(item);
+            const accent = brand.accentColor || 'var(--color-accent, #06b6d4)';
+            const itemStyle = ` style="--ch-item-accent: ${escapeHtml(accent)}"`;
             const metaLines = [];
             if (item.environmentName?.trim()) {
-                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Env:</span> ${escapeHtml(item.environmentName.trim())}</div>`);
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Env</span> ${escapeHtml(item.environmentName.trim())}</div>`);
             }
             if (isActive) {
-                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Started:</span> ${escapeHtml(time)} · <span class="ch-item-live">live</span></div>`);
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-live-dot">Live</span> <span class="ch-meta-divider">·</span> <span>${escapeHtml(time)}</span></div>`);
             } else {
-                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Ended:</span> ${escapeHtml(time)}</div>`);
+                metaLines.push(`<div class="ch-meta-row"><span class="ch-meta-label">Ended</span> ${escapeHtml(time)}</div>`);
             }
             const metaHtml = metaLines.join('');
             const relationshipHtml = item.parentSessionId
@@ -769,7 +829,7 @@ export class ChatHistorySidebar {
                    </button>`
                 : '';
             return `
-                <div class="ch-item${isActive ? ' ch-item-active' : ''}" data-id="${escapeHtml(item.id)}">
+                <div class="ch-item${isActive ? ' ch-item-active' : ''}" data-id="${escapeHtml(item.id)}"${itemStyle}>
                     <div class="ch-item-icon">${logoHtml}</div>
                     <div class="ch-item-content">
                         <div class="ch-item-header">
@@ -821,13 +881,13 @@ export class ChatHistorySidebar {
         const label = this.filterText
             || this.llmFilters.size > 0
             || this.currentDirOnly
-            ? 'Searching older sessions...'
-            : 'Loading more sessions...';
+            ? 'Searching older sessions'
+            : 'Loading more sessions';
 
         return `
             <div class="ch-loading ch-loading-inline">
-                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                <span class="ch-loading-label">${label}</span>
+                <span class="vb-spinner vb-spinner-sm" role="status" aria-label="${escapeHtml(label)}"></span>
+                <span class="ch-loading-label">${escapeHtml(label)}</span>
             </div>
         `;
     }
@@ -846,7 +906,7 @@ export class ChatHistorySidebar {
             <div id="ch-resume-body">
                 <div class="d-flex flex-column gap-2 py-2 text-muted">
                     <div class="d-flex align-items-center gap-2">
-                        <div class="spinner-border spinner-border-sm flex-shrink-0" role="status"></div>
+                        <span class="vb-spinner vb-spinner-sm flex-shrink-0" role="status" aria-label="Generating summary"></span>
                         <span>Generating summary&hellip;</span>
                     </div>
                     <div class="small" style="padding-left:1.75rem;">This might take a moment.</div>
@@ -869,7 +929,7 @@ export class ChatHistorySidebar {
             container.innerHTML = `
                 <div class="d-flex flex-column gap-2 py-2 text-muted">
                     <div class="d-flex align-items-center gap-2">
-                        <div class="spinner-border spinner-border-sm flex-shrink-0" role="status"></div>
+                        <span class="vb-spinner vb-spinner-sm flex-shrink-0" role="status" aria-label="Generating summary"></span>
                         <span>Generating summary&hellip;</span>
                     </div>
                     <div class="small" style="padding-left:1.75rem;">This might take a moment.</div>

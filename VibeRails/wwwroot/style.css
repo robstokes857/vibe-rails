@@ -4587,6 +4587,28 @@ input.form-control:disabled {
     transform: scale(1);
 }
 
+/* One-time discovery pulse on the peek icon for first-time visitors. JS
+   removes the .ch-sidebar-pulse-hint class on first toggle. */
+@keyframes ch-collapsed-icon-pulse-hint {
+    0%, 100% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent, #06b6d4) 0%, transparent);
+    }
+    50% {
+        box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent, #06b6d4) 32%, transparent);
+    }
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-collapsed-icon.ch-sidebar-pulse-hint {
+    animation: ch-collapsed-icon-pulse-hint 1.6s ease-in-out 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vb-terminal-focus-layout.vb-history-under .ch-sidebar-collapsed-icon.ch-sidebar-pulse-hint {
+        animation: none;
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent, #06b6d4) 32%, transparent);
+    }
+}
+
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar:hover .ch-sidebar-collapsed-icon {
     color: #ffffff;
 }
@@ -5367,3 +5389,977 @@ input.form-control:disabled {
         width: calc(100vw - 1rem) !important;
     }
 }
+
+/* ============================================================================
+   Editorial Pass — Chat History Sidebar + Terminal Status Spinner
+   ----------------------------------------------------------------------------
+   Layered on top of the original .ch-* / .vb-tab-status-* rules above. Class
+   names are preserved (the JS still emits them); these rules override visuals
+   only. Brand accent per item is delivered via the inline custom property
+   --ch-item-accent (set in chat-history-sidebar.js from brand.accentColor).
+   ============================================================================ */
+
+:root {
+    --vb-font-mono: ui-monospace, "JetBrains Mono", "Cascadia Code", "Fira Code",
+        "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --vb-ease-emphatic: cubic-bezier(0.22, 1, 0.36, 1);
+    --vb-ease-snap:     cubic-bezier(0.4, 0, 0.2, 1);
+
+    --vb-spinner-color: var(--color-accent, #06b6d4);
+    --vb-spinner-track: color-mix(in srgb, var(--vb-spinner-color) 14%, transparent);
+}
+
+/* ── Spinner primitive (replaces Bootstrap .spinner-border in our modules) ── */
+.vb-spinner {
+    --vb-spin-size:      14px;
+    --vb-spin-thickness: 1.6px;
+    --vb-spin-color:     var(--vb-spinner-color);
+    --vb-spin-track:     var(--vb-spinner-track);
+
+    position: relative;
+    display: inline-block;
+    width: var(--vb-spin-size);
+    height: var(--vb-spin-size);
+    flex-shrink: 0;
+    vertical-align: -0.18em;
+    color: var(--vb-spin-color);
+}
+
+.vb-spinner::before,
+.vb-spinner::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border-style: solid;
+    border-width: var(--vb-spin-thickness);
+    border-color: transparent;
+    will-change: transform;
+}
+
+.vb-spinner::before {
+    border-top-color: var(--vb-spin-color);
+    border-right-color: color-mix(in srgb, var(--vb-spin-color) 55%, transparent);
+    box-shadow: inset 0 0 0 0.5px var(--vb-spin-track);
+    animation: vb-spinner-orbit 0.95s var(--vb-ease-snap) infinite;
+}
+
+.vb-spinner::after {
+    inset: calc(var(--vb-spin-thickness) + 1px);
+    border-bottom-color: color-mix(in srgb, var(--vb-spin-color) 78%, transparent);
+    border-left-color: color-mix(in srgb, var(--vb-spin-color) 22%, transparent);
+    animation: vb-spinner-orbit 1.55s var(--vb-ease-snap) infinite reverse;
+    opacity: 0.85;
+}
+
+@keyframes vb-spinner-orbit {
+    to { transform: rotate(360deg); }
+}
+
+.vb-spinner-sm  { --vb-spin-size: 11px; --vb-spin-thickness: 1.4px; }
+.vb-spinner-lg  { --vb-spin-size: 22px; --vb-spin-thickness: 2px; }
+.vb-spinner-xl  { --vb-spin-size: 32px; --vb-spin-thickness: 2.4px; }
+
+.vb-spinner-muted   { --vb-spin-color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 80%, transparent); }
+.vb-spinner-on-dark { --vb-spin-color: #cdd6f4; }
+
+@media (prefers-reduced-motion: reduce) {
+    .vb-spinner::before { animation-duration: 2s; }
+    .vb-spinner::after  { animation-duration: 3s; }
+}
+
+/* ── Loading row: spinner + label, used by the search/empty/footer states ── */
+.vb-loading-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--color-text-muted, #94a3b8);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+}
+
+.vb-loading-row > .vb-loading-label {
+    font-family: var(--vb-font-mono);
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 90%, transparent);
+}
+
+/* ============================================================================
+   Chat History — editorial overrides
+   ============================================================================ */
+
+/* Sidebar shell — quieter chrome, deeper background contrast */
+#vb-terminal-panel .ch-sidebar,
+.ch-sidebar {
+    background: linear-gradient(180deg,
+        color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 96%, #000) 0%,
+        color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 100%, #000) 100%);
+    border: 1px solid color-mix(in srgb, var(--color-border, #334155) 38%, transparent);
+    border-radius: 10px;
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.03) inset,
+        0 22px 48px rgba(0, 0, 0, 0.35);
+}
+
+/* Header — single hairline, refined typographic title */
+.ch-sidebar-header {
+    padding: 11px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border, #334155) 28%, transparent);
+}
+
+.ch-sidebar-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text, #f8fafc) 78%, transparent);
+}
+
+.ch-sidebar-title svg {
+    opacity: 0.5;
+}
+
+/* Refresh button — morph to spinner via .is-loading */
+.ch-sidebar-refresh-btn {
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 80%, transparent);
+}
+
+.ch-sidebar-refresh-btn:hover {
+    color: var(--color-text, #f8fafc);
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 6%, transparent);
+}
+
+.ch-sidebar-refresh-btn.is-loading i {
+    animation: none;
+    color: transparent;
+    position: relative;
+}
+
+.ch-sidebar-refresh-btn.is-loading::after {
+    content: '';
+    position: absolute;
+    inset: 50% auto auto 50%;
+    width: 14px;
+    height: 14px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    border: 1.6px solid transparent;
+    border-top-color: var(--color-accent, #06b6d4);
+    border-right-color: color-mix(in srgb, var(--color-accent, #06b6d4) 55%, transparent);
+    animation: vb-spinner-orbit 0.95s var(--vb-ease-snap) infinite;
+}
+
+/* Search row — terminal-prompt feel */
+.ch-sidebar-search {
+    padding: 10px 12px 12px;
+    gap: 10px;
+}
+
+.ch-search-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    background: color-mix(in srgb, var(--color-bg-base, #121212) 65%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-border, #334155) 30%, transparent);
+    border-radius: 7px;
+    transition: border-color 0.18s var(--vb-ease-snap), background 0.18s var(--vb-ease-snap),
+                box-shadow 0.2s var(--vb-ease-snap);
+}
+
+.ch-search-input-wrapper:focus-within {
+    border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 55%, transparent);
+    background: color-mix(in srgb, var(--color-bg-base, #121212) 80%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent, #06b6d4) 14%, transparent);
+}
+
+.ch-search-icon {
+    position: static;
+    transform: none;
+    margin-left: 10px;
+    font-size: 0.7rem;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 70%, transparent);
+}
+
+.ch-search-input-wrapper:focus-within .ch-search-icon {
+    color: var(--color-accent, #06b6d4);
+}
+
+.ch-search-input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    padding: 8px 10px;
+    color: var(--color-text, #f8fafc);
+    font-size: 0.78rem;
+    font-family: var(--vb-font-mono);
+    letter-spacing: 0.01em;
+    outline: none;
+}
+
+.ch-search-input::placeholder {
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 55%, transparent);
+    font-family: var(--vb-font-mono);
+    letter-spacing: 0.04em;
+}
+
+.ch-search-kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 8px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    font-family: var(--vb-font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 80%, transparent);
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 6%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 9%, transparent);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    transition: opacity 0.15s ease;
+}
+
+.ch-search-input-wrapper:focus-within .ch-search-kbd {
+    opacity: 0;
+}
+
+/* Filter drawer — keep behavior, refine surfaces */
+.ch-filter-drawer-toggle {
+    background: transparent;
+    border: 1px dashed color-mix(in srgb, var(--color-border, #334155) 48%, transparent);
+    border-radius: 7px;
+    padding: 7px 11px;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 90%, transparent);
+}
+
+.ch-filter-drawer-toggle:hover {
+    border-style: solid;
+    border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 38%, transparent);
+    color: var(--color-text, #f8fafc);
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 6%, transparent);
+}
+
+.ch-filter-drawer-toggle[aria-expanded="true"] {
+    border-style: solid;
+    border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 50%, transparent);
+    color: var(--color-text, #f8fafc);
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 8%, transparent);
+}
+
+.ch-filter-drawer-label {
+    font-family: var(--vb-font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+}
+
+.ch-filter-count-badge {
+    font-family: var(--vb-font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.04em;
+    background: var(--color-accent, #06b6d4);
+    color: var(--color-bg-base, #121212);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent, #06b6d4) 28%, transparent);
+}
+
+.ch-llm-filter-badge {
+    border-radius: 999px;
+    padding: 5px 11px 5px 9px;
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 3%, transparent);
+    border-color: color-mix(in srgb, var(--color-text, #f8fafc) 8%, transparent);
+    font-family: var(--vb-font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 90%, transparent);
+}
+
+.ch-llm-filter-badge:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 38%, transparent);
+    color: var(--color-text, #f8fafc);
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 8%, transparent);
+}
+
+.ch-llm-filter-badge.is-active {
+    border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 60%, transparent);
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 14%, transparent);
+    color: var(--color-text, #f8fafc);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--color-accent, #06b6d4) 30%, transparent);
+}
+
+.ch-llm-filter-badge.is-reset {
+    border-style: dashed;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 75%, transparent);
+}
+
+.ch-current-dir-toggle {
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 3%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 8%, transparent);
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 90%, transparent);
+    font-family: var(--vb-font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.ch-current-dir-toggle.is-active {
+    border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 60%, transparent);
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 12%, transparent);
+    color: var(--color-text, #f8fafc);
+}
+
+/* Body scrollbar */
+.ch-sidebar-body {
+    padding: 4px 0 12px;
+}
+
+.ch-sidebar-body::-webkit-scrollbar { width: 6px; }
+.ch-sidebar-body::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 8%, transparent);
+    border-radius: 3px;
+}
+.ch-sidebar-body::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 18%, transparent);
+}
+
+/* Loading + empty states */
+.ch-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.ch-loading.ch-loading-inline {
+    padding: 14px 16px 18px;
+}
+
+.ch-loading-label {
+    font-family: var(--vb-font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 80%, transparent);
+}
+
+.ch-empty {
+    padding: 36px 18px;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 70%, transparent);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+.ch-empty-glyph {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 50% 35%,
+        color-mix(in srgb, var(--color-accent, #06b6d4) 14%, transparent) 0%,
+        transparent 70%);
+    border: 1px dashed color-mix(in srgb, var(--color-text-muted, #94a3b8) 30%, transparent);
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 70%, transparent);
+    font-size: 1.05rem;
+}
+
+.ch-empty-title {
+    font-family: var(--vb-font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: color-mix(in srgb, var(--color-text, #f8fafc) 70%, transparent);
+}
+
+.ch-empty-hint {
+    font-size: 0.72rem;
+    line-height: 1.55;
+    text-align: center;
+    max-width: 220px;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 70%, transparent);
+}
+
+/* ── ITEM — the signature visual ────────────────────────────────────────────
+   Each item gets a brand-tinted left edge ("rail") that sleeps at low opacity
+   and lights up on hover/active. Inline --ch-item-accent overrides the default. */
+.ch-item {
+    --ch-item-accent: var(--color-accent, #06b6d4);
+    --ch-item-bg-rest: color-mix(in srgb, var(--color-text, #f8fafc) 1.8%, transparent);
+    --ch-item-bg-hover: color-mix(in srgb, var(--color-text, #f8fafc) 5%, transparent);
+
+    padding: 13px 13px 13px 18px;
+    margin: 4px 8px;
+    border-radius: 9px;
+    background: var(--ch-item-bg-rest);
+    border: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 5%, transparent);
+    box-shadow: none;
+    transition:
+        background 0.18s var(--vb-ease-snap),
+        border-color 0.18s var(--vb-ease-snap),
+        transform 0.22s var(--vb-ease-emphatic),
+        box-shadow 0.22s var(--vb-ease-emphatic);
+}
+
+/* Accent rail */
+.ch-item::before {
+    content: '';
+    position: absolute;
+    top: 10px;
+    bottom: 10px;
+    left: 6px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--ch-item-accent);
+    opacity: 0.16;
+    transform: scaleY(0.65);
+    transform-origin: 50% 50%;
+    transition:
+        opacity 0.22s var(--vb-ease-emphatic),
+        transform 0.28s var(--vb-ease-emphatic),
+        box-shadow 0.28s var(--vb-ease-emphatic);
+}
+
+.ch-item:hover {
+    background: var(--ch-item-bg-hover);
+    border-color: color-mix(in srgb, var(--ch-item-accent) 16%, transparent);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.ch-item:hover::before {
+    opacity: 0.6;
+    transform: scaleY(1);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--ch-item-accent) 38%, transparent);
+}
+
+.ch-item.ch-item-menu-active {
+    background: color-mix(in srgb, var(--ch-item-accent) 7%, transparent) !important;
+    border-color: color-mix(in srgb, var(--ch-item-accent) 28%, transparent);
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--ch-item-accent) 16%, transparent),
+        0 8px 18px rgba(0, 0, 0, 0.22);
+}
+
+.ch-item.ch-item-menu-active::before {
+    opacity: 0.85;
+    transform: scaleY(1);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--ch-item-accent) 50%, transparent);
+}
+
+/* Live (active session) — green-leaning, never overrides brand rail */
+.ch-item.ch-item-active {
+    background: color-mix(in srgb, var(--color-success, #10b981) 5%, transparent);
+    border-color: color-mix(in srgb, var(--color-success, #10b981) 22%, transparent);
+    border-left: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 5%, transparent) !important;
+    padding-left: 18px !important;
+}
+
+.ch-item.ch-item-active::before {
+    background: var(--color-success, #10b981);
+    opacity: 0.7;
+    transform: scaleY(1);
+    animation: ch-item-rail-pulse 3s ease-in-out infinite;
+}
+
+@keyframes ch-item-rail-pulse {
+    0%, 100% { box-shadow: 0 0 4px color-mix(in srgb, var(--color-success, #10b981) 22%, transparent); }
+    50%      { box-shadow: 0 0 8px color-mix(in srgb, var(--color-success, #10b981) 45%, transparent); }
+}
+
+/* Item icon block */
+.ch-item-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background:
+        radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--ch-item-accent) 22%, transparent) 0%, transparent 70%),
+        color-mix(in srgb, var(--color-text, #f8fafc) 4%, transparent);
+    border: 1px solid color-mix(in srgb, var(--ch-item-accent) 18%, transparent);
+}
+
+.ch-item-logo { width: 18px; height: 18px; }
+
+/* Item content */
+.ch-item-content {
+    gap: 5px;
+}
+
+.ch-item-header {
+    gap: 4px;
+}
+
+.ch-item-name {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-text, #f8fafc);
+    letter-spacing: 0.005em;
+    line-height: 1.32;
+    -webkit-line-clamp: 2;
+}
+
+.ch-item:hover .ch-item-name {
+    color: #fff;
+}
+
+/* Project badge — refined pill with mono face */
+.ch-project-badge {
+    align-self: flex-start;
+    padding: 2px 8px 2px 7px;
+    gap: 5px;
+    font-family: var(--vb-font-mono);
+    font-size: 0.6rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 95%, transparent);
+    background: color-mix(in srgb, var(--color-bg-base, #121212) 50%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 7%, transparent);
+    border-radius: 4px;
+}
+
+.ch-project-badge i {
+    font-size: 0.52rem;
+    opacity: 0.55;
+}
+
+.ch-item:hover .ch-project-badge {
+    border-color: color-mix(in srgb, var(--ch-item-accent) 28%, transparent);
+    color: var(--color-text, #f8fafc);
+}
+
+/* Resume relationship — quieter, mono caption */
+.ch-item-relationship {
+    font-family: var(--vb-font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 75%, transparent);
+}
+
+.ch-item-relationship-flow {
+    padding: 1.5px 6px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 4%, transparent);
+}
+
+.ch-item-relationship-flow i {
+    font-size: 0.52rem;
+    opacity: 0.6;
+}
+
+.ch-item-relationship-label {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-weight: 600;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 90%, transparent);
+}
+
+/* Meta — mono, tabular numerals, dot separator */
+.ch-item-meta {
+    gap: 2px;
+    font-family: var(--vb-font-mono);
+    font-size: 0.62rem;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 70%, transparent);
+}
+
+.ch-meta-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    line-height: 1.4;
+}
+
+.ch-meta-label {
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 60%, transparent);
+    font-weight: 500;
+}
+
+/* Live dot — replaces the legacy "live" text token; the JS now emits a span */
+.ch-live-dot {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--vb-font-mono);
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-weight: 600;
+    color: var(--color-success, #10b981);
+}
+
+.ch-live-dot::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-success, #10b981);
+    box-shadow: 0 0 5px color-mix(in srgb, var(--color-success, #10b981) 40%, transparent);
+    animation: ch-live-dot-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes ch-live-dot-pulse {
+    0%, 100% { transform: scale(1);    opacity: 0.85; }
+    50%      { transform: scale(1.12); opacity: 1;    }
+}
+
+/* Action buttons */
+.ch-item-actions {
+    gap: 4px;
+}
+
+.ch-item-parent-btn,
+.ch-item-menu-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 70%, transparent);
+    font-size: 0.78rem;
+}
+
+.ch-item-parent-btn:hover,
+.ch-item-menu-btn:hover {
+    color: var(--color-text, #f8fafc);
+    background: color-mix(in srgb, var(--ch-item-accent) 16%, transparent);
+}
+
+.ch-item.ch-item-menu-active .ch-item-menu-btn {
+    color: var(--ch-item-accent);
+    background: color-mix(in srgb, var(--ch-item-accent) 18%, transparent);
+}
+
+/* Context menu — tighter, refined dividers, mono labels for IDs */
+.ch-context-menu {
+    background: color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 96%, #000);
+    border: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 9%, transparent);
+    border-radius: 9px;
+    padding: 5px;
+    box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.4),
+        0 18px 38px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+}
+
+.ch-context-menu-item {
+    font-size: 0.74rem;
+    padding: 7px 11px;
+    border-radius: 5px;
+    color: color-mix(in srgb, var(--color-text, #f8fafc) 80%, transparent);
+    transition: background 0.12s var(--vb-ease-snap), color 0.12s var(--vb-ease-snap),
+                padding-left 0.18s var(--vb-ease-snap);
+}
+
+.ch-context-menu-item:hover {
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 14%, transparent);
+    color: var(--color-text, #f8fafc);
+    padding-left: 14px;
+}
+
+.ch-context-menu-item.text-danger:hover {
+    background: color-mix(in srgb, var(--color-danger, #ef4444) 14%, transparent);
+    color: var(--color-danger, #ef4444);
+}
+
+.ch-context-menu-divider {
+    height: 1px;
+    margin: 4px 6px;
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 8%, transparent);
+}
+
+.ch-context-submenu {
+    background: color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 96%, #000);
+    border: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 9%, transparent);
+    border-radius: 9px;
+    padding: 5px;
+    box-shadow: 0 18px 38px rgba(0, 0, 0, 0.5);
+}
+
+.ch-submenu-group-label {
+    font-family: var(--vb-font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.16em;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 65%, transparent);
+}
+
+/* ============================================================================
+   Terminal Tab Status — refine the THINKING indicator (replaces emoji cycle)
+   ============================================================================ */
+#vb-terminal-panel .tab-status-thinking .vb-tab-status-icon .vb-spinner {
+    --vb-spin-size: 11px;
+    --vb-spin-thickness: 1.4px;
+    --vb-spin-color: var(--vb-terminal-tab-accent, #cdd6f4);
+}
+
+/* Slight luminous glow under the thinking spinner — kept very gentle */
+#vb-terminal-panel .tab-status-thinking .vb-tab-status-icon::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 50%;
+    background: radial-gradient(circle,
+        color-mix(in srgb, var(--vb-terminal-tab-accent, #cdd6f4) 22%, transparent) 0%,
+        transparent 70%);
+    pointer-events: none;
+    opacity: 0.4;
+    animation: tab-thinking-breath 3s ease-in-out infinite;
+}
+
+#vb-terminal-panel .tab-status-thinking .vb-tab-status-icon {
+    position: relative;
+    overflow: visible;
+}
+
+@keyframes tab-thinking-breath {
+    0%, 100% { opacity: 0.22; transform: scale(0.95); }
+    50%      { opacity: 0.45; transform: scale(1.05); }
+}
+
+/* ============================================================================
+   App-wide Refinement Pass — additive, xterm-safe
+   ----------------------------------------------------------------------------
+   Pulls the editorial language (mono caps labels, accent focus rings, refined
+   modals + nav) onto the rest of the app. STRICT no-touch list:
+       • .xterm / .xterm-* (xterm.js DOM)
+       • .terminal (unscoped — collides with xterm.js root)
+       • #vb-terminal-panel .vb-terminal-window-shell sizing/transform
+       • #vb-terminal-panel .vb-terminal-tab-* internals
+       • Anything that mutates the size of the terminal host element
+   Every rule below targets outer chrome only.
+   ============================================================================ */
+
+/* ── Selection ────────────────────────────────────────────────────────────── */
+::selection {
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 32%, transparent);
+    color: var(--color-text, #f8fafc);
+}
+
+/* ── kbd / shortcut chips (global) ────────────────────────────────────────── */
+kbd:not(.ch-search-kbd) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 6px;
+    min-width: 18px;
+    font-family: var(--vb-font-mono);
+    font-size: 0.72em;
+    font-weight: 600;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 90%, transparent);
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 6%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 9%, transparent);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+}
+
+/* ── App nav refinement ───────────────────────────────────────────────────── */
+.app-subnav {
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 96%, transparent) 0%,
+            color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 92%, transparent) 100%);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border, #334155) 38%, transparent);
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--color-text, #f8fafc) 3%, transparent) inset;
+}
+
+.app-subnav-link {
+    position: relative;
+    font-family: var(--vb-font-mono);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    border-bottom: 0;
+    border-radius: 6px;
+    transition: color 0.18s var(--vb-ease-snap), background 0.18s var(--vb-ease-snap);
+}
+
+.app-subnav-link:hover {
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 4%, transparent);
+    border-bottom-color: transparent;
+}
+
+.app-subnav-link.active {
+    color: var(--color-text, #f8fafc);
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 10%, transparent);
+    border-bottom-color: transparent;
+}
+
+.app-subnav-link.active::after {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 28%;
+    bottom: 28%;
+    width: 2px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 55%, transparent);
+}
+
+.app-subnav-link .icon-light {
+    opacity: 0.55;
+    transition: opacity 0.18s var(--vb-ease-snap);
+}
+
+.app-subnav-link:hover .icon-light,
+.app-subnav-link.active .icon-light {
+    opacity: 1;
+}
+
+/* ── Form controls — accent focus ring (was using a stale purple) ─────────── */
+.form-control:focus,
+.form-select:focus {
+    border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 60%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent, #06b6d4) 16%, transparent);
+}
+
+.form-check-input:focus {
+    border-color: color-mix(in srgb, var(--color-accent, #06b6d4) 60%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent, #06b6d4) 16%, transparent);
+}
+
+.form-label {
+    font-family: var(--vb-font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 95%, transparent);
+}
+
+/* ── Buttons — refined focus + softer hover; padding/sizing unchanged ─────── */
+.btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent, #06b6d4) 26%, transparent);
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary, #3b82f6) 28%, transparent);
+}
+
+.btn-outline-primary:hover {
+    background: color-mix(in srgb, var(--color-primary, #3b82f6) 12%, transparent);
+}
+
+.btn-outline-secondary:hover {
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 5%, transparent);
+}
+
+.btn-outline-success:hover {
+    background: color-mix(in srgb, var(--color-success, #10b981) 12%, transparent);
+}
+
+.btn-outline-danger:hover {
+    background: color-mix(in srgb, var(--color-danger, #ef4444) 12%, transparent);
+}
+
+.btn-outline-warning:hover {
+    background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, transparent);
+}
+
+/* ── Modals — refined surface + mono-caps title cue (chrome only) ─────────── */
+.modal-content {
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 96%, #000) 0%,
+            color-mix(in srgb, var(--color-bg-surface, #1e1e1e) 100%, #000) 100%);
+    border: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 8%, transparent);
+    border-radius: 10px;
+    box-shadow:
+        0 1px 0 color-mix(in srgb, var(--color-text, #f8fafc) 4%, transparent) inset,
+        0 28px 60px rgba(0, 0, 0, 0.45);
+}
+
+.modal-header {
+    background: transparent;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 6%, transparent);
+    padding: 0.95rem 1.1rem;
+}
+
+.modal-title {
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text, #f8fafc) 85%, transparent);
+    font-family: var(--vb-font-mono);
+}
+
+.modal-footer {
+    border-top: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 6%, transparent);
+}
+
+.btn-close {
+    opacity: 0.7;
+    transition: opacity 0.15s ease, transform 0.18s var(--vb-ease-snap);
+    border-radius: 4px;
+}
+
+.btn-close:hover {
+    opacity: 1;
+    transform: rotate(90deg);
+}
+
+/* ── Cards — gentle hover, but ONLY for non-terminal cards ────────────────── */
+.card:not(#vb-terminal-panel):not(.menu-card) {
+    border-color: color-mix(in srgb, var(--color-border, #334155) 50%, transparent);
+    transition:
+        border-color 0.2s var(--vb-ease-snap),
+        background 0.2s var(--vb-ease-snap);
+}
+
+.card:not(#vb-terminal-panel):not(.menu-card):hover {
+    border-color: color-mix(in srgb, var(--color-border, #334155) 80%, transparent);
+}
+
+.card-header {
+    background: color-mix(in srgb, var(--color-bg-base, #121212) 30%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 6%, transparent);
+}
+
+/* Card-header titles get a subtle mono-caps treatment but only when they
+   carry the .card-header-label class — leaves regular headings alone. */
+.card-header-label {
+    font-family: var(--vb-font-mono);
+    font-size: 0.7rem !important;
+    letter-spacing: 0.16em !important;
+    text-transform: uppercase;
+}
+
+/* (Inline <code> styling intentionally NOT included — global tag rules near
+    xterm.js carry too much risk while xterm integration is fragile.) */
+
+/* ── Settings / shared scrollable panels — refined scrollbar (NOT xterm) ──── */
+.modal-body::-webkit-scrollbar,
+.developer-tracer-payload::-webkit-scrollbar,
+.ch-summary-transcript::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.modal-body::-webkit-scrollbar-thumb,
+.developer-tracer-payload::-webkit-scrollbar-thumb,
+.ch-summary-transcript::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 8%, transparent);
+    border-radius: 4px;
+}
+.modal-body::-webkit-scrollbar-thumb:hover,
+.developer-tracer-payload::-webkit-scrollbar-thumb:hover,
+.ch-summary-transcript::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--color-text, #f8fafc) 16%, transparent);
+}
+
+/* End of App-wide Refinement Pass ─────────────────────────────────────────── */
