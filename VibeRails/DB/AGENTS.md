@@ -1,9 +1,9 @@
 # DB Layer — Business Logic & Technical Reference
 
-This document describes how Environments, Sandboxes, AgentMetadata, Sessions, and TUI events work at the database layer.
+This document describes how Environments, Sandboxes, AgentMetadata, and Sessions work at the database layer.
 
 > **Contents:**
-> [Database Overview](#database-overview) | [Environments](#environments) | [Sandboxes](#sandboxes) | [AgentMetadata](#agentmetadata) | [Sessions](#sessions) | [TUI Events](#tui-events) | [Entity Relationships](#entity-relationships) | [Repository Patterns](#repository-patterns)
+> [Database Overview](#database-overview) | [Environments](#environments) | [Sandboxes](#sandboxes) | [AgentMetadata](#agentmetadata) | [Sessions](#sessions) | [Entity Relationships](#entity-relationships) | [Repository Patterns](#repository-patterns)
 
 ---
 

@@ -3,33 +3,28 @@ using VibeRails.Services.UserInOut;
 
 namespace VibeRails.Services.BertV2;
 
-/// <summary>
-/// Entry point for capturing user input into the BERT vector store.
-/// Reads cleaned text via <see cref="IGetCleanedUserText"/> — no inline cleaning.
-/// If the input hasn't been cleaned yet, the call silently no-ops.
-/// </summary>
 public class BertV2InputDBService : IBertV2InputDBService
 {
     private readonly IBertV2InputService _inputService;
-    private readonly IGetCleanedUserText _cleanedUserText;
+    private readonly IGetUserText _userText;
 
     public BertV2InputDBService(
         IBertV2InputService inputService,
-        IGetCleanedUserText cleanedUserText)
+        IGetUserText userText)
     {
         _inputService = inputService;
-        _cleanedUserText = cleanedUserText;
+        _userText = userText;
     }
 
     public async Task CaptureUserInputAsync(string sessionId, long userInputId, CancellationToken cancellationToken = default)
     {
-        var cleanedText = await _cleanedUserText.GetTextForInputIdAsync(userInputId, cancellationToken);
-        if (string.IsNullOrEmpty(cleanedText))
+        var text = await _userText.GetTextForInputIdAsync(userInputId, ct: cancellationToken);
+        if (string.IsNullOrEmpty(text))
         {
-            Log.Debug("[BERT-ETL] Skipped input {UserInputId}: not yet cleaned or filtered out", userInputId);
+            Log.Debug("[BERT-ETL] Skipped input {UserInputId}: row missing", userInputId);
             return;
         }
 
-        _inputService.Capture(sessionId, userInputId, cleanedText);
+        _inputService.Capture(sessionId, userInputId, text);
     }
 }

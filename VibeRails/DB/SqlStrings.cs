@@ -118,30 +118,6 @@ namespace VibeRails.DB
         public const string CreateUserInputsIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_session ON UserInputs(SessionId)";
         public const string CreateUserInputsSeqIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_session_seq ON UserInputs(SessionId, Sequence)";
 
-        // CleanedUserInput Table — ETL-filtered, normalized version of UserInputs.InputText.
-        // Strict 1:1 with UserInputs via dual FKs: UserInputs.CleanedId → CleanedUserInput.Id
-        // and CleanedUserInput.UserInputId → UserInputs.Id.
-        public const string CreateCleanedUserInputTable = """
-            CREATE TABLE IF NOT EXISTS CleanedUserInput (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                SessionId TEXT NOT NULL,
-                UserInputId INTEGER NOT NULL UNIQUE,
-                CleanedText TEXT NOT NULL,
-                CreatedUTC TEXT NOT NULL,
-                BertEmbeddedUTC TEXT,
-                FOREIGN KEY (SessionId) REFERENCES Sessions(Id),
-                FOREIGN KEY (UserInputId) REFERENCES UserInputs(Id) ON DELETE CASCADE
-            )
-            """;
-        public const string CreateCleanedUserInputSessionIndex = "CREATE INDEX IF NOT EXISTS idx_cleaned_user_input_session ON CleanedUserInput(SessionId)";
-        public const string CreateCleanedUserInputUserInputIdIndex = "CREATE UNIQUE INDEX IF NOT EXISTS idx_cleaned_user_input_user_input_id ON CleanedUserInput(UserInputId)";
-        public const string CreateCleanedUserInputUnembeddedIndex = "CREATE INDEX IF NOT EXISTS idx_cleaned_user_input_unembedded ON CleanedUserInput(Id) WHERE BertEmbeddedUTC IS NULL AND CleanedText != ''";
-        // Migration: add CleanedId FK column to UserInputs (nullable — null means uncleaned).
-        public const string MigrateUserInputsAddCleanedId = "ALTER TABLE UserInputs ADD COLUMN CleanedId INTEGER REFERENCES CleanedUserInput(Id)";
-        public const string CreateUserInputsCleanedIdIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_cleaned_id ON UserInputs(CleanedId)";
-        // Partial index for fast uncleaned scans.
-        public const string CreateUserInputsUncleanedIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_uncleaned ON UserInputs(SessionId, Id) WHERE CleanedId IS NULL";
-
         // InputFileChanges Table
         public const string CreateInputFileChangesTable = """
             CREATE TABLE IF NOT EXISTS InputFileChanges (
@@ -193,26 +169,6 @@ namespace VibeRails.DB
             WHERE SessionId = $sessionId;
             """;
 
-        // ClaudePlans Table
-        public const string CreateClaudePlansTable = """
-            CREATE TABLE IF NOT EXISTS ClaudePlans (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                SessionId TEXT NOT NULL,
-                UserInputId INTEGER,
-                PlanFilePath TEXT,
-                PlanContent TEXT NOT NULL,
-                PlanSummary TEXT,
-                Status TEXT NOT NULL DEFAULT 'created',
-                CreatedUTC TEXT NOT NULL,
-                CompletedUTC TEXT,
-                FOREIGN KEY (SessionId) REFERENCES Sessions(Id),
-                FOREIGN KEY (UserInputId) REFERENCES UserInputs(Id)
-            )
-            """;
-        public const string CreateClaudePlansSessionIndex = "CREATE INDEX IF NOT EXISTS idx_claude_plans_session ON ClaudePlans(SessionId)";
-        public const string CreateClaudePlansStatusIndex = "CREATE INDEX IF NOT EXISTS idx_claude_plans_status ON ClaudePlans(Status)";
-        public const string CreateClaudePlansCreatedIndex = "CREATE INDEX IF NOT EXISTS idx_claude_plans_created ON ClaudePlans(CreatedUTC DESC)";
-
         public static readonly string[] InitStatements =
         [
             CreateEnvironmentsTable,
@@ -231,15 +187,9 @@ namespace VibeRails.DB
             CreateUserInputsTable,
             CreateUserInputsIndex,
             CreateUserInputsSeqIndex,
-            CreateCleanedUserInputTable,
-            CreateCleanedUserInputSessionIndex,
             CreateInputFileChangesTable,
             CreateInputFileChangesInputIndex,
             CreateInputFileChangesPathIndex,
-            CreateClaudePlansTable,
-            CreateClaudePlansSessionIndex,
-            CreateClaudePlansStatusIndex,
-            CreateClaudePlansCreatedIndex,
             CreateTerminalSessionLogsTable,
             CreateTerminalSessionLogsIndex,
             CreateProjectCacheTable
@@ -258,13 +208,8 @@ namespace VibeRails.DB
             "ALTER TABLE Sessions ADD COLUMN ProjectDisplayName TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE Sessions ADD COLUMN OwnerPid INTEGER",
             "ALTER TABLE Sessions ADD COLUMN OwnershipTracked INTEGER",
-            MigrateUserInputsAddCleanedId,
-            "ALTER TABLE CleanedUserInput ADD COLUMN UserInputId INTEGER REFERENCES UserInputs(Id)",
-            CreateCleanedUserInputUserInputIdIndex,
-            CreateUserInputsCleanedIdIndex,
-            CreateUserInputsUncleanedIndex,
-            "ALTER TABLE CleanedUserInput ADD COLUMN BertEmbeddedUTC TEXT",
-            CreateCleanedUserInputUnembeddedIndex
+            // Drop orphaned table from a previous build.
+            "DROP TABLE IF EXISTS TUI_Event"
         ];
 
         /// <summary>
@@ -536,14 +481,13 @@ namespace VibeRails.DB
                    p.Cli,
                    s.SessionDisplayName,
                    u.Sequence,
-                   SUBSTR(COALESCE(c.CleanedText, u.InputText), 1, 120),
+                   SUBSTR(u.InputText, 1, 120),
                    (SELECT COUNT(*) FROM UserInputs WHERE SessionId = s.Id),
                    CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END
             FROM Sessions s
             LEFT JOIN UserInputs u ON u.Id = (
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
             )
-            LEFT JOIN CleanedUserInput c ON c.Id = u.CleanedId
             LEFT JOIN Sessions p ON p.Id = NULLIF(s.ParentSessionId, '')
             """;
         public const string SelectChatHistoryBySessionId = """
@@ -559,14 +503,13 @@ namespace VibeRails.DB
                    p.Cli,
                    s.SessionDisplayName,
                    u.Sequence,
-                   SUBSTR(COALESCE(c.CleanedText, u.InputText), 1, 120),
+                   SUBSTR(u.InputText, 1, 120),
                    (SELECT COUNT(*) FROM UserInputs WHERE SessionId = s.Id),
                    CASE WHEN s.EndedUTC IS NOT NULL THEN CAST((julianday(s.EndedUTC) - julianday(s.StartedUTC)) * 86400 AS INTEGER) ELSE NULL END
             FROM Sessions s
             LEFT JOIN UserInputs u ON u.Id = (
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
             )
-            LEFT JOIN CleanedUserInput c ON c.Id = u.CleanedId
             LEFT JOIN Sessions p ON p.Id = NULLIF(s.ParentSessionId, '')
             WHERE s.Id = $sessionId
             LIMIT 1;
@@ -588,10 +531,6 @@ namespace VibeRails.DB
             WHERE UserInputId IN (SELECT Id FROM UserInputs WHERE SessionId = $sessionId)
                OR PreviousInputId IN (SELECT Id FROM UserInputs WHERE SessionId = $sessionId);
             """;
-        public const string DeleteSession_ClaudePlans = """
-            DELETE FROM ClaudePlans
-            WHERE SessionId = $sessionId;
-            """;
         public const string DeleteSession_SessionOutput = """
             DELETE FROM sessionOutPut
             WHERE SessionId = $sessionId;
@@ -609,20 +548,13 @@ namespace VibeRails.DB
             WHERE Id = $sessionId;
             """;
 
-        public const string DeleteSession_NullOutCleanedIds = """
-            UPDATE UserInputs SET CleanedId = NULL WHERE SessionId = $sessionId;
-            """;
-
         public static readonly string[] DeleteSessionCommands =
         [
             DeleteSession_UnparentChildren,
             DeleteSession_FileChanges,
-            DeleteSession_ClaudePlans,
             DeleteSession_SessionOutput,
             DeleteSession_SessionLogs,
             DeleteSession_TerminalSessionLogs,
-            DeleteSession_NullOutCleanedIds,
-            DeleteSession_CleanedUserInput,
             DeleteSession_UserInputs,
             DeleteSession_Session
         ];
@@ -662,102 +594,19 @@ namespace VibeRails.DB
             LIMIT 1;
             """;
 
-        // CleanedUserInput CRUD — 1:1 with UserInputs via dual FKs.
-        public const string InsertCleanedUserInputAndLink = """
-            INSERT INTO CleanedUserInput (SessionId, UserInputId, CleanedText, CreatedUTC)
-            VALUES ($sessionId, $userInputId, $cleanedText, $createdUTC)
-            RETURNING Id;
-            """;
-        public const string UpdateUserInputCleanedId = """
-            UPDATE UserInputs SET CleanedId = $cleanedId WHERE Id = $userInputId;
-            """;
-        public const string UpdateCleanedTextForUserInput = """
-            UPDATE CleanedUserInput
-            SET CleanedText = $cleanedText
-            WHERE UserInputId = $userInputId;
-            """;
-        public const string SelectCleanedTextForInputId = """
-            SELECT c.CleanedText
-            FROM UserInputs u
-            INNER JOIN CleanedUserInput c ON u.CleanedId = c.Id
-            WHERE u.Id = $inputId
-            LIMIT 1;
-            """;
-        public const string SelectSessionCleanedTextOrdered = """
-            SELECT c.CleanedText
-            FROM UserInputs u
-            INNER JOIN CleanedUserInput c ON u.CleanedId = c.Id
-            WHERE u.SessionId = $sessionId
-            ORDER BY u.Sequence ASC;
-            """;
-        // Cleaned-or-raw (used by IGetUserText for best-effort display).
+        // User input text reads — used by IGetUserText.
         public const string SelectTextForInputIdOrRaw = """
-            SELECT SUBSTR(COALESCE(c.CleanedText, u.InputText), 1, $maxChars)
+            SELECT SUBSTR(u.InputText, 1, $maxChars)
             FROM UserInputs u
-            LEFT JOIN CleanedUserInput c ON c.Id = u.CleanedId
             WHERE u.Id = $inputId
             LIMIT 1;
             """;
         public const string SelectFirstInputTextForSessionOrRaw = """
-            SELECT SUBSTR(COALESCE(c.CleanedText, u.InputText), 1, $maxChars)
+            SELECT SUBSTR(u.InputText, 1, $maxChars)
             FROM UserInputs u
-            LEFT JOIN CleanedUserInput c ON c.Id = u.CleanedId
             WHERE u.SessionId = $sessionId
             ORDER BY u.Sequence ASC
             LIMIT 1;
-            """;
-        public const string SelectUncleanedInputsForSession = """
-            SELECT u.Id, u.SessionId, u.Sequence, u.InputText, u.GitCommitHash, u.TimestampUTC
-            FROM UserInputs u
-            WHERE u.SessionId = $sessionId
-              AND u.CleanedId IS NULL
-            ORDER BY u.Id ASC;
-            """;
-        public const string SelectUncleanedInputsForClosedSessions = """
-            SELECT u.Id, u.SessionId, u.Sequence, u.InputText, u.GitCommitHash, u.TimestampUTC
-            FROM UserInputs u
-            INNER JOIN Sessions s ON u.SessionId = s.Id
-            WHERE u.CleanedId IS NULL
-              AND s.EndedUTC IS NOT NULL
-              AND datetime(s.EndedUTC) < datetime('now', '-5 minutes')
-            ORDER BY u.Id ASC
-            LIMIT $batchSize;
-            """;
-        public const string SelectPromptPrefixedCleanedInputsForClosedSessions = """
-            SELECT u.Id, u.SessionId, u.Sequence, u.InputText, u.GitCommitHash, u.TimestampUTC
-            FROM UserInputs u
-            INNER JOIN CleanedUserInput c ON c.UserInputId = u.Id
-            INNER JOIN Sessions s ON u.SessionId = s.Id
-            WHERE c.CleanedText != ''
-              AND s.EndedUTC IS NOT NULL
-              AND datetime(s.EndedUTC) < datetime('now', '-5 minutes')
-              AND (
-                    LTRIM(c.CleanedText) LIKE '>%' OR
-                    LTRIM(c.CleanedText) LIKE '›%'
-                  )
-            ORDER BY u.Id ASC
-            LIMIT $batchSize;
-            """;
-        public const string SelectIsInputCleaned = """
-            SELECT CleanedId FROM UserInputs WHERE Id = $inputId LIMIT 1;
-            """;
-        // BERT embedding tracking
-        public const string SelectUnembeddedCleanedInputs = """
-            SELECT c.Id, c.SessionId, c.UserInputId, c.CleanedText
-            FROM CleanedUserInput c
-            WHERE c.BertEmbeddedUTC IS NULL
-              AND c.UserInputId IS NOT NULL
-              AND c.CleanedText != ''
-            ORDER BY c.Id ASC
-            LIMIT $batchSize;
-            """;
-        public const string MarkCleanedInputEmbedded = """
-            UPDATE CleanedUserInput SET BertEmbeddedUTC = $embeddedUTC WHERE Id = $cleanedId;
-            """;
-
-        public const string DeleteSession_CleanedUserInput = """
-            DELETE FROM CleanedUserInput
-            WHERE SessionId = $sessionId;
             """;
 
         // ProjectCache Table — generic key-value store scoped per project

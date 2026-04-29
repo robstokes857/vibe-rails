@@ -46,6 +46,7 @@ public static class CliLaunchRoutes
                     {
                         args.InsertRange(0, ShellArgSanitizer.ParseAndValidate(environment.CustomArgs));
                     }
+                    LlmPromptArgvBuilder.AppendInitialPrompt(args, llm, environment.CustomPrompt);
 
                     // Update last used timestamp
                     environment.LastUsedUTC = DateTime.UtcNow;

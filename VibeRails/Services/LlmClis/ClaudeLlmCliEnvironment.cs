@@ -85,12 +85,26 @@ namespace VibeRails.Services.LlmClis
                 var json = JsonNode.Parse(content);
                 if (json == null) return dto;
 
-                dto.Model = json["model"]?.GetValue<string>() ?? "";
-                dto.PermissionMode = json["permissionMode"]?.GetValue<string>() ?? "default";
-                dto.AllowedTools = json["allowedTools"]?.GetValue<string>() ?? "";
-                dto.DisallowedTools = json["disallowedTools"]?.GetValue<string>() ?? "";
-                dto.SkipPermissions = json["skipPermissions"]?.GetValue<bool>() ?? false;
-                dto.Verbose = json["verbose"]?.GetValue<bool>() ?? false;
+                // Per-field readers are tolerant: a key whose value is the wrong JSON
+                // type (e.g. allowedTools as Claude's native array form) just yields
+                // the default for that one field instead of poisoning the whole DTO.
+                dto.Effort = TryReadString(json, "effort") ?? "";
+                dto.NoSessionPersistence = TryReadBool(json, "noSessionPersistence") ?? false;
+                dto.PermissionMode = TryReadString(json, "permissionMode") ?? "default";
+                dto.SystemPrompt = TryReadString(json, "systemPrompt") ?? "";
+                dto.AllowDangerouslySkipPermissions = TryReadBool(json, "allowDangerouslySkipPermissions") ?? false;
+                dto.DangerouslyLoadDevelopmentChannels = TryReadString(json, "dangerouslyLoadDevelopmentChannels") ?? "";
+                dto.DangerouslySkipPermissions =
+                    TryReadBool(json, "dangerouslySkipPermissions") ??
+                    TryReadBool(json, "skipPermissions") ??
+                    false;
+                dto.AllowedTools = TryReadString(json, "allowedTools") ?? "";
+                dto.AppendSystemPrompt = TryReadString(json, "appendSystemPrompt") ?? "";
+                dto.Bare = TryReadBool(json, "bare") ?? false;
+                dto.Betas = TryReadString(json, "betas") ?? "";
+                dto.Channels = TryReadString(json, "channels") ?? "";
+                dto.Debug = TryReadBool(json, "debug") ?? false;
+                dto.DebugFilter = TryReadString(json, "debugFilter") ?? "";
             }
             catch (JsonException)
             {
@@ -98,6 +112,22 @@ namespace VibeRails.Services.LlmClis
             }
 
             return dto;
+        }
+
+        private static string? TryReadString(JsonNode root, string key)
+        {
+            var node = root[key];
+            if (node is null) return null;
+            try { return node.GetValue<string>(); }
+            catch { return null; }
+        }
+
+        private static bool? TryReadBool(JsonNode root, string key)
+        {
+            var node = root[key];
+            if (node is null) return null;
+            try { return node.GetValue<bool>(); }
+            catch { return null; }
         }
 
         public async Task SaveSettings(string envName, ClaudeSettingsDto settings, CancellationToken cancellationToken)
@@ -127,42 +157,56 @@ namespace VibeRails.Services.LlmClis
             }
 
             json ??= new JsonObject();
+            var obj = json.AsObject();
 
             // Update or add our managed settings
-            if (!string.IsNullOrEmpty(settings.Model))
-                json["model"] = settings.Model;
-            else
-                json.AsObject().Remove("model");
+            SetString(obj, "effort", settings.Effort);
+            SetBool(obj, "noSessionPersistence", settings.NoSessionPersistence);
 
             if (settings.PermissionMode != "default")
-                json["permissionMode"] = settings.PermissionMode;
+                obj["permissionMode"] = settings.PermissionMode;
             else
-                json.AsObject().Remove("permissionMode");
+                obj.Remove("permissionMode");
 
-            if (!string.IsNullOrEmpty(settings.AllowedTools))
-                json["allowedTools"] = settings.AllowedTools;
-            else
-                json.AsObject().Remove("allowedTools");
+            SetString(obj, "systemPrompt", settings.SystemPrompt);
+            SetBool(obj, "allowDangerouslySkipPermissions", settings.AllowDangerouslySkipPermissions);
+            SetString(obj, "dangerouslyLoadDevelopmentChannels", settings.DangerouslyLoadDevelopmentChannels);
+            SetBool(obj, "dangerouslySkipPermissions", settings.DangerouslySkipPermissions);
+            SetString(obj, "allowedTools", settings.AllowedTools);
+            SetString(obj, "appendSystemPrompt", settings.AppendSystemPrompt);
+            SetBool(obj, "bare", settings.Bare);
+            SetString(obj, "betas", settings.Betas);
+            SetString(obj, "channels", settings.Channels);
+            SetBool(obj, "debug", settings.Debug);
+            SetString(obj, "debugFilter", settings.DebugFilter);
 
-            if (!string.IsNullOrEmpty(settings.DisallowedTools))
-                json["disallowedTools"] = settings.DisallowedTools;
-            else
-                json.AsObject().Remove("disallowedTools");
-
-            if (settings.SkipPermissions)
-                json["skipPermissions"] = true;
-            else
-                json.AsObject().Remove("skipPermissions");
-
-            if (settings.Verbose)
-                json["verbose"] = true;
-            else
-                json.AsObject().Remove("verbose");
+            // skipPermissions is a legacy alias for dangerouslySkipPermissions: GetSettings
+            // falls back to it when the new key is missing, so we must clear it whenever we
+            // write the new key — otherwise the legacy value would shadow the user's choice.
+            // Other previously-managed fields (model, disallowedTools, verbose) have no
+            // VibeRails mapping anymore; leave them untouched so a user's manual edits stick.
+            obj.Remove("skipPermissions");
 
             var options = new JsonSerializerOptions { WriteIndented = true };
             var jsonContent = json.ToJsonString(options);
 
             await _fileService.WriteAllTextAsync(configPath, jsonContent, FileMode.Create, FileShare.None, cancellationToken);
+        }
+
+        private static void SetString(JsonObject json, string key, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                json[key] = value;
+            else
+                json.Remove(key);
+        }
+
+        private static void SetBool(JsonObject json, string key, bool value)
+        {
+            if (value)
+                json[key] = true;
+            else
+                json.Remove(key);
         }
 
         private string GetSettingsFilePath(string envName)

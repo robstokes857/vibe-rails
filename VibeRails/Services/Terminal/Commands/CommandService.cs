@@ -25,16 +25,18 @@ public class CommandService : ICommandService
     public PreparedTerminalSession PrepareSession(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "")
     {
-        _ = initialPrompt;
-
         var cli = llm.ToString().ToLower();
         var cliCommand = extraArgs?.Length > 0
             ? $"{cli} {BuildSafeArgString(extraArgs)}"
             : cli;
 
-        if (!string.IsNullOrEmpty(summary))
+        var prompt = !string.IsNullOrWhiteSpace(summary)
+            ? summary
+            : initialPrompt;
+
+        if (!string.IsNullOrWhiteSpace(prompt))
         {
-            var quoted = SafeShellArg(summary);
+            var quoted = SafeShellArg(prompt);
 
             cliCommand = llm switch
             {

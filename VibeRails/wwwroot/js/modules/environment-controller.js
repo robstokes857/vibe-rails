@@ -264,6 +264,16 @@ export class EnvironmentController {
         if (!env) return;
 
         const cliSettings = await this.loadCliSettings(env.cli, env.name);
+
+        // For Codex, env.customPrompt is the source of truth for terminal launch
+        // (TerminalRoutes.cs threads it into the initial prompt). The settings panel's
+        // "prompt" field represents the same concept; preload it from env.customPrompt
+        // so users see the value they'll actually get at launch — and so saving the
+        // form doesn't silently clobber a CLI-set prompt with config.toml's empty value.
+        if ((env.cli || '').toLowerCase() === 'codex' && env.customPrompt) {
+            cliSettings.prompt = env.customPrompt;
+        }
+
         this.showEnvironmentForm({ mode: 'edit', env, cliSettings });
     }
 
@@ -298,6 +308,7 @@ export class EnvironmentController {
               </select>`;
 
         const customArgsValue = isEdit ? escapeHtml(env.customArgs || '') : '';
+        const usesManagedArgs = this.usesManagedCustomArgs(initialCli);
 
         this.app.showModal(title, `
             <form id="env-form">
@@ -309,7 +320,7 @@ export class EnvironmentController {
                     <label class="form-label">CLI Type</label>
                     ${cliField}
                 </div>
-                <div class="mb-3">
+                <div class="mb-3" data-custom-args-group ${usesManagedArgs ? 'style="display: none;"' : ''}>
                     <label class="form-label">Custom Arguments</label>
                     <input type="text" class="form-control" id="env-custom-args" value="${customArgsValue}" placeholder="e.g., --yolo --sandbox">
                     <small class="form-text text-muted">Arguments passed to the CLI when launching with this environment</small>
@@ -327,23 +338,35 @@ export class EnvironmentController {
         if (!isEdit) {
             const cliSelect = document.getElementById('env-cli');
             cliSelect.addEventListener('change', () => {
-                slot.innerHTML = this.buildCliSettingsHtml(cliSelect.value, {});
+                const cli = cliSelect.value;
+                const customArgsGroup = document.querySelector('[data-custom-args-group]');
+                if (customArgsGroup) {
+                    customArgsGroup.style.display = this.usesManagedCustomArgs(cli) ? 'none' : '';
+                }
+                slot.innerHTML = this.buildCliSettingsHtml(cli, {});
             });
         }
 
         document.getElementById('env-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const customArgs = document.getElementById('env-custom-args').value;
 
             try {
                 if (isEdit) {
-                    await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(env.name)}`, 'PUT', { customArgs });
-                    await this.saveCliSettings(env.cli, env.name);
+                    const settingsPayload = this.extractCliSettingsPayload(env.cli);
+                    const payload = this.buildEnvironmentSavePayload(env.cli, settingsPayload);
+                    await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(env.name)}`, 'PUT', payload);
+                    await this.saveCliSettings(env.cli, env.name, settingsPayload);
                 } else {
                     const name = document.getElementById('env-name').value;
                     const cli = document.getElementById('env-cli').value;
-                    await this.app.apiCall('/api/v1/environments', 'POST', { name, cli, customArgs });
-                    await this.saveCliSettings(cli, name);
+                    const settingsPayload = this.extractCliSettingsPayload(cli);
+                    const payload = {
+                        name,
+                        cli,
+                        ...this.buildEnvironmentSavePayload(cli, settingsPayload)
+                    };
+                    await this.app.apiCall('/api/v1/environments', 'POST', payload);
+                    await this.saveCliSettings(cli, name, settingsPayload);
                 }
 
                 this.app.closeModal();
@@ -364,6 +387,11 @@ export class EnvironmentController {
         return null;
     }
 
+    usesManagedCustomArgs(cli) {
+        const cliLower = (cli || '').toLowerCase();
+        return cliLower === 'codex' || cliLower === 'claude';
+    }
+
     async loadCliSettings(cli, envName) {
         const endpoint = this.cliSettingsEndpoint(cli);
         if (!endpoint) return {};
@@ -375,12 +403,169 @@ export class EnvironmentController {
         }
     }
 
-    async saveCliSettings(cli, envName) {
+    async saveCliSettings(cli, envName, payload = null) {
         const endpoint = this.cliSettingsEndpoint(cli);
         if (!endpoint) return;
-        const payload = this.extractCliSettingsPayload(cli);
-        if (!payload) return;
-        await this.app.apiCall(`/api/v1/${endpoint}/settings/${encodeURIComponent(envName)}`, 'PUT', payload);
+        const settingsPayload = payload || this.extractCliSettingsPayload(cli);
+        if (!settingsPayload) return;
+        await this.app.apiCall(`/api/v1/${endpoint}/settings/${encodeURIComponent(envName)}`, 'PUT', settingsPayload);
+    }
+
+    buildEnvironmentSavePayload(cli, settingsPayload = null) {
+        const cliLower = (cli || '').toLowerCase();
+        if (cliLower === 'codex') {
+            const codexSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            // The Codex panel's prompt field is the source of truth for both
+            // config.toml and env.customPrompt — keep them in sync.
+            return {
+                customArgs: this.buildCodexCustomArgs(codexSettings),
+                customPrompt: codexSettings?.prompt ?? ''
+            };
+        }
+
+        if (cliLower === 'claude') {
+            const claudeSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            // Claude has no UI surface for env.customPrompt — its system prompt is a
+            // separate, settings-managed concept. Omit customPrompt from the payload
+            // so the backend preserves whatever was set via `vb env update --prompt`.
+            return {
+                customArgs: this.buildClaudeCustomArgs(claudeSettings)
+            };
+        }
+
+        return {
+            customArgs: document.getElementById('env-custom-args')?.value || ''
+        };
+    }
+
+    buildCodexCustomArgs(settings) {
+        const s = settings || {};
+        const args = [];
+
+        if (s.yolo) {
+            args.push('--yolo');
+        } else if (s.fullAuto) {
+            args.push('--full-auto');
+        } else {
+            args.push('--ask-for-approval', s.askForApproval || 'untrusted');
+        }
+
+        if (s.noAltScreen) {
+            args.push('--no-alt-screen');
+        }
+
+        if (s.oss) {
+            args.push('--oss');
+        }
+
+        return args.join(' ');
+    }
+
+    buildClaudeCustomArgs(settings) {
+        const s = settings || {};
+        const args = [];
+
+        if (s.effort) {
+            args.push('--effort', s.effort);
+        }
+
+        if (s.noSessionPersistence) {
+            args.push('--no-session-persistence');
+        }
+
+        // Only emit --permission-mode when the user picked a non-default value;
+        // otherwise the generated args list is noisier than what they configured.
+        const permissionMode = s.permissionMode || 'default';
+        if (permissionMode !== 'default') {
+            args.push('--permission-mode', permissionMode);
+        }
+
+        this.pushStringArg(args, '--system-prompt', s.systemPrompt);
+
+        if (s.allowDangerouslySkipPermissions) {
+            args.push('--allow-dangerously-skip-permissions');
+        }
+
+        this.pushListArg(args, '--dangerously-load-development-channels', s.dangerouslyLoadDevelopmentChannels, { splitWhitespace: true });
+
+        if (s.dangerouslySkipPermissions) {
+            args.push('--dangerously-skip-permissions');
+        }
+
+        this.pushListArg(args, '--allowedTools', s.allowedTools);
+        this.pushStringArg(args, '--append-system-prompt', s.appendSystemPrompt);
+
+        if (s.bare) {
+            args.push('--bare');
+        }
+
+        this.pushListArg(args, '--betas', s.betas, { splitWhitespace: true });
+        this.pushListArg(args, '--channels', s.channels, { splitWhitespace: true });
+
+        if (s.debug || s.debugFilter) {
+            const filter = this.normalizeCustomArgValue(s.debugFilter);
+            if (filter) {
+                args.push('--debug-filter', filter);
+            } else {
+                args.push('--debug');
+            }
+        }
+
+        return args.map(arg => this.quoteCustomArg(arg)).join(' ');
+    }
+
+    pushStringArg(args, flag, value) {
+        const normalized = this.normalizeCustomArgValue(value);
+        if (normalized) {
+            args.push(flag, normalized);
+        }
+    }
+
+    pushListArg(args, flag, value, options = {}) {
+        const values = this.splitCustomArgList(value, options);
+        if (values.length > 0) {
+            args.push(flag, ...values);
+        }
+    }
+
+    pushRawValue(args, value) {
+        const normalized = this.normalizeCustomArgValue(value);
+        if (normalized) {
+            args.push(normalized);
+        }
+    }
+
+    splitCustomArgList(value, options = {}) {
+        const text = (value || '').trim();
+        if (!text) {
+            return [];
+        }
+
+        if (options.splitWhitespace) {
+            return text.split(/\s+/).map(v => this.normalizeCustomArgValue(v)).filter(Boolean);
+        }
+
+        return text
+            .split(/\r?\n/)
+            .map(v => this.normalizeCustomArgValue(v))
+            .filter(Boolean);
+    }
+
+    normalizeCustomArgValue(value) {
+        return (value || '').replace(/\s+/g, ' ').trim();
+    }
+
+    quoteCustomArg(value) {
+        const text = String(value ?? '');
+        if (!text) {
+            return '""';
+        }
+
+        if (!/[\s"'\\]/.test(text)) {
+            return text;
+        }
+
+        return `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
     }
 
     extractCliSettingsPayload(cli) {
@@ -397,21 +582,30 @@ export class EnvironmentController {
         }
         if (cliLower === 'codex') {
             return {
-                model: document.getElementById('codex-model').value,
-                sandbox: document.getElementById('codex-sandbox').value,
-                approval: document.getElementById('codex-approval').value,
+                askForApproval: document.getElementById('codex-approval').value,
+                yolo: document.getElementById('codex-yolo').checked,
                 fullAuto: document.getElementById('codex-full-auto').checked,
-                search: document.getElementById('codex-search').checked
+                noAltScreen: document.getElementById('codex-no-alt-screen').checked,
+                oss: document.getElementById('codex-oss').checked,
+                prompt: document.getElementById('codex-prompt').value
             };
         }
         if (cliLower === 'claude') {
             return {
-                model: document.getElementById('claude-model').value,
+                effort: document.getElementById('claude-effort').value,
+                noSessionPersistence: document.getElementById('claude-no-session-persistence').checked,
                 permissionMode: document.getElementById('claude-permission-mode').value,
+                systemPrompt: document.getElementById('claude-system-prompt').value,
+                allowDangerouslySkipPermissions: document.getElementById('claude-allow-dangerously-skip-permissions').checked,
+                dangerouslyLoadDevelopmentChannels: document.getElementById('claude-development-channels').value,
+                dangerouslySkipPermissions: document.getElementById('claude-dangerously-skip-permissions').checked,
                 allowedTools: document.getElementById('claude-allowed-tools').value,
-                disallowedTools: document.getElementById('claude-disallowed-tools').value,
-                skipPermissions: document.getElementById('claude-skip-permissions').checked,
-                verbose: document.getElementById('claude-verbose').checked
+                appendSystemPrompt: document.getElementById('claude-append-system-prompt').value,
+                bare: document.getElementById('claude-bare').checked,
+                betas: document.getElementById('claude-betas').value,
+                channels: document.getElementById('claude-channels').value,
+                debug: document.getElementById('claude-debug').checked,
+                debugFilter: document.getElementById('claude-debug-filter').value
             };
         }
         return null;
@@ -472,96 +666,162 @@ export class EnvironmentController {
         }
 
         if (cliLower === 'codex') {
+            const promptValue = this.app.escapeHtml(s.prompt || '');
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Codex CLI Settings</h6>
                 <div class="mb-3">
-                    <label class="form-label">Model</label>
-                    <input type="text" class="form-control" id="codex-model" value="${s.model || ''}" placeholder="e.g., o3, gpt-5-codex">
-                    <small class="form-text text-muted">Override the default model</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Sandbox Policy</label>
-                    <select class="form-select" id="codex-sandbox">
-                        <option value="read-only" ${s.sandbox === 'read-only' ? 'selected' : ''}>Read-Only</option>
-                        <option value="workspace-write" ${s.sandbox === 'workspace-write' ? 'selected' : ''}>Workspace Write</option>
-                        <option value="danger-full-access" ${s.sandbox === 'danger-full-access' ? 'selected' : ''}>Full Access (Dangerous)</option>
-                    </select>
-                    <small class="form-text text-muted">Controls sandbox policy for shell commands</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Approval Mode</label>
+                    <label class="form-label">Ask For Approval</label>
                     <select class="form-select" id="codex-approval">
-                        <option value="untrusted" ${s.approval === 'untrusted' ? 'selected' : ''}>Untrusted (Always Ask)</option>
-                        <option value="on-failure" ${s.approval === 'on-failure' ? 'selected' : ''}>On Failure</option>
-                        <option value="on-request" ${s.approval === 'on-request' ? 'selected' : ''}>On Request</option>
-                        <option value="never" ${s.approval === 'never' ? 'selected' : ''}>Never (Auto-approve All)</option>
+                        <option value="untrusted" ${(s.askForApproval || 'untrusted') === 'untrusted' ? 'selected' : ''}>Untrusted</option>
+                        <option value="on-request" ${s.askForApproval === 'on-request' ? 'selected' : ''}>On Request</option>
+                        <option value="never" ${s.askForApproval === 'never' ? 'selected' : ''}>Never</option>
                     </select>
-                    <small class="form-text text-muted">When to pause for human approval</small>
+                    <small class="form-text text-muted">Controls when Codex pauses for human approval before running a command</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="codex-yolo" ${s.yolo ? 'checked' : ''}>
+                        <label class="form-check-label" for="codex-yolo">YOLO Mode</label>
+                    </div>
+                    <small class="form-text text-muted text-warning">Runs commands without approvals or sandboxing</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" id="codex-full-auto" ${s.fullAuto ? 'checked' : ''}>
                         <label class="form-check-label" for="codex-full-auto">Full-Auto Mode</label>
                     </div>
-                    <small class="form-text text-muted">Shortcut for approval=on-request + sandbox=workspace-write</small>
+                    <small class="form-text text-muted">Sets approval to on-request and sandbox to workspace-write</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="codex-search" ${s.search ? 'checked' : ''}>
-                        <label class="form-check-label" for="codex-search">Web Search</label>
+                        <input class="form-check-input" type="checkbox" id="codex-no-alt-screen" ${s.noAltScreen ? 'checked' : ''}>
+                        <label class="form-check-label" for="codex-no-alt-screen">No Alternate Screen</label>
                     </div>
-                    <small class="form-text text-muted">Enable web search capabilities</small>
+                    <small class="form-text text-muted">Disable alternate screen mode for the TUI</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="codex-oss" ${s.oss ? 'checked' : ''}>
+                        <label class="form-check-label" for="codex-oss">OSS Provider</label>
+                    </div>
+                    <small class="form-text text-muted">Use the local open source model provider</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Prompt</label>
+                    <textarea class="form-control" id="codex-prompt" rows="3" placeholder="Optional text instruction to start the session">${promptValue}</textarea>
+                    <small class="form-text text-muted">Leave empty to launch Codex without a pre-filled message</small>
                 </div>
             `;
         }
 
         if (cliLower === 'claude') {
+            const effort = s.effort || '';
+            const permissionMode = s.permissionMode || 'default';
+            const systemPrompt = this.app.escapeHtml(s.systemPrompt || '');
+            const developmentChannels = this.app.escapeHtml(s.dangerouslyLoadDevelopmentChannels || '');
+            const allowedTools = this.app.escapeHtml(s.allowedTools || '');
+            const appendSystemPrompt = this.app.escapeHtml(s.appendSystemPrompt || '');
+            const betas = this.app.escapeHtml(s.betas || '');
+            const channels = this.app.escapeHtml(s.channels || '');
+            const debugFilter = this.app.escapeHtml(s.debugFilter || '');
+
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Claude CLI Settings</h6>
                 <div class="mb-3">
-                    <label class="form-label">Model</label>
-                    <select class="form-select" id="claude-model">
-                        <option value="" ${!s.model ? 'selected' : ''}>(default)</option>
-                        <option value="sonnet" ${s.model === 'sonnet' ? 'selected' : ''}>Sonnet</option>
-                        <option value="opus" ${s.model === 'opus' ? 'selected' : ''}>Opus</option>
-                        <option value="haiku" ${s.model === 'haiku' ? 'selected' : ''}>Haiku</option>
+                    <label class="form-label">Effort</label>
+                    <select class="form-select" id="claude-effort">
+                        <option value="" ${effort === '' ? 'selected' : ''}>Default</option>
+                        <option value="low" ${effort === 'low' ? 'selected' : ''}>Low</option>
+                        <option value="medium" ${effort === 'medium' ? 'selected' : ''}>Medium</option>
+                        <option value="high" ${effort === 'high' ? 'selected' : ''}>High</option>
+                        <option value="xhigh" ${effort === 'xhigh' ? 'selected' : ''}>XHigh</option>
+                        <option value="max" ${effort === 'max' ? 'selected' : ''}>Max</option>
                     </select>
-                    <small class="form-text text-muted">Override the default model</small>
+                    <small class="form-text text-muted">Sets the effort level for this session</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="claude-no-session-persistence" ${s.noSessionPersistence ? 'checked' : ''}>
+                        <label class="form-check-label" for="claude-no-session-persistence">No Session Persistence</label>
+                    </div>
+                    <small class="form-text text-muted">Do not save sessions to disk for print-mode runs</small>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Permission Mode</label>
                     <select class="form-select" id="claude-permission-mode">
-                        <option value="default" ${s.permissionMode === 'default' ? 'selected' : ''}>Default</option>
-                        <option value="plan" ${s.permissionMode === 'plan' ? 'selected' : ''}>Plan Mode</option>
-                        <option value="bypassPermissions" ${s.permissionMode === 'bypassPermissions' ? 'selected' : ''}>Bypass Permissions (Dangerous)</option>
+                        <option value="default" ${permissionMode === 'default' ? 'selected' : ''}>Default</option>
+                        <option value="acceptEdits" ${permissionMode === 'acceptEdits' ? 'selected' : ''}>Accept Edits</option>
+                        <option value="plan" ${permissionMode === 'plan' ? 'selected' : ''}>Plan</option>
+                        <option value="auto" ${permissionMode === 'auto' ? 'selected' : ''}>Auto</option>
+                        <option value="dontAsk" ${permissionMode === 'dontAsk' ? 'selected' : ''}>Don't Ask</option>
+                        <option value="bypassPermissions" ${permissionMode === 'bypassPermissions' ? 'selected' : ''}>Bypass Permissions</option>
                     </select>
                     <small class="form-text text-muted">Controls permission handling behavior</small>
                 </div>
                 <div class="mb-3">
+                    <label class="form-label">System Prompt</label>
+                    <textarea class="form-control" id="claude-system-prompt" rows="3" placeholder="Replace the entire system prompt">${systemPrompt}</textarea>
+                    <small class="form-text text-muted">Passed as --system-prompt when launching Claude</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="claude-allow-dangerously-skip-permissions" ${s.allowDangerouslySkipPermissions ? 'checked' : ''}>
+                        <label class="form-check-label" for="claude-allow-dangerously-skip-permissions">Allow Dangerous Skip Permissions</label>
+                    </div>
+                    <small class="form-text text-muted">Adds bypassPermissions to the mode cycle without starting in it</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Development Channels</label>
+                    <textarea class="form-control" id="claude-development-channels" rows="2" placeholder="server:webhook">${developmentChannels}</textarea>
+                    <small class="form-text text-muted">Entries for --dangerously-load-development-channels</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="claude-dangerously-skip-permissions" ${s.dangerouslySkipPermissions ? 'checked' : ''}>
+                        <label class="form-check-label" for="claude-dangerously-skip-permissions">Dangerously Skip Permissions</label>
+                    </div>
+                    <small class="form-text text-muted text-warning">Starts Claude with permission prompts bypassed</small>
+                </div>
+                <div class="mb-3">
                     <label class="form-label">Allowed Tools</label>
-                    <input type="text" class="form-control" id="claude-allowed-tools" value="${s.allowedTools || ''}" placeholder="e.g., Read,Glob,Grep">
-                    <small class="form-text text-muted">Comma-separated list of tools to auto-approve</small>
+                    <textarea class="form-control" id="claude-allowed-tools" rows="3" placeholder="Bash(git log *)&#10;Bash(git diff *)&#10;Read">${allowedTools}</textarea>
+                    <small class="form-text text-muted">One --allowedTools entry per line</small>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Disallowed Tools</label>
-                    <input type="text" class="form-control" id="claude-disallowed-tools" value="${s.disallowedTools || ''}" placeholder="e.g., Bash,Write">
-                    <small class="form-text text-muted">Comma-separated list of tools to disable</small>
-                </div>
-                <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="claude-skip-permissions" ${s.skipPermissions ? 'checked' : ''}>
-                        <label class="form-check-label" for="claude-skip-permissions">Skip Permissions</label>
-                    </div>
-                    <small class="form-text text-muted text-warning">Skip all permission prompts (dangerous!)</small>
+                    <label class="form-label">Append System Prompt</label>
+                    <textarea class="form-control" id="claude-append-system-prompt" rows="2" placeholder="Append text to the default system prompt">${appendSystemPrompt}</textarea>
+                    <small class="form-text text-muted">Passed as --append-system-prompt when launching Claude</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="claude-verbose" ${s.verbose ? 'checked' : ''}>
-                        <label class="form-check-label" for="claude-verbose">Verbose Logging</label>
+                        <input class="form-check-input" type="checkbox" id="claude-bare" ${s.bare ? 'checked' : ''}>
+                        <label class="form-check-label" for="claude-bare">Bare Mode</label>
                     </div>
-                    <small class="form-text text-muted">Enable verbose logging output</small>
+                    <small class="form-text text-muted">Skip discovery of hooks, skills, plugins, MCP servers, memory, and CLAUDE.md</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Betas</label>
+                    <input type="text" class="form-control" id="claude-betas" value="${betas}" placeholder="interleaved-thinking">
+                    <small class="form-text text-muted">Entries for --betas</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Channels</label>
+                    <textarea class="form-control" id="claude-channels" rows="2" placeholder="plugin:my-notifier@my-marketplace">${channels}</textarea>
+                    <small class="form-text text-muted">Entries for --channels</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="claude-debug" ${s.debug ? 'checked' : ''}>
+                        <label class="form-check-label" for="claude-debug">Debug Mode</label>
+                    </div>
+                    <small class="form-text text-muted">Enable --debug for this launch</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Debug Filter</label>
+                    <input type="text" class="form-control" id="claude-debug-filter" value="${debugFilter}" placeholder="api,mcp">
+                    <small class="form-text text-muted">Optional category filter passed after --debug</small>
                 </div>
             `;
         }
@@ -670,26 +930,44 @@ export class EnvironmentController {
     }
 
     async launchInWebUI(envId, envName, cli) {
-        // Go back to dashboard to show the launched terminal
-        this.app.goBack();
+        // The terminal panel only exists on the dashboard. `goBack()` was unreliable —
+        // if the user reached the env page via the top sub-nav (rather than from the
+        // dashboard), `goBack()` either does nothing or returns to a different view,
+        // and the subsequent [data-terminal-content] lookup silently fails. Navigate
+        // explicitly so the user always lands where the terminal panel lives, and
+        // preselect the env so the dropdown is right even if auto-start races.
+        if (this.app.currentView !== 'dashboard') {
+            this.app.navigate('dashboard', { preselectedEnvId: envId });
+        }
 
         this.app.showToast('Web Terminal',
             `Launching ${envName} (${cli})...`,
             'info');
 
-        // Scroll to terminal and auto-start the session
-        setTimeout(async () => {
-            const terminalSection = document.querySelector('[data-terminal-section]');
-            if (terminalSection) {
-                terminalSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
+        // The dashboard renders its terminal container asynchronously. Poll briefly
+        // until the container is mounted, then hand off to startTerminal — which
+        // itself awaits the TerminalManager's init promise, so we don't need to
+        // wait for that here.
+        const terminalContent = await this._waitForTerminalContent(2000);
+        if (!terminalContent) {
+            this.app.showError('Could not find the terminal panel — open the dashboard and try again.');
+            return;
+        }
 
-            const terminalContent = document.querySelector('[data-terminal-content]');
-            if (terminalContent) {
-                const selection = `env:${envId}:${cli}`;
-                await this.app.terminalController.startTerminal(terminalContent, selection);
-            }
-        }, 300);
+        document.querySelector('[data-terminal-section]')
+            ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        await this.app.terminalController.startTerminal(terminalContent, `env:${envId}:${cli}`);
+    }
+
+    async _waitForTerminalContent(timeoutMs) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const el = document.querySelector('[data-terminal-content]');
+            if (el) return el;
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        return document.querySelector('[data-terminal-content]');
     }
 }
 

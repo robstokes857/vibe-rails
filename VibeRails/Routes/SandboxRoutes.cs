@@ -213,10 +213,14 @@ public static class SandboxRoutes
             if (!string.IsNullOrEmpty(envName))
             {
                 var environment = await repository.GetEnvironmentByNameAndLlmAsync(envName, llm, cancellationToken);
-                if (environment != null && !string.IsNullOrEmpty(environment.CustomArgs))
+                if (environment != null)
                 {
-                    var customArgs = environment.CustomArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                    args.InsertRange(0, customArgs);
+                    if (!string.IsNullOrEmpty(environment.CustomArgs))
+                    {
+                        var customArgs = ShellArgSanitizer.ParseAndValidate(environment.CustomArgs);
+                        args.InsertRange(0, customArgs);
+                    }
+                    LlmPromptArgvBuilder.AppendInitialPrompt(args, llm, environment.CustomPrompt);
                 }
             }
 

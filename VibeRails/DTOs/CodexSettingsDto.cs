@@ -2,10 +2,11 @@ namespace VibeRails.DTOs
 {
     public class CodexSettingsDto
     {
-        public string Model { get; set; } = "";
-        public string Sandbox { get; set; } = "read-only";       // read-only | workspace-write | danger-full-access
-        public string Approval { get; set; } = "untrusted";      // untrusted | on-failure | on-request | never
+        public string AskForApproval { get; set; } = "untrusted"; // untrusted | on-request | never
+        public bool Yolo { get; set; } = false;
         public bool FullAuto { get; set; } = false;
-        public bool Search { get; set; } = false;
+        public bool NoAltScreen { get; set; } = false;
+        public bool Oss { get; set; } = false;
+        public string Prompt { get; set; } = "";
     }
 }

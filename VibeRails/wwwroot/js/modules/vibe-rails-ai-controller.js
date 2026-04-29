@@ -304,13 +304,6 @@ export class VibeRailsAiController {
             ? `<div class="vra-section"><h3>${textLabel}</h3><pre class="vra-pre">${esc(userText)}</pre></div>`
             : '';
 
-        const cleanedText = i.cleanedUserText || '';
-        const cleanedSection = cleanedText
-            ? `<div class="vra-section"><h3>Cleaned User Text</h3><pre class="vra-pre">${esc(cleanedText)}</pre></div>`
-            : (i.userInputId != null && i.userText
-                ? `<div class="vra-section"><h3>Cleaned User Text</h3><div class="vra-empty" style="min-height:60px">No cleaned text yet for this input.</div></div>`
-                : '');
-
         const meta = [
             ['CLI', i.cli || 'Unknown'],
             ['Environment', i.environmentName || 'None'],
@@ -347,7 +340,6 @@ export class VibeRailsAiController {
             ${scoreBanner}
             ${sessionActions}
             ${textSection}
-            ${cleanedSection}
             <div class="vra-section"><h3>Metadata</h3><div class="vra-meta-grid">${meta}</div></div>
             ${fileSection}
             ${rawSection}

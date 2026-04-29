@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using VibeRails.DTOs;
 using VibeRails.Utils;
 
@@ -41,10 +42,6 @@ namespace VibeRails.Services.LlmClis.Launchers
         {
             try
             {
-                var envVars = !string.IsNullOrEmpty(envName)
-                    ? GetEnvironmentVariables(envName)
-                    : new Dictionary<string, string>();
-
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
                     return LaunchInWindowsTerminal(workingDirectory, args, envName);
@@ -76,36 +73,73 @@ namespace VibeRails.Services.LlmClis.Launchers
             }
         }
 
+        private string[] BuildVbArgv(string workingDirectory, string[] args, string? envName)
+        {
+            var envValue = !string.IsNullOrEmpty(envName) ? envName : CliExecutable;
+            var argv = new List<string> { "--env", envValue, "--workdir", workingDirectory };
+            if (args.Length > 0)
+            {
+                argv.Add("--");
+                argv.AddRange(args);
+            }
+            return argv.ToArray();
+        }
+
         private LaunchResult LaunchInWindowsTerminal(
             string workingDirectory,
             string[] args,
             string? envName)
         {
-            // Get the path to the current executable (vb)
             var exePath = Environment.ProcessPath ?? "vb";
+            var argv = BuildVbArgv(workingDirectory, args, envName);
 
-            // Build the --env command (unified flag for both base CLIs and custom environments)
-            var envValue = !string.IsNullOrEmpty(envName) ? $"\"{envName}\"" : CliExecutable;
-            var bootstrapArgs = $"--env {envValue} --workdir \"{workingDirectory}\"";
-
-            // Add any additional args
-            if (args.Length > 0)
+            // Build a temp .ps1 script and let PowerShell's call operator (`&`) plus
+            // splatting (`@argv`) pass each arg as its own argv element. This avoids
+            // every nested-quote pitfall of `pwsh -Command "..."` when args contain
+            // spaces, quotes, $, or backticks.
+            var sb = new StringBuilder();
+            sb.AppendLine("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8");
+            sb.AppendLine($"$exe = {QuotePowerShellSingleQuoted(exePath)}");
+            sb.Append("$argv = @(");
+            for (int i = 0; i < argv.Length; i++)
             {
-                bootstrapArgs += " -- " + string.Join(" ", args);
+                if (i > 0) sb.Append(", ");
+                sb.Append(QuotePowerShellSingleQuoted(argv[i]));
             }
+            sb.AppendLine(")");
+            sb.AppendLine("try { Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -ErrorAction SilentlyContinue } catch { }");
+            sb.AppendLine("& $exe @argv");
 
-            // Launch in a new pwsh (PowerShell Core) window
-            // Set UTF-8 encoding first for proper Unicode box-drawing character support
-            var process = Process.Start(new ProcessStartInfo
+            var tempScript = Path.Combine(
+                Path.GetTempPath(),
+                $"viberails-launch-{Guid.NewGuid():N}.ps1");
+            File.WriteAllText(tempScript, sb.ToString(), new UTF8Encoding(false));
+
+            var startInfo = new ProcessStartInfo
             {
                 FileName = "pwsh",
-                Arguments = $"-NoExit -NoProfile -Command \"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & '\"{exePath}\"' {bootstrapArgs}\"",
                 WorkingDirectory = workingDirectory,
-                UseShellExecute = true
-            });
+                UseShellExecute = true,
+            };
+            startInfo.ArgumentList.Add("-NoExit");
+            startInfo.ArgumentList.Add("-NoProfile");
+            startInfo.ArgumentList.Add("-File");
+            startInfo.ArgumentList.Add(tempScript);
+
+            Process? process;
+            try
+            {
+                process = Process.Start(startInfo);
+            }
+            catch
+            {
+                try { File.Delete(tempScript); } catch { }
+                throw;
+            }
 
             if (process == null)
             {
+                try { File.Delete(tempScript); } catch { }
                 throw new InvalidOperationException("pwsh (PowerShell Core) is required but was not found. Please install PowerShell Core from https://github.com/PowerShell/PowerShell");
             }
 
@@ -121,28 +155,24 @@ namespace VibeRails.Services.LlmClis.Launchers
             string[] args,
             string? envName)
         {
-            // Get the path to the current executable (vb)
             var exePath = Environment.ProcessPath ?? "vb";
+            var argv = BuildVbArgv(workingDirectory, args, envName);
 
-            // Build the --env command (unified flag for both base CLIs and custom environments)
-            var envValue = !string.IsNullOrEmpty(envName) ? $"\"{envName}\"" : CliExecutable;
-            var bootstrapArgs = $"--env {envValue} --workdir \"{workingDirectory}\"";
+            // Build a single bash command line with POSIX single-quote escaping per arg.
+            var bashCommand = BuildPosixCommandLine(exePath, argv);
 
-            // Add any additional args
-            if (args.Length > 0)
-            {
-                bootstrapArgs += " -- " + string.Join(" ", args);
-            }
+            // Wrap it in AppleScript's `do script "..."` (double-quoted) — escape \ and " for AppleScript.
+            var appleScript = $"tell application \"Terminal\" to do script \"{EscapeForAppleScriptDoubleQuoted(bashCommand)}\"";
 
-            // Use osascript to open Terminal.app and run vb --env
-            var script = $"tell application \"Terminal\" to do script \"\\\"{exePath}\\\" {bootstrapArgs}\"";
-
-            Process.Start(new ProcessStartInfo
+            var startInfo = new ProcessStartInfo
             {
                 FileName = "osascript",
-                Arguments = $"-e \"{script}\"",
-                UseShellExecute = true
-            });
+                UseShellExecute = false,
+            };
+            startInfo.ArgumentList.Add("-e");
+            startInfo.ArgumentList.Add(appleScript);
+
+            Process.Start(startInfo);
 
             return new LaunchResult(
                 Success: true,
@@ -156,41 +186,35 @@ namespace VibeRails.Services.LlmClis.Launchers
             string[] args,
             string? envName)
         {
-            // Get the path to the current executable (vb)
             var exePath = Environment.ProcessPath ?? "vb";
+            var argv = BuildVbArgv(workingDirectory, args, envName);
 
-            // Build the --env command (unified flag for both base CLIs and custom environments)
-            var envValue = !string.IsNullOrEmpty(envName) ? $"\"{envName}\"" : CliExecutable;
-            var bootstrapArgs = $"--env {envValue} --workdir \"{workingDirectory}\"";
+            // POSIX-quoted single command line for `bash -c <fullCommand>`.
+            var fullCommand = BuildPosixCommandLine(exePath, argv) + "; exec bash";
 
-            // Add any additional args
-            if (args.Length > 0)
-            {
-                bootstrapArgs += " -- " + string.Join(" ", args);
-            }
-
-            // Full command to run vb --env
-            var fullCommand = $"\"{exePath}\" {bootstrapArgs}; exec bash";
-
-            // Try common terminal emulators in order of preference
-            var terminals = new (string terminal, string[] terminalArgs)[]
-            {
-                ("gnome-terminal", new[] { "--", "bash", "-c", fullCommand }),
-                ("konsole", new[] { "-e", "bash", "-c", fullCommand }),
-                ("xfce4-terminal", new[] { "-e", $"bash -c '{fullCommand}'" }),
-                ("xterm", new[] { "-e", $"bash -c '{fullCommand}'" })
-            };
+            // Pass via ArgumentList so each element is a discrete argv entry — no
+            // string-join quoting collisions with the inner POSIX-quoted command.
+            (string terminal, string[] terminalArgs)[] terminals =
+            [
+                ("gnome-terminal", ["--", "bash", "-c", fullCommand]),
+                ("konsole",        ["-e", "bash", "-c", fullCommand]),
+                ("xfce4-terminal", ["-e", "bash", "-c", fullCommand]),
+                ("xterm",          ["-e", "bash", "-c", fullCommand]),
+            ];
 
             foreach (var (terminal, terminalArgs) in terminals)
             {
                 try
                 {
-                    Process.Start(new ProcessStartInfo
+                    var startInfo = new ProcessStartInfo
                     {
                         FileName = terminal,
-                        Arguments = string.Join(" ", terminalArgs),
-                        UseShellExecute = true
-                    });
+                        UseShellExecute = false,
+                    };
+                    foreach (var a in terminalArgs)
+                        startInfo.ArgumentList.Add(a);
+
+                    Process.Start(startInfo);
 
                     return new LaunchResult(
                         Success: true,
@@ -210,5 +234,26 @@ namespace VibeRails.Services.LlmClis.Launchers
                 ProcessId: null
             );
         }
+
+        private static string BuildPosixCommandLine(string exePath, string[] argv)
+        {
+            var sb = new StringBuilder();
+            sb.Append(QuotePosixSingleQuoted(exePath));
+            foreach (var a in argv)
+            {
+                sb.Append(' ');
+                sb.Append(QuotePosixSingleQuoted(a));
+            }
+            return sb.ToString();
+        }
+
+        private static string QuotePosixSingleQuoted(string s)
+            => "'" + s.Replace("'", "'\\''") + "'";
+
+        private static string QuotePowerShellSingleQuoted(string s)
+            => "'" + s.Replace("'", "''") + "'";
+
+        private static string EscapeForAppleScriptDoubleQuoted(string s)
+            => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
     }
 }

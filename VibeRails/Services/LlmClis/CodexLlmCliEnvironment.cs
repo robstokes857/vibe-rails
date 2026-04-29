@@ -64,11 +64,15 @@ namespace VibeRails.Services.LlmClis
             var content = await _fileService.ReadAllTextAsync(configPath, cancellationToken);
 
             // Parse TOML-style config (simple key = value format)
-            dto.Model = GetTomlValue(content, "model") ?? "";
-            dto.Sandbox = GetTomlValue(content, "sandbox") ?? "read-only";
-            dto.Approval = GetTomlValue(content, "approval") ?? "untrusted";
+            dto.AskForApproval = NormalizeApproval(
+                GetTomlValue(content, "ask_for_approval")
+                ?? GetTomlValue(content, "approval")
+                ?? "untrusted");
+            dto.Yolo = GetTomlBoolValue(content, "yolo") ?? false;
             dto.FullAuto = GetTomlBoolValue(content, "full_auto") ?? false;
-            dto.Search = GetTomlBoolValue(content, "search") ?? false;
+            dto.NoAltScreen = GetTomlBoolValue(content, "no_alt_screen") ?? false;
+            dto.Oss = GetTomlBoolValue(content, "oss") ?? false;
+            dto.Prompt = GetTomlValue(content, "prompt") ?? "";
 
             return dto;
         }
@@ -91,12 +95,20 @@ namespace VibeRails.Services.LlmClis
                 existingContent = await _fileService.ReadAllTextAsync(configPath, cancellationToken);
             }
 
-            // Update or add each setting
-            existingContent = SetTomlValue(existingContent, "model", settings.Model);
-            existingContent = SetTomlValue(existingContent, "sandbox", settings.Sandbox);
-            existingContent = SetTomlValue(existingContent, "approval", settings.Approval);
+            // `approval` is a legacy alias for `ask_for_approval`: GetSettings falls back
+            // to it when the new key is missing, so we must clear it whenever we write the
+            // new key — otherwise the legacy value would shadow the user's choice. Other
+            // previously-managed fields (model, sandbox, search) have no VibeRails mapping
+            // anymore; leave them untouched so a user's manual edits stick.
+            existingContent = RemoveTomlValue(existingContent, "approval");
+
+            // Update or add each supported setting.
+            existingContent = SetTomlValue(existingContent, "ask_for_approval", NormalizeApproval(settings.AskForApproval));
+            existingContent = SetTomlBoolValue(existingContent, "yolo", settings.Yolo);
             existingContent = SetTomlBoolValue(existingContent, "full_auto", settings.FullAuto);
-            existingContent = SetTomlBoolValue(existingContent, "search", settings.Search);
+            existingContent = SetTomlBoolValue(existingContent, "no_alt_screen", settings.NoAltScreen);
+            existingContent = SetTomlBoolValue(existingContent, "oss", settings.Oss);
+            existingContent = SetTomlValue(existingContent, "prompt", settings.Prompt);
 
             await _fileService.WriteAllTextAsync(configPath, existingContent, FileMode.Create, FileShare.None, cancellationToken);
         }
@@ -109,10 +121,60 @@ namespace VibeRails.Services.LlmClis
 
         private static string? GetTomlValue(string content, string key)
         {
-            // Match: key = "value" or key = 'value' or key = value (unquoted)
-            var pattern = $@"^\s*{Regex.Escape(key)}\s*=\s*[""']?([^""'\r\n]*)[""']?\s*$";
-            var match = Regex.Match(content, pattern, RegexOptions.Multiline | RegexOptions.IgnoreCase);
-            return match.Success ? match.Groups[1].Value.Trim() : null;
+            // Three forms in order of preference:
+            //   key = "basic string with \" and \\ escapes"
+            //   key = 'literal string, no escapes, no embedded single quotes'
+            //   key = bareword   (booleans, numbers, unquoted identifiers)
+            var basicPattern = $@"^\s*{Regex.Escape(key)}\s*=\s*""((?:\\.|[^""\\])*)""\s*(?:#.*)?$";
+            var basicMatch = Regex.Match(content, basicPattern, RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            if (basicMatch.Success)
+                return UnescapeTomlBasicString(basicMatch.Groups[1].Value);
+
+            var literalPattern = $@"^\s*{Regex.Escape(key)}\s*=\s*'([^'\r\n]*)'\s*(?:#.*)?$";
+            var literalMatch = Regex.Match(content, literalPattern, RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            if (literalMatch.Success)
+                return literalMatch.Groups[1].Value;
+
+            var barePattern = $@"^\s*{Regex.Escape(key)}\s*=\s*([^""'\s#][^\r\n#]*?)\s*(?:#.*)?$";
+            var bareMatch = Regex.Match(content, barePattern, RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            return bareMatch.Success ? bareMatch.Groups[1].Value.Trim() : null;
+        }
+
+        private static string UnescapeTomlBasicString(string raw)
+        {
+            var sb = new StringBuilder(raw.Length);
+            for (int i = 0; i < raw.Length; i++)
+            {
+                if (raw[i] != '\\' || i + 1 >= raw.Length)
+                {
+                    sb.Append(raw[i]);
+                    continue;
+                }
+
+                char next = raw[++i];
+                switch (next)
+                {
+                    case '"': sb.Append('"'); break;
+                    case '\\': sb.Append('\\'); break;
+                    case 'b': sb.Append('\b'); break;
+                    case 't': sb.Append('\t'); break;
+                    case 'n': sb.Append('\n'); break;
+                    case 'f': sb.Append('\f'); break;
+                    case 'r': sb.Append('\r'); break;
+                    case 'u' when i + 4 < raw.Length:
+                        if (int.TryParse(raw.AsSpan(i + 1, 4), System.Globalization.NumberStyles.HexNumber, null, out var cp4))
+                            sb.Append((char)cp4);
+                        i += 4;
+                        break;
+                    case 'U' when i + 8 < raw.Length:
+                        if (int.TryParse(raw.AsSpan(i + 1, 8), System.Globalization.NumberStyles.HexNumber, null, out var cp8))
+                            sb.Append(char.ConvertFromUtf32(cp8));
+                        i += 8;
+                        break;
+                    default: sb.Append(next); break;
+                }
+            }
+            return sb.ToString();
         }
 
         private static bool? GetTomlBoolValue(string content, string key)
@@ -122,30 +184,77 @@ namespace VibeRails.Services.LlmClis
             return value.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static string NormalizeApproval(string? value)
+        {
+            return value?.Trim().ToLowerInvariant() switch
+            {
+                "on-request" => "on-request",
+                "never" => "never",
+                "on-failure" => "on-request",
+                _ => "untrusted"
+            };
+        }
+
+        private static string RemoveTomlValue(string content, string key)
+        {
+            var removePattern = $@"^\s*{Regex.Escape(key)}\s*=.*$\r?\n?";
+            return Regex.Replace(content, removePattern, "", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+        }
+
         private static string SetTomlValue(string content, string key, string value)
         {
             if (string.IsNullOrEmpty(value))
             {
-                // Remove the line if value is empty
-                var removePattern = $@"^\s*{Regex.Escape(key)}\s*=.*$\r?\n?";
-                return Regex.Replace(content, removePattern, "", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+                return RemoveTomlValue(content, key);
             }
 
+            // Escape the value as a TOML basic string so user input containing quotes,
+            // backslashes, or newlines can't break out of the value or inject keys.
+            // Use a MatchEvaluator (not a replacement string) so `$1`/`$0`/etc. inside
+            // the user's value aren't interpreted by Regex.Replace.
+            var escapedValue = EscapeTomlBasicString(value);
             var pattern = $@"^(\s*){Regex.Escape(key)}\s*=.*$";
-            var replacement = $"$1{key} = \"{value}\"";
 
             if (Regex.IsMatch(content, pattern, RegexOptions.Multiline | RegexOptions.IgnoreCase))
             {
-                return Regex.Replace(content, pattern, replacement, RegexOptions.Multiline | RegexOptions.IgnoreCase);
+                return Regex.Replace(
+                    content,
+                    pattern,
+                    m => $"{m.Groups[1].Value}{key} = {escapedValue}",
+                    RegexOptions.Multiline | RegexOptions.IgnoreCase);
             }
-            else
+
+            var sb = new StringBuilder(content.TrimEnd());
+            if (sb.Length > 0) sb.AppendLine();
+            sb.AppendLine($"{key} = {escapedValue}");
+            return sb.ToString();
+        }
+
+        private static string EscapeTomlBasicString(string value)
+        {
+            var sb = new StringBuilder(value.Length + 2);
+            sb.Append('"');
+            foreach (var ch in value)
             {
-                // Add new line at the end
-                var sb = new StringBuilder(content.TrimEnd());
-                if (sb.Length > 0) sb.AppendLine();
-                sb.AppendLine($"{key} = \"{value}\"");
-                return sb.ToString();
+                switch (ch)
+                {
+                    case '\\': sb.Append("\\\\"); break;
+                    case '"':  sb.Append("\\\""); break;
+                    case '\b': sb.Append("\\b"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\f': sb.Append("\\f"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    default:
+                        if (ch < 0x20 || ch == 0x7f)
+                            sb.Append($"\\u{(int)ch:X4}");
+                        else
+                            sb.Append(ch);
+                        break;
+                }
             }
+            sb.Append('"');
+            return sb.ToString();
         }
 
         private static string SetTomlBoolValue(string content, string key, bool value)

@@ -50,17 +50,26 @@ namespace VibeRails.Utils
         public bool? Yolo { get; set; }        // --yolo / --no-yolo
 
         // Codex settings options
-        public string? Model { get; set; }         // --model "o3"
-        public string? CodexSandbox { get; set; }  // --codex-sandbox read-only|workspace-write|danger-full-access
-        public string? CodexApproval { get; set; } // --codex-approval untrusted|on-failure|on-request|never
+        public string? CodexApproval { get; set; } // --ask-for-approval untrusted|on-request|never
         public bool? FullAuto { get; set; }        // --full-auto / --no-full-auto
-        public bool? Search { get; set; }          // --search / --no-search
+        public bool? NoAltScreen { get; set; }     // --no-alt-screen / --alt-screen
+        public bool? Oss { get; set; }             // --oss / --no-oss
 
         // Claude settings options
-        public string? ClaudePermissionMode { get; set; }   // --permission-mode default|plan|bypassPermissions
-        public string? ClaudeAllowedTools { get; set; }     // --allowed-tools "tool1,tool2"
-        public string? ClaudeDisallowedTools { get; set; }  // --disallowed-tools "tool1,tool2"
-        public bool? ClaudeSkipPermissions { get; set; }    // --skip-permissions / --no-skip-permissions
+        public string? ClaudeEffort { get; set; }                          // --effort low|medium|high|xhigh|max
+        public bool? ClaudeNoSessionPersistence { get; set; }              // --no-session-persistence
+        public string? ClaudePermissionMode { get; set; }                  // --permission-mode default|acceptEdits|plan|auto|dontAsk|bypassPermissions
+        public string? ClaudeSystemPrompt { get; set; }                    // --system-prompt "text"
+        public bool? ClaudeAllowDangerouslySkipPermissions { get; set; }   // --allow-dangerously-skip-permissions
+        public string? ClaudeDangerouslyLoadDevelopmentChannels { get; set; } // --dangerously-load-development-channels "server:webhook"
+        public bool? ClaudeDangerouslySkipPermissions { get; set; }        // --dangerously-skip-permissions
+        public string? ClaudeAllowedTools { get; set; }                    // --allowedTools "Bash(git log *)"
+        public string? ClaudeAppendSystemPrompt { get; set; }              // --append-system-prompt "text"
+        public bool? ClaudeBare { get; set; }                              // --bare
+        public string? ClaudeBetas { get; set; }                           // --betas "interleaved-thinking"
+        public string? ClaudeChannels { get; set; }                        // --channels "plugin:name@marketplace"
+        public bool? ClaudeDebug { get; set; }                             // --debug
+        public string? ClaudeDebugFilter { get; set; }                     // optional --debug value
 
         // Remote connection options
         public bool MakeRemote { get; set; }    // --make-remote

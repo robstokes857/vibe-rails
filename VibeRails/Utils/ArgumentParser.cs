@@ -281,20 +281,8 @@ namespace VibeRails.Utils
         {
             switch (arg)
             {
-                case "--model":
-                    if (index + 1 < args.Length)
-                    {
-                        parsed.Model = args[++index];
-                    }
-                    return true;
-
-                case "--codex-sandbox":
-                    if (index + 1 < args.Length)
-                    {
-                        parsed.CodexSandbox = args[++index];
-                    }
-                    return true;
-
+                case "-a":
+                case "--ask-for-approval":
                 case "--codex-approval":
                     if (index + 1 < args.Length)
                     {
@@ -310,12 +298,20 @@ namespace VibeRails.Utils
                     parsed.FullAuto = false;
                     return true;
 
-                case "--search":
-                    parsed.Search = true;
+                case "--no-alt-screen":
+                    parsed.NoAltScreen = true;
                     return true;
 
-                case "--no-search":
-                    parsed.Search = false;
+                case "--alt-screen":
+                    parsed.NoAltScreen = false;
+                    return true;
+
+                case "--oss":
+                    parsed.Oss = true;
+                    return true;
+
+                case "--no-oss":
+                    parsed.Oss = false;
                     return true;
 
                 default:
@@ -327,6 +323,17 @@ namespace VibeRails.Utils
         {
             switch (arg)
             {
+                case "--effort":
+                    if (index + 1 < args.Length)
+                    {
+                        parsed.ClaudeEffort = args[++index];
+                    }
+                    return true;
+
+                case "--no-session-persistence":
+                    parsed.ClaudeNoSessionPersistence = true;
+                    return true;
+
                 case "--permission-mode":
                     if (index + 1 < args.Length)
                     {
@@ -334,6 +341,29 @@ namespace VibeRails.Utils
                     }
                     return true;
 
+                case "--system-prompt":
+                    if (index + 1 < args.Length)
+                    {
+                        parsed.ClaudeSystemPrompt = args[++index];
+                    }
+                    return true;
+
+                case "--allow-dangerously-skip-permissions":
+                    parsed.ClaudeAllowDangerouslySkipPermissions = true;
+                    return true;
+
+                case "--dangerously-load-development-channels":
+                    if (index + 1 < args.Length)
+                    {
+                        parsed.ClaudeDangerouslyLoadDevelopmentChannels = args[++index];
+                    }
+                    return true;
+
+                case "--dangerously-skip-permissions":
+                    parsed.ClaudeDangerouslySkipPermissions = true;
+                    return true;
+
+                case "--allowedTools":
                 case "--allowed-tools":
                     if (index + 1 < args.Length)
                     {
@@ -341,22 +371,50 @@ namespace VibeRails.Utils
                     }
                     return true;
 
-                case "--disallowed-tools":
+                case "--append-system-prompt":
                     if (index + 1 < args.Length)
                     {
-                        parsed.ClaudeDisallowedTools = args[++index];
+                        parsed.ClaudeAppendSystemPrompt = args[++index];
                     }
                     return true;
 
-                case "--skip-permissions":
-                    parsed.ClaudeSkipPermissions = true;
+                case "--bare":
+                    parsed.ClaudeBare = true;
                     return true;
 
-                case "--no-skip-permissions":
-                    parsed.ClaudeSkipPermissions = false;
+                case "--betas":
+                    if (index + 1 < args.Length)
+                    {
+                        parsed.ClaudeBetas = args[++index];
+                    }
+                    return true;
+
+                case "--channels":
+                    if (index + 1 < args.Length)
+                    {
+                        parsed.ClaudeChannels = args[++index];
+                    }
+                    return true;
+
+                case "--debug":
+                    parsed.ClaudeDebug = true;
+                    return true;
+
+                case "--debug-filter":
+                    if (index + 1 < args.Length)
+                    {
+                        parsed.ClaudeDebug = true;
+                        parsed.ClaudeDebugFilter = args[++index];
+                    }
                     return true;
 
                 default:
+                    if (arg.StartsWith("--debug=", StringComparison.Ordinal))
+                    {
+                        parsed.ClaudeDebug = true;
+                        parsed.ClaudeDebugFilter = arg["--debug=".Length..];
+                        return true;
+                    }
                     return false;
             }
         }

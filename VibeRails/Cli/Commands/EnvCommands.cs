@@ -56,7 +56,7 @@ namespace VibeRails.Cli.Commands
             Console.WriteLine();
             Console.WriteLine("Examples:");
             Console.WriteLine("  vb env list");
-            Console.WriteLine("  vb env create research --cli claude --args \"--model opus\"");
+            Console.WriteLine("  vb env create research --cli claude --args \"--permission-mode plan\"");
             Console.WriteLine("  vb env update research --prompt \"Focus on code review\"");
             Console.WriteLine("  vb env delete research");
 

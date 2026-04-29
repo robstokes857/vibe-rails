@@ -1,8 +1,5 @@
-using Moq;
-using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
-using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using Xunit;
 
@@ -19,11 +16,9 @@ public class CodexSettingsTests : IDisposable
         _testDirectory = Path.Combine(Path.GetTempPath(), $"CodexSettingsTests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
 
-        // Set up environment variable for test
         Environment.SetEnvironmentVariable("VIBE_CONTROL_ENVPATH", _testDirectory);
 
         _mockFileService = new MockFileService();
-
         _service = new CodexLlmCliEnvironment(_mockFileService);
     }
 
@@ -36,10 +31,6 @@ public class CodexSettingsTests : IDisposable
         }
     }
 
-    // ===========================================
-    // GetSettings Tests
-    // ===========================================
-
     [Fact]
     public async Task GetSettings_ReturnsDefaults_WhenFileNotExists()
     {
@@ -47,22 +38,24 @@ public class CodexSettingsTests : IDisposable
 
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
-        Assert.Equal("", settings.Model);
-        Assert.Equal("read-only", settings.Sandbox);
-        Assert.Equal("untrusted", settings.Approval);
+        Assert.Equal("untrusted", settings.AskForApproval);
+        Assert.False(settings.Yolo);
         Assert.False(settings.FullAuto);
-        Assert.False(settings.Search);
+        Assert.False(settings.NoAltScreen);
+        Assert.False(settings.Oss);
+        Assert.Equal("", settings.Prompt);
     }
 
     [Fact]
-    public async Task GetSettings_ReadsAllValues_FromValidToml()
+    public async Task GetSettings_ReadsAllSupportedValues_FromToml()
     {
         var toml = @"
-model = ""o3""
-sandbox = ""workspace-write""
-approval = ""on-request""
+ask_for_approval = ""on-request""
+yolo = true
 full_auto = true
-search = true
+no_alt_screen = true
+oss = true
+prompt = ""Investigate failing tests""
 ";
 
         _mockFileService.SetFileExists(true);
@@ -70,103 +63,79 @@ search = true
 
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
-        Assert.Equal("o3", settings.Model);
-        Assert.Equal("workspace-write", settings.Sandbox);
-        Assert.Equal("on-request", settings.Approval);
+        Assert.Equal("on-request", settings.AskForApproval);
+        Assert.True(settings.Yolo);
         Assert.True(settings.FullAuto);
-        Assert.True(settings.Search);
+        Assert.True(settings.NoAltScreen);
+        Assert.True(settings.Oss);
+        Assert.Equal("Investigate failing tests", settings.Prompt);
+    }
+
+    [Fact]
+    public async Task GetSettings_FallsBackFromLegacyApproval_AndNormalizesDeprecatedOnFailure()
+    {
+        var toml = @"approval = 'on-failure'";
+
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(toml);
+
+        var settings = await _service.GetSettings("test-env", CancellationToken.None);
+
+        Assert.Equal("on-request", settings.AskForApproval);
     }
 
     [Fact]
     public async Task GetSettings_ReturnsDefaults_ForMissingFields()
     {
-        var toml = @"
-model = ""gpt-5-codex""
-";
-
         _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(toml);
+        _mockFileService.SetFileContent(@"prompt = ""Start here""");
 
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
-        Assert.Equal("gpt-5-codex", settings.Model);
-        Assert.Equal("read-only", settings.Sandbox); // Default
-        Assert.Equal("untrusted", settings.Approval); // Default
-        Assert.False(settings.FullAuto); // Default
-        Assert.False(settings.Search); // Default
+        Assert.Equal("untrusted", settings.AskForApproval);
+        Assert.False(settings.Yolo);
+        Assert.False(settings.FullAuto);
+        Assert.False(settings.NoAltScreen);
+        Assert.False(settings.Oss);
+        Assert.Equal("Start here", settings.Prompt);
     }
 
     [Fact]
-    public async Task GetSettings_HandlesQuotedAndUnquotedValues()
-    {
-        var toml = @"
-model = o3
-sandbox = ""workspace-write""
-approval = 'on-failure'
-";
-
-        _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(toml);
-
-        var settings = await _service.GetSettings("test-env", CancellationToken.None);
-
-        Assert.Equal("o3", settings.Model);
-        Assert.Equal("workspace-write", settings.Sandbox);
-        Assert.Equal("on-failure", settings.Approval);
-    }
-
-    [Fact]
-    public async Task GetSettings_HandlesBooleanValues()
-    {
-        var toml = @"
-full_auto = true
-search = false
-";
-
-        _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(toml);
-
-        var settings = await _service.GetSettings("test-env", CancellationToken.None);
-
-        Assert.True(settings.FullAuto);
-        Assert.False(settings.Search);
-    }
-
-    // ===========================================
-    // SaveSettings Tests
-    // ===========================================
-
-    [Fact]
-    public async Task SaveSettings_WritesAllValues_ToToml()
+    public async Task SaveSettings_WritesSupportedValues_ToToml()
     {
         _mockFileService.SetFileExists(false);
 
         var settings = new CodexSettingsDto
         {
-            Model = "o3",
-            Sandbox = "workspace-write",
-            Approval = "on-request",
+            AskForApproval = "on-request",
+            Yolo = true,
             FullAuto = true,
-            Search = true
+            NoAltScreen = true,
+            Oss = true,
+            Prompt = "Investigate failing tests"
         };
 
         await _service.SaveSettings("test-env", settings, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("model = \"o3\"", writtenContent);
-        Assert.Contains("sandbox = \"workspace-write\"", writtenContent);
-        Assert.Contains("approval = \"on-request\"", writtenContent);
+        Assert.Contains("ask_for_approval = \"on-request\"", writtenContent);
+        Assert.Contains("yolo = true", writtenContent);
         Assert.Contains("full_auto = true", writtenContent);
-        Assert.Contains("search = true", writtenContent);
+        Assert.Contains("no_alt_screen = true", writtenContent);
+        Assert.Contains("oss = true", writtenContent);
+        Assert.Contains("prompt = \"Investigate failing tests\"", writtenContent);
     }
 
     [Fact]
-    public async Task SaveSettings_PreservesExistingContent()
+    public async Task SaveSettings_PreservesUnmappedLegacyFields_ButClearsAliasedApproval()
     {
         var existingToml = @"# Codex CLI Configuration
 # Custom comment
 
 model = ""old-model""
+sandbox = ""read-only""
+approval = ""on-failure""
+search = true
 custom_field = ""preserved""
 ";
 
@@ -175,101 +144,84 @@ custom_field = ""preserved""
 
         var settings = new CodexSettingsDto
         {
-            Model = "new-model",
-            Sandbox = "read-only"
+            AskForApproval = "never",
+            FullAuto = true
         };
 
         await _service.SaveSettings("test-env", settings, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("model = \"new-model\"", writtenContent); // Updated
-        Assert.Contains("custom_field = \"preserved\"", writtenContent); // Preserved
-        Assert.Contains("# Custom comment", writtenContent); // Comments preserved
-    }
-
-    [Fact]
-    public async Task SaveSettings_UpdatesExistingValues()
-    {
-        var existingToml = @"
-model = ""old-model""
-sandbox = ""read-only""
-full_auto = false
-";
-
-        _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(existingToml);
-
-        var settings = new CodexSettingsDto
-        {
-            Model = "new-model",
-            Sandbox = "danger-full-access",
-            FullAuto = true,
-            Search = false
-        };
-
-        await _service.SaveSettings("test-env", settings, CancellationToken.None);
-
-        var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("model = \"new-model\"", writtenContent);
-        Assert.Contains("sandbox = \"danger-full-access\"", writtenContent);
+        Assert.Contains("# Custom comment", writtenContent);
+        Assert.Contains("custom_field = \"preserved\"", writtenContent);
+        Assert.Contains("ask_for_approval = \"never\"", writtenContent);
         Assert.Contains("full_auto = true", writtenContent);
-    }
-
-    [Fact]
-    public async Task SaveSettings_RemovesEmptyModel()
-    {
-        var existingToml = @"
-model = ""old-model""
-sandbox = ""read-only""
-";
-
-        _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(existingToml);
-
-        var settings = new CodexSettingsDto
-        {
-            Model = "", // Empty - should be removed
-            Sandbox = "workspace-write"
-        };
-
-        await _service.SaveSettings("test-env", settings, CancellationToken.None);
-
-        var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.DoesNotContain("model =", writtenContent);
-        Assert.Contains("sandbox = \"workspace-write\"", writtenContent);
-    }
-
-    [Fact]
-    public async Task SaveSettings_AddsNewFieldsAtEnd()
-    {
-        var existingToml = @"# Header comment
-model = ""o3""
-";
-
-        _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(existingToml);
-
-        var settings = new CodexSettingsDto
-        {
-            Model = "o3",
-            Sandbox = "workspace-write",
-            Search = true
-        };
-
-        await _service.SaveSettings("test-env", settings, CancellationToken.None);
-
-        var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("sandbox = \"workspace-write\"", writtenContent);
+        // `approval` is the legacy alias for `ask_for_approval` and must be cleared
+        // so it doesn't shadow the new key on read.
+        Assert.DoesNotMatch(@"(?m)^\s*approval\s*=", writtenContent);
+        // Other legacy fields without VibeRails mapping are left alone.
+        Assert.Contains("model = \"old-model\"", writtenContent);
+        Assert.Contains("sandbox = \"read-only\"", writtenContent);
         Assert.Contains("search = true", writtenContent);
     }
 
-    // ===========================================
-    // Mock Classes
-    // ===========================================
+    [Fact]
+    public async Task SaveSettings_EscapesPromptWithSpecialCharacters_AndRoundTrips()
+    {
+        _mockFileService.SetFileExists(false);
+
+        var dangerous = "She said \"hi\"\nyolo = true\n# pwned\\nope";
+        var settings = new CodexSettingsDto
+        {
+            AskForApproval = "untrusted",
+            Prompt = dangerous
+        };
+
+        await _service.SaveSettings("test-env", settings, CancellationToken.None);
+
+        var written = _mockFileService.GetWrittenContent();
+        // The user's literal text must not appear unescaped — that would let
+        // a quote/newline break out of the prompt = "..." value and inject keys.
+        Assert.DoesNotContain("She said \"hi\"\nyolo = true", written);
+        // And the embedded `yolo = true` line must not have actually been
+        // promoted to a TOML key by our writer.
+        Assert.DoesNotMatch(@"(?m)^\s*yolo\s*=\s*true\s*$", written);
+
+        // Round-trip the written content back through GetSettings.
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(written);
+
+        var roundTripped = await _service.GetSettings("test-env", CancellationToken.None);
+        Assert.Equal(dangerous, roundTripped.Prompt);
+        Assert.False(roundTripped.Yolo);
+    }
+
+    [Fact]
+    public async Task SaveSettings_RemovesEmptyPrompt()
+    {
+        var existingToml = @"
+ask_for_approval = ""on-request""
+prompt = ""old prompt""
+";
+
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(existingToml);
+
+        var settings = new CodexSettingsDto
+        {
+            AskForApproval = "on-request",
+            Prompt = ""
+        };
+
+        await _service.SaveSettings("test-env", settings, CancellationToken.None);
+
+        var writtenContent = _mockFileService.GetWrittenContent();
+        Assert.DoesNotContain("prompt =", writtenContent);
+        Assert.Contains("ask_for_approval = \"on-request\"", writtenContent);
+    }
 
     private class MockFileService : IFileService
     {
-        private bool _fileExists = false;
+        private bool _fileExists;
         private string _fileContent = "";
         private string _writtenContent = "";
 
@@ -288,7 +240,6 @@ model = ""o3""
             return Task.CompletedTask;
         }
 
-        // Unused interface methods - minimal implementations
         public Task<(bool inGet, string projectRoot)> TryGetProjectRootPathAsync(string? workingDirectory = null, CancellationToken cancellationToken = default)
             => Task.FromResult((false, ""));
         public void InitGlobalSave() { }
@@ -310,5 +261,4 @@ model = ""o3""
         public string GetTempPath() => Path.GetTempPath();
         public string GetUserProfilePath() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
-
 }

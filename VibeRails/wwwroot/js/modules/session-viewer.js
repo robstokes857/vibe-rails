@@ -110,10 +110,6 @@ export async function downloadRawSession(sessionId) {
     await downloadFile(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/raw-session`, `${sessionId}-raw-session.zip`);
 }
 
-export async function downloadUserText(sessionId) {
-    await downloadFile(`/api/v1/chatHistory/${encodeURIComponent(sessionId)}/user-text`, `${sessionId}-user-text.txt`);
-}
-
 export async function showTranscriptModal(sessionId) {
     const { body } = createModal(`Transcript — ${sessionId}`);
 

@@ -5,7 +5,6 @@ using VibeRails.DB;
 using VibeRails.Interfaces;
 using VibeRails.DTOs;
 using Microsoft.AspNetCore.Http.HttpResults;
-using VibeRails.Services.UserInOut;
 
 namespace VibeRails.Routes;
 
@@ -169,35 +168,6 @@ public static class ChatHistoryRoutes
 
             return Results.File(archiveStream.ToArray(), "application/zip", $"{sessionId}-raw-session.zip");
         }).WithName("GetChatHistoryRawSession");
-
-        app.MapGet("/api/v1/chatHistory/{sessionId}/user-text", async (
-            IChatHistoryService chatHistoryService,
-            IGetCleanedUserText cleanedUserText,
-            string sessionId,
-            CancellationToken cancellationToken) =>
-        {
-            if (string.IsNullOrWhiteSpace(sessionId))
-                return Results.BadRequest(new ErrorResponse("Session id is required."));
-
-            var session = await chatHistoryService.GetSessionAsync(sessionId, cancellationToken);
-            if (session is null)
-                return Results.NotFound(new ErrorResponse($"Session not found: {sessionId}"));
-
-            var userText = await cleanedUserText.GetSessionTextAsync(sessionId, cancellationToken);
-            if (string.IsNullOrEmpty(userText))
-                return Results.NotFound(new ErrorResponse("No cleaned user text found."));
-
-            var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
-            var utf8TextBytes = utf8.GetBytes(userText);
-            var utf8FileBytes = new byte[utf8.GetPreamble().Length + utf8TextBytes.Length];
-            Buffer.BlockCopy(utf8.GetPreamble(), 0, utf8FileBytes, 0, utf8.GetPreamble().Length);
-            Buffer.BlockCopy(utf8TextBytes, 0, utf8FileBytes, utf8.GetPreamble().Length, utf8TextBytes.Length);
-
-            return Results.File(
-                utf8FileBytes,
-                "text/plain; charset=utf-8",
-                $"{sessionId}-user-text.txt");
-        }).WithName("GetChatHistoryUserText");
 
         app.MapGet("/api/v1/chatHistory/{sessionId}/replay", async (
             IRepository repository,

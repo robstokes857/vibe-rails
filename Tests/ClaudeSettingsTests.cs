@@ -1,8 +1,5 @@
-using Moq;
 using VibeRails.DTOs;
-using VibeRails.DB;
 using VibeRails.Interfaces;
-using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using Xunit;
 
@@ -19,11 +16,9 @@ public class ClaudeSettingsTests : IDisposable
         _testDirectory = Path.Combine(Path.GetTempPath(), $"ClaudeSettingsTests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
 
-        // Set up environment variable for test
         Environment.SetEnvironmentVariable("VIBE_CONTROL_ENVPATH", _testDirectory);
 
         _mockFileService = new MockFileService();
-
         _service = new ClaudeLlmCliEnvironment(_mockFileService);
     }
 
@@ -36,10 +31,6 @@ public class ClaudeSettingsTests : IDisposable
         }
     }
 
-    // ===========================================
-    // GetSettings Tests
-    // ===========================================
-
     [Fact]
     public async Task GetSettings_ReturnsDefaults_WhenFileNotExists()
     {
@@ -47,24 +38,40 @@ public class ClaudeSettingsTests : IDisposable
 
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
-        Assert.Equal("", settings.Model);
+        Assert.Equal("", settings.Effort);
+        Assert.False(settings.NoSessionPersistence);
         Assert.Equal("default", settings.PermissionMode);
+        Assert.Equal("", settings.SystemPrompt);
+        Assert.False(settings.AllowDangerouslySkipPermissions);
+        Assert.Equal("", settings.DangerouslyLoadDevelopmentChannels);
+        Assert.False(settings.DangerouslySkipPermissions);
         Assert.Equal("", settings.AllowedTools);
-        Assert.Equal("", settings.DisallowedTools);
-        Assert.False(settings.SkipPermissions);
-        Assert.False(settings.Verbose);
+        Assert.Equal("", settings.AppendSystemPrompt);
+        Assert.False(settings.Bare);
+        Assert.Equal("", settings.Betas);
+        Assert.Equal("", settings.Channels);
+        Assert.False(settings.Debug);
+        Assert.Equal("", settings.DebugFilter);
     }
 
     [Fact]
-    public async Task GetSettings_ReadsAllValues_FromValidJson()
+    public async Task GetSettings_ReadsAllSupportedValues_FromValidJson()
     {
         var json = @"{
-    ""model"": ""opus"",
+    ""effort"": ""high"",
+    ""noSessionPersistence"": true,
     ""permissionMode"": ""plan"",
-    ""allowedTools"": ""Read,Glob,Grep"",
-    ""disallowedTools"": ""Bash"",
-    ""skipPermissions"": true,
-    ""verbose"": true
+    ""systemPrompt"": ""You are a Python expert"",
+    ""allowDangerouslySkipPermissions"": true,
+    ""dangerouslyLoadDevelopmentChannels"": ""server:webhook plugin:test@local"",
+    ""dangerouslySkipPermissions"": true,
+    ""allowedTools"": ""Bash(git log *)\nRead"",
+    ""appendSystemPrompt"": ""Always use TypeScript"",
+    ""bare"": true,
+    ""betas"": ""interleaved-thinking"",
+    ""channels"": ""plugin:my-notifier@my-marketplace"",
+    ""debug"": true,
+    ""debugFilter"": ""api,mcp""
 }";
 
         _mockFileService.SetFileExists(true);
@@ -72,19 +79,42 @@ public class ClaudeSettingsTests : IDisposable
 
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
-        Assert.Equal("opus", settings.Model);
+        Assert.Equal("high", settings.Effort);
+        Assert.True(settings.NoSessionPersistence);
         Assert.Equal("plan", settings.PermissionMode);
-        Assert.Equal("Read,Glob,Grep", settings.AllowedTools);
-        Assert.Equal("Bash", settings.DisallowedTools);
-        Assert.True(settings.SkipPermissions);
-        Assert.True(settings.Verbose);
+        Assert.Equal("You are a Python expert", settings.SystemPrompt);
+        Assert.True(settings.AllowDangerouslySkipPermissions);
+        Assert.Equal("server:webhook plugin:test@local", settings.DangerouslyLoadDevelopmentChannels);
+        Assert.True(settings.DangerouslySkipPermissions);
+        Assert.Equal("Bash(git log *)\nRead", settings.AllowedTools);
+        Assert.Equal("Always use TypeScript", settings.AppendSystemPrompt);
+        Assert.True(settings.Bare);
+        Assert.Equal("interleaved-thinking", settings.Betas);
+        Assert.Equal("plugin:my-notifier@my-marketplace", settings.Channels);
+        Assert.True(settings.Debug);
+        Assert.Equal("api,mcp", settings.DebugFilter);
+    }
+
+    [Fact]
+    public async Task GetSettings_MapsLegacySkipPermissions_ToDangerouslySkipPermissions()
+    {
+        var json = @"{
+    ""skipPermissions"": true
+}";
+
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(json);
+
+        var settings = await _service.GetSettings("test-env", CancellationToken.None);
+
+        Assert.True(settings.DangerouslySkipPermissions);
     }
 
     [Fact]
     public async Task GetSettings_ReturnsDefaults_ForMissingFields()
     {
         var json = @"{
-    ""model"": ""sonnet""
+    ""permissionMode"": ""auto""
 }";
 
         _mockFileService.SetFileExists(true);
@@ -92,83 +122,62 @@ public class ClaudeSettingsTests : IDisposable
 
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
-        Assert.Equal("sonnet", settings.Model);
-        Assert.Equal("default", settings.PermissionMode); // Default
-        Assert.Equal("", settings.AllowedTools); // Default
-        Assert.Equal("", settings.DisallowedTools); // Default
-        Assert.False(settings.SkipPermissions); // Default
-        Assert.False(settings.Verbose); // Default
+        Assert.Equal("", settings.Effort);
+        Assert.Equal("auto", settings.PermissionMode);
+        Assert.Equal("", settings.AllowedTools);
+        Assert.False(settings.Debug);
     }
 
     [Fact]
-    public async Task GetSettings_HandlesEmptyJson()
-    {
-        var json = "{}";
-
-        _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(json);
-
-        var settings = await _service.GetSettings("test-env", CancellationToken.None);
-
-        Assert.Equal("", settings.Model);
-        Assert.Equal("default", settings.PermissionMode);
-        Assert.False(settings.SkipPermissions);
-        Assert.False(settings.Verbose);
-    }
-
-    [Fact]
-    public async Task GetSettings_HandlesBooleanValues()
-    {
-        var json = @"{
-    ""skipPermissions"": true,
-    ""verbose"": false
-}";
-
-        _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(json);
-
-        var settings = await _service.GetSettings("test-env", CancellationToken.None);
-
-        Assert.True(settings.SkipPermissions);
-        Assert.False(settings.Verbose);
-    }
-
-    // ===========================================
-    // SaveSettings Tests
-    // ===========================================
-
-    [Fact]
-    public async Task SaveSettings_WritesAllValues_ToJson()
+    public async Task SaveSettings_WritesSupportedValues_ToJson()
     {
         _mockFileService.SetFileExists(false);
 
         var settings = new ClaudeSettingsDto
         {
-            Model = "opus",
-            PermissionMode = "plan",
-            AllowedTools = "Read,Glob",
-            DisallowedTools = "Bash",
-            SkipPermissions = true,
-            Verbose = true
+            Effort = "xhigh",
+            NoSessionPersistence = true,
+            PermissionMode = "dontAsk",
+            SystemPrompt = "You are a Python expert",
+            AllowDangerouslySkipPermissions = true,
+            DangerouslyLoadDevelopmentChannels = "server:webhook",
+            DangerouslySkipPermissions = true,
+            AllowedTools = "Bash(git log *)\nRead",
+            AppendSystemPrompt = "Always use TypeScript",
+            Bare = true,
+            Betas = "interleaved-thinking",
+            Channels = "plugin:my-notifier@my-marketplace",
+            Debug = true,
+            DebugFilter = "api,mcp"
         };
 
         await _service.SaveSettings("test-env", settings, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("\"model\": \"opus\"", writtenContent);
-        Assert.Contains("\"permissionMode\": \"plan\"", writtenContent);
-        Assert.Contains("\"allowedTools\": \"Read,Glob\"", writtenContent);
-        Assert.Contains("\"disallowedTools\": \"Bash\"", writtenContent);
-        Assert.Contains("\"skipPermissions\": true", writtenContent);
-        Assert.Contains("\"verbose\": true", writtenContent);
+        Assert.Contains("\"effort\": \"xhigh\"", writtenContent);
+        Assert.Contains("\"noSessionPersistence\": true", writtenContent);
+        Assert.Contains("\"permissionMode\": \"dontAsk\"", writtenContent);
+        Assert.Contains("\"systemPrompt\": \"You are a Python expert\"", writtenContent);
+        Assert.Contains("\"allowDangerouslySkipPermissions\": true", writtenContent);
+        Assert.Contains("\"dangerouslyLoadDevelopmentChannels\": \"server:webhook\"", writtenContent);
+        Assert.Contains("\"dangerouslySkipPermissions\": true", writtenContent);
+        Assert.Contains("\"allowedTools\": \"Bash(git log *)\\nRead\"", writtenContent);
+        Assert.Contains("\"appendSystemPrompt\": \"Always use TypeScript\"", writtenContent);
+        Assert.Contains("\"bare\": true", writtenContent);
+        Assert.Contains("\"betas\": \"interleaved-thinking\"", writtenContent);
+        Assert.Contains("\"channels\": \"plugin:my-notifier@my-marketplace\"", writtenContent);
+        Assert.Contains("\"debug\": true", writtenContent);
+        Assert.Contains("\"debugFilter\": \"api,mcp\"", writtenContent);
     }
 
     [Fact]
-    public async Task SaveSettings_PreservesExistingContent()
+    public async Task SaveSettings_PreservesUnknownAndUnmappedLegacyFields()
     {
         var existingJson = @"{
-    ""permissions"": { ""allow"": [""read""] },
+    ""permissions"": { ""allow"": [""Read""] },
     ""model"": ""old-model"",
+    ""disallowedTools"": ""Bash"",
+    ""verbose"": true,
     ""customField"": ""preserved""
 }";
 
@@ -177,25 +186,33 @@ public class ClaudeSettingsTests : IDisposable
 
         var settings = new ClaudeSettingsDto
         {
-            Model = "new-model",
-            PermissionMode = "default"
+            Effort = "high",
+            PermissionMode = "plan",
+            AllowedTools = "Read"
         };
 
         await _service.SaveSettings("test-env", settings, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("\"model\": \"new-model\"", writtenContent); // Updated
-        Assert.Contains("\"customField\": \"preserved\"", writtenContent); // Preserved
-        Assert.Contains("\"permissions\"", writtenContent); // Preserved
+        Assert.Contains("\"permissions\"", writtenContent);
+        Assert.Contains("\"customField\": \"preserved\"", writtenContent);
+        Assert.Contains("\"effort\": \"high\"", writtenContent);
+        Assert.Contains("\"permissionMode\": \"plan\"", writtenContent);
+        Assert.Contains("\"allowedTools\": \"Read\"", writtenContent);
+        // Legacy fields with no VibeRails mapping are left alone — user's manual edits stick.
+        Assert.Contains("\"model\": \"old-model\"", writtenContent);
+        Assert.Contains("\"disallowedTools\": \"Bash\"", writtenContent);
+        Assert.Contains("\"verbose\": true", writtenContent);
     }
 
     [Fact]
-    public async Task SaveSettings_UpdatesExistingValues()
+    public async Task SaveSettings_ClearsLegacySkipPermissions_WhenItShadowsTheNewKey()
     {
+        // skipPermissions is a legacy alias for dangerouslySkipPermissions; GetSettings
+        // falls back to it. Without clearing it on save, the legacy value would shadow
+        // the user's new choice on the next read.
         var existingJson = @"{
-    ""model"": ""old-model"",
-    ""permissionMode"": ""default"",
-    ""skipPermissions"": false
+    ""skipPermissions"": true
 }";
 
         _mockFileService.SetFileExists(true);
@@ -203,26 +220,24 @@ public class ClaudeSettingsTests : IDisposable
 
         var settings = new ClaudeSettingsDto
         {
-            Model = "new-model",
-            PermissionMode = "bypassPermissions",
-            SkipPermissions = true,
-            Verbose = false
+            DangerouslySkipPermissions = false
         };
 
         await _service.SaveSettings("test-env", settings, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("\"model\": \"new-model\"", writtenContent);
-        Assert.Contains("\"permissionMode\": \"bypassPermissions\"", writtenContent);
-        Assert.Contains("\"skipPermissions\": true", writtenContent);
+        Assert.DoesNotContain("\"skipPermissions\"", writtenContent);
     }
 
     [Fact]
     public async Task SaveSettings_RemovesEmptyAndDefaultValues()
     {
         var existingJson = @"{
-    ""model"": ""old-model"",
-    ""permissionMode"": ""plan""
+    ""effort"": ""high"",
+    ""permissionMode"": ""plan"",
+    ""systemPrompt"": ""old"",
+    ""debug"": true,
+    ""debugFilter"": ""api""
 }";
 
         _mockFileService.SetFileExists(true);
@@ -230,48 +245,22 @@ public class ClaudeSettingsTests : IDisposable
 
         var settings = new ClaudeSettingsDto
         {
-            Model = "", // Empty - should be removed
-            PermissionMode = "default" // Default - should be removed
+            PermissionMode = "default"
         };
 
         await _service.SaveSettings("test-env", settings, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.DoesNotContain("\"model\"", writtenContent);
+        Assert.DoesNotContain("\"effort\"", writtenContent);
         Assert.DoesNotContain("\"permissionMode\"", writtenContent);
+        Assert.DoesNotContain("\"systemPrompt\"", writtenContent);
+        Assert.DoesNotContain("\"debug\"", writtenContent);
+        Assert.DoesNotContain("\"debugFilter\"", writtenContent);
     }
-
-    [Fact]
-    public async Task SaveSettings_AddsNewFieldsToJson()
-    {
-        var existingJson = @"{
-    ""model"": ""sonnet""
-}";
-
-        _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(existingJson);
-
-        var settings = new ClaudeSettingsDto
-        {
-            Model = "sonnet",
-            AllowedTools = "Read,Write",
-            Verbose = true
-        };
-
-        await _service.SaveSettings("test-env", settings, CancellationToken.None);
-
-        var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("\"allowedTools\": \"Read,Write\"", writtenContent);
-        Assert.Contains("\"verbose\": true", writtenContent);
-    }
-
-    // ===========================================
-    // Mock Classes
-    // ===========================================
 
     private class MockFileService : IFileService
     {
-        private bool _fileExists = false;
+        private bool _fileExists;
         private string _fileContent = "";
         private string _writtenContent = "";
 
@@ -290,7 +279,6 @@ public class ClaudeSettingsTests : IDisposable
             return Task.CompletedTask;
         }
 
-        // Unused interface methods - minimal implementations
         public Task<(bool inGet, string projectRoot)> TryGetProjectRootPathAsync(string? workingDirectory = null, CancellationToken cancellationToken = default)
             => Task.FromResult((false, ""));
         public void InitGlobalSave() { }
@@ -312,5 +300,4 @@ public class ClaudeSettingsTests : IDisposable
         public string GetTempPath() => Path.GetTempPath();
         public string GetUserProfilePath() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
-
 }

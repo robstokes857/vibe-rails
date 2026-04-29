@@ -213,19 +213,21 @@ The Codex CLI supports per-environment settings configuration. Settings are stor
 
 | Setting | DTO Property | TOML Key | Type | Default | Description |
 |---------|--------------|----------|------|---------|-------------|
-| Model | `Model` | `model` | string | "" | Override default model (e.g., o3, gpt-5-codex) |
-| Sandbox | `Sandbox` | `sandbox` | string | "read-only" | Sandbox policy: read-only, workspace-write, danger-full-access |
-| Approval | `Approval` | `approval` | string | "untrusted" | Approval mode: untrusted, on-failure, on-request, never |
-| Full-Auto | `FullAuto` | `full_auto` | bool | false | Shortcut for approval=on-request + sandbox=workspace-write |
-| Search | `Search` | `search` | bool | false | Enable web search capabilities |
+| Ask For Approval | `AskForApproval` | `ask_for_approval` | string | "untrusted" | Approval mode: untrusted, on-request, never |
+| YOLO | `Yolo` | `yolo` | bool | false | Bypass approvals and sandboxing |
+| Full-Auto | `FullAuto` | `full_auto` | bool | false | Shortcut for low-friction local work |
+| No Alternate Screen | `NoAltScreen` | `no_alt_screen` | bool | false | Disable alternate screen mode for the TUI |
+| OSS Provider | `Oss` | `oss` | bool | false | Use the local open source model provider |
+| Prompt | `Prompt` | `prompt` | string | "" | Optional text instruction to start the session |
 
 **TOML Format**:
 ```toml
-model = "o3"
-sandbox = "workspace-write"
-approval = "on-request"
+ask_for_approval = "on-request"
+yolo = false
 full_auto = true
-search = false
+no_alt_screen = true
+oss = false
+prompt = "Investigate failing tests"
 ```
 
 ### Technical Specs
@@ -236,11 +238,12 @@ search = false
 ```csharp
 public class CodexSettingsDto
 {
-    public string Model { get; set; } = "";
-    public string Sandbox { get; set; } = "read-only";
-    public string Approval { get; set; } = "untrusted";
+    public string AskForApproval { get; set; } = "untrusted";
+    public bool Yolo { get; set; } = false;
     public bool FullAuto { get; set; } = false;
-    public bool Search { get; set; } = false;
+    public bool NoAltScreen { get; set; } = false;
+    public bool Oss { get; set; } = false;
+    public string Prompt { get; set; } = "";
 }
 ```
 
@@ -276,11 +279,12 @@ vb codex set <env> [options]               # Update settings
 ```
 
 Options:
-- `--model <value>`
-- `--codex-sandbox <read-only|workspace-write|danger-full-access>`
-- `--codex-approval <untrusted|on-failure|on-request|never>`
+- `--ask-for-approval <untrusted|on-request|never>` / `-a <value>`
+- `--yolo`
 - `--full-auto` / `--no-full-auto`
-- `--search` / `--no-search`
+- `--no-alt-screen`
+- `--oss`
+- `--prompt <text>`
 
 ### Testing
 
@@ -290,11 +294,10 @@ Test coverage includes:
 - Reading settings from valid TOML
 - Reading with missing file (defaults)
 - Reading with partial TOML (missing fields)
-- Handling quoted and unquoted values
+- Normalizing legacy `approval = "on-failure"` to `on-request`
 - Writing settings preserves existing content
-- Updating existing values
-- Removing empty model field
-- Adding new fields at end of file
+- Removing unsupported legacy Codex options
+- Removing empty prompt field
 
 ---
 
@@ -313,22 +316,38 @@ The Claude CLI supports per-environment settings configuration. Settings are sto
 
 | Setting | DTO Property | JSON Key | Type | Default | Description |
 |---------|--------------|----------|------|---------|-------------|
-| Model | `Model` | `model` | string | "" | Override default model (sonnet, opus, haiku, or full name) |
-| Permission Mode | `PermissionMode` | `permissionMode` | string | "default" | Permission handling: default, plan, bypassPermissions |
-| Allowed Tools | `AllowedTools` | `allowedTools` | string | "" | Comma-separated list of tools to auto-approve |
-| Disallowed Tools | `DisallowedTools` | `disallowedTools` | string | "" | Comma-separated list of tools to disable |
-| Skip Permissions | `SkipPermissions` | `skipPermissions` | bool | false | Skip all permission prompts (dangerous!) |
-| Verbose | `Verbose` | `verbose` | bool | false | Enable verbose logging output |
+| Effort | `Effort` | `effort` | string | "" | `--effort` value: low, medium, high, xhigh, max |
+| No Session Persistence | `NoSessionPersistence` | `noSessionPersistence` | bool | false | `--no-session-persistence` |
+| Permission Mode | `PermissionMode` | `permissionMode` | string | "default" | Permission handling: default, acceptEdits, plan, auto, dontAsk, bypassPermissions |
+| System Prompt | `SystemPrompt` | `systemPrompt` | string | "" | `--system-prompt` text |
+| Allow Dangerous Skip | `AllowDangerouslySkipPermissions` | `allowDangerouslySkipPermissions` | bool | false | `--allow-dangerously-skip-permissions` |
+| Development Channels | `DangerouslyLoadDevelopmentChannels` | `dangerouslyLoadDevelopmentChannels` | string | "" | `--dangerously-load-development-channels` entries |
+| Dangerously Skip Permissions | `DangerouslySkipPermissions` | `dangerouslySkipPermissions` | bool | false | `--dangerously-skip-permissions` |
+| Allowed Tools | `AllowedTools` | `allowedTools` | string | "" | `--allowedTools` entries |
+| Append System Prompt | `AppendSystemPrompt` | `appendSystemPrompt` | string | "" | `--append-system-prompt` text |
+| Bare | `Bare` | `bare` | bool | false | `--bare` |
+| Betas | `Betas` | `betas` | string | "" | `--betas` entries |
+| Channels | `Channels` | `channels` | string | "" | `--channels` entries |
+| Debug | `Debug` | `debug` | bool | false | `--debug` |
+| Debug Filter | `DebugFilter` | `debugFilter` | string | "" | Optional `--debug` category filter |
 
 **JSON Format**:
 ```json
 {
-  "model": "opus",
+  "effort": "high",
+  "noSessionPersistence": true,
   "permissionMode": "plan",
-  "allowedTools": "Read,Glob,Grep",
-  "disallowedTools": "Bash",
-  "skipPermissions": false,
-  "verbose": true
+  "systemPrompt": "You are a Python expert",
+  "allowDangerouslySkipPermissions": true,
+  "dangerouslyLoadDevelopmentChannels": "server:webhook",
+  "dangerouslySkipPermissions": false,
+  "allowedTools": "Bash(git log *)\nRead",
+  "appendSystemPrompt": "Always use TypeScript",
+  "bare": false,
+  "betas": "interleaved-thinking",
+  "channels": "plugin:my-notifier@my-marketplace",
+  "debug": true,
+  "debugFilter": "api,mcp"
 }
 ```
 
@@ -340,12 +359,20 @@ The Claude CLI supports per-environment settings configuration. Settings are sto
 ```csharp
 public class ClaudeSettingsDto
 {
-    public string Model { get; set; } = "";
+    public string Effort { get; set; } = "";
+    public bool NoSessionPersistence { get; set; } = false;
     public string PermissionMode { get; set; } = "default";
+    public string SystemPrompt { get; set; } = "";
+    public bool AllowDangerouslySkipPermissions { get; set; } = false;
+    public string DangerouslyLoadDevelopmentChannels { get; set; } = "";
+    public bool DangerouslySkipPermissions { get; set; } = false;
     public string AllowedTools { get; set; } = "";
-    public string DisallowedTools { get; set; } = "";
-    public bool SkipPermissions { get; set; } = false;
-    public bool Verbose { get; set; } = false;
+    public string AppendSystemPrompt { get; set; } = "";
+    public bool Bare { get; set; } = false;
+    public string Betas { get; set; } = "";
+    public string Channels { get; set; } = "";
+    public bool Debug { get; set; } = false;
+    public string DebugFilter { get; set; } = "";
 }
 ```
 
@@ -399,12 +426,19 @@ vb claude set <env> [options]               # Update settings
 ```
 
 Options:
-- `--model <value>` - Model to use (sonnet, opus, haiku, or full name)
-- `--permission-mode <value>` - Permission mode: default, plan, bypassPermissions
-- `--allowed-tools <value>` - Comma-separated list of tools to auto-approve
-- `--disallowed-tools <value>` - Comma-separated list of tools to disable
-- `--skip-permissions` / `--no-skip-permissions` - Toggle skip permissions
-- `--verbose` - Enable verbose logging
+- `--effort <low|medium|high|xhigh|max>`
+- `--no-session-persistence`
+- `--permission-mode <default|acceptEdits|plan|auto|dontAsk|bypassPermissions>`
+- `--system-prompt <text>`
+- `--allow-dangerously-skip-permissions`
+- `--dangerously-load-development-channels <entries>`
+- `--dangerously-skip-permissions`
+- `--allowedTools <entries>`
+- `--append-system-prompt <text>`
+- `--bare`
+- `--betas <entries>`
+- `--channels <entries>`
+- `--debug [filter]`
 
 #### UI Integration
 **File**: [wwwroot/js/modules/environment-controller.js](../../wwwroot/js/modules/environment-controller.js)
@@ -412,7 +446,7 @@ Options:
 The `editEnvironment()` method:
 1. Detects if environment is Claude type
 2. Fetches settings via API
-3. Renders model dropdown, permission mode selector, text inputs, and toggle switches
+3. Renders only the supported Claude flag controls listed above
 4. Saves both environment and Claude settings on submit
 
 ### Testing
@@ -423,10 +457,7 @@ Test coverage includes:
 - Reading settings from valid JSON
 - Reading with missing file (defaults)
 - Reading with partial JSON (missing fields)
-- Handling empty JSON
-- Handling boolean values
 - Writing settings to JSON
 - Preserving existing content
-- Updating existing values
+- Removing unsupported legacy fields
 - Removing empty/default values
-- Adding new fields to JSON

@@ -65,20 +65,6 @@ namespace VibeRails.DTOs
         DateTime TimestampUTC
     );
 
-    public record CleanedUserInputRow(
-        long Id,
-        string SessionId,
-        string CleanedText,
-        DateTime CreatedUTC
-    );
-
-    public record UnembeddedCleanedInput(
-        long CleanedId,
-        string SessionId,
-        long UserInputId,
-        string CleanedText
-    );
-
     public record FileChangeInfo(
         string FilePath,
         string ChangeType,
@@ -390,7 +376,6 @@ namespace VibeRails.DTOs
         string? WorkingDirectory,
         string? GitCommitHash,
         string UserText,
-        string CleanedUserText,
         List<BertFileChangeResponse> FileChanges,
         string RawText
     );
@@ -503,36 +488,6 @@ namespace VibeRails.DTOs
         int PageSize
     );
 
-    // Claude Plan DTOs
-    public record ClaudePlanRecord(
-        long Id,
-        string SessionId,
-        long? UserInputId,
-        string? PlanFilePath,
-        string PlanContent,
-        string? PlanSummary,
-        string Status,
-        DateTime CreatedUTC,
-        DateTime? CompletedUTC
-    );
-
-    public record CreateClaudePlanRequest(
-        string SessionId,
-        long? UserInputId,
-        string? PlanFilePath,
-        string PlanContent,
-        string? PlanSummary
-    );
-
-    public record UpdateClaudePlanStatusRequest(
-        string Status
-    );
-
-    public record ClaudePlanListResponse(
-        List<ClaudePlanRecord> Plans,
-        int TotalCount
-    );
-
     // Summary DTOs (remote summary service)
     public class SummaryPostDto
     {
@@ -543,27 +498,6 @@ namespace VibeRails.DTOs
     {
         public string Summary { get; set; } = string.Empty;
     }
-
-    // Swarm planning DTOs (mock API for UI integration)
-    public record SwarmPlanRequest(
-        string TaskDescription
-    );
-
-    public record SwarmPlanWrapper(
-        string Plan
-    );
-
-    public record SwarmStepResponse(
-        string Name,
-        string Description,
-        bool Completed = false
-    );
-
-    public record SwarmPlanResponse(
-        string Name,
-        string Description,
-        List<SwarmStepResponse> Steps
-    );
 
     public record AppToastNotification(
         string Title,
@@ -693,21 +627,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(TerminalTabListResponse))]
     [JsonSerializable(typeof(StartTerminalRequest))]
     [JsonSerializable(typeof(BootstrapCommandResponse))]
-    // Claude Plan DTOs
-    [JsonSerializable(typeof(ClaudePlanRecord))]
-    [JsonSerializable(typeof(List<ClaudePlanRecord>))]
-    [JsonSerializable(typeof(CreateClaudePlanRequest))]
-    [JsonSerializable(typeof(UpdateClaudePlanStatusRequest))]
-    [JsonSerializable(typeof(ClaudePlanListResponse))]
     // Summary DTOs
     [JsonSerializable(typeof(SummaryPostDto))]
     [JsonSerializable(typeof(SummaryResponseDto))]
-    // Swarm plan DTOs
-    [JsonSerializable(typeof(SwarmPlanRequest))]
-    [JsonSerializable(typeof(SwarmPlanWrapper))]
-    [JsonSerializable(typeof(SwarmStepResponse))]
-    [JsonSerializable(typeof(List<SwarmStepResponse>))]
-    [JsonSerializable(typeof(SwarmPlanResponse))]
     // Version/Update DTOs
     [JsonSerializable(typeof(VersionResponse))]
     [JsonSerializable(typeof(ApiVersionResponse))]

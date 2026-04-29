@@ -4,7 +4,6 @@ using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Services.BertBaseClasses;
 using VibeRails.Services.BertV2;
-using VibeRails.Services.CleanedInput;
 using VibeRails.Services.UserInOut;
 using VibeRails.DB;
 using VibeRails.DTOs;
@@ -65,9 +64,6 @@ namespace VibeRails
                 var logger = sp.GetService<ILogger<Repository>>();
                 return new Repository(connectionString, gitDiff, logger);
             });
-            serviceCollection.AddSingleton<ITuiTextExtractor, TuiTextExtractor>();
-            serviceCollection.AddScoped<ICleanedUserInputService, CleanedUserInputService>();
-            serviceCollection.AddScoped<IGetCleanedUserText, GetCleanedUserText>();
             serviceCollection.AddScoped<IGetUserText, GetUserText>();
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
@@ -127,7 +123,6 @@ namespace VibeRails
             serviceCollection.AddScoped<ITerminalIoObserver, MyTerminalObserver>();
             serviceCollection.AddScoped<ITerminalIoObserver, SessionStateEventObserver>();
             serviceCollection.AddScoped<ITerminalIoObserver, GitDiffIdleCaptureObserver>();
-            serviceCollection.AddScoped<ITerminalIoObserver, CleanedInputIdleObserver>();
             serviceCollection.AddSingleton<ITerminalIoObserver, WaitingForUserInputObserver>();
 
 #if DEBUG
@@ -161,8 +156,6 @@ namespace VibeRails
                 serviceCollection.AddHostedService<UpdateCheckJob>();
                 serviceCollection.AddHostedService<StaleSessionCleanupJob>();
                 serviceCollection.AddHostedService<ProjectCacheRefreshJob>();
-                serviceCollection.AddHostedService<CleanedUserInputBackfillJob>();
-                serviceCollection.AddHostedService<BertEmbeddingBackfillJob>();
             }
 
             serviceCollection.AddScoped<ISessionTranscriptService, SessionTranscriptService>();
@@ -181,12 +174,6 @@ namespace VibeRails
 
             // Update Service (singleton with HttpClient)
             serviceCollection.AddHttpClient<UpdateService>();
-
-            // Swarm Service
-            serviceCollection.AddHttpClient<SwarmService>(client =>
-            {
-                client.BaseAddress = new Uri("https://viberails.ai");
-            });
 
             // WebSocket Messaging Client (singleton - auto-reconnects, URL from appsettings.json)
             serviceCollection.AddSingleton<MessagingClient>(sp =>

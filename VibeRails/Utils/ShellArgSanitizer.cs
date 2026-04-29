@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Text;
 
 namespace VibeRails.Utils;
 
@@ -9,11 +10,17 @@ namespace VibeRails.Utils;
 public static partial class ShellArgSanitizer
 {
     /// <summary>
-    /// Shell metacharacters that must never appear in CLI arguments.
-    /// These enable command chaining, piping, subshell execution, and redirection.
+    /// Characters that cannot appear in CLI arguments under any circumstances.
+    /// Every other shell metacharacter (<c>; | &amp; $ ` { } &lt; &gt; ! ( ) *</c>) is
+    /// neutralized at emit time by <see cref="EscapeArg"/>, which always wraps args in
+    /// single quotes (POSIX) or backtick-escaped double quotes (PowerShell). Inside
+    /// those quotes those metacharacters are literal, so blocking them here would
+    /// just reject legitimate prompts (<c>--system-prompt "Use $HOME!"</c>) without
+    /// adding any safety. The chars below are different: they cannot survive our
+    /// per-arg quoting (NUL terminates strings; CR/LF break command lines and our
+    /// own argument tokenizer treats them as whitespace separators).
     /// </summary>
-    private static readonly char[] DangerousChars =
-        [';', '|', '&', '$', '`', '(', ')', '{', '}', '<', '>', '!', '\n', '\r', '\0'];
+    private static readonly char[] DangerousChars = ['\0', '\n', '\r'];
 
     [GeneratedRegex(@"^--?[a-zA-Z][a-zA-Z0-9_-]*$")]
     private static partial Regex FlagPattern();
@@ -39,8 +46,17 @@ public static partial class ShellArgSanitizer
                     _ => ch.ToString()
                 };
                 return $"CustomArgs contains forbidden character '{display}'. " +
-                       "Only CLI flags and values are allowed (e.g. \"--model opus\").";
+                       "Only CLI flags and values are allowed (e.g. \"--permission-mode plan\").";
             }
+        }
+
+        try
+        {
+            _ = ParseArguments(customArgs);
+        }
+        catch (ArgumentException ex)
+        {
+            return ex.Message;
         }
 
         return null;
@@ -59,7 +75,86 @@ public static partial class ShellArgSanitizer
         if (error != null)
             throw new ArgumentException(error);
 
-        return customArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return ParseArguments(customArgs);
+    }
+
+    private static string[] ParseArguments(string customArgs)
+    {
+        var args = new List<string>();
+        var current = new StringBuilder();
+        var inQuote = false;
+        var quoteChar = '\0';
+        var escaping = false;
+        var hasToken = false;
+
+        foreach (var ch in customArgs)
+        {
+            if (escaping)
+            {
+                current.Append(ch);
+                escaping = false;
+                hasToken = true;
+                continue;
+            }
+
+            if (inQuote)
+            {
+                if (ch == '\\')
+                {
+                    escaping = true;
+                    continue;
+                }
+
+                if (ch == quoteChar)
+                {
+                    inQuote = false;
+                    continue;
+                }
+
+                current.Append(ch);
+                hasToken = true;
+                continue;
+            }
+
+            if (ch == '"' || ch == '\'')
+            {
+                inQuote = true;
+                quoteChar = ch;
+                hasToken = true;
+                continue;
+            }
+
+            if (char.IsWhiteSpace(ch))
+            {
+                if (hasToken)
+                {
+                    args.Add(current.ToString());
+                    current.Clear();
+                    hasToken = false;
+                }
+                continue;
+            }
+
+            current.Append(ch);
+            hasToken = true;
+        }
+
+        if (escaping)
+        {
+            current.Append('\\');
+        }
+
+        if (inQuote)
+        {
+            throw new ArgumentException("CustomArgs contains an unterminated quoted value.");
+        }
+
+        if (hasToken)
+        {
+            args.Add(current.ToString());
+        }
+
+        return args.ToArray();
     }
 
     /// <summary>
