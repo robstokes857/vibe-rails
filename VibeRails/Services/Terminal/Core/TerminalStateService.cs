@@ -35,10 +35,19 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         _ioObserverService = ioObserverService;
     }
 
-    public async Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default)
+    public async Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default, string? initialUserInput = null)
     {
         var sessionId = Guid.NewGuid().ToString();
         await _repository.CreateSessionAsync(sessionId, cli, envName, workDir, Environment.ProcessId);
+
+        // Record the env's initial message (if any) as the session's first user input,
+        // so it shows up in UserInputs at sequence=1 alongside subsequent typed inputs
+        // and anchors the git-diff capture window for file activity attribution.
+        // Must run before InputAccumulator is wired so the sequence number is unambiguous.
+        if (!string.IsNullOrWhiteSpace(initialUserInput))
+        {
+            await _repository.RecordUserInputAsync(sessionId, initialUserInput, _gitService, ct);
+        }
 
         var now = DateTimeOffset.UtcNow;
         var outputWriter = new SessionOutputWriter(_repository);

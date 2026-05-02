@@ -189,6 +189,8 @@ namespace VibeRails
 
             // Authentication service (singleton - one token per instance)
             serviceCollection.AddSingleton<IAuthService, AuthService>();
+            serviceCollection.AddSingleton<IAuthBootstrapService, AuthBootstrapService>();
+            serviceCollection.AddSingleton<IUnconsumedBootstrapCodeShutdownWatchdog, UnconsumedBootstrapCodeShutdownWatchdog>();
         }
 
         private static bool IsTerminalTabChildProcess(IEnumerable<string> args)

@@ -168,7 +168,32 @@ namespace VibeRails.Services
             => File.Copy(sourceFileName, destFileName, overwrite);
 
         public void DeleteDirectory(string path, bool recursive)
-            => Directory.Delete(path, recursive);
+        {
+            try
+            {
+                Directory.Delete(path, recursive);
+            }
+            catch (UnauthorizedAccessException) when (recursive)
+            {
+                // Git pack files (*.idx, *.pack) under embedded repos are written
+                // read-only, which blocks Directory.Delete on Windows. Clear the
+                // attribute and retry; let any other failure propagate.
+                ClearReadOnlyAttributes(path);
+                Directory.Delete(path, recursive: true);
+            }
+        }
+
+        private static void ClearReadOnlyAttributes(string path)
+        {
+            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+            {
+                var attrs = File.GetAttributes(file);
+                if ((attrs & FileAttributes.ReadOnly) != 0)
+                {
+                    File.SetAttributes(file, attrs & ~FileAttributes.ReadOnly);
+                }
+            }
+        }
 
         public void DeleteFile(string path)
             => File.Delete(path);

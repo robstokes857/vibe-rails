@@ -98,7 +98,6 @@ export class ChatHistorySidebar {
                     <div class="ch-context-menu-item" data-action="rename">Rename</div>
                     <div class="ch-context-menu-item text-danger" data-action="delete">Delete</div>
                     <div class="ch-context-menu-divider"></div>
-                    <div class="ch-context-menu-item" data-action="get-transcript">Get Transcript</div>
                     <div class="ch-context-menu-item" data-action="get-session">Get Session</div>
                     <div class="ch-context-menu-item" data-action="get-raw-session">Session Data Dump</div>
                 </div>
@@ -202,11 +201,6 @@ export class ChatHistorySidebar {
             void this._showDeleteModal();
         });
 
-        contextMenu?.querySelector('[data-action="get-transcript"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this._closeContextMenu();
-            if (this.activeItem) void SessionDebug.showTranscriptModal(this.activeItem.id);
-        });
         contextMenu?.querySelector('[data-action="get-session"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this._closeContextMenu();

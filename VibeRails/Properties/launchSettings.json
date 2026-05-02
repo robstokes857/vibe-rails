@@ -7,25 +7,9 @@
       },
       "dotnetRunMessages": false
     },
-    "LM_Bootstrap_Gemini": {
-      "commandName": "Project",
-      "commandLineArgs": "--lmbootstrap Gemini --env \"Gemini YOLO\"",
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      },
-      "dotnetRunMessages": false
-    },
     "LaunchBrowser": {
       "commandName": "Project",
-      "commandLineArgs": "--open-browser --trace",
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      },
-      "dotnetRunMessages": false
-    },
-    "help": {
-      "commandName": "Project",
-      "commandLineArgs": "--hekp",
+      "commandLineArgs": "--web",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },

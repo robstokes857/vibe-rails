@@ -37,10 +37,16 @@ public class TerminalRunner
         string? initialPrompt = null,
         string summary = "",
         Func<string, Task>? onRemoteTakeoverAuthorized = null,
-        bool isNativeCli = false)
+        bool isNativeCli = false,
+        string? initialUserInput = null)
     {
         var shouldEnableRemote = ShouldEnableRemote(makeRemote, isNativeCli);
-        var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct);
+        // Web flow passes the env's CustomPrompt as initialPrompt and we record the
+        // same text. CLI flow bakes the prompt into extraArgs so initialPrompt is
+        // null; that path passes initialUserInput explicitly to record without
+        // double-encoding the prompt into the launch command.
+        var userInputToRecord = initialUserInput ?? initialPrompt;
+        var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct, initialUserInput: userInputToRecord);
         Terminal? terminal = null;
         IRemoteTerminalConnection? activeRemoteConn = null;
 
@@ -468,7 +474,8 @@ public class TerminalRunner
     /// </summary>
     public async Task<int> RunCliWithWebAsync(
         LLM llm, string workDir, string? envName, string[]? extraArgs,
-        ITerminalSessionService sessionService, bool makeRemote = false, CancellationToken ct = default)
+        ITerminalSessionService sessionService, bool makeRemote = false, CancellationToken ct = default,
+        string? initialUserInput = null)
     {
         var (terminal, sessionId, remoteConn) = await CreateSessionAsync(
             llm,
@@ -478,6 +485,7 @@ public class TerminalRunner
             ct,
             makeRemote: makeRemote,
             isNativeCli: true,
+            initialUserInput: initialUserInput,
             onRemoteTakeoverAuthorized: trigger =>
             {
                 // Native CLI coexists with remote viewer — both can run concurrently.

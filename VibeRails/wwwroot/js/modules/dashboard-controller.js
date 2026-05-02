@@ -50,135 +50,127 @@ export class DashboardController {
 
                 const folderName = this.app.getProjectNameFromPath(rootPath);
                 const projectName = this._customProjectName || folderName;
-                const sandboxCount = this.app.data.sandboxes.length;
-                const agentCount = this.app.data.agents.length;
+                const sandboxCount = this.app.data.sandboxes?.length || 0;
+                const agentCount = this.app.data.agents?.length || 0;
+                const totalRuleCount = (this.app.data.agents || []).reduce((sum, agent) => sum + (Number(agent.ruleCount) || 0), 0);
+                const environmentCount = this.app.data.environments?.length || 0;
                 const gitBranch = this.app.data.configs?.gitBranch;
                 const isSandbox = this.app.data.configs?.isSandbox === true;
+                const contextLabel = isSandbox ? 'Sandbox Context' : 'Project Context';
+                const contextIcon = isSandbox ? 'fa-box-archive' : 'fa-folder-tree';
+                const safeProjectName = this.app.escapeHtml(projectName);
+                const safeRootPath = this.app.escapeHtml(rootPath);
+                const safeRepoName = this.app.escapeHtml(repoName);
+                const safeRemoteUrl = this.app.escapeHtml(gitRemoteUrl || '');
+                const agentLabel = agentCount === 1 ? 'Agent' : 'Agents';
+                const sandboxLabel = sandboxCount === 1 ? 'Sandbox' : 'Sandboxes';
+                const ruleLabel = totalRuleCount === 1 ? 'rule' : 'rules';
+                const remoteHref = /^https?:\/\//i.test(gitRemoteUrl || '') ? safeRemoteUrl : '';
+                const remoteBranchValue = gitRemoteUrl ? 'Pending data' : 'No remote';
+                const safeRemoteBranchValue = this.app.escapeHtml(remoteBranchValue);
+                const branchValue = gitBranch || 'Not detected';
+                const safeBranchValue = this.app.escapeHtml(branchValue);
+
+                const remoteRepoMarkup = gitRemoteUrl
+                    ? remoteHref
+                        ? `<a class="dash-fact-card dash-fact-link" href="${remoteHref}" target="_blank" rel="noopener noreferrer" title="${safeRemoteUrl}">
+                                <span class="dash-fact-label"><i class="fa-solid fa-cloud"></i> Remote repo</span>
+                                <strong>${safeRepoName}</strong>
+                                <small>${safeRemoteUrl}</small>
+                            </a>`
+                        : `<div class="dash-fact-card" title="${safeRemoteUrl}">
+                                <span class="dash-fact-label"><i class="fa-solid fa-cloud"></i> Remote repo</span>
+                                <strong>${safeRepoName}</strong>
+                                <small>${safeRemoteUrl}</small>
+                            </div>`
+                    : `<div class="dash-fact-card is-muted">
+                            <span class="dash-fact-label"><i class="fa-solid fa-cloud"></i> Remote repo</span>
+                            <strong>No remote</strong>
+                            <small>origin not detected</small>
+                        </div>`;
 
                 headingContainer.innerHTML = `
-                    <div class="card border-secondary border-opacity-10 bg-dark bg-opacity-25 context-header-card ${isSandbox ? 'context-header-sandbox' : ''}">
+                    <section class="context-header-card dashboard-context-header ${isSandbox ? 'context-header-sandbox' : ''}">
                         ${isSandbox ? '<div class="context-header-accent-bar"></div>' : ''}
-
-                        <div class="card-header border-0 bg-transparent py-1 d-flex align-items-center">
-                            <span class="x-small text-muted text-uppercase fw-bold">
-                                <i class="fa-solid fa-folder-tree me-2" style="font-size: 11px;"></i>
-                                ${isSandbox ? 'Sandbox Context' : 'Project Context'}
-                            </span>
-                        </div>
-
-                        <div class="card-body p-3 p-lg-4">
-                            <div class="d-flex align-items-center gap-3 mb-4">
-                                <div class="dash-project-icon ${isSandbox ? 'dash-project-icon-sandbox' : ''}">
-                                    <i class="fa-solid fa-folder-tree"></i>
+                        <div class="dashboard-context-layout">
+                            <div class="dashboard-context-main">
+                                <div class="dash-project-icon ${isSandbox ? 'dash-project-icon-sandbox' : ''}" aria-hidden="true">
+                                    <i class="fa-solid ${contextIcon}"></i>
                                 </div>
-                                <div class="d-flex flex-column gap-1">
-                                    <div class="d-flex align-items-center gap-2">
-                                        <h4 class="mb-0 text-white fw-bold">${this.app.escapeHtml(projectName)}</h4>
+                                <div class="dashboard-context-copy">
+                                    <div class="dashboard-context-kicker">
+                                        <i class="fa-solid ${contextIcon}"></i>
+                                        ${contextLabel}
+                                    </div>
+                                    <div class="dashboard-context-title-line">
+                                        <h2 class="dashboard-context-name">${safeProjectName}</h2>
                                         ${isSandbox ? '<span class="dash-sandbox-badge">Sandbox</span>' : ''}
-                                        <button class="btn btn-link btn-sm p-0 text-muted hover-accent ms-1 d-flex align-items-center opacity-75" type="button" data-action="set-custom-name" title="Rename project">
-                                            <i class="fa-solid fa-pen-to-square" style="font-size: 13px;"></i>
+                                        <button class="dash-icon-button" type="button" data-action="set-custom-name" title="Rename project">
+                                            <i class="fa-solid fa-pen-to-square"></i>
                                         </button>
                                     </div>
-                                    <div class="d-flex align-items-center flex-wrap gap-4 mt-1">
-                                        ${gitRemoteUrl ? `
-                                        <div class="d-flex flex-column">
-                                            <span class="dash-meta-label">Remote</span>
-                                            <div class="d-flex align-items-center gap-1">
-                                                <i class="fa-brands fa-github text-muted opacity-50" style="font-size: 12px;"></i>
-                                                <a href="${gitRemoteUrl}" target="_blank" class="text-decoration-none small text-white hover-accent opacity-75 fw-medium">${this.app.escapeHtml(repoName)}</a>
-                                            </div>
-                                        </div>` : ''}
-                                        ${gitBranch ? `
-                                        <div class="d-flex flex-column">
-                                            <span class="dash-meta-label">Branch</span>
-                                            <div class="d-flex align-items-center gap-1">
-                                                <i class="fa-solid fa-code-branch text-muted opacity-50" style="font-size: 11px;"></i>
-                                                <span class="small text-white opacity-75 fw-medium">${this.app.escapeHtml(gitBranch)}</span>
-                                            </div>
-                                        </div>` : ''}
-                                        <div class="d-flex flex-column min-w-0">
-                                            <span class="dash-meta-label">Working Dir</span>
-                                            <div class="d-flex align-items-center gap-1">
-                                                <i class="fa-solid fa-location-dot text-muted opacity-50 flex-shrink-0" style="font-size: 11px;"></i>
-                                                <div class="text-white small font-monospace text-truncate opacity-75 fw-medium" style="max-width: 400px;">${rootPath}</div>
-                                                <button class="btn btn-link btn-sm p-0 text-muted hover-accent opacity-50 ms-1 flex-shrink-0 d-flex align-items-center" type="button" data-action="copy-path" title="Copy path">
-                                                    <i class="fa-regular fa-copy" style="font-size: 11px;"></i>
-                                                </button>
-                                            </div>
-                                        </div>
+                                    <div class="dash-path-row">
+                                        <span class="dash-path-label">
+                                            <i class="fa-regular fa-folder-open"></i>
+                                            Directory
+                                        </span>
+                                        <code class="dash-path-badge" title="${safeRootPath}">${safeRootPath}</code>
+                                        <button class="dash-icon-button compact" type="button" data-action="copy-path" title="Copy path">
+                                            <i class="fa-regular fa-copy"></i>
+                                        </button>
                                     </div>
                                 </div>
                             </div>
-
-                            <div class="row g-3">
-                                <div class="col-md-2">
-                                    <div class="dash-insight-card">
-                                        <div class="dash-insight-label">Environments</div>
-                                        <div class="d-flex align-items-baseline gap-2">
-                                            <span class="dash-insight-value text-accent" data-env-count>${this.app.data.environments?.length || 0}</span>
-                                            <span class="dash-insight-sub">Custom</span>
-                                        </div>
-                                        <button class="dash-insight-link" data-action="navigate" data-view="environments">
-                                            <i class="fa-solid fa-arrow-right me-1" style="font-size: 9px;"></i>Manage
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="dash-insight-card">
-                                        <div class="dash-insight-label">Sandboxes</div>
-                                        <div class="d-flex align-items-baseline gap-2">
-                                            <span class="dash-insight-value text-primary">${sandboxCount}</span>
-                                            <span class="dash-insight-sub">Live</span>
-                                        </div>
-                                        <div class="dash-insight-sub mt-1">Isolated environments</div>
-                                    </div>
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="dash-insight-card">
-                                        <div class="dash-insight-label">Active Agents</div>
-                                        <div class="d-flex align-items-baseline gap-2">
-                                            <span class="dash-insight-value text-accent">${agentCount}</span>
-                                            <span class="dash-insight-sub">Live</span>
-                                        </div>
-                                        <div class="dash-insight-sub mt-1">Managing project rules</div>
-                                    </div>
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="dash-insight-card">
-                                        <div class="dash-insight-label">VCA Status</div>
-                                        <div class="d-flex align-items-baseline gap-2">
-                                            <span class="dash-insight-value text-info">Clean</span>
-                                        </div>
-                                        <div class="dash-insight-sub mt-1">0 active violations</div>
-                                    </div>
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="dash-insight-card">
-                                        <div class="dash-insight-label">Vibe Rails AI</div>
-                                        <div class="d-flex align-items-baseline gap-2">
-                                            <span class="dash-insight-value text-warning"><i class="fa-solid fa-brain"></i></span>
-                                            <span class="dash-insight-sub">Local embeddings</span>
-                                        </div>
-                                        <a href="#" class="dash-insight-link" data-action="navigate" data-view="vibe-rails-ai">
-                                            <i class="fa-solid fa-arrow-right me-1" style="font-size: 9px;"></i>Explorer
-                                        </a>
-                                    </div>
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="dash-insight-card">
-                                        <div class="dash-insight-label">MCP Server</div>
-                                        <div class="d-flex align-items-baseline gap-2">
-                                            <span class="dash-insight-value text-accent"><i class="fa-solid fa-plug"></i></span>
-                                            <span class="dash-insight-sub">Tool server</span>
-                                        </div>
-                                        <a href="#" class="dash-insight-link" data-action="navigate" data-view="mcp">
-                                            <i class="fa-solid fa-arrow-right me-1" style="font-size: 9px;"></i>Explorer
-                                        </a>
-                                    </div>
-                                </div>
+                            <div class="dashboard-context-stats" aria-label="Project counts">
+                                <button class="dash-summary-card" type="button" data-action="navigate" data-view="environments">
+                                    <span class="dash-summary-icon"><i class="fa-solid fa-layer-group"></i></span>
+                                    <strong data-env-count>${environmentCount}</strong>
+                                    <span>Custom Environments</span>
+                                </button>
+                                <button class="dash-summary-card" type="button" data-action="navigate" data-view="agents">
+                                    <span class="dash-summary-icon"><i class="fa-solid fa-circle-nodes"></i></span>
+                                    <strong>${agentCount}</strong>
+                                    <span>${agentLabel}</span>
+                                    <small>${totalRuleCount} ${ruleLabel}</small>
+                                </button>
+                                <button class="dash-summary-card" type="button" data-action="navigate" data-view="environments">
+                                    <span class="dash-summary-icon"><i class="fa-solid fa-boxes-stacked"></i></span>
+                                    <strong>${sandboxCount}</strong>
+                                    <span>${sandboxLabel}</span>
+                                </button>
                             </div>
                         </div>
-                    </div>
+                        <div class="dashboard-context-grid" aria-label="Repository context">
+                            <div class="dash-fact-card ${gitBranch ? '' : 'is-muted'}">
+                                <span class="dash-fact-label"><i class="fa-solid fa-code-branch"></i> Local branch</span>
+                                <strong title="${safeBranchValue}">${safeBranchValue}</strong>
+                                <small>${isSandbox ? 'sandbox checkout' : 'working tree'}</small>
+                            </div>
+                            ${remoteRepoMarkup}
+                            <div class="dash-fact-card is-placeholder">
+                                <span class="dash-fact-label"><i class="fa-solid fa-diagram-project"></i> Remote branch</span>
+                                <strong>${safeRemoteBranchValue}</strong>
+                                <small>upstream tracking</small>
+                            </div>
+                        </div>
+                        <div class="dashboard-insight-strip" aria-label="Dashboard insight placeholders">
+                            <div class="dash-telemetry-card">
+                                <span>Vibe AI Size</span>
+                                <strong>--</strong>
+                                <small>Index size</small>
+                            </div>
+                            <div class="dash-telemetry-card">
+                                <span>Top CLI</span>
+                                <strong>--</strong>
+                                <small>Usage leader</small>
+                            </div>
+                            <div class="dash-telemetry-card">
+                                <span>Sessions</span>
+                                <strong>--</strong>
+                                <small>Total runs</small>
+                            </div>
+                        </div>
+                    </section>
                 `;
 
                 this.app.bindAction(headingContainer, '[data-action="set-custom-name"]', () => this.app.showCustomNameModal());
@@ -196,25 +188,21 @@ export class DashboardController {
 
             } else {
                 headingContainer.innerHTML = `
-                    <div class="card border-secondary border-opacity-10 bg-dark bg-opacity-25 context-header-card">
-                        <div class="card-header border-0 bg-transparent py-1 d-flex align-items-center">
-                            <span class="x-small text-muted text-uppercase fw-bold">
-                                <i class="fa-solid fa-globe me-2" style="font-size: 11px;"></i>
-                                Global Context
-                            </span>
-                        </div>
-                        <div class="card-body p-3">
-                            <div class="d-flex align-items-center gap-3">
-                                <div class="project-logo-wrapper d-flex align-items-center justify-content-center flex-shrink-0 context-header-global-icon">
+                    <section class="context-header-card dashboard-context-header">
+                        <div class="dashboard-context-main">
+                            <div class="dash-project-icon dash-project-icon-global" aria-hidden="true">
+                                <i class="fa-solid fa-globe"></i>
+                            </div>
+                            <div class="dashboard-context-copy">
+                                <div class="dashboard-context-kicker">
                                     <i class="fa-solid fa-globe"></i>
+                                    Global Context
                                 </div>
-                                <div>
-                                    <h4 class="mb-0 text-white fw-semibold">Global Context</h4>
-                                    <span class="text-muted">Manage settings and view history across all projects</span>
-                                </div>
+                                <h2 class="dashboard-context-name">Global Context</h2>
+                                <p class="dashboard-context-description">Manage settings and review activity across all projects.</p>
                             </div>
                         </div>
-                    </div>
+                    </section>
                 `;
             }
         }
@@ -349,12 +337,6 @@ export class DashboardController {
 
             const name = node.querySelector('[data-env-name]');
             if (name) name.textContent = env.name;
-
-            const badge = node.querySelector('[data-env-badge]');
-            if (badge) {
-                badge.textContent = env.cli;
-                if (brand.className) badge.classList.add(brand.className);
-            }
 
             const logo = node.querySelector('[data-env-logo]');
             if (logo && brand.logo) {

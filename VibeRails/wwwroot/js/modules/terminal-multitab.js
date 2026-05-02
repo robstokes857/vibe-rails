@@ -682,6 +682,8 @@ class TerminalTab {
             this.disconnect({ disposeTerminal: true, preserveStatus: true });
             if (body.resumeSessionId) {
                 this.statusController?.markResumedSession();
+            } else if (this._launchHasInitialPrompt(body)) {
+                this.statusController?.markInitialPrompt();
             }
             await this.connect();
             return true;
@@ -709,6 +711,19 @@ class TerminalTab {
         this.disconnect({ disposeTerminal: true, preserveStatus: true });
         this.manager.updateUi();
         return true;
+    }
+
+    _launchHasInitialPrompt(body) {
+        // Mirror the server's env.customPrompt → initialPrompt resolution so the tab
+        // can land directly in THINKING when the agent will boot with a pre-filled
+        // prompt. Explicit body.initialPrompt wins; otherwise look up the env by name
+        // in the already-loaded environments list. Default LLMs (not in the list)
+        // fall through to false — they don't carry customPrompt today.
+        if (body?.initialPrompt && body.initialPrompt.trim()) return true;
+        if (!body?.environmentName) return false;
+        const envs = this.manager.app.data?.environments || [];
+        const env = envs.find(e => e.name === body.environmentName);
+        return !!(env?.customPrompt && env.customPrompt.trim());
     }
 }
 

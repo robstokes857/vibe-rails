@@ -114,8 +114,15 @@
     <!-- Templates -->
     <template id="dashboard-template">
         <div class="dashboard" data-dashboard="unified">
+            <!-- Dashboard Header -->
+            <header class="row dashboard-page-header">
+                <div class="col-12 mb-3">
+                    <h4 class="text-uppercase fw-bold mb-0" style="letter-spacing: 0.05em;"><span class="text-gradient">Dashboard</span></h4>
+                </div>
+            </header>
+
             <!-- Project Header -->
-            <div class="row mb-2 animate-fade-up delay-100">
+            <div class="row mb-3">
                 <div class="col-12" data-context-heading-container></div>
             </div>
 
@@ -323,7 +330,6 @@
                 <div class="flex-grow-1 min-w-0">
                     <div class="d-flex align-items-center gap-2 mb-0">
                         <h6 class="mb-0 text-white text-truncate fw-bold" data-env-name></h6>
-                        <span class="badge badge-cli x-small py-1" data-env-badge></span>
                     </div>
                     <div class="text-muted small opacity-50" style="font-size: 0.7rem;" data-env-time></div>
                 </div>
@@ -870,8 +876,8 @@
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <span class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img
                                     src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-light"
-                                    style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom;">Environment
-                                Profiles</span>
+                                    style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom;">Custom
+                                Environments</span>
                             <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" type="button"
                                 data-action="create-environment">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"

@@ -161,6 +161,13 @@ export class TabStatusController {
         this._startAsThinking = true;
     }
 
+    markInitialPrompt() {
+        // The agent receives a prompt as argv at boot, so it begins processing
+        // immediately. Same shape as markResumedSession — flag the controller so
+        // onSocketOpen lands directly in THINKING instead of CONNECTED.
+        this._startAsThinking = true;
+    }
+
     onSocketClose() {
         this._transitionTo(TAB_STATUS.DISCONNECTED);
     }

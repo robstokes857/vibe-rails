@@ -123,13 +123,20 @@ export class EnvironmentController {
             return '<p class="text-muted text-center py-3">No environments configured. Create your first environment to get started.</p>';
         }
 
+        const escape = (value) => this.app.escapeHtml(value);
+
         return `
             <div class="table-responsive">
-                <table class="table table-hover align-middle">
+                <table class="table table-hover align-middle environments-table">
+                    <colgroup>
+                        <col class="env-col-name">
+                        <col class="env-col-commands">
+                        <col class="env-col-last-used">
+                        <col class="env-col-actions">
+                    </colgroup>
                     <thead>
                         <tr>
                             <th>Name</th>
-                            <th>CLI</th>
                             <th>Custom Args</th>
                             <th>Last Used</th>
                             <th>Actions</th>
@@ -137,24 +144,57 @@ export class EnvironmentController {
                     </thead>
                     <tbody>
                         ${this.app.data.environments.map(env => {
+                            const brand = this.app.getCliBrand(env.cli);
+                            const safeName = escape(env.name);
+                            const safeCli = escape(env.cli);
+                            const safeEnvId = escape(env.id);
+                            const safeLastUsed = escape(env.lastUsed || 'Never');
+                            const safeBrandLabel = escape(brand.label || env.cli || 'CLI');
+                            const safeLogo = escape(brand.logo || '');
+                            const cliKey = (env.cli || '').toLowerCase();
+                            const iconLightClass = ['codex', 'chatgpt', 'openai'].includes(cliKey) ? ' icon-light' : '';
+                            const logoMarkup = safeLogo
+                                ? `<img class="env-cli-logo${iconLightClass}" src="${safeLogo}" alt="${safeBrandLabel} logo" loading="lazy">`
+                                : `<i class="fa-solid fa-terminal env-cli-logo-fallback" aria-hidden="true"></i>`;
+                            const customArgs = env.customArgs || '';
+                            const prompt = env.customPrompt || '';
+                            const promptMarkup = prompt.trim()
+                                ? `<details class="env-prompt-details">
+                                        <summary class="env-prompt-toggle">
+                                            <span class="env-prompt-toggle-icon" aria-hidden="true"></span>
+                                            <span>Initial prompt</span>
+                                        </summary>
+                                        <pre class="env-prompt-preview">${escape(prompt)}</pre>
+                                   </details>`
+                                : '';
+
                             return `
                             <tr>
-                                <td><strong>${env.name}</strong></td>
-                                <td>${env.cli}</td>
-                                <td><code>${env.customArgs || '-'}</code></td>
-                                <td class="small text-muted text-nowrap">${env.lastUsed || 'Never'}</td>
-                                <td>
-                                    <div class="d-inline-flex gap-1">
-                                        <button class="btn btn-xs btn-outline-secondary d-inline-flex align-items-center" type="button" data-action="launch-environment" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in external terminal">
+                                <td class="env-name-cell">
+                                    <div class="env-name-wrap">
+                                        <div class="env-cli-logo-wrap" title="${safeBrandLabel}" aria-label="${safeBrandLabel}">
+                                            ${logoMarkup}
+                                        </div>
+                                        <strong class="env-name-text">${safeName}</strong>
+                                    </div>
+                                </td>
+                                <td class="env-command-cell">
+                                    ${customArgs ? `<code class="env-command-code">${escape(customArgs)}</code>` : '<span class="env-empty-value">-</span>'}
+                                    ${promptMarkup}
+                                </td>
+                                <td class="small text-muted text-nowrap">${safeLastUsed}</td>
+                                <td class="env-actions-cell">
+                                    <div class="env-actions">
+                                        <button class="btn btn-xs btn-outline-secondary env-action-btn" type="button" data-action="launch-environment" data-env-name="${safeName}" data-env-cli="${safeCli}" title="Launch in external terminal" aria-label="Launch ${safeName} in external terminal">
                                             <i class="fa-solid fa-terminal"></i>
                                         </button>
-                                        <button class="btn btn-xs btn-outline-success d-inline-flex align-items-center" type="button" data-action="launch-in-webui" data-env-id="${env.id}" data-env-name="${env.name}" data-env-cli="${env.cli}" title="Launch in Web Terminal">
+                                        <button class="btn btn-xs btn-outline-success env-action-btn" type="button" data-action="launch-in-webui" data-env-id="${safeEnvId}" data-env-name="${safeName}" data-env-cli="${safeCli}" title="Launch in Web Terminal" aria-label="Launch ${safeName} in Web Terminal">
                                             <i class="fa-solid fa-display"></i>
                                         </button>
-                                        <button class="btn btn-xs btn-outline-secondary d-inline-flex align-items-center" type="button" data-action="edit-environment" data-env-name="${env.name}" title="Settings">
+                                        <button class="btn btn-xs btn-outline-secondary env-action-btn" type="button" data-action="edit-environment" data-env-name="${safeName}" title="Settings" aria-label="Edit ${safeName} settings">
                                             <i class="fa-solid fa-sliders"></i>
                                         </button>
-                                        <button class="btn btn-xs btn-outline-danger d-inline-flex align-items-center" type="button" data-action="remove-environment" data-env-name="${env.name}" title="Delete">
+                                        <button class="btn btn-xs btn-outline-danger env-action-btn" type="button" data-action="remove-environment" data-env-name="${safeName}" title="Delete" aria-label="Delete ${safeName}">
                                             <i class="fa-solid fa-trash"></i>
                                         </button>
                                     </div>
@@ -256,8 +296,18 @@ export class EnvironmentController {
         // "prompt" field represents the same concept; preload it from env.customPrompt
         // so users see the value they'll actually get at launch — and so saving the
         // form doesn't silently clobber a CLI-set prompt with config.toml's empty value.
-        if ((env.cli || '').toLowerCase() === 'codex' && env.customPrompt) {
+        const cliLower = (env.cli || '').toLowerCase();
+        if (cliLower === 'codex' && env.customPrompt) {
             cliSettings.prompt = env.customPrompt;
+        }
+        if (cliLower === 'codex') {
+            this.mergeCodexSettingsFromCustomArgs(cliSettings, env.customArgs || '');
+        }
+        if (cliLower === 'claude' && env.customPrompt) {
+            cliSettings.initialMessage = env.customPrompt;
+        }
+        if (cliLower === 'gemini' && env.customPrompt) {
+            cliSettings.initialMessage = env.customPrompt;
         }
 
         this.showEnvironmentForm({ mode: 'edit', env, cliSettings });
@@ -401,8 +451,6 @@ export class EnvironmentController {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'codex') {
             const codexSettings = settingsPayload || this.extractCliSettingsPayload(cli);
-            // The Codex panel's prompt field is the source of truth for both
-            // config.toml and env.customPrompt — keep them in sync.
             return {
                 customArgs: this.buildCodexCustomArgs(codexSettings),
                 customPrompt: codexSettings?.prompt ?? ''
@@ -411,11 +459,17 @@ export class EnvironmentController {
 
         if (cliLower === 'claude') {
             const claudeSettings = settingsPayload || this.extractCliSettingsPayload(cli);
-            // Claude has no UI surface for env.customPrompt — its system prompt is a
-            // separate, settings-managed concept. Omit customPrompt from the payload
-            // so the backend preserves whatever was set via `vb env update --prompt`.
             return {
-                customArgs: this.buildClaudeCustomArgs(claudeSettings)
+                customArgs: this.buildClaudeCustomArgs(claudeSettings),
+                customPrompt: claudeSettings?.initialMessage ?? ''
+            };
+        }
+
+        if (cliLower === 'gemini') {
+            const geminiSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            return {
+                customArgs: document.getElementById('env-custom-args')?.value || '',
+                customPrompt: geminiSettings?.initialMessage ?? ''
             };
         }
 
@@ -427,24 +481,205 @@ export class EnvironmentController {
     buildCodexCustomArgs(settings) {
         const s = settings || {};
         const args = [];
+        const model = this.normalizeCodexModel(s.model);
+        const approval = this.normalizeCodexApproval(s.askForApproval);
+
+        if (model) {
+            args.push('--model', model);
+        }
+
+        if (s.effort) {
+            args.push('-c', `model_reasoning_effort=${s.effort}`);
+        }
 
         if (s.yolo) {
-            args.push('--yolo');
-        } else if (s.fullAuto) {
-            args.push('--full-auto');
+            args.push('--dangerously-bypass-approvals-and-sandbox');
         } else {
-            args.push('--ask-for-approval', s.askForApproval || 'untrusted');
+            if (s.fullAuto) {
+                args.push('--sandbox', 'workspace-write');
+            }
+
+            const approvalToUse = approval || (s.fullAuto ? 'on-request' : '');
+            if (approvalToUse) {
+                args.push('--ask-for-approval', approvalToUse);
+            }
         }
 
         if (s.noAltScreen) {
             args.push('--no-alt-screen');
         }
 
-        if (s.oss) {
-            args.push('--oss');
+        if (s.fastMode) {
+            args.push('-c', 'service_tier=fast');
+            args.push('--enable', 'fast_mode');
         }
 
         return args.join(' ');
+    }
+
+    mergeCodexSettingsFromCustomArgs(settings, customArgs) {
+        const args = this.parseArgString(customArgs);
+        if (args.length === 0) return settings;
+
+        let sawFastFeature = false;
+        let sawFastTier = false;
+
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+            const next = args[i + 1];
+
+            if ((arg === '--model' || arg === '-m') && next) {
+                settings.model = this.normalizeCodexModel(next);
+                i++;
+                continue;
+            }
+
+            if ((arg === '--config' || arg === '-c') && next) {
+                const [key, value = ''] = next.split('=');
+                const cleanValue = value.replace(/^["']|["']$/g, '');
+                if (key === 'model_reasoning_effort') {
+                    settings.effort = cleanValue;
+                }
+                if (key === 'service_tier' && cleanValue === 'fast') {
+                    sawFastTier = true;
+                }
+                if (key === 'features.fast_mode' && cleanValue.toLowerCase() !== 'false') {
+                    sawFastFeature = true;
+                }
+                i++;
+                continue;
+            }
+
+            if ((arg === '--ask-for-approval' || arg === '-a') && next) {
+                settings.askForApproval = this.normalizeCodexApproval(next);
+                i++;
+                continue;
+            }
+
+            if (arg === '--enable' && next === 'fast_mode') {
+                sawFastFeature = true;
+                i++;
+                continue;
+            }
+
+            if (arg === '--dangerously-bypass-approvals-and-sandbox' || arg === '--yolo') {
+                settings.yolo = true;
+                continue;
+            }
+
+            if (arg === '--no-alt-screen') {
+                settings.noAltScreen = true;
+                continue;
+            }
+
+            if ((arg === '--sandbox' || arg === '-s') && next === 'workspace-write') {
+                settings.fullAuto = true;
+                i++;
+                continue;
+            }
+        }
+
+        // Older VibeRails builds wrote only `--enable fast_mode`; keep the user's
+        // intent when they next edit/save the environment by migrating it to the
+        // current `service_tier=fast` launch args.
+        if (sawFastFeature || sawFastTier) {
+            settings.fastMode = true;
+        }
+
+        return settings;
+    }
+
+    parseArgString(value) {
+        const args = [];
+        let current = '';
+        let inQuote = false;
+        let quoteChar = '';
+        let escaping = false;
+        let hasToken = false;
+
+        for (const ch of value || '') {
+            if (escaping) {
+                current += ch;
+                escaping = false;
+                hasToken = true;
+                continue;
+            }
+
+            if (inQuote) {
+                if (ch === '\\') {
+                    escaping = true;
+                    continue;
+                }
+                if (ch === quoteChar) {
+                    inQuote = false;
+                    continue;
+                }
+                current += ch;
+                hasToken = true;
+                continue;
+            }
+
+            if (ch === '"' || ch === "'") {
+                inQuote = true;
+                quoteChar = ch;
+                hasToken = true;
+                continue;
+            }
+
+            if (/\s/.test(ch)) {
+                if (hasToken) {
+                    args.push(current);
+                    current = '';
+                    hasToken = false;
+                }
+                continue;
+            }
+
+            current += ch;
+            hasToken = true;
+        }
+
+        if (escaping) current += '\\';
+        if (hasToken) args.push(current);
+        return args;
+    }
+
+    normalizeCodexModel(model) {
+        const raw = (model || '').trim();
+        const lower = raw.toLowerCase();
+        if (lower === 'gpt-5') return 'gpt-5.4';
+        if (lower === 'gpt-5-codex') return 'gpt-5.3-codex';
+        return raw;
+    }
+
+    normalizeCodexApproval(value) {
+        const raw = (value || '').trim().toLowerCase();
+        if (raw === 'on-failure') return 'on-request';
+        if (['untrusted', 'on-request', 'never'].includes(raw)) return raw;
+        return '';
+    }
+
+    renderCodexModelOptions(selectedModel) {
+        const selected = this.normalizeCodexModel(selectedModel);
+        const options = [
+            ['', 'Default (Codex recommended)'],
+            ['gpt-5.5', 'gpt-5.5'],
+            ['gpt-5.4', 'gpt-5.4'],
+            ['gpt-5.4-mini', 'gpt-5.4-mini'],
+            ['gpt-5.3-codex', 'gpt-5.3-codex'],
+            ['gpt-5.3-codex-spark', 'gpt-5.3-codex-spark'],
+            ['gpt-5.2', 'gpt-5.2']
+        ];
+        const known = new Set(options.map(([value]) => value));
+        const rendered = options.map(([value, label]) =>
+            `<option value="${this.app.escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${this.app.escapeHtml(label)}</option>`
+        );
+
+        if (selected && !known.has(selected)) {
+            rendered.push(`<option value="${this.app.escapeHtml(selected)}" selected>${this.app.escapeHtml(selected)} (custom)</option>`);
+        }
+
+        return rendered.join('');
     }
 
     buildClaudeCustomArgs(settings) {
@@ -472,29 +707,16 @@ export class EnvironmentController {
             args.push('--allow-dangerously-skip-permissions');
         }
 
-        this.pushListArg(args, '--dangerously-load-development-channels', s.dangerouslyLoadDevelopmentChannels, { splitWhitespace: true });
-
         if (s.dangerouslySkipPermissions) {
             args.push('--dangerously-skip-permissions');
         }
-
-        this.pushListArg(args, '--allowedTools', s.allowedTools);
-        this.pushStringArg(args, '--append-system-prompt', s.appendSystemPrompt);
 
         if (s.bare) {
             args.push('--bare');
         }
 
-        this.pushListArg(args, '--betas', s.betas, { splitWhitespace: true });
-        this.pushListArg(args, '--channels', s.channels, { splitWhitespace: true });
-
-        if (s.debug || s.debugFilter) {
-            const filter = this.normalizeCustomArgValue(s.debugFilter);
-            if (filter) {
-                args.push('--debug-filter', filter);
-            } else {
-                args.push('--debug');
-            }
+        if (s.debug) {
+            args.push('--debug');
         }
 
         return args.map(arg => this.quoteCustomArg(arg)).join(' ');
@@ -559,6 +781,7 @@ export class EnvironmentController {
         if (cliLower === 'gemini') {
             return {
                 theme: document.getElementById('gemini-theme').value,
+                initialMessage: document.getElementById('gemini-initial-message').value,
                 sandboxEnabled: document.getElementById('gemini-sandbox').checked,
                 autoApproveTools: document.getElementById('gemini-auto-approve').checked,
                 vimMode: document.getElementById('gemini-vim').checked,
@@ -568,30 +791,27 @@ export class EnvironmentController {
         }
         if (cliLower === 'codex') {
             return {
-                askForApproval: document.getElementById('codex-approval').value,
                 yolo: document.getElementById('codex-yolo').checked,
                 fullAuto: document.getElementById('codex-full-auto').checked,
                 noAltScreen: document.getElementById('codex-no-alt-screen').checked,
-                oss: document.getElementById('codex-oss').checked,
-                prompt: document.getElementById('codex-prompt').value
+                prompt: document.getElementById('codex-prompt').value,
+                askForApproval: this.normalizeCodexApproval(document.getElementById('codex-approval').value),
+                model: this.normalizeCodexModel(document.getElementById('codex-model').value),
+                effort: document.getElementById('codex-effort').value,
+                fastMode: document.getElementById('codex-fast-mode').checked
             };
         }
         if (cliLower === 'claude') {
             return {
                 effort: document.getElementById('claude-effort').value,
+                initialMessage: document.getElementById('claude-initial-message').value,
                 noSessionPersistence: document.getElementById('claude-no-session-persistence').checked,
                 permissionMode: document.getElementById('claude-permission-mode').value,
                 systemPrompt: document.getElementById('claude-system-prompt').value,
                 allowDangerouslySkipPermissions: document.getElementById('claude-allow-dangerously-skip-permissions').checked,
-                dangerouslyLoadDevelopmentChannels: document.getElementById('claude-development-channels').value,
                 dangerouslySkipPermissions: document.getElementById('claude-dangerously-skip-permissions').checked,
-                allowedTools: document.getElementById('claude-allowed-tools').value,
-                appendSystemPrompt: document.getElementById('claude-append-system-prompt').value,
                 bare: document.getElementById('claude-bare').checked,
-                betas: document.getElementById('claude-betas').value,
-                channels: document.getElementById('claude-channels').value,
-                debug: document.getElementById('claude-debug').checked,
-                debugFilter: document.getElementById('claude-debug-filter').value
+                debug: document.getElementById('claude-debug').checked
             };
         }
         return null;
@@ -602,6 +822,7 @@ export class EnvironmentController {
         const cliLower = (cli || '').toLowerCase();
 
         if (cliLower === 'gemini') {
+            const geminiInitialMessage = this.app.escapeHtml(s.initialMessage || '');
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Gemini CLI Settings</h6>
@@ -612,6 +833,11 @@ export class EnvironmentController {
                         <option value="Dark" ${s.theme === 'Dark' ? 'selected' : ''}>Dark</option>
                         <option value="Light" ${s.theme === 'Light' ? 'selected' : ''}>Light</option>
                     </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Initial Message</label>
+                    <textarea class="form-control" id="gemini-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to Gemini as soon as the session starts.">${geminiInitialMessage}</textarea>
+                    <small class="form-text text-muted">Passed as <code>gemini "&lt;text&gt;"</code> and recorded as the session's first user input.</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
@@ -653,17 +879,52 @@ export class EnvironmentController {
 
         if (cliLower === 'codex') {
             const promptValue = this.app.escapeHtml(s.prompt || '');
+            const codexModel = this.normalizeCodexModel(s.model);
+            const codexEffort = s.effort || '';
+            const codexApproval = this.normalizeCodexApproval(s.askForApproval);
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Codex CLI Settings</h6>
                 <div class="mb-3">
+                    <label class="form-label">Starting Message</label>
+                    <textarea class="form-control" id="codex-prompt" rows="3" maxlength="6000" placeholder="Please review the code changes. Look for bugs, code smells, and security issues.">${promptValue}</textarea>
+                    <small class="form-text text-muted">Passed as <code>codex "&lt;text&gt;"</code> and recorded as the session's first user input.</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Model</label>
+                    <select class="form-select" id="codex-model">
+                        ${this.renderCodexModelOptions(codexModel)}
+                    </select>
+                    <small class="form-text text-muted">Passed as <code>--model</code> when launching Codex</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Effort</label>
+                    <select class="form-select" id="codex-effort">
+                        <option value="" ${codexEffort === '' ? 'selected' : ''}>Default</option>
+                        <option value="minimal" ${codexEffort === 'minimal' ? 'selected' : ''}>Minimal</option>
+                        <option value="low" ${codexEffort === 'low' ? 'selected' : ''}>Low</option>
+                        <option value="medium" ${codexEffort === 'medium' ? 'selected' : ''}>Medium</option>
+                        <option value="high" ${codexEffort === 'high' ? 'selected' : ''}>High</option>
+                        <option value="xhigh" ${codexEffort === 'xhigh' ? 'selected' : ''}>XHigh</option>
+                    </select>
+                    <small class="form-text text-muted">Passed as <code>-c model_reasoning_effort=&lt;level&gt;</code></small>
+                </div>
+                <div class="mb-3">
                     <label class="form-label">Ask For Approval</label>
                     <select class="form-select" id="codex-approval">
-                        <option value="untrusted" ${(s.askForApproval || 'untrusted') === 'untrusted' ? 'selected' : ''}>Untrusted</option>
-                        <option value="on-request" ${s.askForApproval === 'on-request' ? 'selected' : ''}>On Request</option>
-                        <option value="never" ${s.askForApproval === 'never' ? 'selected' : ''}>Never</option>
+                        <option value="" ${codexApproval === '' ? 'selected' : ''}>Default</option>
+                        <option value="on-request" ${codexApproval === 'on-request' ? 'selected' : ''}>On Request</option>
+                        <option value="untrusted" ${codexApproval === 'untrusted' ? 'selected' : ''}>Untrusted</option>
+                        <option value="never" ${codexApproval === 'never' ? 'selected' : ''}>Never</option>
                     </select>
-                    <small class="form-text text-muted">Controls when Codex pauses for human approval before running a command</small>
+                    <small class="form-text text-muted">Passed as <code>--ask-for-approval</code>; ignored when YOLO mode is enabled</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="codex-fast-mode" ${s.fastMode ? 'checked' : ''}>
+                        <label class="form-check-label" for="codex-fast-mode">Fast Mode</label>
+                    </div>
+                    <small class="form-text text-muted">Launches with <code>service_tier=fast</code> for supported ChatGPT-backed models</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
@@ -686,35 +947,32 @@ export class EnvironmentController {
                     </div>
                     <small class="form-text text-muted">Disable alternate screen mode for the TUI</small>
                 </div>
-                <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="codex-oss" ${s.oss ? 'checked' : ''}>
-                        <label class="form-check-label" for="codex-oss">OSS Provider</label>
-                    </div>
-                    <small class="form-text text-muted">Use the local open source model provider</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Prompt</label>
-                    <textarea class="form-control" id="codex-prompt" rows="3" placeholder="Optional text instruction to start the session">${promptValue}</textarea>
-                    <small class="form-text text-muted">Leave empty to launch Codex without a pre-filled message</small>
-                </div>
             `;
         }
 
         if (cliLower === 'claude') {
             const effort = s.effort || '';
             const permissionMode = s.permissionMode || 'default';
+            const initialMessage = this.app.escapeHtml(s.initialMessage || '');
             const systemPrompt = this.app.escapeHtml(s.systemPrompt || '');
-            const developmentChannels = this.app.escapeHtml(s.dangerouslyLoadDevelopmentChannels || '');
-            const allowedTools = this.app.escapeHtml(s.allowedTools || '');
-            const appendSystemPrompt = this.app.escapeHtml(s.appendSystemPrompt || '');
-            const betas = this.app.escapeHtml(s.betas || '');
-            const channels = this.app.escapeHtml(s.channels || '');
-            const debugFilter = this.app.escapeHtml(s.debugFilter || '');
 
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Claude CLI Settings</h6>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="claude-allow-dangerously-skip-permissions" ${s.allowDangerouslySkipPermissions ? 'checked' : ''}>
+                        <label class="form-check-label" for="claude-allow-dangerously-skip-permissions">Allow Dangerous Skip Permissions</label>
+                    </div>
+                    <small class="form-text text-muted">Adds bypassPermissions to the mode cycle without starting in it</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="claude-dangerously-skip-permissions" ${s.dangerouslySkipPermissions ? 'checked' : ''}>
+                        <label class="form-check-label" for="claude-dangerously-skip-permissions">Dangerously Skip Permissions</label>
+                    </div>
+                    <small class="form-text text-muted text-warning">Starts Claude with permission prompts bypassed</small>
+                </div>
                 <div class="mb-3">
                     <label class="form-label">Effort</label>
                     <select class="form-select" id="claude-effort">
@@ -726,6 +984,11 @@ export class EnvironmentController {
                         <option value="max" ${effort === 'max' ? 'selected' : ''}>Max</option>
                     </select>
                     <small class="form-text text-muted">Sets the effort level for this session</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Initial Message</label>
+                    <textarea class="form-control" id="claude-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to Claude as soon as the session starts.">${initialMessage}</textarea>
+                    <small class="form-text text-muted">Passed as <code>claude "&lt;text&gt;"</code> and recorded as the session's first user input.</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
@@ -753,49 +1016,10 @@ export class EnvironmentController {
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="claude-allow-dangerously-skip-permissions" ${s.allowDangerouslySkipPermissions ? 'checked' : ''}>
-                        <label class="form-check-label" for="claude-allow-dangerously-skip-permissions">Allow Dangerous Skip Permissions</label>
-                    </div>
-                    <small class="form-text text-muted">Adds bypassPermissions to the mode cycle without starting in it</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Development Channels</label>
-                    <textarea class="form-control" id="claude-development-channels" rows="2" placeholder="server:webhook">${developmentChannels}</textarea>
-                    <small class="form-text text-muted">Entries for --dangerously-load-development-channels</small>
-                </div>
-                <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="claude-dangerously-skip-permissions" ${s.dangerouslySkipPermissions ? 'checked' : ''}>
-                        <label class="form-check-label" for="claude-dangerously-skip-permissions">Dangerously Skip Permissions</label>
-                    </div>
-                    <small class="form-text text-muted text-warning">Starts Claude with permission prompts bypassed</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Allowed Tools</label>
-                    <textarea class="form-control" id="claude-allowed-tools" rows="3" placeholder="Bash(git log *)&#10;Bash(git diff *)&#10;Read">${allowedTools}</textarea>
-                    <small class="form-text text-muted">One --allowedTools entry per line</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Append System Prompt</label>
-                    <textarea class="form-control" id="claude-append-system-prompt" rows="2" placeholder="Append text to the default system prompt">${appendSystemPrompt}</textarea>
-                    <small class="form-text text-muted">Passed as --append-system-prompt when launching Claude</small>
-                </div>
-                <div class="mb-3">
-                    <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" id="claude-bare" ${s.bare ? 'checked' : ''}>
                         <label class="form-check-label" for="claude-bare">Bare Mode</label>
                     </div>
                     <small class="form-text text-muted">Skip discovery of hooks, skills, plugins, MCP servers, memory, and CLAUDE.md</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Betas</label>
-                    <input type="text" class="form-control" id="claude-betas" value="${betas}" placeholder="interleaved-thinking">
-                    <small class="form-text text-muted">Entries for --betas</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Channels</label>
-                    <textarea class="form-control" id="claude-channels" rows="2" placeholder="plugin:my-notifier@my-marketplace">${channels}</textarea>
-                    <small class="form-text text-muted">Entries for --channels</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
@@ -803,11 +1027,6 @@ export class EnvironmentController {
                         <label class="form-check-label" for="claude-debug">Debug Mode</label>
                     </div>
                     <small class="form-text text-muted">Enable --debug for this launch</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Debug Filter</label>
-                    <input type="text" class="form-control" id="claude-debug-filter" value="${debugFilter}" placeholder="api,mcp">
-                    <small class="form-text text-muted">Optional category filter passed after --debug</small>
                 </div>
             `;
         }

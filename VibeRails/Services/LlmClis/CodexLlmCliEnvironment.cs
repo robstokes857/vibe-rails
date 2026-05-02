@@ -29,14 +29,15 @@ namespace VibeRails.Services.LlmClis
                     # Codex CLI Configuration
                     # This is an isolated environment managed by Vibe Rails
 
-                    [model]
-                    # default_model = "o3"
+                    # model = "gpt-5.5"
+                    # model_reasoning_effort = "medium"
+                    # service_tier = "fast"
 
-                    [approval]
-                    # auto_approve = false
+                    # approval_policy = "on-request"
+                    # sandbox_mode = "workspace-write"
 
-                    [sandbox]
-                    # enabled = true
+                    [features]
+                    # fast_mode = true
                     """;
                 await _fileService.WriteAllTextAsync(configFile, defaultConfig, FileMode.Create, FileShare.None, cancellationToken);
             }
@@ -65,14 +66,18 @@ namespace VibeRails.Services.LlmClis
 
             // Parse TOML-style config (simple key = value format)
             dto.AskForApproval = NormalizeApproval(
-                GetTomlValue(content, "ask_for_approval")
+                GetTomlValue(content, "approval_policy")
+                ?? GetTomlValue(content, "ask_for_approval")
                 ?? GetTomlValue(content, "approval")
-                ?? "untrusted");
+                ?? "");
             dto.Yolo = GetTomlBoolValue(content, "yolo") ?? false;
             dto.FullAuto = GetTomlBoolValue(content, "full_auto") ?? false;
             dto.NoAltScreen = GetTomlBoolValue(content, "no_alt_screen") ?? false;
             dto.Oss = GetTomlBoolValue(content, "oss") ?? false;
             dto.Prompt = GetTomlValue(content, "prompt") ?? "";
+            dto.Model = NormalizeModel(GetTomlValue(content, "model"));
+            dto.Effort = NormalizeEffort(GetTomlValue(content, "model_reasoning_effort"));
+            dto.FastMode = IsFastModeEnabled(content);
 
             return dto;
         }
@@ -95,20 +100,20 @@ namespace VibeRails.Services.LlmClis
                 existingContent = await _fileService.ReadAllTextAsync(configPath, cancellationToken);
             }
 
-            // `approval` is a legacy alias for `ask_for_approval`: GetSettings falls back
-            // to it when the new key is missing, so we must clear it whenever we write the
-            // new key — otherwise the legacy value would shadow the user's choice. Other
-            // previously-managed fields (model, sandbox, search) have no VibeRails mapping
-            // anymore; leave them untouched so a user's manual edits stick.
+            // Clear old aliases so they cannot shadow the current Codex key.
+            existingContent = RemoveTomlValue(existingContent, "ask_for_approval");
             existingContent = RemoveTomlValue(existingContent, "approval");
 
             // Update or add each supported setting.
-            existingContent = SetTomlValue(existingContent, "ask_for_approval", NormalizeApproval(settings.AskForApproval));
+            existingContent = SetTomlValue(existingContent, "approval_policy", NormalizeApproval(settings.AskForApproval));
             existingContent = SetTomlBoolValue(existingContent, "yolo", settings.Yolo);
             existingContent = SetTomlBoolValue(existingContent, "full_auto", settings.FullAuto);
             existingContent = SetTomlBoolValue(existingContent, "no_alt_screen", settings.NoAltScreen);
             existingContent = SetTomlBoolValue(existingContent, "oss", settings.Oss);
             existingContent = SetTomlValue(existingContent, "prompt", settings.Prompt);
+            existingContent = SetTomlValue(existingContent, "model", NormalizeModel(settings.Model));
+            existingContent = SetTomlValue(existingContent, "model_reasoning_effort", NormalizeEffort(settings.Effort));
+            existingContent = SetFastMode(existingContent, settings.FastMode);
 
             await _fileService.WriteAllTextAsync(configPath, existingContent, FileMode.Create, FileShare.None, cancellationToken);
         }
@@ -117,6 +122,19 @@ namespace VibeRails.Services.LlmClis
         {
             var envBasePath = ParserConfigs.GetEnvPath();
             return Path.Combine(envBasePath, envName, GetConfigSubdirectory(), "config.toml");
+        }
+
+        private static bool IsFastModeEnabled(string content)
+        {
+            var serviceTier = GetTomlValue(content, "service_tier");
+            if (!string.Equals(serviceTier, "fast", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var featureEnabled =
+                GetTomlBoolValue(content, "features.fast_mode") ??
+                GetTomlSectionBoolValue(content, "features", "fast_mode");
+
+            return featureEnabled != false;
         }
 
         private static string? GetTomlValue(string content, string key)
@@ -138,6 +156,16 @@ namespace VibeRails.Services.LlmClis
             var barePattern = $@"^\s*{Regex.Escape(key)}\s*=\s*([^""'\s#][^\r\n#]*?)\s*(?:#.*)?$";
             var bareMatch = Regex.Match(content, barePattern, RegexOptions.Multiline | RegexOptions.IgnoreCase);
             return bareMatch.Success ? bareMatch.Groups[1].Value.Trim() : null;
+        }
+
+        private static string? GetTomlSectionValue(string content, string section, string key)
+        {
+            var sectionPattern = $@"(?ms)^\s*\[{Regex.Escape(section)}\]\s*(?<body>.*?)(?=^\s*\[|\z)";
+            var sectionMatch = Regex.Match(content, sectionPattern, RegexOptions.IgnoreCase);
+            if (!sectionMatch.Success)
+                return null;
+
+            return GetTomlValue(sectionMatch.Groups["body"].Value, key);
         }
 
         private static string UnescapeTomlBasicString(string raw)
@@ -184,6 +212,13 @@ namespace VibeRails.Services.LlmClis
             return value.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool? GetTomlSectionBoolValue(string content, string section, string key)
+        {
+            var value = GetTomlSectionValue(content, section, key);
+            if (value == null) return null;
+            return value.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static string NormalizeApproval(string? value)
         {
             return value?.Trim().ToLowerInvariant() switch
@@ -191,7 +226,33 @@ namespace VibeRails.Services.LlmClis
                 "on-request" => "on-request",
                 "never" => "never",
                 "on-failure" => "on-request",
-                _ => "untrusted"
+                "untrusted" => "untrusted",
+                _ => ""
+            };
+        }
+
+        private static string NormalizeEffort(string? value)
+        {
+            return value?.Trim().ToLowerInvariant() switch
+            {
+                "minimal" => "minimal",
+                "low" => "low",
+                "medium" => "medium",
+                "high" => "high",
+                "xhigh" => "xhigh",
+                _ => ""
+            };
+        }
+
+        private static string NormalizeModel(string? value)
+        {
+            var trimmed = value?.Trim() ?? "";
+            return trimmed.ToLowerInvariant() switch
+            {
+                "gpt-5" => "gpt-5.4",
+                "gpt-5-codex" => "gpt-5.3-codex",
+                "" => "",
+                _ => trimmed
             };
         }
 
@@ -224,10 +285,7 @@ namespace VibeRails.Services.LlmClis
                     RegexOptions.Multiline | RegexOptions.IgnoreCase);
             }
 
-            var sb = new StringBuilder(content.TrimEnd());
-            if (sb.Length > 0) sb.AppendLine();
-            sb.AppendLine($"{key} = {escapedValue}");
-            return sb.ToString();
+            return AddRootTomlLine(content, $"{key} = {escapedValue}");
         }
 
         private static string EscapeTomlBasicString(string value)
@@ -268,12 +326,90 @@ namespace VibeRails.Services.LlmClis
             }
             else
             {
-                // Add new line at the end
+                return AddRootTomlLine(content, $"{key} = {value.ToString().ToLowerInvariant()}");
+            }
+        }
+
+        private static string SetFastMode(string content, bool enabled)
+        {
+            if (enabled)
+            {
+                content = SetTomlValue(content, "service_tier", "fast");
+                return SetTomlSectionBoolValue(content, "features", "fast_mode", true);
+            }
+
+            var serviceTier = GetTomlValue(content, "service_tier");
+            return string.Equals(serviceTier, "fast", StringComparison.OrdinalIgnoreCase)
+                ? RemoveTomlValue(content, "service_tier")
+                : content;
+        }
+
+        private static string SetTomlSectionBoolValue(string content, string section, string key, bool value)
+        {
+            var rendered = $"{key} = {value.ToString().ToLowerInvariant()}";
+            var sectionPattern = $@"(?ms)^\s*\[{Regex.Escape(section)}\]\s*(?<body>.*?)(?=^\s*\[|\z)";
+            var sectionMatch = Regex.Match(content, sectionPattern, RegexOptions.IgnoreCase);
+
+            if (!sectionMatch.Success)
+            {
                 var sb = new StringBuilder(content.TrimEnd());
-                if (sb.Length > 0) sb.AppendLine();
-                sb.AppendLine($"{key} = {value.ToString().ToLowerInvariant()}");
+                if (sb.Length > 0) sb.AppendLine().AppendLine();
+                sb.AppendLine($"[{section}]");
+                sb.AppendLine(rendered);
                 return sb.ToString();
             }
+
+            var bodyGroup = sectionMatch.Groups["body"];
+            var body = bodyGroup.Value;
+            var keyPattern = $@"^(\s*){Regex.Escape(key)}\s*=.*$";
+
+            if (Regex.IsMatch(body, keyPattern, RegexOptions.Multiline | RegexOptions.IgnoreCase))
+            {
+                body = Regex.Replace(
+                    body,
+                    keyPattern,
+                    m => $"{m.Groups[1].Value}{rendered}",
+                    RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            }
+            else
+            {
+                var sb = new StringBuilder(body.TrimEnd());
+                if (sb.Length > 0) sb.AppendLine();
+                sb.AppendLine(rendered);
+                body = sb.ToString();
+            }
+
+            return content[..bodyGroup.Index] + body + content[(bodyGroup.Index + bodyGroup.Length)..];
+        }
+
+        private static string AddRootTomlLine(string content, string line)
+        {
+            var trimmed = content.TrimEnd();
+            if (trimmed.Length == 0)
+                return line + Environment.NewLine;
+
+            var firstTable = Regex.Match(trimmed, @"(?m)^\s*\[");
+            if (!firstTable.Success)
+                return trimmed + Environment.NewLine + line + Environment.NewLine;
+
+            var before = trimmed[..firstTable.Index].TrimEnd();
+            var after = trimmed[firstTable.Index..].TrimStart('\r', '\n');
+            var sb = new StringBuilder();
+
+            if (before.Length > 0)
+            {
+                sb.AppendLine(before);
+            }
+
+            sb.AppendLine(line);
+
+            if (after.Length > 0)
+            {
+                sb.AppendLine();
+                sb.Append(after);
+            }
+
+            return sb.ToString();
         }
     }
 }

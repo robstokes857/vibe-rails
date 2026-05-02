@@ -681,8 +681,15 @@ export class VibeTerminal {
             return;
         }
 
+        // xterm.js `Terminal.clear()` wipes the visible buffer AND scrollback.
+        // This path runs on every shrink-resize via `resetDisplayOnly()`, and
+        // TUIs like Claude Code repaint in place with absolute CUP — they never
+        // re-scroll old conversation back into the buffer, so a single shrink
+        // mid-session was enough to wipe an entire long Claude session's
+        // scrollback. Use VT ED2 + CUP home instead: same visible-cell cleanup,
+        // scrollback preserved. Regression: UITests/tests/xterm-scrollback.spec.js
         this._terminal.clearSelection?.();
-        this._terminal.clear();
+        this._terminal.write('\x1b[2J\x1b[H');
         this.patchTextarea();
         this._followOutput = true;
     }

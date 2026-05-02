@@ -1,11 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
-using VibeRails.Cli;
 using VibeRails.DB;
 using VibeRails.DTOs;
-
 using VibeRails.Services;
 using VibeRails.Services.Terminal;
-
 using VibeRails.Utils;
 
 namespace VibeRails;
@@ -13,74 +10,31 @@ namespace VibeRails;
 public static class CliLoop
 {
     /// <summary>
-    /// Handles all CLI modes. Returns (exit: true) if a CLI command was handled,
-    /// or (exit: false) to continue to web server mode.
+    /// Parses argv and handles the only two argv-handled exits — --help and --version.
+    /// Every other invocation falls through to web/LMBootstrap mode in Program.cs.
     /// </summary>
-    public static async Task<(bool exit, ParsedArgs parsedArgs)> RunAsync(string[] args, IServiceProvider services)
+    public static Task<(bool exit, ParsedArgs parsedArgs)> RunAsync(string[] args, IServiceProvider services)
     {
         ParsedArgs parsedArgs = ParserConfigs.ParseArgs(args);
 
-        // Create a scope for resolving scoped services
-        using var scope = services.CreateScope();
-        var scopedServices = scope.ServiceProvider;
-
-        // 0. Handle top-level --help and --version flags (no command required)
         if (parsedArgs.Help)
         {
-            CommandRouter.ShowHelp();
-            return (true, parsedArgs);
+            ShowHelp();
+            return Task.FromResult((true, parsedArgs));
         }
 
         if (parsedArgs.Version)
         {
-            CommandRouter.ShowVersion();
-            return (true, parsedArgs);
+            ShowVersion();
+            return Task.FromResult((true, parsedArgs));
         }
 
-        // 1. Try new CLI commands first (env, agent, rules, validate, hooks, launch)
-        var exitCode = await CommandRouter.RouteAsync(parsedArgs, scopedServices, CancellationToken.None);
-        if (exitCode.HasValue)
-        {
-            Environment.ExitCode = exitCode.Value;
-            return (true, parsedArgs);
-        }
-
-        // 2. Check for LMBootstrap mode - fall through to start web server + CLI terminal concurrently
-        if (parsedArgs.IsLMBootstrap)
-        {
-            return (false, parsedArgs);
-        }
-
-        // 3. Check for VCA validation mode - validates rules without web server
-        if (parsedArgs.ValidateVca)
-        {
-            var code = await VcaValidationRunner.RunAsync(services);
-            Environment.ExitCode = code;
-            return (true, parsedArgs);
-        }
-
-        // 4. Check for commit-msg hook validation (called by git commit-msg hook)
-        if (!string.IsNullOrEmpty(parsedArgs.CommitMsgFile))
-        {
-            var code = await VcaValidationRunner.RunCommitMsgValidationAsync(services, parsedArgs.CommitMsgFile);
-            Environment.ExitCode = code;
-            return (true, parsedArgs);
-        }
-
-        // 5. Check for hook management mode
-        if (parsedArgs.InstallHook || parsedArgs.UninstallHook)
-        {
-            var code = await VcaValidationRunner.RunHookManagementAsync(services, parsedArgs.InstallHook);
-            Environment.ExitCode = code;
-            return (true, parsedArgs);
-        }
-
-        // No CLI mode matched - continue to web server
-        return (false, parsedArgs);
+        return Task.FromResult((false, parsedArgs));
     }
 
     /// <summary>
-    /// Runs the CLI terminal with web server access. Called from Program.cs after the web server is started.
+    /// Runs an LLM CLI in the foreground while the web server runs in the background.
+    /// Invoked from Program.cs after the host has started when --env was passed.
     /// </summary>
     public static async Task RunTerminalWithWebAsync(ParsedArgs parsedArgs, IServiceProvider services)
     {
@@ -91,9 +45,10 @@ public static class CliLoop
         var sessionService = scopedServices.GetRequiredService<ITerminalSessionService>();
         var runner = scopedServices.GetRequiredService<TerminalRunner>();
 
-        // Resolve LLM type (smart resolution: LLM enum name → base CLI, otherwise → DB lookup)
+        // Resolve LLM type (smart resolution: LLM enum name → base CLI, otherwise → DB lookup).
         LLM llm;
         string? environmentName = null;
+        string? environmentInitialMessage = null;
 
         if (Enum.TryParse<LLM>(parsedArgs.LMBootstrapCli, true, out var parsedLlm))
         {
@@ -101,16 +56,20 @@ public static class CliLoop
         }
         else
         {
-            // Custom environment - resolve via DB
             var env = await repository.FindEnvironmentByNameAsync(parsedArgs.LMBootstrapCli ?? "");
             if (env == null)
                 throw new InvalidOperationException($"Unknown CLI or environment: {parsedArgs.LMBootstrapCli}");
 
             llm = env.LLM;
             environmentName = env.CustomName;
+            // Carry the env's initial message into the session as UserInputs sequence=1.
+            // The launch command already embeds the prompt in extraArgs (via the spawning
+            // route's AppendInitialPrompt), so this value is for DB recording only —
+            // CreateSessionAsync passes it to the state service, not to PrepareSession.
+            environmentInitialMessage = env.CustomPrompt;
         }
 
-        // Resolve working directory
+        // Resolve working directory.
         var workingDirectory = parsedArgs.WorkDir;
         if (string.IsNullOrEmpty(workingDirectory))
         {
@@ -125,7 +84,33 @@ public static class CliLoop
             }
         }
 
-        var exitCode = await runner.RunCliWithWebAsync(llm, workingDirectory, environmentName, parsedArgs.ExtraArgs, sessionService, parsedArgs.MakeRemote, CancellationToken.None);
+        var exitCode = await runner.RunCliWithWebAsync(
+            llm,
+            workingDirectory,
+            environmentName,
+            parsedArgs.ExtraArgs,
+            sessionService,
+            makeRemote: false,
+            CancellationToken.None,
+            environmentInitialMessage);
         Environment.ExitCode = exitCode;
+    }
+
+    private static void ShowVersion()
+    {
+        Console.WriteLine($"vb {VersionInfo.Version}");
+    }
+
+    private static void ShowHelp()
+    {
+        Console.WriteLine($"vb {VersionInfo.Version}");
+        Console.WriteLine();
+        Console.WriteLine("Usage:");
+        Console.WriteLine("  vb                       Launch the web dashboard (browser opens, server stops on close).");
+        Console.WriteLine("  vb --web                 Same as `vb`.");
+        Console.WriteLine("  vb --version, -v         Print version and exit.");
+        Console.WriteLine("  vb --help,    -h         Print this help and exit.");
+        Console.WriteLine();
+        Console.WriteLine("Everything else is driven from the dashboard or the VS Code extension.");
     }
 }
