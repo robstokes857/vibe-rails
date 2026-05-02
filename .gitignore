@@ -12,6 +12,10 @@ artifacts/
 # Contains personal session content; benchmark Skip()s when these are absent.
 Tests/Services/BertV2/Fixtures/cleaned_input_corpus.jsonl
 Tests/Services/BertV2/Fixtures/cleaned_input_corpus.txt
+
+# Local-only terminal session replay fixtures dumped from real SessionLogs.Content.
+# Contains personal session bytes; replay tests Skip() when these are absent.
+TerminalEmulator.Tests/fixtures/
 # User-specific files
 *.rsuser
 *.suo
