@@ -288,11 +288,11 @@ if (exit)
 }
 
 Log.Information(
-    "[Startup] Parsed mode. processId={ProcessId} isVsCodeMode={IsVsCodeMode} isLMBootstrap={IsLMBootstrap} cli={Cli}",
+    "[Startup] Parsed mode. processId={ProcessId} isVsCodeMode={IsVsCodeMode} isLMBootstrap={IsLMBootstrap} env={Env}",
     Environment.ProcessId,
     parsedArgs.IsVsCodeMode,
     parsedArgs.IsLMBootstrap,
-    parsedArgs.Cli ?? "n/a");
+    parsedArgs.LMBootstrapCli ?? "n/a");
 
 // Start server in background (non-blocking)
 await app.StartAsync();
@@ -353,8 +353,8 @@ if (parsedArgs.IsLMBootstrap)
 
 // Standard web-only mode
 // Generate one-time bootstrap code for authentication
-IAuthService authService = app.Services.GetRequiredService<IAuthService>();
-string bootstrapCode = authService.GenerateBootstrapCode();
+IAuthBootstrapService authBootstrapService = app.Services.GetRequiredService<IAuthBootstrapService>();
+string bootstrapCode = authBootstrapService.GenerateBootstrapCode();
 string bootstrapUrl = $"{serverUrl}/auth/bootstrap?code={bootstrapCode}";
 string vsCodeV1Url = $"vs-code-v1={bootstrapUrl}";
 
@@ -369,11 +369,9 @@ if (redirectArgs.Length > 0)
     bootstrapUrl = $"{bootstrapUrl}&redirectArgs={encodedArgs}";
 }
 
-var isVsCodeMode = args.Any(a => a.Contains("--vs"));
-
 // VS Code mode: emit bootstrap URL immediately, then flush so the extension picks it up.
 // Don't wait for git detection — the frontend handles the "not in git" state dynamically.
-if (isVsCodeMode)
+if (parsedArgs.IsVsCodeMode)
 {
     Log.Information(
         "[Startup] Running in VS Code mode. processId={ProcessId} serverUrl={ServerUrl}",
@@ -404,7 +402,7 @@ Console.WriteLine();
 Console.WriteLine($"Open this URL to access the dashboard:");
 Console.WriteLine($"  {bootstrapUrl}");
 Console.WriteLine();
-Console.WriteLine("(Link expires in 2 minutes and can only be used once)");
+Console.WriteLine("(Link expires in 2 minutes, can only be used once, and the server stops if unused)");
 Console.WriteLine("Press Ctrl+C to stop the server.");
 Console.WriteLine();
 
@@ -418,6 +416,8 @@ Log.Information(
 
 static string[] GetRedirectArgs(string[] args)
 {
+    // Strip internal/web-only flags so they don't leak into a redirected vb invocation.
+    // Surviving redirectable shape: `--env <x> --workdir <y> [-- ...]`.
     var redirectArgs = new List<string>(args.Length);
 
     for (var i = 0; i < args.Length; i++)
@@ -430,13 +430,12 @@ static string[] GetRedirectArgs(string[] args)
             {
                 i++;
             }
-
             continue;
         }
 
         if (arg.StartsWith("--parent-pid=", StringComparison.OrdinalIgnoreCase)
-            || arg.StartsWith("--vs", StringComparison.OrdinalIgnoreCase)
-            || arg is ("--open-browser" or "--launch-browser" or "--launch-web" or "--web"))
+            || arg.Equals("--vs-code-v1", StringComparison.OrdinalIgnoreCase)
+            || arg.Equals("--web", StringComparison.OrdinalIgnoreCase))
         {
             continue;
         }
@@ -446,4 +445,3 @@ static string[] GetRedirectArgs(string[] args)
 
     return redirectArgs.ToArray();
 }
-

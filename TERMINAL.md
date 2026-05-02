@@ -683,12 +683,14 @@ Date started: 2026-03-07
 
 ## Active Issues
 
-Post-hardening remaining work is smaller and lower-risk:
+**Audit (2026-05-01):** these four are all backend hardening polish — accepted
+to live with for now, not user-visible bugs. None are "ConPTY-style upstream"
+in the strict sense, but each is a "won't bite us in normal operation" item:
 
-- stale-session cleanup is activity-aware now, but still not true process-liveness detection
-- `InputAccumulator` still uses an unbounded channel (lower risk than PTY output, but not bounded)
-- `TerminalIoObserverService` still fans out on fire-and-forget tasks with no hard cap
-- end-to-end lifecycle/replay race coverage is still thinner than the emulator/parser regression suite
+- stale-session cleanup is activity-aware now, but still not true process-liveness detection (accepted: false-positives only on idle but truly-running sessions)
+- `InputAccumulator` still uses an unbounded channel (accepted: bounded by user typing speed)
+- `TerminalIoObserverService` still fans out on fire-and-forget tasks with no hard cap (accepted: only used by lightweight observers today)
+- end-to-end lifecycle/replay race coverage is still thinner than the emulator/parser regression suite (accepted: tracked, not blocking)
 
 ---
 
@@ -709,6 +711,58 @@ Key file: `VibeRails/Services/Terminal/TerminalRunner.cs` — `_nativeRemoteEnab
 ---
 
 ## Fixed Issues
+
+### ✅ Scrollback wiped on shrink-resize during long live xterm.js sessions (2026-05-01)
+
+**Symptom (Rob, session `8dd5fe21-2eaf-4622-a7ba-a070416ffa7d`):** after a long
+Claude Code live session in the VS Code extension's web terminal, scrolling up
+in xterm.js showed nothing — not even early conversation. C# emulator scrollback
+for the same session was healthy (~4,600 rows from the original Claude banner
+through the most recent message), so the loss was strictly client-side. Note
+this is the **live xterm.js terminal** in the dashboard / VS Code extension —
+not the Sessions replay viewer modal.
+
+**Root cause:** `VibeTerminal.clearDisplay()` in
+`VibeRails/wwwroot/js/modules/vibe-terminal.js` called xterm.js
+`Terminal.clear()`. Per xterm.js v6 contract, `Terminal.clear()` collapses the
+buffer to a single row — wiping both the visible viewport AND the scrollback
+ring buffer. `clearDisplay()` runs on every shrink-resize via
+`resetDisplayOnly()` from `sendResizeToPty()` in `terminal-multitab.js`. So a
+single font-size bump (or container shrink) mid-session was enough to drop
+scrollback to zero. Claude Code's TUI repaints in place using absolute CUP
+positioning and never re-scrolls history back into the buffer, so once the
+scrollback was wiped it stayed wiped for the rest of the session — exactly
+matching the "scrolling up at the very end shows nothing" symptom.
+
+**Fix:** `clearDisplay()` now writes `\x1b[2J\x1b[H` (ED2 + CUP home) through
+`Terminal.write()` instead of calling the API-level `Terminal.clear()`. ED2
+erases the visible viewport without touching scrollback — same stale-cell
+cleanup the original code wanted, scrollback intact.
+
+**Regression coverage:**
+- `UITests/tests/xterm-scrollback.spec.js` — Node test (xterm/headless) that
+  replays the captured 30-hour session, asserts `clearDisplay`-equivalent
+  cleanup preserves scrollback baseY, and source-greps `vibe-terminal.js` to
+  block re-introducing `this._terminal.clear()`. Run with
+  `cd UITests && node --test tests/xterm-scrollback.spec.js`.
+- `TerminalEmulator.Tests/Session_8dd5fe21_ScrollbackDiagnostic.cs` — pins the
+  server-side guarantee that the C# emulator accumulates scrollback through a
+  long main-screen TUI session (so reconnect snapshots stay non-empty too).
+- Fixture: `TerminalEmulator.Tests/fixtures/session_8dd5fe21_full.bin`
+  (~2.8 MB raw concatenated `SessionLogs.Content` for the session).
+
+**Guardrail:** `Terminal.clear()` is the wrong primitive for any "freshen the
+viewport" job in this codebase. Use `term.write('\x1b[2J\x1b[H')` for visible
+cleanup; only use the API-level reset on a cold reconnect path where
+scrollback is about to be repopulated by a server snapshot
+(`resetForSnapshotReplay()`).
+
+Key files:
+- `VibeRails/wwwroot/js/modules/vibe-terminal.js` — `clearDisplay()`
+- `UITests/tests/xterm-scrollback.spec.js`
+- `TerminalEmulator.Tests/Session_8dd5fe21_ScrollbackDiagnostic.cs`
+
+---
 
 ### ✅ Backend lifecycle / transport hardening pass (2026-03-18)
 
@@ -1162,6 +1216,12 @@ state machine that replaced `CircularBuffer` as the terminal state proxy.
  Terminal Known Issues & Notes
 
 ## Open Bugs
+
+**Audit (2026-05-01):** Of the items below, three are accepted live-with
+(ConPTY redraw quirks + Codex's own mode-transition behavior — upstream
+problems, no clean fix in our layer). The "Typing lag" item is **not**
+live-with: investigation is complete, fix is just deferred — should be picked
+up next cycle, not left as a known issue indefinitely.
 
 ### Font size change causes incomplete TUI rendering / double print
 

@@ -29,4 +29,11 @@
     <ProjectReference Include="..\TerminalEmulator\TerminalEmulator.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="fixtures\*.bin">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

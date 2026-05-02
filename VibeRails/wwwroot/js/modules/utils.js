@@ -89,7 +89,7 @@ export function getCliBrand(cli) {
             label: 'Copilot',
             logo: getAssetPath('assets/img/copilot.svg'),
             className: 'badge-cli-copilot',
-            accentColor: '#199fd7'
+            accentColor: '#ab7df8'
         }
     };
 

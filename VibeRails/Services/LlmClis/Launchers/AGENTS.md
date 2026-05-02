@@ -269,23 +269,6 @@ GET  /api/v1/codex/settings/{envName}  → GetCodexSettings
 PUT  /api/v1/codex/settings/{envName}  → UpdateCodexSettings
 ```
 
-#### CLI Commands
-**File**: [Cli/Commands/CodexCommands.cs](../../Cli/Commands/CodexCommands.cs)
-
-```
-vb codex settings <env>                    # Show all settings
-vb codex get <env> --name <setting>        # Get specific setting
-vb codex set <env> [options]               # Update settings
-```
-
-Options:
-- `--ask-for-approval <untrusted|on-request|never>` / `-a <value>`
-- `--yolo`
-- `--full-auto` / `--no-full-auto`
-- `--no-alt-screen`
-- `--oss`
-- `--prompt <text>`
-
 ### Testing
 
 Unit tests are located in [Tests/CodexSettingsTests.cs](../../../Tests/CodexSettingsTests.cs).
@@ -415,30 +398,6 @@ Key methods:
 GET  /api/v1/claude/settings/{envName}  → GetClaudeSettings
 PUT  /api/v1/claude/settings/{envName}  → UpdateClaudeSettings
 ```
-
-#### CLI Commands
-**File**: [Cli/Commands/ClaudeCommands.cs](../../Cli/Commands/ClaudeCommands.cs)
-
-```
-vb claude settings <env>                    # Show all settings
-vb claude get <env> --name <setting>        # Get specific setting
-vb claude set <env> [options]               # Update settings
-```
-
-Options:
-- `--effort <low|medium|high|xhigh|max>`
-- `--no-session-persistence`
-- `--permission-mode <default|acceptEdits|plan|auto|dontAsk|bypassPermissions>`
-- `--system-prompt <text>`
-- `--allow-dangerously-skip-permissions`
-- `--dangerously-load-development-channels <entries>`
-- `--dangerously-skip-permissions`
-- `--allowedTools <entries>`
-- `--append-system-prompt <text>`
-- `--bare`
-- `--betas <entries>`
-- `--channels <entries>`
-- `--debug [filter]`
 
 #### UI Integration
 **File**: [wwwroot/js/modules/environment-controller.js](../../wwwroot/js/modules/environment-controller.js)

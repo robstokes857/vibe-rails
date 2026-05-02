@@ -94,6 +94,44 @@ public class AuthService : IAuthService
         }
     }
 
+    public bool TryGetUnconsumedBootstrapCodeExpiryUtc(out DateTime expiryUtc)
+    {
+        lock (_bootstrapLock)
+        {
+            if (_bootstrapCode == null || _bootstrapCodeExpiry == null || _bootstrapCodeUsed)
+            {
+                expiryUtc = default;
+                return false;
+            }
+
+            expiryUtc = _bootstrapCodeExpiry.Value;
+            return true;
+        }
+    }
+
+    public bool TryExpireUnconsumedBootstrapCode(DateTime expectedExpiryUtc)
+    {
+        lock (_bootstrapLock)
+        {
+            if (_bootstrapCode == null || _bootstrapCodeExpiry == null || _bootstrapCodeUsed)
+            {
+                return false;
+            }
+
+            // Stale-watcher guard: a re-generated code has a different expiry, so a watcher
+            // armed against the prior expiry must not expire the current code.
+            if (_bootstrapCodeExpiry.Value != expectedExpiryUtc)
+            {
+                return false;
+            }
+
+            // Atomic: any auth request racing through ValidateAndConsumeBootstrapCode will
+            // now see _bootstrapCodeUsed=true and 403, instead of succeeding mid-shutdown.
+            _bootstrapCodeUsed = true;
+            return true;
+        }
+    }
+
     public void SetTabTokenHeader(HttpContext context)
     {
         if (context.Request.Path.Value != "/auth/bootstrap")

@@ -38,24 +38,33 @@ public class CodexSettingsTests : IDisposable
 
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
-        Assert.Equal("untrusted", settings.AskForApproval);
+        Assert.Equal("", settings.AskForApproval);
         Assert.False(settings.Yolo);
         Assert.False(settings.FullAuto);
         Assert.False(settings.NoAltScreen);
         Assert.False(settings.Oss);
         Assert.Equal("", settings.Prompt);
+        Assert.Equal("", settings.Model);
+        Assert.Equal("", settings.Effort);
+        Assert.False(settings.FastMode);
     }
 
     [Fact]
     public async Task GetSettings_ReadsAllSupportedValues_FromToml()
     {
         var toml = @"
-ask_for_approval = ""on-request""
+approval_policy = ""on-request""
 yolo = true
 full_auto = true
 no_alt_screen = true
 oss = true
 prompt = ""Investigate failing tests""
+model = ""gpt-5.4""
+model_reasoning_effort = ""xhigh""
+service_tier = ""fast""
+
+[features]
+fast_mode = true
 ";
 
         _mockFileService.SetFileExists(true);
@@ -69,6 +78,9 @@ prompt = ""Investigate failing tests""
         Assert.True(settings.NoAltScreen);
         Assert.True(settings.Oss);
         Assert.Equal("Investigate failing tests", settings.Prompt);
+        Assert.Equal("gpt-5.4", settings.Model);
+        Assert.Equal("xhigh", settings.Effort);
+        Assert.True(settings.FastMode);
     }
 
     [Fact]
@@ -112,18 +124,67 @@ prompt = ""Investigate failing tests""
             FullAuto = true,
             NoAltScreen = true,
             Oss = true,
-            Prompt = "Investigate failing tests"
+            Prompt = "Investigate failing tests",
+            Model = "gpt-5.5",
+            Effort = "xhigh",
+            FastMode = true
         };
 
         await _service.SaveSettings("test-env", settings, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("ask_for_approval = \"on-request\"", writtenContent);
+        Assert.Contains("approval_policy = \"on-request\"", writtenContent);
         Assert.Contains("yolo = true", writtenContent);
         Assert.Contains("full_auto = true", writtenContent);
         Assert.Contains("no_alt_screen = true", writtenContent);
         Assert.Contains("oss = true", writtenContent);
         Assert.Contains("prompt = \"Investigate failing tests\"", writtenContent);
+        Assert.Contains("model = \"gpt-5.5\"", writtenContent);
+        Assert.Contains("model_reasoning_effort = \"xhigh\"", writtenContent);
+        Assert.Contains("service_tier = \"fast\"", writtenContent);
+        Assert.Contains("[features]", writtenContent);
+        Assert.Contains("fast_mode = true", writtenContent);
+    }
+
+    [Fact]
+    public async Task SaveSettings_MigratesStaleCodexModelNames()
+    {
+        _mockFileService.SetFileExists(false);
+
+        await _service.SaveSettings("test-env", new CodexSettingsDto
+        {
+            Model = "gpt-5",
+            Effort = "high"
+        }, CancellationToken.None);
+
+        var writtenContent = _mockFileService.GetWrittenContent();
+        Assert.Contains("model = \"gpt-5.4\"", writtenContent);
+        Assert.Contains("model_reasoning_effort = \"high\"", writtenContent);
+    }
+
+    [Fact]
+    public async Task SaveSettings_InsertsRootKeysBeforeExistingTables()
+    {
+        var existingToml = """
+            # Codex CLI Configuration
+
+            [features]
+            fast_mode = false
+            """;
+
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(existingToml);
+
+        await _service.SaveSettings("test-env", new CodexSettingsDto
+        {
+            Model = "gpt-5.4-mini",
+            FastMode = true
+        }, CancellationToken.None);
+
+        var writtenContent = _mockFileService.GetWrittenContent();
+        Assert.Matches(@"(?s)model = ""gpt-5\.4-mini"".*\[features\]", writtenContent);
+        Assert.Matches(@"(?s)service_tier = ""fast"".*\[features\]", writtenContent);
+        Assert.Contains("fast_mode = true", writtenContent);
     }
 
     [Fact]
@@ -153,13 +214,14 @@ custom_field = ""preserved""
         var writtenContent = _mockFileService.GetWrittenContent();
         Assert.Contains("# Custom comment", writtenContent);
         Assert.Contains("custom_field = \"preserved\"", writtenContent);
-        Assert.Contains("ask_for_approval = \"never\"", writtenContent);
+        Assert.Contains("approval_policy = \"never\"", writtenContent);
         Assert.Contains("full_auto = true", writtenContent);
-        // `approval` is the legacy alias for `ask_for_approval` and must be cleared
-        // so it doesn't shadow the new key on read.
+        // Legacy aliases must be cleared so they do not shadow the current key.
+        Assert.DoesNotMatch(@"(?m)^\s*ask_for_approval\s*=", writtenContent);
         Assert.DoesNotMatch(@"(?m)^\s*approval\s*=", writtenContent);
-        // Other legacy fields without VibeRails mapping are left alone.
-        Assert.Contains("model = \"old-model\"", writtenContent);
+        // `model` is now a managed field, so the empty/default selection removes
+        // any previous explicit model. Other unmapped legacy fields stay intact.
+        Assert.DoesNotMatch(@"(?m)^\s*model\s*=", writtenContent);
         Assert.Contains("sandbox = \"read-only\"", writtenContent);
         Assert.Contains("search = true", writtenContent);
     }
@@ -199,7 +261,7 @@ custom_field = ""preserved""
     public async Task SaveSettings_RemovesEmptyPrompt()
     {
         var existingToml = @"
-ask_for_approval = ""on-request""
+approval_policy = ""on-request""
 prompt = ""old prompt""
 ";
 
@@ -216,7 +278,7 @@ prompt = ""old prompt""
 
         var writtenContent = _mockFileService.GetWrittenContent();
         Assert.DoesNotContain("prompt =", writtenContent);
-        Assert.Contains("ask_for_approval = \"on-request\"", writtenContent);
+        Assert.Contains("approval_policy = \"on-request\"", writtenContent);
     }
 
     private class MockFileService : IFileService

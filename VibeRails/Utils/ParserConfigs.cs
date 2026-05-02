@@ -5,82 +5,20 @@ namespace VibeRails.Utils
     /// </summary>
     public class ParsedArgs
     {
-        // CLI command structure (e.g., "vb env list" → Command="env", SubCommand="list")
-        public string? Command { get; set; }
-        public string? SubCommand { get; set; }
-        public string? Target { get; set; }  // e.g., environment name, agent path
-
-        // LMBootstrap mode args
+        // LMBootstrap mode (vb --env <llm|name> --workdir <path> [-- <extra-args>])
         public bool IsLMBootstrap { get; set; }
-        public bool IsVsCodeMode { get; set; }
-        public bool OpenBrowser { get; set; }
-        public bool ShutdownOnBrowserClose { get; set; }
         public string? LMBootstrapCli { get; set; }
         public string? WorkDir { get; set; }
         public string[] ExtraArgs { get; set; } = [];
 
-        // VCA Validation mode args
-        public bool ValidateVca { get; set; }
-        public bool PreCommit { get; set; }
-        public bool Staged { get; set; }
-        public string? CommitMsgFile { get; set; }
-        public string? AgentPath { get; set; }
+        // VS Code extension / parent->child terminal-tab spawn (vb --vs-code-v1 [--parent-pid <pid>])
+        public bool IsVsCodeMode { get; set; }
 
-        // Hook management args
-        public bool InstallHook { get; set; }
-        public bool UninstallHook { get; set; }
+        // Web dashboard (vb / vb --web)
+        public bool OpenBrowser { get; set; }
+        public bool ShutdownOnBrowserClose { get; set; }
 
-        // Environment command options
-        public string? Cli { get; set; }       // --cli claude/codex/gemini
-        public string? Args { get; set; }      // --args "custom arguments"
-        public string? Prompt { get; set; }    // --prompt "custom prompt"
-
-        // Agent/Rules command options
-        public string? Rule { get; set; }      // --rule "rule text"
-        public string? Level { get; set; }     // --level WARN/COMMIT/STOP
-        public string? Rules { get; set; }     // --rules "rule1,rule2" (comma-separated)
-        public string? Name { get; set; }      // --name "custom name"
-
-        // Gemini settings options
-        public string? Theme { get; set; }     // --theme Default/Dark/Light
-        public bool? Sandbox { get; set; }     // --sandbox / --no-sandbox
-        public bool? AutoApprove { get; set; } // --auto-approve / --no-auto-approve
-        public bool? VimMode { get; set; }     // --vim / --no-vim
-        public bool? CheckUpdates { get; set; } // --check-updates / --no-check-updates
-        public bool? Yolo { get; set; }        // --yolo / --no-yolo
-
-        // Codex settings options
-        public string? CodexApproval { get; set; } // --ask-for-approval untrusted|on-request|never
-        public bool? FullAuto { get; set; }        // --full-auto / --no-full-auto
-        public bool? NoAltScreen { get; set; }     // --no-alt-screen / --alt-screen
-        public bool? Oss { get; set; }             // --oss / --no-oss
-
-        // Claude settings options
-        public string? ClaudeEffort { get; set; }                          // --effort low|medium|high|xhigh|max
-        public bool? ClaudeNoSessionPersistence { get; set; }              // --no-session-persistence
-        public string? ClaudePermissionMode { get; set; }                  // --permission-mode default|acceptEdits|plan|auto|dontAsk|bypassPermissions
-        public string? ClaudeSystemPrompt { get; set; }                    // --system-prompt "text"
-        public bool? ClaudeAllowDangerouslySkipPermissions { get; set; }   // --allow-dangerously-skip-permissions
-        public string? ClaudeDangerouslyLoadDevelopmentChannels { get; set; } // --dangerously-load-development-channels "server:webhook"
-        public bool? ClaudeDangerouslySkipPermissions { get; set; }        // --dangerously-skip-permissions
-        public string? ClaudeAllowedTools { get; set; }                    // --allowedTools "Bash(git log *)"
-        public string? ClaudeAppendSystemPrompt { get; set; }              // --append-system-prompt "text"
-        public bool? ClaudeBare { get; set; }                              // --bare
-        public string? ClaudeBetas { get; set; }                           // --betas "interleaved-thinking"
-        public string? ClaudeChannels { get; set; }                        // --channels "plugin:name@marketplace"
-        public bool? ClaudeDebug { get; set; }                             // --debug
-        public string? ClaudeDebugFilter { get; set; }                     // optional --debug value
-
-        // Remote connection options
-        public bool MakeRemote { get; set; }    // --make-remote
-
-        // Output options
-        public bool Verbose { get; set; }      // --verbose
-
-        // Trace mode
-        public bool Trace { get; set; }        // --trace
-
-        // Help/Version
+        // Top-level
         public bool Help { get; set; }
         public bool Version { get; set; }
     }

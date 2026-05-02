@@ -36,6 +36,33 @@ public static class EnvironmentRoutes
             return Results.Ok(new EnvironmentListResponse(response));
         }).WithName("GetEnvironments");
 
+        // GET /api/v1/environments/{name} - Fetch a single environment by name.
+        // Includes default environments (the LIST endpoint hides them) so launchers
+        // can resolve any env the UI exposes through the launch flow.
+        app.MapGet("/api/v1/environments/{name}", async (
+            IRepository repository,
+            string name,
+            CancellationToken cancellationToken) =>
+        {
+            var environment = await repository.FindEnvironmentByNameAsync(name, cancellationToken);
+
+            if (environment == null)
+            {
+                return Results.NotFound(new ErrorResponse($"Environment not found: {name}"));
+            }
+
+            return Results.Ok(new EnvironmentResponse(
+                environment.Id,
+                environment.CustomName,
+                environment.LLM.ToString(),
+                environment.Path,
+                environment.CustomArgs,
+                environment.CustomPrompt,
+                LLM_Environment.DefaultPrompt,
+                environment.LastUsedUTC
+            ));
+        }).WithName("GetEnvironmentByName");
+
         // POST /api/v1/environments - Create new environment
         app.MapPost("/api/v1/environments", async (
             LlmCliEnvironmentService envService,
@@ -104,8 +131,7 @@ public static class EnvironmentRoutes
             UpdateEnvironmentRequest request,
             CancellationToken cancellationToken) =>
         {
-            var environments = await repository.GetAllEnvironmentsAsync(cancellationToken);
-            var environment = environments.FirstOrDefault(e => e.CustomName == name);
+            var environment = await repository.FindEnvironmentByNameAsync(name, cancellationToken);
 
             if (environment == null)
             {
@@ -153,8 +179,7 @@ public static class EnvironmentRoutes
             string name,
             CancellationToken cancellationToken) =>
         {
-            var environments = await repository.GetAllEnvironmentsAsync(cancellationToken);
-            var environment = environments.FirstOrDefault(e => e.CustomName == name);
+            var environment = await repository.FindEnvironmentByNameAsync(name, cancellationToken);
 
             if (environment == null)
             {

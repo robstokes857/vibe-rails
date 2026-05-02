@@ -12,6 +12,7 @@
   "type": "commonjs",
   "devDependencies": {
     "@playwright/test": "^1.58.0",
+    "@xterm/headless": "^6.0.0",
     "http-server": "^14.1.1"
   }
 }
