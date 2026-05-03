@@ -88,10 +88,7 @@ Press `F5` to launch the extension in development mode, then click the VibeRails
    - STOP: min_coverage=80
    - WARN: log_files_changed
    ```
-3. **Launch a CLI** with environment isolation:
-   ```bash
-   vb --lmbootstrap claude --env development
-   ```
+3. **Launch a CLI** from the dashboard Web Terminal or from an environment's **Web UI** / native terminal action.
 
 ---
 
@@ -305,13 +302,14 @@ vb
 - Opens browser to dashboard UI
 - Provides REST API at `http://localhost:<port>/api/v1/`
 
-#### 2. LMBootstrap Mode (CLI Wrapper)
+#### 2. Environment Bootstrap Mode (Internal Native-Terminal Wrapper)
 
 ```bash
-vb --lmbootstrap claude --env production
+vb --env production --workdir /path/to/repo
 ```
 
-- Wraps LLM CLI execution with environment isolation
+- Used by Web UI and VS Code launch paths when a tracked native terminal is needed
+- Wraps LLM CLI execution with environment isolation and session tracking
 - Captures terminal output for session logging
 - Applies environment-specific configurations
 - Stores session data in SQLite
@@ -376,16 +374,7 @@ echo "## Rules\n- WARN: log_files_changed" > agent.md
 
 Create isolated environments for different contexts:
 
-```bash
-# Development environment
-vb --lmbootstrap claude --env development
-
-# Production environment (stricter rules)
-vb --lmbootstrap claude --env production
-
-# Team-specific environment
-vb --lmbootstrap codex --env team-alpha
-```
+Use the Environments page to create named Claude, Codex, Gemini, or Copilot profiles. Launch them through the Web Terminal, the environment row's **Web UI** button, or the native terminal action.
 
 **Environment Configuration:**
 ```
@@ -405,13 +394,7 @@ vb --lmbootstrap codex --env team-alpha
 
 All CLI sessions are logged with full terminal output:
 
-```bash
-# Launch with logging
-vb --lmbootstrap claude --env dev
-
-# View logs in Web UI
-# Navigate to Sessions → Select session → View terminal output
-```
+Launch from the Web Terminal or an environment action, then navigate to Sessions and select a session to view terminal output.
 
 **Database Storage:**
 - Global: `~/.vibe_rails/vibecontrol.db`

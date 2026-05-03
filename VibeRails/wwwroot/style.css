@@ -3603,6 +3603,166 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     font-size: 0.9rem;
 }
 
+.ts-cli-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    line-height: 1.25;
+}
+
+.ts-cli-logo {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    flex: 0 0 20px;
+}
+
+.ts-cli-logo.ts-cli-logo-fallback {
+    color: var(--color-text-muted);
+    font-size: 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ts-cli-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+/* ----- Tom Select theme overrides for the app's dark surface ----- */
+
+.ts-wrapper.single .ts-control,
+.ts-wrapper.single .ts-control input {
+    cursor: pointer;
+}
+
+.ts-wrapper .ts-control {
+    background-color: var(--color-bg-surface);
+    border-color: var(--color-border);
+    color: var(--color-text);
+    min-height: 36px;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.95rem;
+}
+
+.ts-wrapper .ts-control input,
+.ts-wrapper .ts-control input::placeholder {
+    color: var(--color-text);
+}
+
+.ts-wrapper .ts-control input::placeholder {
+    color: var(--color-text-muted);
+    opacity: 0.85;
+}
+
+.ts-wrapper.focus .ts-control,
+.ts-wrapper.single.input-active .ts-control {
+    background-color: var(--color-bg-surface);
+    border-color: color-mix(in srgb, var(--color-primary, #6ea8fe) 70%, var(--color-border) 30%);
+    box-shadow: 0 0 0 0.18rem color-mix(in srgb, var(--color-primary, #6ea8fe) 25%, transparent);
+}
+
+.ts-wrapper.disabled .ts-control,
+.ts-wrapper.disabled .ts-control * {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.ts-wrapper .ts-control .item {
+    color: var(--color-text);
+}
+
+.ts-dropdown {
+    background-color: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    margin-top: 4px;
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 0.95rem;
+    min-width: 320px;
+    width: max-content;
+    max-width: min(560px, 90vw);
+}
+
+.ts-dropdown .ts-dropdown-content {
+    max-height: min(60vh, 480px);
+    padding: 4px 0;
+}
+
+.ts-dropdown .option {
+    padding: 8px 12px;
+    color: var(--color-text);
+    border-radius: 0;
+    line-height: 1.3;
+}
+
+.ts-dropdown .option.active,
+.ts-dropdown .active {
+    background-color: var(--color-bg-surface-hover);
+    color: var(--color-text);
+}
+
+.ts-dropdown .option.selected {
+    background-color: color-mix(in srgb, var(--color-primary, #6ea8fe) 22%, var(--color-bg-surface));
+    color: var(--color-text);
+}
+
+.ts-dropdown .option.selected.active {
+    background-color: color-mix(in srgb, var(--color-primary, #6ea8fe) 32%, var(--color-bg-surface));
+}
+
+.ts-dropdown .optgroup-header {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+    color: var(--color-text-muted);
+    background-color: color-mix(in srgb, var(--color-bg-surface) 60%, var(--color-bg-base));
+    padding: 6px 12px 4px;
+    border-top: 1px solid var(--color-border);
+}
+
+.ts-dropdown .optgroup:first-child .optgroup-header {
+    border-top: none;
+}
+
+.ts-dropdown .no-results {
+    color: var(--color-text-muted);
+    padding: 10px 12px;
+}
+
+/* Compact variants — match BS5 form-select-sm / form-select-xs sizing */
+.ts-wrapper.form-select-sm .ts-control {
+    min-height: 31px;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+.ts-wrapper.form-select-xs .ts-control {
+    min-height: 26px;
+    padding: 0.15rem 0.45rem;
+    font-size: 0.8rem;
+}
+
+.ts-wrapper.form-select-sm .ts-cli-logo,
+.ts-wrapper.form-select-xs .ts-cli-logo {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+}
+
+.ts-wrapper.form-select-sm .ts-cli-row,
+.ts-wrapper.form-select-xs .ts-cli-row {
+    gap: 7px;
+}
+
 .env-name-text {
     min-width: 0;
     overflow: hidden;

@@ -1760,6 +1760,17 @@ class TerminalManager {
             });
         }
 
+        const ts = selectEl.tomselect;
+        if (ts) {
+            try {
+                ts.focus();
+                ts.open();
+                return;
+            } catch {
+                // Fall through to native fallback.
+            }
+        }
+
         selectEl.focus();
         if (typeof selectEl.showPicker === 'function') {
             try {
@@ -1957,10 +1968,16 @@ class TerminalManager {
             const active = this.getActiveTab();
             const canSelect = active && !active.state.hasActiveSession;
             this.headerSelect.disabled = !canSelect;
-            if (active) {
-                this.headerSelect.value = active.state.selection || '';
+            const ts = this.headerSelect.tomselect;
+            if (ts) {
+                if (canSelect) ts.enable();
+                else ts.disable();
+            }
+            const nextValue = active ? (active.state.selection || '') : '';
+            if (ts) {
+                ts.setValue(nextValue, true);
             } else {
-                this.headerSelect.value = '';
+                this.headerSelect.value = nextValue;
             }
         }
     }

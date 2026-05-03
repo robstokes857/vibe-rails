@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="assets/xterm/xterm.css" />
     <link rel="stylesheet" href="assets/fontawesome/all.min.css" />
     <link rel="stylesheet" href="assets/not-a-toast.css" />
+    <link rel="stylesheet" href="assets/tom-select/tom-select.bootstrap5.min.css" />
     <style>
         /* Hide nav until app stylesheet loads to prevent FOUC */
         .app-subnav { opacity: 0; }
@@ -21,17 +22,21 @@
     <script>
         window.__viberails_cache_bust__ = Date.now().toString(36);
 
-        const _styleBase = (window.__viberails_VSCODE__ && window.__viberails_ASSETS_BASE__)
+        const _assetBase = (window.__viberails_VSCODE__ && window.__viberails_ASSETS_BASE__)
             ? window.__viberails_ASSETS_BASE__.replace(/\/$/, '') + '/'
             : document.baseURI;
-        const appStyleUrl = new URL('style.css', _styleBase);
-        if (!window.__viberails_VSCODE__) {
-            appStyleUrl.searchParams.set('v', window.__viberails_cache_bust__);
-        }
+
+        window.__viberails_asset_url__ = (path) => {
+            const url = new URL(path, _assetBase);
+            if (!window.__viberails_VSCODE__) {
+                url.searchParams.set('v', window.__viberails_cache_bust__);
+            }
+            return url.toString();
+        };
 
         const appStyleLink = document.createElement('link');
         appStyleLink.rel = 'stylesheet';
-        appStyleLink.href = appStyleUrl.toString();
+        appStyleLink.href = window.__viberails_asset_url__('style.css');
         document.head.appendChild(appStyleLink);
     </script>
 </head>
@@ -1408,9 +1413,30 @@
     <script src="assets/xterm/addon-clipboard.js"></script>
     <script src="assets/xterm/terminal-themes.js"></script>
     <script src="assets/sortable.min.js"></script>
-    <script src="js/performance-mode.js"></script>
-    <script src="js/background-effect.js"></script>
-    <script type="module" src="app.js"></script>
+    <script src="assets/tom-select/tom-select.complete.min.js"></script>
+    <script>
+        const loadVibeRailsScript = (src, type) => new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = window.__viberails_asset_url__(src);
+            if (type) {
+                script.type = type;
+            }
+            if (window.__viberails_NONCE__) {
+                script.nonce = window.__viberails_NONCE__;
+            }
+            script.onload = resolve;
+            script.onerror = () => reject(new Error(`Failed to load ${src}`));
+            document.body.appendChild(script);
+        });
+
+        (async () => {
+            await loadVibeRailsScript('js/performance-mode.js');
+            await loadVibeRailsScript('js/background-effect.js');
+            await loadVibeRailsScript('app.js', 'module');
+        })().catch((error) => {
+            console.error('Failed to load VibeRails assets:', error);
+        });
+    </script>
 </body>
 
 </html>

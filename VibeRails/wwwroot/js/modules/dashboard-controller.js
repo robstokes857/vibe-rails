@@ -459,12 +459,18 @@ export class DashboardController {
                 const result = this.parseSandboxCliSelection(cliSelect);
                 if (!result) {
                     if (cliSelect) {
-                        cliSelect.classList.remove('vb-terminal-selection-shake');
-                        void cliSelect.offsetWidth;
-                        cliSelect.classList.add('vb-terminal-selection-shake');
-                        cliSelect.focus();
-                        if (typeof cliSelect.showPicker === 'function') {
-                            try { cliSelect.showPicker(); } catch {}
+                        const ts = cliSelect.tomselect;
+                        const shakeTarget = ts?.wrapper || cliSelect;
+                        shakeTarget.classList.remove('vb-terminal-selection-shake');
+                        void shakeTarget.offsetWidth;
+                        shakeTarget.classList.add('vb-terminal-selection-shake');
+                        if (ts) {
+                            try { ts.focus(); ts.open(); } catch {}
+                        } else {
+                            cliSelect.focus();
+                            if (typeof cliSelect.showPicker === 'function') {
+                                try { cliSelect.showPicker(); } catch {}
+                            }
                         }
                     }
                     return null;

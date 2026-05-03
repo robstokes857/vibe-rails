@@ -66,13 +66,28 @@ namespace VibeRails.Services.LlmClis
             var node = JsonNode.Parse(json);
             if (node == null) return dto;
 
-            // Map Gemini CLI settings to our DTO
+            // Map Gemini CLI settings to our DTO. Keep legacy keys as fallbacks
+            // because older VibeRails builds wrote them.
             dto.Theme = node["theme"]?.GetValue<string>() ?? "Default";
-            dto.CheckForUpdates = node["checkForUpdates"]?.GetValue<bool>() ?? true;
+            dto.CheckForUpdates =
+                node["general"]?["enableAutoUpdate"]?.GetValue<bool>()
+                ?? node["checkForUpdates"]?.GetValue<bool>()
+                ?? true;
             dto.VimMode = node["general"]?["vimMode"]?.GetValue<bool>() ?? false;
-            dto.SandboxEnabled = node["sandbox"]?["enabled"]?.GetValue<bool>() ?? true;
-            dto.AutoApproveTools = node["tools"]?["autoAccept"]?.GetValue<bool>() ?? false;
-            dto.YoloMode = !(node["security"]?["disableYoloMode"]?.GetValue<bool>() ?? true);
+            dto.SandboxEnabled =
+                node["tools"]?["sandbox"]?.GetValue<bool>()
+                ?? node["sandbox"]?["enabled"]?.GetValue<bool>()
+                ?? true;
+
+            dto.ApprovalMode = NormalizeApprovalMode(node["general"]?["defaultApprovalMode"]?.GetValue<string>());
+            var legacyAutoAccept = node["tools"]?["autoAccept"]?.GetValue<bool>() ?? false;
+            if (dto.ApprovalMode == "default" && legacyAutoAccept)
+            {
+                dto.ApprovalMode = "auto_edit";
+            }
+
+            dto.AutoApproveTools = dto.ApprovalMode == "auto_edit";
+            dto.YoloMode = dto.ApprovalMode == "yolo";
 
             return dto;
         }
@@ -97,26 +112,35 @@ namespace VibeRails.Services.LlmClis
             }
             node ??= new JsonObject();
 
-            // Update our managed settings
-            node["theme"] = settings.Theme;
-            node["checkForUpdates"] = settings.CheckForUpdates;
-
             // Nested settings - ensure parent objects exist
             node["general"] ??= new JsonObject();
             node["general"]!["vimMode"] = settings.VimMode;
-
-            node["sandbox"] ??= new JsonObject();
-            node["sandbox"]!["enabled"] = settings.SandboxEnabled;
+            node["general"]!["enableAutoUpdate"] = settings.CheckForUpdates;
+            var approvalMode = NormalizeApprovalMode(settings.ApprovalMode);
+            if (approvalMode == "default" && settings.AutoApproveTools)
+            {
+                approvalMode = "auto_edit";
+            }
+            node["general"]!["defaultApprovalMode"] = approvalMode == "yolo" ? "default" : approvalMode;
 
             node["tools"] ??= new JsonObject();
-            node["tools"]!["autoAccept"] = settings.AutoApproveTools;
-
-            node["security"] ??= new JsonObject();
-            node["security"]!["disableYoloMode"] = !settings.YoloMode;
+            node["tools"]!["sandbox"] = settings.SandboxEnabled;
 
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = node.ToJsonString(options);
             await _fileService.WriteAllTextAsync(settingsPath, json, FileMode.Create, FileShare.None, cancellationToken);
+        }
+
+        private static string NormalizeApprovalMode(string? value)
+        {
+            var raw = (value ?? "").Trim().ToLowerInvariant();
+            return raw switch
+            {
+                "auto_edit" => "auto_edit",
+                "yolo" => "yolo",
+                "plan" => "plan",
+                _ => "default"
+            };
         }
 
         private string GetSettingsFilePath(string envName)

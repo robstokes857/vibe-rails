@@ -14,12 +14,11 @@ All launchers build commands using the unified `--env` flag:
 - **Custom environment**: `vb --env "{envName}" --workdir "{dir}"`
 - **Base CLI (no custom env)**: `vb --env {cliName} --workdir "{dir}"`
 
-The `--env`, `--environment`, and `--lmbootstrap` flags are all aliases — they all trigger
-LMBootstrap mode. The value is resolved smartly:
+Only `--env` is supported for environment bootstrap mode. The value is resolved smartly:
 1. If it matches an LLM enum name (claude/codex/gemini, case-insensitive) → base CLI launch
 2. Otherwise → custom environment name, looked up in DB via `FindEnvironmentByNameAsync()`
 
-See [Cli/AGENTS.md](../../../Cli/AGENTS.md) for full details on how `--env` resolution works.
+The old `--environment` / `--lmbootstrap` aliases and broader CLI command router have been removed.
 
 ## Architecture
 
@@ -213,21 +212,30 @@ The Codex CLI supports per-environment settings configuration. Settings are stor
 
 | Setting | DTO Property | TOML Key | Type | Default | Description |
 |---------|--------------|----------|------|---------|-------------|
-| Ask For Approval | `AskForApproval` | `ask_for_approval` | string | "untrusted" | Approval mode: untrusted, on-request, never |
+| Ask For Approval | `AskForApproval` | `approval_policy` | string | "" | Approval mode: default, untrusted, on-request, never |
 | YOLO | `Yolo` | `yolo` | bool | false | Bypass approvals and sandboxing |
 | Full-Auto | `FullAuto` | `full_auto` | bool | false | Shortcut for low-friction local work |
 | No Alternate Screen | `NoAltScreen` | `no_alt_screen` | bool | false | Disable alternate screen mode for the TUI |
 | OSS Provider | `Oss` | `oss` | bool | false | Use the local open source model provider |
 | Prompt | `Prompt` | `prompt` | string | "" | Optional text instruction to start the session |
+| Model | `Model` | `model` | string | "" | Optional Codex model override |
+| Effort | `Effort` | `model_reasoning_effort` | string | "" | Optional reasoning effort override |
+| Fast Mode | `FastMode` | `service_tier` + `[features].fast_mode` | bool | false | Enables fast service tier for supported models |
 
 **TOML Format**:
 ```toml
-ask_for_approval = "on-request"
+approval_policy = "on-request"
 yolo = false
 full_auto = true
 no_alt_screen = true
 oss = false
 prompt = "Investigate failing tests"
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+service_tier = "fast"
+
+[features]
+fast_mode = true
 ```
 
 ### Technical Specs
@@ -238,12 +246,15 @@ prompt = "Investigate failing tests"
 ```csharp
 public class CodexSettingsDto
 {
-    public string AskForApproval { get; set; } = "untrusted";
+    public string AskForApproval { get; set; } = "";
     public bool Yolo { get; set; } = false;
     public bool FullAuto { get; set; } = false;
     public bool NoAltScreen { get; set; } = false;
     public bool Oss { get; set; } = false;
     public string Prompt { get; set; } = "";
+    public string Model { get; set; } = "";
+    public string Effort { get; set; } = "";
+    public bool FastMode { get; set; } = false;
 }
 ```
 
