@@ -134,7 +134,7 @@ VibeControl2/
 
 ### Application Modes
 
-VibeRails operates in three primary modes:
+VibeRails has a deliberately small startup surface:
 
 #### 1. Web Server Mode (Default)
 ```bash
@@ -145,31 +145,31 @@ vb
 - Provides REST API for managing agents, environments, sessions
 - Terminal sessions started from Web UI via `POST /api/v1/terminal/start`
 
-#### 2. CLI + Web Mode (Terminal Session)
+#### 2. VS Code Extension Mode
+```bash
+vb --vs-code-v1 [--parent-pid <pid>]
+```
+- Internal mode used by the VS Code extension and terminal-tab child processes
+- Prints a one-time bootstrap URL for the extension host
+- Uses the same authenticated web/API backend as browser mode
+
+#### 3. Environment Bootstrap Mode
 ```bash
 vb --env claude                    # Launch base CLI with session tracking + web viewer
 vb --env "my-research-setup"       # Launch custom environment (DB lookup)
 vb --env gemini --workdir /project # Explicit working directory
 ```
-- Unified `--env` flag (`--environment` and `--lmbootstrap` are aliases)
+- Used by Web UI and VS Code launch paths when a tracked native terminal is needed
 - Smart resolution: LLM name → base CLI, otherwise → custom environment DB lookup
 - `--workdir` optional: uses git root if available, falls back to current directory
-- **Starts web server in background** — prints URL for browser access to same terminal
+- Starts web server in background and prints the viewer URL
 - CLI runs in foreground (Console.ReadKey input loop)
-- Web viewers connect via WebSocket — both Console and WebSocket consumers active simultaneously (pub/sub)
+- Web viewers connect via WebSocket; both Console and WebSocket consumers can receive output
 - Full session tracking: database logging, user input tracking, git change detection
 - Web UI "Stop" button disabled for CLI-owned sessions
 - Web server shuts down when CLI terminal exits
 
-#### 3. CLI-Only Commands
-```bash
-vb env list                        # List environments
-vb validate                        # Run VCA validation
-vb hooks install                   # Install git hooks
-```
-- Pure CLI commands that exit immediately without starting a web server
-
-See [Cli/AGENTS.md](VibeRails/Cli/AGENTS.md) for full details.
+The old CLI management commands (`vb env`, `vb validate`, `vb hooks`, etc.) are no longer part of the supported surface. Use the Web UI, VS Code extension, or REST APIs for those workflows.
 
 ### Component Interaction Flow
 
@@ -885,9 +885,8 @@ VibeRails implements production-grade cookie-based authentication to prevent una
 
 **Browser Launch:**
 ```bash
-vb --open-browser    # Auto-launches with secure URL
-vb --launch-browser  # Alternative flag
-vb                   # Prints URL to copy/paste
+vb        # Launches the dashboard and opens the browser
+vb --web  # Explicit web-dashboard launch
 ```
 
 ### Input Validation
@@ -1002,12 +1001,12 @@ VibeRails includes a sophisticated git hook installation system that automatical
 
 **Hook Scripts**:
 1. **pre-commit-hook.sh** - Validates VCA rules before commit
-   - Runs `vb --validate-vca --pre-commit`
+   - Legacy script kept with the hook installer; do not document it as a direct user workflow until the non-interactive validation runner is restored
    - Blocks commits if validation fails
    - Allows bypass with `git commit --no-verify`
 
 2. **commit-msg-hook.sh** - Validates COMMIT-level acknowledgments
-   - Runs `vb --commit-msg "$1"`
+   - Legacy script kept with the hook installer; the old `vb --commit-msg` entry point has been removed
    - Ensures required acknowledgments in commit message
    - Enforces COMMIT-level rule compliance
 
@@ -1086,19 +1085,6 @@ if (hookService.IsHookInstalled(repoPath))
 
 // Uninstall hooks
 var uninstallResult = await hookService.UninstallHooksAsync(repoPath, cancellationToken);
-```
-
-**CLI Commands**:
-
-```bash
-# Check hook status
-vb hooks status
-
-# Install hooks manually (if auto-install disabled)
-vb hooks install
-
-# Uninstall hooks
-vb hooks uninstall
 ```
 
 **API Endpoints**:

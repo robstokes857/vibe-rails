@@ -226,13 +226,18 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
         placeholder = 'Select LLM...',
         selectedValue = '',
         includeGroups = true,
-        includeDefaultSuffix = true
+        includeDefaultSuffix = true,
+        enhance = true
     } = options;
 
     const optionItems = buildLlmSelectionOptions(environments, {
         includeGroups,
         includeDefaultSuffix
     });
+
+    if (selectEl.tomselect) {
+        selectEl.tomselect.destroy();
+    }
 
     selectEl.innerHTML = '';
 
@@ -258,6 +263,10 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
             const option = document.createElement('option');
             option.value = item.value;
             option.textContent = item.label;
+            option.dataset.cli = item.cli || '';
+            if (item.environmentId != null) {
+                option.dataset.envId = String(item.environmentId);
+            }
             parent.appendChild(option);
         });
     });
@@ -266,7 +275,55 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
         selectEl.value = selectedValue;
     }
 
+    if (enhance) {
+        enhanceLlmSelectWithTomSelect(selectEl, {
+            placeholder: placeholder || 'Select LLM...'
+        });
+    }
+
     return optionItems;
+}
+
+function renderCliRowHtml(cliKey, data, escape) {
+    const cli = (data[cliKey] || '').toString();
+    const brand = getCliBrand(cli);
+    const logoStyle = brand.logoFilter ? ` style="filter: ${escape(brand.logoFilter)};"` : '';
+    const logo = brand.logo
+        ? `<img class="ts-cli-logo" src="${escape(brand.logo)}" alt="" loading="lazy"${logoStyle}>`
+        : `<span class="ts-cli-logo ts-cli-logo-fallback"><i class="fa-solid fa-terminal" aria-hidden="true"></i></span>`;
+    const label = escape(data.text || '');
+    return `<div class="ts-cli-row">${logo}<span class="ts-cli-label">${label}</span></div>`;
+}
+
+export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
+    if (!selectEl || typeof window.TomSelect !== 'function') return null;
+
+    const {
+        placeholder = 'Select LLM...',
+        cliKey = 'cli',
+        searchable = false
+    } = options;
+
+    if (selectEl.tomselect) {
+        selectEl.tomselect.destroy();
+    }
+
+    const config = {
+        placeholder,
+        allowEmptyOption: true,
+        maxOptions: null,
+        plugins: [],
+        render: {
+            option: (data, escape) => renderCliRowHtml(cliKey, data, escape),
+            item: (data, escape) => renderCliRowHtml(cliKey, data, escape)
+        }
+    };
+
+    if (!searchable) {
+        config.controlInput = null;
+    }
+
+    return new window.TomSelect(selectEl, config);
 }
 
 export function parseLlmSelection(selection, environments = []) {

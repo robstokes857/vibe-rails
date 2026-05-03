@@ -1,3 +1,5 @@
+import { enhanceLlmSelectWithTomSelect } from './utils.js';
+
 export class EnvironmentController {
     constructor(app) {
         this.app = app;
@@ -87,12 +89,18 @@ export class EnvironmentController {
                     const selection = this.app.dashboardController.parseSandboxCliSelection(select);
                     
                     if (!selection) {
-                        select.classList.remove('vb-terminal-selection-shake');
-                        void select.offsetWidth;
-                        select.classList.add('vb-terminal-selection-shake');
-                        select.focus();
-                        if (typeof select.showPicker === 'function') {
-                            try { select.showPicker(); } catch {}
+                        const ts = select.tomselect;
+                        const shakeTarget = ts?.wrapper || select;
+                        shakeTarget.classList.remove('vb-terminal-selection-shake');
+                        void shakeTarget.offsetWidth;
+                        shakeTarget.classList.add('vb-terminal-selection-shake');
+                        if (ts) {
+                            try { ts.focus(); ts.open(); } catch {}
+                        } else {
+                            select.focus();
+                            if (typeof select.showPicker === 'function') {
+                                try { select.showPicker(); } catch {}
+                            }
                         }
                         return null;
                     }
@@ -306,8 +314,17 @@ export class EnvironmentController {
         if (cliLower === 'claude' && env.customPrompt) {
             cliSettings.initialMessage = env.customPrompt;
         }
-        if (cliLower === 'gemini' && env.customPrompt) {
-            cliSettings.initialMessage = env.customPrompt;
+        if (cliLower === 'gemini') {
+            if (env.customPrompt) {
+                cliSettings.initialMessage = env.customPrompt;
+            }
+            this.mergeGeminiSettingsFromCustomArgs(cliSettings, env.customArgs || '');
+        }
+        if (cliLower === 'copilot') {
+            if (env.customPrompt) {
+                cliSettings.initialMessage = env.customPrompt;
+            }
+            this.mergeCopilotSettingsFromCustomArgs(cliSettings, env.customArgs || '');
         }
 
         this.showEnvironmentForm({ mode: 'edit', env, cliSettings });
@@ -373,6 +390,10 @@ export class EnvironmentController {
 
         if (!isEdit) {
             const cliSelect = document.getElementById('env-cli');
+            enhanceLlmSelectWithTomSelect(cliSelect, {
+                placeholder: 'Select CLI...',
+                cliKey: 'value'
+            });
             cliSelect.addEventListener('change', () => {
                 const cli = cliSelect.value;
                 const customArgsGroup = document.querySelector('[data-custom-args-group]');
@@ -425,7 +446,7 @@ export class EnvironmentController {
 
     usesManagedCustomArgs(cli) {
         const cliLower = (cli || '').toLowerCase();
-        return cliLower === 'codex' || cliLower === 'claude';
+        return cliLower === 'codex' || cliLower === 'claude' || cliLower === 'gemini' || cliLower === 'copilot';
     }
 
     async loadCliSettings(cli, envName) {
@@ -468,8 +489,16 @@ export class EnvironmentController {
         if (cliLower === 'gemini') {
             const geminiSettings = settingsPayload || this.extractCliSettingsPayload(cli);
             return {
-                customArgs: document.getElementById('env-custom-args')?.value || '',
+                customArgs: this.buildGeminiCustomArgs(geminiSettings),
                 customPrompt: geminiSettings?.initialMessage ?? ''
+            };
+        }
+
+        if (cliLower === 'copilot') {
+            const copilotSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            return {
+                customArgs: this.buildCopilotCustomArgs(copilotSettings),
+                customPrompt: copilotSettings?.initialMessage ?? ''
             };
         }
 
@@ -515,6 +544,78 @@ export class EnvironmentController {
         }
 
         return args.join(' ');
+    }
+
+    buildGeminiCustomArgs(settings) {
+        const s = settings || {};
+        const args = [];
+        const approvalMode = this.normalizeGeminiApprovalMode(s.approvalMode || (s.yoloMode ? 'yolo' : (s.autoApproveTools ? 'auto_edit' : '')));
+
+        if (s.sandboxEnabled) {
+            args.push('--sandbox');
+        }
+
+        if (approvalMode && approvalMode !== 'default') {
+            args.push('--approval-mode', approvalMode);
+        }
+
+        args.push(...this.parseArgString(s.additionalArgs || ''));
+
+        return args.map(arg => this.quoteCustomArg(arg)).join(' ');
+    }
+
+    mergeGeminiSettingsFromCustomArgs(settings, customArgs) {
+        const args = this.parseArgString(customArgs);
+        if (args.length === 0) return settings;
+
+        const additionalArgs = [];
+
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+            const next = args[i + 1];
+
+            if (arg === '--sandbox' || arg === '-s') {
+                settings.sandboxEnabled = true;
+                continue;
+            }
+
+            if (arg === '--yolo' || arg === '-y') {
+                settings.approvalMode = 'yolo';
+                settings.yoloMode = true;
+                continue;
+            }
+
+            if (arg.startsWith('--approval-mode=')) {
+                const approvalMode = this.normalizeGeminiApprovalMode(arg.slice('--approval-mode='.length));
+                settings.approvalMode = approvalMode;
+                settings.autoApproveTools = approvalMode === 'auto_edit';
+                settings.yoloMode = approvalMode === 'yolo';
+                continue;
+            }
+
+            if (arg === '--approval-mode' && next) {
+                const approvalMode = this.normalizeGeminiApprovalMode(next);
+                settings.approvalMode = approvalMode;
+                settings.autoApproveTools = approvalMode === 'auto_edit';
+                settings.yoloMode = approvalMode === 'yolo';
+                i++;
+                continue;
+            }
+
+            additionalArgs.push(arg);
+        }
+
+        if (additionalArgs.length > 0) {
+            settings.additionalArgs = additionalArgs.map(arg => this.quoteCustomArg(arg)).join(' ');
+        }
+
+        return settings;
+    }
+
+    normalizeGeminiApprovalMode(value) {
+        const raw = (value || '').trim().toLowerCase();
+        if (['default', 'auto_edit', 'yolo', 'plan'].includes(raw)) return raw;
+        return '';
     }
 
     mergeCodexSettingsFromCustomArgs(settings, customArgs) {
@@ -682,6 +783,123 @@ export class EnvironmentController {
         return rendered.join('');
     }
 
+    buildCopilotCustomArgs(settings) {
+        const s = settings || {};
+        const args = [];
+        const mode = this.normalizeCopilotMode(s.mode);
+        const permissionPreset = this.normalizeCopilotPermissionPreset(s.permissionPreset);
+
+        if (mode) {
+            args.push('--mode', mode);
+        }
+
+        this.pushStringArg(args, '--model', s.model);
+
+        if (permissionPreset === 'yolo') {
+            args.push('--yolo');
+        } else if (permissionPreset === 'allow-all-tools') {
+            args.push('--allow-all-tools');
+        }
+
+        if (s.noAskUser) {
+            args.push('--no-ask-user');
+        }
+
+        args.push(...this.parseArgString(s.additionalArgs || ''));
+
+        return args.map(arg => this.quoteCustomArg(arg)).join(' ');
+    }
+
+    mergeCopilotSettingsFromCustomArgs(settings, customArgs) {
+        const args = this.parseArgString(customArgs);
+        if (args.length === 0) return settings;
+
+        const additionalArgs = [];
+
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+            const next = args[i + 1];
+
+            if (arg === '--yolo' || arg === '--allow-all') {
+                settings.permissionPreset = 'yolo';
+                continue;
+            }
+
+            if (arg === '--allow-all-tools') {
+                settings.permissionPreset = 'allow-all-tools';
+                continue;
+            }
+
+            if (arg === '--no-ask-user') {
+                settings.noAskUser = true;
+                continue;
+            }
+
+            if (arg === '--plan') {
+                settings.mode = 'plan';
+                continue;
+            }
+
+            if (arg === '--autopilot') {
+                settings.mode = 'autopilot';
+                continue;
+            }
+
+            if (arg.startsWith('--mode=')) {
+                settings.mode = this.normalizeCopilotMode(arg.slice('--mode='.length));
+                continue;
+            }
+
+            if (arg === '--mode' && next) {
+                settings.mode = this.normalizeCopilotMode(next);
+                i++;
+                continue;
+            }
+
+            if (arg.startsWith('--model=')) {
+                settings.model = arg.slice('--model='.length).trim();
+                continue;
+            }
+
+            if (arg === '--model' && next) {
+                settings.model = next.trim();
+                i++;
+                continue;
+            }
+
+            if (arg.startsWith('--interactive=')) {
+                settings.initialMessage ||= arg.slice('--interactive='.length);
+                continue;
+            }
+
+            if ((arg === '--interactive' || arg === '-i') && next) {
+                settings.initialMessage ||= next;
+                i++;
+                continue;
+            }
+
+            additionalArgs.push(arg);
+        }
+
+        if (additionalArgs.length > 0) {
+            settings.additionalArgs = additionalArgs.map(arg => this.quoteCustomArg(arg)).join(' ');
+        }
+
+        return settings;
+    }
+
+    normalizeCopilotMode(value) {
+        const raw = (value || '').trim().toLowerCase();
+        if (['interactive', 'plan', 'autopilot'].includes(raw)) return raw;
+        return '';
+    }
+
+    normalizeCopilotPermissionPreset(value) {
+        const raw = (value || '').trim().toLowerCase();
+        if (raw === 'allow-all-tools' || raw === 'yolo') return raw;
+        return '';
+    }
+
     buildClaudeCustomArgs(settings) {
         const s = settings || {};
         const args = [];
@@ -779,14 +997,16 @@ export class EnvironmentController {
     extractCliSettingsPayload(cli) {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'gemini') {
+            const approvalMode = this.normalizeGeminiApprovalMode(document.getElementById('gemini-approval-mode').value);
             return {
-                theme: document.getElementById('gemini-theme').value,
                 initialMessage: document.getElementById('gemini-initial-message').value,
                 sandboxEnabled: document.getElementById('gemini-sandbox').checked,
-                autoApproveTools: document.getElementById('gemini-auto-approve').checked,
+                approvalMode,
+                autoApproveTools: approvalMode === 'auto_edit',
                 vimMode: document.getElementById('gemini-vim').checked,
                 checkForUpdates: document.getElementById('gemini-updates').checked,
-                yoloMode: document.getElementById('gemini-yolo').checked
+                yoloMode: approvalMode === 'yolo',
+                additionalArgs: document.getElementById('gemini-additional-args').value
             };
         }
         if (cliLower === 'codex') {
@@ -814,6 +1034,16 @@ export class EnvironmentController {
                 debug: document.getElementById('claude-debug').checked
             };
         }
+        if (cliLower === 'copilot') {
+            return {
+                initialMessage: document.getElementById('copilot-initial-message').value,
+                mode: this.normalizeCopilotMode(document.getElementById('copilot-mode').value),
+                model: document.getElementById('copilot-model').value.trim(),
+                permissionPreset: this.normalizeCopilotPermissionPreset(document.getElementById('copilot-permission-preset').value),
+                noAskUser: document.getElementById('copilot-no-ask-user').checked,
+                additionalArgs: document.getElementById('copilot-additional-args').value
+            };
+        }
         return null;
     }
 
@@ -823,17 +1053,11 @@ export class EnvironmentController {
 
         if (cliLower === 'gemini') {
             const geminiInitialMessage = this.app.escapeHtml(s.initialMessage || '');
+            const geminiApprovalMode = this.normalizeGeminiApprovalMode(s.approvalMode || (s.yoloMode ? 'yolo' : (s.autoApproveTools ? 'auto_edit' : '')));
+            const geminiAdditionalArgs = this.app.escapeHtml(s.additionalArgs || '');
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Gemini CLI Settings</h6>
-                <div class="mb-3">
-                    <label class="form-label">Theme</label>
-                    <select class="form-select" id="gemini-theme">
-                        <option value="Default" ${s.theme === 'Default' ? 'selected' : ''}>Default</option>
-                        <option value="Dark" ${s.theme === 'Dark' ? 'selected' : ''}>Dark</option>
-                        <option value="Light" ${s.theme === 'Light' ? 'selected' : ''}>Light</option>
-                    </select>
-                </div>
                 <div class="mb-3">
                     <label class="form-label">Initial Message</label>
                     <textarea class="form-control" id="gemini-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to Gemini as soon as the session starts.">${geminiInitialMessage}</textarea>
@@ -847,11 +1071,14 @@ export class EnvironmentController {
                     <small class="form-text text-muted">Run tools in a containerized sandbox for safety</small>
                 </div>
                 <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="gemini-auto-approve" ${s.autoApproveTools ? 'checked' : ''}>
-                        <label class="form-check-label" for="gemini-auto-approve">Auto-Approve Tools</label>
-                    </div>
-                    <small class="form-text text-muted">Automatically execute safe operations without confirmation</small>
+                    <label class="form-label">Approval Mode</label>
+                    <select class="form-select" id="gemini-approval-mode">
+                        <option value="" ${geminiApprovalMode === '' ? 'selected' : ''}>Default prompts</option>
+                        <option value="auto_edit" ${geminiApprovalMode === 'auto_edit' ? 'selected' : ''}>Auto-approve edits</option>
+                        <option value="yolo" ${geminiApprovalMode === 'yolo' ? 'selected' : ''}>YOLO: auto-approve all actions</option>
+                        <option value="plan" ${geminiApprovalMode === 'plan' ? 'selected' : ''}>Plan: read-only</option>
+                    </select>
+                    <small class="form-text text-muted">Passed as <code>--approval-mode</code>; YOLO uses <code>--approval-mode yolo</code></small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
@@ -868,11 +1095,9 @@ export class EnvironmentController {
                     <small class="form-text text-muted">Automatically check for CLI updates</small>
                 </div>
                 <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="gemini-yolo" ${s.yoloMode ? 'checked' : ''}>
-                        <label class="form-check-label" for="gemini-yolo">YOLO Mode</label>
-                    </div>
-                    <small class="form-text text-muted text-warning">Auto-approve ALL operations (dangerous!)</small>
+                    <label class="form-label">Additional Arguments</label>
+                    <input type="text" class="form-control" id="gemini-additional-args" value="${geminiAdditionalArgs}" placeholder="Optional extra Gemini flags">
+                    <small class="form-text text-muted">Preserves advanced flags not covered above</small>
                 </div>
             `;
         }
@@ -946,6 +1171,60 @@ export class EnvironmentController {
                         <label class="form-check-label" for="codex-no-alt-screen">No Alternate Screen</label>
                     </div>
                     <small class="form-text text-muted">Disable alternate screen mode for the TUI</small>
+                </div>
+            `;
+        }
+
+        if (cliLower === 'copilot') {
+            const initialMessage = this.app.escapeHtml(s.initialMessage || '');
+            const mode = this.normalizeCopilotMode(s.mode);
+            const permissionPreset = this.normalizeCopilotPermissionPreset(s.permissionPreset);
+            const model = this.app.escapeHtml(s.model || '');
+            const additionalArgs = this.app.escapeHtml(s.additionalArgs || '');
+
+            return `
+                <hr class="my-4">
+                <h6 class="text-muted mb-3">Copilot CLI Settings</h6>
+                <div class="mb-3">
+                    <label class="form-label">Initial Message</label>
+                    <textarea class="form-control" id="copilot-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to Copilot as soon as the session starts.">${initialMessage}</textarea>
+                    <small class="form-text text-muted">Passed as <code>copilot --interactive=&lt;text&gt;</code> and recorded as the session's first user input.</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Mode</label>
+                    <select class="form-select" id="copilot-mode">
+                        <option value="" ${mode === '' ? 'selected' : ''}>Default</option>
+                        <option value="interactive" ${mode === 'interactive' ? 'selected' : ''}>Interactive</option>
+                        <option value="plan" ${mode === 'plan' ? 'selected' : ''}>Plan</option>
+                        <option value="autopilot" ${mode === 'autopilot' ? 'selected' : ''}>Autopilot</option>
+                    </select>
+                    <small class="form-text text-muted">Passed as <code>--mode</code> when launching Copilot</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Model</label>
+                    <input type="text" class="form-control" id="copilot-model" value="${model}" placeholder="Default, auto, or a model name">
+                    <small class="form-text text-muted">Passed as <code>--model</code>; leave blank to use Copilot's default</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Permissions</label>
+                    <select class="form-select" id="copilot-permission-preset">
+                        <option value="" ${permissionPreset === '' ? 'selected' : ''}>Default prompts</option>
+                        <option value="allow-all-tools" ${permissionPreset === 'allow-all-tools' ? 'selected' : ''}>Auto-approve tools</option>
+                        <option value="yolo" ${permissionPreset === 'yolo' ? 'selected' : ''}>YOLO: all permissions</option>
+                    </select>
+                    <small class="form-text text-muted">Uses <code>--allow-all-tools</code> or <code>--yolo</code>; YOLO is equivalent to allowing all permissions</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="copilot-no-ask-user" ${s.noAskUser ? 'checked' : ''}>
+                        <label class="form-check-label" for="copilot-no-ask-user">Don't Ask User</label>
+                    </div>
+                    <small class="form-text text-muted">Disables Copilot's <code>ask_user</code> tool with <code>--no-ask-user</code></small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Additional Arguments</label>
+                    <input type="text" class="form-control" id="copilot-additional-args" value="${additionalArgs}" placeholder="Optional extra Copilot flags">
+                    <small class="form-text text-muted">Preserves advanced flags not covered above</small>
                 </div>
             `;
         }

@@ -7,6 +7,7 @@ namespace VibeRails.DTOs
         public bool AutoApproveTools { get; set; } = false;
         public bool VimMode { get; set; } = false;
         public bool CheckForUpdates { get; set; } = true;
+        public string ApprovalMode { get; set; } = "default";
         public bool YoloMode { get; set; } = false;
     }
 }
