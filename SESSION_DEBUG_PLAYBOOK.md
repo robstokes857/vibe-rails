@@ -14,6 +14,8 @@ When a session's UI display is wrong (cleaned text shows noise, prompt got merge
 | `CleanedUserInput` | ETL-cleaned `CleanedText` shown in the UI; 1:1 with `UserInputs` via `UserInputId` |
 | `TerminalSessionLogs` | Enriched replay data for xterm.js viewer (`Cols`, `Rows`, `IsAlternateScreen`, `Data BLOB`); separate from `SessionLogs` |
 
+**Data safety:** the DB, decoded text exports, and raw session captures can contain real prompts, paths, terminal output, secrets, or customer/project data. Use them locally to diagnose the bug, but do **not** check in the actual session used to write the unit test. Only commit minimized, sanitized regression fixtures that contain no real data.
+
 ## Tools (already exist — don't rewrite)
 
 In `python-scripts/`:
@@ -32,10 +34,10 @@ All default to `~/.vibe_rails/state.db`; pass `--db` to override.
 `Tests/Services/CleanedInput/Session_<8char>_RegressionTests.cs`. Three working examples — pick the one whose shape matches the bug:
 
 - **`Session_8458cd22_RegressionTests.cs`** — `TuiTextExtractor` picked the wrong line: longest-containing won, fuzzy tail-match overwrote with prior prompt, box-drawing rows out-lengthened the real prompt. Inline fixtures only.
-- **`Session_bf428817_RegressionTests.cs`** — `@`-autocomplete + TAB: split rows from premature bracketed-paste flush, dropdown picked, keystroke-echo prepended. Inline fixtures **and** real `Fixtures/session_bf428817_log.bin` (~349KB capture).
+- **`Session_bf428817_RegressionTests.cs`** — `@`-autocomplete + TAB: split rows from premature bracketed-paste flush, dropdown picked, keystroke-echo prepended. Inline fixtures **and** byte-level `Fixtures/session_bf428817_log.bin` (~349KB capture).
 - **`Session_11553f24_RegressionTests.cs`** — `@`-autocomplete with no space: needs *windowed* fixtures (`window1` = pre-submission, `window2` = post-submission), each bounded by adjacent `UserInputs` timestamps.
 
-Fixtures live at `Tests/Services/CleanedInput/Fixtures/session_<prefix>_log.bin` (or `_window1_log.bin` / `_window2_log.bin` for split rows). They are **checked in** — permanent regression coverage.
+Fixtures live at `Tests/Services/CleanedInput/Fixtures/session_<prefix>_log.bin` (or `_window1_log.bin` / `_window2_log.bin` for split rows). Checked-in fixtures are permanent regression coverage, so they must be minimized and sanitized. The raw session capture you used for investigation stays local and untracked.
 
 The test target is `CleanedUserInputService.CleanText(rawInputText, tuiOutputString)`. Construct with mocked `IRepository` (returns empty `GetSessionLogChunksAsync`), real `new TuiTextExtractor()`, `NullLogger<CleanedUserInputService>.Instance`.
 
@@ -81,16 +83,22 @@ Compare `InputText` vs `CleanedText` vs what the UI showed. The mismatch is the 
 | xterm.js replay double-prints / loses redraws / glitches on resize | `TerminalEmulator` | `TerminalEmulator.Tests/FixtureReplayTests.cs` pattern; run `analyze_doubleprint.py` first |
 | No logs at all / chunks missing | `SessionOutputWriter` or chunk-write path | not a parsing bug |
 
-### 5. Capture the fixture
-Identify the `SessionLogs` byte range corresponding to the failing `UserInput` (timestamp-bounded by adjacent `UserInputs.TimestampUTC` rows). Concatenate those `Content` blobs and write to:
+### 5. Capture and sanitize the fixture
+Identify the `SessionLogs` byte range corresponding to the failing `UserInput` (timestamp-bounded by adjacent `UserInputs.TimestampUTC` rows). Concatenate those `Content` blobs locally, then write the minimized/sanitized version to:
 ```
 Tests/Services/CleanedInput/Fixtures/session_<8char>_log.bin
 ```
 For split-row bugs, capture two windows: `_window1_log.bin` (pre-submission) and `_window2_log.bin` (post-submission).
 
+Do not check in the first raw capture if it contains real data. Before staging it:
+- Trim it to the smallest byte window that reproduces the bug.
+- Redact or replace real prompt text, paths, filenames, command output, tokens, IDs, and user/project names.
+- Re-run the test against the sanitized fixture to prove the bug still reproduces.
+- If redaction changes the terminal behavior and the only reproducer contains real data, keep the raw fixture out of git and commit an inline synthetic reproducer instead, with a note explaining why no binary fixture is checked in.
+
 ### 6. Write the failing test
 Copy the closest-matching `Session_*_RegressionTests.cs` as a template. Rename namespace, class, fixture path. Required test cases:
-- `CleanText(rawInputText, LoadFixture()) → expectedPrompt` against the real `.bin`
+- `CleanText(rawInputText, LoadFixture()) → expectedPrompt` against the sanitized `.bin`, when a safe byte-level fixture can be committed
 - Inline-fixture variants for the specific syntactic hazard (CUP fusion, prompt-glyph, dropdown-then-prompt, etc.) so the bug is documented standalone
 
 Class-level docstring: name the session UUID, one line per bug observed. Match the existing tone — it's written for future-you.
@@ -115,12 +123,14 @@ dotnet test --filter "FullyQualifiedName~Tests.Services.CleanedInput"
 ```
 Cross-regression is real — Session_8458cd22 contains a test (`CleanText_LeadingWhitespaceRaw_ExtractsFullPromptAfterAutocomplete`) that exists specifically to keep its fix from breaking 11553f24.
 
-### 10. Leave the fixture and test in place
-They are the contract. Don't delete or rename existing session-named test files or fixtures.
+### 10. Leave the safe fixture and test in place
+They are the contract. Don't delete or rename existing session-named test files or sanitized fixtures. Keep raw session exports, decoded files, copied database files, and any private capture used to author the test out of git.
 
 ## Don't
 
 - Don't write a new Python script when `decode_session.py` / `analyze_doubleprint.py` / `show_chunks.py` already cover the case.
-- Don't ship a test that uses synthetic TUI strings only. Always include at least one assertion against the real `.bin` fixture — synthetic strings miss byte-level pathology.
+- Don't check in `state.db`, decoded session `.txt` files, full-session `.bin` captures, or the real session used to write the unit test.
+- Don't ship a binary fixture that still contains real prompts, paths, filenames, output, tokens, IDs, or project/user names. Sanitize it first.
+- Don't ship a test that uses synthetic TUI strings only when a sanitized byte-level fixture can reproduce the bug. Synthetic strings miss byte-level pathology, but privacy wins over fixture fidelity.
 - Don't skip step 3 (sqlite query). Without it you don't know which row is wrong and you'll test the wrong column.
 - Don't refactor while fixing. The bug fix and any cleanup go in separate commits.
