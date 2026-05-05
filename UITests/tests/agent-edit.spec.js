@@ -1,4 +1,4 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./fixtures');
 
 test('has title', async ({ page }) => {
   await page.goto('/');

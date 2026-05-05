@@ -1,3 +1,4 @@
+using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services.LlmClis;
 using static VibeRails.Utils.ShellArgSanitizer;
@@ -15,6 +16,7 @@ public class CommandService : ICommandService
 {
     private readonly LlmCliEnvironmentService _envService;
     private readonly McpSettings _mcpSettings;
+    private static int _fakeCliWarningEmitted;
 
     public CommandService(LlmCliEnvironmentService envService, McpSettings mcpSettings)
     {
@@ -25,6 +27,27 @@ public class CommandService : ICommandService
     public PreparedTerminalSession PrepareSession(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "")
     {
+        if (Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI") == "1")
+        {
+            if (System.Threading.Interlocked.Exchange(ref _fakeCliWarningEmitted, 1) == 0)
+            {
+                Log.Warning(
+                    "[Test] VIBERAILS_TEST_FAKE_CLI is active — every CLI session will be a portable echo+sleep fake. This MUST NOT be set in production.");
+            }
+
+            // `echo` + `sleep N` are valid in both pwsh (aliases of Write-Output / Start-Sleep)
+            // and bash, so the same command runs the PTY+WS+xterm path on Windows and Linux
+            // without needing a real LLM CLI installed in CI.
+            var fakeCmd = $"echo VIBERAILS_FAKE_CLI_READY:{llm}; sleep 600";
+            var fakeEnv = new Dictionary<string, string>
+            {
+                ["LANG"] = "en_US.UTF-8",
+                ["LC_ALL"] = "en_US.UTF-8",
+                ["PYTHONIOENCODING"] = "utf-8"
+            };
+            return new PreparedTerminalSession(fakeCmd, fakeCmd, Array.Empty<string>(), fakeEnv);
+        }
+
         var cli = llm.ToString().ToLower();
         var cliCommand = extraArgs?.Length > 0
             ? $"{cli} {BuildSafeArgString(extraArgs)}"
