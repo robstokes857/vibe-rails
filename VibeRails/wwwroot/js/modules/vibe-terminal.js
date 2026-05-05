@@ -186,22 +186,49 @@ export class VibeTerminal {
             this._terminal?.textarea?.focus();
         });
 
-        const useWebgl = (() => {
-            try {
-                // WebGL is preferred for GPU-accelerated rendering; fall back to canvas if explicitly disabled.
-                return localStorage.getItem('viberails_terminal_webgl') !== 'false';
-            } catch {
-                return true;
-            }
+        const preferWebgl = (() => {
+            try { return localStorage.getItem('viberails_terminal_webgl') !== 'false'; }
+            catch { return true; }
         })();
 
-        if (useWebgl && window.WebglAddon?.WebglAddon) {
+        // Initialised to null so that whichever renderer wins below — including
+        // 'dom' as a final fallback — produces a real transition that fires
+        // _rendererListeners. This matters for any listener registered after
+        // construction that wants the initial value via change events alone.
+        this._activeRenderer = null;
+        this._rendererListeners = new Set();
+
+        // CanvasAddon does not expose onContextLoss in its public API, so 2D
+        // context loss (rare under memory pressure) is unrecoverable here.
+        // WebGL has the event and falls back to canvas → dom on loss.
+        const tryCanvas = () => {
+            if (!window.CanvasAddon?.CanvasAddon) return false;
             try {
-                this._terminal.loadAddon(new window.WebglAddon.WebglAddon());
+                this._terminal.loadAddon(new window.CanvasAddon.CanvasAddon());
+                this._setActiveRenderer('canvas');
+                return true;
             } catch (e) {
-                console.warn('WebGL addon failed, falling back to canvas renderer:', e);
+                console.warn('Canvas addon failed:', e);
+                return false;
             }
-        }
+        };
+        const tryWebgl = () => {
+            if (!preferWebgl || !window.WebglAddon?.WebglAddon) return false;
+            try {
+                const addon = new window.WebglAddon.WebglAddon();
+                this._terminal.loadAddon(addon);
+                addon.onContextLoss(() => {
+                    try { addon.dispose(); } catch {}
+                    if (!tryCanvas()) this._setActiveRenderer('dom');
+                });
+                this._setActiveRenderer('webgl');
+                return true;
+            } catch (e) {
+                console.warn('WebGL addon failed:', e);
+                return false;
+            }
+        };
+        if (!tryWebgl() && !tryCanvas()) this._setActiveRenderer('dom');
 
         if (window.ClipboardAddon?.ClipboardAddon) {
             try {
@@ -631,6 +658,24 @@ export class VibeTerminal {
     setCursorInactiveStyle(style) {
         if (!this._terminal) return;
         this._terminal.options.cursorInactiveStyle = style;
+    }
+
+    getActiveRenderer() {
+        return this._activeRenderer;
+    }
+
+    onRendererChange(listener) {
+        if (typeof listener !== 'function') return () => {};
+        this._rendererListeners.add(listener);
+        return () => this._rendererListeners.delete(listener);
+    }
+
+    _setActiveRenderer(renderer) {
+        if (this._activeRenderer === renderer) return;
+        this._activeRenderer = renderer;
+        for (const listener of this._rendererListeners) {
+            try { listener(renderer); } catch (e) { console.warn('renderer listener error:', e); }
+        }
     }
 
     suppressCursorDuringOutput(idleMs = 90) {

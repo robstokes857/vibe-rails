@@ -13,7 +13,12 @@ async function main(): Promise<void> {
         extensionTestsPath,
         vscodeExecutablePath,
         extensionTestsEnv: {
-            VIBERAILS_SMOKE_WORKSPACE: workspacePath
+            VIBERAILS_SMOKE_WORKSPACE: workspacePath,
+            // Backend inherits env via process.env when extension spawns vb (see
+            // backend-manager.ts). VIBERAILS_TEST_FAKE_CLI=1 makes CommandService
+            // short-circuit to a portable echo+sleep so the smoke test runs on
+            // CI runners without codex/claude/etc. installed.
+            VIBERAILS_TEST_FAKE_CLI: '1'
         },
         launchArgs: [
             '--disable-workspace-trust',

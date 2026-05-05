@@ -7,9 +7,20 @@ import {
     getCliBrand
 } from './utils.js';
 import { TabStatusController } from './terminal-tab-status.js';
+import { TerminalSettings, renderTerminalSettingsPanelHtml } from './terminal-settings.js';
 
 const RESIZE_PREFIX = '__resize__:';
 const VIEWER_SNAPSHOT_REPLAY_COMMAND = '__cmd__:replay';
+
+// Pending-close grace window: how long a closed tab is held in the undo
+// dropdown before the backend DELETE actually fires. Keep PENDING_CLOSE_MS
+// and PENDING_CLOSE_LABEL in sync — the label is what the user sees in the
+// undo button title and the dropdown header.
+const PENDING_CLOSE_MS = 2 * 60 * 1000;
+const PENDING_CLOSE_LABEL = (() => {
+    const minutes = Math.round(PENDING_CLOSE_MS / 60000);
+    return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+})();
 // Collapse layout-settle/font-load fit bursts into one PTY resize so ConPTY does not
 // redraw the full TUI multiple times while the browser is still stabilizing.
 const RESIZE_SYNC_DEBOUNCE_MS = 140;
@@ -739,6 +750,16 @@ class TerminalManager {
         this.tabOrder = [];
         this.activeTabId = null;
 
+        this._pendingCloses = new Map();
+        this._pendingCloseMs = PENDING_CLOSE_MS;
+        this._undoBtn = null;
+        this._undoCount = null;
+        this._undoWrapper = null;
+        this._undoSelectEl = null;
+        this._undoTomSelect = null;
+        this._undoCountdownTimer = null;
+        this._undoBodyClickHandler = null;
+
         this.panel = null;
         this.tabList = null;
         this.tabAdd = null;
@@ -772,59 +793,20 @@ class TerminalManager {
         this.downloadMenu = null;
         this.downloadMenuDismissHandler = null;
         this._themeSwatches = [];
+
+        this.settings = null;
     }
 
     isDestroyed() {
         return this._destroyed;
     }
 
-    _loadRendererPreference() {
-        try {
-            return localStorage.getItem('viberails_terminal_webgl') === 'false' ? 'canvas' : 'webgl';
-        } catch {
-            return 'webgl';
-        }
-    }
-
-    _loadThemePreference() {
-        try {
-            return localStorage.getItem('viberails_terminal_theme') || null;
-        } catch {
-            return null;
-        }
-    }
-
-    _loadCursorStyle() {
-        try {
-            return localStorage.getItem('viberails_terminal_cursorStyle') || 'block';
-        } catch {
-            return 'block';
-        }
-    }
-
-    _loadCursorInactiveStyle() {
-        try {
-            return localStorage.getItem('viberails_terminal_cursorInactiveStyle') || 'outline';
-        } catch {
-            return 'outline';
-        }
-    }
-
-    _applySavedTerminalSettings(tab) {
-        const vibe = tab?.instance?.vibeTerminal;
-        if (!vibe?._terminal) return;
-
-        const themeKey = this._loadThemePreference();
-        if (themeKey && window.CXL_THEMES?.[themeKey]) {
-            vibe.setTheme(window.CXL_THEMES[themeKey]);
-        }
-
-        vibe.setCursorStyle(this._loadCursorStyle());
-        vibe.setCursorInactiveStyle(this._loadCursorInactiveStyle());
-    }
-
     applySavedTerminalSettingsForTab(tabId) {
-        this._applySavedTerminalSettings(this.tabs.get(tabId));
+        const tab = this.tabs.get(tabId);
+        const vibe = tab?.instance?.vibeTerminal;
+        if (!vibe) return;
+        this.settings?.applyToTerminal(vibe);
+        this.settings?.bindTab(tabId, vibe);
     }
 
     async initialize() {
@@ -838,6 +820,11 @@ class TerminalManager {
         this.tabScrollRight = this.container.querySelector('#vb-terminal-tab-scroll-right');
         this.tabAdd = this.container.querySelector('#vb-terminal-tab-add-btn');
         this.tabSelect = this.container.querySelector('#vb-terminal-tab-select-btn');
+        this._undoWrapper = this.container.querySelector('#vb-terminal-tab-undo-wrapper');
+        this._undoBtn = this.container.querySelector('#vb-terminal-tab-undo-btn');
+        this._undoCount = this.container.querySelector('#vb-terminal-tab-undo-count');
+        this._undoSelectEl = this.container.querySelector('#vb-terminal-tab-undo-select');
+        this._initUndoControl();
         this.tabPanels = this.container.querySelector('#vb-terminal-tab-panels');
         this.placeholder = this.container.querySelector('#terminal-placeholder');
         this.terminalContainer = this.container.querySelector('#terminal-container');
@@ -862,15 +849,15 @@ class TerminalManager {
         this.zoomOutBtn    = this.container.querySelector('#terminal-zoom-out-btn');
         this.refreshBtn    = this.container.querySelector('#terminal-refresh-btn');
         this.fontSizeLabel = this.container.querySelector('#vb-terminal-font-size-label');
-        this.settingsBtn   = this.container.querySelector('#terminal-settings-btn');
-        this.settingsPanel = this.container.querySelector('#vb-terminal-settings-panel');
-        this.settingsClose = this.container.querySelector('#terminal-settings-close');
         this.historyBtn    = null; // toggle lives on collapsed sidebar strip
 
         this.populateSelect();
         this.bindActions();
         this._initTabScrollArrows();
-        this._initSettingsPanel();
+        this.settings = new TerminalSettings(this.container, this);
+        this.settings.init();
+        const savedFontSize = this.settings.loadFontSize();
+        if (this.fontSizeLabel) this.fontSizeLabel.textContent = savedFontSize;
         await this.restoreTabs();
 
         if (this._destroyed) {
@@ -916,6 +903,24 @@ class TerminalManager {
         }
         this.downloadMenu = null;
         document.body.classList.remove('vb-terminal-active-session');
+
+        // Fire-and-forget DELETE for any tabs still in pending-close so we don't leak
+        // child processes when the user navigates away.
+        this._pendingCloses.forEach((pending, tabId) => {
+            clearTimeout(pending.timeoutId);
+            void this.app.apiCall(`/api/v1/terminal/tabs/${encodeURIComponent(tabId)}`, 'DELETE')
+                .catch(() => { /* best effort */ });
+        });
+        this._pendingCloses.clear();
+        this._stopUndoCountdown();
+        if (this._undoBodyClickHandler) {
+            document.removeEventListener('click', this._undoBodyClickHandler, true);
+            this._undoBodyClickHandler = null;
+        }
+        if (this._undoTomSelect) {
+            try { this._undoTomSelect.destroy(); } catch { /* no-op */ }
+            this._undoTomSelect = null;
+        }
 
         this.tabs.forEach((tab) => tab.instance.dispose());
         this.tabs.clear();
@@ -1050,16 +1055,6 @@ class TerminalManager {
                 });
         }
 
-        this.settingsBtn?.addEventListener('click',   () => this.toggleSettingsPanel());
-        this.settingsClose?.addEventListener('click', () => this.toggleSettingsPanel(false));
-        this.container.querySelector('#terminal-settings-font-size')
-            ?.addEventListener('change', (e) => this.adjustFontSize(0, parseInt(e.target.value, 10)));
-        this.container.querySelector('#terminal-settings-renderer')
-            ?.addEventListener('change', (e) => this.applyRendererPreference(e.target.value));
-        this.container.querySelector('#terminal-settings-cursor-style')
-            ?.addEventListener('change', (e) => this.applyCursorStyle(e.target.value));
-        this.container.querySelector('#terminal-settings-cursor-inactive')
-            ?.addEventListener('change', (e) => this.applyCursorInactiveStyle(e.target.value));
     }
 
     async restoreTabs() {
@@ -1237,6 +1232,7 @@ class TerminalManager {
 
         this.activeTabId = target.state.id;
         this.saveActiveTabId(target.state.id);
+        this.settings?.setActiveTab(target.state.id);
 
         target.state.ui.item.classList.add('active');
         target.state.ui.panel.style.display = 'block';
@@ -1310,9 +1306,75 @@ class TerminalManager {
     }
 
     async closeTab(tabId) {
+        return this._enterPendingClose(tabId);
+    }
+
+    async _enterPendingClose(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab || this._pendingCloses.has(tabId)) {
+            return;
+        }
+
+        const wasActive = this.activeTabId === tabId;
+
+        tab.state.ui.item.style.display = 'none';
+        tab.state.ui.panel.style.display = 'none';
+        tab.state.ui.item.classList.remove('active');
+        tab.instance.setActive(false);
+
+        if (wasActive) {
+            this.activeTabId = null;
+        }
+
+        const expiresAt = Date.now() + this._pendingCloseMs;
+        const timeoutId = setTimeout(() => {
+            void this._commitClose(tabId);
+        }, this._pendingCloseMs);
+
+        this._pendingCloses.set(tabId, { expiresAt, timeoutId });
+
+        this._refreshUndoControl({ flash: true });
+
+        if (wasActive) {
+            const nextId = this._nextVisibleTabId();
+            if (nextId) {
+                await this.activateTab(nextId, { connectIfNeeded: true });
+            } else {
+                this.applyPanelState();
+                this.updateUi();
+            }
+        } else {
+            this.updateUi();
+        }
+    }
+
+    async _undoClose(tabId) {
+        const tab = this.tabs.get(tabId);
+        const pending = this._pendingCloses.get(tabId);
+        if (!tab || !pending) {
+            return;
+        }
+
+        clearTimeout(pending.timeoutId);
+        this._pendingCloses.delete(tabId);
+        tab.state.ui.item.style.display = '';
+
+        this._refreshUndoControl();
+
+        await this.activateTab(tabId, { connectIfNeeded: true });
+    }
+
+    async _commitClose(tabId) {
         const tab = this.tabs.get(tabId);
         if (!tab) {
             return;
+        }
+
+        const pending = this._pendingCloses.get(tabId);
+        if (pending) {
+            clearTimeout(pending.timeoutId);
+            this._pendingCloses.delete(tabId);
+            this._refreshUndoControl();
         }
 
         try {
@@ -1325,6 +1387,7 @@ class TerminalManager {
             // Always fall through to local cleanup so the tab is removed from the UI
         }
 
+        this.settings?.unbindTab(tabId);
         tab.instance.dispose();
         tab.state.ui.item.remove();
         tab.state.ui.panel.remove();
@@ -1339,17 +1402,203 @@ class TerminalManager {
             this.activeTabId = null;
         }
 
-        if (this.tabOrder.length === 0) {
+        if (this.tabOrder.length === 0 && this._pendingCloses.size === 0) {
             await this.createAndActivateTab({ selection: DEFAULT_SELECTION });
             return;
         }
 
         if (!this.activeTabId) {
-            const nextId = this.tabOrder[Math.max(0, this.tabOrder.length - 1)];
-            await this.activateTab(nextId, { connectIfNeeded: false });
+            const nextId = this._nextVisibleTabId();
+            if (nextId) {
+                await this.activateTab(nextId, { connectIfNeeded: false });
+            }
         }
 
         this.updateUi();
+    }
+
+    _nextVisibleTabId() {
+        for (let i = this.tabOrder.length - 1; i >= 0; i--) {
+            const id = this.tabOrder[i];
+            if (!this._pendingCloses.has(id)) {
+                return id;
+            }
+        }
+        return null;
+    }
+
+    _initUndoControl() {
+        if (!this._undoBtn) return;
+
+        this._undoBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this._handleUndoClick();
+        });
+
+        if (!this._undoSelectEl || typeof window.TomSelect !== 'function') {
+            // Tom-select missing: button still works for the 1-pending case via _handleUndoClick.
+            return;
+        }
+
+        if (this._undoSelectEl.tomselect) {
+            this._undoSelectEl.tomselect.destroy();
+        }
+
+        this._undoTomSelect = new window.TomSelect(this._undoSelectEl, {
+            controlInput: null,
+            allowEmptyOption: true,
+            maxOptions: null,
+            plugins: {
+                dropdown_header: {
+                    title: `Terminal will auto close in ${PENDING_CLOSE_LABEL}.`
+                }
+            },
+            dropdownParent: 'body',
+            dropdownClass: 'ts-dropdown vb-undo-dropdown',
+            render: {
+                option: (data, escape) => {
+                    const time = this._formatTimeLeft(Number(data.expiresAt) || 0);
+                    const metaParts = [];
+                    if (data.cliBadge) {
+                        metaParts.push(`<span class="vb-undo-row-cli">${escape(data.cliBadge)}</span>`);
+                    }
+                    metaParts.push(
+                        `<span class="vb-undo-row-time" data-tab-time="${escape(data.value)}">auto-close in ${escape(time)}</span>`
+                    );
+                    return `<div class="vb-undo-row" data-tab-id="${escape(data.value)}">`
+                        + `<div class="vb-undo-row-main">`
+                        +   `<div class="vb-undo-row-label" title="${escape(data.label || data.value)}">${escape(data.label || data.value)}</div>`
+                        +   `<div class="vb-undo-row-meta">${metaParts.join(' <span class="vb-undo-row-meta-sep">·</span> ')}</div>`
+                        + `</div>`
+                        + `<button type="button" class="vb-undo-row-kill" data-kill="${escape(data.value)}" title="Close permanently" aria-label="Close permanently">`
+                        +   `<i class="fa-solid fa-xmark"></i>`
+                        + `</button>`
+                        + `</div>`;
+                }
+            },
+            onItemAdd: (value) => {
+                void this._undoClose(value);
+                try { this._undoTomSelect.removeOption(value); } catch { /* no-op */ }
+                try { this._undoTomSelect.clear(true); } catch { /* no-op */ }
+                if (this._pendingCloses.size === 0) {
+                    try { this._undoTomSelect.close(); } catch { /* no-op */ }
+                }
+            },
+            onDropdownOpen: () => this._startUndoCountdown(),
+            onDropdownClose: () => this._stopUndoCountdown()
+        });
+
+        // Body-level capture-phase delegate: clicking the per-row red X commits
+        // the close immediately. Tom-select's dropdown is rendered to <body>
+        // (dropdownParent: 'body'), so a body listener reaches it without
+        // touching tom-select internals. Capture phase ensures we run before
+        // tom-select's bubble-phase option-select handler.
+        this._undoBodyClickHandler = (event) => {
+            const killBtn = event.target.closest('[data-kill]');
+            if (!killBtn || !killBtn.closest('.vb-undo-dropdown')) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const tabId = killBtn.getAttribute('data-kill');
+            if (!tabId) return;
+            void this._commitClose(tabId);
+            if (this._pendingCloses.size <= 1) {
+                try { this._undoTomSelect?.close(); } catch { /* no-op */ }
+            }
+        };
+        document.addEventListener('click', this._undoBodyClickHandler, true);
+    }
+
+    _handleUndoClick() {
+        if (this._pendingCloses.size === 0) return;
+        if (this._undoTomSelect) {
+            try { this._undoTomSelect.open(); } catch { /* no-op */ }
+        } else {
+            // Tom-select unavailable — fall back to restoring the most recent.
+            const ids = Array.from(this._pendingCloses.keys());
+            void this._undoClose(ids[ids.length - 1]);
+        }
+    }
+
+    _refreshUndoControl({ flash = false } = {}) {
+        if (!this._undoWrapper) return;
+
+        const size = this._pendingCloses.size;
+        if (size === 0) {
+            this._undoWrapper.hidden = true;
+            if (this._undoTomSelect) {
+                try { this._undoTomSelect.clearOptions(); } catch { /* no-op */ }
+                try { this._undoTomSelect.close(); } catch { /* no-op */ }
+            }
+            this._stopUndoCountdown();
+            this._undoBtn?.classList.remove('vb-undo-pulse');
+            return;
+        }
+
+        this._undoWrapper.hidden = false;
+        if (this._undoCount) {
+            this._undoCount.textContent = String(size);
+        }
+
+        if (this._undoTomSelect) {
+            try {
+                this._undoTomSelect.clearOptions();
+                for (const [tabId, pending] of this._pendingCloses) {
+                    const tab = this.tabs.get(tabId);
+                    if (!tab) continue;
+                    const meta = this.getSelectionMeta(tab.state.selection);
+                    this._undoTomSelect.addOption({
+                        value: tabId,
+                        text: tab.state.label || tabId,
+                        label: tab.state.label || tabId,
+                        cliBadge: meta?.cli ? meta.cli.toString() : '',
+                        expiresAt: pending.expiresAt
+                    });
+                }
+                this._undoTomSelect.refreshOptions(false);
+            } catch { /* no-op */ }
+        }
+
+        if (flash && this._undoBtn) {
+            this._undoBtn.classList.remove('vb-undo-pulse');
+            // Force a reflow so the animation restarts on every new pending close.
+            void this._undoBtn.offsetWidth;
+            this._undoBtn.classList.add('vb-undo-pulse');
+        }
+    }
+
+    _startUndoCountdown() {
+        this._stopUndoCountdown();
+        this._tickUndoCountdown();
+        this._undoCountdownTimer = setInterval(() => this._tickUndoCountdown(), 1000);
+    }
+
+    _stopUndoCountdown() {
+        if (this._undoCountdownTimer) {
+            clearInterval(this._undoCountdownTimer);
+            this._undoCountdownTimer = null;
+        }
+    }
+
+    _tickUndoCountdown() {
+        if (!this._undoTomSelect) return;
+        const dropdown = this._undoTomSelect.dropdown_content;
+        if (!dropdown) return;
+        const escapeAttr = window.CSS && typeof window.CSS.escape === 'function'
+            ? (s) => window.CSS.escape(s)
+            : (s) => String(s).replace(/"/g, '\\"');
+        for (const [tabId, pending] of this._pendingCloses) {
+            const el = dropdown.querySelector(`[data-tab-time="${escapeAttr(tabId)}"]`);
+            if (el) el.textContent = `auto-close in ${this._formatTimeLeft(pending.expiresAt)}`;
+        }
+    }
+
+    _formatTimeLeft(expiresAt) {
+        const ms = Math.max(0, expiresAt - Date.now());
+        const totalSec = Math.ceil(ms / 1000);
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        return m > 0 ? `${m}m ${s}s` : `${s}s`;
     }
 
     async startFromSelection(selection) {
@@ -2445,93 +2694,21 @@ class TerminalManager {
     // Font size
     // -------------------------------------------------------------------------
 
-    _loadFontSize() {
-        try { return parseInt(localStorage.getItem('viberails_terminal_fontSize'), 10) || 14; } catch { return 14; }
-    }
-
-    _saveFontSize(size) {
-        try { localStorage.setItem('viberails_terminal_fontSize', size); } catch {}
-    }
-
     adjustFontSize(delta, absolute) {
-        const current = this._loadFontSize();
+        const current = this.settings?.loadFontSize() ?? 14;
         const next = Math.max(6, Math.min(72, absolute != null ? absolute : current + delta));
-        this._saveFontSize(next);
+        this.settings?.saveFontSize(next);
         if (this.fontSizeLabel) this.fontSizeLabel.textContent = next;
-        const sizeInput = this.container.querySelector('#terminal-settings-font-size');
-        if (sizeInput) sizeInput.value = next;
+        this.settings?.syncFontSizeInput(next);
         this.tabs.forEach((tab) => tab.instance.applyFontSize(next));
     }
 
     // -------------------------------------------------------------------------
-    // Settings panel
+    // Settings panel — implementation lives in terminal-settings.js
     // -------------------------------------------------------------------------
 
-    _initSettingsPanel() {
-        const size = this._loadFontSize();
-        if (this.fontSizeLabel) this.fontSizeLabel.textContent = size;
-        const sizeInput = this.container.querySelector('#terminal-settings-font-size');
-        if (sizeInput) sizeInput.value = size;
-
-        this._themeItems = [];
-        const themeList = this.container.querySelector('#vb-terminal-settings-theme-list');
-        if (themeList && window.CXL_THEMES) {
-            themeList.innerHTML = '';
-            for (const [key, theme] of Object.entries(window.CXL_THEMES)) {
-                const item = document.createElement('div');
-                item.className = 'vb-terminal-settings-theme-item';
-                item.dataset.theme = key;
-                item.title = theme.name;
-
-                const preview = document.createElement('div');
-                preview.className = 'vb-terminal-settings-theme-preview';
-                preview.style.background = theme.background;
-
-                // Add accent pills to preview
-                const accents = [theme.red, theme.green, theme.blue, theme.magenta, theme.cyan, theme.yellow];
-                const activeAccents = accents.filter(c => c).slice(0, 4);
-                activeAccents.forEach(color => {
-                    const pill = document.createElement('div');
-                    pill.className = 'accent-pill';
-                    pill.style.background = color;
-                    preview.appendChild(pill);
-                });
-
-                const name = document.createElement('div');
-                name.className = 'vb-terminal-settings-theme-name';
-                name.textContent = theme.name;
-
-                item.appendChild(preview);
-                item.appendChild(name);
-
-                item.addEventListener('click', () => this.applyTheme(key));
-                themeList.appendChild(item);
-                this._themeItems.push(item);
-            }
-        }
-
-        const rendererSelect = this.container.querySelector('#terminal-settings-renderer');
-        if (rendererSelect) rendererSelect.value = this._loadRendererPreference();
-
-        const cursorStyleSelect = this.container.querySelector('#terminal-settings-cursor-style');
-        if (cursorStyleSelect) cursorStyleSelect.value = this._loadCursorStyle();
-
-        const cursorInactiveSelect = this.container.querySelector('#terminal-settings-cursor-inactive');
-        if (cursorInactiveSelect) cursorInactiveSelect.value = this._loadCursorInactiveStyle();
-
-        const savedTheme = this._loadThemePreference();
-        if (savedTheme) {
-            this._themeItems?.forEach((item) => {
-                item.classList.toggle('active', item.dataset.theme === savedTheme);
-            });
-        }
-    }
-
     toggleSettingsPanel(forceOpen) {
-        const open = forceOpen ?? !this.settingsPanel?.classList.contains('open');
-        this.settingsPanel?.classList.toggle('open', open);
-        this.settingsBtn?.classList.toggle('active', open);
-        if (!open) this.focusActiveTerminalInput();
+        this.settings?.togglePanel(forceOpen);
     }
 
     syncHistoryPanelState(forceOpen) {
@@ -2563,41 +2740,10 @@ class TerminalManager {
         this.syncHistoryPanelState(open);
     }
 
-    applyTheme(key) {
-        if (!window.CXL_THEMES?.[key]) return;
-        try { localStorage.setItem('viberails_terminal_theme', key); } catch {}
-        const theme = window.CXL_THEMES[key];
-        this.tabs.forEach((tab) => {
-            if (tab.instance.vibeTerminal?._terminal) {
-                tab.instance.vibeTerminal.setTheme(theme);
-            }
-        });
-        this._themeItems?.forEach(s => s.classList.toggle('active', s.dataset.theme === key));
-    }
-
-    applyRendererPreference(renderer) {
-        const useWebgl = renderer === 'webgl';
-        try { localStorage.setItem('viberails_terminal_webgl', String(useWebgl)); } catch {}
-        this.app.showToast(
-            'Renderer Updated',
-            'Renderer preference saved. Restart active terminal tabs to apply.',
-            'info'
-        );
-    }
-
-    applyCursorStyle(style) {
-        try { localStorage.setItem('viberails_terminal_cursorStyle', style); } catch {}
-        this.tabs.forEach((tab) => {
-            tab.instance.vibeTerminal?.setCursorStyle(style);
-        });
-    }
-
-    applyCursorInactiveStyle(style) {
-        try { localStorage.setItem('viberails_terminal_cursorInactiveStyle', style); } catch {}
-        this.tabs.forEach((tab) => {
-            tab.instance.vibeTerminal?.setCursorInactiveStyle(style);
-        });
-    }
+    applyTheme(key) { this.settings?.applyTheme(key); }
+    applyRendererPreference(renderer) { this.settings?.applyRendererPreference(renderer); }
+    applyCursorStyle(style) { this.settings?.applyCursorStyle(style); }
+    applyCursorInactiveStyle(style) { this.settings?.applyCursorInactiveStyle(style); }
 }
 
 export class TerminalController {
@@ -2900,6 +3046,17 @@ export class TerminalController {
                             <button type="button" class="vb-terminal-tab-select" id="vb-terminal-tab-select-btn" title="Select CLI/environment for active tab" aria-label="Select CLI/environment">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708"/></svg>
                             </button>
+                            <div class="vb-terminal-tab-undo-wrapper" id="vb-terminal-tab-undo-wrapper" hidden>
+                                <button type="button" class="vb-terminal-tab-undo" id="vb-terminal-tab-undo-btn" title="Restore a recently closed terminal (terminals auto-close after ${PENDING_CLOSE_LABEL})" aria-label="Restore a recently closed terminal">
+                                    <span class="vb-undo-icon" aria-hidden="true">
+                                        <i class="fa-solid fa-rotate-left"></i>
+                                    </span>
+                                    <span class="vb-undo-count" id="vb-terminal-tab-undo-count">0</span>
+                                </button>
+                                <div class="vb-terminal-tab-undo-select-wrap" aria-hidden="true">
+                                    <select id="vb-terminal-tab-undo-select" multiple></select>
+                                </div>
+                            </div>
                         </div>
                         <div class="vb-terminal-window-controls vb-terminal-window-controls-right">
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
@@ -2940,56 +3097,7 @@ export class TerminalController {
                         <p class="mb-3">Select a LLM to continue</p>
                         <p class="small mb-0">Use the <strong>+</strong> button to open a tab, then pick a CLI/environment.</p>
                     </div>
-                    <div class="vb-terminal-settings-panel" id="vb-terminal-settings-panel">
-                        <div class="vb-terminal-settings-header">
-                            <span>Terminal Settings</span>
-                            <button type="button" id="terminal-settings-close">&#x2715;</button>
-                        </div>
-                        <div class="vb-terminal-settings-body">
-                            <div class="vb-terminal-settings-section">
-                                <div class="vb-terminal-settings-section-title">Theme</div>
-                                <div class="vb-terminal-settings-theme-list" id="vb-terminal-settings-theme-list"></div>
-                            </div>
-                            <div class="vb-terminal-settings-section">
-                                <div class="vb-terminal-settings-section-title">Rendering</div>
-                                <div class="vb-terminal-settings-row">
-                                    <label>Renderer</label>
-                                    <select id="terminal-settings-renderer">
-                                        <option value="webgl">WebGL (Preferred)</option>
-                                        <option value="canvas">Canvas</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="vb-terminal-settings-section">
-                                <div class="vb-terminal-settings-section-title">Font</div>
-                                <div class="vb-terminal-settings-row">
-                                    <label>Size</label>
-                                    <input type="number" id="terminal-settings-font-size" min="6" max="72">
-                                </div>
-                            </div>
-                            <div class="vb-terminal-settings-section">
-                                <div class="vb-terminal-settings-section-title">Cursor</div>
-                                <div class="vb-terminal-settings-row">
-                                    <label>Active style</label>
-                                    <select id="terminal-settings-cursor-style">
-                                        <option value="block">Block</option>
-                                        <option value="bar">Bar</option>
-                                        <option value="underline">Underline</option>
-                                    </select>
-                                </div>
-                                <div class="vb-terminal-settings-row">
-                                    <label>Inactive style</label>
-                                    <select id="terminal-settings-cursor-inactive">
-                                        <option value="outline">Outline</option>
-                                        <option value="block">Block</option>
-                                        <option value="bar">Bar</option>
-                                        <option value="underline">Underline</option>
-                                        <option value="none">None</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    ${renderTerminalSettingsPanelHtml()}
                 </div>
             </div>
         `;
