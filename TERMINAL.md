@@ -712,37 +712,12 @@ Key file: `VibeRails/Services/Terminal/TerminalRunner.cs` — `_nativeRemoteEnab
 
 ## Fixed Issues
 
-### ⚠️ Cold-start typing lag (~800–3000 ms echo) caused by Chromium throttling our setTimeout coalesce (2026-05-05 — UNVERIFIED, NEEDS TESTING)
+### ✅ Cold-start typing lag (~800–3000 ms echo) caused by Chromium throttling our setTimeout coalesce (2026-05-05, verified 2026-05-06)
 
-**Verification status:** Code change is in but **not yet validated end-to-end.**
-Two things must be confirmed before this entry can be marked `✅`:
-
-1. **Cold-start lag is actually gone.** Kill all `Code.exe` and `vb.exe` in
-   Process Explorer (a normal window close is not enough — the renderer
-   process must be fully torn down to re-enter the occluded state). Launch
-   VS Code, open the dashboard, type immediately. Echo should be tight from
-   the very first keystroke. If lag is still ~800 ms+, something else
-   beyond `setTimeout` clamping is at play and this fix did not land it.
-2. **No regression of the Codex/Copilot tearing the original
-   `setTimeout` coalesce was protecting against** (commit `3ea2f30` —
-   intermediate torn frames during multi-write TUI redraws, e.g. erase →
-   sync-on → content → sync-off arriving as separate WS frames). Steady-state
-   typing into a Codex/Copilot session, plus a streaming response, should
-   not show blank-row flicker or torn intermediate redraws. If it does,
-   that means the per-task batching window of `queueMicrotask` is too
-   narrow for cases that escape the server-side `NormalCoalesceDelayMs = 4`
-   hold — switch the runtime toggle to `scheduler.postTask` (see Fix
-   below) and re-test; that mode adds a real 10 ms cross-task batch window
-   without re-introducing occlusion throttling.
-3. **`scheduler.postTask` mode also passes the cold-start test.** With
-   the Output Coalescing toggle set to `postTask`, repeat verification
-   step 1 (kill `Code.exe` + `vb.exe`, relaunch, type immediately).
-   Echo should still be tight. If lag returns under `postTask` but is
-   fine under `microtask`, the throttle hypothesis was wrong and we need
-   to dig further.
-
-If all three checks pass, change the heading from `⚠️` to `✅` and remove
-this verification block.
+**Verified fixed in v1.6.12** (commit `989afd1`). End-to-end checks passed:
+cold-start echo is tight from the first keystroke after a full `Code.exe` +
+`vb.exe` teardown, no Codex/Copilot tear regression observed, and
+`scheduler.postTask` mode also passes the cold-start test.
 
 **Symptom:** First cold start of VS Code → typing in the VibeRails dashboard
 echoed at 500–1000 ms+ per character (worst keystrokes pushing 3 s). Lag was
@@ -1379,16 +1354,14 @@ state machine that replaced `CircularBuffer` as the terminal state proxy.
   window on top of xterm's pipeline (so steady-state echo budget rises to
   ~30 ms when enabled, in exchange for tear protection on multi-frame TUI
   redraws).
-- **Cold-start typing latency (candidate fix, unverified 2026-05-05):** the previously catastrophic
-  ~800–3000 ms first-cold-start echo lag was a separate problem from the
-  steady-state ~20 ms above. Root cause was Chromium clamping our
-  `setTimeout`-based output coalesce in `terminal-multitab.js` to a 1-second
-  minimum while the VS Code webview was occluded during workbench cold paint.
-  The candidate fix switches to `queueMicrotask`, but it is not verified until
-  the cold-start lag check and Codex/Copilot tearing regression check both
-  pass. See the Fixed Issues entry for the full diagnostic signature and
-  guardrails — in particular, do not reintroduce `setTimeout` for short-delay
-  batching in the webview.
+- **Cold-start typing latency (fixed 2026-05-05, verified 2026-05-06, v1.6.12):**
+  the previously catastrophic ~800–3000 ms first-cold-start echo lag was a
+  separate problem from the steady-state ~20 ms above. Root cause was Chromium
+  clamping our `setTimeout`-based output coalesce in `terminal-multitab.js` to a
+  1-second minimum while the VS Code webview was occluded during workbench cold
+  paint. Fixed by switching to `queueMicrotask`. See the Fixed Issues entry for
+  the full diagnostic signature and guardrails — in particular, do not
+  reintroduce `setTimeout` for short-delay batching in the webview.
 
 
 
@@ -1574,13 +1547,12 @@ This is not a bug in VibeControl — it is standard terminal behavior. `vim`, `n
 
 **Status:** Open — 2026-04-20 — investigation complete, fix deferred
 
-**Note (2026-05-05):** This entry is about the **server-side** 4 ms
-`NormalCoalesceDelayMs` hold and is distinct from the cold-start typing lag
-candidate fix from 2026-05-05 (which addresses a **client-side** `setTimeout`
-being clamped to 1 s by Chromium during webview occlusion). See the Fixed
-Issues entry "Cold-start typing lag (~800–3000 ms echo)…" for the pending
-verification checks. The remaining 5–17 ms per-frame stutter described below
-is the steady-state server-side concern.
+**Note (2026-05-05, updated 2026-05-06):** This entry is about the
+**server-side** 4 ms `NormalCoalesceDelayMs` hold and is distinct from the
+cold-start typing lag fix shipped 2026-05-05 and verified 2026-05-06 in
+v1.6.12 (which addressed a **client-side** `setTimeout` being clamped to 1 s
+by Chromium during webview occlusion). The remaining 5–17 ms per-frame
+stutter described below is the steady-state server-side concern.
 
 **Symptom:** Typing and held-down backspace feel laggy/stuttery in the xterm.js terminal. Stutter is perceptible rather than uniform — some frames pop instantly, others visibly lag.
 

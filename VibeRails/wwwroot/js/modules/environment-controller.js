@@ -783,6 +783,40 @@ export class EnvironmentController {
         return rendered.join('');
     }
 
+    renderCopilotModelOptions(selectedModel) {
+        const selected = (selectedModel || '').trim();
+        const options = [
+            ['', 'Default (auto)'],
+            ['claude-sonnet-4.6', 'claude-sonnet-4.6'],
+            ['claude-sonnet-4.5', 'claude-sonnet-4.5'],
+            ['claude-haiku-4.5', 'claude-haiku-4.5'],
+            ['claude-opus-4.7', 'claude-opus-4.7'],
+            ['claude-opus-4.6', 'claude-opus-4.6'],
+            ['claude-opus-4.6-fast', 'claude-opus-4.6-fast'],
+            ['claude-opus-4.5', 'claude-opus-4.5'],
+            ['claude-sonnet-4', 'claude-sonnet-4'],
+            ['gpt-5.5', 'gpt-5.5'],
+            ['gpt-5.4', 'gpt-5.4'],
+            ['gpt-5.3-codex', 'gpt-5.3-codex'],
+            ['gpt-5.2-codex', 'gpt-5.2-codex'],
+            ['gpt-5.2', 'gpt-5.2'],
+            ['gpt-5.1', 'gpt-5.1'],
+            ['gpt-5.4-mini', 'gpt-5.4-mini'],
+            ['gpt-5-mini', 'gpt-5-mini'],
+            ['gpt-4.1', 'gpt-4.1'],
+        ];
+        const known = new Set(options.map(([value]) => value));
+        const rendered = options.map(([value, label]) =>
+            `<option value="${this.app.escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${this.app.escapeHtml(label)}</option>`
+        );
+
+        if (selected && !known.has(selected)) {
+            rendered.push(`<option value="${this.app.escapeHtml(selected)}" selected>${this.app.escapeHtml(selected)} (custom)</option>`);
+        }
+
+        return rendered.join('');
+    }
+
     buildCopilotCustomArgs(settings) {
         const s = settings || {};
         const args = [];
@@ -1179,7 +1213,7 @@ export class EnvironmentController {
             const initialMessage = this.app.escapeHtml(s.initialMessage || '');
             const mode = this.normalizeCopilotMode(s.mode);
             const permissionPreset = this.normalizeCopilotPermissionPreset(s.permissionPreset);
-            const model = this.app.escapeHtml(s.model || '');
+            const model = s.model || '';
             const additionalArgs = this.app.escapeHtml(s.additionalArgs || '');
 
             return `
@@ -1202,7 +1236,9 @@ export class EnvironmentController {
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Model</label>
-                    <input type="text" class="form-control" id="copilot-model" value="${model}" placeholder="Default, auto, or a model name">
+                    <select class="form-select" id="copilot-model">
+                        ${this.renderCopilotModelOptions(model)}
+                    </select>
                     <small class="form-text text-muted">Passed as <code>--model</code>; leave blank to use Copilot's default</small>
                 </div>
                 <div class="mb-3">
