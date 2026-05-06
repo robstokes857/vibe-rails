@@ -3022,13 +3022,11 @@ code {
     cursor: not-allowed;
 }
 
-/* Undo (pending-close) button — sits after the carrot */
+/* Undo (pending-close) button — lives in the right-side controls cluster */
 #vb-terminal-panel .vb-terminal-tab-undo-wrapper {
     position: relative;
     display: inline-flex;
     align-items: center;
-    height: 100%;
-    margin-left: 4px;
     flex-shrink: 0;
 }
 
@@ -3038,18 +3036,15 @@ code {
 
 #vb-terminal-panel .vb-terminal-tab-undo {
     background: transparent;
-    border: 1px solid transparent;
+    border: 1px solid rgba(249, 181, 114, 0.35);
     color: #f9b572;
-    padding: 0 10px;
-    height: calc(100% - 8px);
-    margin-top: 4px;
-    margin-bottom: 4px;
-    border-radius: 4px;
+    padding: 0.4rem 0.7rem;
+    border-radius: 6px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     line-height: 1;
     cursor: pointer;
     transition: background 0.2s, color 0.2s, border-color 0.2s;
@@ -3624,7 +3619,10 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
         padding-left: 8px;
     }
 
-    #vb-terminal-panel .vb-terminal-window-controls-right {
+    /* Hide the right-side controls cluster on narrow viewports, but keep
+       the undo (pending-close) wrapper reachable — it's a recovery control,
+       not a nice-to-have like zoom/refresh/settings. */
+    #vb-terminal-panel .vb-terminal-window-controls-right > *:not(.vb-terminal-tab-undo-wrapper) {
         display: none;
     }
 

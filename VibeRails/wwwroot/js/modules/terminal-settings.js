@@ -30,6 +30,16 @@ export function renderTerminalSettingsPanelHtml() {
                     </div>
                 </div>
                 <div class="vb-terminal-settings-section">
+                    <div class="vb-terminal-settings-section-title">Output Coalescing</div>
+                    <div class="vb-terminal-settings-row">
+                        <label>Mode</label>
+                        <select id="terminal-settings-output-coalesce">
+                            <option value="microtask">Instant (queueMicrotask)</option>
+                            <option value="postTask">10ms batching (scheduler.postTask)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="vb-terminal-settings-section">
                     <div class="vb-terminal-settings-section-title">Font</div>
                     <div class="vb-terminal-settings-row">
                         <label>Size</label>
@@ -78,6 +88,7 @@ export class TerminalSettings {
         this._rendererStatusEl = null;
         this._cursorStyleSelect = null;
         this._cursorInactiveSelect = null;
+        this._outputCoalesceSelect = null;
         this._themeListEl = null;
     }
 
@@ -112,6 +123,13 @@ export class TerminalSettings {
         catch { return 'outline'; }
     }
 
+    loadOutputCoalesce() {
+        try {
+            const v = localStorage.getItem('viberails_terminal_outputCoalesce');
+            return v === 'postTask' ? 'postTask' : 'microtask';
+        } catch { return 'microtask'; }
+    }
+
     // ---------- Mount + populate ----------
 
     init() {
@@ -123,6 +141,7 @@ export class TerminalSettings {
         this._rendererStatusEl  = this._container.querySelector('#terminal-settings-renderer-active');
         this._cursorStyleSelect = this._container.querySelector('#terminal-settings-cursor-style');
         this._cursorInactiveSelect = this._container.querySelector('#terminal-settings-cursor-inactive');
+        this._outputCoalesceSelect = this._container.querySelector('#terminal-settings-output-coalesce');
         this._themeListEl       = this._container.querySelector('#vb-terminal-settings-theme-list');
 
         this._panelBtn?.addEventListener('click', () => this.togglePanel());
@@ -134,6 +153,7 @@ export class TerminalSettings {
         this._rendererSelect?.addEventListener('change', (e) => this.applyRendererPreference(e.target.value));
         this._cursorStyleSelect?.addEventListener('change', (e) => this.applyCursorStyle(e.target.value));
         this._cursorInactiveSelect?.addEventListener('change', (e) => this.applyCursorInactiveStyle(e.target.value));
+        this._outputCoalesceSelect?.addEventListener('change', (e) => this.applyOutputCoalesce(e.target.value));
 
         this._populate();
     }
@@ -178,6 +198,7 @@ export class TerminalSettings {
         if (this._rendererSelect) this._rendererSelect.value = this.loadRenderer();
         if (this._cursorStyleSelect) this._cursorStyleSelect.value = this.loadCursorStyle();
         if (this._cursorInactiveSelect) this._cursorInactiveSelect.value = this.loadCursorInactiveStyle();
+        if (this._outputCoalesceSelect) this._outputCoalesceSelect.value = this.loadOutputCoalesce();
 
         const savedTheme = this.loadTheme();
         if (savedTheme) {
@@ -245,6 +266,10 @@ export class TerminalSettings {
         for (const tab of this._manager.tabs.values()) {
             tab.instance.vibeTerminal?.setCursorInactiveStyle(style);
         }
+    }
+
+    applyOutputCoalesce(mode) {
+        this._manager.setOutputCoalesceMode(mode);
     }
 
     syncFontSizeInput(size) {

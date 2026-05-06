@@ -712,6 +712,172 @@ Key file: `VibeRails/Services/Terminal/TerminalRunner.cs` — `_nativeRemoteEnab
 
 ## Fixed Issues
 
+### ⚠️ Cold-start typing lag (~800–3000 ms echo) caused by Chromium throttling our setTimeout coalesce (2026-05-05 — UNVERIFIED, NEEDS TESTING)
+
+**Verification status:** Code change is in but **not yet validated end-to-end.**
+Two things must be confirmed before this entry can be marked `✅`:
+
+1. **Cold-start lag is actually gone.** Kill all `Code.exe` and `vb.exe` in
+   Process Explorer (a normal window close is not enough — the renderer
+   process must be fully torn down to re-enter the occluded state). Launch
+   VS Code, open the dashboard, type immediately. Echo should be tight from
+   the very first keystroke. If lag is still ~800 ms+, something else
+   beyond `setTimeout` clamping is at play and this fix did not land it.
+2. **No regression of the Codex/Copilot tearing the original
+   `setTimeout` coalesce was protecting against** (commit `3ea2f30` —
+   intermediate torn frames during multi-write TUI redraws, e.g. erase →
+   sync-on → content → sync-off arriving as separate WS frames). Steady-state
+   typing into a Codex/Copilot session, plus a streaming response, should
+   not show blank-row flicker or torn intermediate redraws. If it does,
+   that means the per-task batching window of `queueMicrotask` is too
+   narrow for cases that escape the server-side `NormalCoalesceDelayMs = 4`
+   hold — switch the runtime toggle to `scheduler.postTask` (see Fix
+   below) and re-test; that mode adds a real 10 ms cross-task batch window
+   without re-introducing occlusion throttling.
+3. **`scheduler.postTask` mode also passes the cold-start test.** With
+   the Output Coalescing toggle set to `postTask`, repeat verification
+   step 1 (kill `Code.exe` + `vb.exe`, relaunch, type immediately).
+   Echo should still be tight. If lag returns under `postTask` but is
+   fine under `microtask`, the throttle hypothesis was wrong and we need
+   to dig further.
+
+If all three checks pass, change the heading from `⚠️` to `✅` and remove
+this verification block.
+
+**Symptom:** First cold start of VS Code → typing in the VibeRails dashboard
+echoed at 500–1000 ms+ per character (worst keystrokes pushing 3 s). Lag was
+"unusably slow" until the user closed the extension and reopened it within the
+same VS Code session — at which point typing was instantly fine and stayed
+fine for the rest of the session. The lag could only be reproduced by killing
+VS Code in Process Explorer (or fully quitting); a normal close/reopen of the
+window did not bring it back.
+
+**How it presented in measurements:** server round-trip (`Send → Recv`) was
+healthy at ~46 ms. Renderer end-to-end (`Recv → Commit`) was healthy at ~16 ms.
+But Chrome Performance trace `TimerInstall` / `TimerFire` events showed
+short-target timers (requested ~10 ms) firing at:
+
+```
+p25:    0.6 ms        ← when not throttled
+p50:  801.3 ms        ← median: 80× over budget
+p75:  980.5 ms
+p95: 1353.0 ms
+p99: 2992.6 ms        ← worst: 300× over budget
+```
+
+12 of 19 short timers in a 96 s trace fired in 760–2993 ms instead of 10 ms.
+
+**Root cause:** Chromium clamps `setTimeout` to a 1-second minimum when the
+renderer reports the frame as "occluded" (`visible_content_area: 0`). The
+VS Code webview is occluded during cold start until the workbench finishes
+its first paint cycle. Our `socket.onmessage` in
+`VibeRails/wwwroot/js/modules/terminal-multitab.js` used
+`setTimeout(flushPendingChunks, OUTPUT_WRITE_COALESCE_MS)` to coalesce
+adjacent WS frames into one `xterm.write()` (anti-tearing for Codex/Copilot
+multi-frame redraws — added in commit `3ea2f30`). Under cold-start
+occlusion, every echo's coalesce timer was held 800+ ms before firing,
+stalling the entire echo path while the bytes sat in `pendingChunks`.
+
+Once the workbench finished its first paint, the throttle disengaged for
+the lifetime of the renderer process — so any subsequent extension
+open/reopen was instant. Killing VS Code was required to re-enter the
+occluded state.
+
+**Why the gate exists** (do not reintroduce setTimeout):
+> TUI apps (Codex, Copilot) split their screen updates across multiple
+> small PTY writes that arrive 1–10 ms apart — e.g. an erase sequence,
+> then `?2026h` (sync-on), then the redrawn content, then `?2026l`
+> (sync-off/render). If each arrives as a separate WebSocket frame,
+> xterm.js may render intermediate torn states (blank cells) between
+> the erase and the sync-on.
+
+That tearing concern is real, but it is **already** covered by:
+1. The server-side coalesce in `WebSocketConsumer.cs`
+   (`NormalCoalesceDelayMs = 4`) — primary tear protection.
+2. xterm.js's own per-frame rAF render — multiple `write()` calls within
+   one paint interval produce a single composited paint.
+
+The client-side gate in `terminal-multitab.js` is the third layer, and
+its job is only to fold chunks that arrive in the same task into one
+`xterm.write()` call.
+
+**Fix:** Replaced `setTimeout` with `queueMicrotask` in `socket.onmessage`.
+Microtasks are not subject to background-frame throttling — they always
+drain at the end of the current task regardless of visibility state.
+Briefly tried `requestAnimationFrame` first; switched on the realization
+that rAF couples byte *processing* to visibility — bytes would accumulate
+in `pendingChunks` during occlusion and hand a large backlog to
+`xterm.write` in one synchronous parse when visibility returned.
+Microtask decouples processing from rendering: xterm's parser updates
+state as bytes arrive, xterm's own internal rAF renderer paints when
+the page is paintable.
+
+Added a runtime-selectable alternative in Terminal Settings →
+"Output Coalescing": **`scheduler.postTask` 10ms batching**. Defaults to
+`queueMicrotask`. `scheduler.postTask` gives the cross-task batching the
+original `setTimeout` provided (10 ms sliding window across adjacent
+`onmessage` tasks) without the occlusion clamp — `scheduler.postTask` is
+not subject to the visibility/occlusion throttling that breaks
+`setTimeout` and `requestAnimationFrame`. Falls back to `queueMicrotask`
+if `scheduler.postTask` isn't available in the runtime. Stored in
+`localStorage` under `viberails_terminal_outputCoalesce`
+(`'microtask'` | `'postTask'`). Switching the toggle takes effect
+on the next WS frame — no reconnect required. The selector lives on
+`TerminalManager` (`_outputCoalesceMode` + `setOutputCoalesceMode`); the
+read in `socket.onmessage` is a property lookup, no localStorage hit on
+the hot path.
+
+Removed the now-unused `OUTPUT_WRITE_COALESCE_MS` constant. Renamed
+`flushTimeoutId → flushQueued` (boolean). Disconnect path no longer
+needs `clearTimeout` — it just clears `pendingChunks` and the flag,
+since any in-flight microtask is no-op'd by the existing
+`this.socket !== socket` guard inside `flushPendingChunks`.
+
+**Scope (deliberate):** this is a *client-only* change. An earlier draft
+also tightened the server-side constants in `WebSocketConsumer.cs`
+(`NormalCoalesceDelayMs` 4→2, `MaxSyncOutputHoldMs` 100→16) to chase
+steady-state typing latency. That was rolled back — switching to
+`queueMicrotask` already eliminates the same-task client batching window
+the original `setTimeout` provided, so the server-side coalesce is now
+the *only* multi-frame tear protection left (besides xterm's per-paint
+rAF). Halving it in the same change would have stacked two protection
+losses on top of each other, exactly when verification hasn't run yet.
+If steady-state typing latency is the next target, do it as a separate,
+testable change with the Codex/Copilot tear regression check (#2 above)
+re-run after.
+
+**Guardrails:**
+- Never use `setTimeout` for short-delay batching of incoming WS data
+  (or any input-event-driven work) in the webview. Treat `setTimeout`
+  as background-throttled by default. Use `queueMicrotask` for
+  immediate drain or `requestAnimationFrame` for paint-aligned work.
+- For deliberate cross-task batching (multi-frame TUI tear protection),
+  prefer `scheduler.postTask({ delay, priority })` over `setTimeout`.
+  Both `setTimeout` and `requestAnimationFrame` are throttled or
+  suspended when the renderer is occluded; `scheduler.postTask` is not.
+  Chromium 94+ (covers VS Code's Electron webview and modern Chrome/Edge).
+  Fall back to `queueMicrotask` for browsers without `scheduler.postTask`
+  (Firefox/Safari) — the no-cross-task-batching trade-off matches the
+  current default behavior.
+- If a "lag only on cold start, fine after reopen" symptom appears
+  again, suspect timer throttling first. Capture a Performance trace
+  and inspect `TimerInstall` / `TimerFire` actual-vs-requested delays
+  before going deeper into server-side or render-side suspects.
+
+**Diagnostic signature:** in a Performance trace from cold start, look
+for short-target timers (`TimerInstall` requested timeout ≤ 50 ms)
+whose corresponding `TimerFire` lands 700–3000 ms later. Trace
+`Trace-20260505T155736.json.gz` is the canonical example.
+
+Key files:
+- `VibeRails/wwwroot/js/modules/terminal-multitab.js` — `socket.onmessage`,
+  `flushPendingChunks`
+- `VibeRails/Services/Terminal/Consumers/WebSocketConsumer.cs` —
+  `NormalCoalesceDelayMs = 4` (server-side coalesce, unchanged; still the
+  primary tear protection)
+
+---
+
 ### ✅ Scrollback wiped on shrink-resize during long live xterm.js sessions (2026-05-01)
 
 **Symptom (Rob, session `8dd5fe21-2eaf-4622-a7ba-a070416ffa7d`):** after a long
@@ -1203,10 +1369,26 @@ state machine that replaced `CircularBuffer` as the terminal state proxy.
   by the TerminalEmulator grid approach.
 - Replay is now the standard reconnect baseline for all session types. Do not reintroduce
   CLI-specific skip-replay branches unless a concrete reproducer and regression tests require it.
-- **Sluggish typing (accepted):** ~20 ms per character echo latency is inherent — xterm.js v6
-  `WriteBuffer` batches via `setTimeout(0)` (~4 ms) + rAF render (~16 ms). No delay on our
-  `onData` → `socket.send()` path; the bottleneck is xterm.js's async write pipeline. Fixing
-  would require local echo or xterm.js internal APIs. Accepted as-is.
+- **Steady-state typing latency (accepted):** ~20 ms per character echo is
+  inherent — xterm.js v6 `WriteBuffer` batches via `setTimeout(0)` (~4 ms) +
+  rAF render (~16 ms). No delay on our `onData` → `socket.send()` path; the
+  bottleneck is xterm.js's async write pipeline. Fixing would require local
+  echo or xterm.js internal APIs. Accepted as-is. See Terminal Settings →
+  "Output Coalescing" for the runtime A/B between `queueMicrotask` (default)
+  and `scheduler.postTask` 10 ms — `postTask` adds a 10 ms cross-task batch
+  window on top of xterm's pipeline (so steady-state echo budget rises to
+  ~30 ms when enabled, in exchange for tear protection on multi-frame TUI
+  redraws).
+- **Cold-start typing latency (candidate fix, unverified 2026-05-05):** the previously catastrophic
+  ~800–3000 ms first-cold-start echo lag was a separate problem from the
+  steady-state ~20 ms above. Root cause was Chromium clamping our
+  `setTimeout`-based output coalesce in `terminal-multitab.js` to a 1-second
+  minimum while the VS Code webview was occluded during workbench cold paint.
+  The candidate fix switches to `queueMicrotask`, but it is not verified until
+  the cold-start lag check and Codex/Copilot tearing regression check both
+  pass. See the Fixed Issues entry for the full diagnostic signature and
+  guardrails — in particular, do not reintroduce `setTimeout` for short-delay
+  batching in the webview.
 
 
 
@@ -1391,6 +1573,14 @@ This is not a bug in VibeControl — it is standard terminal behavior. `vim`, `n
 ### Typing lag / stutter from WebSocket coalesce hold
 
 **Status:** Open — 2026-04-20 — investigation complete, fix deferred
+
+**Note (2026-05-05):** This entry is about the **server-side** 4 ms
+`NormalCoalesceDelayMs` hold and is distinct from the cold-start typing lag
+candidate fix from 2026-05-05 (which addresses a **client-side** `setTimeout`
+being clamped to 1 s by Chromium during webview occlusion). See the Fixed
+Issues entry "Cold-start typing lag (~800–3000 ms echo)…" for the pending
+verification checks. The remaining 5–17 ms per-frame stutter described below
+is the steady-state server-side concern.
 
 **Symptom:** Typing and held-down backspace feel laggy/stuttery in the xterm.js terminal. Stutter is perceptible rather than uniform — some frames pop instantly, others visibly lag.
 
