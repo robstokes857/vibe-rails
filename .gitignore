@@ -386,3 +386,5 @@ FodyWeavers.xsd
 /TerminalEmulator.Tests/snapshots
 /fixtures
 TerminalEmulator.Tests/state.db
+UITests/test-results/.last-run.json
+UITests/test-results/.last-run.json
