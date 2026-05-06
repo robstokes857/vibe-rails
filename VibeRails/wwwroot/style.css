@@ -2995,33 +2995,6 @@ code {
     cursor: not-allowed;
 }
 
-#vb-terminal-panel .vb-terminal-tab-select {
-    background: transparent;
-    border: none;
-    color: #6c7086;
-    padding: 0 8px;
-    height: calc(100% - 8px);
-    margin-top: 4px;
-    margin-bottom: 4px;
-    border-radius: 0 4px 4px 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background 0.2s, color 0.2s;
-    flex-shrink: 0;
-}
-
-#vb-terminal-panel .vb-terminal-tab-select:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #cdd6f4;
-}
-
-#vb-terminal-panel .vb-terminal-tab-select:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-}
-
 /* Undo (pending-close) button — lives in the right-side controls cluster */
 #vb-terminal-panel .vb-terminal-tab-undo-wrapper {
     position: relative;
@@ -3036,8 +3009,8 @@ code {
 
 #vb-terminal-panel .vb-terminal-tab-undo {
     background: transparent;
-    border: 1px solid rgba(249, 181, 114, 0.35);
-    color: #f9b572;
+    border: 1px solid var(--terminal-border);
+    color: #a6adc8;
     padding: 0.4rem 0.7rem;
     border-radius: 6px;
     display: inline-flex;
@@ -3052,9 +3025,9 @@ code {
 }
 
 #vb-terminal-panel .vb-terminal-tab-undo:hover {
-    background: rgba(249, 181, 114, 0.12);
-    color: #ffcb91;
-    border-color: rgba(249, 181, 114, 0.3);
+    background: rgba(255, 255, 255, 0.05);
+    color: #cdd6f4;
+    border-color: rgba(255, 255, 255, 0.18);
 }
 
 #vb-terminal-panel .vb-terminal-tab-undo .vb-undo-icon {
@@ -3071,8 +3044,8 @@ code {
     height: 18px;
     padding: 0 5px;
     border-radius: 9px;
-    background: rgba(249, 181, 114, 0.22);
-    color: #ffd9b3;
+    background: rgba(255, 255, 255, 0.1);
+    color: #cdd6f4;
     font-size: 0.72rem;
     font-weight: 600;
     line-height: 1;
@@ -3084,17 +3057,17 @@ code {
 
 @keyframes vb-undo-pulse {
     0% {
-        box-shadow: 0 0 0 0 rgba(249, 181, 114, 0.65);
-        background: rgba(249, 181, 114, 0.22);
+        box-shadow: 0 0 0 0 rgba(205, 214, 244, 0.45);
+        background: rgba(255, 255, 255, 0.12);
     }
 
     70% {
-        box-shadow: 0 0 0 10px rgba(249, 181, 114, 0);
-        background: rgba(249, 181, 114, 0.05);
+        box-shadow: 0 0 0 10px rgba(205, 214, 244, 0);
+        background: rgba(255, 255, 255, 0.03);
     }
 
     100% {
-        box-shadow: 0 0 0 0 rgba(249, 181, 114, 0);
+        box-shadow: 0 0 0 0 rgba(205, 214, 244, 0);
         background: transparent;
     }
 }
@@ -3127,7 +3100,7 @@ code {
 
 .vb-undo-dropdown.ts-dropdown {
     background: #1e1e2e;
-    border: 1px solid rgba(249, 181, 114, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 6px;
     color: #cdd6f4;
     box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
@@ -3137,13 +3110,18 @@ code {
     margin: 0;
     padding: 0;
     overflow: hidden;
+    /* Right-anchor to the undo button so the 340px dropdown grows leftward
+       into open space, instead of overflowing past the viewport edge and
+       clipping the per-row kill ("X") button. */
+    left: auto !important;
+    right: 0;
 }
 
 .vb-undo-dropdown.ts-dropdown .dropdown-header {
-    background: rgba(249, 181, 114, 0.08);
-    border-bottom: 1px solid rgba(249, 181, 114, 0.22);
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     padding: 8px 14px;
-    color: #f9b572;
+    color: #a6adc8;
     font-size: 0.78rem;
     letter-spacing: 0.01em;
     border-radius: 0;
@@ -3175,17 +3153,32 @@ code {
 
 .vb-undo-dropdown.ts-dropdown .option.active,
 .vb-undo-dropdown.ts-dropdown .option:hover {
-    background: rgba(249, 181, 114, 0.1);
+    background: rgba(255, 255, 255, 0.06);
 }
 
 .vb-undo-row {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 22px 1fr auto;
     align-items: center;
     column-gap: 12px;
     padding: 10px 14px;
     cursor: pointer;
     min-height: 48px;
+}
+
+.vb-undo-row-logo {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    flex: 0 0 22px;
+}
+
+.vb-undo-row-logo.vb-undo-row-logo-fallback {
+    color: #a6adc8;
+    font-size: 0.95rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .vb-undo-row-main {
@@ -3215,23 +3208,8 @@ code {
     white-space: nowrap;
 }
 
-.vb-undo-row-meta-sep {
-    color: #585b70;
-}
-
-.vb-undo-row-cli {
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: #a6adc8;
-    background: rgba(166, 173, 200, 0.12);
-    border-radius: 3px;
-    padding: 1px 6px;
-    font-size: 0.68rem;
-    font-weight: 600;
-}
-
 .vb-undo-row-time {
-    color: #f9b572;
+    color: #a6adc8;
     font-variant-numeric: tabular-nums;
 }
 
@@ -3703,7 +3681,6 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     }
 
     #vb-terminal-panel .vb-terminal-tab-add,
-    #vb-terminal-panel .vb-terminal-tab-select,
     #vb-terminal-panel .vb-terminal-tab-undo {
         padding-left: 8px;
         padding-right: 8px;
@@ -4869,13 +4846,15 @@ input.form-control:disabled {
    Terminal Settings Panel + Zoom Controls
    ========================================================================= */
 
-/* Download button + dropdown */
-#vb-terminal-panel .vb-terminal-download-wrap {
+/* Download/action buttons + dropdowns */
+#vb-terminal-panel .vb-terminal-download-wrap,
+#vb-terminal-panel .vb-terminal-menu-wrap {
     position: relative;
     display: inline-flex;
 }
 
-#vb-terminal-panel .vb-terminal-download-menu {
+#vb-terminal-panel .vb-terminal-download-menu,
+#vb-terminal-panel .vb-terminal-menu {
     position: absolute;
     top: calc(100% + 4px);
     right: 0;
@@ -4890,11 +4869,13 @@ input.form-control:disabled {
     gap: 2px;
 }
 
-#vb-terminal-panel .vb-terminal-download-menu[hidden] {
+#vb-terminal-panel .vb-terminal-download-menu[hidden],
+#vb-terminal-panel .vb-terminal-menu[hidden] {
     display: none;
 }
 
-#vb-terminal-panel .vb-terminal-download-menu button {
+#vb-terminal-panel .vb-terminal-download-menu button,
+#vb-terminal-panel .vb-terminal-menu button {
     background: none;
     border: none;
     color: #d4d4d4;
@@ -4904,11 +4885,25 @@ input.form-control:disabled {
     border-radius: 4px;
     cursor: pointer;
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
 }
 
-#vb-terminal-panel .vb-terminal-download-menu button:hover {
+#vb-terminal-panel .vb-terminal-download-menu button:hover,
+#vb-terminal-panel .vb-terminal-menu button:hover {
     background: rgba(255, 255, 255, 0.07);
     color: #fff;
+}
+
+#vb-terminal-panel #terminal-menu-btn[aria-expanded="true"] {
+    background: rgba(255, 255, 255, 0.1);
+    color: #cdd6f4;
+}
+
+.vb-multirun-modal-shell {
+    min-height: 120px;
 }
 
 /* Zoom buttons and font size label in the tab bar */
@@ -4981,7 +4976,10 @@ input.form-control:disabled {
 #vb-terminal-panel .vb-terminal-settings-body {
     flex: 1;
     overflow-y: auto;
-    padding: 12px 0;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
 }
@@ -4996,24 +4994,100 @@ input.form-control:disabled {
 }
 
 #vb-terminal-panel .vb-terminal-settings-section {
-    padding: 12px 16px;
-}
-
-#vb-terminal-panel .vb-terminal-settings-section+.vb-terminal-settings-section {
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.025);
+    overflow: hidden;
 }
 
 #vb-terminal-panel .vb-terminal-settings-section-title {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 11px 12px;
     font-size: 0.7rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: #9399b2;
-    margin-bottom: 12px;
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 10px;
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+    line-height: 1.2;
+    transition: background 0.2s, color 0.2s;
+}
+
+#vb-terminal-panel .vb-terminal-settings-section-title:hover,
+#vb-terminal-panel .vb-terminal-settings-section.open .vb-terminal-settings-section-title {
+    background: rgba(255, 255, 255, 0.04);
+    color: #cdd6f4;
+}
+
+#vb-terminal-panel .vb-terminal-settings-section-title:focus-visible {
+    outline: 2px solid rgba(137, 180, 250, 0.45);
+    outline-offset: -2px;
+}
+
+#vb-terminal-panel .vb-terminal-settings-section-label,
+#vb-terminal-panel .vb-terminal-settings-section-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+#vb-terminal-panel .vb-terminal-settings-section-label {
+    overflow: hidden;
+}
+
+#vb-terminal-panel .vb-terminal-settings-section-label span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#vb-terminal-panel .vb-terminal-settings-section-label i {
+    color: #89b4fa;
+    font-size: 0.76rem;
+    width: 14px;
+    text-align: center;
+    flex: 0 0 14px;
+}
+
+#vb-terminal-panel .vb-terminal-settings-section-chevron {
+    color: #6c7086;
+    font-size: 0.64rem;
+    transition: transform 0.2s ease, color 0.2s ease;
+    flex: 0 0 auto;
+}
+
+#vb-terminal-panel .vb-terminal-settings-section.open .vb-terminal-settings-section-chevron {
+    color: #cdd6f4;
+    transform: rotate(180deg);
+}
+
+#vb-terminal-panel .vb-terminal-settings-section-content {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.22s ease;
+}
+
+#vb-terminal-panel .vb-terminal-settings-section.open .vb-terminal-settings-section-content {
+    grid-template-rows: 1fr;
+}
+
+#vb-terminal-panel .vb-terminal-settings-section-inner {
+    min-height: 0;
+    overflow: hidden;
+    padding: 0 12px;
+}
+
+#vb-terminal-panel .vb-terminal-settings-section.open .vb-terminal-settings-section-inner {
+    padding-bottom: 12px;
 }
 
 #vb-terminal-panel .vb-terminal-settings-section-status {
@@ -5040,6 +5114,10 @@ input.form-control:disabled {
     margin-bottom: 10px;
     font-size: 0.8rem;
     color: #a6adc8;
+}
+
+#vb-terminal-panel .vb-terminal-settings-row:last-child {
+    margin-bottom: 0;
 }
 
 #vb-terminal-panel .vb-terminal-settings-row label {

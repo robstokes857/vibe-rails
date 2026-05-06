@@ -12,59 +12,109 @@ export function renderTerminalSettingsPanelHtml() {
                 <button type="button" id="terminal-settings-close">&#x2715;</button>
             </div>
             <div class="vb-terminal-settings-body">
-                <div class="vb-terminal-settings-section">
-                    <div class="vb-terminal-settings-section-title">Theme</div>
-                    <div class="vb-terminal-settings-theme-list" id="vb-terminal-settings-theme-list"></div>
-                </div>
-                <div class="vb-terminal-settings-section">
-                    <div class="vb-terminal-settings-section-title">
-                        <span>Rendering</span>
-                        <span class="vb-terminal-settings-section-status" id="terminal-settings-renderer-active">—</span>
-                    </div>
-                    <div class="vb-terminal-settings-row">
-                        <label>Renderer</label>
-                        <select id="terminal-settings-renderer">
-                            <option value="webgl">WebGL (Preferred)</option>
-                            <option value="canvas">Canvas</option>
-                        </select>
+                <div class="vb-terminal-settings-section open" data-settings-section="theme">
+                    <button type="button" class="vb-terminal-settings-section-title" id="terminal-settings-section-theme" aria-expanded="true" aria-controls="terminal-settings-section-theme-content" data-settings-toggle="theme">
+                        <span class="vb-terminal-settings-section-label">
+                            <i class="fa-solid fa-palette" aria-hidden="true"></i>
+                            <span>Theme</span>
+                        </span>
+                        <i class="fa-solid fa-chevron-down vb-terminal-settings-section-chevron" aria-hidden="true"></i>
+                    </button>
+                    <div class="vb-terminal-settings-section-content" id="terminal-settings-section-theme-content" role="region" aria-labelledby="terminal-settings-section-theme">
+                        <div class="vb-terminal-settings-section-inner">
+                            <div class="vb-terminal-settings-theme-list" id="vb-terminal-settings-theme-list"></div>
+                        </div>
                     </div>
                 </div>
-                <div class="vb-terminal-settings-section">
-                    <div class="vb-terminal-settings-section-title">Output Coalescing</div>
-                    <div class="vb-terminal-settings-row">
-                        <label>Mode</label>
-                        <select id="terminal-settings-output-coalesce">
-                            <option value="microtask">Instant (queueMicrotask)</option>
-                            <option value="postTask">10ms batching (scheduler.postTask)</option>
-                        </select>
+                <div class="vb-terminal-settings-section" data-settings-section="rendering">
+                    <button type="button" class="vb-terminal-settings-section-title" id="terminal-settings-section-rendering" aria-expanded="false" aria-controls="terminal-settings-section-rendering-content" data-settings-toggle="rendering">
+                        <span class="vb-terminal-settings-section-label">
+                            <i class="fa-solid fa-microchip" aria-hidden="true"></i>
+                            <span>Rendering</span>
+                        </span>
+                        <span class="vb-terminal-settings-section-meta">
+                            <span class="vb-terminal-settings-section-status" id="terminal-settings-renderer-active">—</span>
+                            <i class="fa-solid fa-chevron-down vb-terminal-settings-section-chevron" aria-hidden="true"></i>
+                        </span>
+                    </button>
+                    <div class="vb-terminal-settings-section-content" id="terminal-settings-section-rendering-content" role="region" aria-labelledby="terminal-settings-section-rendering">
+                        <div class="vb-terminal-settings-section-inner">
+                            <div class="vb-terminal-settings-row">
+                                <label>Renderer</label>
+                                <select id="terminal-settings-renderer">
+                                    <option value="webgl">WebGL (Preferred)</option>
+                                    <option value="canvas">Canvas</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="vb-terminal-settings-section">
-                    <div class="vb-terminal-settings-section-title">Font</div>
-                    <div class="vb-terminal-settings-row">
-                        <label>Size</label>
-                        <input type="number" id="terminal-settings-font-size" min="6" max="72">
+                <div class="vb-terminal-settings-section" data-settings-section="output">
+                    <button type="button" class="vb-terminal-settings-section-title" id="terminal-settings-section-output" aria-expanded="false" aria-controls="terminal-settings-section-output-content" data-settings-toggle="output">
+                        <span class="vb-terminal-settings-section-label">
+                            <i class="fa-solid fa-wave-square" aria-hidden="true"></i>
+                            <span>Output Coalescing</span>
+                        </span>
+                        <i class="fa-solid fa-chevron-down vb-terminal-settings-section-chevron" aria-hidden="true"></i>
+                    </button>
+                    <div class="vb-terminal-settings-section-content" id="terminal-settings-section-output-content" role="region" aria-labelledby="terminal-settings-section-output">
+                        <div class="vb-terminal-settings-section-inner">
+                            <div class="vb-terminal-settings-row">
+                                <label>Mode</label>
+                                <select id="terminal-settings-output-coalesce">
+                                    <option value="microtask">Instant (queueMicrotask)</option>
+                                    <option value="postTask">10ms batching (scheduler.postTask)</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="vb-terminal-settings-section">
-                    <div class="vb-terminal-settings-section-title">Cursor</div>
-                    <div class="vb-terminal-settings-row">
-                        <label>Active style</label>
-                        <select id="terminal-settings-cursor-style">
-                            <option value="block">Block</option>
-                            <option value="bar">Bar</option>
-                            <option value="underline">Underline</option>
-                        </select>
+                <div class="vb-terminal-settings-section" data-settings-section="font">
+                    <button type="button" class="vb-terminal-settings-section-title" id="terminal-settings-section-font" aria-expanded="false" aria-controls="terminal-settings-section-font-content" data-settings-toggle="font">
+                        <span class="vb-terminal-settings-section-label">
+                            <i class="fa-solid fa-font" aria-hidden="true"></i>
+                            <span>Font</span>
+                        </span>
+                        <i class="fa-solid fa-chevron-down vb-terminal-settings-section-chevron" aria-hidden="true"></i>
+                    </button>
+                    <div class="vb-terminal-settings-section-content" id="terminal-settings-section-font-content" role="region" aria-labelledby="terminal-settings-section-font">
+                        <div class="vb-terminal-settings-section-inner">
+                            <div class="vb-terminal-settings-row">
+                                <label>Size</label>
+                                <input type="number" id="terminal-settings-font-size" min="6" max="72">
+                            </div>
+                        </div>
                     </div>
-                    <div class="vb-terminal-settings-row">
-                        <label>Inactive style</label>
-                        <select id="terminal-settings-cursor-inactive">
-                            <option value="outline">Outline</option>
-                            <option value="block">Block</option>
-                            <option value="bar">Bar</option>
-                            <option value="underline">Underline</option>
-                            <option value="none">None</option>
-                        </select>
+                </div>
+                <div class="vb-terminal-settings-section" data-settings-section="cursor">
+                    <button type="button" class="vb-terminal-settings-section-title" id="terminal-settings-section-cursor" aria-expanded="false" aria-controls="terminal-settings-section-cursor-content" data-settings-toggle="cursor">
+                        <span class="vb-terminal-settings-section-label">
+                            <i class="fa-solid fa-i-cursor" aria-hidden="true"></i>
+                            <span>Cursor</span>
+                        </span>
+                        <i class="fa-solid fa-chevron-down vb-terminal-settings-section-chevron" aria-hidden="true"></i>
+                    </button>
+                    <div class="vb-terminal-settings-section-content" id="terminal-settings-section-cursor-content" role="region" aria-labelledby="terminal-settings-section-cursor">
+                        <div class="vb-terminal-settings-section-inner">
+                            <div class="vb-terminal-settings-row">
+                                <label>Active style</label>
+                                <select id="terminal-settings-cursor-style">
+                                    <option value="block">Block</option>
+                                    <option value="bar">Bar</option>
+                                    <option value="underline">Underline</option>
+                                </select>
+                            </div>
+                            <div class="vb-terminal-settings-row">
+                                <label>Inactive style</label>
+                                <select id="terminal-settings-cursor-inactive">
+                                    <option value="outline">Outline</option>
+                                    <option value="block">Block</option>
+                                    <option value="bar">Bar</option>
+                                    <option value="underline">Underline</option>
+                                    <option value="none">None</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -90,6 +140,7 @@ export class TerminalSettings {
         this._cursorInactiveSelect = null;
         this._outputCoalesceSelect = null;
         this._themeListEl = null;
+        this._sectionToggles = [];
     }
 
     // ---------- Preference helpers (was _load* on the manager) ----------
@@ -143,9 +194,13 @@ export class TerminalSettings {
         this._cursorInactiveSelect = this._container.querySelector('#terminal-settings-cursor-inactive');
         this._outputCoalesceSelect = this._container.querySelector('#terminal-settings-output-coalesce');
         this._themeListEl       = this._container.querySelector('#vb-terminal-settings-theme-list');
+        this._sectionToggles    = Array.from(this._container.querySelectorAll('[data-settings-toggle]'));
 
         this._panelBtn?.addEventListener('click', () => this.togglePanel());
         this._closeBtn?.addEventListener('click', () => this.togglePanel(false));
+        this._sectionToggles.forEach((toggle) => {
+            toggle.addEventListener('click', () => this.openSection(toggle.dataset.settingsToggle));
+        });
 
         this._fontSizeInput?.addEventListener('change', (e) => {
             this._manager.adjustFontSize(0, parseInt(e.target.value, 10));
@@ -156,6 +211,7 @@ export class TerminalSettings {
         this._outputCoalesceSelect?.addEventListener('change', (e) => this.applyOutputCoalesce(e.target.value));
 
         this._populate();
+        this.openSection(this.loadOpenSection());
     }
 
     _populate() {
@@ -215,11 +271,40 @@ export class TerminalSettings {
         this._panelEl?.classList.toggle('open', open);
         this._panelBtn?.classList.toggle('active', open);
         if (open) {
+            this.openSection(this.loadOpenSection());
             // Re-read the active renderer in case GPU recovered or the active tab changed.
             this._refreshRendererStatus();
         } else {
             this._manager.focusActiveTerminalInput?.();
         }
+    }
+
+    loadOpenSection() {
+        try { return localStorage.getItem('viberails_terminal_settingsSection') || 'theme'; }
+        catch { return 'theme'; }
+    }
+
+    saveOpenSection(section) {
+        try { localStorage.setItem('viberails_terminal_settingsSection', section); } catch {}
+    }
+
+    openSection(sectionName) {
+        const sections = Array.from(this._container.querySelectorAll('[data-settings-section]'));
+        const target = sections.find((section) => section.dataset.settingsSection === sectionName)
+            ? sectionName
+            : 'theme';
+
+        sections.forEach((section) => {
+            const isOpen = section.dataset.settingsSection === target;
+            section.classList.toggle('open', isOpen);
+            const toggle = section.querySelector('[data-settings-toggle]');
+            const content = section.querySelector('.vb-terminal-settings-section-content');
+            toggle?.setAttribute('aria-expanded', String(isOpen));
+            content?.toggleAttribute('inert', !isOpen);
+            content?.setAttribute('aria-hidden', String(!isOpen));
+        });
+
+        this.saveOpenSection(target);
     }
 
     // ---------- Apply settings to terminals ----------
