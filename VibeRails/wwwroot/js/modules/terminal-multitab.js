@@ -24,9 +24,12 @@ const PENDING_CLOSE_LABEL = (() => {
 // Collapse layout-settle/font-load fit bursts into one PTY resize so ConPTY does not
 // redraw the full TUI multiple times while the browser is still stabilizing.
 const RESIZE_SYNC_DEBOUNCE_MS = 140;
-// Codex often splits one visual redraw across several WebSocket message events a few
-// milliseconds apart. Use a short timer, not queueMicrotask, so adjacent events batch.
-const OUTPUT_WRITE_COALESCE_MS = 10;
+// Cross-task coalesce window for the optional scheduler.postTask flush mode.
+// scheduler.postTask is not subject to occlusion throttling, so this delay
+// is honored on cold start (unlike setTimeout, which Chromium clamps to 1s).
+const POST_TASK_COALESCE_DELAY_MS = 10;
+const OUTPUT_COALESCE_STORAGE_KEY = 'viberails_terminal_outputCoalesce';
+const OUTPUT_COALESCE_DEFAULT = 'microtask';
 const OUTPUT_CURSOR_IDLE_MS = 90;
 const CONNECT_FOCUS_RETRY_MS = 180;
 const DEFAULT_SELECTION = null;
@@ -577,17 +580,30 @@ class TerminalTab {
                 resolve(true);
             };
 
-            // Client-side write coalescing: buffer incoming binary frames and flush
-            // them into one term.write() call after a short delay. WebSocket
-            // onmessage callbacks run as separate tasks, so queueMicrotask only
-            // batches chunks that arrive in the same callback, which is too narrow
-            // for Codex's multi-frame redraw pattern.
+            // Client-side write coalescing: buffer incoming binary frames and hand them
+            // to xterm.write through one of two flush mechanisms, selectable at runtime
+            // from Terminal Settings → "Output Coalescing":
+            //   - 'microtask' (default): queueMicrotask, drains at end of current task.
+            //     Zero delay, no cross-task batching. Immune to occlusion throttling.
+            //   - 'postTask': scheduler.postTask({ delay: 10 }). 10ms cross-task batch
+            //     window — the cross-task coalescing the original setTimeout(10) gave us
+            //     — but NOT subject to Chromium's 1s occlusion clamp on setTimeout.
+            //     Falls back to queueMicrotask if scheduler.postTask is unavailable.
+            // We do NOT use setTimeout (Chromium clamps it to 1s when the renderer is
+            // occluded — VS Code webview is occluded during cold start, before the
+            // workbench finishes its first paint — turning every echo into an ~800ms
+            // stall). We also do NOT use rAF, because rAF couples byte *processing* to
+            // visibility: an occluded webview would accumulate bytes in pendingChunks
+            // until visible, then dump them in one big synchronous parse. Multi-frame
+            // TUI redraw tearing is already prevented by the server-side coalesce
+            // (NormalCoalesceDelayMs in WebSocketConsumer.cs) and by xterm's per-frame
+            // rAF render, not by this client-side gate.
             let replayFocusDone = false;
             let pendingChunks = [];
-            let flushTimeoutId = null;
+            let flushQueued = false;
 
             const flushPendingChunks = () => {
-                flushTimeoutId = null;
+                flushQueued = false;
                 if (pendingChunks.length === 0) return;
                 if (this.socket !== socket) { pendingChunks = []; return; }
 
@@ -625,8 +641,17 @@ class TerminalTab {
                 if (this.socket !== socket) return;
 
                 pendingChunks.push(new Uint8Array(event.data));
-                if (flushTimeoutId === null) {
-                    flushTimeoutId = window.setTimeout(flushPendingChunks, OUTPUT_WRITE_COALESCE_MS);
+                if (!flushQueued) {
+                    flushQueued = true;
+                    const mode = this.manager?._outputCoalesceMode;
+                    if (mode === 'postTask' && typeof scheduler !== 'undefined' && scheduler?.postTask) {
+                        scheduler.postTask(flushPendingChunks, {
+                            delay: POST_TASK_COALESCE_DELAY_MS,
+                            priority: 'user-visible',
+                        });
+                    } else {
+                        queueMicrotask(flushPendingChunks);
+                    }
                 }
 
                 // Fire first-message init synchronously (before flush) — these actions
@@ -644,10 +669,10 @@ class TerminalTab {
             socket.onclose = (event) => {
                 if (this.socket !== socket) return;
 
-                if (flushTimeoutId !== null) {
-                    clearTimeout(flushTimeoutId);
-                    flushTimeoutId = null;
-                }
+                // Microtasks can't be cancelled, but flushPendingChunks bails out
+                // when `this.socket !== socket`, so any queued flush after this no-ops.
+                pendingChunks = [];
+                flushQueued = false;
                 this.teardownResizeHandling();
                 this.clearConnectFocusTimeouts();
                 this._initialConnectActive = false;
@@ -795,6 +820,16 @@ class TerminalManager {
         this._themeSwatches = [];
 
         this.settings = null;
+
+        this._outputCoalesceMode = (() => {
+            try { return localStorage.getItem(OUTPUT_COALESCE_STORAGE_KEY) || OUTPUT_COALESCE_DEFAULT; }
+            catch { return OUTPUT_COALESCE_DEFAULT; }
+        })();
+    }
+
+    setOutputCoalesceMode(mode) {
+        this._outputCoalesceMode = mode === 'postTask' ? 'postTask' : 'microtask';
+        try { localStorage.setItem(OUTPUT_COALESCE_STORAGE_KEY, this._outputCoalesceMode); } catch {}
     }
 
     isDestroyed() {
@@ -3046,10 +3081,12 @@ export class TerminalController {
                             <button type="button" class="vb-terminal-tab-select" id="vb-terminal-tab-select-btn" title="Select CLI/environment for active tab" aria-label="Select CLI/environment">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708"/></svg>
                             </button>
+                        </div>
+                        <div class="vb-terminal-window-controls vb-terminal-window-controls-right">
                             <div class="vb-terminal-tab-undo-wrapper" id="vb-terminal-tab-undo-wrapper" hidden>
                                 <button type="button" class="vb-terminal-tab-undo" id="vb-terminal-tab-undo-btn" title="Restore a recently closed terminal (terminals auto-close after ${PENDING_CLOSE_LABEL})" aria-label="Restore a recently closed terminal">
                                     <span class="vb-undo-icon" aria-hidden="true">
-                                        <i class="fa-solid fa-rotate-left"></i>
+                                        <i class="fa-regular fa-window-restore"></i>
                                     </span>
                                     <span class="vb-undo-count" id="vb-terminal-tab-undo-count">0</span>
                                 </button>
@@ -3057,8 +3094,6 @@ export class TerminalController {
                                     <select id="vb-terminal-tab-undo-select" multiple></select>
                                 </div>
                             </div>
-                        </div>
-                        <div class="vb-terminal-window-controls vb-terminal-window-controls-right">
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
                             <span class="vb-terminal-font-size-label" id="vb-terminal-font-size-label">14</span>
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
