@@ -15,16 +15,18 @@ export function renderTerminalMenuHtml() {
 }
 
 /**
- * Generic dropdown menu controller. Owns open/close state, aria-expanded,
- * outside-click and Escape dismissal, and binds a list of menu-item buttons
- * whose clicks run a callback and then close the menu.
+ * Generic dropdown menu controller. Each instance owns its own outside-click
+ * dismissal independently — the trigger button does NOT stopPropagation, so
+ * every document click reaches every mounted menu's listener, and each menu
+ * decides for itself whether the click landed inside its own button/menu
+ * (ignore) or outside (close). Mount as many of these as you want; they
+ * coordinate via the DOM, not via shared state.
  *
  * @param {HTMLElement} container — root element to query within
  * @param {object} config
  * @param {string} config.buttonId — DOM id of the trigger button
  * @param {string} config.menuId   — DOM id of the menu element (the [hidden] panel)
  * @param {Array<{ id: string, onClick: (event: Event) => void }>} [config.items]
- * @param {() => void} [config.onBeforeOpen] — fires just before the menu opens
  */
 export class TerminalMenu {
     constructor(container, config = {}) {
@@ -51,7 +53,6 @@ export class TerminalMenu {
             if (!el) continue;
             const handler = (event) => {
                 event.preventDefault();
-                event.stopPropagation();
                 this.close();
                 itemConfig.onClick?.(event);
             };
@@ -79,14 +80,22 @@ export class TerminalMenu {
 
     open() {
         if (!this.menu || this.isOpen()) return;
-        this.config.onBeforeOpen?.();
         this.menu.removeAttribute('hidden');
         this.button?.setAttribute('aria-expanded', 'true');
+        this.items[0]?.el.focus();
     }
 
     close() {
-        this.menu?.setAttribute('hidden', '');
+        if (!this.menu) return;
+        const focusInsideMenu = this.menu.contains(document.activeElement);
+        this.menu.setAttribute('hidden', '');
         this.button?.setAttribute('aria-expanded', 'false');
+        // If focus was on a menu item we just hid, restore it to the trigger
+        // so it doesn't fall through to <body>. If focus was elsewhere (user
+        // clicked outside, Tabbed away, etc.) leave it where the user put it.
+        if (focusInsideMenu) {
+            this.button?.focus({ preventScroll: true });
+        }
     }
 
     toggle() {
@@ -96,17 +105,31 @@ export class TerminalMenu {
 
     handleButtonClick(event) {
         event.preventDefault();
-        event.stopPropagation();
         this.toggle();
     }
 
-    handleDocumentClick() {
+    handleDocumentClick(event) {
+        if (!this.isOpen()) return;
+        const target = event.target;
+        if (this.button?.contains(target) || this.menu?.contains(target)) return;
         this.close();
     }
 
     handleDocumentKeydown(event) {
+        if (!this.isOpen()) return;
         if (event.key === 'Escape') {
+            event.preventDefault();
             this.close();
+            return;
+        }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            const els = this.items.map((i) => i.el).filter(Boolean);
+            if (els.length === 0) return;
+            event.preventDefault();
+            const currentIdx = els.indexOf(document.activeElement);
+            const dir = event.key === 'ArrowDown' ? 1 : -1;
+            const nextIdx = currentIdx === -1 ? 0 : (currentIdx + dir + els.length) % els.length;
+            els[nextIdx]?.focus();
         }
     }
 }

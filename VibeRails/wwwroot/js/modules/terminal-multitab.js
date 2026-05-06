@@ -9,6 +9,7 @@ import { TabStatusController } from './terminal-tab-status.js';
 import { TerminalSettings, renderTerminalSettingsPanelHtml } from './terminal-settings.js';
 import { TerminalMenu, renderTerminalMenuHtml } from './terminal-menu.js';
 import { TerminalTab } from './terminal-tab.js';
+import { TerminalMultiRun } from './terminal-multirun.js';
 
 // Pending-close grace window: how long a closed tab is held in the undo
 // dropdown before the backend DELETE actually fires. Keep PENDING_CLOSE_MS
@@ -21,6 +22,10 @@ const PENDING_CLOSE_LABEL = (() => {
 })();
 const OUTPUT_COALESCE_STORAGE_KEY = 'viberails_terminal_outputCoalesce';
 const OUTPUT_COALESCE_DEFAULT = 'microtask';
+// Allowlist for CSS filter values spliced into <img style="filter: ...">.
+// Today logoFilter only comes from getCliBrand's hardcoded map, but lock the
+// surface down so future user-supplied brand metadata can't inject CSS.
+const SAFE_CSS_FILTER = /^[a-z0-9\s().,%#-]+$/i;
 const DEFAULT_SELECTION = null;
 const ACTIVE_TAB_KEY = 'viberails_terminal_active_tab_id';
 const TAB_SELECTION_PREFIX = 'viberails_terminal_tab_selection_';
@@ -332,7 +337,6 @@ class TerminalManager {
         this.zoomInBtn?.addEventListener('click',  () => this.adjustFontSize(1));
         this.zoomOutBtn?.addEventListener('click', () => this.adjustFontSize(-1));
         this.refreshBtn?.addEventListener('click', () => this.refreshActiveTab());
-
     }
 
     _mountDropdowns() {
@@ -341,8 +345,7 @@ class TerminalManager {
             menuId: 'vb-terminal-menu',
             items: [
                 { id: 'terminal-multirun-btn', onClick: () => this._showMultiRunModal() }
-            ],
-            onBeforeOpen: () => this._closeOtherDropdowns(this.terminalMenu)
+            ]
         });
         this.terminalMenu.mount();
 
@@ -359,23 +362,13 @@ class TerminalManager {
             items: [
                 { id: 'terminal-save-text', onClick: () => this.saveActiveTerminalSession('text') },
                 { id: 'terminal-save-html', onClick: () => this.saveActiveTerminalSession('html') }
-            ],
-            onBeforeOpen: () => this._closeOtherDropdowns(this.downloadMenu)
+            ]
         });
         this.downloadMenu.mount();
     }
 
-    _closeOtherDropdowns(except) {
-        if (this.terminalMenu && this.terminalMenu !== except) this.terminalMenu.close();
-        if (this.downloadMenu && this.downloadMenu !== except) this.downloadMenu.close();
-    }
-
     _showMultiRunModal() {
-        this.app.showModal('Multi Run', `
-            <div class="vb-multirun-modal-shell" aria-label="Multi Run">
-                <textarea class="form-control font-monospace" id="vb-multirun-input" rows="8" placeholder="Type or paste commands here..." spellcheck="false"></textarea>
-            </div>
-        `);
+        new TerminalMultiRun(this).show();
     }
 
     async restoreTabs() {
@@ -780,7 +773,8 @@ class TerminalManager {
             render: {
                 option: (data, escape) => {
                     const time = this._formatTimeLeft(Number(data.expiresAt) || 0);
-                    const logoStyle = data.cliLogoFilter ? ` style="filter: ${escape(data.cliLogoFilter)};"` : '';
+                    const filterValue = data.cliLogoFilter && SAFE_CSS_FILTER.test(data.cliLogoFilter) ? data.cliLogoFilter : '';
+                    const logoStyle = filterValue ? ` style="filter: ${escape(filterValue)};"` : '';
                     const logoHtml = data.cliLogo
                         ? `<img class="vb-undo-row-logo" src="${escape(data.cliLogo)}" alt="${escape(data.cliLabel || '')}" loading="lazy"${logoStyle}>`
                         : `<span class="vb-undo-row-logo vb-undo-row-logo-fallback"><i class="fa-solid fa-terminal" aria-hidden="true"></i></span>`;

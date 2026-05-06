@@ -199,7 +199,7 @@ export class TerminalSettings {
         this._panelBtn?.addEventListener('click', () => this.togglePanel());
         this._closeBtn?.addEventListener('click', () => this.togglePanel(false));
         this._sectionToggles.forEach((toggle) => {
-            toggle.addEventListener('click', () => this.openSection(toggle.dataset.settingsToggle));
+            toggle.addEventListener('click', () => this.toggleSection(toggle.dataset.settingsToggle));
         });
 
         this._fontSizeInput?.addEventListener('change', (e) => {
@@ -211,7 +211,7 @@ export class TerminalSettings {
         this._outputCoalesceSelect?.addEventListener('change', (e) => this.applyOutputCoalesce(e.target.value));
 
         this._populate();
-        this.openSection(this.loadOpenSection());
+        this._restoreSections();
     }
 
     _populate() {
@@ -271,7 +271,6 @@ export class TerminalSettings {
         this._panelEl?.classList.toggle('open', open);
         this._panelBtn?.classList.toggle('active', open);
         if (open) {
-            this.openSection(this.loadOpenSection());
             // Re-read the active renderer in case GPU recovered or the active tab changed.
             this._refreshRendererStatus();
         } else {
@@ -279,32 +278,44 @@ export class TerminalSettings {
         }
     }
 
-    loadOpenSection() {
-        try { return localStorage.getItem('viberails_terminal_settingsSection') || 'theme'; }
-        catch { return 'theme'; }
+    loadOpenSections() {
+        try {
+            const raw = localStorage.getItem('viberails_terminal_settingsSections');
+            if (raw === null) return new Set(['theme']);
+            return new Set(raw ? raw.split(',').filter(Boolean) : []);
+        } catch { return new Set(['theme']); }
     }
 
-    saveOpenSection(section) {
-        try { localStorage.setItem('viberails_terminal_settingsSection', section); } catch {}
+    saveOpenSections(set) {
+        try { localStorage.setItem('viberails_terminal_settingsSections', Array.from(set).join(',')); } catch {}
     }
 
-    openSection(sectionName) {
-        const sections = Array.from(this._container.querySelectorAll('[data-settings-section]'));
-        const target = sections.find((section) => section.dataset.settingsSection === sectionName)
-            ? sectionName
-            : 'theme';
+    _setSectionOpen(section, isOpen) {
+        section.classList.toggle('open', isOpen);
+        const toggle = section.querySelector('[data-settings-toggle]');
+        const content = section.querySelector('.vb-terminal-settings-section-content');
+        toggle?.setAttribute('aria-expanded', String(isOpen));
+        content?.toggleAttribute('inert', !isOpen);
+        content?.setAttribute('aria-hidden', String(!isOpen));
+    }
 
+    _restoreSections() {
+        const open = this.loadOpenSections();
+        const sections = this._container.querySelectorAll('[data-settings-section]');
         sections.forEach((section) => {
-            const isOpen = section.dataset.settingsSection === target;
-            section.classList.toggle('open', isOpen);
-            const toggle = section.querySelector('[data-settings-toggle]');
-            const content = section.querySelector('.vb-terminal-settings-section-content');
-            toggle?.setAttribute('aria-expanded', String(isOpen));
-            content?.toggleAttribute('inert', !isOpen);
-            content?.setAttribute('aria-hidden', String(!isOpen));
+            this._setSectionOpen(section, open.has(section.dataset.settingsSection));
         });
+    }
 
-        this.saveOpenSection(target);
+    toggleSection(sectionName) {
+        const section = this._container.querySelector(`[data-settings-section="${sectionName}"]`);
+        if (!section) return;
+        const willOpen = !section.classList.contains('open');
+        this._setSectionOpen(section, willOpen);
+
+        const open = this.loadOpenSections();
+        if (willOpen) open.add(sectionName); else open.delete(sectionName);
+        this.saveOpenSections(open);
     }
 
     // ---------- Apply settings to terminals ----------

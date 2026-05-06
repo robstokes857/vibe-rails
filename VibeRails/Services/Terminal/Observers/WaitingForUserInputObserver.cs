@@ -24,10 +24,31 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
     private static readonly TimeSpan SampleWindow = TimeSpan.FromSeconds(5);
     private const int IdleChunkSizeThreshold = 50;
     private const int IdleMaxUniqueBigChunks = 5;
-    private const int IdleMinTopChunkCount = 20;
-    private const int IdleMinBigChunkSamples = 40;
+    // Codex's idle keepalive emits ~1 big chunk per second (a CUP+EL row-clear
+    // sweep, ~150 bytes), bracketed by tiny sub-threshold chunks, and rotates
+    // through a 2- or 3-frame spinner. A 5-second window therefore lands at
+    // bigTotal=5, unique=2–3, topCount=3–4. Older codex builds emitted many
+    // more frames per second; the previous {Top=20, Samples=40} gates assumed
+    // that density and are unreachable on the current cadence. The structural
+    // defense against working-state false-positives is IdleMaxUniqueBigChunks:
+    // codex's per-char working animation hits unique=24–80 in any 5s window
+    // (verified against Session_881cd29d fixture), so idle and working remain
+    // cleanly separated by unique-count alone. TopChunkCount=2 keeps the
+    // "4 distinct big chunks, all unique" transient working pattern out.
+    private const int IdleMinTopChunkCount = 2;
+    private const int IdleMinBigChunkSamples = 4;
     private const int QuietBufferThreshold = 5;
     private const int MaxQueuedChunks = 20_000;
+    // The buffer must have been collecting for nearly a full SampleWindow before
+    // we classify. Codex's per-char working animation can hit a transient
+    // (unique=4, topCount=4) shape during the first ~250ms of the buffer
+    // filling — diverse frames haven't arrived yet, so they look like idle.
+    // Requiring the oldest chunk to be at least IdleMinObservationSpan old
+    // gives the unique-count discriminator (which is the real working signal)
+    // time to engage. The old IdleMinBigChunkSamples=40 happened to mask this
+    // by being unreachable in <1s; making the time guard explicit is clearer
+    // and survives codex tightening or relaxing its frame cadence.
+    private static readonly TimeSpan IdleMinObservationSpan = TimeSpan.FromSeconds(2);
 
     private readonly IAppEventBus _eventBus;
     private readonly TimeProvider _timeProvider;
@@ -109,6 +130,13 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
                 var cutoff = now - SampleWindow;
                 while (_chunks.Count > 0 && _chunks.Peek().Timestamp < cutoff)
                     _chunks.Dequeue();
+
+                // Don't classify until the buffer has been observing for long
+                // enough that the unique-count discriminator is meaningful.
+                // See IdleMinObservationSpan for why.
+                var oldest = _chunks.Count > 0 ? _chunks.Peek().Timestamp : now;
+                if (now - oldest < IdleMinObservationSpan)
+                    return false;
 
                 switch (Classify(_chunks))
                 {

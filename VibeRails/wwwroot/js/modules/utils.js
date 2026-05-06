@@ -323,7 +323,36 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
         config.controlInput = null;
     }
 
-    return new window.TomSelect(selectEl, config);
+    const ts = new window.TomSelect(selectEl, config);
+
+    // TomSelect doesn't ship viewport-aware positioning. When the dropdown
+    // would otherwise extend past the bottom of the viewport, flip it above
+    // the control. Only checks at open time — no scroll listener, since the
+    // dropdown closes on outside scroll anyway.
+    ts.on('dropdown_open', () => positionTomSelectDropdown(ts));
+    ts.on('dropdown_close', () => {
+        ts.dropdown?.classList.remove('ts-dropdown-flipped');
+    });
+
+    return ts;
+}
+
+function positionTomSelectDropdown(ts) {
+    const wrapper = ts.wrapper;
+    const dropdown = ts.dropdown;
+    if (!wrapper || !dropdown) return;
+
+    // Reset before measuring so we get the natural placement first.
+    dropdown.classList.remove('ts-dropdown-flipped');
+
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const dropdownHeight = dropdown.offsetHeight || dropdown.getBoundingClientRect().height || 200;
+    const spaceBelow = window.innerHeight - wrapperRect.bottom;
+    const spaceAbove = wrapperRect.top;
+
+    if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
+        dropdown.classList.add('ts-dropdown-flipped');
+    }
 }
 
 export function parseLlmSelection(selection, environments = []) {
