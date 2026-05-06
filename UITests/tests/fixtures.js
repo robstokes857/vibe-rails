@@ -27,8 +27,24 @@ function readRuntime() {
 
 const test = base.test.extend({
     context: async ({ browser }, use) => {
-        const { storageState, baseURL } = readRuntime();
+        const { storageState, baseURL, sessionStorage: sessionData } = readRuntime();
         const ctx = await browser.newContext({ storageState, baseURL });
+        // Playwright's storageState persists cookies + localStorage but NOT
+        // sessionStorage. The bootstrap flow stashes the tab token there
+        // (`viberails_tab`), and API calls 401 without it, sending the page
+        // back to /auth/bootstrap. Re-inject the captured sessionStorage on
+        // every new page in the context so fresh tabs start authenticated.
+        if (sessionData && Object.keys(sessionData).length > 0) {
+            await ctx.addInitScript((data) => {
+                try {
+                    for (const [k, v] of Object.entries(data)) {
+                        sessionStorage.setItem(k, v);
+                    }
+                } catch {
+                    // sessionStorage can throw in some sandboxed contexts; ignore.
+                }
+            }, sessionData);
+        }
         await use(ctx);
         await ctx.close();
     },

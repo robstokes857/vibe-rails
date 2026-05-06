@@ -1,5 +1,49 @@
 # TERMINAL.md
 
+## 2026-05-06 Suspected microtask-flush rendering regression (under bisect)
+
+Open: corruption of an existing TUI block (Claude Code task list) when Rob navigates
+away from the VS Code webview and comes back. Visible signature is characters
+dropped mid-word at fixed column positions and the pre-occlusion content rendered
+twice at slightly different widths — i.e. overprinting at a different cols geometry,
+not bytes reordered.
+
+Session investigated: `dd5cc208-8b09-4473-8268-0a565a5bd55e`. Critically, the
+SessionLogs byte stream for the entire session contains:
+
+- 0 occurrences of `\e[?1049l`, `\e[?2004l`, or `\e[3J`
+- exactly 1 `\e[2J` (the initial PowerShell clear at session start)
+- only 2 `TerminalSessionLogs` rows, both at session start (Sequence 0 + 1)
+
+Conclusion: the WebSocket did not disconnect on navigate-away/back, the server
+never ran `TerminalGridSerializer.Serialize`, and no snapshot prologue was sent.
+Whatever rendered the corrupted view did so against the existing emulator state
+on the viewer side. This rules out the C# emulator and the snapshot prologue —
+the bug lives in the JS/xterm.js client path during the occluded → visible
+transition.
+
+Suspected change: `989afd1` ("fixed slow start bug") swapped the WebSocket
+output flush from `setTimeout(flushPendingChunks, 10)` to
+`queueMicrotask(flushPendingChunks)` in the default ('microtask') coalesce mode
+in `terminal-tab.js`. setTimeout is clamped to 1s under Chromium occlusion;
+queueMicrotask is not. The two modes therefore behave very differently while
+the webview is hidden — under microtask, every onmessage produces an immediate
+xterm.write into xterm's internal buffer; under setTimeout/postTask, chunks
+merge into one xterm.write per ~10ms. The behavioral difference is real but I
+have not been able to confirm from the SessionLogs alone which xterm internal
+state ends up corrupted.
+
+Bisect in progress: Rob is switching the Output Coalescing mode from "Instant
+(queueMicrotask)" to "10ms batching (scheduler.postTask)" via Terminal Settings
+and will report whether the corruption still reproduces. If postTask fixes it,
+the fix lives in the microtask path (or we change the default and document why).
+If postTask still corrupts, the regression is somewhere else and this note can
+be deleted.
+
+Do not delete this section without resolving the bisect — even if `Tests/` and
+`TerminalEmulator.Tests/` stay green, those suites cannot exercise the
+client-only occlusion path.
+
 ## 2026-04-27 Snapshot replay state reset contract
 
 Reconnect must preserve the live xterm.js DOM node for stable fit/cell metrics,

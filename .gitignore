@@ -16,6 +16,7 @@ Tests/Services/BertV2/Fixtures/cleaned_input_corpus.txt
 # Local-only terminal session replay fixtures dumped from real SessionLogs.Content.
 # Contains personal session bytes; replay tests Skip() when these are absent.
 TerminalEmulator.Tests/fixtures/
+Tests/Services/Terminal/Fixtures/session_8522be5b_*.bin
 # User-specific files
 *.rsuser
 *.suo
@@ -386,5 +387,4 @@ FodyWeavers.xsd
 /TerminalEmulator.Tests/snapshots
 /fixtures
 TerminalEmulator.Tests/state.db
-UITests/test-results/.last-run.json
 UITests/test-results/.last-run.json

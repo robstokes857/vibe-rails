@@ -3912,6 +3912,17 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     max-width: min(560px, 90vw);
 }
 
+/* Flip the dropdown above the control when there isn't enough room below.
+   Toggled at runtime from enhanceLlmSelectWithTomSelect's dropdown_open hook
+   (utils.js). !important is needed because TomSelect's bundled CSS sets
+   top:100% on .ts-dropdown with similar specificity. */
+.ts-dropdown.ts-dropdown-flipped {
+    top: auto !important;
+    bottom: 100%;
+    margin-top: 0;
+    margin-bottom: 4px;
+}
+
 .ts-dropdown .ts-dropdown-content {
     max-height: min(60vh, 480px);
     padding: 4px 0;
@@ -4902,8 +4913,24 @@ input.form-control:disabled {
     color: #cdd6f4;
 }
 
-.vb-multirun-modal-shell {
+.vb-multirun-modal {
+    display: flex;
+    flex-direction: column;
+}
+
+.vb-multirun-modal .vb-multirun-help {
+    margin-bottom: 0.75rem;
+}
+
+.vb-multirun-modal textarea#vb-multirun-input {
+    resize: vertical;
     min-height: 120px;
+    background-color: var(--color-bg-base, #1e1e2e);
+    color: var(--color-text, #cdd6f4);
+}
+
+.vb-multirun-modal .vb-multirun-actions .btn {
+    min-width: 84px;
 }
 
 /* Zoom buttons and font size label in the tab bar */
@@ -4998,6 +5025,7 @@ input.form-control:disabled {
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.025);
     overflow: hidden;
+    flex: 0 0 auto;
 }
 
 #vb-terminal-panel .vb-terminal-settings-section-title {

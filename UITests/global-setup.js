@@ -55,14 +55,26 @@ module.exports = async () => {
     const baseURL = `${url.protocol}//${url.host}`;
 
     // Bootstrap code is single-use. Consume it once via a throwaway browser context
-    // and persist the resulting auth cookie + sessionStorage so every test context
-    // can re-use it.
+    // and persist the resulting auth cookie + tab token so every test context can
+    // re-use it. Cookies + localStorage land in storageState; the tab token lives
+    // in sessionStorage (which Playwright's storageState does NOT persist) and is
+    // captured separately below for fixtures.js to re-inject via addInitScript.
     const browser = await chromium.launch();
+    let sessionData = {};
     try {
         const ctx = await browser.newContext();
         const page = await ctx.newPage();
         await page.goto(bootstrapUrl);
         await page.waitForLoadState('networkidle');
+        // Only persist the auth tab token. Other sessionStorage keys (active
+        // view, expanded tab id, etc.) would force every test to start from
+        // wherever the bootstrap browser ended up instead of the home page.
+        sessionData = await page.evaluate(() => {
+            const out = {};
+            const token = sessionStorage.getItem('viberails_tab');
+            if (token) out.viberails_tab = token;
+            return out;
+        });
         await ctx.storageState({ path: STORAGE_FILE });
         await ctx.close();
     } finally {
@@ -72,6 +84,7 @@ module.exports = async () => {
     fs.writeFileSync(RUNTIME_FILE, JSON.stringify({
         baseURL,
         storageState: STORAGE_FILE,
+        sessionStorage: sessionData,
         pid: child.pid,
         backendLog: BACKEND_LOG,
     }, null, 2));
