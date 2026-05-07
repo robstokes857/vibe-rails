@@ -524,14 +524,15 @@ code {
 .quick-launch-card {
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: stretch;
     justify-content: space-between;
     min-width: 0;
     height: 100%;
+    min-height: 132px;
     background: rgba(255, 255, 255, 0.02);
     border: 2px solid rgba(255, 255, 255, 0.05);
     border-radius: 4px;
-    padding: 0.55rem 0.6rem;
+    padding: 0.6rem 0.65rem;
     transition: all 0.2s ease;
 }
 
@@ -594,15 +595,16 @@ code {
 
 .ql-actions {
     width: 100%;
-}
-
-.ql-actions-dual {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.25rem;
 }
 
-.ql-actions-dual .btn {
+.ql-actions-dual {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ql-actions .btn {
     min-width: 0;
     width: 100%;
     padding-left: 0.45rem;
@@ -610,7 +612,7 @@ code {
     white-space: normal;
 }
 
-.ql-actions-dual .btn span {
+.ql-actions .btn span {
     min-width: 0;
     line-height: 1.1;
     text-align: center;
@@ -3910,15 +3912,15 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     min-width: 320px;
     width: max-content;
     max-width: min(560px, 90vw);
+    /* Sits above the sticky nav (z-index:1019) since dropdownParent:'body'
+       moves it to the document root. */
+    z-index: 1100;
 }
 
-/* Flip the dropdown above the control when there isn't enough room below.
-   Toggled at runtime from enhanceLlmSelectWithTomSelect's dropdown_open hook
-   (utils.js). !important is needed because TomSelect's bundled CSS sets
-   top:100% on .ts-dropdown with similar specificity. */
+/* Marker class added by positionTomSelectDropdown when the dropdown is
+   flipped above the control. Position itself is set inline (top:N px) since
+   the dropdown is rendered in <body> via dropdownParent:'body'. */
 .ts-dropdown.ts-dropdown-flipped {
-    top: auto !important;
-    bottom: 100%;
     margin-top: 0;
     margin-bottom: 4px;
 }

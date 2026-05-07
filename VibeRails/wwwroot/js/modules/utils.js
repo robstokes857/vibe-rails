@@ -313,6 +313,9 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
         allowEmptyOption: true,
         maxOptions: null,
         plugins: [],
+        // Render the dropdown in <body> so parent cards with overflow:hidden
+        // (#vb-terminal-panel, sandbox cards) can't clip it.
+        dropdownParent: 'body',
         render: {
             option: (data, escape) => renderCliRowHtml(cliKey, data, escape),
             item: (data, escape) => renderCliRowHtml(cliKey, data, escape)
@@ -325,11 +328,15 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
 
     const ts = new window.TomSelect(selectEl, config);
 
-    // TomSelect doesn't ship viewport-aware positioning. When the dropdown
-    // would otherwise extend past the bottom of the viewport, flip it above
-    // the control. Only checks at open time — no scroll listener, since the
-    // dropdown closes on outside scroll anyway.
-    ts.on('dropdown_open', () => positionTomSelectDropdown(ts));
+    // Wrap TomSelect's body-parent positioning to (a) clear the inline width
+    // it sets to match the control (our content needs more room — see CSS
+    // .ts-dropdown min-width 320px / max-width 560px) and (b) flip above the
+    // control when the dropdown would otherwise overflow the viewport bottom.
+    const originalPosition = ts.positionDropdown.bind(ts);
+    ts.positionDropdown = function () {
+        originalPosition();
+        positionTomSelectDropdown(ts);
+    };
     ts.on('dropdown_close', () => {
         ts.dropdown?.classList.remove('ts-dropdown-flipped');
     });
@@ -344,13 +351,20 @@ function positionTomSelectDropdown(ts) {
 
     // Reset before measuring so we get the natural placement first.
     dropdown.classList.remove('ts-dropdown-flipped');
+    dropdown.style.width = '';
 
+    const margin = 8;
     const wrapperRect = wrapper.getBoundingClientRect();
     const dropdownHeight = dropdown.offsetHeight || dropdown.getBoundingClientRect().height || 200;
     const spaceBelow = window.innerHeight - wrapperRect.bottom;
     const spaceAbove = wrapperRect.top;
 
-    if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
+    if (spaceBelow < dropdownHeight + margin && spaceAbove > spaceBelow) {
+        // Flip above. With dropdownParent='body' the dropdown is positioned in
+        // document coordinates, so we set `top` directly rather than rely on
+        // CSS bottom:100% (which is relative to body, not the wrapper).
+        const flippedTop = wrapperRect.top + window.scrollY - dropdownHeight - 4;
+        dropdown.style.top = `${flippedTop}px`;
         dropdown.classList.add('ts-dropdown-flipped');
     }
 }

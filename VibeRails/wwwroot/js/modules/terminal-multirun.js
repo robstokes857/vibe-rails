@@ -7,7 +7,7 @@ export function renderTerminalMultiRunModalHtml() {
     return `
         <div class="vb-multirun-modal">
             <p class="vb-multirun-help text-muted small mb-3">
-                Open two terminal tabs with the same prompt to compare how different CLIs respond.
+                Open two terminal tabs with the same prompt.
             </p>
             <div class="row g-3">
                 <div class="col-md-6">
@@ -22,8 +22,7 @@ export function renderTerminalMultiRunModalHtml() {
             <div class="mt-3">
                 <label class="form-label" for="vb-multirun-input">Initial prompt</label>
                 <textarea id="vb-multirun-input" class="form-control font-monospace" rows="6"
-                    placeholder="Type or paste a prompt to send to both tabs..." spellcheck="false"></textarea>
-                <small class="form-text text-muted">Tip: Cmd/Ctrl+Enter to launch.</small>
+                    placeholder="Type or paste a prompt to send to both tabs..." spellcheck="false"></textarea>               
             </div>
             <div class="vb-multirun-actions mt-3 d-flex justify-content-end gap-2">
                 <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>

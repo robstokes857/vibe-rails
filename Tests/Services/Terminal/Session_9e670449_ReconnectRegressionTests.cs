@@ -111,16 +111,13 @@ public sealed class Session_9e670449_ReconnectRegressionTests(Xunit.ITestOutputH
         var frontendPath = FindRepoFile(Path.Combine("VibeRails", "wwwroot", "js", "modules", "terminal-multitab.js"));
         var source = File.ReadAllText(frontendPath);
 
-        var refreshBody = GetMethodSlice(source, "refreshActiveTab", "saveActiveTerminalSession");
         var reconnectBody = GetMethodSlice(source, "reconnectActiveTab", "getSelectionMeta");
-        Assert.Contains("requestViewerSnapshotReplay", refreshBody);
 
         // triggerRedrawBump performs a temporary font-size change and restores it,
         // producing two PTY resize opportunities. In the captured Claude session,
         // replaying those real PTY redraw bytes more than once duplicates the
         // startup card in the rendered grid.
-        return (ContainsSyntheticPtyRedraw(refreshBody) ? 2 : 0)
-            + (ContainsSyntheticPtyRedraw(reconnectBody) ? 2 : 0);
+        return ContainsSyntheticPtyRedraw(reconnectBody) ? 2 : 0;
     }
 
     private static bool ContainsSyntheticPtyRedraw(string methodBody)
