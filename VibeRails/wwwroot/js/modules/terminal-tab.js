@@ -1,15 +1,10 @@
 import { VibeTerminal } from './vibe-terminal.js';
 
 const RESIZE_PREFIX = '__resize__:';
-const VIEWER_SNAPSHOT_REPLAY_COMMAND = '__cmd__:replay';
 
 // Collapse layout-settle/font-load fit bursts into one PTY resize so ConPTY does not
 // redraw the full TUI multiple times while the browser is still stabilizing.
 const RESIZE_SYNC_DEBOUNCE_MS = 140;
-// Cross-task coalesce window for the optional scheduler.postTask flush mode.
-// scheduler.postTask is not subject to occlusion throttling, so this delay
-// is honored on cold start (unlike setTimeout, which Chromium clamps to 1s).
-const POST_TASK_COALESCE_DELAY_MS = 10;
 const OUTPUT_CURSOR_IDLE_MS = 90;
 const CONNECT_FOCUS_RETRY_MS = 180;
 
@@ -409,28 +404,6 @@ export class TerminalTab {
         this.vibeTerminal.scheduleFitPasses();
     }
 
-    requestViewerSnapshotReplay() {
-        if (!this.hasOpenSocket()) {
-            return false;
-        }
-
-        try {
-            // Do not reset the local xterm here. The socket is still open and
-            // live PTY bytes can be in flight in the WS pipe between this send
-            // and the snapshot reply. A local reset would paint those in-flight
-            // bytes onto a blank terminal until the snapshot prologue lands.
-            // The server-side snapshot prologue (1049/1047/47 off, 2J/3J/H,
-            // mode resets) is sufficient on its own for the active-socket
-            // refresh path. The reconnect path in connect() still resets
-            // locally because it has stale state that no server prologue is
-            // about to wipe.
-            this.socket.send(VIEWER_SNAPSHOT_REPLAY_COMMAND);
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
     setupResizeHandling() {
         if (!this.vibeTerminal) {
             return;
@@ -540,23 +513,20 @@ export class TerminalTab {
             };
 
             // Client-side write coalescing: buffer incoming binary frames and hand them
-            // to xterm.write through one of two flush mechanisms, selectable at runtime
-            // from Terminal Settings → "Output Coalescing":
-            //   - 'microtask' (default): queueMicrotask, drains at end of current task.
-            //     Zero delay, no cross-task batching. Immune to occlusion throttling.
-            //   - 'postTask': scheduler.postTask({ delay: 10 }). 10ms cross-task batch
-            //     window — the cross-task coalescing the original setTimeout(10) gave us
-            //     — but NOT subject to Chromium's 1s occlusion clamp on setTimeout.
-            //     Falls back to queueMicrotask if scheduler.postTask is unavailable.
+            // to xterm.write via queueMicrotask, which drains at the end of the current
+            // task. Zero delay, no cross-task batching. Immune to occlusion throttling.
             // We do NOT use setTimeout (Chromium clamps it to 1s when the renderer is
             // occluded — VS Code webview is occluded during cold start, before the
             // workbench finishes its first paint — turning every echo into an ~800ms
             // stall). We also do NOT use rAF, because rAF couples byte *processing* to
             // visibility: an occluded webview would accumulate bytes in pendingChunks
-            // until visible, then dump them in one big synchronous parse. Multi-frame
-            // TUI redraw tearing is already prevented by the server-side coalesce
-            // (NormalCoalesceDelayMs in WebSocketConsumer.cs) and by xterm's per-frame
-            // rAF render, not by this client-side gate.
+            // until visible, then dump them in one big synchronous parse. We also tried
+            // scheduler.postTask({ delay: 10 }) as a runtime-selectable alternative for
+            // cross-task batching — pulled 2026-05-07 because it felt slow in practice
+            // (suspected delay clamping or scheduler queuing under VS Code's webview).
+            // Multi-frame TUI redraw tearing is already prevented by the server-side
+            // coalesce (NormalCoalesceDelayMs in WebSocketConsumer.cs) and by xterm's
+            // per-frame rAF render, not by this client-side gate.
             let replayFocusDone = false;
             let pendingChunks = [];
             let flushQueued = false;
@@ -602,15 +572,7 @@ export class TerminalTab {
                 pendingChunks.push(new Uint8Array(event.data));
                 if (!flushQueued) {
                     flushQueued = true;
-                    const mode = this.manager?._outputCoalesceMode;
-                    if (mode === 'postTask' && typeof scheduler !== 'undefined' && scheduler?.postTask) {
-                        scheduler.postTask(flushPendingChunks, {
-                            delay: POST_TASK_COALESCE_DELAY_MS,
-                            priority: 'user-visible',
-                        });
-                    } else {
-                        queueMicrotask(flushPendingChunks);
-                    }
+                    queueMicrotask(flushPendingChunks);
                 }
 
                 // Fire first-message init synchronously (before flush) — these actions

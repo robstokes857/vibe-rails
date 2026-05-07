@@ -20,8 +20,6 @@ const PENDING_CLOSE_LABEL = (() => {
     const minutes = Math.round(PENDING_CLOSE_MS / 60000);
     return minutes === 1 ? '1 minute' : `${minutes} minutes`;
 })();
-const OUTPUT_COALESCE_STORAGE_KEY = 'viberails_terminal_outputCoalesce';
-const OUTPUT_COALESCE_DEFAULT = 'microtask';
 // Allowlist for CSS filter values spliced into <img style="filter: ...">.
 // Today logoFilter only comes from getCliBrand's hardcoded map, but lock the
 // surface down so future user-supplied brand metadata can't inject CSS.
@@ -104,16 +102,6 @@ class TerminalManager {
         this._themeSwatches = [];
 
         this.settings = null;
-
-        this._outputCoalesceMode = (() => {
-            try { return localStorage.getItem(OUTPUT_COALESCE_STORAGE_KEY) || OUTPUT_COALESCE_DEFAULT; }
-            catch { return OUTPUT_COALESCE_DEFAULT; }
-        })();
-    }
-
-    setOutputCoalesceMode(mode) {
-        this._outputCoalesceMode = mode === 'postTask' ? 'postTask' : 'microtask';
-        try { localStorage.setItem(OUTPUT_COALESCE_STORAGE_KEY, this._outputCoalesceMode); } catch {}
     }
 
     isDestroyed() {
@@ -165,7 +153,6 @@ class TerminalManager {
 
         this.zoomInBtn     = this.container.querySelector('#terminal-zoom-in-btn');
         this.zoomOutBtn    = this.container.querySelector('#terminal-zoom-out-btn');
-        this.refreshBtn    = this.container.querySelector('#terminal-refresh-btn');
         this.fontSizeLabel = this.container.querySelector('#vb-terminal-font-size-label');
         this.historyBtn    = null; // toggle lives on collapsed sidebar strip
 
@@ -267,19 +254,6 @@ class TerminalManager {
         return DEFAULT_SELECTION;
     }
 
-    refreshActiveTab() {
-        const tab = this.getActiveTab();
-        if (!tab || !tab.state.hasActiveSession) {
-            return;
-        }
-
-        if (tab.instance.requestViewerSnapshotReplay()) {
-            return;
-        }
-
-        void this.reconnectActiveTab();
-    }
-
     saveActiveTerminalSession(format) {
         const active = this.getActiveTab();
         const vt = active?.instance?.vibeTerminal;
@@ -336,7 +310,6 @@ class TerminalManager {
 
         this.zoomInBtn?.addEventListener('click',  () => this.adjustFontSize(1));
         this.zoomOutBtn?.addEventListener('click', () => this.adjustFontSize(-1));
-        this.refreshBtn?.addEventListener('click', () => this.refreshActiveTab());
     }
 
     _mountDropdowns() {
@@ -2367,9 +2340,6 @@ export class TerminalController {
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
                             <span class="vb-terminal-font-size-label" id="vb-terminal-font-size-label">14</span>
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
-                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-refresh-btn" title="Refresh terminal snapshot" aria-label="Refresh terminal snapshot">
-                                <i class="fa-solid fa-arrows-rotate"></i>
-                            </button>
                             <div class="vb-terminal-download-wrap" id="vb-terminal-download-wrap">
                                 <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-download-btn" title="Save session" aria-label="Save session">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">

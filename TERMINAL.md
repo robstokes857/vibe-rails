@@ -1,48 +1,51 @@
 # TERMINAL.md
 
-## 2026-05-06 Suspected microtask-flush rendering regression (under bisect)
+## 2026-05-07 queueMicrotask rendering bug: reprint / overprint after webview occlusion (sole open bug)
 
-Open: corruption of an existing TUI block (Claude Code task list) when Rob navigates
-away from the VS Code webview and comes back. Visible signature is characters
-dropped mid-word at fixed column positions and the pre-occlusion content rendered
-twice at slightly different widths — i.e. overprinting at a different cols geometry,
-not bytes reordered.
+**Status:** Open — observed once, not reliably reproducible, otherwise stable.
 
-Session investigated: `dd5cc208-8b09-4473-8268-0a565a5bd55e`. Critically, the
-SessionLogs byte stream for the entire session contains:
+**Symptom:** Corruption of an existing TUI block (Claude Code task list) when
+Rob navigates away from the VS Code webview and comes back. Visible signature
+is characters dropped mid-word at fixed column positions and the pre-occlusion
+content rendered twice at slightly different widths — i.e. overprinting at a
+different cols geometry, not bytes reordered.
 
-- 0 occurrences of `\e[?1049l`, `\e[?2004l`, or `\e[3J`
-- exactly 1 `\e[2J` (the initial PowerShell clear at session start)
-- only 2 `TerminalSessionLogs` rows, both at session start (Sequence 0 + 1)
+**Current state:** Seen in exactly one session
+(`dd5cc208-8b09-4473-8268-0a565a5bd55e`) and not reproduced since. The terminal
+has otherwise been very stable across normal use. Cause has not been pinned
+down.
 
-Conclusion: the WebSocket did not disconnect on navigate-away/back, the server
-never ran `TerminalGridSerializer.Serialize`, and no snapshot prologue was sent.
-Whatever rendered the corrupted view did so against the existing emulator state
-on the viewer side. This rules out the C# emulator and the snapshot prologue —
-the bug lives in the JS/xterm.js client path during the occluded → visible
-transition.
+**What's already known about the failure mode:** the SessionLogs byte stream
+for the bad session contains 0 occurrences of `\e[?1049l`, `\e[?2004l`, or
+`\e[3J`, exactly 1 `\e[2J` (the initial PowerShell clear at session start),
+and only 2 `TerminalSessionLogs` rows, both at session start (Sequence 0 + 1).
+That means the WebSocket did not disconnect on navigate-away/back, the server
+never ran `TerminalGridSerializer.Serialize`, and no snapshot prologue was
+sent. Whatever rendered the corrupted view did so against the existing emulator
+state on the viewer side — the bug lives in the JS/xterm.js client path during
+the occluded → visible transition, not in the C# emulator or the snapshot
+prologue.
 
-Suspected change: `989afd1` ("fixed slow start bug") swapped the WebSocket
-output flush from `setTimeout(flushPendingChunks, 10)` to
-`queueMicrotask(flushPendingChunks)` in the default ('microtask') coalesce mode
-in `terminal-tab.js`. setTimeout is clamped to 1s under Chromium occlusion;
-queueMicrotask is not. The two modes therefore behave very differently while
-the webview is hidden — under microtask, every onmessage produces an immediate
-xterm.write into xterm's internal buffer; under setTimeout/postTask, chunks
-merge into one xterm.write per ~10ms. The behavioral difference is real but I
-have not been able to confirm from the SessionLogs alone which xterm internal
-state ends up corrupted.
+**Bisect outcome (2026-05-07):** the runtime A/B between `queueMicrotask` and
+`scheduler.postTask` 10 ms batching was rolled out so Rob could compare the two
+flush mechanisms. `scheduler.postTask` mode felt **slow in practice** —
+possibly delay clamping under the VS Code webview, possibly scheduler queuing
+behavior, root cause not isolated. The `postTask` mode has therefore been
+removed: the Terminal Settings → "Output Coalescing" toggle is gone,
+`setOutputCoalesceMode` / `_outputCoalesceMode` / the `viberails_terminal_outputCoalesce`
+localStorage key are gone, and `socket.onmessage` in `terminal-tab.js` always
+uses `queueMicrotask(flushPendingChunks)`. The historical "we tried postTask"
+context is preserved in the comment above the flush call so we don't
+re-introduce it unthinkingly.
 
-Bisect in progress: Rob is switching the Output Coalescing mode from "Instant
-(queueMicrotask)" to "10ms batching (scheduler.postTask)" via Terminal Settings
-and will report whether the corruption still reproduces. If postTask fixes it,
-the fix lives in the microtask path (or we change the default and document why).
-If postTask still corrupts, the regression is somewhere else and this note can
-be deleted.
+**Next step if it reproduces:** capture a Performance trace + raw SessionLogs
+from a session where the corruption is visible, and compare the xterm.js
+internal buffer state across the occluded → visible transition. The C# emulator
+and snapshot prologue are already ruled out for this failure mode.
 
-Do not delete this section without resolving the bisect — even if `Tests/` and
-`TerminalEmulator.Tests/` stay green, those suites cannot exercise the
-client-only occlusion path.
+Do not delete this section unless the issue stops reproducing for an extended
+period, or unless it is replaced with a real fix. `Tests/` and
+`TerminalEmulator.Tests/` cannot exercise the client-only occlusion path.
 
 ## 2026-04-27 Snapshot replay state reset contract
 
@@ -761,7 +764,9 @@ Key file: `VibeRails/Services/Terminal/TerminalRunner.cs` — `_nativeRemoteEnab
 **Verified fixed in v1.6.12** (commit `989afd1`). End-to-end checks passed:
 cold-start echo is tight from the first keystroke after a full `Code.exe` +
 `vb.exe` teardown, no Codex/Copilot tear regression observed, and
-`scheduler.postTask` mode also passes the cold-start test.
+`scheduler.postTask` mode also passed the cold-start test at the time. The
+`scheduler.postTask` runtime A/B was later removed (2026-05-07) — see the
+Open Bugs entry at the top of this file for why.
 
 **Symptom:** First cold start of VS Code → typing in the VibeRails dashboard
 echoed at 500–1000 ms+ per character (worst keystrokes pushing 3 s). Lag was
@@ -831,20 +836,18 @@ Microtask decouples processing from rendering: xterm's parser updates
 state as bytes arrive, xterm's own internal rAF renderer paints when
 the page is paintable.
 
-Added a runtime-selectable alternative in Terminal Settings →
-"Output Coalescing": **`scheduler.postTask` 10ms batching**. Defaults to
-`queueMicrotask`. `scheduler.postTask` gives the cross-task batching the
-original `setTimeout` provided (10 ms sliding window across adjacent
-`onmessage` tasks) without the occlusion clamp — `scheduler.postTask` is
-not subject to the visibility/occlusion throttling that breaks
-`setTimeout` and `requestAnimationFrame`. Falls back to `queueMicrotask`
-if `scheduler.postTask` isn't available in the runtime. Stored in
-`localStorage` under `viberails_terminal_outputCoalesce`
-(`'microtask'` | `'postTask'`). Switching the toggle takes effect
-on the next WS frame — no reconnect required. The selector lives on
-`TerminalManager` (`_outputCoalesceMode` + `setOutputCoalesceMode`); the
-read in `socket.onmessage` is a property lookup, no localStorage hit on
-the hot path.
+A runtime-selectable alternative was briefly shipped in Terminal Settings →
+"Output Coalescing" — **`scheduler.postTask` 10ms batching** as the
+non-default option, with `queueMicrotask` as the default. The intent was to
+recover the cross-task batching the original `setTimeout` provided (10 ms
+sliding window across adjacent `onmessage` tasks) without the occlusion
+clamp, since `scheduler.postTask` is not subject to the visibility/occlusion
+throttling that breaks `setTimeout` and `requestAnimationFrame`. **Removed
+2026-05-07** — `postTask` mode felt slow in practice (suspected delay
+clamping or scheduler queuing under the VS Code webview, not pinned down).
+The setting, the `setOutputCoalesceMode` / `_outputCoalesceMode` plumbing on
+`TerminalManager`, and the `viberails_terminal_outputCoalesce` localStorage
+key are all gone — `socket.onmessage` now always uses `queueMicrotask`.
 
 Removed the now-unused `OUTPUT_WRITE_COALESCE_MS` constant. Renamed
 `flushTimeoutId → flushQueued` (boolean). Disconnect path no longer
@@ -871,13 +874,13 @@ re-run after.
   as background-throttled by default. Use `queueMicrotask` for
   immediate drain or `requestAnimationFrame` for paint-aligned work.
 - For deliberate cross-task batching (multi-frame TUI tear protection),
-  prefer `scheduler.postTask({ delay, priority })` over `setTimeout`.
-  Both `setTimeout` and `requestAnimationFrame` are throttled or
-  suspended when the renderer is occluded; `scheduler.postTask` is not.
-  Chromium 94+ (covers VS Code's Electron webview and modern Chrome/Edge).
-  Fall back to `queueMicrotask` for browsers without `scheduler.postTask`
-  (Firefox/Safari) — the no-cross-task-batching trade-off matches the
-  current default behavior.
+  `scheduler.postTask({ delay, priority })` is the textbook answer over
+  `setTimeout` because `setTimeout` and `requestAnimationFrame` are
+  throttled or suspended when the renderer is occluded while
+  `scheduler.postTask` is not. We tried `scheduler.postTask` 10 ms here
+  as a runtime A/B and pulled it 2026-05-07 because it felt slow in the
+  VS Code webview — keep that empirical result in mind before reaching
+  for it again.
 - If a "lag only on cold start, fine after reopen" symptom appears
   again, suspect timer throttling first. Capture a Performance trace
   and inspect `TimerInstall` / `TimerFire` actual-vs-requested delays
@@ -1392,12 +1395,11 @@ state machine that replaced `CircularBuffer` as the terminal state proxy.
   inherent — xterm.js v6 `WriteBuffer` batches via `setTimeout(0)` (~4 ms) +
   rAF render (~16 ms). No delay on our `onData` → `socket.send()` path; the
   bottleneck is xterm.js's async write pipeline. Fixing would require local
-  echo or xterm.js internal APIs. Accepted as-is. See Terminal Settings →
-  "Output Coalescing" for the runtime A/B between `queueMicrotask` (default)
-  and `scheduler.postTask` 10 ms — `postTask` adds a 10 ms cross-task batch
-  window on top of xterm's pipeline (so steady-state echo budget rises to
-  ~30 ms when enabled, in exchange for tear protection on multi-frame TUI
-  redraws).
+  echo or xterm.js internal APIs. Accepted as-is. The `socket.onmessage`
+  client-side flush always uses `queueMicrotask` — the runtime A/B with
+  `scheduler.postTask` 10 ms batching was removed 2026-05-07 because
+  `postTask` felt slow in the VS Code webview (suspected clamping/queuing,
+  not pinned down).
 - **Cold-start typing latency (fixed 2026-05-05, verified 2026-05-06, v1.6.12):**
   the previously catastrophic ~800–3000 ms first-cold-start echo lag was a
   separate problem from the steady-state ~20 ms above. Root cause was Chromium
@@ -1416,15 +1418,29 @@ state machine that replaced `CircularBuffer` as the terminal state proxy.
 
 ## Open Bugs
 
-**Audit (2026-05-01):** Of the items below, three are accepted live-with
-(ConPTY redraw quirks + Codex's own mode-transition behavior — upstream
-problems, no clean fix in our layer). The "Typing lag" item is **not**
-live-with: investigation is complete, fix is just deferred — should be picked
-up next cycle, not left as a known issue indefinitely.
+The sole open known bug is the **queueMicrotask rendering bug: reprint /
+overprint after webview occlusion** issue tracked at the top of this file
+(entry dated 2026-05-07). Observed in exactly one session, not reliably
+reproducible, terminal otherwise stable.
 
-### Font size change causes incomplete TUI rendering / double print
+The other items historically tracked under "Open Bugs" have been reclassified
+as accepted-live-with or deferred and moved to **Closed / Informational**
+below. They are not actively open.
 
-**Status:** Open — 2026-04-01
+---
+
+## Closed / Informational
+
+## Font size change causes incomplete TUI rendering / double print
+
+**Status:** Accepted / live-with — 2026-04-01 (reclassified 2026-05-07)
+
+**Why this is not on the Open list:** root cause is upstream — ConPTY's redraw
+after `ResizePseudoConsole` is not always complete at certain col/row
+dimensions. There is no clean fix in our layer; mitigations exist (see "Possible
+fix directions" below) but the underlying behavior is a Windows ConPTY quirk.
+Tracked here so future investigators don't waste time rediscovering the
+symptoms.
 
 **Symptom:** Changing xterm.js font size via the +/- buttons can cause two related rendering failures:
 1. **Double print:** At the original font size, ConPTY emits a redundant full redraw, causing text to appear twice.
@@ -1459,8 +1475,6 @@ The problem is **ConPTY's redraw after `ResizePseudoConsole` is not always compl
 - Investigate whether the issue is ConPTY-specific (likely) or Ink/React layout-dependent at certain column widths.
 
 ---
-
-## Closed / Informational
 
 ## Codex: Status-line cursor flash / cursor hop during TUI redraw
 
@@ -1545,7 +1559,7 @@ Left on disk deliberately (may be used elsewhere in the app): all `.woff`/`.woff
 - `VibeRails/wwwroot/assets/xterm/terminal-themes.js`
 - `VibeRails/wwwroot/index.html`
 
-**Cross-reference:** The *existing* open bug "Font size change causes incomplete TUI rendering / double print" (above) is separate — that one is about the +/- font-size buttons triggering ConPTY resize partial redraws. It remains open, but this fix removes one compounding factor (no more font/ligature-load reflow firing on top of a user-initiated size change).
+**Cross-reference:** The "Font size change causes incomplete TUI rendering / double print" note (above) is separate — that one is about the +/- font-size buttons triggering ConPTY resize partial redraws. It is accepted / live-with, not an actively open bug, but this fix removes one compounding factor (no more font/ligature-load reflow firing on top of a user-initiated size change).
 
 **Debug tool used:** `python-scripts/decode_session.py` + `python-scripts/analyze_doubleprint.py` — dump a session's raw `SessionLogs` BLOBs with ANSI escapes spelled out, then fingerprint chunks to detect identical full-screen redraws within a time window.
 
@@ -1589,7 +1603,7 @@ This is not a bug in VibeControl — it is standard terminal behavior. `vim`, `n
 
 ### Typing lag / stutter from WebSocket coalesce hold
 
-**Status:** Open — 2026-04-20 — investigation complete, fix deferred
+**Status:** Deferred — 2026-04-20 — investigation complete, fix deferred (reclassified 2026-05-07; not on the Open Bugs list)
 
 **Note (2026-05-05, updated 2026-05-06):** This entry is about the
 **server-side** 4 ms `NormalCoalesceDelayMs` hold and is distinct from the
