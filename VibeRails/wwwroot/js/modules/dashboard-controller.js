@@ -92,6 +92,7 @@ export class DashboardController {
                 headingContainer.innerHTML = `
                     <section class="context-header-card dashboard-context-header ${isSandbox ? 'context-header-sandbox' : ''}">
                         ${isSandbox ? '<div class="context-header-accent-bar"></div>' : ''}
+                        <!-- dashboard-context-layout hidden for now — we'll add stuff here later
                         <div class="dashboard-context-layout">
                             <div class="dashboard-context-main">
                                 <div class="dash-project-icon ${isSandbox ? 'dash-project-icon-sandbox' : ''}" aria-hidden="true">
@@ -140,6 +141,7 @@ export class DashboardController {
                                 </button>
                             </div>
                         </div>
+                        -->
                         <div class="dashboard-context-grid" aria-label="Repository context">
                             <div class="dash-fact-card ${gitBranch ? '' : 'is-muted'}">
                                 <span class="dash-fact-label"><i class="fa-solid fa-code-branch"></i> Local branch</span>
