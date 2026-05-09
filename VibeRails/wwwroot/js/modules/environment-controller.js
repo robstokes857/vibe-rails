@@ -401,8 +401,11 @@ export class EnvironmentController {
                     customArgsGroup.style.display = this.usesManagedCustomArgs(cli) ? 'none' : '';
                 }
                 slot.innerHTML = this.buildCliSettingsHtml(cli, {});
+                this.bindCliSettingsInteractions(cli);
             });
         }
+
+        this.bindCliSettingsInteractions(initialCli);
 
         document.getElementById('env-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -549,13 +552,19 @@ export class EnvironmentController {
     buildGeminiCustomArgs(settings) {
         const s = settings || {};
         const args = [];
-        const approvalMode = this.normalizeGeminiApprovalMode(s.approvalMode || (s.yoloMode ? 'yolo' : (s.autoApproveTools ? 'auto_edit' : '')));
+        const normalizedApprovalMode = this.normalizeGeminiApprovalMode(s.approvalMode);
+        const yoloMode = Boolean(s.yoloMode || normalizedApprovalMode === 'yolo');
+        const approvalMode = yoloMode
+            ? ''
+            : this.normalizeGeminiApprovalMode(s.approvalMode || (s.autoApproveTools ? 'auto_edit' : ''));
 
         if (s.sandboxEnabled) {
             args.push('--sandbox');
         }
 
-        if (approvalMode && approvalMode !== 'default') {
+        if (yoloMode) {
+            args.push('--yolo');
+        } else if (approvalMode && approvalMode !== 'default') {
             args.push('--approval-mode', approvalMode);
         }
 
@@ -616,6 +625,26 @@ export class EnvironmentController {
         const raw = (value || '').trim().toLowerCase();
         if (['default', 'auto_edit', 'yolo', 'plan'].includes(raw)) return raw;
         return '';
+    }
+
+    bindCliSettingsInteractions(cli) {
+        const cliLower = (cli || '').toLowerCase();
+        if (cliLower === 'gemini') {
+            this.bindGeminiYoloModeControls();
+        }
+    }
+
+    bindGeminiYoloModeControls() {
+        const yoloSwitch = document.getElementById('gemini-yolo');
+        const approvalSelect = document.getElementById('gemini-approval-mode');
+        if (!yoloSwitch || !approvalSelect) return;
+
+        const syncApprovalState = () => {
+            approvalSelect.disabled = yoloSwitch.checked;
+        };
+
+        yoloSwitch.addEventListener('change', syncApprovalState);
+        syncApprovalState();
     }
 
     mergeCodexSettingsFromCustomArgs(settings, customArgs) {
@@ -1031,15 +1060,18 @@ export class EnvironmentController {
     extractCliSettingsPayload(cli) {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'gemini') {
-            const approvalMode = this.normalizeGeminiApprovalMode(document.getElementById('gemini-approval-mode').value);
+            const yoloMode = document.getElementById('gemini-yolo').checked;
+            const approvalMode = yoloMode
+                ? 'yolo'
+                : this.normalizeGeminiApprovalMode(document.getElementById('gemini-approval-mode').value);
             return {
                 initialMessage: document.getElementById('gemini-initial-message').value,
                 sandboxEnabled: document.getElementById('gemini-sandbox').checked,
                 approvalMode,
-                autoApproveTools: approvalMode === 'auto_edit',
+                autoApproveTools: !yoloMode && approvalMode === 'auto_edit',
                 vimMode: document.getElementById('gemini-vim').checked,
                 checkForUpdates: document.getElementById('gemini-updates').checked,
-                yoloMode: approvalMode === 'yolo',
+                yoloMode,
                 additionalArgs: document.getElementById('gemini-additional-args').value
             };
         }
@@ -1087,7 +1119,9 @@ export class EnvironmentController {
 
         if (cliLower === 'gemini') {
             const geminiInitialMessage = this.app.escapeHtml(s.initialMessage || '');
-            const geminiApprovalMode = this.normalizeGeminiApprovalMode(s.approvalMode || (s.yoloMode ? 'yolo' : (s.autoApproveTools ? 'auto_edit' : '')));
+            const normalizedApprovalMode = this.normalizeGeminiApprovalMode(s.approvalMode || (s.autoApproveTools ? 'auto_edit' : ''));
+            const geminiYoloMode = Boolean(s.yoloMode || normalizedApprovalMode === 'yolo');
+            const geminiApprovalMode = geminiYoloMode ? '' : normalizedApprovalMode;
             const geminiAdditionalArgs = this.app.escapeHtml(s.additionalArgs || '');
             return `
                 <hr class="my-4">
@@ -1105,14 +1139,20 @@ export class EnvironmentController {
                     <small class="form-text text-muted">Run tools in a containerized sandbox for safety</small>
                 </div>
                 <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="gemini-yolo" ${geminiYoloMode ? 'checked' : ''}>
+                        <label class="form-check-label" for="gemini-yolo">YOLO Mode</label>
+                    </div>
+                    <small class="form-text text-muted text-warning">Launches Gemini with <code>--yolo</code> and bypasses approval prompts</small>
+                </div>
+                <div class="mb-3">
                     <label class="form-label">Approval Mode</label>
                     <select class="form-select" id="gemini-approval-mode">
                         <option value="" ${geminiApprovalMode === '' ? 'selected' : ''}>Default prompts</option>
                         <option value="auto_edit" ${geminiApprovalMode === 'auto_edit' ? 'selected' : ''}>Auto-approve edits</option>
-                        <option value="yolo" ${geminiApprovalMode === 'yolo' ? 'selected' : ''}>YOLO: auto-approve all actions</option>
                         <option value="plan" ${geminiApprovalMode === 'plan' ? 'selected' : ''}>Plan: read-only</option>
                     </select>
-                    <small class="form-text text-muted">Passed as <code>--approval-mode</code>; YOLO uses <code>--approval-mode yolo</code></small>
+                    <small class="form-text text-muted">Passed as <code>--approval-mode</code>; disabled while YOLO mode is enabled</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
