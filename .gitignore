@@ -16,7 +16,11 @@ Tests/Services/BertV2/Fixtures/cleaned_input_corpus.txt
 # Local-only terminal session replay fixtures dumped from real SessionLogs.Content.
 # Contains personal session bytes; replay tests Skip() when these are absent.
 TerminalEmulator.Tests/fixtures/
-Tests/Services/Terminal/Fixtures/session_8522be5b_*.bin
+# Any raw session capture (regardless of session id or location). Each file is bytes
+# from a real chat session and must never reach git.
+session_*.bin
+session_*.fixture.bin
+**/Fixtures/session_*
 # User-specific files
 *.rsuser
 *.suo
@@ -386,5 +390,21 @@ FodyWeavers.xsd
 /vscode-viberails/.claude/settings.local.json
 /TerminalEmulator.Tests/snapshots
 /fixtures
-TerminalEmulator.Tests/state.db
 UITests/test-results/.last-run.json
+
+# Local-only investigative copies of build outputs (e.g., bin_check/ next to a
+# project) used to sanity-check that native DLLs landed where expected.
+bin_check/
+
+# SQLite databases AND their WAL/SHM companions. state.db et al. hold real
+# session content (Sessions, UserInputs, SessionLogs, embedding vectors) and
+# must never be tracked. Patterns cover dev .vibe_rails dirs, test temp dirs,
+# and the runtime artifacts SQLite creates next to any open DB.
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm

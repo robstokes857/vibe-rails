@@ -2,7 +2,6 @@ using System.Diagnostics;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
-using VibeRails.Services.Terminal;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 
 namespace VibeRails.Jobs;

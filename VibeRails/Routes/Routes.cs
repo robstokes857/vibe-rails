@@ -24,6 +24,7 @@ public static class RouteExtensions
         LifecycleRoutes.Map(app);
         app.Services.GetRequiredService<AppEventWebSocketHandler>().MapWebSocket(app);
         BertRoutes.Map(app);
+        SearchRoutes.Map(app);
 
         // Debug routes - only map if in debug mode
 #if DEBUG

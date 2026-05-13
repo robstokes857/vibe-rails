@@ -79,6 +79,12 @@ namespace VibeRails.DB
             """;
         public const string CreateSessionsIndex = "CREATE INDEX IF NOT EXISTS idx_sessions_started ON Sessions(StartedUTC DESC)";
 
+        // Session-level BERT aggregate embedding tracking — drives SessionAggregateEmbeddingBackfillJob's
+        // ended-but-unembedded scan. Defined in MigrationStatements since it references the
+        // AggregateEmbeddedUTC column added by ALTER TABLE.
+        public const string MigrateSessionsAddAggregateEmbeddedUTC = "ALTER TABLE Sessions ADD COLUMN AggregateEmbeddedUTC TEXT";
+        public const string CreateSessionsUnaggregatedIndex = "CREATE INDEX IF NOT EXISTS idx_sessions_unaggregated ON Sessions(EndedUTC) WHERE AggregateEmbeddedUTC IS NULL AND EndedUTC IS NOT NULL";
+
         // SessionLogs Table
         public const string CreateSessionLogsTable = """
             CREATE TABLE IF NOT EXISTS SessionLogs (
@@ -117,6 +123,61 @@ namespace VibeRails.DB
             """;
         public const string CreateUserInputsIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_session ON UserInputs(SessionId)";
         public const string CreateUserInputsSeqIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_session_seq ON UserInputs(SessionId, Sequence)";
+
+        // FTS5 lexical index over UserInputs.InputText. External-content table — the
+        // virtual table is just the inverted index; raw text stays in UserInputs.
+        // bundle_e_sqlite3 ships with FTS5 enabled.
+        //
+        // FTS writes are driven from C# (Repository.InsertUserInputAsync /
+        // BackfillUserInputsFtsAsync) — NOT from triggers — so that
+        // InputEtlFilter.Process can strip secrets before anything lands in
+        // UserInputs_fts. The legacy auto-insert/auto-update triggers from earlier
+        // installs are dropped below; only the delete trigger remains so deletions
+        // continue to keep the index in sync (calling 'delete' against a rowid that
+        // was never indexed is a harmless no-op).
+        public const string CreateUserInputsFts = """
+            CREATE VIRTUAL TABLE IF NOT EXISTS UserInputs_fts USING fts5(
+                InputText,
+                content='UserInputs',
+                content_rowid='Id',
+                tokenize='porter unicode61'
+            );
+            """;
+        public const string CreateUserInputsFtsAfterDeleteTrigger = """
+            CREATE TRIGGER IF NOT EXISTS UserInputs_fts_ad AFTER DELETE ON UserInputs BEGIN
+                INSERT INTO UserInputs_fts(UserInputs_fts, rowid, InputText) VALUES('delete', old.Id, old.InputText);
+            END;
+            """;
+
+        // Drop legacy auto-insert / auto-update triggers from earlier installs that
+        // copied raw InputText into the FTS index before secret filtering existed.
+        public const string DropUserInputsFtsAfterInsertTrigger = "DROP TRIGGER IF EXISTS UserInputs_fts_ai;";
+        public const string DropUserInputsFtsAfterUpdateTrigger = "DROP TRIGGER IF EXISTS UserInputs_fts_au;";
+
+        // Code-driven FTS write: only called after InputEtlFilter clears the text.
+        public const string InsertUserInputsFtsRow = """
+            INSERT INTO UserInputs_fts(rowid, InputText) VALUES ($rowid, $inputText);
+            """;
+        // Backfill scan: rowids present in UserInputs but absent from the FTS shadow
+        // table. External-content FTS5 stores rowids in a sibling docsize table
+        // (UserInputs_fts_docsize), which IS authoritative for "is this row indexed?"
+        // even though the virtual table itself proxies UserInputs.
+        public const string SelectUserInputsMissingFromFts = """
+            SELECT Id, InputText
+            FROM UserInputs
+            WHERE Id NOT IN (SELECT id FROM UserInputs_fts_docsize);
+            """;
+
+        // BERT embedding tracking — partial index drives the BertEmbeddingBackfillJob's
+        // unembedded-row scan. Defined in MigrationStatements since it references the
+        // BertEmbeddedUTC column added by ALTER TABLE.
+        public const string MigrateUserInputsAddBertEmbeddedUTC = "ALTER TABLE UserInputs ADD COLUMN BertEmbeddedUTC TEXT";
+        public const string CreateUserInputsUnembeddedIndex = "CREATE INDEX IF NOT EXISTS idx_user_inputs_unembedded ON UserInputs(Id) WHERE BertEmbeddedUTC IS NULL";
+        // Failure count column lets the backfill skip poison-pill rows (e.g. a row whose
+        // text the embedder OOMs on) so a single bad row doesn't block every newer row
+        // behind it forever.
+        public const string MigrateUserInputsAddBertEmbedFailureCount = "ALTER TABLE UserInputs ADD COLUMN BertEmbedFailureCount INTEGER NOT NULL DEFAULT 0";
+        public const string MigrateSessionsAddAggregateEmbedFailureCount = "ALTER TABLE Sessions ADD COLUMN AggregateEmbedFailureCount INTEGER NOT NULL DEFAULT 0";
 
         // InputFileChanges Table
         public const string CreateInputFileChangesTable = """
@@ -209,7 +270,17 @@ namespace VibeRails.DB
             "ALTER TABLE Sessions ADD COLUMN OwnerPid INTEGER",
             "ALTER TABLE Sessions ADD COLUMN OwnershipTracked INTEGER",
             // Drop orphaned table from a previous build.
-            "DROP TABLE IF EXISTS TUI_Event"
+            "DROP TABLE IF EXISTS TUI_Event",
+            MigrateUserInputsAddBertEmbeddedUTC,
+            CreateUserInputsUnembeddedIndex,
+            MigrateUserInputsAddBertEmbedFailureCount,
+            MigrateSessionsAddAggregateEmbeddedUTC,
+            CreateSessionsUnaggregatedIndex,
+            MigrateSessionsAddAggregateEmbedFailureCount,
+            CreateUserInputsFts,
+            CreateUserInputsFtsAfterDeleteTrigger,
+            DropUserInputsFtsAfterInsertTrigger,
+            DropUserInputsFtsAfterUpdateTrigger
         ];
 
         /// <summary>
@@ -592,6 +663,62 @@ namespace VibeRails.DB
             FROM UserInputs
             WHERE Id = $id
             LIMIT 1;
+            """;
+
+        // Poison-pill threshold: after this many consecutive failures we stop trying a
+        // given row so it can't block every newer row behind it. Reset by hand if the
+        // underlying problem is fixed (e.g. a bug in the embedder pipeline).
+        public const int BertEmbedFailureSkipThreshold = 3;
+
+        // BERT embedding backfill — drives BertEmbeddingBackfillJob.
+        public static readonly string SelectUnembeddedUserInputs = $"""
+            SELECT Id, SessionId, InputText
+            FROM UserInputs
+            WHERE BertEmbeddedUTC IS NULL
+              AND BertEmbedFailureCount < {BertEmbedFailureSkipThreshold}
+            ORDER BY Id ASC
+            LIMIT $batchSize;
+            """;
+        public const string MarkUserInputBertEmbedded = """
+            UPDATE UserInputs SET BertEmbeddedUTC = $now WHERE Id = $id;
+            """;
+        public const string IncrementUserInputBertEmbedFailureCount = """
+            UPDATE UserInputs SET BertEmbedFailureCount = BertEmbedFailureCount + 1 WHERE Id = $id;
+            """;
+
+        // Session-level BERT aggregate embedding backfill — drives SessionAggregateEmbeddingBackfillJob.
+        public static readonly string SelectUnaggregatedEndedSessionIds = $"""
+            SELECT Id
+            FROM Sessions
+            WHERE EndedUTC IS NOT NULL
+              AND AggregateEmbeddedUTC IS NULL
+              AND AggregateEmbedFailureCount < {BertEmbedFailureSkipThreshold}
+            ORDER BY EndedUTC ASC
+            LIMIT $batchSize;
+            """;
+        public const string MarkSessionAggregateEmbedded = """
+            UPDATE Sessions SET AggregateEmbeddedUTC = $now WHERE Id = $id;
+            """;
+        public const string IncrementSessionAggregateEmbedFailureCount = """
+            UPDATE Sessions SET AggregateEmbedFailureCount = AggregateEmbedFailureCount + 1 WHERE Id = $id;
+            """;
+        public const string SelectUserInputTextsForSessionInOrder = """
+            SELECT InputText
+            FROM UserInputs
+            WHERE SessionId = $sessionId
+            ORDER BY Sequence ASC;
+            """;
+
+        // FTS5 lexical search over UserInputs.InputText, joining the source table to
+        // produce the same `<sessionId>:<userInputId>` document id format the existing
+        // BertSearchHitResponse pipeline expects. Lower bm25 rank = better match.
+        public const string SelectUserInputsFtsByQuery = """
+            SELECT ui.SessionId, ui.Id, ui.InputText
+            FROM UserInputs_fts fts
+            JOIN UserInputs ui ON ui.Id = fts.rowid
+            WHERE UserInputs_fts MATCH $query
+            ORDER BY fts.rank
+            LIMIT $topK;
             """;
 
         // User input text reads — used by IGetUserText.

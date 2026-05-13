@@ -26,7 +26,11 @@ public class BertSearchServiceV2Tests : IDisposable
             Path.Combine(_runtimeDir, "vocab.txt"));
         _store = new BertV2VectorStore(Path.Combine(_tempDir, "bert_user_text_vectors.db"));
         _inputService = new BertV2InputService(_embedder, _store);
-        _searchDb = new BertSearchDbService(new TestBertSettings(_runtimeDir, _tempDir));
+        // Pin state.db to a fresh, empty file so FTS5 lookups in SearchByText
+        // don't accidentally resolve against the developer's real state.db.
+        _searchDb = new BertSearchDbService(
+            new TestBertSettings(_runtimeDir, _tempDir),
+            stateDatabasePathOverride: Path.Combine(_tempDir, "state.db"));
         _searchService = new BertSearchServiceV2(
             new IBertSearchStrategy[]
             {

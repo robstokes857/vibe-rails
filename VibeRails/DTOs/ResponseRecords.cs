@@ -65,6 +65,12 @@ namespace VibeRails.DTOs
         DateTime TimestampUTC
     );
 
+    public record UnembeddedUserInputRow(
+        long Id,
+        string SessionId,
+        string InputText
+    );
+
     public record FileChangeInfo(
         string FilePath,
         string ChangeType,
@@ -341,7 +347,9 @@ namespace VibeRails.DTOs
         long VectorDatabaseSizeBytes,
         long StateDatabaseSizeBytes,
         long ModelFileSizeBytes,
-        long VocabFileSizeBytes
+        long VocabFileSizeBytes,
+        int SessionDocumentCount,
+        int SessionVectorCount
     );
 
     public record BertFileChangeResponse(
@@ -362,7 +370,9 @@ namespace VibeRails.DTOs
         string? WorkingDirectory,
         string? GitCommitHash,
         string UserTextPreview,
-        int FileChangeCount
+        int FileChangeCount,
+        string Kind = "input",
+        int? ChunkIndex = null
     );
 
     public record BertCaptureDetailResponse(
@@ -377,7 +387,9 @@ namespace VibeRails.DTOs
         string? GitCommitHash,
         string UserText,
         List<BertFileChangeResponse> FileChanges,
-        string RawText
+        string RawText,
+        string Kind = "input",
+        int? ChunkIndex = null
     );
 
     public record BertCaptureListResponse(
@@ -390,7 +402,8 @@ namespace VibeRails.DTOs
     public record BertSearchRequest(
         string Query,
         string Mode = "semantic",
-        int TopK = 10
+        int TopK = 10,
+        string Scope = "inputs"
     );
 
     public record BertSearchHitResponse(
@@ -405,16 +418,40 @@ namespace VibeRails.DTOs
         string? GitCommitHash,
         string UserTextPreview,
         int FileChangeCount,
-        double? Score
+        double? Score,
+        string Kind = "input",
+        int? ChunkIndex = null
     );
 
     public record BertSearchResponse(
         string Query,
         string Mode,
+        string Scope,
         int TopK,
         int DocumentCount,
         long SearchTimeMs,
         List<BertSearchHitResponse> Results
+    );
+
+    public record UnifiedSearchRequest(
+        string Query,
+        int TopK = 10
+    );
+
+    public record UnifiedSearchHitGroup(
+        string Key,
+        string Label,
+        string Description,
+        long SearchTimeMs,
+        int CorpusSize,
+        List<BertSearchHitResponse> Hits
+    );
+
+    public record UnifiedSearchResponse(
+        string Query,
+        int TopK,
+        long TotalSearchTimeMs,
+        List<UnifiedSearchHitGroup> Groups
     );
 
     public record UpdateChatHistorySessionRequest(
@@ -655,6 +692,10 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(BertSearchHitResponse))]
     [JsonSerializable(typeof(List<BertSearchHitResponse>))]
     [JsonSerializable(typeof(BertSearchResponse))]
+    [JsonSerializable(typeof(UnifiedSearchRequest))]
+    [JsonSerializable(typeof(UnifiedSearchHitGroup))]
+    [JsonSerializable(typeof(List<UnifiedSearchHitGroup>))]
+    [JsonSerializable(typeof(UnifiedSearchResponse))]
     // App Configuration (for appsettings.json VibeRails section)
     [JsonSerializable(typeof(Services.VibeRailsConfiguration))]
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]

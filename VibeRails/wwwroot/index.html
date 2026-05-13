@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=JetBrains+Mono:wght@400;600;700&display=swap">
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=JetBrains+Mono:wght@400;600;700&family=Major+Mono+Display&display=swap">
     <link rel="stylesheet" href="assets/bootstrap.min.css" />
     <link rel="stylesheet" href="assets/xterm/xterm.css" />
     <link rel="stylesheet" href="assets/fontawesome/all.min.css" />
@@ -1188,71 +1188,1078 @@
                 .vibe-rails-ai-view details.vra-details summary { cursor:pointer; padding:0.65rem 0.85rem; color: var(--color-text); list-style:none; font-size:0.775rem; font-weight:600; }
                 .vibe-rails-ai-view details.vra-details summary::-webkit-details-marker { display:none; }
                 .vibe-rails-ai-view details.vra-details pre.vra-pre { border:none; border-radius:0; border-top:1px solid var(--color-border); }
+                .vibe-rails-ai-view .vra-group-header { display:flex; justify-content:space-between; align-items:center; gap:0.5rem; padding:0.55rem 0.75rem; margin:0.75rem 0 0.4rem; border:1px solid var(--color-border); border-radius:6px; background: rgba(255,255,255,0.03); }
+                .vibe-rails-ai-view .vra-group-header:first-child { margin-top:0; }
+                .vibe-rails-ai-view .vra-group-header .label { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; font-weight:700; color: var(--color-text); }
+                .vibe-rails-ai-view .vra-group-header .desc { font-size:0.68rem; color: var(--color-text-muted); flex:1; margin-left:0.5rem; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+                .vibe-rails-ai-view .vra-group-header .stats { font-size:0.65rem; color: var(--color-text-muted); white-space:nowrap; }
+                .vibe-rails-ai-view .vra-group-empty { padding:0.6rem 0.85rem; border:1px dashed var(--color-border); border-radius:6px; color: var(--color-text-muted); font-size:0.75rem; text-align:center; background: rgba(255,255,255,0.02); }
+                .vibe-rails-ai-view .vra-stores { display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; margin:0 0 0.75rem; }
+                .vibe-rails-ai-view .vra-store-card { padding:0.85rem 1rem; border:1px solid var(--color-border); border-radius:8px; background: rgba(255,255,255,0.03); display:grid; gap:0.55rem; }
+                .vibe-rails-ai-view .vra-store-card.msg { border-left:3px solid var(--color-accent); }
+                .vibe-rails-ai-view .vra-store-card.sess { border-left:3px solid #a78bfa; }
+                .vibe-rails-ai-view .vra-store-title { display:flex; justify-content:space-between; align-items:baseline; gap:0.5rem; }
+                .vibe-rails-ai-view .vra-store-title .name { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.1em; font-weight:700; color: var(--color-text); }
+                .vibe-rails-ai-view .vra-store-title .sub { font-size:0.65rem; color: var(--color-text-muted); }
+                .vibe-rails-ai-view .vra-store-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:0.5rem; }
+                .vibe-rails-ai-view .vra-store-stat { display:grid; gap:0.1rem; }
+                .vibe-rails-ai-view .vra-store-stat .label { font-size:0.6rem; color: var(--color-text-muted); text-transform:uppercase; letter-spacing:0.08em; font-weight:700; }
+                .vibe-rails-ai-view .vra-store-stat .value { font-size:1.1rem; font-weight:700; color: var(--color-text); }
+                .vibe-rails-ai-view .vra-score-chip-lg { font-weight:700; font-size:0.85rem; padding:0.25rem 0.6rem; border-radius:6px; }
+                .vibe-rails-ai-view .vra-score-chip-lg.high { color:#fff; background: var(--color-success); }
+                .vibe-rails-ai-view .vra-score-chip-lg.mid { color:#1f1300; background: var(--color-warning); }
+                .vibe-rails-ai-view .vra-score-chip-lg.low { color:#fff; background: var(--color-danger); }
+                @media(max-width:800px){ .vibe-rails-ai-view .vra-stores { grid-template-columns:1fr; } }
                 @media(max-width:1000px){ .vibe-rails-ai-view .vra-main { grid-template-columns:1fr; grid-template-rows:minmax(200px,0.4fr) 1fr; } }
                 @media(max-width:700px){ .vibe-rails-ai-view .vra-query-bar { flex-direction:column; align-items:stretch; } .vibe-rails-ai-view .vra-stats { margin-left:0; } }
+
+                /* ─── BERT Inspector: Diagnostic Lab Instrument ─── */
+                .vibe-rails-ai-view .insp {
+                    --insp-accent: var(--color-accent);
+                    --insp-mark: #fbbf24;
+                    --insp-mark-bg: rgba(251, 191, 36, 0.18);
+                    --insp-hairline: color-mix(in srgb, var(--color-text) 8%, transparent);
+                    --insp-hairline-strong: color-mix(in srgb, var(--color-text) 16%, transparent);
+                    --insp-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+                    --insp-display: inherit;
+                    display: grid;
+                    gap: 1rem;
+                    min-height: calc(100vh - 200px);
+                    grid-template-rows: auto auto auto auto 1fr auto;
+                    color: var(--color-text);
+                }
+
+                /* Masthead */
+                .vibe-rails-ai-view .insp-masthead {
+                    display: grid;
+                    grid-template-columns: 1fr auto;
+                    gap: 1rem;
+                    align-items: end;
+                    padding: 0.25rem 0 0.85rem;
+                    border-bottom: 1px solid var(--insp-hairline-strong);
+                }
+                .vibe-rails-ai-view .insp-title {
+                    display: grid;
+                    gap: 0.25rem;
+                }
+                .vibe-rails-ai-view .insp-h1 {
+                    font-family: inherit;
+                    font-size: 1.35rem;
+                    font-weight: 600;
+                    margin: 0;
+                    letter-spacing: 0;
+                    line-height: 1.2;
+                    color: var(--color-text);
+                }
+                .vibe-rails-ai-view .insp-sub {
+                    font-size: 0.825rem;
+                    color: var(--color-text-muted);
+                    line-height: 1.5;
+                    max-width: 60ch;
+                    margin: 0.15rem 0 0;
+                }
+                .vibe-rails-ai-view .insp-status {
+                    display: grid;
+                    gap: 0.5rem;
+                    justify-items: end;
+                    align-content: end;
+                }
+                .vibe-rails-ai-view .insp-status-row {
+                    display: flex;
+                    gap: 0.35rem;
+                    flex-wrap: wrap;
+                    justify-content: flex-end;
+                }
+                .vibe-rails-ai-view .insp-pill {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                    padding: 0.28rem 0.55rem;
+                    border-radius: 2px;
+                    font-family: var(--insp-mono);
+                    font-size: 0.62rem;
+                    letter-spacing: 0.12em;
+                    text-transform: uppercase;
+                    font-weight: 600;
+                    border: 1px solid var(--insp-hairline-strong);
+                    background: color-mix(in srgb, var(--color-bg-surface) 60%, transparent);
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-pill::before {
+                    content: '';
+                    width: 6px; height: 6px;
+                    border-radius: 50%;
+                    background: currentColor;
+                    flex-shrink: 0;
+                }
+                .vibe-rails-ai-view .insp-pill.ok { color: var(--color-success); border-color: color-mix(in srgb, var(--color-success) 35%, var(--insp-hairline)); }
+                .vibe-rails-ai-view .insp-pill.warn { color: var(--color-warning); border-color: color-mix(in srgb, var(--color-warning) 35%, var(--insp-hairline)); }
+                .vibe-rails-ai-view .insp-pill.bad { color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 40%, var(--insp-hairline)); }
+                .vibe-rails-ai-view .insp-toggle {
+                    background: transparent;
+                    border: 1px solid var(--insp-hairline-strong);
+                    color: var(--color-text-muted);
+                    padding: 0.35rem 0.7rem;
+                    font-family: var(--insp-mono);
+                    font-size: 0.62rem;
+                    letter-spacing: 0.18em;
+                    text-transform: uppercase;
+                    cursor: pointer;
+                    border-radius: 2px;
+                    transition: color 0.2s, border-color 0.2s, background 0.2s;
+                }
+                .vibe-rails-ai-view .insp-toggle:hover { color: var(--insp-accent); border-color: var(--insp-accent); }
+                .vibe-rails-ai-view .insp-toggle .chev { display: inline-block; transition: transform 0.2s; margin-right: 0.4rem; }
+                .vibe-rails-ai-view .insp-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+
+                /* Diagnostics drawer */
+                .vibe-rails-ai-view .insp-diagnostics {
+                    border: 1px solid var(--insp-hairline-strong);
+                    border-radius: 4px;
+                    padding: 1rem;
+                    background: color-mix(in srgb, var(--color-bg-surface) 50%, transparent);
+                    display: none;
+                    gap: 1rem;
+                    grid-template-columns: 1fr 1fr;
+                }
+                .vibe-rails-ai-view .insp-diagnostics.open { display: grid; }
+                @media (max-width: 880px) { .vibe-rails-ai-view .insp-diagnostics { grid-template-columns: 1fr; } }
+                .vibe-rails-ai-view .insp-diag-card {
+                    display: grid;
+                    gap: 0.55rem;
+                    padding: 0.85rem 1rem;
+                    border: 1px solid var(--insp-hairline);
+                    border-left: 2px solid var(--insp-accent);
+                    border-radius: 0 4px 4px 0;
+                    background: color-mix(in srgb, var(--color-bg-base) 80%, transparent);
+                }
+                .vibe-rails-ai-view .insp-diag-card.sess { border-left-color: #a78bfa; }
+                .vibe-rails-ai-view .insp-diag-label {
+                    font-family: var(--insp-mono);
+                    font-size: 0.6rem;
+                    letter-spacing: 0.2em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-diag-stat-row {
+                    display: grid;
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 0.5rem;
+                }
+                .vibe-rails-ai-view .insp-diag-stat .k {
+                    font-family: var(--insp-mono);
+                    font-size: 0.58rem;
+                    letter-spacing: 0.16em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-diag-stat .v {
+                    font-family: var(--insp-mono);
+                    font-size: 1.15rem;
+                    font-weight: 700;
+                    color: var(--color-text);
+                    letter-spacing: 0.02em;
+                }
+                .vibe-rails-ai-view .insp-diag-paths {
+                    display: grid;
+                    gap: 0.45rem;
+                    margin-top: 0.35rem;
+                }
+                .vibe-rails-ai-view .insp-diag-path {
+                    display: grid;
+                    grid-template-columns: 100px 1fr;
+                    gap: 0.6rem;
+                    align-items: baseline;
+                    font-family: var(--insp-mono);
+                    font-size: 0.7rem;
+                }
+                .vibe-rails-ai-view .insp-diag-path .pk {
+                    color: var(--color-text-muted);
+                    letter-spacing: 0.12em;
+                    text-transform: uppercase;
+                    font-size: 0.55rem;
+                }
+                .vibe-rails-ai-view .insp-diag-path .pv {
+                    color: var(--insp-accent);
+                    word-break: break-all;
+                }
+
+                /* Query shell */
+                .vibe-rails-ai-view .insp-query {
+                    position: relative;
+                    display: grid;
+                    gap: 0.55rem;
+                    padding: 1.1rem 1.25rem 0.85rem;
+                    border: 1px solid var(--insp-hairline-strong);
+                    border-radius: 4px;
+                    background: var(--color-bg-surface);
+                    box-shadow: 0 0 0 1px color-mix(in srgb, var(--insp-accent) 6%, transparent),
+                                inset 0 1px 0 color-mix(in srgb, var(--color-text) 4%, transparent);
+                }
+                .vibe-rails-ai-view .insp-query-label {
+                    font-size: 0.7rem;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                    font-weight: 600;
+                    color: var(--color-text-muted);
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                .vibe-rails-ai-view .insp-query-row {
+                    display: grid;
+                    grid-template-columns: 1fr auto auto auto;
+                    gap: 0.6rem;
+                    align-items: center;
+                }
+                .vibe-rails-ai-view .insp-input {
+                    width: 100%;
+                    background: transparent;
+                    border: none;
+                    border-bottom: 1px solid var(--insp-hairline-strong);
+                    color: var(--color-text);
+                    font-family: var(--insp-mono);
+                    font-size: 1.05rem;
+                    padding: 0.5rem 0.25rem;
+                    letter-spacing: 0.01em;
+                    transition: border-color 0.2s;
+                }
+                .vibe-rails-ai-view .insp-input::placeholder { color: var(--color-text-muted); opacity: 0.65; font-style: italic; }
+                .vibe-rails-ai-view .insp-input:focus {
+                    outline: none;
+                    border-bottom-color: var(--insp-accent);
+                }
+                .vibe-rails-ai-view .insp-topk {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                    font-family: var(--insp-mono);
+                    font-size: 0.62rem;
+                    letter-spacing: 0.18em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-topk input {
+                    width: 60px;
+                    background: var(--color-bg-base);
+                    border: 1px solid var(--insp-hairline-strong);
+                    color: var(--color-text);
+                    font-family: var(--insp-mono);
+                    font-size: 0.85rem;
+                    padding: 0.35rem 0.5rem;
+                    border-radius: 2px;
+                    text-align: center;
+                    letter-spacing: 0.05em;
+                }
+                .vibe-rails-ai-view .insp-topk input:focus { outline: none; border-color: var(--insp-accent); }
+                .vibe-rails-ai-view .insp-run {
+                    background: var(--insp-accent);
+                    color: var(--color-bg-base);
+                    border: 1px solid var(--insp-accent);
+                    font-family: var(--insp-mono);
+                    font-size: 0.7rem;
+                    font-weight: 700;
+                    letter-spacing: 0.22em;
+                    text-transform: uppercase;
+                    padding: 0.55rem 1.1rem;
+                    cursor: pointer;
+                    border-radius: 2px;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    transition: background 0.15s, transform 0.15s;
+                }
+                .vibe-rails-ai-view .insp-run:hover { background: color-mix(in srgb, var(--insp-accent) 80%, white); }
+                .vibe-rails-ai-view .insp-run:active { transform: translateY(1px); }
+                .vibe-rails-ai-view .insp-run[disabled] { opacity: 0.45; cursor: not-allowed; }
+                .vibe-rails-ai-view .insp-run .arrow { display: inline-block; transition: transform 0.15s; }
+                .vibe-rails-ai-view .insp-run:hover .arrow { transform: translateX(2px); }
+                .vibe-rails-ai-view .insp-refresh {
+                    background: transparent;
+                    border: 1px solid var(--insp-hairline-strong);
+                    color: var(--color-text-muted);
+                    font-family: var(--insp-mono);
+                    font-size: 0.62rem;
+                    letter-spacing: 0.18em;
+                    text-transform: uppercase;
+                    padding: 0.5rem 0.85rem;
+                    border-radius: 2px;
+                    cursor: pointer;
+                    transition: color 0.2s, border-color 0.2s;
+                }
+                .vibe-rails-ai-view .insp-refresh:hover { color: var(--color-text); border-color: var(--color-text); }
+                .vibe-rails-ai-view .insp-query-stats {
+                    display: flex;
+                    gap: 1.5rem;
+                    flex-wrap: wrap;
+                    font-family: var(--insp-mono);
+                    font-size: 0.65rem;
+                    letter-spacing: 0.14em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                    align-items: center;
+                    min-height: 18px;
+                }
+                .vibe-rails-ai-view .insp-query-stats .stat { display: inline-flex; gap: 0.35rem; align-items: baseline; }
+                .vibe-rails-ai-view .insp-query-stats .stat b { color: var(--color-text); font-weight: 700; }
+                .vibe-rails-ai-view .insp-query-stats .stat.live { color: var(--insp-accent); }
+                .vibe-rails-ai-view .insp-query-stats .err { color: var(--color-danger); }
+
+                /* Column grid */
+                .vibe-rails-ai-view .insp-cols {
+                    display: grid;
+                    grid-template-columns: repeat(4, minmax(0, 1fr));
+                    gap: 0.6rem;
+                    min-height: 0;
+                }
+                @media (max-width: 1280px) { .vibe-rails-ai-view .insp-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+                @media (max-width: 720px) { .vibe-rails-ai-view .insp-cols { grid-template-columns: 1fr; } }
+                .vibe-rails-ai-view .insp-col {
+                    display: flex;
+                    flex-direction: column;
+                    border: 1px solid var(--insp-hairline-strong);
+                    border-radius: 4px;
+                    background: color-mix(in srgb, var(--color-bg-surface) 55%, transparent);
+                    overflow: hidden;
+                    min-height: 320px;
+                }
+                .vibe-rails-ai-view .insp-col-head {
+                    padding: 0.7rem 0.85rem;
+                    border-bottom: 1px solid var(--insp-hairline);
+                    background: color-mix(in srgb, var(--color-bg-base) 40%, transparent);
+                    display: grid;
+                    gap: 0.35rem;
+                }
+                .vibe-rails-ai-view .insp-col[data-key="per-message-semantic"] { border-top: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent); }
+                .vibe-rails-ai-view .insp-col[data-key="per-session-semantic"] { border-top: 2px solid color-mix(in srgb, #a78bfa 60%, transparent); }
+                .vibe-rails-ai-view .insp-col[data-key="lexical"] { border-top: 2px solid color-mix(in srgb, var(--insp-mark) 60%, transparent); }
+                .vibe-rails-ai-view .insp-col[data-key="fused"] { border-top: 2px solid color-mix(in srgb, var(--color-success) 60%, transparent); }
+                .vibe-rails-ai-view .insp-col-tag {
+                    font-size: 0.62rem;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                    font-weight: 600;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-col-name {
+                    font-family: inherit;
+                    font-size: 0.95rem;
+                    font-weight: 600;
+                    letter-spacing: 0;
+                    color: var(--color-text);
+                }
+                .vibe-rails-ai-view .insp-col[data-key="per-message-semantic"] .insp-col-name { color: var(--color-accent); }
+                .vibe-rails-ai-view .insp-col[data-key="per-session-semantic"] .insp-col-name { color: #a78bfa; }
+                .vibe-rails-ai-view .insp-col[data-key="lexical"] .insp-col-name { color: var(--insp-mark); }
+                .vibe-rails-ai-view .insp-col[data-key="fused"] .insp-col-name { color: var(--color-success); }
+                .vibe-rails-ai-view .insp-col-meta {
+                    font-family: var(--insp-mono);
+                    font-size: 0.6rem;
+                    letter-spacing: 0.1em;
+                    color: var(--color-text-muted);
+                    display: flex;
+                    gap: 0.85rem;
+                    flex-wrap: wrap;
+                }
+                .vibe-rails-ai-view .insp-col-meta b { color: var(--color-text); font-weight: 700; }
+                .vibe-rails-ai-view .insp-col-explainer {
+                    font-size: 0.68rem;
+                    color: var(--color-text-muted);
+                    line-height: 1.4;
+                    font-style: italic;
+                }
+                .vibe-rails-ai-view .insp-col-body {
+                    flex: 1;
+                    overflow-y: auto;
+                    padding: 0.5rem;
+                    display: grid;
+                    gap: 0.45rem;
+                    align-content: start;
+                }
+                .vibe-rails-ai-view .insp-col-body::-webkit-scrollbar { width: 6px; }
+                .vibe-rails-ai-view .insp-col-body::-webkit-scrollbar-thumb { background: var(--insp-hairline-strong); border-radius: 3px; }
+
+                /* Hit card */
+                .vibe-rails-ai-view .insp-hit {
+                    --rank-color: var(--insp-accent);
+                    width: 100%;
+                    text-align: left;
+                    background: var(--color-bg-base);
+                    border: 1px solid var(--insp-hairline);
+                    border-left: 2px solid var(--rank-color);
+                    border-radius: 0 3px 3px 0;
+                    color: inherit;
+                    padding: 0.5rem 0.6rem;
+                    display: grid;
+                    gap: 0.4rem;
+                    cursor: pointer;
+                    font-family: inherit;
+                    font-size: 0.78rem;
+                    transition: border-color 0.15s, background 0.15s, transform 0.15s;
+                    animation: insp-fade-up 0.35s ease backwards;
+                }
+                @keyframes insp-fade-up {
+                    from { opacity: 0; transform: translateY(4px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                .vibe-rails-ai-view .insp-hit:hover {
+                    border-color: var(--insp-accent);
+                    background: color-mix(in srgb, var(--insp-accent) 6%, var(--color-bg-base));
+                }
+                .vibe-rails-ai-view .insp-hit.sel {
+                    border-color: var(--insp-accent);
+                    background: color-mix(in srgb, var(--insp-accent) 8%, var(--color-bg-base));
+                }
+                .vibe-rails-ai-view .insp-hit.shared {
+                    box-shadow: inset 3px 0 0 var(--insp-mark);
+                }
+                .vibe-rails-ai-view .insp-hit-top {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: baseline;
+                    gap: 0.5rem;
+                }
+                .vibe-rails-ai-view .insp-hit-rank {
+                    font-family: var(--insp-mono);
+                    font-size: 0.62rem;
+                    letter-spacing: 0.12em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                }
+                .vibe-rails-ai-view .insp-hit-rank .num {
+                    color: var(--rank-color);
+                    font-weight: 700;
+                    font-size: 0.85rem;
+                }
+                .vibe-rails-ai-view .insp-hit-score {
+                    font-family: var(--insp-mono);
+                    font-size: 0.78rem;
+                    font-weight: 700;
+                    color: var(--rank-color);
+                    letter-spacing: 0.02em;
+                    flex-shrink: 0;
+                }
+                .vibe-rails-ai-view .insp-hit-score .pct { font-size: 1rem; }
+                .vibe-rails-ai-view .insp-hit-score .raw {
+                    color: var(--color-text-muted);
+                    font-size: 0.62rem;
+                    font-weight: 500;
+                    display: block;
+                    letter-spacing: 0.08em;
+                    margin-top: 0.05rem;
+                }
+                .vibe-rails-ai-view .insp-meter {
+                    height: 3px;
+                    background: var(--insp-hairline);
+                    border-radius: 99px;
+                    overflow: hidden;
+                    position: relative;
+                }
+                .vibe-rails-ai-view .insp-meter::after {
+                    content: '';
+                    position: absolute;
+                    top: 0; left: 0;
+                    height: 100%;
+                    width: var(--w, 0%);
+                    background: var(--rank-color);
+                    border-radius: 99px;
+                    transition: width 0.4s ease;
+                }
+                .vibe-rails-ai-view .insp-hit-text {
+                    font-size: 0.78rem;
+                    line-height: 1.45;
+                    color: var(--color-text);
+                    display: -webkit-box;
+                    -webkit-line-clamp: 3;
+                    -webkit-box-orient: vertical;
+                    overflow: hidden;
+                    word-break: break-word;
+                }
+                .vibe-rails-ai-view .insp-hit-foot {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    gap: 0.4rem;
+                    font-family: var(--insp-mono);
+                    font-size: 0.58rem;
+                    letter-spacing: 0.08em;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-hit-badges {
+                    display: flex;
+                    gap: 0.25rem;
+                    flex-wrap: wrap;
+                }
+                .vibe-rails-ai-view .insp-badge {
+                    display: inline-block;
+                    padding: 0.08rem 0.4rem;
+                    border-radius: 2px;
+                    font-family: var(--insp-mono);
+                    font-size: 0.55rem;
+                    letter-spacing: 0.14em;
+                    text-transform: uppercase;
+                    border: 1px solid var(--insp-hairline-strong);
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-badge.msg { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 40%, var(--insp-hairline)); }
+                .vibe-rails-ai-view .insp-badge.sess { color: #a78bfa; border-color: color-mix(in srgb, #a78bfa 40%, var(--insp-hairline)); }
+                .vibe-rails-ai-view .insp-badge.lex { color: var(--insp-mark); border-color: color-mix(in srgb, var(--insp-mark) 40%, var(--insp-hairline)); }
+                .vibe-rails-ai-view .insp-badge.fused { color: var(--color-success); border-color: color-mix(in srgb, var(--color-success) 40%, var(--insp-hairline)); }
+                .vibe-rails-ai-view .insp-col-empty {
+                    padding: 1.5rem 0.85rem;
+                    text-align: center;
+                    color: var(--color-text-muted);
+                    font-family: var(--insp-mono);
+                    font-size: 0.7rem;
+                    letter-spacing: 0.06em;
+                    line-height: 1.6;
+                    border: 1px dashed var(--insp-hairline);
+                    border-radius: 3px;
+                    background: color-mix(in srgb, var(--color-bg-base) 60%, transparent);
+                    margin: 0.5rem;
+                }
+                .vibe-rails-ai-view .insp-col-empty.idle {
+                    border-style: solid;
+                    background: transparent;
+                }
+                .vibe-rails-ai-view .insp-col-empty .glyph {
+                    display: block;
+                    font-family: var(--insp-display);
+                    font-size: 1.6rem;
+                    color: var(--insp-hairline-strong);
+                    letter-spacing: 0.3em;
+                    margin-bottom: 0.5rem;
+                }
+
+                /* Lens (detail panel) */
+                .vibe-rails-ai-view .insp-lens {
+                    border: 1px solid var(--insp-hairline-strong);
+                    border-radius: 4px;
+                    background: var(--color-bg-surface);
+                    display: grid;
+                    grid-template-rows: auto 1fr;
+                    min-height: 280px;
+                    overflow: hidden;
+                }
+                .vibe-rails-ai-view .insp-lens-head {
+                    display: grid;
+                    grid-template-columns: auto 1fr auto;
+                    gap: 1rem;
+                    align-items: center;
+                    padding: 0.7rem 1rem;
+                    border-bottom: 1px solid var(--insp-hairline-strong);
+                    background: color-mix(in srgb, var(--color-bg-base) 40%, transparent);
+                }
+                .vibe-rails-ai-view .insp-lens-label {
+                    font-size: 0.7rem;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                    font-weight: 600;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-lens-title {
+                    font-family: var(--insp-mono);
+                    font-size: 0.82rem;
+                    color: var(--color-text);
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                .vibe-rails-ai-view .insp-lens-actions {
+                    display: flex;
+                    gap: 0.4rem;
+                }
+                .vibe-rails-ai-view .insp-lens-action {
+                    background: transparent;
+                    border: 1px solid var(--insp-hairline-strong);
+                    color: var(--color-text);
+                    font-family: var(--insp-mono);
+                    font-size: 0.62rem;
+                    letter-spacing: 0.16em;
+                    text-transform: uppercase;
+                    padding: 0.4rem 0.7rem;
+                    cursor: pointer;
+                    border-radius: 2px;
+                    transition: color 0.2s, border-color 0.2s;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                }
+                .vibe-rails-ai-view .insp-lens-action:hover { color: var(--insp-accent); border-color: var(--insp-accent); }
+                .vibe-rails-ai-view .insp-lens-body {
+                    overflow-y: auto;
+                    padding: 1rem 1.25rem 1.25rem;
+                    display: grid;
+                    gap: 1rem;
+                    grid-template-columns: 1fr 1fr;
+                }
+                @media (max-width: 1100px) { .vibe-rails-ai-view .insp-lens-body { grid-template-columns: 1fr; } }
+                .vibe-rails-ai-view .insp-lens-body::-webkit-scrollbar { width: 6px; }
+                .vibe-rails-ai-view .insp-lens-body::-webkit-scrollbar-thumb { background: var(--insp-hairline-strong); border-radius: 3px; }
+
+                .vibe-rails-ai-view .insp-lens-empty {
+                    grid-column: 1 / -1;
+                    text-align: center;
+                    padding: 2rem 1rem;
+                    color: var(--color-text-muted);
+                    font-size: 0.825rem;
+                    line-height: 1.6;
+                }
+
+                .vibe-rails-ai-view .insp-section {
+                    display: grid;
+                    gap: 0.55rem;
+                }
+                .vibe-rails-ai-view .insp-section.wide { grid-column: 1 / -1; }
+                .vibe-rails-ai-view .insp-section-head {
+                    font-family: var(--insp-mono);
+                    font-size: 0.58rem;
+                    letter-spacing: 0.28em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                    padding-bottom: 0.35rem;
+                    border-bottom: 1px solid var(--insp-hairline);
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: baseline;
+                }
+
+                /* Why-it-matched */
+                .vibe-rails-ai-view .insp-why { display: grid; gap: 0.65rem; }
+                .vibe-rails-ai-view .insp-why-prime {
+                    display: grid;
+                    grid-template-columns: auto 1fr auto;
+                    gap: 1rem;
+                    align-items: center;
+                    padding: 0.85rem 1rem;
+                    background: color-mix(in srgb, var(--color-bg-base) 70%, transparent);
+                    border: 1px solid var(--insp-hairline-strong);
+                    border-left: 3px solid var(--rank-color);
+                    border-radius: 0 3px 3px 0;
+                }
+                .vibe-rails-ai-view .insp-why-pct {
+                    font-family: var(--insp-display);
+                    font-size: 2.4rem;
+                    line-height: 1;
+                    color: var(--rank-color);
+                    letter-spacing: 0;
+                }
+                .vibe-rails-ai-view .insp-why-text {
+                    display: grid;
+                    gap: 0.2rem;
+                    min-width: 0;
+                }
+                .vibe-rails-ai-view .insp-why-strategy {
+                    font-family: var(--insp-mono);
+                    font-size: 0.7rem;
+                    letter-spacing: 0.16em;
+                    text-transform: uppercase;
+                    color: var(--color-text);
+                    font-weight: 700;
+                }
+                .vibe-rails-ai-view .insp-why-formula {
+                    font-family: var(--insp-mono);
+                    font-size: 0.7rem;
+                    color: var(--color-text-muted);
+                    line-height: 1.5;
+                }
+                .vibe-rails-ai-view .insp-why-formula code {
+                    color: var(--insp-accent);
+                    background: color-mix(in srgb, var(--insp-accent) 10%, transparent);
+                    padding: 0.05rem 0.35rem;
+                    border-radius: 2px;
+                }
+                .vibe-rails-ai-view .insp-why-strength {
+                    text-align: right;
+                    font-family: var(--insp-mono);
+                    font-size: 0.6rem;
+                    letter-spacing: 0.16em;
+                    text-transform: uppercase;
+                    color: var(--rank-color);
+                }
+                .vibe-rails-ai-view .insp-why-meter {
+                    height: 6px;
+                    background: var(--insp-hairline);
+                    border-radius: 99px;
+                    overflow: hidden;
+                    position: relative;
+                    margin-top: 0.4rem;
+                }
+                .vibe-rails-ai-view .insp-why-meter .fill {
+                    position: absolute;
+                    top: 0; left: 0;
+                    height: 100%;
+                    background: var(--rank-color);
+                    border-radius: 99px;
+                    transition: width 0.5s ease;
+                }
+                .vibe-rails-ai-view .insp-why-meter .tick {
+                    position: absolute;
+                    top: -2px; bottom: -2px;
+                    width: 1px;
+                    background: color-mix(in srgb, var(--color-text) 25%, transparent);
+                }
+                .vibe-rails-ai-view .insp-why-meter .tick-lbl {
+                    position: absolute;
+                    top: 10px;
+                    font-family: var(--insp-mono);
+                    font-size: 0.55rem;
+                    letter-spacing: 0.1em;
+                    color: var(--color-text-muted);
+                    transform: translateX(-50%);
+                }
+                .vibe-rails-ai-view .insp-cross {
+                    display: grid;
+                    grid-template-columns: 100px 1fr auto;
+                    gap: 0.75rem;
+                    align-items: center;
+                    padding: 0.45rem 0.6rem;
+                    font-family: var(--insp-mono);
+                    font-size: 0.7rem;
+                    border: 1px solid var(--insp-hairline);
+                    border-radius: 3px;
+                    background: color-mix(in srgb, var(--color-bg-base) 50%, transparent);
+                }
+                .vibe-rails-ai-view .insp-cross .label {
+                    color: var(--color-text-muted);
+                    font-size: 0.58rem;
+                    letter-spacing: 0.18em;
+                    text-transform: uppercase;
+                }
+                .vibe-rails-ai-view .insp-cross .score {
+                    color: var(--color-text);
+                    font-weight: 700;
+                }
+                .vibe-rails-ai-view .insp-cross.msg { border-left: 2px solid var(--color-accent); }
+                .vibe-rails-ai-view .insp-cross.sess { border-left: 2px solid #a78bfa; }
+                .vibe-rails-ai-view .insp-cross.lex { border-left: 2px solid var(--insp-mark); }
+                .vibe-rails-ai-view .insp-cross.fused { border-left: 2px solid var(--color-success); }
+                .vibe-rails-ai-view .insp-cross-none {
+                    padding: 0.45rem 0.7rem;
+                    font-family: var(--insp-mono);
+                    font-size: 0.65rem;
+                    color: var(--color-text-muted);
+                    font-style: italic;
+                }
+
+                /* Matching text + highlighting */
+                .vibe-rails-ai-view .insp-text {
+                    font-family: var(--insp-mono);
+                    font-size: 0.8rem;
+                    line-height: 1.7;
+                    background: var(--color-bg-base);
+                    border: 1px solid var(--insp-hairline);
+                    border-radius: 3px;
+                    padding: 0.85rem 1rem;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    max-height: 320px;
+                    overflow: auto;
+                    color: var(--color-text);
+                }
+                .vibe-rails-ai-view .insp-text mark {
+                    background: var(--insp-mark-bg);
+                    color: var(--insp-mark);
+                    padding: 0.05rem 0.18rem;
+                    border-radius: 2px;
+                    border-bottom: 1px solid var(--insp-mark);
+                    font-weight: 600;
+                }
+                .vibe-rails-ai-view .insp-term-row {
+                    display: flex;
+                    gap: 0.35rem;
+                    flex-wrap: wrap;
+                    margin-top: 0.4rem;
+                }
+                .vibe-rails-ai-view .insp-term {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.35rem;
+                    font-family: var(--insp-mono);
+                    font-size: 0.62rem;
+                    padding: 0.22rem 0.55rem;
+                    border-radius: 99px;
+                    border: 1px solid color-mix(in srgb, var(--insp-mark) 50%, var(--insp-hairline));
+                    color: var(--insp-mark);
+                    background: color-mix(in srgb, var(--insp-mark) 8%, transparent);
+                }
+                .vibe-rails-ai-view .insp-term.miss {
+                    border-color: var(--insp-hairline-strong);
+                    color: var(--color-text-muted);
+                    background: transparent;
+                    text-decoration: line-through;
+                }
+                .vibe-rails-ai-view .insp-term .cnt { color: var(--insp-mark); font-weight: 700; }
+                .vibe-rails-ai-view .insp-term.miss .cnt { color: var(--color-text-muted); }
+
+                /* Metadata */
+                .vibe-rails-ai-view .insp-meta {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                    gap: 0.4rem;
+                }
+                .vibe-rails-ai-view .insp-meta-cell {
+                    padding: 0.55rem 0.7rem;
+                    border: 1px solid var(--insp-hairline);
+                    border-radius: 2px;
+                    background: color-mix(in srgb, var(--color-bg-base) 50%, transparent);
+                    display: grid;
+                    gap: 0.2rem;
+                }
+                .vibe-rails-ai-view .insp-meta-cell .k {
+                    font-family: var(--insp-mono);
+                    font-size: 0.55rem;
+                    letter-spacing: 0.18em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-meta-cell .v {
+                    font-family: var(--insp-mono);
+                    font-size: 0.78rem;
+                    color: var(--color-text);
+                    word-break: break-all;
+                }
+                .vibe-rails-ai-view .insp-files {
+                    border: 1px solid var(--insp-hairline);
+                    border-radius: 3px;
+                    overflow: hidden;
+                    background: var(--color-bg-base);
+                }
+                .vibe-rails-ai-view .insp-files table { width: 100%; border-collapse: collapse; font-family: var(--insp-mono); font-size: 0.7rem; }
+                .vibe-rails-ai-view .insp-files th, .vibe-rails-ai-view .insp-files td {
+                    padding: 0.45rem 0.65rem;
+                    text-align: left;
+                    border-bottom: 1px solid var(--insp-hairline);
+                }
+                .vibe-rails-ai-view .insp-files th {
+                    font-size: 0.55rem;
+                    letter-spacing: 0.18em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                    background: color-mix(in srgb, var(--color-bg-surface) 60%, transparent);
+                }
+                .vibe-rails-ai-view .insp-files .add { color: var(--color-success); }
+                .vibe-rails-ai-view .insp-files .del { color: var(--color-danger); }
+                .vibe-rails-ai-view .insp-files code { color: var(--insp-accent); font-family: inherit; }
+                .vibe-rails-ai-view .insp-raw {
+                    border: 1px solid var(--insp-hairline);
+                    border-radius: 3px;
+                    background: var(--color-bg-base);
+                }
+                .vibe-rails-ai-view .insp-raw summary {
+                    padding: 0.6rem 0.85rem;
+                    cursor: pointer;
+                    font-family: var(--insp-mono);
+                    font-size: 0.62rem;
+                    letter-spacing: 0.16em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                    list-style: none;
+                }
+                .vibe-rails-ai-view .insp-raw summary::-webkit-details-marker { display: none; }
+                .vibe-rails-ai-view .insp-raw summary::before { content: '▶ '; color: var(--insp-accent); }
+                .vibe-rails-ai-view .insp-raw[open] summary::before { content: '▼ '; }
+                .vibe-rails-ai-view .insp-raw pre {
+                    margin: 0;
+                    padding: 0.85rem 1rem;
+                    font-family: var(--insp-mono);
+                    font-size: 0.72rem;
+                    line-height: 1.6;
+                    color: var(--color-text);
+                    border-top: 1px solid var(--insp-hairline);
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    max-height: 280px;
+                    overflow: auto;
+                }
+
+                /* Footer disclosures */
+                .vibe-rails-ai-view .insp-disclosures {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 0.6rem;
+                }
+                @media (max-width: 800px) { .vibe-rails-ai-view .insp-disclosures { grid-template-columns: 1fr; } }
+                .vibe-rails-ai-view .insp-disc {
+                    border: 1px solid var(--insp-hairline-strong);
+                    border-radius: 4px;
+                    background: color-mix(in srgb, var(--color-bg-surface) 50%, transparent);
+                    overflow: hidden;
+                }
+                .vibe-rails-ai-view .insp-disc-head {
+                    width: 100%;
+                    padding: 0.65rem 0.85rem;
+                    background: transparent;
+                    border: none;
+                    color: var(--color-text);
+                    font-family: var(--insp-mono);
+                    font-size: 0.65rem;
+                    letter-spacing: 0.22em;
+                    text-transform: uppercase;
+                    cursor: pointer;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    text-align: left;
+                }
+                .vibe-rails-ai-view .insp-disc-head:hover { color: var(--insp-accent); }
+                .vibe-rails-ai-view .insp-disc-head .chev { transition: transform 0.2s; }
+                .vibe-rails-ai-view .insp-disc-head[aria-expanded="true"] .chev { transform: rotate(90deg); }
+                .vibe-rails-ai-view .insp-disc-body {
+                    display: none;
+                    padding: 0.85rem;
+                    border-top: 1px solid var(--insp-hairline-strong);
+                }
+                .vibe-rails-ai-view .insp-disc-body.open { display: block; }
+                .vibe-rails-ai-view .insp-lookup-row {
+                    display: grid;
+                    grid-template-columns: 1fr auto;
+                    gap: 0.5rem;
+                    align-items: center;
+                }
+                .vibe-rails-ai-view .insp-lookup-row input {
+                    background: var(--color-bg-base);
+                    border: 1px solid var(--insp-hairline-strong);
+                    color: var(--color-text);
+                    font-family: var(--insp-mono);
+                    font-size: 0.75rem;
+                    padding: 0.5rem 0.65rem;
+                    border-radius: 2px;
+                }
+                .vibe-rails-ai-view .insp-lookup-row input:focus { outline: none; border-color: var(--insp-accent); }
+                .vibe-rails-ai-view .insp-banner {
+                    font-family: var(--insp-mono);
+                    font-size: 0.62rem;
+                    letter-spacing: 0.12em;
+                    color: var(--color-text-muted);
+                    margin-top: 0.5rem;
+                    min-height: 1em;
+                }
+                .vibe-rails-ai-view .insp-banner.error { color: var(--color-danger); }
+                .vibe-rails-ai-view .insp-banner.success { color: var(--color-success); }
+                .vibe-rails-ai-view .insp-recent {
+                    display: grid;
+                    gap: 0.4rem;
+                    max-height: 320px;
+                    overflow-y: auto;
+                }
+                .vibe-rails-ai-view .insp-recent::-webkit-scrollbar { width: 6px; }
+                .vibe-rails-ai-view .insp-recent::-webkit-scrollbar-thumb { background: var(--insp-hairline-strong); border-radius: 3px; }
+                .vibe-rails-ai-view .insp-recent-item {
+                    width: 100%;
+                    text-align: left;
+                    padding: 0.55rem 0.7rem;
+                    background: color-mix(in srgb, var(--color-bg-base) 60%, transparent);
+                    border: 1px solid var(--insp-hairline);
+                    border-radius: 2px;
+                    color: inherit;
+                    cursor: pointer;
+                    font-family: inherit;
+                    font-size: 0.75rem;
+                    display: grid;
+                    gap: 0.25rem;
+                    transition: border-color 0.15s, background 0.15s;
+                }
+                .vibe-rails-ai-view .insp-recent-item:hover {
+                    border-color: var(--insp-accent);
+                    background: color-mix(in srgb, var(--insp-accent) 6%, var(--color-bg-base));
+                }
+                .vibe-rails-ai-view .insp-recent-meta {
+                    display: flex;
+                    justify-content: space-between;
+                    font-family: var(--insp-mono);
+                    font-size: 0.55rem;
+                    letter-spacing: 0.12em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-recent-text {
+                    line-height: 1.4;
+                    color: var(--color-text);
+                    display: -webkit-box;
+                    -webkit-line-clamp: 2;
+                    -webkit-box-orient: vertical;
+                    overflow: hidden;
+                    word-break: break-word;
+                }
             </style>
 
-            <div class="row">
-                <div class="col-12 mb-3">
-                    <h4 class="text-uppercase fw-bold mb-0" style="letter-spacing: 0.05em;"><span class="text-gradient">Vibe Rails AI</span></h4>
-                </div>
-            </div>
+            <div class="insp" data-view="vibe-rails-ai">
 
-            <div class="vra-shell">
-                <div class="vra-topbar" style="display:block">
-                    <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap; margin-bottom:0.75rem;">
-                        <div>
-                            <div class="vra-eyebrow">Vibe Rails AI</div>
-                            <h3>Query &amp; Inspect Captures</h3>
+                <!-- Masthead -->
+                <header class="insp-masthead">
+                    <div class="insp-title">
+                        <h1 class="insp-h1">BERT Search Inspector</h1>
+                        <p class="insp-sub">Run the same query through every retrieval strategy at once — per-message vectors, per-session vectors, lexical, and reciprocal-rank fusion — and see which lens actually returns what you expect.</p>
+                    </div>
+                    <div class="insp-status">
+                        <div class="insp-status-row" data-vra-status-pills></div>
+                        <button class="insp-toggle" type="button" data-vra-diag-toggle aria-expanded="false" aria-controls="insp-diag-panel"><span class="chev">▸</span>Diagnostics<span style="margin-left:0.5rem;color:var(--insp-accent)" data-vra-queries>0</span></button>
+                    </div>
+                </header>
+
+                <!-- Diagnostics drawer (collapsed by default) -->
+                <div class="insp-diagnostics" id="insp-diag-panel"></div>
+
+                <!-- Query shell -->
+                <div class="insp-query">
+                    <div class="insp-query-label">
+                        <span>Query</span>
+                        <span data-vra-banner class="insp-banner" style="margin:0"></span>
+                    </div>
+                    <div class="insp-query-row" data-vra-form>
+                        <input class="insp-input" data-vra-query type="text" placeholder="ask what you'd ask the corpus — &quot;fixing a flaky test&quot;, &quot;rate limit&quot;, &quot;vector database setup&quot;..." autocomplete="off" spellcheck="false">
+                        <div class="insp-topk">
+                            <span>top k</span>
+                            <input data-vra-topk type="number" min="1" max="50" value="10" title="Top K per strategy">
                         </div>
-                        <div class="vra-status-pills" data-vra-status-pills style="margin-left:auto"></div>
-                        <div class="vra-stats">
-                            <span>Docs<b data-vra-docs>0</b></span>
-                            <span>Sessions<b data-vra-sessions>0</b></span>
-                            <span>Queries<b data-vra-queries>0</b></span>
+                        <button class="insp-run" data-vra-search type="button">Search&nbsp;<span class="arrow">→</span></button>
+                        <button class="insp-refresh" data-vra-refresh type="button" title="Refresh corpus stats and recent captures">↻ Refresh</button>
+                    </div>
+                    <div class="insp-query-stats" data-vra-query-stats>
+                        <span class="stat">awaiting query · type to search</span>
+                    </div>
+                </div>
+
+                <!-- Lens (capture detail) -->
+                <div class="insp-lens">
+                    <div class="insp-lens-head">
+                        <div class="insp-lens-label">Result</div>
+                        <div class="insp-lens-title" data-vra-lens-title>nothing selected</div>
+                        <div class="insp-lens-actions" data-vra-lens-actions></div>
+                    </div>
+                    <div class="insp-lens-body" data-vra-lens>
+                        <div class="insp-lens-empty">
+                            Click a hit in any column to inspect the score, the matching text, and the metadata behind it.
                         </div>
                     </div>
-                    <div class="vra-meta-grid" data-vra-header-grid></div>
                 </div>
 
-                <div class="vra-query-bar" data-vra-form>
-                    <input class="vra-control" data-vra-query type="text" placeholder="Search prompts, diffs, or intent..." autocomplete="off">
-                    <select class="vra-control" data-vra-mode style="width:140px">
-                        <option value="semantic">Semantic</option>
-                        <option value="text">Text</option>
-                    </select>
-                    <input class="vra-control" data-vra-topk type="number" min="1" max="50" value="10" style="width:70px" title="Top K results">
-                    <button class="vra-button primary" data-vra-search type="button">Search</button>
-                    <button class="vra-button" data-vra-refresh type="button">Refresh</button>
-                    <div class="vra-banner" data-vra-banner></div>
+                <!-- 4-column comparison grid -->
+                <div class="insp-cols" data-vra-cols>
+                    <!-- columns are rendered by the controller -->
                 </div>
 
-                <div class="vra-query-bar">
-                    <label style="font-size:12px;color:var(--vra-muted);white-space:nowrap">Session ID</label>
-                    <input class="vra-control" data-vra-session-id type="text" placeholder="Paste a session ID to see all its captures..." autocomplete="off" style="flex:1;min-width:200px">
-                    <button class="vra-button primary" data-vra-session-search type="button">Lookup</button>
-                    <div class="vra-banner" data-vra-session-banner></div>
-                </div>
-
-                <div class="vra-main">
-                    <section class="vra-panel">
-                        <div class="vra-head">
-                            <div><strong>Results</strong><span data-vra-results-sub style="font-size:11px;color:var(--vra-muted);margin-left:8px;font-weight:normal"></span></div>
-                            <select class="vra-control" data-vra-results-source style="padding:5px 8px;font-size:11px;border-radius:8px">
-                                <option value="sessions-recent">Recent Sessions</option>
-                                <option value="search">Search Hits</option>
-                                <option value="recent">Recent Captures</option>
-                                <option value="session">Session Captures</option>
-                            </select>
+                <!-- Disclosures: recent browse + session lookup -->
+                <div class="insp-disclosures">
+                    <section class="insp-disc">
+                        <button class="insp-disc-head" type="button" data-vra-disc-toggle="browse" aria-expanded="false"><span><span class="chev">▸</span> Browse Recent Sessions</span><span data-vra-recent-count style="color:var(--color-text-muted)">—</span></button>
+                        <div class="insp-disc-body" data-vra-disc-body="browse">
+                            <div class="insp-recent" data-vra-recent></div>
                         </div>
-                        <div class="vra-body"><div class="vra-list" data-vra-results></div></div>
                     </section>
-
-                    <section class="vra-panel">
-                        <div class="vra-head">
-                            <div><strong>Capture Detail</strong><span data-vra-detail-sub style="font-size:11px;color:var(--vra-muted);margin-left:8px;font-weight:normal"></span></div>
+                    <section class="insp-disc">
+                        <button class="insp-disc-head" type="button" data-vra-disc-toggle="lookup" aria-expanded="false"><span><span class="chev">▸</span> Look Up a Specific Session</span></button>
+                        <div class="insp-disc-body" data-vra-disc-body="lookup">
+                            <div class="insp-lookup-row">
+                                <input data-vra-session-id type="text" placeholder="paste session id…" autocomplete="off" spellcheck="false">
+                                <button class="insp-refresh" data-vra-session-search type="button">Look Up</button>
+                            </div>
+                            <div class="insp-banner" data-vra-session-banner></div>
                         </div>
-                        <div class="vra-body" data-vra-detail></div>
                     </section>
                 </div>
             </div>

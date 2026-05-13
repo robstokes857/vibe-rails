@@ -138,4 +138,18 @@ public class InputEtlFilterTests
         Assert.Null(InputEtlFilter.Process(
             "[Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY','sk-ant-api03-FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE-TESTONLY-000000000000000000000000_NOTREAL-xTEST0xAAA','User')"));
     }
+
+    // Regression: BertV2InputService now routes through Process; these BERT-search
+    // test corpus strings must survive the filter or the embedding tests go empty.
+    [Theory]
+    [InlineData("How do I reset my password?")]
+    [InlineData("The server crashed with an out of memory error")]
+    [InlineData("Deploy the application to production")]
+    [InlineData("Configure nginx reverse proxy settings")]
+    [InlineData("I forgot my login credentials")]
+    public void Process_KeepsBertCorpusStrings(string input)
+    {
+        var result = InputEtlFilter.Process(input);
+        Assert.Equal(input, result);
+    }
 }

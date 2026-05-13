@@ -36,8 +36,12 @@ public static class InputEtlFilter
         // Slack tokens
         new(@"xox[bpsar]-[A-Za-z0-9\-]{10,}", RegexOptions.Compiled),
 
-        // Environment variable assignments setting secret-named variables
-        new(@"(?:export|setx?|\[Environment\].*SetEnvironmentVariable)\b.*\b(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)\b",
+        // Environment variable assignments setting secret-named variables. Leading
+        // word boundary keeps the `setx?` branch from matching the "set" tail inside
+        // ordinary words like "reset" — without it any sentence containing both
+        // "reset" and a secret-named keyword (e.g. "How do I reset my password?")
+        // gets falsely flagged.
+        new(@"\b(?:export|setx?|\[Environment\].*SetEnvironmentVariable)\b.*\b(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)\b",
             RegexOptions.Compiled | RegexOptions.IgnoreCase),
 
         // PowerShell SetEnvironmentVariable with quoted args (catches the specific pattern from the user's example)

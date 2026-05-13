@@ -46,14 +46,23 @@ namespace VibeRails
                 var settings = sp.GetRequiredService<IBertSettings>();
                 return new BertV2VectorStore(Path.Combine(settings.DataDirectory, BertSearchSchema.DatabaseFileName));
             });
+            serviceCollection.AddSingleton<IBertV2SessionVectorStore>(sp =>
+            {
+                var settings = sp.GetRequiredService<IBertSettings>();
+                return new BertV2SessionVectorStore(Path.Combine(settings.DataDirectory, BertSearchSchema.DatabaseFileName));
+            });
             serviceCollection.AddSingleton<IBertV2InputService, BertV2InputService>();
+            serviceCollection.AddSingleton<IBertV2SessionEmbeddingService, BertV2SessionEmbeddingService>();
             serviceCollection.AddScoped<IBertV2InputDBService, BertV2InputDBService>();
             serviceCollection.AddSingleton<IBertSearchDbService, BertSearchDbService>();
             serviceCollection.AddSingleton<IBertDocumentResponseMapper, BertDocumentResponseMapper>();
             serviceCollection.AddSingleton<IBertCaptureQueryService, BertCaptureQueryService>();
             serviceCollection.AddSingleton<IBertSearchStrategy, SemanticBertSearchStrategy>();
             serviceCollection.AddSingleton<IBertSearchStrategy, TextBertSearchStrategy>();
+            serviceCollection.AddSingleton<IBertSearchStrategy, SemanticSessionBertSearchStrategy>();
+            serviceCollection.AddSingleton<IBertSearchStrategy, TextSessionBertSearchStrategy>();
             serviceCollection.AddSingleton<IBertSearchServiceV2, BertSearchServiceV2>();
+            serviceCollection.AddSingleton<IUnifiedSearchService, UnifiedSearchService>();
 
             serviceCollection.AddSingleton<IGitDiffCaptureService, GitDiffCaptureService>();
             serviceCollection.AddSingleton<ILlmParser, LlmParser>();
@@ -156,6 +165,8 @@ namespace VibeRails
                 serviceCollection.AddHostedService<UpdateCheckJob>();
                 serviceCollection.AddHostedService<StaleSessionCleanupJob>();
                 serviceCollection.AddHostedService<ProjectCacheRefreshJob>();
+                serviceCollection.AddHostedService<BertEmbeddingBackfillJob>();
+                serviceCollection.AddHostedService<SessionAggregateEmbeddingBackfillJob>();
             }
 
             serviceCollection.AddScoped<ISessionTranscriptService, SessionTranscriptService>();
