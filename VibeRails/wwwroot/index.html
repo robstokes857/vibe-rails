@@ -1270,6 +1270,28 @@
                     flex-wrap: wrap;
                     justify-content: flex-end;
                 }
+                .vibe-rails-ai-view .insp-status-tools {
+                    display: flex;
+                    gap: 0.5rem;
+                    align-items: center;
+                    justify-content: flex-end;
+                    flex-wrap: wrap;
+                }
+                .vibe-rails-ai-view .insp-query-count {
+                    font-family: var(--insp-mono);
+                    font-size: 0.62rem;
+                    letter-spacing: 0.14em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                    border: 1px solid var(--insp-hairline-strong);
+                    border-radius: 2px;
+                    padding: 0.35rem 0.6rem;
+                    white-space: nowrap;
+                }
+                .vibe-rails-ai-view .insp-query-count b {
+                    color: var(--insp-accent);
+                    font-weight: 700;
+                }
                 .vibe-rails-ai-view .insp-pill {
                     display: inline-flex;
                     align-items: center;
@@ -1504,6 +1526,35 @@
                 .vibe-rails-ai-view .insp-query-stats .stat b { color: var(--color-text); font-weight: 700; }
                 .vibe-rails-ai-view .insp-query-stats .stat.live { color: var(--insp-accent); }
                 .vibe-rails-ai-view .insp-query-stats .err { color: var(--color-danger); }
+                @media (max-width: 720px) {
+                    .vibe-rails-ai-view .insp-query {
+                        padding: 0.95rem;
+                    }
+                    .vibe-rails-ai-view .insp-query-label {
+                        align-items: flex-start;
+                        gap: 0.5rem;
+                    }
+                    .vibe-rails-ai-view .insp-query-row {
+                        grid-template-columns: 1fr;
+                    }
+                    .vibe-rails-ai-view .insp-input {
+                        font-size: 0.95rem;
+                    }
+                    .vibe-rails-ai-view .insp-topk {
+                        justify-content: space-between;
+                    }
+                    .vibe-rails-ai-view .insp-topk input {
+                        width: 96px;
+                    }
+                    .vibe-rails-ai-view .insp-run,
+                    .vibe-rails-ai-view .insp-refresh {
+                        width: 100%;
+                        justify-content: center;
+                    }
+                    .vibe-rails-ai-view .insp-query-stats {
+                        gap: 0.6rem 1rem;
+                    }
+                }
 
                 /* Column grid */
                 .vibe-rails-ai-view .insp-cols {
@@ -1513,7 +1564,8 @@
                     min-height: 0;
                 }
                 @media (max-width: 1280px) { .vibe-rails-ai-view .insp-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-                @media (max-width: 720px) { .vibe-rails-ai-view .insp-cols { grid-template-columns: 1fr; } }
+                @media (max-width: 720px) { .vibe-rails-ai-view .insp-cols { gap: 0.45rem; } }
+                @media (max-width: 360px) { .vibe-rails-ai-view .insp-cols { grid-template-columns: 1fr; } }
                 .vibe-rails-ai-view .insp-col {
                     display: flex;
                     flex-direction: column;
@@ -1521,14 +1573,14 @@
                     border-radius: 4px;
                     background: color-mix(in srgb, var(--color-bg-surface) 55%, transparent);
                     overflow: hidden;
-                    min-height: 320px;
+                    min-height: 170px;
                 }
                 .vibe-rails-ai-view .insp-col-head {
-                    padding: 0.7rem 0.85rem;
+                    padding: 0.55rem 0.7rem;
                     border-bottom: 1px solid var(--insp-hairline);
                     background: color-mix(in srgb, var(--color-bg-base) 40%, transparent);
                     display: grid;
-                    gap: 0.35rem;
+                    gap: 0.25rem;
                 }
                 .vibe-rails-ai-view .insp-col[data-key="per-message-semantic"] { border-top: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent); }
                 .vibe-rails-ai-view .insp-col[data-key="per-session-semantic"] { border-top: 2px solid color-mix(in srgb, #a78bfa 60%, transparent); }
@@ -1563,17 +1615,21 @@
                 }
                 .vibe-rails-ai-view .insp-col-meta b { color: var(--color-text); font-weight: 700; }
                 .vibe-rails-ai-view .insp-col-explainer {
-                    font-size: 0.68rem;
+                    font-size: 0.64rem;
                     color: var(--color-text-muted);
-                    line-height: 1.4;
+                    line-height: 1.35;
                     font-style: italic;
+                    display: -webkit-box;
+                    -webkit-line-clamp: 2;
+                    -webkit-box-orient: vertical;
+                    overflow: hidden;
                 }
                 .vibe-rails-ai-view .insp-col-body {
                     flex: 1;
                     overflow-y: auto;
-                    padding: 0.5rem;
+                    padding: 0.4rem;
                     display: grid;
-                    gap: 0.45rem;
+                    gap: 0.35rem;
                     align-content: start;
                 }
                 .vibe-rails-ai-view .insp-col-body::-webkit-scrollbar { width: 6px; }
@@ -1589,7 +1645,7 @@
                     border-left: 2px solid var(--rank-color);
                     border-radius: 0 3px 3px 0;
                     color: inherit;
-                    padding: 0.5rem 0.6rem;
+                    padding: 0.45rem 0.55rem;
                     display: grid;
                     gap: 0.4rem;
                     cursor: pointer;
@@ -1709,17 +1765,17 @@
                 .vibe-rails-ai-view .insp-badge.lex { color: var(--insp-mark); border-color: color-mix(in srgb, var(--insp-mark) 40%, var(--insp-hairline)); }
                 .vibe-rails-ai-view .insp-badge.fused { color: var(--color-success); border-color: color-mix(in srgb, var(--color-success) 40%, var(--insp-hairline)); }
                 .vibe-rails-ai-view .insp-col-empty {
-                    padding: 1.5rem 0.85rem;
+                    padding: 0.65rem 0.7rem;
                     text-align: center;
                     color: var(--color-text-muted);
                     font-family: var(--insp-mono);
-                    font-size: 0.7rem;
+                    font-size: 0.64rem;
                     letter-spacing: 0.06em;
-                    line-height: 1.6;
+                    line-height: 1.45;
                     border: 1px dashed var(--insp-hairline);
                     border-radius: 3px;
                     background: color-mix(in srgb, var(--color-bg-base) 60%, transparent);
-                    margin: 0.5rem;
+                    margin: 0.25rem;
                 }
                 .vibe-rails-ai-view .insp-col-empty.idle {
                     border-style: solid;
@@ -1728,10 +1784,44 @@
                 .vibe-rails-ai-view .insp-col-empty .glyph {
                     display: block;
                     font-family: var(--insp-display);
-                    font-size: 1.6rem;
+                    font-size: 1.05rem;
                     color: var(--insp-hairline-strong);
-                    letter-spacing: 0.3em;
-                    margin-bottom: 0.5rem;
+                    letter-spacing: 0.22em;
+                    margin-bottom: 0.2rem;
+                }
+                @media (max-width: 720px) {
+                    .vibe-rails-ai-view .insp-col {
+                        min-height: 0;
+                    }
+                    .vibe-rails-ai-view .insp-col-head {
+                        padding: 0.45rem 0.55rem;
+                        gap: 0.18rem;
+                    }
+                    .vibe-rails-ai-view .insp-col-tag {
+                        font-size: 0.54rem;
+                    }
+                    .vibe-rails-ai-view .insp-col-name {
+                        font-size: 0.82rem;
+                    }
+                    .vibe-rails-ai-view .insp-col-meta {
+                        gap: 0.45rem;
+                        font-size: 0.54rem;
+                    }
+                    .vibe-rails-ai-view .insp-col-explainer {
+                        -webkit-line-clamp: 1;
+                    }
+                    .vibe-rails-ai-view .insp-col-body {
+                        padding: 0.3rem;
+                    }
+                    .vibe-rails-ai-view .insp-col.idle .insp-col-body {
+                        display: none;
+                    }
+                    .vibe-rails-ai-view .insp-col-empty {
+                        padding: 0.45rem 0.6rem;
+                    }
+                    .vibe-rails-ai-view .insp-col-empty .glyph {
+                        display: none;
+                    }
                 }
 
                 /* Lens (detail panel) */
@@ -1743,6 +1833,9 @@
                     grid-template-rows: auto 1fr;
                     min-height: 280px;
                     overflow: hidden;
+                }
+                .vibe-rails-ai-view .insp-lens[hidden] {
+                    display: none;
                 }
                 .vibe-rails-ai-view .insp-lens-head {
                     display: grid;
@@ -2192,17 +2285,25 @@
                 <!-- Masthead -->
                 <header class="insp-masthead">
                     <div class="insp-title">
-                        <h1 class="insp-h1">BERT Search Inspector</h1>
-                        <p class="insp-sub">Run the same query through every retrieval strategy at once — per-message vectors, per-session vectors, lexical, and reciprocal-rank fusion — and see which lens actually returns what you expect.</p>
+                        <h1 class="insp-h1">Vibe AI Search</h1>
+                        <p class="insp-sub">Search captured agent sessions across messages, whole-session context, keyword matches, and blended best matches.</p>
                     </div>
                     <div class="insp-status">
                         <div class="insp-status-row" data-vra-status-pills></div>
-                        <button class="insp-toggle" type="button" data-vra-diag-toggle aria-expanded="false" aria-controls="insp-diag-panel"><span class="chev">▸</span>Diagnostics<span style="margin-left:0.5rem;color:var(--insp-accent)" data-vra-queries>0</span></button>
+                        <div class="insp-status-tools">
+                            <button class="insp-toggle" type="button" data-vra-diag-toggle aria-expanded="false" aria-controls="insp-diag-panel"><span class="chev">▸</span>Diagnostics</button>
+                            <span class="insp-query-count"><b data-vra-queries>0</b> <span data-vra-query-count-label>searches</span></span>
+                        </div>
                     </div>
                 </header>
 
                 <!-- Diagnostics drawer (collapsed by default) -->
                 <div class="insp-diagnostics" id="insp-diag-panel"></div>
+
+                <!-- 4-column comparison grid -->
+                <div class="insp-cols" data-vra-cols>
+                    <!-- columns are rendered by the controller -->
+                </div>
 
                 <!-- Query shell -->
                 <div class="insp-query">
@@ -2224,30 +2325,11 @@
                     </div>
                 </div>
 
-                <!-- Lens (capture detail) -->
-                <div class="insp-lens">
-                    <div class="insp-lens-head">
-                        <div class="insp-lens-label">Result</div>
-                        <div class="insp-lens-title" data-vra-lens-title>nothing selected</div>
-                        <div class="insp-lens-actions" data-vra-lens-actions></div>
-                    </div>
-                    <div class="insp-lens-body" data-vra-lens>
-                        <div class="insp-lens-empty">
-                            Click a hit in any column to inspect the score, the matching text, and the metadata behind it.
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 4-column comparison grid -->
-                <div class="insp-cols" data-vra-cols>
-                    <!-- columns are rendered by the controller -->
-                </div>
-
                 <!-- Disclosures: recent browse + session lookup -->
                 <div class="insp-disclosures">
                     <section class="insp-disc">
-                        <button class="insp-disc-head" type="button" data-vra-disc-toggle="browse" aria-expanded="false"><span><span class="chev">▸</span> Browse Recent Sessions</span><span data-vra-recent-count style="color:var(--color-text-muted)">—</span></button>
-                        <div class="insp-disc-body" data-vra-disc-body="browse">
+                        <button class="insp-disc-head" type="button" data-vra-disc-toggle="browse" aria-expanded="true"><span><span class="chev">▸</span> Browse Recent Sessions</span><span data-vra-recent-count style="color:var(--color-text-muted)">—</span></button>
+                        <div class="insp-disc-body open" data-vra-disc-body="browse">
                             <div class="insp-recent" data-vra-recent></div>
                         </div>
                     </section>
@@ -2261,6 +2343,20 @@
                             <div class="insp-banner" data-vra-session-banner></div>
                         </div>
                     </section>
+                </div>
+
+                <!-- Lens (capture detail) -->
+                <div class="insp-lens" hidden>
+                    <div class="insp-lens-head">
+                        <div class="insp-lens-label">Result</div>
+                        <div class="insp-lens-title" data-vra-lens-title>nothing selected</div>
+                        <div class="insp-lens-actions" data-vra-lens-actions></div>
+                    </div>
+                    <div class="insp-lens-body" data-vra-lens>
+                        <div class="insp-lens-empty">
+                            Click a hit in any column to inspect the score, the matching text, and the metadata behind it.
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

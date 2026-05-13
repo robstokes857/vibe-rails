@@ -1,61 +1,40 @@
 # TERMINAL.md
 
-## 2026-05-07 queueMicrotask rendering bug: reprint / overprint after webview occlusion (sole open bug)
+## 2026-05-13 Double-print / overprint on fast terminal resize (sole open bug)
 
-**Status:** Open — observed once, not reliably reproducible, otherwise stable.
+**Status:** Open — only known terminal-side issue. Not reliably reproducible
+but has a fresh, short repro session to bisect against.
 
-**Symptom:** Corruption of an existing TUI block (Claude Code task list) when
-Rob navigates away from the VS Code webview and comes back. Visible signature
-is characters dropped mid-word at fixed column positions and the pre-occlusion
-content rendered twice at slightly different widths — i.e. overprinting at a
-different cols geometry, not bytes reordered.
+**Symptom:** An existing TUI block (Claude Code task list) overprints itself
+at slightly different widths after a viewer transition, leaving characters
+dropped mid-word at fixed column positions. The double-render is at a
+different `cols` geometry than the original paint — i.e. the redraw happens
+after a width change rather than a byte-stream reorder.
 
-**Current state:** Seen in exactly one session
-(`dd5cc208-8b09-4473-8268-0a565a5bd55e`) and not reproduced since. The terminal
-has otherwise been very stable across normal use. Cause has not been pinned
-down.
+**Working hypothesis (Rob, 2026-05-13):** triggers when the terminal resizes
+**very quickly** — fast successive fit/resize events, likely on the occluded →
+visible transition when the VS Code webview returns. Earlier framing pinned
+this on the JS flush mechanism (`queueMicrotask` vs `scheduler.postTask`); that
+A/B is now settled — `queueMicrotask` is fine and `postTask` was removed (see
+the closed entry under Fixed Issues for that history). The remaining open
+question is the resize path, not the flush path.
 
-**2026-05-13 new repro candidate:** Rob flagged session
-`f3e25a1e-c0eb-4834-a3d2-0eace2bb0e1f` as another double-print occurrence, and
-notably **short**, which makes it a much better candidate for bisecting the byte
-stream than the original long session. Rob's working hypothesis: it triggers
-when the terminal resizes very quickly (fast successive resizes / rapid fit
-events under occluded → visible transitions). If/when we pick this back up,
-start by diffing this session's SessionLogs against `dd5cc208…` for resize
-clustering (multiple `__resize__` frames in tight succession or `\e[8;...t`
-reports landing close together) before re-instrumenting the client.
+**Repro sessions:**
 
-**What's already known about the failure mode:** the SessionLogs byte stream
-for the bad session contains 0 occurrences of `\e[?1049l`, `\e[?2004l`, or
-`\e[3J`, exactly 1 `\e[2J` (the initial PowerShell clear at session start),
-and only 2 `TerminalSessionLogs` rows, both at session start (Sequence 0 + 1).
-That means the WebSocket did not disconnect on navigate-away/back, the server
-never ran `TerminalGridSerializer.Serialize`, and no snapshot prologue was
-sent. Whatever rendered the corrupted view did so against the existing emulator
-state on the viewer side — the bug lives in the JS/xterm.js client path during
-the occluded → visible transition, not in the C# emulator or the snapshot
-prologue.
+- `f3e25a1e-c0eb-4834-a3d2-0eace2bb0e1f` — **2026-05-13, short**, best
+  bisect candidate. Start here.
+- `dd5cc208-8b09-4473-8268-0a565a5bd55e` — 2026-05-07, long, original
+  observation.
 
-**Bisect outcome (2026-05-07):** the runtime A/B between `queueMicrotask` and
-`scheduler.postTask` 10 ms batching was rolled out so Rob could compare the two
-flush mechanisms. `scheduler.postTask` mode felt **slow in practice** —
-possibly delay clamping under the VS Code webview, possibly scheduler queuing
-behavior, root cause not isolated. The `postTask` mode has therefore been
-removed: the Terminal Settings → "Output Coalescing" toggle is gone,
-`setOutputCoalesceMode` / `_outputCoalesceMode` / the `viberails_terminal_outputCoalesce`
-localStorage key are gone, and `socket.onmessage` in `terminal-tab.js` always
-uses `queueMicrotask(flushPendingChunks)`. The historical "we tried postTask"
-context is preserved in the comment above the flush call so we don't
-re-introduce it unthinkingly.
-
-**Next step if it reproduces:** capture a Performance trace + raw SessionLogs
-from a session where the corruption is visible, and compare the xterm.js
-internal buffer state across the occluded → visible transition. The C# emulator
-and snapshot prologue are already ruled out for this failure mode.
-
-Do not delete this section unless the issue stops reproducing for an extended
-period, or unless it is replaced with a real fix. `Tests/` and
-`TerminalEmulator.Tests/` cannot exercise the client-only occlusion path.
+**Next step when picked up:** diff the two sessions' SessionLogs for resize
+clustering — multiple `__resize__` frames in tight succession, or `\e[8;...t`
+geometry reports landing close together — before re-instrumenting the client.
+The C# emulator and snapshot prologue have already been ruled out for the
+original session (no `\e[?1049l` / `\e[?2004l` / `\e[3J`, exactly 1 `\e[2J`
+at session start, only 2 `TerminalSessionLogs` rows, WebSocket never
+disconnected, server never ran `TerminalGridSerializer.Serialize`). Confirm
+the same forensics hold for `f3e25a1e…` before assuming the bug lives
+client-side.
 
 ## 2026-04-27 Snapshot replay state reset contract
 
@@ -768,6 +747,36 @@ Key file: `VibeRails/Services/Terminal/TerminalRunner.cs` — `_nativeRemoteEnab
 ---
 
 ## Fixed Issues
+
+### ✅ Output-flush mechanism A/B: `queueMicrotask` vs `scheduler.postTask` (2026-05-07, settled 2026-05-13)
+
+**Settled — `queueMicrotask` is the keeper.** This entry only closes the flush-
+mechanism question. The broader double-print/overprint bug it was meant to
+diagnose is **still open** and lives in the open-bug section at the top of this
+file — the flush path was a red herring; the resize path is the current
+hypothesis.
+
+**Background:** while chasing the post-occlusion overprint bug, a runtime A/B
+was rolled out so Rob could compare `queueMicrotask` against
+`scheduler.postTask` 10 ms batching as the `socket.onmessage` flush mechanism
+in `terminal-tab.js`. The toggle lived under Terminal Settings → "Output
+Coalescing" and was backed by `setOutputCoalesceMode` / `_outputCoalesceMode` /
+the `viberails_terminal_outputCoalesce` localStorage key.
+
+**Outcome (2026-05-07):** `scheduler.postTask` mode felt **slow in practice** —
+possibly delay clamping under the VS Code webview, possibly scheduler queuing
+behavior, root cause not isolated. `queueMicrotask` mode was the better daily
+driver and did not, on its own, cause the overprint. The `postTask` mode was
+therefore removed: the Terminal Settings toggle, the `setOutputCoalesceMode` /
+`_outputCoalesceMode` fields, and the `viberails_terminal_outputCoalesce`
+localStorage key are gone, and `socket.onmessage` in `terminal-tab.js` always
+uses `queueMicrotask(flushPendingChunks)`. The historical "we tried postTask"
+context is preserved in the comment above the flush call so we don't
+re-introduce it unthinkingly.
+
+**Guardrail:** do not re-add a `postTask` / `setTimeout` coalesce variant
+without a fresh reason. The cold-start typing-lag fix below depends on
+`queueMicrotask` not being throttled the way `setTimeout` is.
 
 ### ✅ Cold-start typing lag (~800–3000 ms echo) caused by Chromium throttling our setTimeout coalesce (2026-05-05, verified 2026-05-06)
 

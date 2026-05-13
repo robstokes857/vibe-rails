@@ -24,7 +24,8 @@ const GROUP_META = {
     'per-message-semantic': {
         short: 'msg',
         tag: 'Strategy · 01',
-        name: 'msg.sem',
+        name: 'Messages',
+        technicalName: 'msg.sem',
         explainer: 'Cosine similarity of the query embedding against each user message vector.',
         formula: 'score = 1 − cosine(query_emb, doc_emb)',
         model: 'bge-small-en',
@@ -35,7 +36,8 @@ const GROUP_META = {
     'per-session-semantic': {
         short: 'sess',
         tag: 'Strategy · 02',
-        name: 'sess.sem',
+        name: 'Sessions',
+        technicalName: 'sess.sem',
         explainer: 'Same vector match — but against full-session aggregate chunks (1600/800 windows).',
         formula: 'score = 1 − cosine(query_emb, session_chunk_emb)',
         model: 'bge-small-en',
@@ -46,7 +48,8 @@ const GROUP_META = {
     'lexical': {
         short: 'lex',
         tag: 'Strategy · 03',
-        name: 'lex.fts',
+        name: 'Keyword',
+        technicalName: 'lex.fts',
         explainer: 'Literal token match over user messages — no embedding involved, ranked by FTS5 / LIKE order.',
         formula: 'ranked by literal token containment',
         model: 'sqlite fts5',
@@ -57,7 +60,8 @@ const GROUP_META = {
     'fused': {
         short: 'fused',
         tag: 'Strategy · 04',
-        name: 'rrf.fuse',
+        name: 'Best Match',
+        technicalName: 'rrf.fuse',
         explainer: 'Reciprocal-rank fusion across the three groups. Docs that appear in multiple groups float to the top.',
         formula: 'score = Σ 1 / (60 + rank_i)',
         model: 'RRF · k=60',
@@ -148,7 +152,7 @@ export class VibeRailsAiController {
             detailLoading: false,
             docPresence: new Map(),   // docId → [{groupKey, rank, score}]
             diagOpen: false,
-            disc: { browse: false, lookup: false },
+            disc: { browse: true, lookup: false },
         };
         // Incremented on each runSearch — used to drop responses from stale
         // in-flight searches when the user fires a newer one.
@@ -158,6 +162,7 @@ export class VibeRailsAiController {
         this.nodes = {
             statusPills: q('[data-vra-status-pills]'),
             queriesCounter: q('[data-vra-queries]'),
+            queriesLabel: q('[data-vra-query-count-label]'),
             diagToggle: q('[data-vra-diag-toggle]'),
             diagPanel: q('#insp-diag-panel'),
             form: q('[data-vra-form]'),
@@ -168,6 +173,7 @@ export class VibeRailsAiController {
             banner: q('[data-vra-banner]'),
             queryStats: q('[data-vra-query-stats]'),
             cols: q('[data-vra-cols]'),
+            lensPanel: q('.insp-lens'),
             lens: q('[data-vra-lens]'),
             lensTitle: q('[data-vra-lens-title]'),
             lensActions: q('[data-vra-lens-actions]'),
@@ -179,8 +185,9 @@ export class VibeRailsAiController {
         };
 
         this._bindEvents();
+        this._syncDisclosures();
         this._renderEmptyColumns('Run a search to see how each strategy ranks your query.');
-        this.refreshAll();
+        this.refreshAll({ silent: true });
     }
 
     _bindEvents() {
@@ -277,10 +284,29 @@ export class VibeRailsAiController {
     }
     _toggleDisc(name) {
         this.state.disc[name] = !this.state.disc[name];
-        const head = this.root.querySelector(`[data-vra-disc-toggle="${name}"]`);
-        const body = this.root.querySelector(`[data-vra-disc-body="${name}"]`);
-        if (head) head.setAttribute('aria-expanded', String(this.state.disc[name]));
-        if (body) body.classList.toggle('open', this.state.disc[name]);
+        this._syncDisclosures();
+    }
+
+    _syncDisclosures() {
+        for (const name of Object.keys(this.state.disc)) {
+            const head = this.root.querySelector(`[data-vra-disc-toggle="${name}"]`);
+            const body = this.root.querySelector(`[data-vra-disc-body="${name}"]`);
+            if (head) head.setAttribute('aria-expanded', String(this.state.disc[name]));
+            if (body) body.classList.toggle('open', this.state.disc[name]);
+        }
+    }
+
+    _collapseDisclosures() {
+        this.state.disc.browse = false;
+        this.state.disc.lookup = false;
+        this._syncDisclosures();
+    }
+
+    _resetSearchSelection() {
+        this.state.selectedDocId = null;
+        this.state.selectedGroupKey = null;
+        this.state.selected = null;
+        this.state.detailLoading = false;
     }
 
     renderStatus() {
@@ -336,11 +362,11 @@ export class VibeRailsAiController {
         this.nodes.cols.innerHTML = GROUP_KEYS.map(key => {
             const m = GROUP_META[key];
             return `
-                <div class="insp-col" data-key="${key}">
+                <div class="insp-col idle" data-key="${key}">
                     <div class="insp-col-head">
                         <div class="insp-col-tag">${esc(m.tag)}</div>
-                        <div class="insp-col-name">${esc(m.name)}</div>
-                        <div class="insp-col-meta"><span>${esc(m.model)}</span></div>
+                        <div class="insp-col-name" title="${esc(m.technicalName)}">${esc(m.name)}</div>
+                        <div class="insp-col-meta"><span>${esc(m.technicalName)}</span><span>${esc(m.model)}</span></div>
                         <div class="insp-col-explainer">${esc(m.explainer)}</div>
                     </div>
                     <div class="insp-col-body">
@@ -357,8 +383,8 @@ export class VibeRailsAiController {
             const group = groupMap.get(key);
             const hits = group?.hits || [];
             const stats = group
-                ? `<span><b>${hits.length}</b> hits</span><span><b>${group.searchTimeMs}</b> ms</span><span>corpus <b>${fmtNum(group.corpusSize)}</b></span>`
-                : `<span>${esc(meta.model)}</span>`;
+                ? `<span>${esc(meta.technicalName)}</span><span><b>${hits.length}</b> hits</span><span><b>${group.searchTimeMs}</b> ms</span><span>corpus <b>${fmtNum(group.corpusSize)}</b></span>`
+                : `<span>${esc(meta.technicalName)}</span><span>${esc(meta.model)}</span>`;
             const body = hits.length === 0
                 ? `<div class="insp-col-empty"><span class="glyph">${meta.short.toUpperCase()}</span>${esc(meta.idleText)}</div>`
                 : hits.map((h, idx) => this._renderHitCard(h, key, idx)).join('');
@@ -366,7 +392,7 @@ export class VibeRailsAiController {
                 <div class="insp-col" data-key="${key}">
                     <div class="insp-col-head">
                         <div class="insp-col-tag">${esc(meta.tag)}</div>
-                        <div class="insp-col-name">${esc(meta.name)}</div>
+                        <div class="insp-col-name" title="${esc(meta.technicalName)}">${esc(meta.name)}</div>
                         <div class="insp-col-meta">${stats}</div>
                         <div class="insp-col-explainer">${esc(meta.explainer)}</div>
                     </div>
@@ -467,6 +493,7 @@ export class VibeRailsAiController {
     _renderLens() {
         const { state, nodes } = this;
         if (!state.selected) {
+            nodes.lensPanel.hidden = true;
             nodes.lensTitle.textContent = 'nothing selected';
             nodes.lensActions.innerHTML = '';
             nodes.lens.innerHTML = `
@@ -476,6 +503,7 @@ export class VibeRailsAiController {
             return;
         }
 
+        nodes.lensPanel.hidden = false;
         const i = state.selected;
         const groupKey = state.selectedGroupKey || 'per-message-semantic';
         const meta = GROUP_META[groupKey];
@@ -696,12 +724,13 @@ export class VibeRailsAiController {
         this._renderRecent();
     }
 
-    async refreshAll() {
+    async refreshAll(options = {}) {
+        const silent = options?.silent === true;
         this.setBusy(true);
         try {
             await this.loadStatus();
             await this.loadRecent();
-            this.setBanner('Status refreshed.', 'success');
+            if (!silent) this.setBanner('Status refreshed.', 'success');
         } catch (err) {
             this.setBanner(err.message, 'error');
         } finally {
@@ -723,12 +752,11 @@ export class VibeRailsAiController {
         const gen = ++this._searchGen;
         this.setBusy(true);
         this.setBanner('Searching…');
+        this._collapseDisclosures();
         this.state.searchGroups = [];
         this.state.docPresence = new Map();
         this.state.queryTerms = tokenizeQuery(query);
-        this.state.selectedDocId = null;
-        this.state.selectedGroupKey = null;
-        this.state.selected = null;
+        this._resetSearchSelection();
         this.state.lastSearch = { query, totalSearchTimeMs: 0 };
         this._renderEmptyColumns('Running…');
         this._renderQueryStats();
@@ -744,24 +772,19 @@ export class VibeRailsAiController {
             this.state.docPresence = this._buildDocPresence(this.state.searchGroups);
             this.state.queryCount += 1;
             this.nodes.queriesCounter.textContent = String(this.state.queryCount);
+            this.nodes.queriesLabel.textContent = this.state.queryCount === 1 ? 'search' : 'searches';
 
             this._renderColumns();
             this._renderQueryStats();
-
-            // Auto-select the top hit from the fused group if present, otherwise from
-            // the first non-empty group. Fused-first matches what the user is most
-            // likely interested in (the consensus answer).
-            const order = ['fused', 'per-message-semantic', 'per-session-semantic', 'lexical'];
-            let firstGroup = null, firstHit = null;
-            for (const key of order) {
-                const g = this.state.searchGroups.find(x => x.key === key);
-                if (g?.hits?.length) { firstGroup = g; firstHit = g.hits[0]; break; }
-            }
-            if (firstHit) await this.loadCapture(firstHit.documentId, firstGroup.key);
-            else this._renderLens();
+            this._renderLens();
 
             const total = this.state.searchGroups.reduce((a, g) => a + (g.hits?.length || 0), 0);
-            this.setBanner(`${total} hit${total === 1 ? '' : 's'} · ${p.totalSearchTimeMs}ms`, 'success');
+            this.setBanner(
+                total
+                    ? `${total} hit${total === 1 ? '' : 's'} · ${p.totalSearchTimeMs}ms · click a result to inspect`
+                    : `No hits · ${p.totalSearchTimeMs}ms`,
+                total ? 'success' : ''
+            );
         } catch (err) {
             if (gen !== this._searchGen) return;
             this.state.searchGroups = [];
@@ -839,6 +862,7 @@ export class VibeRailsAiController {
                 this.setSessionBanner('No captures for this session.', 'error');
                 return;
             }
+            this._collapseDisclosures();
 
             // Synthesize a single "session" pseudo-group so the column view shows
             // the captures with the same UI as a search. Clears any prior search.
@@ -853,12 +877,13 @@ export class VibeRailsAiController {
             this.state.searchGroups = [pseudoGroup];
             this.state.docPresence = this._buildDocPresence(this.state.searchGroups);
             this.state.queryTerms = [];
+            this._resetSearchSelection();
             this.state.lastSearch = { query: `session:${shortId(sessionId)}`, totalSearchTimeMs: 0 };
             this._renderColumns();
             this._renderQueryStats();
+            this._renderLens();
 
-            await this.loadCapture(captures[0].documentId, 'per-message-semantic');
-            this.setSessionBanner(`Loaded ${captures.length} capture${captures.length === 1 ? '' : 's'}.`, 'success');
+            this.setSessionBanner(`Loaded ${captures.length} capture${captures.length === 1 ? '' : 's'} · click one to inspect.`, 'success');
         } catch (err) {
             this.setSessionBanner(err.message, 'error');
         }
