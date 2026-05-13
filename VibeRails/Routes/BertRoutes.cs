@@ -18,6 +18,11 @@ public static class BertRoutes
             return Results.Ok(captures.GetCaptures(skip ?? 0, take ?? BertSearchDefaults.DefaultTake));
         }).WithName("GetBertCaptures");
 
+        app.MapGet("/api/v1/bert/session-captures", (IBertCaptureQueryService captures, int? skip, int? take) =>
+        {
+            return Results.Ok(captures.GetSessionCaptures(skip ?? 0, take ?? BertSearchDefaults.DefaultTake));
+        }).WithName("GetBertSessionCaptures");
+
         app.MapGet("/api/v1/bert/captures/by-session/{sessionId}", (string sessionId, IBertCaptureQueryService captures) =>
         {
             try
@@ -50,7 +55,7 @@ public static class BertRoutes
         {
             try
             {
-                return Results.Ok(bertSearch.Search(request.Query, request.Mode, request.TopK));
+                return Results.Ok(bertSearch.Search(request.Query, request.Mode, request.Scope, request.TopK));
             }
             catch (ArgumentException ex)
             {
@@ -71,6 +76,8 @@ public static class BertRoutes
         var documentCount = 0;
         var sessionCount = 0;
         var vectorCount = 0;
+        var sessionDocumentCount = 0;
+        var sessionVectorCount = 0;
         DateTime? latestCaptureUtc = null;
 
         if (databaseExists)
@@ -78,6 +85,8 @@ public static class BertRoutes
             documentCount = searchDb.CountDocuments();
             sessionCount = searchDb.CountSessions();
             vectorCount = searchDb.CountVectors();
+            sessionDocumentCount = searchDb.CountSessionDocuments();
+            sessionVectorCount = searchDb.CountSessionVectors();
 
             var latestDocumentId = searchDb.GetLatestDocumentId();
             if (!string.IsNullOrWhiteSpace(latestDocumentId))
@@ -110,7 +119,9 @@ public static class BertRoutes
             databaseExists ? SafeFileSize(searchDb.VectorDatabasePath) : 0,
             stateDatabaseExists ? SafeFileSize(searchDb.StateDatabasePath) : 0,
             modelFileExists ? SafeFileSize(settings.ModelPath) : 0,
-            vocabFileExists ? SafeFileSize(settings.VocabPath) : 0);
+            vocabFileExists ? SafeFileSize(settings.VocabPath) : 0,
+            sessionDocumentCount,
+            sessionVectorCount);
     }
 
     private static long SafeFileSize(string path)

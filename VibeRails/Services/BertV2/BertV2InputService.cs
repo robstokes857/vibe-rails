@@ -1,3 +1,5 @@
+using VibeRails.Services.UserInOut;
+
 namespace VibeRails.Services.BertV2;
 
 public class BertV2InputService : IBertV2InputService
@@ -14,10 +16,10 @@ public class BertV2InputService : IBertV2InputService
 
     public void Capture(string sessionId, long userInputId, string inputText)
     {
-        if (string.IsNullOrWhiteSpace(inputText))
-            return;
-
-        var captureText = SanitizeText(inputText);
+        // InputEtlFilter.Process handles null/whitespace, normalizes the text, drops
+        // noise commands, and — most importantly — refuses to return anything that
+        // matches a known secret pattern. A null return means "do not embed."
+        var captureText = InputEtlFilter.Process(inputText);
         if (string.IsNullOrWhiteSpace(captureText))
             return;
 
@@ -27,13 +29,5 @@ public class BertV2InputService : IBertV2InputService
         {
             _store.AddOrUpdate(BertDocumentId.Create(sessionId, userInputId), captureText, embedding);
         }
-    }
-
-    private static string SanitizeText(string value)
-    {
-        return value.Replace("\0", string.Empty)
-            .Replace("\r\n", "\n")
-            .Replace('\r', '\n')
-            .Trim();
     }
 }

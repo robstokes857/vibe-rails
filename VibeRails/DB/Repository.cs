@@ -28,6 +28,17 @@ namespace VibeRails.DB
 
         public void InitializeDatabase() => EnsureInitialized();
 
+        private static bool IsBenignMigrationError(SqliteException ex)
+        {
+            // SQLite error messages we expect on re-run: "duplicate column name",
+            // "table X already exists", "index X already exists". Anything else
+            // (e.g. "no such module: fts5", syntax errors, malformed schema) is
+            // a real failure that should be logged.
+            var message = ex.Message ?? string.Empty;
+            return message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("already exists", StringComparison.OrdinalIgnoreCase);
+        }
+
         private void EnsureInitialized()
         {
             if (_initialized) return;
@@ -74,13 +85,158 @@ namespace VibeRails.DB
                             seedCmd.ExecuteNonQuery();
                         }
                     }
-                    catch (SqliteException)
+                    catch (SqliteException ex) when (IsBenignMigrationError(ex))
                     {
-                        // Ignore errors from migrations (e.g., column already exists)
+                        // Expected re-run noise: column/table/index already exists.
+                    }
+                    catch (SqliteException ex)
+                    {
+                        // Real migration failure (e.g., CREATE VIRTUAL TABLE on a build
+                        // without FTS5). Don't crash startup, but surface it so a silent
+                        // degradation (search falls back to LIKE on a missing FTS table)
+                        // is at least visible in the log.
+                        _logger?.LogWarning(ex,
+                            "Migration failed and will be skipped: {Sql}",
+                            migration.Length > 200 ? migration[..200] + "…" : migration);
                     }
                 }
 
+                MaybeRebuildUserInputsFts(connection);
+                BackfillUserInputsFts(connection);
+
                 _initialized = true;
+            }
+        }
+
+        // Bump when the FTS pre-filter rules change in a way that means previously
+        // indexed text might now be wrong. Currently 1: corresponds to the switch
+        // from legacy raw-text triggers to InputEtlFilter-driven writes.
+        private const int CurrentFtsSchemaVersion = 1;
+
+        /// <summary>
+        /// Pre-1 installs populated UserInputs_fts via the legacy auto-insert /
+        /// auto-update triggers, which copied raw InputText into the FTS index
+        /// before secret filtering existed. Migrations now drop those triggers,
+        /// but the rows they already wrote are still searchable.
+        ///
+        /// On any state.db where PRAGMA user_version &lt; CurrentFtsSchemaVersion,
+        /// we drop UserInputs_fts entirely and let BackfillUserInputsFts repopulate
+        /// it through InputEtlFilter. Fresh installs hit this path once and the
+        /// FTS table is empty, so the drop-and-recreate is a no-op.
+        /// </summary>
+        private void MaybeRebuildUserInputsFts(SqliteConnection connection)
+        {
+            int currentVersion;
+            using (var readVersion = connection.CreateCommand())
+            {
+                readVersion.CommandText = "PRAGMA user_version;";
+                currentVersion = Convert.ToInt32(readVersion.ExecuteScalar() ?? 0);
+            }
+            if (currentVersion >= CurrentFtsSchemaVersion)
+                return;
+
+            using (var ftsCheck = connection.CreateCommand())
+            {
+                ftsCheck.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='UserInputs_fts' LIMIT 1;";
+                if (ftsCheck.ExecuteScalar() is null)
+                    return; // No FTS table to rebuild; CreateUserInputsFts ran fresh.
+            }
+
+            _logger?.LogInformation(
+                "Rebuilding UserInputs_fts to apply InputEtlFilter to historical rows (schema {From} -> {To}).",
+                currentVersion, CurrentFtsSchemaVersion);
+
+            using (var drop = connection.CreateCommand())
+            {
+                drop.CommandText = "DROP TABLE UserInputs_fts;";
+                drop.ExecuteNonQuery();
+            }
+            using (var recreate = connection.CreateCommand())
+            {
+                recreate.CommandText = SqlStrings.CreateUserInputsFts;
+                recreate.ExecuteNonQuery();
+            }
+
+            // user_version is bumped AFTER BackfillUserInputsFts succeeds (below)
+            // so a crash mid-backfill leaves the marker low and we retry next start.
+        }
+
+        /// <summary>
+        /// Code-driven backfill for the UserInputs_fts lexical index. Runs once per
+        /// process during EnsureInitialized after triggers have been dropped/refreshed.
+        ///
+        /// Why this is in code rather than a single INSERT…SELECT migration:
+        ///   - External-content FTS5 tables proxy rowids from the content table, so
+        ///     "WHERE Id NOT IN (SELECT rowid FROM UserInputs_fts)" always reports
+        ///     zero missing rows even when the FTS index is empty. The authoritative
+        ///     "is this rowid indexed?" lookup is against UserInputs_fts_docsize.
+        ///   - We need to run InputEtlFilter.Process on each row so historical rows
+        ///     containing API keys / passwords are never re-indexed into FTS.
+        /// </summary>
+        private void BackfillUserInputsFts(SqliteConnection connection)
+        {
+            // UserInputs_fts_docsize is created automatically with the virtual table,
+            // but be defensive about brand-new schemas where the FTS table itself
+            // doesn't exist yet (older test fixtures, partial migrations).
+            using (var tableCheck = connection.CreateCommand())
+            {
+                tableCheck.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='UserInputs_fts_docsize' LIMIT 1;";
+                if (tableCheck.ExecuteScalar() is null)
+                    return;
+            }
+
+            var pending = new List<(long Id, string InputText)>();
+            using (var readCmd = connection.CreateCommand())
+            {
+                readCmd.CommandText = SqlStrings.SelectUserInputsMissingFromFts;
+                using var reader = readCmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    pending.Add((reader.GetInt64(0), reader.GetString(1)));
+                }
+            }
+            if (pending.Count == 0) return;
+
+            // Batch the writes so a 50k-row backfill doesn't sit in one transaction
+            // and block startup behind a multi-second commit on cold disk.
+            const int BatchSize = 500;
+            int written = 0;
+            for (int start = 0; start < pending.Count; start += BatchSize)
+            {
+                using var transaction = connection.BeginTransaction();
+                int end = Math.Min(start + BatchSize, pending.Count);
+                for (int i = start; i < end; i++)
+                {
+                    var (id, inputText) = pending[i];
+                    var safe = Services.UserInOut.InputEtlFilter.Process(inputText);
+                    if (string.IsNullOrWhiteSpace(safe))
+                        continue;
+
+                    using var insert = connection.CreateCommand();
+                    insert.Transaction = transaction;
+                    insert.CommandText = SqlStrings.InsertUserInputsFtsRow;
+                    insert.Parameters.AddWithValue("$rowid", id);
+                    insert.Parameters.AddWithValue("$inputText", safe);
+                    insert.ExecuteNonQuery();
+                    written++;
+                }
+                transaction.Commit();
+            }
+
+            if (written > 0)
+            {
+                _logger?.LogInformation(
+                    "Backfilled {Count} rows into UserInputs_fts (of {Pending} pending).",
+                    written, pending.Count);
+            }
+
+            // Mark FTS schema as current only after a successful backfill pass so
+            // a crash mid-backfill leaves the marker low and we re-attempt next
+            // startup. PRAGMA user_version is idempotent and free.
+            using (var bump = connection.CreateCommand())
+            {
+                bump.CommandText = $"PRAGMA user_version = {CurrentFtsSchemaVersion};";
+                bump.ExecuteNonQuery();
             }
         }
 
@@ -1229,16 +1385,51 @@ namespace VibeRails.DB
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = SqlStrings.InsertUserInput;
-            cmd.Parameters.AddWithValue("$sessionId", sessionId);
-            cmd.Parameters.AddWithValue("$sequence", sequence);
-            cmd.Parameters.AddWithValue("$inputText", inputText);
-            cmd.Parameters.AddWithValue("$gitCommitHash", gitCommitHash ?? (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("$timestampUTC", DateTime.UtcNow.ToString("O"));
+            // The canonical INSERT runs as its own implicit transaction — never coupled
+            // to the best-effort FTS write below. A poisoned FTS statement used to
+            // unwind a shared explicit transaction and silently lose the user input;
+            // BackfillUserInputsFts is the authoritative reconciliation path, so a
+            // failed FTS write here is purely an optimization miss.
+            long userInputId;
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = SqlStrings.InsertUserInput;
+                cmd.Parameters.AddWithValue("$sessionId", sessionId);
+                cmd.Parameters.AddWithValue("$sequence", sequence);
+                cmd.Parameters.AddWithValue("$inputText", inputText);
+                cmd.Parameters.AddWithValue("$gitCommitHash", gitCommitHash ?? (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("$timestampUTC", DateTime.UtcNow.ToString("O"));
 
-            var result = await cmd.ExecuteScalarAsync();
-            return (long)result!;
+                var result = await cmd.ExecuteScalarAsync();
+                userInputId = (long)result!;
+            }
+
+            // FTS index write — only if InputEtlFilter clears the text. Anything that
+            // looks like a secret/credential is excluded from the lexical index so it
+            // never becomes searchable. UserInputs itself still holds the canonical
+            // raw row (transcript replay needs it). If the FTS table is missing or
+            // this insert blows up for any reason, BackfillUserInputsFts reconciles
+            // on next startup.
+            var safe = Services.UserInOut.InputEtlFilter.Process(inputText);
+            if (!string.IsNullOrWhiteSpace(safe))
+            {
+                try
+                {
+                    await using var ftsCmd = connection.CreateCommand();
+                    ftsCmd.CommandText = SqlStrings.InsertUserInputsFtsRow;
+                    ftsCmd.Parameters.AddWithValue("$rowid", userInputId);
+                    ftsCmd.Parameters.AddWithValue("$inputText", safe);
+                    await ftsCmd.ExecuteNonQueryAsync();
+                }
+                catch (SqliteException ex)
+                {
+                    _logger?.LogWarning(ex,
+                        "FTS index insert for UserInput {UserInputId} failed; canonical row already committed and backfill will reconcile later.",
+                        userInputId);
+                }
+            }
+
+            return userInputId;
         }
 
         // NOTE: new code should use ReplaceFileChangesAsync — this append-only
@@ -1396,6 +1587,154 @@ namespace VibeRails.DB
                 );
             }
             return null;
+        }
+
+        public async Task<List<UnembeddedUserInputRow>> GetUnembeddedUserInputsAsync(int batchSize, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectUnembeddedUserInputs;
+            cmd.Parameters.AddWithValue("$batchSize", batchSize);
+
+            var rows = new List<UnembeddedUserInputRow>(batchSize);
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(new UnembeddedUserInputRow(
+                    Id: reader.GetInt64(0),
+                    SessionId: reader.GetString(1),
+                    InputText: reader.GetString(2)
+                ));
+            }
+            return rows;
+        }
+
+        public async Task MarkUserInputsBertEmbeddedAsync(IReadOnlyCollection<long> userInputIds, DateTime utcNow, CancellationToken cancellationToken)
+        {
+            if (userInputIds.Count == 0) return;
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = SqlStrings.MarkUserInputBertEmbedded;
+            var idParam = cmd.Parameters.Add("$id", SqliteType.Integer);
+            cmd.Parameters.AddWithValue("$now", utcNow.ToString("O"));
+
+            foreach (var id in userInputIds)
+            {
+                idParam.Value = id;
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        public async Task IncrementUserInputBertEmbedFailureCountsAsync(IReadOnlyCollection<long> userInputIds, CancellationToken cancellationToken)
+        {
+            if (userInputIds.Count == 0) return;
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = SqlStrings.IncrementUserInputBertEmbedFailureCount;
+            var idParam = cmd.Parameters.Add("$id", SqliteType.Integer);
+
+            foreach (var id in userInputIds)
+            {
+                idParam.Value = id;
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        public async Task<List<string>> GetUnaggregatedEndedSessionIdsAsync(int batchSize, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectUnaggregatedEndedSessionIds;
+            cmd.Parameters.AddWithValue("$batchSize", batchSize);
+
+            var ids = new List<string>(batchSize);
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                ids.Add(reader.GetString(0));
+            }
+            return ids;
+        }
+
+        public async Task<List<string>> GetUserInputTextsForSessionAsync(string sessionId, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectUserInputTextsForSessionInOrder;
+            cmd.Parameters.AddWithValue("$sessionId", sessionId);
+
+            var texts = new List<string>();
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                texts.Add(reader.GetString(0));
+            }
+            return texts;
+        }
+
+        public async Task MarkSessionsAggregateEmbeddedAsync(IReadOnlyCollection<string> sessionIds, DateTime utcNow, CancellationToken cancellationToken)
+        {
+            if (sessionIds.Count == 0) return;
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = SqlStrings.MarkSessionAggregateEmbedded;
+            var idParam = cmd.Parameters.Add("$id", SqliteType.Text);
+            cmd.Parameters.AddWithValue("$now", utcNow.ToString("O"));
+
+            foreach (var id in sessionIds)
+            {
+                idParam.Value = id;
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        public async Task IncrementSessionAggregateEmbedFailureCountsAsync(IReadOnlyCollection<string> sessionIds, CancellationToken cancellationToken)
+        {
+            if (sessionIds.Count == 0) return;
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = SqlStrings.IncrementSessionAggregateEmbedFailureCount;
+            var idParam = cmd.Parameters.Add("$id", SqliteType.Text);
+
+            foreach (var id in sessionIds)
+            {
+                idParam.Value = id;
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
         }
 
         public async Task<string> GetTextForInputIdOrRawAsync(long inputId, int? maxChars = null, CancellationToken cancellationToken = default)

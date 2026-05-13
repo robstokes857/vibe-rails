@@ -15,6 +15,16 @@ different cols geometry, not bytes reordered.
 has otherwise been very stable across normal use. Cause has not been pinned
 down.
 
+**2026-05-13 new repro candidate:** Rob flagged session
+`f3e25a1e-c0eb-4834-a3d2-0eace2bb0e1f` as another double-print occurrence, and
+notably **short**, which makes it a much better candidate for bisecting the byte
+stream than the original long session. Rob's working hypothesis: it triggers
+when the terminal resizes very quickly (fast successive resizes / rapid fit
+events under occluded → visible transitions). If/when we pick this back up,
+start by diffing this session's SessionLogs against `dd5cc208…` for resize
+clustering (multiple `__resize__` frames in tight succession or `\e[8;...t`
+reports landing close together) before re-instrumenting the client.
+
 **What's already known about the failure mode:** the SessionLogs byte stream
 for the bad session contains 0 occurrences of `\e[?1049l`, `\e[?2004l`, or
 `\e[3J`, exactly 1 `\e[2J` (the initial PowerShell clear at session start),
