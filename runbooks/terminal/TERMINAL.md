@@ -1,40 +1,221 @@
 # TERMINAL.md
 
-## 2026-05-13 Double-print / overprint on fast terminal resize (sole open bug)
+> **Rob's note (2026-05-14):** I want to come back to this resize reprint
+> bug soon. It is the only known open terminal display bug. The first
+> client-side fix attempt (Codex, 2026-05-14) was reverted because it
+> risked re-opening the 2026-05-05 process-lifetime typing-lag failure
+> mode — see the full write-up directly below and the
+> "Persistent process-wide typing lag" entry further down. Next session
+> on this we should think harder about the **server-side coalesce**
+> direction (bump `WebSocketConsumer.NormalCoalesceDelayMs` for a short
+> window after each `__resize__`) before touching client-side flush
+> timing again. Until then the bug stays.
 
-**Status:** Open — only known terminal-side issue. Not reliably reproducible
-but has a fresh, short repro session to bisect against.
+## 2026-05-13 Resize reprint / overprint (sole open bug — accepted, not fixing)
+
+**Status:** Open. Last reviewed 2026-05-14 — accepted as live-with after a
+candidate fix was investigated, prototyped, and rejected on the analysis
+below. The observed impact is small (a brief ~7 ms visual flash at one
+resize moment, then the screen self-corrects); the available client-side
+fixes re-open a much worse failure mode (see "Persistent process-wide
+typing lag" further down in this file). The bug stays for now.
 
 **Symptom:** An existing TUI block (Claude Code task list) overprints itself
-at slightly different widths after a viewer transition, leaving characters
-dropped mid-word at fixed column positions. The double-render is at a
-different `cols` geometry than the original paint — i.e. the redraw happens
-after a width change rather than a byte-stream reorder.
-
-**Working hypothesis (Rob, 2026-05-13):** triggers when the terminal resizes
-**very quickly** — fast successive fit/resize events, likely on the occluded →
-visible transition when the VS Code webview returns. Earlier framing pinned
-this on the JS flush mechanism (`queueMicrotask` vs `scheduler.postTask`); that
-A/B is now settled — `queueMicrotask` is fine and `postTask` was removed (see
-the closed entry under Fixed Issues for that history). The remaining open
-question is the resize path, not the flush path.
+at slightly different positions after a viewer transition or geometry change,
+leaving characters dropped mid-word at fixed column positions for a short
+moment. The screen then settles into the correct final layout. The C#
+emulator's final state is **correct** — replay shows the right thing.
+The artifact lives purely on the live render path while the burst of
+post-resize bytes is in flight to xterm.js.
 
 **Repro sessions:**
 
-- `f3e25a1e-c0eb-4834-a3d2-0eace2bb0e1f` — **2026-05-13, short**, best
-  bisect candidate. Start here.
+- `f3e25a1e-c0eb-4834-a3d2-0eace2bb0e1f` — 2026-05-13, short, best bisect
+  candidate. Forensic profile below is from this one. Saved binary at
+  `runbooks/terminal/repro-fixtures/session_f3e25a1e_resize_reprint.bin`.
 - `dd5cc208-8b09-4473-8268-0a565a5bd55e` — 2026-05-07, long, original
-  observation.
+  observation. Same byte-stream signature.
 
-**Next step when picked up:** diff the two sessions' SessionLogs for resize
-clustering — multiple `__resize__` frames in tight succession, or `\e[8;...t`
-geometry reports landing close together — before re-instrumenting the client.
-The C# emulator and snapshot prologue have already been ruled out for the
-original session (no `\e[?1049l` / `\e[?2004l` / `\e[3J`, exactly 1 `\e[2J`
-at session start, only 2 `TerminalSessionLogs` rows, WebSocket never
-disconnected, server never ran `TerminalGridSerializer.Serialize`). Confirm
-the same forensics hold for `f3e25a1e…` before assuming the bug lives
-client-side.
+**Forensic profile (from f3e25a1e):**
+
+- Exactly **one** geometry change at the bug moment: 150×10 → 150×28
+  (rows only, cols unchanged). No `\e[8;…t` clustering, no `\e[?1049`
+  toggles, no `\e[2J` outside the initial PowerShell prompt, no
+  `\e[?2004l`, no alt-screen. Clean profile — same as `dd5cc208`.
+- The original "fast successive fit/resize" hypothesis (occluded → visible
+  transition spamming resize events) was **not** supported by the bytes
+  in either session. There is one resize, then the artifact.
+- At the resize moment (t≈+33 s), Claude Code emits **two** full-screen
+  repaints 7 ms apart, both starting with `\e[H` (cursor home, no
+  `\e[2J`):
+  - Chunk `5783642` (1512 B, 05:29:25.181Z) — paints the bottom-of-screen
+    TUI starting at row 1: status line, ls cmd, "Wibbling…" spinner,
+    divider, prompt, mode indicator. **No banner, no user-input row.**
+  - Chunk `5783643` (1974 B, 05:29:25.189Z, 7 ms later) — paints the
+    full UI starting at row 1: Claude banner rows 1–3, user input
+    row 5, then the same bottom TUI elements shifted down to rows 7–15.
+- Each line in both chunks ends with `\e[K`, so cell-for-cell the second
+  chunk fully overwrites the first. The visible bug is the brief moment
+  xterm.js commits the first chunk's layout (bottom UI at rows 1–9)
+  before the second chunk lands and replaces it (banner at rows 1–3,
+  bottom UI shifted to 7–15).
+
+**Root cause shape:**
+
+Claude Code emits two full-screen frames in response to a single SIGWINCH
+when the terminal grows. The first reflects "what was on screen at the
+old size, repainted from row 1"; the second reflects "the full UI at the
+new size, with the previously-off-screen banner restored above." If both
+reach xterm in the same render task, no artifact. If they cross a task
+boundary (which they did here, 7 ms apart), xterm commits the
+intermediate state for one frame.
+
+This is upstream behavior. Suppressing the first frame is the trap an
+earlier fix attempt fell into ("Claude emitting dup sequences" — the two
+frames are content-different, not duplicates; any dedup heuristic eats
+legitimate first-paints across the rest of the terminal subsystem,
+spinner ticks, scrollback recovery, and most non-resize redraws). Do
+not go there.
+
+**Candidate fix that was tried and rejected (Codex, 2026-05-14):**
+
+Codex prototyped a client-side post-resize output hold in
+`VibeRails/wwwroot/js/modules/terminal-tab.js`. Shape:
+
+- New constants `RESIZE_OUTPUT_QUIET_MS = 40` and
+  `RESIZE_OUTPUT_MAX_HOLD_MS = 250`.
+- `sendResizeToPty()` armed a deadline
+  `_pendingResizeOutputHoldDeadline = performance.now() + 250` right
+  before `socket.send('__resize__:…')` (only when the cols×rows
+  signature actually changed).
+- `socket.onmessage` was rerouted through a new `queuePendingChunkFlush()`:
+  - If `deadline > performance.now()` → schedule
+    `setTimeout(flushPendingChunks, 40)`. Each new incoming chunk
+    `clearTimeout`-cancels and reschedules, so the timer fires after
+    40 ms of quiet.
+  - Else → existing `queueMicrotask(flushPendingChunks)` path
+    (cancelling any pending hold-timer first).
+- Disconnect / `socket.onclose` paths cleared the new state.
+
+In local source inspection the two f3e25a1e chunks (7 ms apart) would
+land inside one timer-deferred `xterm.write()` and the visible artifact
+would go away. The fix was reverted before any real webview validation
+run. Two concrete reasons:
+
+1. **Re-opens the `setTimeout` occlusion-throttle door.** See the
+   "Persistent process-wide typing lag" Closed/Informational entry
+   further down. Severity of that bug was process-lifetime: **every
+   keystroke 1–3 s for the entire VS Code session**, only a full VS
+   Code restart cleared it, and only fresh `Code.exe` launches (no
+   warm parent process) could land in the throttled state. Codex's
+   fix narrows the receive-path `setTimeout` to "the next ≤250 ms
+   after a real geometry change," not every keystroke — so steady-state
+   typing is unaffected. But during a throttled VS Code process,
+   **every resize event** in the session (font bumps, panel drags,
+   window fits, container resizes) would buffer the post-resize
+   redraw burst for ~1 s. That is a real regression on a path that
+   today is immediate.
+2. **Late-firing callback corrupts subsequent-resize state.** The
+   hold-timer callback unconditionally writes
+   `this._pendingResizeOutputHoldDeadline = 0;` before flushing. Under
+   throttle the callback fires ~1 s after it was scheduled. If a
+   *second* resize landed in that ~1 s window and opened its own
+   hold (extended deadline to a future value), the late callback from
+   the first resize **wipes** that new deadline when it finally fires.
+   The second resize's redraw burst then leaks through with no
+   coalescing — the original reprint bug re-appears on the second
+   resize. The callback has no "am I still the authoritative timer?"
+   check (no compare against the current deadline, no signature
+   check, no `performance.now()` re-evaluation). The minimal patch
+   would be a guard like
+   `if (this._pendingResizeOutputHoldDeadline <= performance.now()) { … }`
+   in the callback, but that's a patch on a patch about late-firing
+   timers under occlusion clamping — exactly the class of reasoning
+   the 2026-05-05 fix migrated us away from.
+
+The cost/benefit didn't pencil out: the bug being fixed is a one-time
+~7 ms artifact with correct final state; the regressions risked are
+1 s post-resize stalls during a session-wide throttle. Reverted.
+
+**Why we are not fixing it yet:**
+
+Every client-side fix considered so far either (a) re-introduces a
+`setTimeout` on the `socket.onmessage` receive path — see the explicit
+guardrail in the "Persistent process-wide typing lag" entry below — or
+(b) requires reasoning about late-firing timers under VS Code webview
+occlusion clamping. The cost of getting either wrong is much higher
+than the cost of leaving the artifact in place.
+
+The cleaner direction, **when this is revisited**, is server-side:
+bump `WebSocketConsumer.NormalCoalesceDelayMs` (currently 4 ms) to ~20
+for ~200 ms after a `__resize__` arrives on the server. That keeps the
+client purely on `queueMicrotask`, never touches the throttle-prone
+path, and the worst case is "post-resize echo is +16 ms slower" —
+invisible. This has not been attempted; it is the recommended next try.
+
+**How to verify the bug still exists (manual repro):**
+
+1. Open a Claude Code (or Codex / Copilot) TUI session in the VibeRails
+   web terminal or VS Code extension.
+2. Let the TUI fill with content (task list, tool output, etc.) so the
+   conversation has rows that would scroll above the viewport at a
+   smaller height.
+3. Resize the terminal pane sharply to **grow** the visible area — drag
+   a panel divider so row count changes significantly (e.g. ~10 → ~28
+   rows), toggle the side panel, or change font size step. The
+   triggering geometry change is a single resize-up.
+4. Watch the first paint after the resize. If reproducing: the bottom
+   TUI briefly appears at the top of the viewport, then jumps down as
+   the banner / earlier rows materialize above it. Sometimes presents
+   as "characters dropped mid-word at fixed column positions" during
+   the transient. The flash is brief (~7 ms — about one frame).
+5. The artifact is not reliably reproducible. Repeat the resize a few
+   times; some viewer states (occluded → visible transitions on
+   webview return, very rapid successive fits) make it more likely.
+
+**Repro forensics (use these when re-investigating):**
+
+- Suspect chunks in the f3e25a1e SessionLogs: `5783642` (1512 B,
+  partial paint) and `5783643` (1974 B, full paint), 7 ms apart at
+  `05:29:25.181Z` and `05:29:25.189Z`.
+- Dump them with:
+  ```
+  python python-scripts/decode_session.py f3e25a1e-c0eb-4834-a3d2-0eace2bb0e1f
+  python python-scripts/show_chunks.py f3e25a1e-c0eb-4834-a3d2-0eace2bb0e1f 5783642 5783643
+  ```
+- Replay the bytes directly into the C# emulator or a headless xterm
+  for an automated test:
+  `runbooks/terminal/repro-fixtures/session_f3e25a1e_resize_reprint.bin`
+  is the two chunks concatenated in arrival order (1512 B + 1974 B =
+  3486 B). See that directory's README for the layout.
+- **Signature check:** in both repro sessions there is exactly one
+  `\e[2J` (the initial PowerShell prompt), one `\e[8;…t` (the boot
+  geometry report), no `\e[?1049` toggles, no `\e[?2004l`, no
+  alt-screen. If a future repro shows a *different* signature
+  (extra `\e[2J`s, `?1049` toggles, multiple `\e[8;…t` reports), it
+  is not this bug.
+
+**When you pick this back up:**
+
+1. Re-read this entry AND the "Persistent process-wide typing lag"
+   entry below before doing anything. Do **not** re-propose a
+   `setTimeout`-based receive-path coalesce without explicitly
+   addressing both risks above and writing the "am I still
+   authoritative?" guard into any timer callback.
+2. Try the server-side coalesce bump first
+   (`WebSocketConsumer.NormalCoalesceDelayMs` raised to ~20 ms for
+   ~200 ms after a `__resize__` is received). Add a unit test under
+   `Tests/Services/Terminal/` that feeds the two chunks from
+   `session_f3e25a1e_resize_reprint.bin` through the consumer in
+   post-resize state and asserts they emerge as one frame.
+3. Only fall back to a client-side hold if the server path proves
+   insufficient. Even then, prefer `queueMicrotask` chains over
+   `setTimeout`, and never use a timer-throttled API
+   (`setTimeout` / `requestAnimationFrame` / `setInterval`) on the
+   receive path without the explicit "this throttle is
+   process-lifetime under fresh-launch VS Code, not a brief
+   cold-start hiccup" framing in mind.
+4. The reprint is small. Don't trade it for the 2026-05-05 bug.
 
 ## 2026-04-27 Snapshot replay state reset contract
 
@@ -775,25 +956,34 @@ context is preserved in the comment above the flush call so we don't
 re-introduce it unthinkingly.
 
 **Guardrail:** do not re-add a `postTask` / `setTimeout` coalesce variant
-without a fresh reason. The cold-start typing-lag fix below depends on
-`queueMicrotask` not being throttled the way `setTimeout` is.
+without a fresh reason. The typing-lag fix below depends on `queueMicrotask`
+not being throttled the way `setTimeout` is — and when that bug bit, the
+1–3 s per-keystroke lag persisted for the **entire lifetime of the VS Code
+process** (not just until first paint), with only a full VS Code restart
+clearing it. Any new `setTimeout`-bearing path in `socket.onmessage` is
+re-opening that door.
 
-### ✅ Cold-start typing lag (~800–3000 ms echo) caused by Chromium throttling our setTimeout coalesce (2026-05-05, verified 2026-05-06)
+### ✅ Persistent process-wide typing lag (~800–3000 ms echo) caused by Chromium throttling our setTimeout coalesce (2026-05-05, verified 2026-05-06)
 
 **Verified fixed in v1.6.12** (commit `989afd1`). End-to-end checks passed:
-cold-start echo is tight from the first keystroke after a full `Code.exe` +
-`vb.exe` teardown, no Codex/Copilot tear regression observed, and
-`scheduler.postTask` mode also passed the cold-start test at the time. The
-`scheduler.postTask` runtime A/B was later removed (2026-05-07) — see the
-Open Bugs entry at the top of this file for why.
+echo is tight from the first keystroke after a full `Code.exe` + `vb.exe`
+teardown, no Codex/Copilot tear regression observed, and `scheduler.postTask`
+mode also passed the test at the time. The `scheduler.postTask` runtime A/B
+was later removed (2026-05-07) — see the Open Bugs entry at the top of this
+file for why.
 
-**Symptom:** First cold start of VS Code → typing in the VibeRails dashboard
-echoed at 500–1000 ms+ per character (worst keystrokes pushing 3 s). Lag was
-"unusably slow" until the user closed the extension and reopened it within the
-same VS Code session — at which point typing was instantly fine and stayed
-fine for the rest of the session. The lag could only be reproduced by killing
-VS Code in Process Explorer (or fully quitting); a normal close/reopen of the
-window did not bring it back.
+**Symptom:** When the bug was active, **every keystroke** in the VibeRails
+dashboard echoed at 1–3 s (sometimes longer), and the lag **persisted for the
+entire lifetime of the VS Code process**, not just the first few seconds.
+Closing and reopening the extension within the same VS Code window did **not**
+fix it. The only known recovery was fully quitting VS Code and starting it
+again — sometimes requiring more than one restart attempt before the next
+launch came up clean. Reproducibility was tied to whether VS Code launched
+from a truly **fresh process state** (no surviving `Code.exe` in the
+background): launches from a fresh state could land in the throttled mode and
+stay there; launches that reused an already-warm parent process did not
+trigger it. Hence "cold start" undersells the symptom — once a VS Code process
+got into the clamped state, it stayed there until that process exited.
 
 **How it presented in measurements:** server round-trip (`Send → Recv`) was
 healthy at ~46 ms. Renderer end-to-end (`Recv → Commit`) was healthy at ~16 ms.
@@ -811,20 +1001,26 @@ p99: 2992.6 ms        ← worst: 300× over budget
 12 of 19 short timers in a 96 s trace fired in 760–2993 ms instead of 10 ms.
 
 **Root cause:** Chromium clamps `setTimeout` to a 1-second minimum when the
-renderer reports the frame as "occluded" (`visible_content_area: 0`). The
-VS Code webview is occluded during cold start until the workbench finishes
-its first paint cycle. Our `socket.onmessage` in
+renderer reports the frame as "occluded" (`visible_content_area: 0`). When a
+fresh-start VS Code webview entered that state, it could **stay** in the
+clamped condition for the lifetime of the VS Code process — not just until
+the first workbench paint. Our `socket.onmessage` in
 `VibeRails/wwwroot/js/modules/terminal-multitab.js` used
 `setTimeout(flushPendingChunks, OUTPUT_WRITE_COALESCE_MS)` to coalesce
 adjacent WS frames into one `xterm.write()` (anti-tearing for Codex/Copilot
-multi-frame redraws — added in commit `3ea2f30`). Under cold-start
-occlusion, every echo's coalesce timer was held 800+ ms before firing,
-stalling the entire echo path while the bytes sat in `pendingChunks`.
+multi-frame redraws — added in commit `3ea2f30`). Under the throttled state,
+**every keystroke's coalesce timer** was held 800+ ms before firing, stalling
+the entire echo path while the bytes sat in `pendingChunks` — and because the
+clamping persisted, the lag did not self-heal: the user saw 1–3 s per
+character for as long as that VS Code process kept running.
 
-Once the workbench finished its first paint, the throttle disengaged for
-the lifetime of the renderer process — so any subsequent extension
-open/reopen was instant. Killing VS Code was required to re-enter the
-occluded state.
+Restarting just the VibeRails extension within the same VS Code window did
+not clear the clamp; only fully quitting and relaunching VS Code did. Some
+relaunches still came up throttled and needed a second attempt before a clean
+state appeared. The underlying Chromium signal that decides whether the
+webview reports as occluded was not pinned down — empirically, fresh-process
+launches were the only path that could land in the bad state, and they did
+so non-deterministically.
 
 **Why the gate exists** (do not reintroduce setTimeout):
 > TUI apps (Codex, Copilot) split their screen updates across multiple
@@ -900,10 +1096,15 @@ re-run after.
   as a runtime A/B and pulled it 2026-05-07 because it felt slow in the
   VS Code webview — keep that empirical result in mind before reaching
   for it again.
-- If a "lag only on cold start, fine after reopen" symptom appears
-  again, suspect timer throttling first. Capture a Performance trace
-  and inspect `TimerInstall` / `TimerFire` actual-vs-requested delays
-  before going deeper into server-side or render-side suspects.
+- If a "every keystroke is slow and stays slow for the whole VS Code
+  session, only a full VS Code quit-and-relaunch clears it, and it only
+  reproduces from a fresh `Code.exe` process" symptom appears again,
+  suspect renderer-occlusion timer throttling first. The symptom does
+  **not** self-heal on workbench paint or on extension close/reopen —
+  in the original incident it persisted for the lifetime of the
+  affected VS Code process. Capture a Performance trace and inspect
+  `TimerInstall` / `TimerFire` actual-vs-requested delays before going
+  deeper into server-side or render-side suspects.
 
 **Diagnostic signature:** in a Performance trace from cold start, look
 for short-target timers (`TimerInstall` requested timeout ≤ 50 ms)
@@ -1437,10 +1638,14 @@ state machine that replaced `CircularBuffer` as the terminal state proxy.
 
 ## Open Bugs
 
-The sole open known bug is the **queueMicrotask rendering bug: reprint /
-overprint after webview occlusion** issue tracked at the top of this file
-(entry dated 2026-05-07). Observed in exactly one session, not reliably
-reproducible, terminal otherwise stable.
+The sole open known terminal display bug is the resize reprint / overprint
+issue tracked at the top of this file. **Status: open / accepted-live-with**
+as of 2026-05-14 — a 2026-05-14 candidate fix was rejected on review (the
+proposed client-side `setTimeout` hold re-opened the
+process-lifetime occlusion-throttle failure mode for a small visual
+artifact). The recommended next attempt is the server-side coalesce bump
+in `WebSocketConsumer`; until someone has time to do that, the artifact
+stays.
 
 The other items historically tracked under "Open Bugs" have been reclassified
 as accepted-live-with or deferred and moved to **Closed / Informational**

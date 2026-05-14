@@ -8,6 +8,12 @@
 # breaks the shebang line on Linux/macOS ("bad interpreter: bash\r").
 *.sh text eol=lf
 
+# Session captures are binary fixtures even when the byte stream contains no
+# NUL bytes. Keep them out of text diffs and line-ending normalization.
+session_*.bin binary
+session_*.fixture.bin binary
+**/Fixtures/session_* binary
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

@@ -39,6 +39,23 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
     private const int IdleMinBigChunkSamples = 4;
     private const int QuietBufferThreshold = 5;
     private const int MaxQueuedChunks = 20_000;
+    // Small-chunk concentration gate. The big-chunk uniqueness gate alone
+    // can't distinguish a codex Working sub-phase that streams bit-identical
+    // ~124-byte CUP+EL "cursor-park" frames (big_uniq=1, big_top high — looks
+    // exactly like idle keepalive on the big-chunk axis) from a true idle.
+    // The difference shows up on the *small* chunks: a real idle brackets
+    // each big keepalive with a small repeating set (mode-toggle, cursor-
+    // restore, fixed-position CUP), so a few small chunks repeat heavily —
+    // small_top stays at or above the count of distinct small chunks. A
+    // working cursor-park phase emits varying cursor-position chunks (each
+    // appearing only a few times), so small_unique grows faster than any
+    // one of them repeats. We reject Idle when small_top < small_unique
+    // *and* the small-chunk sample is large enough to be meaningful. Verified
+    // against Session_e910eb94 working-falsefire (small_top stays 1-2 below
+    // small_unique throughout the burst) without breaking any existing
+    // true-positive fixture (881cd29d approval, 0ebd404d, 8522be5b, e910eb94
+    // composer all have small_top >= small_unique at their fire moment).
+    private const int SmallChunkConcentrationMinSamples = 6;
     // The buffer must have been collecting for nearly a full SampleWindow before
     // we classify. Codex's per-char working animation can hit a transient
     // (unique=4, topCount=4) shape during the first ~250ms of the buffer
@@ -168,16 +185,25 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
         private static BufferVerdict Classify(IEnumerable<TimedChunk> chunks)
         {
             Dictionary<string, int>? bigCounts = null;
+            Dictionary<string, int>? smallCounts = null;
             var bigTotal = 0;
+            var smallTotal = 0;
             var totalChunks = 0;
             foreach (var c in chunks)
             {
                 totalChunks++;
-                if (c.Content.Length < IdleChunkSizeThreshold)
-                    continue;
-                bigCounts ??= new Dictionary<string, int>(StringComparer.Ordinal);
-                bigCounts[c.Content] = bigCounts.GetValueOrDefault(c.Content) + 1;
-                bigTotal++;
+                if (c.Content.Length >= IdleChunkSizeThreshold)
+                {
+                    bigCounts ??= new Dictionary<string, int>(StringComparer.Ordinal);
+                    bigCounts[c.Content] = bigCounts.GetValueOrDefault(c.Content) + 1;
+                    bigTotal++;
+                }
+                else
+                {
+                    smallCounts ??= new Dictionary<string, int>(StringComparer.Ordinal);
+                    smallCounts[c.Content] = smallCounts.GetValueOrDefault(c.Content) + 1;
+                    smallTotal++;
+                }
             }
 
             // Buffer is effectively silent (user paused while reading the
@@ -199,9 +225,23 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
             foreach (var v in bigCounts.Values)
                 if (v > topCount) topCount = v;
 
-            return topCount >= IdleMinTopChunkCount
-                ? BufferVerdict.Idle
-                : BufferVerdict.Working;
+            if (topCount < IdleMinTopChunkCount)
+                return BufferVerdict.Working;
+
+            // Small-chunk concentration gate — see the constant comment for
+            // the rationale. Only applied when we have enough small samples
+            // to make the comparison meaningful; below that, fall back to
+            // the big-chunk verdict only.
+            if (smallCounts is not null && smallTotal >= SmallChunkConcentrationMinSamples)
+            {
+                var smallTop = 0;
+                foreach (var v in smallCounts.Values)
+                    if (v > smallTop) smallTop = v;
+                if (smallTop < smallCounts.Count)
+                    return BufferVerdict.Working;
+            }
+
+            return BufferVerdict.Idle;
         }
 
         private readonly record struct TimedChunk(DateTimeOffset Timestamp, string Content);
