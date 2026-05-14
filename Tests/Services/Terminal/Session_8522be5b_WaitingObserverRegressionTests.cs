@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Text;
 using VibeRails.DTOs;
 using VibeRails.Services;
@@ -50,7 +49,7 @@ public sealed class Session_8522be5b_WaitingObserverRegressionTests
         if (!File.Exists(FixturePath))
             Assert.Skip($"Fixture not present: {FixturePath}. Run python-scripts/export_chunks_fixture.py against the session locally to regenerate.");
 
-        var chunks = LoadFixture(FixturePath);
+        var chunks = TerminalTestFixtures.LoadFixture(FixturePath);
         Assert.NotEmpty(chunks);
 
         var clock = new ManualTimeProvider(new DateTimeOffset(2026, 5, 6, 21, 29, 50, TimeSpan.Zero));
@@ -88,42 +87,5 @@ public sealed class Session_8522be5b_WaitingObserverRegressionTests
 
         Assert.Single(events);
         Assert.Equal("session_waiting_for_user", events[0].Type);
-    }
-
-    private static List<TimedChunk> LoadFixture(string path)
-    {
-        var bytes = File.ReadAllBytes(path);
-        var pos = 0;
-        var count = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(pos, 4));
-        pos += 4;
-        var chunks = new List<TimedChunk>((int)count);
-        for (var i = 0u; i < count; i++)
-        {
-            var byteCount = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(pos, 4));
-            pos += 4;
-            var msOffset = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(pos, 4));
-            pos += 4;
-            var data = new byte[byteCount];
-            Array.Copy(bytes, pos, data, 0, byteCount);
-            pos += (int)byteCount;
-            chunks.Add(new TimedChunk(data, msOffset));
-        }
-        return chunks;
-    }
-
-    private readonly record struct TimedChunk(byte[] Bytes, uint MsOffset);
-
-    private sealed class ManualTimeProvider : TimeProvider
-    {
-        private DateTimeOffset _utcNow;
-
-        public ManualTimeProvider(DateTimeOffset start)
-        {
-            _utcNow = start;
-        }
-
-        public override DateTimeOffset GetUtcNow() => _utcNow;
-
-        public void SetUtcNow(DateTimeOffset value) => _utcNow = value;
     }
 }

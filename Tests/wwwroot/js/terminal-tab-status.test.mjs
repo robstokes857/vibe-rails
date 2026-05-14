@@ -234,11 +234,11 @@ test('session idle while WAITING does NOT pop the tab to READY', () => {
 });
 
 test('Enter from WAITING → THINKING; backend pings + CSI do not leave WAITING', () => {
-    // Single typed printables are intentionally covered by the
-    // "typing a printable char during WAITING clears it" test above —
-    // this test pins that the *other* signals (idle pings, busy pings,
-    // CSI arrow keys) still don't disturb WAITING, and that Enter is
-    // still the path to THINKING.
+    // Single typed printables are intentionally NOT exercised here — they
+    // clear WAITING (covered by "typing a printable char during WAITING
+    // clears it to CONNECTED" above). This test pins the complement:
+    // backend idle/busy pings and CSI sequences must leave WAITING alone,
+    // and Enter is still the path to THINKING.
     const { controller } = makeController({ isActiveTab: () => true });
     controller.onSocketOpen();
     controller.onTerminalData('\r');

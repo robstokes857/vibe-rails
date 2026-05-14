@@ -117,14 +117,19 @@ public sealed class WaitingForUserInputObserverTests
         Assert.Single(events);
 
         // Codex settles back into idle. Phase 3 must run for at least one
-        // full SampleWindow (5s) so the rolling buffer ages out the working
+        // full SampleWindow so the rolling buffer ages out the working
         // residuals before classifying as Idle: the small-chunk
         // concentration gate added for Session_e910eb94's CUP-park false
         // positive will keep returning Working until those varied small
-        // working chunks fall out of the window.
-        for (var i = 0; i < 130; i++)
+        // working chunks fall out of the window. Derive the iteration count
+        // from SampleWindow so this test self-adjusts if the observer's
+        // window is retuned.
+        const int phase3StepMs = 50;
+        var phase3Iterations =
+            (int)Math.Ceiling(WaitingForUserInputObserver.SampleWindow.TotalMilliseconds / phase3StepMs) + 30;
+        for (var i = 0; i < phase3Iterations; i++)
         {
-            clock.Advance(TimeSpan.FromMilliseconds(50));
+            clock.Advance(TimeSpan.FromMilliseconds(phase3StepMs));
             await SendOutputAsync(observer, "session-1", CodexIdleChunk);
         }
 
@@ -170,12 +175,4 @@ public sealed class WaitingForUserInputObserverTests
             TimestampUtc: DateTimeOffset.UtcNow));
     }
 
-    private sealed class ManualTimeProvider : TimeProvider
-    {
-        private DateTimeOffset _utcNow = new(2026, 4, 26, 12, 0, 0, TimeSpan.Zero);
-
-        public override DateTimeOffset GetUtcNow() => _utcNow;
-
-        public void Advance(TimeSpan value) => _utcNow += value;
-    }
 }

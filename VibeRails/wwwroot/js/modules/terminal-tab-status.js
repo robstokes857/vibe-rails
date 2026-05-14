@@ -195,6 +195,16 @@ export class TabStatusController {
         //   - Bracketed-paste wrappers ("\x1b[200~…\x1b[201~") and clipboard
         //     pastes arrive as one large multi-byte chunk — excluded.
         // Enter is handled above; this guards the *typing* path only.
+        //
+        // ASCII-only by design: xterm.js delivers user input to onData as
+        // UTF-8 bytes packed into a JS string (one byte per char), so a
+        // typed non-ASCII character ("é", "中", emoji) arrives as a 2–4
+        // char chunk and falls out via `data.length === 1`. We accept that
+        // gap: a user typing a non-ASCII first character will still need
+        // Enter (or any subsequent ASCII char) to clear WAITING. Widening
+        // beyond 0x7E would re-admit single-byte C1 controls and Latin-1
+        // glyphs that xterm.js could emit during DCS/OSC responses, which
+        // is exactly the ACTIVE-state failure mode this carve-out avoids.
         if (this._status === TAB_STATUS.WAITING && data.length === 1) {
             const code = data.charCodeAt(0);
             if (code >= 0x20 && code <= 0x7e) {
