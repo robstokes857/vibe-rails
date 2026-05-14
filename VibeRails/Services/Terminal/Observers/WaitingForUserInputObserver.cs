@@ -21,7 +21,10 @@ namespace VibeRails.Services.Terminal;
 /// </summary>
 public sealed class WaitingForUserInputObserver : ITerminalIoObserver
 {
-    private static readonly TimeSpan SampleWindow = TimeSpan.FromSeconds(5);
+    // Exposed (internal) so the unit tests can size their loops against the
+    // observer's rolling window without duplicating the value. Bumping this
+    // does not require touching test iteration counts as a result.
+    internal static readonly TimeSpan SampleWindow = TimeSpan.FromSeconds(5);
     private const int IdleChunkSizeThreshold = 50;
     private const int IdleMaxUniqueBigChunks = 5;
     // Codex's idle keepalive emits ~1 big chunk per second (a CUP+EL row-clear
@@ -50,11 +53,22 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
     // working cursor-park phase emits varying cursor-position chunks (each
     // appearing only a few times), so small_unique grows faster than any
     // one of them repeats. We reject Idle when small_top < small_unique
-    // *and* the small-chunk sample is large enough to be meaningful. Verified
-    // against Session_e910eb94 working-falsefire (small_top stays 1-2 below
-    // small_unique throughout the burst) without breaking any existing
-    // true-positive fixture (881cd29d approval, 0ebd404d, 8522be5b, e910eb94
-    // composer all have small_top >= small_unique at their fire moment).
+    // *and* the small-chunk sample is large enough to be meaningful.
+    //
+    // Concrete numbers at the fire moment (from analyze_fixture_buffer.py):
+    //   e910eb94 working falsefire: small_top=11 vs small_unique=12 → REJECT
+    //   881cd29d approval menu:     small_top=49 vs small_unique=13 → ACCEPT
+    //   0ebd404d idle-at-end:       small_top=50 vs small_unique=12 → ACCEPT
+    //   e910eb94 composer truefire: small_top=65 vs small_unique=60 → ACCEPT
+    //
+    // The e910eb94 composer case is the tight one — only 5 chunks of margin.
+    // Ratio-based gates (small_top / small_total) do NOT discriminate here:
+    // both populations sit around 33–35%, because the working pattern packs
+    // a small total into a few seconds while the idle pattern packs a much
+    // larger total into the same window. The diversity comparison is the
+    // signal — keep it. If a future codex update tightens the composer
+    // margin further or shifts small_unique past current bounds, add a new
+    // fixture and re-tune rather than going to a ratio.
     private const int SmallChunkConcentrationMinSamples = 6;
     // The buffer must have been collecting for nearly a full SampleWindow before
     // we classify. Codex's per-char working animation can hit a transient
@@ -182,7 +196,11 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
 
         private enum BufferVerdict { Indeterminate, Working, Idle }
 
-        private static BufferVerdict Classify(IEnumerable<TimedChunk> chunks)
+        // Concrete Queue<TimedChunk> parameter (not IEnumerable<>) so the
+        // struct enumerator stays on the stack — this runs once per PTY
+        // chunk, so even a single boxed-enumerator allocation per call is
+        // a persistent micro-allocation in a hot path.
+        private static BufferVerdict Classify(Queue<TimedChunk> chunks)
         {
             Dictionary<string, int>? bigCounts = null;
             Dictionary<string, int>? smallCounts = null;

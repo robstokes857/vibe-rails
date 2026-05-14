@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Text;
 using VibeRails.DTOs;
 using VibeRails.Services;
@@ -77,7 +76,7 @@ public sealed class Session_e910eb94_WaitingObserverRegressionTests
 
     private async Task<List<AppEvent>> ReplayFixtureAsync(string path)
     {
-        var chunks = LoadFixture(path);
+        var chunks = TerminalTestFixtures.LoadFixture(path);
         var clock = new ManualTimeProvider(new DateTimeOffset(2026, 5, 14, 12, 22, 0, TimeSpan.Zero));
         var bus = new AppEventBus();
         var observer = new WaitingForUserInputObserver(bus, clock);
@@ -111,42 +110,5 @@ public sealed class Session_e910eb94_WaitingObserverRegressionTests
             }
         }
         return events;
-    }
-
-    private static List<TimedChunk> LoadFixture(string path)
-    {
-        var bytes = File.ReadAllBytes(path);
-        var pos = 0;
-        var count = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(pos, 4));
-        pos += 4;
-        var chunks = new List<TimedChunk>((int)count);
-        for (var i = 0u; i < count; i++)
-        {
-            var byteCount = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(pos, 4));
-            pos += 4;
-            var msOffset = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(pos, 4));
-            pos += 4;
-            var data = new byte[byteCount];
-            Array.Copy(bytes, pos, data, 0, byteCount);
-            pos += (int)byteCount;
-            chunks.Add(new TimedChunk(data, msOffset));
-        }
-        return chunks;
-    }
-
-    private readonly record struct TimedChunk(byte[] Bytes, uint MsOffset);
-
-    private sealed class ManualTimeProvider : TimeProvider
-    {
-        private DateTimeOffset _utcNow;
-
-        public ManualTimeProvider(DateTimeOffset start)
-        {
-            _utcNow = start;
-        }
-
-        public override DateTimeOffset GetUtcNow() => _utcNow;
-
-        public void SetUtcNow(DateTimeOffset value) => _utcNow = value;
     }
 }
