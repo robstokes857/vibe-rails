@@ -18,6 +18,7 @@ namespace Tests.Services.Terminal;
 /// End-to-end fixture-based regressions live in:
 ///   - Session_0ebd404d_WaitingObserverRegressionTests
 ///   - Session_881cd29d_WaitingObserverRegressionTests
+///   - Session_e910eb94_WaitingObserverRegressionTests
 /// </summary>
 public sealed class WaitingForUserInputObserverTests
 {
@@ -106,7 +107,7 @@ public sealed class WaitingForUserInputObserverTests
         }
         Assert.Single(events);
 
-        // Codex resumes working — diverse chunks for >5s flush the buffer
+        // Codex resumes working — diverse chunks for >5s flush the buffer.
         for (var i = 0; i < 200; i++)
         {
             clock.Advance(TimeSpan.FromMilliseconds(30));
@@ -115,8 +116,13 @@ public sealed class WaitingForUserInputObserverTests
         }
         Assert.Single(events);
 
-        // Codex settles back into idle — fires the second time
-        for (var i = 0; i < 80; i++)
+        // Codex settles back into idle. Phase 3 must run for at least one
+        // full SampleWindow (5s) so the rolling buffer ages out the working
+        // residuals before classifying as Idle: the small-chunk
+        // concentration gate added for Session_e910eb94's CUP-park false
+        // positive will keep returning Working until those varied small
+        // working chunks fall out of the window.
+        for (var i = 0; i < 130; i++)
         {
             clock.Advance(TimeSpan.FromMilliseconds(50));
             await SendOutputAsync(observer, "session-1", CodexIdleChunk);

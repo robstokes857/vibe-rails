@@ -182,6 +182,24 @@ export class TabStatusController {
         }
         if (data === '\x1b' && this._status === TAB_STATUS.THINKING) {
             this._transitionTo(TAB_STATUS.CONNECTED);
+            return;
+        }
+        // If the user starts typing while WAITING, the "Codex is waiting for
+        // you" signal is stale — they're already engaging. Clear back to
+        // CONNECTED so the indicator reflects reality. Narrowly scoped to a
+        // single printable byte (0x20–0x7E) to avoid re-introducing the
+        // ACTIVE-state false positives that motivated its retirement:
+        //   - CSI sequences (arrow keys "\x1b[B", function keys, focus
+        //     reports "\x1b[I/O", DSR auto-replies "\x1b[24;80R") have
+        //     length > 1 and start with ESC — excluded.
+        //   - Bracketed-paste wrappers ("\x1b[200~…\x1b[201~") and clipboard
+        //     pastes arrive as one large multi-byte chunk — excluded.
+        // Enter is handled above; this guards the *typing* path only.
+        if (this._status === TAB_STATUS.WAITING && data.length === 1) {
+            const code = data.charCodeAt(0);
+            if (code >= 0x20 && code <= 0x7e) {
+                this._transitionTo(TAB_STATUS.CONNECTED);
+            }
         }
     }
 

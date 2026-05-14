@@ -57,8 +57,13 @@ tab button (e.g. `Connected`, `Thinking`, `Ready`, `Disconnected`).
 And on socket close from *any* state: → `DISCONNECTED`.
 
 `onWaitingForUserSelection()` can move us into `WAITING` from any state except
-`DISCONNECTED`. From `WAITING`, Enter (`\r`) → `THINKING`. Typed characters do
-not change the state.
+`DISCONNECTED`. From `WAITING`:
+
+- Enter (`\r`) → `THINKING`.
+- A single printable byte (0x20–0x7E) → `CONNECTED` — the user has started
+  typing a response, so the "Codex is waiting for you" signal is stale.
+- Anything else (CSI sequences, multi-byte chunks, backend pings) leaves
+  the state alone.
 
 ## Triggers
 
@@ -73,10 +78,17 @@ events are routed into `onSessionIdle()` / `onSessionCompleted()` /
    → `THINKING`.
 2. `data === '\x1b'` (bare Escape) while in `THINKING` → `CONNECTED`
    (treated as abort).
-3. Everything else is ignored. Typed characters, arrow keys, function keys,
-   and xterm auto-responses to server queries all flow through without
-   changing the state. This is a deliberate change from the previous
-   `_hasPrintableChar` heuristic — see the ACTIVE retirement note above.
+3. A single printable byte (0x20–0x7E) while in `WAITING` → `CONNECTED`.
+   Narrowly scoped to `data.length === 1` so the carve-out covers genuine
+   keystrokes only: CSI sequences (arrow keys `\x1b[B`, function keys, focus
+   reports `\x1b[I/O`, DSR auto-replies `\x1b[24;80R`), bracketed-paste
+   wrappers, and clipboard pastes all arrive as multi-byte chunks and are
+   excluded — re-introducing the false positives that retired the ACTIVE
+   state would defeat the purpose. This is the only printable-byte transition
+   in the machine; THINKING, CONNECTED, and READY all still ignore typing.
+4. Everything else is ignored. Typed characters during `THINKING`, arrow
+   keys, function keys, and xterm auto-responses to server queries all flow
+   through without changing the state.
 
 ### `onSessionIdle()` / `onSessionCompleted()`
 

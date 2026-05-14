@@ -183,13 +183,38 @@ test('typing during THINKING no longer flips the tab', () => {
     assert.equal(controller._status, TAB_STATUS.THINKING);
 });
 
-test('typing during WAITING no longer flips the tab', () => {
+test('typing a printable char during WAITING clears it to CONNECTED', () => {
+    // Reported by Rob in session e910eb94: Codex genuinely asked for permission,
+    // tab landed in WAITING, user started typing a reply, and the indicator
+    // stayed on "Waiting for user input" — but the user is no longer waiting,
+    // they're engaging. Single printable bytes (0x20–0x7E) now clear WAITING
+    // back to CONNECTED. CSI sequences and pastes are still ignored — see the
+    // ACTIVE-state retirement note in terminal-tab-status.md for why.
     const { controller } = makeController({ isActiveTab: () => true });
     controller.onSocketOpen();
     controller.onTerminalData('\r');
     controller.onWaitingForUserSelection();
-    controller.onTerminalData('hello');
-    assert.equal(controller._status, TAB_STATUS.WAITING);
+    assert.equal(controller._status, TAB_STATUS.WAITING, 'setup: should land in WAITING');
+    controller.onTerminalData('h');
+    assert.equal(controller._status, TAB_STATUS.CONNECTED, 'first typed char clears WAITING');
+});
+
+test('multi-byte data during WAITING does not clear it (paste / CSI)', () => {
+    // Guard the carve-out: only single-byte printables clear WAITING. Paste
+    // payloads, bracketed-paste wrappers, and CSI sequences must not trigger
+    // the transition.
+    const { controller } = makeController({ isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r');
+    controller.onWaitingForUserSelection();
+    controller.onTerminalData('hello');                      // multi-char chunk (paste-shape)
+    assert.equal(controller._status, TAB_STATUS.WAITING, 'multi-byte chunk must not clear');
+    controller.onTerminalData('\x1b[200~pasted\x1b[201~');   // bracketed paste
+    assert.equal(controller._status, TAB_STATUS.WAITING, 'bracketed paste must not clear');
+    controller.onTerminalData('\x1b[B');                     // arrow key
+    assert.equal(controller._status, TAB_STATUS.WAITING, 'CSI arrow must not clear');
+    controller.onTerminalData('\x1b[24;80R');                // DSR auto-reply
+    assert.equal(controller._status, TAB_STATUS.WAITING, 'DSR auto-reply must not clear');
 });
 
 test('session idle while WAITING does NOT pop the tab to READY', () => {
@@ -208,7 +233,12 @@ test('session idle while WAITING does NOT pop the tab to READY', () => {
     assert.equal(controller._status, TAB_STATUS.WAITING);
 });
 
-test('Enter from WAITING → THINKING is the only way out of WAITING', () => {
+test('Enter from WAITING → THINKING; backend pings + CSI do not leave WAITING', () => {
+    // Single typed printables are intentionally covered by the
+    // "typing a printable char during WAITING clears it" test above —
+    // this test pins that the *other* signals (idle pings, busy pings,
+    // CSI arrow keys) still don't disturb WAITING, and that Enter is
+    // still the path to THINKING.
     const { controller } = makeController({ isActiveTab: () => true });
     controller.onSocketOpen();
     controller.onTerminalData('\r');
@@ -216,7 +246,6 @@ test('Enter from WAITING → THINKING is the only way out of WAITING', () => {
     controller.onSessionBusy();
     controller.onSessionIdle();
     controller.onTerminalData('\x1b[B');       // arrow key
-    controller.onTerminalData('x');            // typed char
     assert.equal(controller._status, TAB_STATUS.WAITING, 'setup: none of those should leave WAITING');
     controller.onTerminalData('\r');
     assert.equal(controller._status, TAB_STATUS.THINKING);

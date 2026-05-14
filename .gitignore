@@ -21,6 +21,11 @@ TerminalEmulator.Tests/fixtures/
 session_*.bin
 session_*.fixture.bin
 **/Fixtures/session_*
+# Approved, sanitized terminal regression fixtures. Keep the broad raw-capture
+# ignores above; add exact exceptions only after review.
+!Tests/Services/Terminal/Fixtures/session_e910eb94_codex_working_falsefire.fixture.bin
+!Tests/Services/Terminal/Fixtures/session_e910eb94_codex_composer_truefire.fixture.bin
+!runbooks/terminal/repro-fixtures/session_f3e25a1e_resize_reprint.bin
 # User-specific files
 *.rsuser
 *.suo
