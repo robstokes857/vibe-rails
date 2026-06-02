@@ -12,9 +12,20 @@ Use these upstream CLI references to verify exact option names, accepted values,
 and launch behavior before changing generated arguments:
 
 - Claude: https://code.claude.com/docs/en/cli-reference
+- Claude settings: https://code.claude.com/docs/en/settings
 - Codex: https://developers.openai.com/codex/cli/reference
-- Gemini: https://geminicli.com/docs/reference/commands
+- Codex config: https://developers.openai.com/codex/config-reference
+- Gemini: https://geminicli.com/docs/cli/cli-reference/
+- Gemini settings: https://geminicli.com/docs/reference/configuration/
 - Copilot: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference
+
+Status checked against the upstream references above on June 2, 2026.
+
+Important distinction: `CustomArgs` and `CustomPrompt` are VibeRails' launch
+contract. The DTO field lists below describe fields VibeRails currently
+round-trips through its settings APIs; they are not a complete upstream settings
+schema. When writing physical CLI config files, prefer current upstream config
+keys and keep legacy read fallbacks for older VibeRails environments.
 
 ## Current Managed Settings
 
@@ -37,7 +48,7 @@ UI-managed launch and prompt settings:
 - Bare Mode: `--bare`.
 - Debug Mode: `--debug`.
 
-Settings file fields persisted through `ClaudeSettingsDto`:
+Settings API fields currently round-tripped through `ClaudeSettingsDto`:
 
 - `effort`
 - `noSessionPersistence`
@@ -53,6 +64,11 @@ Settings file fields persisted through `ClaudeSettingsDto`:
 - `channels`
 - `debug`
 - `debugFilter`
+
+Upstream settings note: current Claude settings use keys such as `effortLevel`
+and `permissions.defaultMode` / `permissions.allow`. Most Claude controls above
+are launch-only and should continue to be emitted through `CustomArgs` unless
+the CLI documents a persistent settings-file key.
 
 ### Codex
 
@@ -71,7 +87,7 @@ UI-managed launch and prompt settings:
   `--ask-for-approval on-request`.
 - No Alternate Screen: `--no-alt-screen`.
 
-Settings file fields persisted through `CodexSettingsDto`:
+Settings API fields currently round-tripped through `CodexSettingsDto`:
 
 - `approval_policy`
 - `yolo`
@@ -82,6 +98,21 @@ Settings file fields persisted through `CodexSettingsDto`:
 - `model`
 - `model_reasoning_effort`
 - `service_tier = "fast"` plus `[features].fast_mode`
+
+Upstream config equivalents to prefer for new config-file writes:
+
+- `approval_policy`
+- `model`
+- `model_reasoning_effort`
+- `service_tier = "fast"` plus `[features].fast_mode`
+- `sandbox_mode = "workspace-write"` for Full-Auto sandbox behavior
+- `tui.alternate_screen = "never"` for No Alternate Screen
+- `model_provider = "oss"` for OSS provider selection
+
+`prompt`, `yolo`, and the historical `full_auto`, `no_alt_screen`, and `oss`
+boolean keys are compatibility fields in VibeRails, not current upstream config
+keys. Keep reading them for migration, but do not introduce new config-file
+behavior based on them without checking Codex docs.
 
 Legacy aliases still read:
 
@@ -97,7 +128,8 @@ UI-managed launch and prompt settings:
 
 - Initial Message: stored in `CustomPrompt`; sent as the first prompt.
 - Sandbox Mode: `--sandbox`.
-- YOLO Mode: `--yolo`.
+- YOLO Mode: `--approval-mode yolo`; legacy `--yolo` is still read from saved
+  args.
 - Approval Mode: `--approval-mode`; values `auto_edit`, `plan`; default emits
   no flag and YOLO disables the selector.
 - Vim Mode: stored in settings file.
@@ -118,6 +150,7 @@ Legacy fields still read:
 - `checkForUpdates`
 - `sandbox.enabled`
 - `tools.autoAccept`
+- `--yolo` / `-y` in saved launch args
 
 ### Copilot
 
@@ -131,7 +164,8 @@ UI-managed launch and prompt settings:
 - Mode: `--mode`; values `interactive`, `plan`, `autopilot`.
 - Model: `--model`; current suggested values include Claude, GPT-5, GPT-4.1,
   and Codex model names from `renderCopilotModelOptions()`.
-- Permissions: `--allow-all-tools` or `--yolo`.
+- Permissions: `--allow-all-tools` for tool-only auto-approval, or `--yolo`
+  for all permissions (`--allow-all` equivalent).
 - Don't Ask User: `--no-ask-user`.
 - Additional Arguments: preserved in `CustomArgs` for advanced Copilot flags not
   modeled by VibeRails.
@@ -261,8 +295,9 @@ Gemini:
 - API endpoint prefix: `/api/v1/gemini/settings/{envName}`.
 - Current launch args come from `buildGeminiCustomArgs()`.
 - Current settings payload comes from `GeminiSettingsDto`.
-- YOLO mode is a launch flag (`--yolo`), not a persisted
-  `security.disableYoloMode` setting.
+- YOLO mode is a launch flag (`--approval-mode yolo`), not a persisted
+  `security.disableYoloMode` setting. Legacy `--yolo` saved args are still
+  parsed.
 - `customPrompt` is populated from the Gemini initial message.
 
 Copilot:
