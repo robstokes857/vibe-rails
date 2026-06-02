@@ -35,9 +35,9 @@ public class CommandService : ICommandService
                     "[Test] VIBERAILS_TEST_FAKE_CLI is active — every CLI session will be a portable echo+sleep fake. This MUST NOT be set in production.");
             }
 
-            // `echo` + `sleep N` are valid in both pwsh (aliases of Write-Output / Start-Sleep)
-            // and bash, so the same command runs the PTY+WS+xterm path on Windows and Linux
-            // without needing a real LLM CLI installed in CI.
+            // `echo` + `sleep N` are valid in pwsh (aliases of Write-Output / Start-Sleep)
+            // and the Unix-like shells we spawn, so the same command runs the
+            // PTY+WS+xterm path without needing a real LLM CLI installed in CI.
             var fakeCmd = $"echo VIBERAILS_FAKE_CLI_READY:{llm}; sleep 600";
             var fakeEnv = new Dictionary<string, string>
             {
@@ -98,6 +98,12 @@ public class CommandService : ICommandService
             ["LC_ALL"] = "en_US.UTF-8",
             ["PYTHONIOENCODING"] = "utf-8"
         };
+
+        // LLM-specific env vars (e.g. Claude's CLAUDE_CODE_FORCE_SYNC_OUTPUT) live in the
+        // env service so all per-LLM injection has one home. These apply with or without a
+        // custom environment.
+        foreach (var kvp in _envService.GetBaseEnvironmentVariables(llm))
+            environment[kvp.Key] = kvp.Value;
 
         if (!string.IsNullOrEmpty(envName))
         {

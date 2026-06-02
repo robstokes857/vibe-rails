@@ -71,9 +71,14 @@ public static class EnvironmentRoutes
             CreateEnvironmentRequest request,
             CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrEmpty(request.Name))
+            // request.Name flows directly into ~/.vibe_rails/envs/{Name} and into the
+            // CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_*_HOME env vars for spawned CLIs.
+            // Reject path traversal, separators, control chars, etc. before doing
+            // anything else.
+            var nameError = EnvironmentNameValidator.Validate(request.Name);
+            if (nameError != null)
             {
-                return Results.BadRequest(new ErrorResponse("Name is required"));
+                return Results.BadRequest(new ErrorResponse(nameError));
             }
 
             if (string.IsNullOrEmpty(request.Cli))
@@ -99,10 +104,23 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse($"CustomPrompt exceeds {MaxCustomPromptLength} character limit."));
             }
 
+            // Reject case-insensitive name collisions across all LLMs. CustomName
+            // becomes the path segment under ~/.vibe_rails/envs/ which is
+            // case-insensitive on Windows ("Nightly" and "nightly" resolve to the
+            // same directory). Per-LLM subdirectories inside that root would then
+            // share credentials with whichever existing env grabbed the path first.
+            var trimmedName = request.Name.Trim();
+            var collision = await repository.FindEnvironmentByNameIgnoreCaseAsync(trimmedName, cancellationToken);
+            if (collision != null)
+            {
+                return Results.Conflict(new ErrorResponse(
+                    $"An environment named '{collision.CustomName}' already exists (matches case-insensitively because the name maps to a shared directory)."));
+            }
+
             var environment = new LLM_Environment
             {
                 LLM = llm,
-                CustomName = request.Name,
+                CustomName = trimmedName,
                 CustomArgs = request.CustomArgs ?? "",
                 CustomPrompt = request.CustomPrompt ?? "",
                 CreatedUTC = DateTime.UtcNow,

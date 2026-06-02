@@ -21,6 +21,13 @@ TerminalEmulator.Tests/fixtures/
 session_*.bin
 session_*.fixture.bin
 **/Fixtures/session_*
+# Debug bundles pulled from viberails.ai (real user session data — never commit).
+# Written by python-scripts/pull_debug_bundle.py.
+bundles/
+**/bundles/
+# Decoded/forensic session dumps (real terminal output) — keep local, never commit.
+*.decoded.txt
+**/*.decoded.txt
 # Approved, sanitized terminal regression fixtures. Keep the broad raw-capture
 # ignores above; add exact exceptions only after review.
 !Tests/Services/Terminal/Fixtures/session_e910eb94_codex_working_falsefire.fixture.bin
@@ -413,3 +420,10 @@ bin_check/
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm
+/IntegrationTest/IntegrationTest.csproj.lscache
+/MCP_Server/MCP_Server.csproj.lscache
+/Pty.Net/Pty.Net.csproj.lscache
+/TerminalEmulator/TerminalEmulator.csproj.lscache
+/TerminalEmulator.Tests/TerminalEmulator.Tests.csproj.lscache
+/Tests/Tests.csproj.lscache
+/VibeRails/VibeRails.csproj.lscache

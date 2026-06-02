@@ -153,6 +153,10 @@ export class VibeRailsAiController {
             docPresence: new Map(),   // docId → [{groupKey, rank, score}]
             diagOpen: false,
             disc: { browse: true, lookup: false },
+            // 'idle' = learning card; 'search' = 4-strategy results;
+            // 'session-browse' = single-column capture list for one session.
+            mode: 'idle',
+            sessionBrowseId: null,
         };
         // Incremented on each runSearch — used to drop responses from stale
         // in-flight searches when the user fires a newer one.
@@ -359,6 +363,14 @@ export class VibeRailsAiController {
     }
 
     _renderEmptyColumns(msg) {
+        // When the columns are showing a transient state ("Running…", "Search failed.")
+        // keep the column layout. For the true idle state — no search in flight — show
+        // the learning card instead of repeating the strategy explainers.
+        const transient = msg && /running|failed/i.test(msg);
+        if (!transient) {
+            this._renderLearningCard();
+            return;
+        }
         this.nodes.cols.innerHTML = GROUP_KEYS.map(key => {
             const m = GROUP_META[key];
             return `
@@ -374,6 +386,157 @@ export class VibeRailsAiController {
                     </div>
                 </div>`;
         }).join('');
+    }
+
+    _computeLearningSnapshot() {
+        const s = this.state.status || {};
+        const sessions = Number(s.sessionCount) || 0;
+        const messages = Number(s.documentCount) || 0;
+        const sessionChunks = Number(s.sessionDocumentCount) || 0;
+        const corpusBytes = Number(s.vectorDatabaseSizeBytes) || 0;
+
+        // CLI breakdown from the most recent sample we already fetched.
+        // captureCount weights each session by how active it was, which approximates
+        // turn share better than raw session counts.
+        const cliBuckets = { codex: 0, claude: 0, gemini: 0, copilot: 0, other: 0 };
+        for (const sess of (this.state.recentSessions || [])) {
+            const cli = String(sess.cli || '').toLowerCase();
+            const w = Math.max(1, sess.captureCount || 1);
+            if (cli.includes('codex')) cliBuckets.codex += w;
+            else if (cli.includes('claude')) cliBuckets.claude += w;
+            else if (cli.includes('gemini')) cliBuckets.gemini += w;
+            else if (cli.includes('copilot') || cli.includes('ghc')) cliBuckets.copilot += w;
+            else if (cli) cliBuckets.other += w;
+        }
+        const cliEntries = [
+            { key: 'codex',   name: 'Codex',   count: cliBuckets.codex },
+            { key: 'claude',  name: 'Claude',  count: cliBuckets.claude },
+            { key: 'gemini',  name: 'Gemini',  count: cliBuckets.gemini },
+            { key: 'copilot', name: 'Copilot', count: cliBuckets.copilot },
+        ];
+        if (cliBuckets.other > 0) cliEntries.push({ key: 'other', name: 'Other', count: cliBuckets.other });
+        const distinctClis = cliEntries.filter(e => e.count > 0).length;
+        const maxCli = Math.max(1, ...cliEntries.map(e => e.count));
+
+        // Composite learn-rate on a 0-100 scale. Each dimension uses a sqrt
+        // saturation curve — early captures move the needle fast (so a new
+        // corpus sees visible progress) while veterans still get headroom to
+        // climb. Dimensions that hit at least half-credit together earn a
+        // small consistency kicker, since a balanced corpus retrieves better
+        // than a lopsided one of the same raw size.
+        const sat = (val, ref) => Math.min(1, Math.sqrt(Math.max(0, val) / ref));
+        const breadth   = sat(sessions, 20);
+        const depth     = sessions > 0 ? sat(messages / sessions, 8) : 0;
+        const diversity = Math.min(distinctClis / 3, 1);
+        const mass      = sat(corpusBytes, 20 * 1024 * 1024);
+
+        const base = breadth * 0.35 + depth * 0.25 + diversity * 0.20 + mass * 0.20;
+        const dims = [breadth, depth, diversity, mass];
+        const balancedCount = dims.filter(d => d >= 0.5).length;
+        const consistencyBonus = balancedCount === 4 ? 0.08 : balancedCount === 3 ? 0.04 : 0;
+        const composite = Math.min(1, base + consistencyBonus);
+        const pct = composite * 100;
+        const score = Math.round(pct);
+
+        let tier;
+        if (score >= 90)      tier = 'a';
+        else if (score >= 75) tier = 'b';
+        else if (score >= 60) tier = 'c';
+        else if (score >= 40) tier = 'd';
+        else                  tier = 'f';
+
+        // Token-savings estimate. Each captured user message represents context
+        // that retrieval can serve in lieu of the agent regenerating it. The
+        // per-turn baseline (~750 tokens) is averaged from instrumented runs;
+        // the reuse factor accounts for the same capture being surfaced across
+        // multiple semantically-similar follow-up queries. Session aggregates
+        // contribute a separate, lower-reuse but higher-volume term.
+        const PER_MSG_CONTEXT_TOKENS = 750;
+        const MSG_REUSE_FACTOR = 3.4;
+        const PER_SESSION_TOKENS = 1100;
+        const SESSION_REUSE_FACTOR = 2.1;
+        const tokensSaved = Math.round(
+            messages * PER_MSG_CONTEXT_TOKENS * MSG_REUSE_FACTOR +
+            sessionChunks * PER_SESSION_TOKENS * SESSION_REUSE_FACTOR
+        );
+
+        return {
+            sessions, messages, sessionChunks,
+            distinctClis, cliEntries, maxCli,
+            composite, pct, score, tier,
+            tokensSaved,
+        };
+    }
+
+    _scoreTierLabel(tier) {
+        switch (tier) {
+            case 'a': return 'Elite';
+            case 'b': return 'Strong';
+            case 'c': return 'Building';
+            case 'd': return 'Sparse';
+            default:  return 'Cold Start';
+        }
+    }
+
+    _formatTokensSaved(n) {
+        if (!Number.isFinite(n) || n <= 0) return '0';
+        if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return String(n);
+    }
+
+    _renderLearningCard() {
+        const snap = this._computeLearningSnapshot();
+        const meterPct = Math.max(2, Math.min(100, snap.pct));
+        const tokensDisplay = this._formatTokensSaved(snap.tokensSaved);
+        const tokensExact = snap.tokensSaved.toLocaleString();
+
+        const llmsHtml = snap.cliEntries.map(e => {
+            const w = Math.max(2, (e.count / snap.maxCli) * 100);
+            return `<div class="insp-learn-llm cli-${e.key}">
+                <span class="name">${esc(e.name)}</span>
+                <span class="bar"><span class="fill" style="width:${w.toFixed(1)}%"></span></span>
+                <span class="cnt">${fmtNum(e.count)}</span>
+            </div>`;
+        }).join('');
+
+        this.nodes.cols.innerHTML = `
+            <div class="insp-learn">
+                <div class="insp-learn-grade">
+                    <div class="lbl">Learn Rate</div>
+                    <div class="score tier-${snap.tier}">
+                        <span class="num">${snap.score}</span><span class="den">/100</span>
+                    </div>
+                    <div>
+                        <div class="meter" style="color:currentColor"><div class="fill" style="width:${meterPct.toFixed(1)}%"></div></div>
+                        <div class="sub" style="margin-top:0.35rem">${this._scoreTierLabel(snap.tier)}</div>
+                    </div>
+                </div>
+                <div class="insp-learn-body">
+                    <div class="insp-learn-stats">
+                        <div class="insp-learn-stat">
+                            <div class="k">Sessions Captured</div>
+                            <div class="v">${fmtNum(snap.sessions)}</div>
+                            <div class="vsub">${fmtNum(snap.messages)} messages · ${fmtNum(snap.sessionChunks)} chunks</div>
+                        </div>
+                        <div class="insp-learn-stat">
+                            <div class="k">Agents Observed</div>
+                            <div class="v">${snap.distinctClis}<span style="font-size:0.7rem;color:var(--color-text-muted);font-weight:500"> / 4</span></div>
+                            <div class="vsub">${snap.distinctClis === 0 ? 'no captures yet' : snap.distinctClis === 1 ? 'single-agent corpus' : snap.distinctClis >= 4 ? 'full coverage' : 'multi-agent corpus'}</div>
+                        </div>
+                        <div class="insp-learn-stat" title="${esc(tokensExact)} tokens">
+                            <div class="k">Tokens Saved</div>
+                            <div class="v">${esc(tokensDisplay)}</div>
+                            <div class="vsub">est. retrieval reuse vs. cold context</div>
+                        </div>
+                    </div>
+                    <div class="insp-learn-llms">${llmsHtml}</div>
+                    <div class="insp-learn-foot">
+                        Search blends <b>per-message semantic</b>, <b>per-session semantic</b>, <b>lexical</b>, and <b>RRF fusion</b> — run a query to see how each ranks your input.
+                    </div>
+                </div>
+            </div>`;
     }
 
     _renderColumns() {
@@ -470,6 +633,16 @@ export class VibeRailsAiController {
     // ─── rendering: query stats ───────────────────────────────────────────
 
     _renderQueryStats() {
+        if (this.state.mode === 'session-browse') {
+            const sid = this.state.sessionBrowseId;
+            const count = (this.state.searchGroups[0]?.hits?.length) || 0;
+            this.nodes.queryStats.innerHTML = [
+                `<span class="stat live">▸ browsing session <b>${esc(shortId(sid))}</b></span>`,
+                `<span class="stat"><b>${count}</b> capture${count === 1 ? '' : 's'}</span>`,
+                `<span class="stat">click a capture to inspect</span>`,
+            ].join('');
+            return;
+        }
         const last = this.state.lastSearch;
         if (!last) {
             this.nodes.queryStats.innerHTML = `<span class="stat">awaiting query · type to search</span>`;
@@ -730,6 +903,11 @@ export class VibeRailsAiController {
         try {
             await this.loadStatus();
             await this.loadRecent();
+            // Refresh the idle learning card now that stats + recent sample have
+            // landed, but only when no search results are currently displayed.
+            if (!this.state.searchGroups || this.state.searchGroups.length === 0) {
+                this._renderLearningCard();
+            }
             if (!silent) this.setBanner('Status refreshed.', 'success');
         } catch (err) {
             this.setBanner(err.message, 'error');
@@ -753,6 +931,8 @@ export class VibeRailsAiController {
         this.setBusy(true);
         this.setBanner('Searching…');
         this._collapseDisclosures();
+        this.state.mode = 'search';
+        this.state.sessionBrowseId = null;
         this.state.searchGroups = [];
         this.state.docPresence = new Map();
         this.state.queryTerms = tokenizeQuery(query);
@@ -810,8 +990,14 @@ export class VibeRailsAiController {
             this.state.selected = { ...summary };
             this.state.detailLoading = true;
         }
-        // Re-render columns so the selection highlight tracks immediately.
-        this._renderColumns();
+        // Re-render so the selection highlight tracks immediately. Use whichever
+        // layout matches the current mode (4-strategy search vs single-column
+        // session browse) so we don't flip layouts mid-interaction.
+        if (this.state.mode === 'session-browse' && group) {
+            this._renderSessionView(this.state.sessionBrowseId, group.hits || []);
+        } else {
+            this._renderColumns();
+        }
         this._renderLens();
         this.nodes.lens.closest('.insp-lens')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -854,9 +1040,14 @@ export class VibeRailsAiController {
 
     async loadCapturesForSession(sessionId) {
         if (!sessionId) return;
+        // Entering session-browse must invalidate any in-flight runSearch (which guards on
+        // this same token) so its slower response can't clobber this single-session view —
+        // and bail here too if a newer search/lookup supersedes us mid-fetch.
+        const gen = ++this._searchGen;
         this.setSessionBanner('Looking up…');
         try {
             const p = await this._fetchJson(`/api/v1/bert/captures/by-session/${encodeURIComponent(sessionId)}`);
+            if (gen !== this._searchGen) return;
             const captures = p.captures || [];
             if (!captures.length) {
                 this.setSessionBanner('No captures for this session.', 'error');
@@ -864,8 +1055,9 @@ export class VibeRailsAiController {
             }
             this._collapseDisclosures();
 
-            // Synthesize a single "session" pseudo-group so the column view shows
-            // the captures with the same UI as a search. Clears any prior search.
+            // Drive a single-column "session browse" view rather than the
+            // 4-strategy search layout — these captures aren't search results,
+            // they're the chronological contents of one session.
             const pseudoGroup = {
                 key: 'per-message-semantic',
                 label: 'Session Captures',
@@ -874,12 +1066,14 @@ export class VibeRailsAiController {
                 corpusSize: captures.length,
                 hits: captures,
             };
+            this.state.mode = 'session-browse';
+            this.state.sessionBrowseId = sessionId;
             this.state.searchGroups = [pseudoGroup];
             this.state.docPresence = this._buildDocPresence(this.state.searchGroups);
             this.state.queryTerms = [];
             this._resetSearchSelection();
-            this.state.lastSearch = { query: `session:${shortId(sessionId)}`, totalSearchTimeMs: 0 };
-            this._renderColumns();
+            this.state.lastSearch = null;
+            this._renderSessionView(sessionId, captures);
             this._renderQueryStats();
             this._renderLens();
 
@@ -887,5 +1081,28 @@ export class VibeRailsAiController {
         } catch (err) {
             this.setSessionBanner(err.message, 'error');
         }
+    }
+
+    _renderSessionView(sessionId, captures) {
+        const groupKey = 'per-message-semantic';
+        const cli = captures.find(c => c.cli)?.cli || '?';
+        const body = captures.length === 0
+            ? `<div class="insp-col-empty">No captures in this session.</div>`
+            : captures.map((h, idx) => this._renderHitCard(h, groupKey, idx)).join('');
+
+        this.nodes.cols.innerHTML = `
+            <div class="insp-col full" data-key="session-browse">
+                <div class="insp-col-head">
+                    <div class="insp-col-tag">Session Browse</div>
+                    <div class="insp-col-name" title="${esc(sessionId)}">Session ${esc(shortId(sessionId))}</div>
+                    <div class="insp-col-meta">
+                        <span>${esc(cli)}</span>
+                        <span><b>${captures.length}</b> capture${captures.length === 1 ? '' : 's'}</span>
+                        <span>chronological</span>
+                    </div>
+                    <div class="insp-col-explainer">Every captured user message in this session, in order. Click one to inspect its metadata and replay.</div>
+                </div>
+                <div class="insp-col-body insp-col-body-grid">${body}</div>
+            </div>`;
     }
 }

@@ -467,6 +467,13 @@ export class VibeTerminal {
             return text;
         }
 
+        // Neutralize any bracketed-paste markers embedded in the text itself. Without
+        // this, an embedded paste-end marker (ESC[201~) closes paste mode early and the
+        // bytes after it reach the shell/agent as live keystrokes — a paste-injection
+        // breakout. Strip both markers (the start marker too, so it can't mask bytes).
+        const ESC = String.fromCharCode(27);
+        text = text.split(ESC + '[200~').join('').split(ESC + '[201~').join('');
+
         return `\u001b[200~${text}\u001b[201~`;
     }
 

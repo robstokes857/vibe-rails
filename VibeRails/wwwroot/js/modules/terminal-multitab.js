@@ -10,6 +10,8 @@ import { TerminalSettings, renderTerminalSettingsPanelHtml } from './terminal-se
 import { TerminalMenu, renderTerminalMenuHtml } from './terminal-menu.js';
 import { TerminalTab } from './terminal-tab.js';
 import { TerminalMultiRun } from './terminal-multirun.js';
+import { TerminalEditorModal } from './terminal-editor-modal.js';
+import { showSendDebugLogModal } from './debug-bundle.js';
 
 // Pending-close grace window: how long a closed tab is held in the undo
 // dropdown before the backend DELETE actually fires. Keep PENDING_CLOSE_MS
@@ -102,10 +104,23 @@ class TerminalManager {
         this._themeSwatches = [];
 
         this.settings = null;
+
+        // Session-scoped draft for the "Open in text editor" scratchpad. Lives on
+        // the manager (not a tab) because it's a composing surface independent of
+        // which tab is active; cleared on a successful send, dropped on destroy.
+        this._editorDraft = '';
     }
 
     isDestroyed() {
         return this._destroyed;
+    }
+
+    getEditorDraft() {
+        return this._editorDraft || '';
+    }
+
+    setEditorDraft(text) {
+        this._editorDraft = typeof text === 'string' ? text : '';
     }
 
     applySavedTerminalSettingsForTab(tabId) {
@@ -268,6 +283,11 @@ class TerminalManager {
         }
     }
 
+    _sendDebugLog() {
+        const active = this.getActiveTab();
+        showSendDebugLogModal(this.app, active?.state?.sessionId || null);
+    }
+
     bindActions() {
         this.tabAdd?.addEventListener('click', () => {
             void this.createAndActivateTab({ selection: DEFAULT_SELECTION });
@@ -317,7 +337,9 @@ class TerminalManager {
             buttonId: 'terminal-menu-btn',
             menuId: 'vb-terminal-menu',
             items: [
-                { id: 'terminal-multirun-btn', onClick: () => this._showMultiRunModal() }
+                { id: 'terminal-multirun-btn', onClick: () => this._showMultiRunModal() },
+                { id: 'terminal-editor-btn', onClick: () => this._showEditorModal() },
+                { id: 'terminal-senddebug-btn', onClick: () => this._sendDebugLog() }
             ]
         });
         this.terminalMenu.mount();
@@ -342,6 +364,10 @@ class TerminalManager {
 
     _showMultiRunModal() {
         new TerminalMultiRun(this).show();
+    }
+
+    _showEditorModal() {
+        void new TerminalEditorModal(this).show();
     }
 
     async restoreTabs() {
@@ -373,7 +399,8 @@ class TerminalManager {
                 label: metadata?.label || null,
                 icon: metadata?.icon || null,
                 accentColor: metadata?.accentColor || null,
-                taskKey: metadata?.taskKey || null
+                taskKey: metadata?.taskKey || null,
+                customLabel: metadata?.customLabel === true
             });
         });
     }
@@ -394,6 +421,8 @@ class TerminalManager {
             icon: options.icon || null,
             accentColor: this.normalizeAccentColor(options.accentColor),
             taskKey: cleanString(options.taskKey),
+            customLabel: options.customLabel === true,
+            renaming: false,
             hasActiveSession: tabInfo.hasActiveSession === true,
             sessionId: tabInfo.sessionId || null,
             status: tabInfo.hasActiveSession ? 'disconnected' : 'not-started',
@@ -423,6 +452,23 @@ class TerminalManager {
             void this.activateTab(state.id, { connectIfNeeded: false });
         });
 
+        // Right-click a tab to rename it (companion to the hover pencil below).
+        button.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            this.beginRenameTab(state.id);
+        });
+
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'vb-terminal-tab-edit';
+        edit.innerHTML = '<i class="fa-solid fa-pen"></i>';
+        edit.title = 'Rename tab';
+        edit.setAttribute('aria-label', 'Rename tab');
+        edit.addEventListener('click', (event) => {
+            event.stopPropagation();
+            this.beginRenameTab(state.id);
+        });
+
         const close = document.createElement('button');
         close.type = 'button';
         close.className = 'vb-terminal-tab-close';
@@ -434,6 +480,7 @@ class TerminalManager {
         });
 
         item.appendChild(button);
+        item.appendChild(edit);
         item.appendChild(close);
 
         const panel = document.createElement('div');
@@ -450,7 +497,7 @@ class TerminalManager {
         this.tabList?.appendChild(item);
         this.tabPanels?.appendChild(panel);
 
-        state.ui = { item, button, close, panel, terminalElement };
+        state.ui = { item, button, edit, close, panel, terminalElement };
 
         const instance = new TerminalTab(this, state);
         instance.statusController = new TabStatusController(state, state.ui, {
@@ -483,7 +530,8 @@ class TerminalManager {
             label: state.label,
             icon: state.icon,
             accentColor: state.accentColor,
-            taskKey: state.taskKey
+            taskKey: state.taskKey,
+            customLabel: state.customLabel
         });
         this.renderTabButton(tab);
         this.applyTabAccent(tab);
@@ -1134,7 +1182,10 @@ class TerminalManager {
     applySelection(tab, selection) {
         const meta = this.getSelectionMeta(selection);
         tab.state.selection = selection;
-        tab.state.label = meta.displayName;
+        // A user-supplied name wins over the auto-generated CLI label.
+        if (!tab.state.customLabel) {
+            tab.state.label = meta.displayName;
+        }
 
         // Update accent color from brand
         const brand = getCliBrand(meta.cli);
@@ -1147,7 +1198,8 @@ class TerminalManager {
             label: tab.state.label,
             icon: tab.state.icon,
             accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey
+            taskKey: tab.state.taskKey,
+            customLabel: tab.state.customLabel
         });
         this.renderTabButton(tab);
         this.applyTabAccent(tab);
@@ -1268,10 +1320,105 @@ class TerminalManager {
             label: tab.state.label,
             icon: tab.state.icon,
             accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey
+            taskKey: tab.state.taskKey,
+            customLabel: tab.state.customLabel
         });
 
         this.applyTabAccent(tab);
+        this.renderTabButton(tab);
+    }
+
+    // ── Tab rename ────────────────────────────────────────────────────────
+
+    // Swap the tab button for an inline <input> in place. The button (and its
+    // status visuals, managed by TabStatusController) is only hidden, never torn
+    // down, so the spinner/accent survive a rename. Enter/blur commits, Escape
+    // cancels, an empty value reverts to the auto-generated CLI label.
+    beginRenameTab(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab || tab.state.renaming) return;
+
+        const item = tab.state.ui?.item;
+        const button = tab.state.ui?.button;
+        if (!item || !button) return;
+
+        tab.state.renaming = true;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'vb-terminal-tab-rename-input';
+        input.value = tab.state.label || '';
+        input.maxLength = 60;
+        input.setAttribute('aria-label', 'Tab name');
+
+        item.classList.add('is-renaming');
+        button.style.display = 'none';
+        item.insertBefore(input, button);
+
+        let settled = false;
+        const cleanup = () => {
+            input.removeEventListener('keydown', onKeydown);
+            input.removeEventListener('blur', onBlur);
+            input.remove();
+            button.style.display = '';
+            item.classList.remove('is-renaming');
+            tab.state.renaming = false;
+        };
+        const commit = () => {
+            if (settled) return;
+            settled = true;
+            const next = input.value;
+            cleanup();
+            this.renameTab(tabId, next);
+        };
+        const cancel = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+        };
+        const onKeydown = (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                commit();
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                cancel();
+            }
+            event.stopPropagation();
+        };
+        const onBlur = () => commit();
+
+        input.addEventListener('keydown', onKeydown);
+        input.addEventListener('blur', onBlur);
+
+        requestAnimationFrame(() => {
+            input.focus();
+            input.select();
+        });
+    }
+
+    renameTab(tabId, label) {
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+
+        const clean = cleanString(label);
+        if (clean) {
+            tab.state.label = clean;
+            tab.state.customLabel = true;
+        } else {
+            // Empty name → drop the custom flag and fall back to the CLI label.
+            tab.state.customLabel = false;
+            tab.state.label = this.getSelectionMeta(tab.state.selection).displayName;
+        }
+
+        this.saveTabMeta(tab.state.id, {
+            label: tab.state.label,
+            icon: tab.state.icon,
+            accentColor: tab.state.accentColor,
+            taskKey: tab.state.taskKey,
+            customLabel: tab.state.customLabel
+        });
+
         this.renderTabButton(tab);
     }
 
@@ -1936,7 +2083,8 @@ class TerminalManager {
                 label: cleanString(metadata.label) || null,
                 icon: cleanString(metadata.icon) || null,
                 accentColor: this.normalizeAccentColor(metadata.accentColor),
-                taskKey: cleanString(metadata.taskKey) || null
+                taskKey: cleanString(metadata.taskKey) || null,
+                customLabel: metadata.customLabel === true
             };
             window.sessionStorage.setItem(`${TAB_META_PREFIX}${tabId}`, JSON.stringify(payload));
         } catch {}
@@ -1951,7 +2099,8 @@ class TerminalManager {
                 label: cleanString(parsed?.label) || null,
                 icon: cleanString(parsed?.icon) || null,
                 accentColor: this.normalizeAccentColor(parsed?.accentColor),
-                taskKey: cleanString(parsed?.taskKey) || null
+                taskKey: cleanString(parsed?.taskKey) || null,
+                customLabel: parsed?.customLabel === true
             };
         } catch {
             return null;

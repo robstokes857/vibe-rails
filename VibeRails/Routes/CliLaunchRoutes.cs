@@ -12,8 +12,16 @@ public static class CliLaunchRoutes
     {
         app.MapGet("/api/v1/environments/{name}/launch", (LlmCliEnvironmentService envService, string name, LLM llm) =>
         {
-            var envVars = envService.GetEnvironmentVariables(name, llm);
-            return Results.Ok(envVars);
+            try
+            {
+                var envVars = envService.GetEnvironmentVariables(name, llm);
+                return Results.Ok(envVars);
+            }
+            catch (ArgumentException ex)
+            {
+                // Name escaped the envs root (containment guard) — reject rather than 500.
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
         }).WithName("GetLaunchEnvironment");
 
         app.MapPost("/api/v1/cli/launch/{cli}", async (

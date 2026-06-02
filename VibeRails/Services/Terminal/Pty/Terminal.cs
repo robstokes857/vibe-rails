@@ -1,6 +1,7 @@
 using Pty.Net;
 using Serilog;
 using VibeRails.Services.Terminal.Consumers;
+using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
 
@@ -41,7 +42,7 @@ public sealed class Terminal : IAsyncDisposable
         }
     }
 
-    public static string GetDefaultShellPath() => OperatingSystem.IsWindows() ? "pwsh.exe" : "bash";
+    public static string GetDefaultShellPath() => ShellDefaults.GetDefaultPtyShellPath();
 
     /// <summary>
     /// Event fired when the PTY process exits (naturally or via kill).

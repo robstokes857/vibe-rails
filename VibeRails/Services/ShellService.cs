@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using VibeRails.Utils;
 
 namespace VibeRails.Services;
 
@@ -46,7 +47,7 @@ public class ShellService(ILogger<ShellService> logger) : IShellService
 
         var psi = new ProcessStartInfo
         {
-            FileName = "pwsh",
+            FileName = ShellDefaults.WindowsCommandShell,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -58,16 +59,17 @@ public class ShellService(ILogger<ShellService> logger) : IShellService
         return psi;
     }
 
-    // Unix: open bash, pass args as positional parameters via "$@" so each arg
-    // is forwarded verbatim without shell re-quoting issues.
-    // bash -c '"$@"' -- cmd arg1 arg2 ...
+    // Unix-like: open the platform command shell, pass args as positional
+    // parameters via "$@" so each arg is forwarded verbatim without shell
+    // re-quoting issues.
+    // zsh/bash -c '"$@"' -- cmd arg1 arg2 ...
     //   $0 = "--" (placeholder script name)
     //   $@ = cmd arg1 arg2 ... → exec'd by the shell
     private static ProcessStartInfo BuildUnixStartInfo(string[] args)
     {
         var psi = new ProcessStartInfo
         {
-            FileName = "bash",
+            FileName = ShellDefaults.GetUnixCommandShellPath(),
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

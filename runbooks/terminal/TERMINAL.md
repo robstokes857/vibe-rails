@@ -1,19 +1,653 @@
 # TERMINAL.md
 
-> **Rob's note (2026-05-14):** I want to come back to this resize reprint
-> bug soon. It is the only known open terminal display bug. The first
-> client-side fix attempt (Codex, 2026-05-14) was reverted because it
-> risked re-opening the 2026-05-05 process-lifetime typing-lag failure
-> mode — see the full write-up directly below and the
-> "Persistent process-wide typing lag" entry further down. Next session
-> on this we should think harder about the **server-side coalesce**
-> direction (bump `WebSocketConsumer.NormalCoalesceDelayMs` for a short
-> window after each `__resize__`) before touching client-side flush
-> timing again. Until then the bug stays.
+> **Rob's note (2026-05-21):** Overall happy with where the terminal sits
+> right now. The stacked-repaints situation is well-understood, the
+> diagnosis below holds up, and day-to-day terminal work is not being
+> impacted. Nothing on the open-bug list feels urgent.
+>
+> **One change is on the table.** The
+> `RESIZE_SYNC_DEBOUNCE_MS = 140 → 2000` bump in `terminal-tab.js`,
+> plus `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1` for Claude in
+> `CommandService.cs`, were originally written on the `cron` branch
+> alongside that work. They were cherry-picked into `main` on 2026-05-21
+> (commit `f20ba34`) so the code is now sitting in the tree — but **this
+> must not ship as default behavior.** The 2 s debounce has a real UX
+> cost: Claude Code only learns the new terminal size ~2 s after the
+> user stops dragging, so a fast drag-then-type still feels off until
+> the size settles. That trade-off needs to be opt-in.
+>
+> **Update 2026-05-21 (later):** The flag has landed in the per-terminal
+> settings panel (Terminal Settings → Rendering → "Resize debounce"),
+> backed by the `viberails_terminal_resizeDebounce` localStorage key.
+> Default is `"default"` (140 ms, pre-fix behavior); the experimental
+> `"extended"` value selects 2 s. `terminal-tab.js` resolves the value
+> per resize via `resolveResizeDebounceMs()`, so toggling the dropdown
+> takes effect on the next resize — no tab restart needed.
+>
+> `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1` is intentionally **not** gated.
+> Per session `2c93b090` analysis it is currently harmless theatre
+> (Claude Code 2.1.142 emits empty BSU/ESU pairs), and it costs
+> nothing to leave on so upstream gets a free win the day Claude
+> Code's wrapping is fixed.
+>
+> The diagnostic test (`Session_2c93b090_StackedRepaintsDiagnostic.cs`)
+> and the env-var pin test (`CommandServiceTests.cs`) are fine to keep
+> as-is regardless of how the flag lands — they pin code-level
+> contracts, not user-facing defaults.
+>
+> See the 2026-05-15 entry below for the full diagnosis. That writeup
+> is still the canonical reference for what the bug is and why this
+> approach works at the trigger layer.
 
-## 2026-05-13 Resize reprint / overprint (sole open bug — accepted, not fixing)
+> **Rob's note (2026-05-15, late):** The "stacked repaints" bug is
+> **understood and fixed at the trigger layer.** Real symptom is N
+> persistent copies of Claude Code's UI on screen, **does not
+> self-correct**, primary trigger is **rapid/sustained resize events**
+> from slow panel-drags (each unique cols×rows reaching the PTY fires
+> a SIGWINCH → Claude Code repaints → xterm.js renders the paint mid
+> non-quiesced reflow → stacked copies persist). Fix: bumped
+> `RESIZE_SYNC_DEBOUNCE_MS` in `terminal-tab.js` from **140 ms → 2000 ms**
+> so the outgoing `__resize__` only fires once the user has been
+> quiet for 2 s. Local xterm fit stays responsive at 100 ms so the
+> on-screen terminal still tracks during the drag — only the server
+> SIGWINCH is gated. The underlying xterm.js-side reason that the
+> same byte stream produces a clean single banner in our C# emulator
+> but stacked copies in xterm.js live-render is **still open** — the
+> 2 s gate suppresses the trigger condition (N rapid SIGWINCHes) so
+> the live-render bug can't manifest, but it doesn't cure the
+> live-render bug itself. See "Why 2 s, why not fix xterm.js" below.
+>
+> **Bug name going forward: "stacked repaints during drag-resize"** (or
+> just "stacked repaints" when context is clear). Avoid: "reprint"
+> (implies single duplicate; reality is N≥2), "flicker"/"flash"
+> (imply transience; symptom is persistent), "resize bug" alone
+> (multiple things called that — qualify with "stacked").
+>
+> The DEC 2026 `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1` env var from earlier
+> today **stays in `CommandService.cs`** but is **not the fix.**
+> Session `2c93b090` proved Claude Code 2.1.142 emits sync sequences
+> as empty `\e[?2026h\e[?2026l` no-op pairs without bracketing the
+> actual redraws, so xterm.js's deferred-render path activates around
+> nothing. Harmless to leave in (and may help once Claude Code's
+> wrapping is fixed upstream), but it's belt-only — not the
+> suspenders. Full triage below.
 
-**Status:** Open. Last reviewed 2026-05-14 — accepted as live-with after a
+## 2026-05-15 Stacked repaints during drag-resize — diagnosis, fix, and lessons
+
+**Status:** Code change landed. **Awaiting Rob's manual re-test using
+the same slow-sidebar-drag repro that produced `fd7ac97f` —** do not
+mark this closed until a fresh slow-drag session shows ≤1 redraw per
+drag in `analyze_doubleprint.py` and no visible stacking on screen.
+
+This entry is the **canonical write-up** for the stacked-repaints bug.
+It supersedes (does not delete) the earlier 2026-05-13 entry, which is
+preserved below as historical context.
+
+### TL;DR
+
+| | |
+|---|---|
+| **Trigger** | Rapid/sustained `__resize__` messages to the server during slow panel-drag → one SIGWINCH per intermediate size → one Claude Code full-screen repaint per SIGWINCH → xterm.js renders the bursts mid-reflow → stacked copies of the UI persist |
+| **Root cause (downstream)** | Unknown xterm.js or pipeline reflow-during-incoming-bytes behavior — bytes are clean per C# emulator, but xterm.js live-render produces stacking. **Not investigated to root**; suppressed at trigger. |
+| **Fix** | `RESIZE_SYNC_DEBOUNCE_MS = 140 → 2000` in `terminal-tab.js`. Trailing-edge debounce: the outgoing `__resize__` only fires after 2 s of quiet on resize events. Each new `onFitChange` callback restarts the timer (`scheduleResizeToPty` already does `clearPendingResizeToPty` before scheduling, so this works for free). |
+| **Side effect** | After the user stops dragging, Claude Code learns the new size ~2 s later. xterm.js itself reflows on the user's screen continuously (100 ms fit debounce in `vibe-terminal.js`, unchanged). |
+| **Sessions** | `f3e25a1e` (2026-05-13, original misread, single-resize), `dd5cc208` (2026-05-07, same misread), `2c93b090` (2026-05-15, no-resize repro from boot animation), `fd7ac97f` (2026-05-15, slow-drag repro that finally exposed the rapid-resize trigger) |
+| **What stays in** | DEC 2026 env var in `CommandService.cs` + its test (`CommandServiceTests.cs`); diagnostic test `Session_2c93b090_StackedRepaintsDiagnostic.cs` (one-shot forensic, kept for archaeology) |
+| **What was rejected** | Codex 2026-05-14 receive-path `setTimeout` hold (reverted, see historical entry); `Ctrl+L`-after-resize-settle (still banned per 2026-04-09 guardrail); server-side `NormalCoalesceDelayMs` bump (not needed once trigger is gated) |
+
+### Symptom (correct version — the 2026-05-13 entry below got this wrong)
+
+- **Persistent stacked repaints**: N copies of Claude Code's
+  full-screen UI (banner, divider, prompt, mode indicator) accumulate
+  on screen at different vertical positions. They stay there. The
+  screen does **not** self-correct on subsequent redraws.
+- **Trigger is rapid resize events** — primary trigger. Most cleanly
+  reproduced by slowly dragging the panel sidebar in VS Code so the
+  terminal container resizes by 1–2 cells at a time, every ~100–500 ms,
+  for a few seconds. Each unique cols×rows reaching the PTY fires
+  another SIGWINCH → another Claude Code full-screen repaint. The
+  faster the drag, the worse the stacking.
+- **Also reproduces from periodic non-resize repaints in some cases.**
+  Session `2c93b090` had zero resize events but Claude Code's
+  boot-animation full-screen repaints still produced stacking. So the
+  bug isn't purely a resize-vs-bytes race; it's a "fast successive
+  repaints arrive at xterm.js while it's still reflowing the previous
+  one" race. Resize storms are just the easiest way to produce that
+  condition.
+- **Not always rooted at the top of the viewport.** Stacked copies
+  appear at whatever cursor baseline each repaint started from. Some
+  repaints emit `\e[H` (home) and paint from row 1; others start from
+  wherever the cursor happens to be. Rows that one repaint didn't
+  touch retain content from a previous repaint that did.
+
+### What we got wrong before, and why
+
+The 2026-05-13 forensic of `f3e25a1e` framed this as **"a brief ~7 ms
+flash on resize that self-corrects."** Three layers of misreading:
+
+1. **"Brief flash" → wrong.** The forensic captured the byte stream
+   correctly (two Claude Code repaints 7 ms apart after one SIGWINCH)
+   and inferred from the byte timing that the visible artifact must
+   also be 7 ms. But the artifact is on the *render* side, not the
+   *bytes* side — xterm.js commits each repaint as a separate DOM
+   update, and once both are committed, both stay visible until
+   something explicitly overwrites the rows the second repaint didn't
+   touch. The artifact is **not** transient.
+2. **"Self-corrects" → wrong.** The 2026-05-13 entry said "the screen
+   then settles into the correct final layout." Rob's visual debug on
+   2026-05-15 disproved this directly. The screen stays stacked.
+3. **"Resize-only / single-resize" → mostly wrong.** The
+   `f3e25a1e`/`dd5cc208` sessions happened to capture moments with
+   only one SIGWINCH visible in the bytes. We took that as the bug's
+   defining shape. The real shape (slow drag → many SIGWINCHes) is
+   much more common in normal use, and there's a separate
+   non-resize-driven variant.
+
+The reason we missed it: **the original forensic process was
+byte-stream-driven, not visual-driven.** A visible artifact on screen
+that the bytes-alone analysis can't reproduce (because the bytes are
+*correct* — see "Bytes are clean" below) needs a screenshot or a
+recording, not just a `decode_session.py` dump. The forensic shop in
+2026-05-13 didn't have either. Lesson noted at the bottom of this
+entry.
+
+### Investigation log (following `SESSION_DEBUG_PLAYBOOK.md`)
+
+Did this end-to-end after Rob pointed at the playbook. Steps below
+match the playbook's numbered workflow.
+
+**Step 1 — Resolve UUIDs.** Rob handed over two sessions:
+- `2c93b090-75bf-4976-af6a-56373576c0ee` — visual debug, shows three
+  stacked banners on screen during boot animation, no drag involved.
+- `fd7ac97f-0b7b-4c0b-9c32-4daf9030392d` — slow sidebar drag,
+  reproduces stacking with rapid resize events.
+
+**Step 2 — Decode the raw stream.** `python decode_session.py …`
+produced `<uuid>.decoded.txt` for both. Inspected for known suspects
+(`\e[2J` storms, CUP fusion, bracketed paste, prompt glyphs,
+dropdown lines).
+
+**Step 4 — Classify.** Per the playbook table: symptom is "xterm.js
+replay double-prints / loses redraws / glitches on resize" → subsystem
+is `TerminalEmulator` → required step before testing is **run
+`analyze_doubleprint.py` first**.
+
+**`analyze_doubleprint.py` findings — `2c93b090` (boot animation, no drag):**
+
+```
++ 2.142s  #6289863     16B  [SYNC_ON]                          # empty BSU+ESU
++ 2.143s  #6289864   1636B  [-]                                 # 1st banner paint
++ 6.223s  #6289867   1936B  [HOME,EOL_ERASE_x24]               # 2nd paint, ~4s later
++ 6.229s  #6289868     16B  [SYNC_ON]                          # empty BSU+ESU
++ 6.238s  #6289869   1744B  [HOME,EOL_ERASE_x22]               # 3rd paint
++11.341s  #6289870   1726B  [HOME,EOL_ERASE_x22] fp=baaaf645…  # DUPLICATE fp of #6289869
++11.346s  #6289871     16B  [SYNC_ON]
++11.347s  #6289872   1815B  [HOME,EOL_ERASE_x21]               # yet another full paint
++42.840s  #6289899   1158B  [-]                                # …and so on
+```
+- 50+ standalone 16-byte `SYNC_ON` chunks across the session, each
+  containing exactly `\e[?2026h\e[?2026l` — Claude Code emitting
+  empty BSU/ESU pairs that do not bracket the actual paints.
+- All `HOME,EOL_ERASE_xN` redraw chunks erase only 19–24 lines, but
+  the terminal is 27 rows tall. Rows 23–27 are never touched by any
+  redraw, so any prior content there survives.
+- Chunks `#6289869` and `#6289870` have **identical fingerprints**
+  5 s apart — Claude Code emits the exact same full redraw twice.
+
+**`analyze_doubleprint.py` findings — `fd7ac97f` (slow sidebar drag):**
+
+```
++ 4.627s  #6313694   1791B  [HOME,EOL_ERASE_x20]
++ 4.642s  #6313695   1827B  [HOME,EOL_ERASE_x19]               # 15 ms after previous
++ 4.877s  #6313696   1821B  [HOME,EOL_ERASE_x19] DUP fp        # 235 ms after #6313695
++ 4.892s  #6313697   1819B  [HOME,EOL_ERASE_x19]               # 15 ms
++ 5.710s  #6313698   1813B  [HOME,EOL_ERASE_x19] DUP fp
++ 5.716s  #6313699   1811B  [HOME,EOL_ERASE_x19]               # 6 ms
++ 6.061s  #6313700   1805B  [HOME,EOL_ERASE_x19] DUP fp
++ 6.077s  #6313701   1803B  [HOME,EOL_ERASE_x19]               # 16 ms
++ 6.276s  #6313702   1797B  [HOME,EOL_ERASE_x19] DUP fp
++ 6.283s  #6313703   1795B  [HOME,EOL_ERASE_x19]               # 7 ms
++ 7.077s  #6313704   1789B  [HOME,EOL_ERASE_x19] DUP fp
++ 7.083s  #6313705   1787B  [HOME,EOL_ERASE_x19]               # 6 ms
++ 7.575s  #6313706   1660B  [HOME,EOL_ERASE_x19]
++ 7.582s  #6313707   1779B  [HOME,EOL_ERASE_x19]               # 7 ms
+```
+- **11 full-screen redraws in ~3 seconds** during the slow drag
+  (between +4.6 s and +7.6 s).
+- Many pairs fire 6–16 ms apart — these are the rapid post-SIGWINCH
+  repaints Claude Code emits in response to each resize event.
+- Several duplicate-fingerprint redraws — Claude Code occasionally
+  emits the same paint twice, presumably one for the SIGWINCH and one
+  for some other refresh trigger.
+
+**Step 5+6 (modified for this bug shape).** The playbook's
+`Tests/Services/CleanedInput/` test pattern is for prompt-extraction
+bugs in `CleanedUserInputService`. This bug is **not** in that
+subsystem (the playbook classification table actually directs xterm-replay
+bugs to `TerminalEmulator.Tests/FixtureReplayTests.cs` pattern), so
+the fixture/test step we did was:
+
+1. Wrote `TerminalEmulator.Tests/Session_2c93b090_StackedRepaintsDiagnostic.cs`
+   (one-shot forensic, not a regression). Replayed `2c93b090`'s
+   16,730 bytes through `Terminal` at 171×27 (the dimensions in
+   `\e[8;27;171t`). Dumped converged live grid + scrollback.
+2. Created companion fixture `TerminalEmulator.Tests/fixtures/session_2c93b090_full.bin`.
+
+**Result — the C# emulator converges to ONE banner.** Full grid dump:
+
+```
+[L00] | ▐▛███▜▌   Claude Code v2.1.142
+[L01] |▝▜█████▛▘  Opus 4.7 (1M context) with high effort · Claude Max
+[L02] |  ▘▘ ▝▝    C:\source\vibe-rails
+[L03] |
+[L04] |> hi
+[L05] |
+[L06] |● Hi! What would you like to work on?
+[L07] |
+[L08] |✻ Sautéed for 1s
+[L09] |
+[L10] |─────────────…────────  (full-width divider, 171 cols)
+[L11] |>
+[L12] |─────────────…────────
+[L13] |  ⏵⏵ auto mode on (shift+tab to cycle)
+[L14] | (empty)
+[L15..L26] | (all empty)
+```
+
+- Exactly **one** "Claude Code" string in the live grid.
+- Zero scrollback rows.
+- Cursor at row 13, col 170 (final stable position).
+- Not in alt screen.
+
+**So the bytes are clean.** Our C# emulator (which is the same code
+path that produces `TerminalGridSerializer.Serialize` snapshots for
+reconnect) does not produce stacking when fed the exact byte stream
+that produced stacking in xterm.js live-render.
+
+**Step 8 — Fix the smallest piece.** The downstream cause (xterm.js
+mishandling something during reflow-with-incoming-bytes) is real but
+out of scope for this fix. The trigger (rapid SIGWINCHes from
+non-debounced sustained resize events) is in scope, well-understood,
+and one line:
+
+```js
+// VibeRails/wwwroot/js/modules/terminal-tab.js
+const RESIZE_SYNC_DEBOUNCE_MS = 2000;   // was 140
+```
+
+Why this works: `onFitChange` is wired to `scheduleResizeToPty()`
+which does `clearPendingResizeToPty()` before setting a new timeout.
+Each new fit during the drag restarts the 2 s timer. Only when the
+user has been quiet on resize for 2 s does the outgoing `__resize__`
+actually fire, the server resizes the PTY, Claude Code gets exactly
+one SIGWINCH, and emits exactly one final repaint.
+
+The bug needs N≥2 rapid SIGWINCHes to manifest visibly. With N=1 per
+drag, the live-render bug has no opportunity to fire.
+
+### Why 2 s, why not fix xterm.js
+
+**The xterm.js live-render bug is still open** — when xterm.js
+receives a burst of full-screen redraws while it's still committing
+the previous one (or while a reflow is in flight), the result
+visually stacks. The same bytes converge cleanly in our C# emulator
+and would presumably converge cleanly in xterm.js too if the bytes
+arrived in one task. Suspects include:
+
+- xterm.js's parser-vs-renderer task split (rows committed before all
+  bytes for the frame are parsed).
+- Empty `\e[?2026h\e[?2026l` pairs firing `_onRequestRefreshRows.fire(void 0)`
+  at unexpected times (xterm v6 sync output handler).
+- `WebSocketConsumer.NormalCoalesceDelayMs = 4 ms` chunking redraws
+  into separate WS frames that xterm.js commits as separate paints.
+- Some interaction between fit-reflow and incoming-bytes when both
+  happen in the same render frame.
+
+We chose **trigger-side suppression** (debounce the outgoing resize)
+over **root-cause fix** (find and fix the xterm.js issue) because:
+
+1. **Cost.** The xterm.js fix would require headless xterm replay
+   harness + bisection on which sequence triggers it + likely an
+   upstream patch. Multi-day. The trigger-side fix is one line.
+2. **Justification.** Users resize panels rarely and deliberately.
+   A 2 s settle latency on Claude Code learning the new size is
+   barely perceptible — the local xterm fit (at 100 ms) makes the
+   on-screen terminal track during the drag, so the user sees the
+   resize happening live. They only experience the 2 s wait if they
+   look closely at "when does Claude Code's prompt area redraw to
+   the new dimensions."
+3. **Reversibility.** One-line revert if it doesn't work or causes
+   secondary issues. The constant is in one place.
+
+**Numerical justification for 2 s vs 200–500 ms** (community
+recommendations are around 150–200 ms for fit-debounce in xterm.js +
+fit-addon stacks):
+
+- Rob's repro is a **slow** drag with 100–500 ms gaps between mouse
+  movements. A 200 ms debounce would still let multiple SIGWINCHes
+  through during the drag. A 500 ms might be enough but is close to
+  the user's drag rhythm.
+- VS Code's own integrated terminal **does not debounce** the
+  panel-resize → SIGWINCH path (treated as "as-designed" per
+  `microsoft/vscode#71728`), so we have no reference number from
+  them. We're going stricter on purpose.
+- 2 s is safely outside the human drag-pause window for "I'm still
+  resizing." It guarantees the user really stopped before the gate
+  opens.
+
+If 2 s feels too laggy in practice, **tune it down** by halving
+(2000 → 1000 → 500) and re-running the slow-drag repro until
+stacking returns. The minimum that still suppresses the bug is the
+right value. **Do not** reduce below 500 ms without re-doing the
+manual repro — the rapid-pair patterns in `fd7ac97f` were as quick
+as 6 ms apart.
+
+### Verification gate (must pass before this section gets a "Verified" status)
+
+1. **Slow-drag repro (same gesture that produced `fd7ac97f`).**
+   - Open Claude Code in the VibeRails web terminal (VS Code extension
+     or browser, either is fine — both go through the same
+     `terminal-tab.js` debounce path).
+   - Slowly drag the VS Code sidebar or panel divider to change the
+     terminal's column count, with deliberate 100–500 ms pauses
+     between movements, for at least 3–5 seconds.
+   - Let go.
+   - Wait 2 s.
+   - **Expected:** terminal reflows once, Claude Code's banner /
+     divider / prompt redraws once at the final size. No stacked
+     copies. No visible artifact.
+2. **Capture the session ID** that produced the test drag. Run:
+   ```
+   python python-scripts/analyze_doubleprint.py <new-session-id>
+   ```
+   **Expected:** ≤1 redraw chunk per drag gesture (not 11 like
+   `fd7ac97f`). Empty `SYNC_ON` chunks may still appear since Claude
+   Code's empty-BSU/ESU bug is unrelated to this fix; ignore them.
+3. **Quick-resize sanity check.** Drag the panel rapidly back and
+   forth (Rob's original 2026-05-15 morning repro shape). The bug
+   was easier to trigger this way too. **Expected:** same outcome —
+   one final repaint after letting go, no stacking.
+4. **No-resize sanity check.** Launch Claude Code, do nothing for
+   ~30 s, observe the boot animation and any spinner ticks.
+   **Expected:** still might show stacking on the boot animation if
+   Claude Code's repaint cadence happens to be fast enough. This is
+   the open xterm.js issue. The 2 s debounce does **not** fix the
+   non-resize variant. If this variant is observable in practice,
+   we'll have to revisit the xterm.js root cause.
+5. **If all four checks pass:** update this entry's status to
+   "Verified <date>, session `<id>`" and the Rob's-note at top of
+   file accordingly.
+
+### What stays in, what's new, what's old
+
+| File | What | Status |
+|---|---|---|
+| `VibeRails/wwwroot/js/modules/terminal-tab.js` | `RESIZE_SYNC_DEBOUNCE_MS = 2000` (was 140) | **NEW** — the actual fix |
+| `VibeRails/Services/Terminal/Commands/CommandService.cs` | `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1` for `LLM.Claude` | KEPT — harmless, may matter once Claude Code upstream fixes empty-BSU/ESU |
+| `Tests/Services/Terminal/CommandServiceTests.cs` | Env-var contract pin (Claude positive + 3 negatives) | KEPT — pins the contract |
+| `TerminalEmulator.Tests/Session_2c93b090_StackedRepaintsDiagnostic.cs` | One-shot forensic: replays `2c93b090` bytes → dumps converged grid | KEPT — useful archaeology if the bug returns |
+| `TerminalEmulator.Tests/fixtures/session_2c93b090_full.bin` | Fixture for the above | KEPT |
+
+Did **not** change:
+
+- `VibeRails/Services/Terminal/Consumers/WebSocketConsumer.cs` — server-side coalesce stays at `NormalCoalesceDelayMs = 4 ms`.
+- `VibeRails/wwwroot/js/modules/vibe-terminal.js` — local fit debounce stays at 100 ms (immediate user feedback during drag).
+- `VibeRails/wwwroot/js/modules/terminal-tab.js`'s `socket.onmessage` — still uses `queueMicrotask`, no `setTimeout` on receive path.
+- `TerminalResizeCoordinator.EnableDebouncedRedrawOnResize` — still `false` (would conflict with the 2026-04-09 "no Ctrl+L pokes" guardrail).
+
+### Guardrails (do not unwind)
+
+- **Do not reduce `RESIZE_SYNC_DEBOUNCE_MS` below 500 ms** without
+  re-running the slow-drag repro. The fastest rapid-pair in `fd7ac97f`
+  was 6 ms apart; 500 ms is a reasonable empirical lower bound.
+- **Do not reintroduce `Ctrl+L`-after-resize pokes.** 2026-04-09
+  guardrail (the prior "stacked banners" bug was caused by exactly
+  this — Ctrl+L on attach scrolling banner rows into scrollback over
+  reconnects). Sending fewer SIGWINCHes (this fix) is the right way
+  to reduce repaints; sending fake redraw hints is not.
+- **Do not add `setTimeout`-based output coalesce on `socket.onmessage`.**
+  2026-05-05 occlusion-throttle landmine still applies (1–3 s per
+  keystroke for the lifetime of a fresh VS Code process). The
+  receive path must stay on `queueMicrotask`.
+- **Do not gate the local `vibe-terminal.js` fit at >100 ms.** User
+  wants the on-screen terminal to track the drag — gating that too
+  makes the resize feel laggy. Only the *outgoing* `__resize__` is
+  debounced at 2 s.
+- **Do not delete `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1` from
+  `CommandService`** without checking whether Claude Code has shipped
+  a fix for the empty-BSU/ESU emission bug. If it has, the env var
+  starts doing real work (proper bracketing → xterm.js deferred
+  render → atomic frame commits) and is suddenly load-bearing.
+
+### Open downstream work (not blocking)
+
+The xterm.js live-render bug that turns clean bytes into stacked
+copies is **not investigated to root**. Suggested approach if/when
+we revisit:
+
+1. Write a Node test in `UITests/` using `@xterm/headless` that feeds
+   `fd7ac97f`'s byte stream into a fresh `Terminal` and dumps the
+   final cell grid. Compare against
+   `Session_2c93b090_StackedRepaintsDiagnostic`'s C# converged grid.
+2. If the headless xterm grid is **also clean** (one banner), then
+   the bug is in the browser xterm.js *render* path specifically —
+   look at DOM/canvas commits, reflow timing, the WebGL/Canvas
+   renderer addon (if we ship one).
+3. If the headless xterm grid is **stacked**, then xterm.js's
+   *parser* produces different cell state than our C# emulator for
+   the same bytes — bisect on which escape sequence triggers it.
+   Likely candidates: empty `\e[?2026h\e[?2026l` interacting with
+   reflow, or `\e[K` + absolute-CUP-after-`\e[H` ordering.
+4. Report findings upstream at `xtermjs/xterm.js` if the cause is in
+   xterm.js itself. Our `xterm.min.js` v6.0.0 was published Nov 2025;
+   they may have already fixed this on main.
+
+This work is **optional**. The 2 s debounce closes the user-visible
+symptom for the common case. The non-resize variant (boot animation
+stacking, like `2c93b090`) is rarer and the user can refresh the
+terminal to recover. Investigate when convenient, not urgently.
+
+### Lessons (for future Claude / Rob / anyone reading)
+
+1. **A user screenshot is worth a thousand decoded chunks.** The
+   2026-05-13 forensic interpreted byte timing as visual timing and
+   called this a "transient flash" for two days. The first time Rob
+   actually showed a screenshot, the misreading was obvious in 30
+   seconds. **If a bug is described in visual terms, get a visual
+   capture before doing byte forensics.** Bytes are necessary but
+   not sufficient.
+2. **Follow `SESSION_DEBUG_PLAYBOOK.md` early, not late.** The
+   playbook explicitly says "xterm.js replay double-prints / loses
+   redraws / glitches on resize → run `analyze_doubleprint.py` first."
+   Skipping this step on 2026-05-15 morning cost a couple of hours
+   of speculation about server-side coalesce vs DEC 2026 before the
+   tool surfaced the rapid-resize trigger pattern immediately.
+3. **Trust the user's bug name.** Rob called this "the reprint /
+   double-print bug" from the start. The 2026-05-13 entry tried to
+   reframe it as a "resize flicker" and built the wrong mental model
+   from there. The user's working name was closer to truth — the
+   bug literally is the same content printed multiple times.
+4. **Rapid-resize debounce is older than you think.** The
+   `RESIZE_SYNC_DEBOUNCE_MS` constant already existed at 140 ms in
+   `terminal-tab.js` — that's been catching *some* class of resize
+   spam since whenever it was introduced. The bug fixed here is
+   strictly "the debounce window is shorter than the user's slow-drag
+   rhythm." VS Code itself **had** a debounced resize in 1.25, lost
+   it by 1.28 (per Tyriar in `microsoft/vscode#58975`), and didn't
+   reinstate. So we're going stricter than VS Code on purpose — and
+   for a defensible reason (the underlying xterm.js race we haven't
+   fixed yet).
+5. **Atomic-protocol fixes (DEC 2026) require the producer's
+   cooperation.** Claude Code 2.1.142 advertises sync output support
+   when forced via env var, but emits empty BSU/ESU pairs that don't
+   wrap actual redraws. Real fix needs upstream patch at
+   `anthropics/claude-code`. Until then, the env var is theatre —
+   it makes the byte stream *look* like it's bracketed but produces
+   no actual atomicity. Don't trust a protocol fix until you've
+   verified the producer is using the protocol correctly, not just
+   emitting its sequences.
+
+### Reference: session forensic data
+
+All four canonical repros live in `~/.vibe_rails/state.db`
+(SessionLogs table) and can be re-replayed with `decode_session.py`
+and `analyze_doubleprint.py`:
+
+- **`f3e25a1e-c0eb-4834-a3d2-0eace2bb0e1f`** (2026-05-13) — single
+  SIGWINCH 150×10 → 150×28, two repaints 7 ms apart. The original
+  "transient flash" misread came from this. Saved binary fixture
+  exists at `runbooks/terminal/repro-fixtures/session_f3e25a1e_resize_reprint.bin`
+  (the two suspect chunks, 1512 B + 1974 B = 3486 B).
+- **`dd5cc208-8b09-4473-8268-0a565a5bd55e`** (2026-05-07) — same shape
+  as `f3e25a1e`, longer session. Same misread.
+- **`2c93b090-75bf-4976-af6a-56373576c0ee`** (2026-05-15 AM) — boot
+  animation alone produced stacking, no resize. Claude Code 2.1.142.
+  Visual screenshot at `OneDrive/Desktop/1.png` (local to Rob, not in
+  repo). 42 empty `?2026` toggles. Bytes converge cleanly through C#
+  emulator. Fixture at
+  `TerminalEmulator.Tests/fixtures/session_2c93b090_full.bin`.
+- **`fd7ac97f-0b7b-4c0b-9c32-4daf9030392d`** (2026-05-15 PM) — slow
+  sidebar drag, 11 redraws in 3 s, rapid-pair pattern (6–235 ms
+  between redraws). The session that finally exposed the trigger.
+
+---
+
+## 2026-05-15 (earlier today) DEC 2026 candidate fix — disproven, code stays in
+
+**What changed:**
+
+```csharp
+// VibeRails/Services/Terminal/Commands/CommandService.cs
+if (llm == LLM.Claude)
+{
+    environment["CLAUDE_CODE_FORCE_SYNC_OUTPUT"] = "1";
+}
+```
+
+**Why this works:**
+
+DEC private mode 2026 ("Synchronized Output") lets the application bracket
+a burst of redraw bytes with `CSI ?2026 h` (BSU = Begin Synchronized
+Update) and `CSI ?2026 l` (ESU = End Synchronized Update). xterm.js v6.0.0
+buffers parser-state updates between BSU and ESU and only commits to the
+DOM atomically on ESU (or after a 1-second safety timeout). Two server
+frames 7 ms apart bracketed inside one BSU/ESU pair → one DOM commit,
+zero flicker, regardless of WS task boundaries or `setTimeout` throttling.
+
+This is the upstream-blessed contract that VS Code, ghostty, kitty,
+contour, and tmux all implement. Anthropic ships Claude Code with sync
+output support but **2.1.110+ regressed** from runtime `DECRQM` capability
+detection to a hardcoded TERM allowlist (`xterm-ghostty`, `xterm-kitty`
+work; `xterm-256color` and the default ConPTY value don't). Our ConPTY
+child lands off the allowlist, so sync output stayed dark and the two
+post-resize redraw frames committed as separate paints — the visible
+reprint flash. Tracking: `anthropics/claude-code#49584` (2.1.110
+regression report), `anthropics/claude-code#55613` (still broken 2.1.126).
+
+Anthropic's documented workaround for terminals their TERM-sniffing
+misses is the **`CLAUDE_CODE_FORCE_SYNC_OUTPUT=1`** env var, added
+May 2026. That's what we now set per-PTY when the LLM is Claude.
+
+**Receiver-side verification:**
+
+Confirmed `VibeRails/wwwroot/assets/xterm/xterm.min.js` (v6.0.0 per the
+bundle header comment) has the full deferred-render path:
+
+- `case 2026: this._coreService.decPrivateModes.synchronizedOutput=!0`
+  (BSU enable handler)
+- `case 2026: this._coreService.decPrivateModes.synchronizedOutput=!1,
+  this._onRequestRefreshRows.fire(void 0)` (ESU disable + atomic flush)
+- `if(this._coreService.decPrivateModes.synchronizedOutput) return void
+  this._syncOutputHandler.bufferRows(e,t)` (renderer routes deferred
+  while sync is active)
+- 1000 ms safety timeout literally visible as `1e3` in the source
+- DECRQM query response so capability detection works for any future
+  consumer that probes us
+
+**Why this beats the alternatives that were on the table:**
+
+| Approach | Trade-off |
+|---|---|
+| Client-side `setTimeout(40ms)` hold (Codex, 2026-05-14) | Re-opens the `setTimeout` occlusion-throttle landmine (1–3 s/keystroke under fresh-Code.exe) — **rejected** |
+| Server-side `NormalCoalesceDelayMs` bump to ~20 ms for ~200 ms post-`__resize__` | Heuristic timing; still races; only catches the specific 7 ms-apart shape — would have been my next try |
+| **DEC 2026 env var (this fix)** | Atomic by protocol, no timers, no race window, no client/server code changes, works for any number of frames in any window |
+
+**Caveats / known limits:**
+
+- Only fixes **Claude Code**. If Codex/Copilot ever show the same shape
+  of reprint, they'd need either an analogous env var (Codex has its own
+  sync-output gating story) or a separate mitigation. Forensic profile
+  for the open repro sessions was Claude Code only, so this is enough.
+- Depends on Claude Code keeping `CLAUDE_CODE_FORCE_SYNC_OUTPUT` as a
+  supported env var. If they retire it, the bug returns; the regression
+  test in `CommandServiceTests` won't catch that (it only pins **we**
+  set the var, not that Claude Code **honors** it). A future repro of
+  the artifact in a fresh session should re-check the byte stream for
+  `?2026h`/`?2026l` presence — see "How to verify" below.
+- Snapshot serializer (`TerminalGridSerializer`) does not track or
+  re-emit sync output state on reconnect. That is fine: reconnect
+  snapshots are a single atomic frame already.
+
+**How to verify the fix worked:**
+
+After updating, in a real Claude Code session, dump a fresh session's
+bytes and grep for `?2026h` / `?2026l`:
+
+```
+python python-scripts/decode_session.py <session-id>
+python python-scripts/show_chunks.py <session-id> <suspect-chunks>
+```
+
+The repro sessions `f3e25a1e-c0eb-4834-a3d2-0eace2bb0e1f` and
+`dd5cc208-8b09-4473-8268-0a565a5bd55e` showed **zero** `?2026` toggles.
+A post-fix session should show them bracketing the post-resize redraws.
+
+**Guardrails for future changes:**
+
+- Do not strip or rewrite `?2026h`/`?2026l` anywhere in the consumer
+  pipeline. They must reach xterm.js untouched.
+- If you migrate the env-merging code path, keep the
+  `llm == LLM.Claude → CLAUDE_CODE_FORCE_SYNC_OUTPUT=1` branch — the
+  `CommandServiceTests` pins this contract.
+- If Anthropic switches Claude Code back to runtime capability detection
+  (the right fix), the env var becomes a no-op and can stay or be
+  removed without functional change. No urgency.
+- Do **not** introduce client-side `setTimeout`-based receive-path
+  coalescing as a "belt and suspenders" backup. The 2026-05-05 occlusion
+  throttling failure mode still applies; the protocol-level fix is the
+  only one that does not interact with it.
+
+---
+
+## 2026-05-13 Resize reprint / overprint — original analysis (historical, symptom characterization corrected 2026-05-15)
+
+> **Correction (2026-05-15):** The "Symptom" and "Root cause shape"
+> sections below describe a **brief ~7 ms transient flash that
+> self-corrects**. That is **wrong**. Visual debug of session
+> `2c93b090` on 2026-05-15 showed the real symptom is **persistent
+> stacked repaints that do not self-correct**, and the trigger is not
+> limited to resize (boot-time periodic redraws reproduce it too). See
+> the 2026-05-15 entry above for the corrected symptom and the new
+> investigation plan. The rest of the analysis below — the rejected
+> client-side `setTimeout` hold, the explanation of why two frames
+> arrive 7 ms apart, the explicit "do not reintroduce `setTimeout` on
+> the receive path" guardrail — remains load-bearing and is preserved
+> intact. The forensic data on `f3e25a1e` / `dd5cc208` itself is also
+> still accurate; the misreading was in interpreting that data as
+> describing a transient artifact when those captured sessions likely
+> just happened to settle quickly due to follow-on redraws painting
+> over the stacked state. New investigations should treat the bug as
+> "stacked repaints that accumulate during the session" — see
+> proposed canonical name at top of file.
+
+**Status:** Superseded 2026-05-15 by the DEC 2026 env-var fix (see entry
+above). Kept here because the forensic profile, the rejected client-side
+hold attempt, and the explicit "do not reintroduce `setTimeout` on the
+receive path" reasoning are still load-bearing context — if the artifact
+ever returns, this section is the starting point for re-investigation
+before the fix entry above.
+
+**Original status (2026-05-14):** Open, accepted as live-with after a
 candidate fix was investigated, prototyped, and rejected on the analysis
 below. The observed impact is small (a brief ~7 ms visual flash at one
 resize moment, then the screen self-corrects); the available client-side

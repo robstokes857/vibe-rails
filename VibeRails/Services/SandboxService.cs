@@ -36,6 +36,10 @@ namespace VibeRails.Services
 
         private static readonly Regex ValidNameRegex = new(@"^[a-zA-Z0-9_-]+$", RegexOptions.Compiled);
 
+        // Bounds the name that becomes a path segment (Path.Combine) and a git branch.
+        // Mirrors EnvironmentNameValidator's cap so an over-long name can't overrun MAX_PATH.
+        private const int MaxSandboxNameLength = 64;
+
         public SandboxService(IRepository repository)
         {
             _repository = repository;
@@ -46,6 +50,9 @@ namespace VibeRails.Services
             // Validate name
             if (string.IsNullOrWhiteSpace(name))
                 throw new InvalidOperationException("Sandbox name is required.");
+
+            if (name.Length > MaxSandboxNameLength)
+                throw new InvalidOperationException($"Sandbox name must be {MaxSandboxNameLength} characters or fewer.");
 
             if (!ValidNameRegex.IsMatch(name))
                 throw new InvalidOperationException("Sandbox name can only contain alphanumeric characters, hyphens, and underscores.");

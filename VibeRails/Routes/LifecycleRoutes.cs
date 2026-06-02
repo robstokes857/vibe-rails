@@ -9,7 +9,13 @@ public static class LifecycleRoutes
 {
     private const string BrowserOwnerPrefix = "browser:";
     private static readonly TimeSpan BrowserPulseTtl = TimeSpan.FromSeconds(75);
-    private static readonly TimeSpan BrowserCloseShutdownDelay = TimeSpan.FromMinutes(1);
+    // Grace window after the last browser unload before we stop the --web host. Has
+    // to cover a normal refresh + reconnect, including slow-Wi-Fi cases where the
+    // new tab's first heartbeat lands more than a few seconds after the closing
+    // tab's unload. 3s was too aggressive (a single hiccup tore down the host
+    // while a refresh was in flight); 15s is the smallest value we landed on that
+    // survives a ~10s NIC stall reliably on a tethered phone.
+    private static readonly TimeSpan BrowserCloseShutdownDelay = TimeSpan.FromSeconds(15);
     private static int _browserCloseShutdownRequested;
 
     public static void Map(WebApplication app)
@@ -98,7 +104,7 @@ public static class LifecycleRoutes
         {
             try
             {
-                await Task.Delay(BrowserCloseShutdownDelay);
+                await Task.Delay(BrowserCloseShutdownDelay, hostApplicationLifetime.ApplicationStopping);
 
                 if (localClientTracker.HasActiveOwnersWithPrefix(BrowserOwnerPrefix))
                 {
@@ -121,6 +127,10 @@ public static class LifecycleRoutes
                     Environment.ProcessId,
                     detail);
                 hostApplicationLifetime.StopApplication();
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal shutdown.
             }
             catch (Exception ex)
             {

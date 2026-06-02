@@ -306,6 +306,17 @@ namespace VibeRails.DTOs
         string Message
     );
 
+    // Debug Bundle DTOs (remote debug-log export)
+    public record DebugBundleSendRequest(
+        string? Message
+    );
+
+    public record DebugBundleSendResponse(
+        bool Success,
+        string Status,
+        string Message
+    );
+
     public record AppSettingsDto(
         bool RemoteAccess,
         string ApiKey,
@@ -671,6 +682,9 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(VersionResponse))]
     [JsonSerializable(typeof(ApiVersionResponse))]
     [JsonSerializable(typeof(MessageResponse))]
+    // Debug Bundle DTOs
+    [JsonSerializable(typeof(DebugBundleSendRequest))]
+    [JsonSerializable(typeof(DebugBundleSendResponse))]
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(AppSettingsDto))]
     // Remote PIN DTOs

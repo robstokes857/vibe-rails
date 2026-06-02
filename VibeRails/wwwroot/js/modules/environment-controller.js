@@ -1185,7 +1185,7 @@ export class EnvironmentController {
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Codex CLI Settings</h6>
                 <div class="mb-3">
-                    <label class="form-label">Starting Message</label>
+                    <label class="form-label">Initial Message</label>
                     <textarea class="form-control" id="codex-prompt" rows="3" maxlength="6000" placeholder="Please review the code changes. Look for bugs, code smells, and security issues.">${promptValue}</textarea>
                     <small class="form-text text-muted">Passed as <code>codex "&lt;text&gt;"</code> and recorded as the session's first user input.</small>
                 </div>

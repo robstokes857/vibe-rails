@@ -1,0 +1,76 @@
+using Moq;
+using VibeRails.DTOs;
+using VibeRails.Interfaces;
+using VibeRails.Services;
+using VibeRails.Services.LlmClis;
+using VibeRails.Services.Terminal;
+using Xunit;
+
+namespace Tests.Services.Terminal;
+
+/// <summary>
+/// Pins the env-var contract for Claude Code's DEC 2026 synchronized output.
+/// claude-code 2.1.110+ gates BSU/ESU emission on a hardcoded TERM allowlist
+/// our ConPTY child doesn't land on, so CLAUDE_CODE_FORCE_SYNC_OUTPUT=1 is the
+/// only reliable way to make it bracket its post-resize redraws. xterm.js v6
+/// in the browser then commits one atomic frame per BSU/ESU pair and the
+/// resize-reprint flash disappears. See runbooks/terminal/TERMINAL.md
+/// resize-reprint entry + anthropics/claude-code#49584, #55613.
+/// </summary>
+public class CommandServiceTests : IDisposable
+{
+    private readonly string? _originalFakeCliFlag;
+
+    public CommandServiceTests()
+    {
+        // Isolate from any caller-set fake-CLI override that would short-circuit
+        // PrepareSession before the LLM-specific env injection runs.
+        _originalFakeCliFlag = Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI");
+        Environment.SetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI", null);
+    }
+
+    public void Dispose()
+    {
+        Environment.SetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI", _originalFakeCliFlag);
+    }
+
+    [Fact]
+    public void PrepareSession_Claude_SetsForceSyncOutputEnvVar()
+    {
+        var service = CreateService();
+
+        var prepared = service.PrepareSession(LLM.Claude, envName: null, extraArgs: null);
+
+        Assert.True(
+            prepared.Environment.TryGetValue("CLAUDE_CODE_FORCE_SYNC_OUTPUT", out var value),
+            "Expected CLAUDE_CODE_FORCE_SYNC_OUTPUT to be set for LLM.Claude.");
+        Assert.Equal("1", value);
+    }
+
+    [Theory]
+    [InlineData(LLM.Codex)]
+    [InlineData(LLM.Gemini)]
+    [InlineData(LLM.Copilot)]
+    public void PrepareSession_NonClaude_DoesNotSetForceSyncOutputEnvVar(LLM llm)
+    {
+        var service = CreateService();
+
+        var prepared = service.PrepareSession(llm, envName: null, extraArgs: null);
+
+        Assert.False(
+            prepared.Environment.ContainsKey("CLAUDE_CODE_FORCE_SYNC_OUTPUT"),
+            $"CLAUDE_CODE_FORCE_SYNC_OUTPUT must only be set for LLM.Claude, not {llm}.");
+    }
+
+    private static CommandService CreateService()
+    {
+        var fileService = new Mock<IFileService>().Object;
+        var envService = new LlmCliEnvironmentService(
+            new ClaudeLlmCliEnvironment(fileService),
+            new CodexLlmCliEnvironment(fileService),
+            new GeminiLlmCliEnvironment(fileService),
+            new CopilotLlmCliEnvironment(fileService),
+            fileService);
+        return new CommandService(envService, new McpSettings(""));
+    }
+}

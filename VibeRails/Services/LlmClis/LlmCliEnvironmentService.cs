@@ -1,3 +1,4 @@
+using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Utils;
@@ -56,11 +57,24 @@ namespace VibeRails.Services.LlmClis
         {
             ArgumentNullException.ThrowIfNull(environment);
 
+            var envBasePath = ParserConfigs.GetEnvPath();
             var environmentPath = string.IsNullOrWhiteSpace(environment.Path)
-                ? Path.Combine(ParserConfigs.GetEnvPath(), environment.CustomName)
+                ? Path.Combine(envBasePath, environment.CustomName)
                 : environment.Path;
 
-            if (string.IsNullOrWhiteSpace(environmentPath) || !_fileService.DirectoryExists(environmentPath))
+            // Containment guard: the create/launch paths are hardened, but environment.Path
+            // here comes from a stored DB row that could predate that hardening or have been
+            // hand-edited to point outside the envs root. Never recursively delete a path
+            // outside the root — skip the filesystem delete and let the caller drop the DB row.
+            if (!EnvironmentNameValidator.IsWithinEnvironmentRoot(envBasePath, environmentPath))
+            {
+                Log.Warning(
+                    "[Environment] Refusing recursive delete of '{Path}' for environment '{Name}' — resolves outside the environments root.",
+                    environmentPath, environment.CustomName);
+                return Task.CompletedTask;
+            }
+
+            if (!_fileService.DirectoryExists(environmentPath))
             {
                 return Task.CompletedTask;
             }
@@ -73,7 +87,11 @@ namespace VibeRails.Services.LlmClis
         public Dictionary<string, string> GetEnvironmentVariables(string envName, LLM llm)
         {
             var envBasePath = ParserConfigs.GetEnvPath();
-            var envPath = Path.Combine(envBasePath, envName);
+            // envName arrives unvalidated from the launch routes (terminal/start, cli/launch,
+            // sandbox) — EnvironmentNameValidator.Validate only runs on create. Resolve through
+            // the containment guard so a "../" / absolute name can't point these env vars
+            // outside the envs root.
+            var envPath = EnvironmentNameValidator.ResolveEnvironmentDirectory(envBasePath, envName);
 
             return llm switch
             {
@@ -93,6 +111,25 @@ namespace VibeRails.Services.LlmClis
                     ["XDG_STATE_HOME"] = Path.Combine(envPath, "gemini", "state")
                 },
                 LLM.Copilot => new Dictionary<string, string>(),
+                _ => new Dictionary<string, string>()
+            };
+        }
+
+        /// <summary>
+        /// Per-LLM environment variables independent of any custom environment (they apply
+        /// even when no envName is set). Central home for LLM-specific env injection so
+        /// one-off "if (llm == X)" tweaks stay out of call sites like CommandService.
+        /// </summary>
+        public Dictionary<string, string> GetBaseEnvironmentVariables(LLM llm)
+        {
+            return llm switch
+            {
+                // Force DEC 2026 sync output regardless of TERM. Claude Code 2.1.110+ gates
+                // BSU/ESU on a hardcoded TERM allowlist (xterm-ghostty/kitty) our ConPTY child
+                // doesn't land on, so without it the post-resize redraws aren't bracketed and
+                // xterm.js commits the intermediate frame. See runbooks/terminal/TERMINAL.md
+                // resize-reprint entry + anthropics/claude-code#49584, #55613.
+                LLM.Claude => new Dictionary<string, string> { ["CLAUDE_CODE_FORCE_SYNC_OUTPUT"] = "1" },
                 _ => new Dictionary<string, string>()
             };
         }

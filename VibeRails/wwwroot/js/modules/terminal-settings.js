@@ -46,6 +46,13 @@ export function renderTerminalSettingsPanelHtml() {
                                     <option value="canvas">Canvas</option>
                                 </select>
                             </div>
+                            <div class="vb-terminal-settings-row">
+                                <label title="Wait this long after the last resize event before notifying the running CLI of the new size. Extended (2 s) suppresses the 'stacked repaints' bug during slow panel drags, at the cost of a brief delay before Claude Code reflows to the new size.">Resize debounce</label>
+                                <select id="terminal-settings-resize-debounce">
+                                    <option value="default">Standard (140&nbsp;ms)</option>
+                                    <option value="extended">Extended (2&nbsp;s, experimental)</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -116,6 +123,7 @@ export class TerminalSettings {
         this._fontSizeInput = null;
         this._rendererSelect = null;
         this._rendererStatusEl = null;
+        this._resizeDebounceSelect = null;
         this._cursorStyleSelect = null;
         this._cursorInactiveSelect = null;
         this._themeListEl = null;
@@ -153,6 +161,16 @@ export class TerminalSettings {
         catch { return 'outline'; }
     }
 
+    // 'default' = 140 ms (matches community xterm fit-addon norm)
+    // 'extended' = 2 s (opt-in; suppresses stacked-repaints during slow drags).
+    // See runbooks/terminal/TERMINAL.md "Stacked repaints during drag-resize".
+    // Consumed by terminal-tab.js via the same localStorage key (kept in sync
+    // by string contract — do not rename without grepping for the key).
+    loadResizeDebounce() {
+        try { return localStorage.getItem('viberails_terminal_resizeDebounce') === 'extended' ? 'extended' : 'default'; }
+        catch { return 'default'; }
+    }
+
     // ---------- Mount + populate ----------
 
     init() {
@@ -162,6 +180,7 @@ export class TerminalSettings {
         this._fontSizeInput     = this._container.querySelector('#terminal-settings-font-size');
         this._rendererSelect    = this._container.querySelector('#terminal-settings-renderer');
         this._rendererStatusEl  = this._container.querySelector('#terminal-settings-renderer-active');
+        this._resizeDebounceSelect = this._container.querySelector('#terminal-settings-resize-debounce');
         this._cursorStyleSelect = this._container.querySelector('#terminal-settings-cursor-style');
         this._cursorInactiveSelect = this._container.querySelector('#terminal-settings-cursor-inactive');
         this._themeListEl       = this._container.querySelector('#vb-terminal-settings-theme-list');
@@ -177,6 +196,7 @@ export class TerminalSettings {
             this._manager.adjustFontSize(0, parseInt(e.target.value, 10));
         });
         this._rendererSelect?.addEventListener('change', (e) => this.applyRendererPreference(e.target.value));
+        this._resizeDebounceSelect?.addEventListener('change', (e) => this.applyResizeDebounce(e.target.value));
         this._cursorStyleSelect?.addEventListener('change', (e) => this.applyCursorStyle(e.target.value));
         this._cursorInactiveSelect?.addEventListener('change', (e) => this.applyCursorInactiveStyle(e.target.value));
 
@@ -222,6 +242,7 @@ export class TerminalSettings {
         }
 
         if (this._rendererSelect) this._rendererSelect.value = this.loadRenderer();
+        if (this._resizeDebounceSelect) this._resizeDebounceSelect.value = this.loadResizeDebounce();
         if (this._cursorStyleSelect) this._cursorStyleSelect.value = this.loadCursorStyle();
         if (this._cursorInactiveSelect) this._cursorInactiveSelect.value = this.loadCursorInactiveStyle();
 
@@ -317,6 +338,13 @@ export class TerminalSettings {
             'Renderer preference saved. Restart active terminal tabs to apply.',
             'info'
         );
+    }
+
+    applyResizeDebounce(value) {
+        // terminal-tab.js reads this same key per-resize, so the new value
+        // takes effect on the next resize event — no tab restart needed.
+        const normalized = value === 'extended' ? 'extended' : 'default';
+        try { localStorage.setItem('viberails_terminal_resizeDebounce', normalized); } catch {}
     }
 
     applyCursorStyle(style) {

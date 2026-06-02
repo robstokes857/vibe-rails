@@ -27,7 +27,9 @@ namespace VibeRails.Services.LlmClis.Launchers
         public virtual Dictionary<string, string> GetEnvironmentVariables(string envName)
         {
             var envBasePath = ParserConfigs.GetEnvPath();
-            var configPath = Path.Combine(envBasePath, envName, ConfigSubdirectory);
+            // Containment guard: envName can reach here unvalidated from the launch routes.
+            var envDir = EnvironmentNameValidator.ResolveEnvironmentDirectory(envBasePath, envName);
+            var configPath = Path.Combine(envDir, ConfigSubdirectory);
 
             return new Dictionary<string, string>
             {
@@ -117,7 +119,7 @@ namespace VibeRails.Services.LlmClis.Launchers
 
             var startInfo = new ProcessStartInfo
             {
-                FileName = "pwsh",
+                FileName = ShellDefaults.WindowsCommandShell,
                 WorkingDirectory = workingDirectory,
                 UseShellExecute = true,
             };
@@ -158,19 +160,12 @@ namespace VibeRails.Services.LlmClis.Launchers
             var exePath = Environment.ProcessPath ?? "vb";
             var argv = BuildVbArgv(workingDirectory, args, envName);
 
-            // Build a single bash command line with POSIX single-quote escaping per arg.
-            var bashCommand = BuildPosixCommandLine(exePath, argv);
+            // Build a zsh-targeted Terminal.app command with POSIX single-quote escaping per arg.
+            var commandLine = BuildPosixCommandLine(exePath, argv);
+            var terminalCommand = MacTerminalCommandBuilder.BuildZshLaunchCommand(commandLine);
 
             // Wrap it in AppleScript's `do script "..."` (double-quoted) — escape \ and " for AppleScript.
-            var appleScript = $"tell application \"Terminal\" to do script \"{EscapeForAppleScriptDoubleQuoted(bashCommand)}\"";
-
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "osascript",
-                UseShellExecute = false,
-            };
-            startInfo.ArgumentList.Add("-e");
-            startInfo.ArgumentList.Add(appleScript);
+            var startInfo = MacTerminalCommandBuilder.BuildStartInfo(terminalCommand);
 
             Process.Start(startInfo);
 
@@ -189,17 +184,18 @@ namespace VibeRails.Services.LlmClis.Launchers
             var exePath = Environment.ProcessPath ?? "vb";
             var argv = BuildVbArgv(workingDirectory, args, envName);
 
-            // POSIX-quoted single command line for `bash -c <fullCommand>`.
-            var fullCommand = BuildPosixCommandLine(exePath, argv) + "; exec bash";
+            // POSIX-quoted single command line for `<shell> -c <fullCommand>`.
+            var shell = ShellDefaults.LinuxShell;
+            var fullCommand = BuildPosixCommandLine(exePath, argv) + $"; exec {shell}";
 
             // Pass via ArgumentList so each element is a discrete argv entry — no
             // string-join quoting collisions with the inner POSIX-quoted command.
             (string terminal, string[] terminalArgs)[] terminals =
             [
-                ("gnome-terminal", ["--", "bash", "-c", fullCommand]),
-                ("konsole",        ["-e", "bash", "-c", fullCommand]),
-                ("xfce4-terminal", ["-e", "bash", "-c", fullCommand]),
-                ("xterm",          ["-e", "bash", "-c", fullCommand]),
+                ("gnome-terminal", ["--", shell, "-c", fullCommand]),
+                ("konsole",        ["-e", shell, "-c", fullCommand]),
+                ("xfce4-terminal", ["-e", shell, "-c", fullCommand]),
+                ("xterm",          ["-e", shell, "-c", fullCommand]),
             ];
 
             foreach (var (terminal, terminalArgs) in terminals)
@@ -238,22 +234,16 @@ namespace VibeRails.Services.LlmClis.Launchers
         private static string BuildPosixCommandLine(string exePath, string[] argv)
         {
             var sb = new StringBuilder();
-            sb.Append(QuotePosixSingleQuoted(exePath));
+            sb.Append(MacTerminalCommandBuilder.QuotePosixSingleQuoted(exePath));
             foreach (var a in argv)
             {
                 sb.Append(' ');
-                sb.Append(QuotePosixSingleQuoted(a));
+                sb.Append(MacTerminalCommandBuilder.QuotePosixSingleQuoted(a));
             }
             return sb.ToString();
         }
 
-        private static string QuotePosixSingleQuoted(string s)
-            => "'" + s.Replace("'", "'\\''") + "'";
-
         private static string QuotePowerShellSingleQuoted(string s)
             => "'" + s.Replace("'", "''") + "'";
-
-        private static string EscapeForAppleScriptDoubleQuoted(string s)
-            => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
     }
 }
