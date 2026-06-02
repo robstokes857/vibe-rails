@@ -29,7 +29,12 @@ jobs:
           - rid: osx-x64
             os: macos-15-intel
           - rid: osx-arm64
-            os: macos-14
+            # macos-15 (arm64, Xcode 16) ships the Swift static libs the .NET Apple
+            # crypto PAL needs for NativeAOT linking; macos-14 does not, so the
+            # debug-bundle AesGcm/RSA usage fails to link there (undefined
+            # __swift_FORCE_LOAD_$_swift_* from pal_swiftbindings.o). Matches osx-x64
+            # (macos-15-intel), which links the same crypto fine.
+            os: macos-15
 
     steps:
       - name: Checkout
