@@ -91,7 +91,7 @@ public static class SandboxRoutes
                     process = System.Diagnostics.Process.Start(
                         new System.Diagnostics.ProcessStartInfo
                         {
-                            FileName = "pwsh",
+                            FileName = ShellDefaults.WindowsCommandShell,
                             Arguments = "-NoExit -NoProfile",
                             WorkingDirectory = sandbox.Path,
                             UseShellExecute = true
@@ -100,14 +100,9 @@ public static class SandboxRoutes
                 else if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
                              System.Runtime.InteropServices.OSPlatform.OSX))
                 {
-                    var script = $"tell application \"Terminal\" to do script \"cd '{sandbox.Path}'\"";
+                    var terminalCommand = MacTerminalCommandBuilder.BuildOpenDirectoryCommand(sandbox.Path);
                     process = System.Diagnostics.Process.Start(
-                        new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = "osascript",
-                            Arguments = $"-e \"{script}\"",
-                            UseShellExecute = true
-                        });
+                        MacTerminalCommandBuilder.BuildStartInfo(terminalCommand));
                 }
                 else
                 {

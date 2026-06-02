@@ -2,9 +2,36 @@ import { VibeTerminal } from './vibe-terminal.js';
 
 const RESIZE_PREFIX = '__resize__:';
 
-// Collapse layout-settle/font-load fit bursts into one PTY resize so ConPTY does not
-// redraw the full TUI multiple times while the browser is still stabilizing.
-const RESIZE_SYNC_DEBOUNCE_MS = 140;
+// Trailing-edge debounce for the outgoing `__resize__` message to the PTY.
+// Each new `onFitChange` callback restarts this timer (scheduleResizeToPty()
+// calls clearPendingResizeToPty() before scheduling), so the server only sees
+// one final resize once the user has been quiet on resize events for the
+// chosen window. Default (140 ms) matches the community 150-200 ms norm.
+//
+// The 2000 ms "extended" value is opt-in via the per-terminal settings
+// panel (Rendering → Resize debounce; backed by the
+// `viberails_terminal_resizeDebounce` localStorage key). It suppresses the
+// stacked-repaints bug during slow panel-drags (each unique cols x rows
+// would otherwise fire a SIGWINCH, Claude Code repaints once per SIGWINCH,
+// xterm.js renders the rapid repaints mid-reflow and persistent stacked
+// copies of the UI appear). Trade-off: Claude Code learns the new terminal
+// size ~2 s after the user stops dragging, so fast drag-then-type feels
+// briefly off until the size settles. See runbooks/terminal/TERMINAL.md
+// "Stacked repaints during drag-resize" entry. Do NOT reduce the extended
+// value below 500 ms without re-running the slow-sidebar-drag repro
+// (session fd7ac97f-0b7b-4c0b-9c32-4daf9030392d).
+const RESIZE_SYNC_DEBOUNCE_MS_DEFAULT = 140;
+const RESIZE_SYNC_DEBOUNCE_MS_EXTENDED = 2000;
+
+function resolveResizeDebounceMs() {
+    try {
+        return localStorage.getItem('viberails_terminal_resizeDebounce') === 'extended'
+            ? RESIZE_SYNC_DEBOUNCE_MS_EXTENDED
+            : RESIZE_SYNC_DEBOUNCE_MS_DEFAULT;
+    } catch {
+        return RESIZE_SYNC_DEBOUNCE_MS_DEFAULT;
+    }
+}
 const OUTPUT_CURSOR_IDLE_MS = 90;
 const CONNECT_FOCUS_RETRY_MS = 180;
 
@@ -38,6 +65,30 @@ export class TerminalTab {
 
     hasOpenSocket() {
         return this.socket && this.socket.readyState === WebSocket.OPEN;
+    }
+
+    // Inject a block of text into the live PTY exactly as a clipboard paste would
+    // (mirrors the attachClipboardPaste handler in ensureTerminal). Bracketed-paste
+    // wrapping keeps multi-line text atomic. Paste-only: no trailing newline is
+    // appended, so the cursor is left after the text and the user presses Enter
+    // themselves. Returns false when there is no open socket to send through.
+    injectText(text) {
+        if (typeof text !== 'string' || text.length === 0) {
+            return false;
+        }
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+            return false;
+        }
+        const payload = this.vibeTerminal?.createBracketedPastePayload(text) ?? text;
+        // Defensive cap: the server closes the socket on any single message over
+        // TerminalControlProtocol.MaxMessageBytes (256 KiB). Refuse to send an oversized
+        // payload rather than kill the session. Callers that want a user-facing message
+        // (e.g. the editor modal) pre-check the size before calling.
+        if (new TextEncoder().encode(payload).length > 256 * 1024) {
+            return false;
+        }
+        this.socket.send(payload);
+        return true;
     }
 
     ensureTerminal() {
@@ -298,16 +349,17 @@ export class TerminalTab {
         }
     }
 
-    scheduleResizeToPty({ force = false, delayMs = RESIZE_SYNC_DEBOUNCE_MS } = {}) {
+    scheduleResizeToPty({ force = false, delayMs = null } = {}) {
         if (!this.isActive || !this.vibeTerminal || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
             return;
         }
 
+        const effectiveDelay = delayMs ?? resolveResizeDebounceMs();
         this.clearPendingResizeToPty();
         this._pendingResizeSyncTimeoutId = window.setTimeout(() => {
             this._pendingResizeSyncTimeoutId = null;
             this.sendResizeToPty({ force });
-        }, delayMs);
+        }, effectiveDelay);
     }
 
     sendResizeToPty({ force = false } = {}) {

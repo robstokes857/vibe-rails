@@ -279,6 +279,24 @@ namespace VibeRails.DB
             return null;
         }
 
+        public async Task<LLM_Environment?> FindEnvironmentByNameIgnoreCaseAsync(string name, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectEnvironmentByNameNoCase;
+            cmd.Parameters.AddWithValue("$customName", name);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                return ReadEnvironment(reader);
+            }
+
+            return null;
+        }
+
         public async Task<LLM_Environment> GetOrCreateEnvironmentAsync(string name, LLM llm, CancellationToken cancellationToken = default)
         {
             var existing = await GetEnvironmentByNameAndLlmAsync(name, llm, cancellationToken);
@@ -904,6 +922,30 @@ namespace VibeRails.DB
         #endregion
 
         #region Session Retrieval
+
+        public async Task<SessionResponse?> GetSessionByIdAsync(string sessionId, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var sessionCmd = connection.CreateCommand();
+            sessionCmd.CommandText = SqlStrings.SelectSessionById;
+            sessionCmd.Parameters.AddWithValue("$id", sessionId);
+
+            await using var reader = await sessionCmd.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return null;
+
+            return new SessionResponse(
+                Id: reader.GetString(0),
+                Cli: reader.GetString(1),
+                EnvironmentName: reader.IsDBNull(2) ? null : reader.GetString(2),
+                WorkingDirectory: reader.GetString(3),
+                StartedUTC: DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                EndedUTC: reader.IsDBNull(5) ? null : DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                ExitCode: reader.IsDBNull(6) ? null : reader.GetInt32(6)
+            );
+        }
 
         public async Task<SessionWithLogsResponse?> GetSessionWithLogsAsync(string sessionId, CancellationToken cancellationToken)
         {

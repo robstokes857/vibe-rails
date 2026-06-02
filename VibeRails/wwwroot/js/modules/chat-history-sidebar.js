@@ -5,6 +5,7 @@ import {
     escapeHtml
 } from './utils.js';
 import * as SessionDebug from './session-viewer.js';
+import { showSendDebugLogModal } from './debug-bundle.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 const SCROLL_LOAD_THRESHOLD_PX = 48;
@@ -98,8 +99,10 @@ export class ChatHistorySidebar {
                     <div class="ch-context-menu-item" data-action="rename">Rename</div>
                     <div class="ch-context-menu-item text-danger" data-action="delete">Delete</div>
                     <div class="ch-context-menu-divider"></div>
-                    <div class="ch-context-menu-item" data-action="get-session">Get Session</div>
+                    <div class="ch-context-menu-item" data-action="get-session">Replay Session</div>
                     <div class="ch-context-menu-item" data-action="get-raw-session">Session Data Dump</div>
+                    <div class="ch-context-menu-divider"></div>
+                    <div class="ch-context-menu-item" data-action="send-debug-log"><i class="fa-solid fa-bug me-1"></i>Send debug log</div>
                 </div>
             </div>`;
     }
@@ -215,6 +218,11 @@ export class ChatHistorySidebar {
                     this.app.showError(`Failed to download raw session: ${message}`);
                 });
             }
+        });
+        contextMenu?.querySelector('[data-action="send-debug-log"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._closeContextMenu();
+            if (this.activeItem) showSendDebugLogModal(this.app, this.activeItem.id);
         });
         const searchInput = root.querySelector('#ch-search-input');
         searchInput?.addEventListener('input', (e) => {

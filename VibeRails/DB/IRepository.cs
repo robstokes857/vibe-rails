@@ -19,6 +19,7 @@ namespace VibeRails.DB
         Task SetSessionDisplayNameAsync(string sessionId, string displayName);
 
         // Session retrieval
+        Task<SessionResponse?> GetSessionByIdAsync(string sessionId, CancellationToken cancellationToken);
         Task<SessionWithLogsResponse?> GetSessionWithLogsAsync(string sessionId, CancellationToken cancellationToken);
         Task<List<SessionResponse>> GetRecentSessionsAsync(int limit, CancellationToken cancellationToken);
         Task<SessionOutputDetailResponse?> GetSessionOutputAsync(string sessionId, CancellationToken cancellationToken);
@@ -61,6 +62,7 @@ namespace VibeRails.DB
         // Environment operations (global, not project-scoped)
         Task<LLM_Environment?> GetEnvironmentByNameAndLlmAsync(string name, LLM llm, CancellationToken cancellationToken = default);
         Task<LLM_Environment?> FindEnvironmentByNameAsync(string name, CancellationToken cancellationToken = default);
+        Task<LLM_Environment?> FindEnvironmentByNameIgnoreCaseAsync(string name, CancellationToken cancellationToken = default);
         Task<LLM_Environment> GetOrCreateEnvironmentAsync(string name, LLM llm, CancellationToken cancellationToken = default);
         Task<List<LLM_Environment>> GetAllEnvironmentsAsync(CancellationToken cancellationToken = default);
         Task<List<LLM_Environment>> GetCustomEnvironmentsAsync(CancellationToken cancellationToken = default);

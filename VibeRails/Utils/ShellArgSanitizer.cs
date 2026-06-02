@@ -158,6 +158,14 @@ public static partial class ShellArgSanitizer
     }
 
     /// <summary>
+    /// Wraps a value in POSIX single quotes, escaping embedded single quotes
+    /// (<c>' → '\''</c>). The canonical POSIX shell-quoting primitive — call this
+    /// instead of re-implementing it (see MacTerminalCommandBuilder).
+    /// </summary>
+    public static string QuotePosixSingleQuoted(string value)
+        => "'" + value.Replace("'", "'\\''") + "'";
+
+    /// <summary>
     /// Escapes a single argument for safe inclusion in a shell command string.
     /// Wraps in single quotes (Unix) or double quotes (Windows) with proper internal escaping.
     /// </summary>
@@ -175,7 +183,7 @@ public static partial class ShellArgSanitizer
             return "\"" + escaped + "\"";
         }
 
-        return "'" + arg.Replace("'", "'\\''") + "'";
+        return QuotePosixSingleQuoted(arg);
     }
 
     /// <summary>

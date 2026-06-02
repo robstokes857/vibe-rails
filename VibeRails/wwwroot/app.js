@@ -59,6 +59,7 @@ export class VibeControlApp {
     async init() {
         this.startLifecycleHeartbeat();
         await this.fetchConfigs();
+        this.applyDocumentTitle();
         await this.applyInitialSettings();
         this.appEventClient.start();
         this.terminalController.bindSessionEvents(this.appEventClient);
@@ -279,9 +280,38 @@ export class VibeControlApp {
         }
     }
 
-    // ============================================ 
+    async applyDocumentTitle() {
+        const path = this.data.configs?.rootPath;
+        let customName = null;
+        if (path) {
+            // Race the fetch against a 2s timer so a hung backend doesn't block app
+            // init forever — we fall back to the folder name and update later if/when
+            // the customName fetch eventually returns (we ignore the late result).
+            let timeoutHandle = null;
+            try {
+                const fetchPromise = this.apiCall(`/api/v1/projects/name?path=${encodeURIComponent(path)}`);
+                const result = await Promise.race([
+                    fetchPromise,
+                    new Promise(resolve => { timeoutHandle = setTimeout(() => resolve(null), 2000); }),
+                ]);
+                customName = result?.customName || null;
+            } catch { /* ignore */ }
+            finally { if (timeoutHandle) clearTimeout(timeoutHandle); }
+        }
+        const folderName = path ? this.getProjectNameFromPath(path) : null;
+        const name = customName || folderName;
+        const title = name ? `${name} — Vibe Rails` : 'Vibe Rails';
+        document.title = title;
+        // Browser tab title only; in VS Code, the panel tab is owned by the
+        // extension, so notify it via postMessage.
+        if (typeof window.__viberails_setTitle__ === 'function') {
+            try { window.__viberails_setTitle__(title); } catch { /* ignore */ }
+        }
+    }
+
+    // ============================================
     // Core Infrastructure
-    // ============================================ 
+    // ============================================
 
     cloneTemplate(id) {
         const template = document.getElementById(id);

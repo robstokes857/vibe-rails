@@ -9,6 +9,14 @@ export function renderTerminalMenuHtml() {
                     <i class="fa-solid fa-layer-group"></i>
                     <span>Multi Run</span>
                 </button>
+                <button type="button" id="terminal-editor-btn" role="menuitem">
+                    <i class="fa-solid fa-file-pen"></i>
+                    <span>Open in text editor</span>
+                </button>
+                <button type="button" id="terminal-senddebug-btn" role="menuitem">
+                    <i class="fa-solid fa-bug"></i>
+                    <span>Send debug log</span>
+                </button>
             </div>
         </div>
     `;

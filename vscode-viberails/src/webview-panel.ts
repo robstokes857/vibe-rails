@@ -47,6 +47,15 @@ export class WebviewPanelManager {
         this.panel.webview.onDidReceiveMessage(message => {
             if (message.command === 'close') {
                 this._onCloseRequested.fire();
+            } else if (message.command === 'setTitle' && this.panel && typeof message.title === 'string') {
+                // Strip Unicode format (Cf — RTL/LTR overrides, zero-width joiners) and
+                // control (Cc) characters before assigning the tab title, so a crafted
+                // project display name can't spoof adjacent VS Code tab titles.
+                const sanitized = message.title.replace(/[\p{Cf}\p{Cc}]/gu, '');
+                const trimmed = sanitized.trim().slice(0, 200);
+                if (trimmed.length > 0) {
+                    this.panel.title = trimmed;
+                }
             }
         });
 
@@ -235,6 +244,7 @@ export class WebviewPanelManager {
         window.__viberails_NONCE__ = '${nonce}';
         const vscode = acquireVsCodeApi();
         window.__viberails_close__ = function() { vscode.postMessage({ command: 'close' }); };
+        window.__viberails_setTitle__ = function(title) { vscode.postMessage({ command: 'setTitle', title: title }); };
         ${fetchPatch}
         ${vscodeExitButtonPatch}
     </script>`;

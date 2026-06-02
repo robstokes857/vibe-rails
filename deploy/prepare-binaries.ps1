@@ -133,6 +133,26 @@ foreach ($platform in $platforms) {
         Write-Host "    Copied $($extraFiles.Count) additional publish files (native DLLs, etc.)" -ForegroundColor Green
     }
 
+    # Copy ONLY the public key(s) from Certs/ (used to encrypt uploaded debug bundles).
+    # Never recurse the whole folder: the private decryption key must never ship in a
+    # client VSIX. The extra-files loop above only copies top-level files, so the public
+    # key would otherwise be dropped — the same failure mode as the ONNX DLLs.
+    $sourceCerts = Join-Path $sourceDir "Certs"
+    if (Test-Path $sourceCerts) {
+        # Guard: refuse to build if anything resembling private key material is staged here.
+        $privateKeys = Get-ChildItem -Path $sourceCerts -Recurse -File | Where-Object {
+            $_.Name -match '(?i)private' -or $_.Name -ieq 'pass.txt' -or $_.Extension -ieq '.key'
+        }
+        if ($privateKeys) {
+            $names = [string]::Join(', ', ($privateKeys | ForEach-Object { $_.Name }))
+            throw "Refusing to package: private key material found under $sourceCerts ($names). The private key must never ship to clients."
+        }
+        $destCerts = Join-Path $platformDir "Certs"
+        New-Item -ItemType Directory -Path $destCerts -Force | Out-Null
+        Copy-Item -Path (Join-Path $sourceCerts "*_public_key.pem") -Destination $destCerts -Force
+        Write-Host "    Copied Certs/ public key(s)" -ForegroundColor Green
+    }
+
     # Set execute permissions on Linux binary (no-op on Windows)
     if ($platform.Binary -eq "vb" -and -not $IsWindows) {
         chmod +x $destBinary
@@ -153,6 +173,12 @@ foreach ($platform in $platforms) {
     $ortPresent = Get-ChildItem -Path $platformDir -File | Where-Object { $_.Name -match '(?i)onnxruntime' } | Select-Object -First 1
     if (-not $ortPresent) {
         throw "Native ONNX Runtime library missing from bin/$($platform.Name)/. Expected an onnxruntime.{dll,so,dylib} alongside vb. Did the AOT publish emit it into $sourceDir?"
+    }
+
+    # Assert the debug-bundle public key shipped. Without it the "Send debug log"
+    # feature can't encrypt uploads and fails at runtime on the user's machine.
+    if (-not (Test-Path (Join-Path $platformDir "Certs/rsa_public_key.pem"))) {
+        throw "Public key missing from bin/$($platform.Name)/Certs/. Expected Certs/rsa_public_key.pem alongside vb. Did the AOT publish emit VibeRails/Certs/ into $sourceDir?"
     }
 }
 

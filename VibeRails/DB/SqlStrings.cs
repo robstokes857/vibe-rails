@@ -21,6 +21,13 @@ namespace VibeRails.DB
             )
             """;
         public const string CreateEnvironmentsIndex = "CREATE INDEX IF NOT EXISTS idx_environments_name_llm ON Environments(CustomName, LLM)";
+        // Durable backstop for the create-time collision check: the env name maps to a
+        // case-insensitive directory (envs/{name}/{llm}), so "Work" and "work" for the same
+        // LLM would share a credential directory. Upgrades the case-sensitive UNIQUE(CustomName,
+        // LLM) table constraint to be case-insensitive. Lives in MigrationStatements (not
+        // InitStatements) so a legacy DB already holding case-variant duplicates logs-and-skips
+        // instead of failing startup.
+        public const string CreateEnvironmentsNameNoCaseUniqueIndex = "CREATE UNIQUE INDEX IF NOT EXISTS idx_environments_name_nocase_llm ON Environments(CustomName COLLATE NOCASE, LLM)";
 
         // AgentMetadata Table
         public const string CreateAgentMetadataTable = """
@@ -280,7 +287,8 @@ namespace VibeRails.DB
             CreateUserInputsFts,
             CreateUserInputsFtsAfterDeleteTrigger,
             DropUserInputsFtsAfterInsertTrigger,
-            DropUserInputsFtsAfterUpdateTrigger
+            DropUserInputsFtsAfterUpdateTrigger,
+            CreateEnvironmentsNameNoCaseUniqueIndex
         ];
 
         /// <summary>
@@ -309,6 +317,16 @@ namespace VibeRails.DB
             SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC
             FROM Environments
             WHERE CustomName = $customName
+            ORDER BY LastUsedUTC DESC
+            LIMIT 1;
+            """;
+        // Case-insensitive single-row lookup for the create-time collision check (the env
+        // name maps to a case-insensitive directory). NOCASE folds ASCII, matching the
+        // validated env-name charset.
+        public const string SelectEnvironmentByNameNoCase = """
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC
+            FROM Environments
+            WHERE CustomName = $customName COLLATE NOCASE
             ORDER BY LastUsedUTC DESC
             LIMIT 1;
             """;

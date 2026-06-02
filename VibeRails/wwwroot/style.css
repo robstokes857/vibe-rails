@@ -841,6 +841,13 @@ code {
     min-width: 0;
 }
 
+.dashboard-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+}
+
 .dashboard-context-name {
     margin: 0;
     color: var(--dashboard-old-text);
@@ -2802,6 +2809,58 @@ code {
     color: #cdd6f4;
 }
 
+/* Rename pencil — revealed on hover / for the active tab only. */
+#vb-terminal-panel .vb-terminal-tab-edit {
+    border: none;
+    background: transparent;
+    color: #6c7086;
+    padding: 4px 6px;
+    margin-left: 2px;
+    border-radius: 4px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    font-size: 0.78rem;
+    min-width: 24px;
+    min-height: 24px;
+    transition: background 0.2s, color 0.2s;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item:hover .vb-terminal-tab-edit,
+#vb-terminal-panel .vb-terminal-tab-item.active .vb-terminal-tab-edit {
+    display: inline-flex;
+}
+
+#vb-terminal-panel .vb-terminal-tab-edit:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #cdd6f4;
+}
+
+/* While renaming, the pencil and close button step aside for the input. */
+#vb-terminal-panel .vb-terminal-tab-item.is-renaming .vb-terminal-tab-edit,
+#vb-terminal-panel .vb-terminal-tab-item.is-renaming .vb-terminal-tab-close {
+    display: none;
+}
+
+#vb-terminal-panel .vb-terminal-tab-rename-input {
+    flex: 1;
+    min-width: 0;
+    height: 72%;
+    margin: 0 6px;
+    padding: 2px 6px;
+    border: 1px solid var(--vb-terminal-tab-accent, #89b4fa);
+    border-radius: 4px;
+    background: var(--vb-terminal-tab-bg, #1e1e2e);
+    color: #cdd6f4;
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    outline: none;
+}
+
 /* ═══════════ Tab Status Overhaul ═══════════ */
 
 /* Identity section (left side of tab) */
@@ -3330,6 +3389,11 @@ body.vb-terminal-focus-active #vb-terminal-panel #terminal-container {
     height: 100%;
     overflow: hidden;
     touch-action: manipulation;
+    /* Small bottom breathing room so a transient over-tall fit can't clip the
+       last (input) row. The xterm FitAddon measures this element's content
+       height, so it reserves this padding and computes *fewer* rows — it can
+       never cause overflow. Mirrors the mobile `.vb-terminal-element` rule. */
+    padding-bottom: 8px;
 }
 
 .vb-terminal-element .xterm {
@@ -4711,6 +4775,50 @@ input.form-control:disabled {
     padding: 0;
     min-height: 0;
     overflow: hidden;
+}
+
+/* "Open in text editor" — Monaco scratchpad modal. Monaco needs an explicitly
+   sized flex container; the min-height: 0 on .modal-body is what lets the editor
+   take real height (without it the editor collapses to 0px, as it would in the
+   auto-height app.showModal dialog). Mirrors .sandbox-diff-modal above. */
+.vb-terminal-editor-modal .modal-dialog {
+    max-width: 80vw;
+    height: 80vh;
+    margin: 10vh auto;
+}
+
+.vb-terminal-editor-modal .modal-content {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background-color: #1a1a22;
+    border: 1px solid var(--color-border);
+}
+
+.vb-terminal-editor-modal .modal-header {
+    background-color: #1e1e24;
+    border-bottom: 1px solid #2b2b36;
+    flex-shrink: 0;
+}
+
+.vb-terminal-editor-modal .modal-body {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+.vb-terminal-editor-modal .modal-footer {
+    background-color: #1e1e24;
+    border-top: 1px solid #2b2b36;
+    flex-shrink: 0;
+}
+
+.vb-terminal-editor-host {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
 }
 
 .sandbox-diff-sidebar {
@@ -7683,3 +7791,193 @@ kbd:not(.ch-search-kbd) {
 }
 
 /* End of App-wide Refinement Pass ─────────────────────────────────────────── */
+
+/* ─── Vibe AI: Learning card (idle state of the strategy columns) ───────── */
+.vibe-rails-ai-view .insp-learn {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(200px, 240px) 1fr;
+    gap: 1.25rem;
+    align-items: stretch;
+    padding: 1.1rem 1.25rem;
+    border: 1px solid var(--insp-hairline-strong);
+    border-radius: 6px;
+    background:
+        radial-gradient(ellipse at top left, color-mix(in srgb, var(--insp-accent) 8%, transparent), transparent 60%),
+        color-mix(in srgb, var(--color-bg-base) 60%, transparent);
+}
+.vibe-rails-ai-view .insp-learn-grade {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 0.45rem;
+    padding: 0.85rem 0.95rem;
+    border: 1px solid var(--insp-hairline-strong);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--color-bg-surface) 70%, transparent);
+    text-align: center;
+}
+.vibe-rails-ai-view .insp-learn-grade .lbl {
+    font-family: var(--insp-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+}
+.vibe-rails-ai-view .insp-learn-grade .score {
+    font-family: var(--insp-mono);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: var(--insp-accent);
+    text-shadow: 0 0 24px color-mix(in srgb, var(--insp-accent) 30%, transparent);
+    align-self: center;
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 0.15rem;
+}
+.vibe-rails-ai-view .insp-learn-grade .score .num {
+    font-size: 3.6rem;
+}
+.vibe-rails-ai-view .insp-learn-grade .score .den {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    color: color-mix(in srgb, currentColor 55%, transparent);
+    text-shadow: none;
+}
+.vibe-rails-ai-view .insp-learn-grade .score.tier-a { color: var(--color-success); text-shadow: 0 0 24px color-mix(in srgb, var(--color-success) 35%, transparent); }
+.vibe-rails-ai-view .insp-learn-grade .score.tier-b { color: var(--insp-accent);   text-shadow: 0 0 24px color-mix(in srgb, var(--insp-accent) 30%, transparent); }
+.vibe-rails-ai-view .insp-learn-grade .score.tier-c { color: var(--insp-mark);     text-shadow: 0 0 24px color-mix(in srgb, var(--insp-mark) 30%, transparent); }
+.vibe-rails-ai-view .insp-learn-grade .score.tier-d { color: var(--color-warning); text-shadow: 0 0 24px color-mix(in srgb, var(--color-warning) 30%, transparent); }
+.vibe-rails-ai-view .insp-learn-grade .score.tier-f { color: var(--color-danger);  text-shadow: 0 0 24px color-mix(in srgb, var(--color-danger) 30%, transparent); }
+.vibe-rails-ai-view .insp-learn-grade .meter {
+    position: relative;
+    height: 4px;
+    border-radius: 99px;
+    background: color-mix(in srgb, var(--color-text) 8%, transparent);
+    overflow: hidden;
+}
+.vibe-rails-ai-view .insp-learn-grade .meter .fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: currentColor;
+    border-radius: 99px;
+}
+.vibe-rails-ai-view .insp-learn-grade .sub {
+    font-family: var(--insp-mono);
+    font-size: 0.55rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+}
+.vibe-rails-ai-view .insp-learn-body {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    gap: 0.85rem;
+    min-width: 0;
+}
+.vibe-rails-ai-view .insp-learn-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.6rem;
+}
+.vibe-rails-ai-view .insp-learn-stat {
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--insp-hairline);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--color-bg-base) 50%, transparent);
+    display: grid;
+    gap: 0.2rem;
+}
+.vibe-rails-ai-view .insp-learn-stat .k {
+    font-family: var(--insp-mono);
+    font-size: 0.55rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+}
+.vibe-rails-ai-view .insp-learn-stat .v {
+    font-family: var(--insp-mono);
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--color-text);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+}
+.vibe-rails-ai-view .insp-learn-stat .vsub {
+    font-size: 0.62rem;
+    color: var(--color-text-muted);
+}
+.vibe-rails-ai-view .insp-learn-llms {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem 0.85rem;
+}
+.vibe-rails-ai-view .insp-learn-llm {
+    display: grid;
+    grid-template-columns: 70px 1fr 40px;
+    align-items: center;
+    gap: 0.55rem;
+    font-family: var(--insp-mono);
+    font-size: 0.66rem;
+}
+.vibe-rails-ai-view .insp-learn-llm .name {
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text);
+    font-weight: 600;
+}
+.vibe-rails-ai-view .insp-learn-llm .bar {
+    position: relative;
+    height: 6px;
+    border-radius: 99px;
+    background: color-mix(in srgb, var(--color-text) 6%, transparent);
+    overflow: hidden;
+}
+.vibe-rails-ai-view .insp-learn-llm .bar .fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 99px;
+}
+.vibe-rails-ai-view .insp-learn-llm.cli-codex   .bar .fill { background: #34d399; }
+.vibe-rails-ai-view .insp-learn-llm.cli-claude  .bar .fill { background: #f59e0b; }
+.vibe-rails-ai-view .insp-learn-llm.cli-gemini  .bar .fill { background: #60a5fa; }
+.vibe-rails-ai-view .insp-learn-llm.cli-copilot .bar .fill { background: #c084fc; }
+.vibe-rails-ai-view .insp-learn-llm.cli-other   .bar .fill { background: color-mix(in srgb, var(--color-text) 35%, transparent); }
+.vibe-rails-ai-view .insp-learn-llm .cnt {
+    text-align: right;
+    color: var(--color-text-muted);
+    font-weight: 700;
+}
+.vibe-rails-ai-view .insp-learn-foot {
+    align-self: end;
+    font-size: 0.68rem;
+    line-height: 1.5;
+    color: var(--color-text-muted);
+    border-top: 1px dashed var(--insp-hairline);
+    padding-top: 0.55rem;
+}
+.vibe-rails-ai-view .insp-learn-foot b {
+    color: var(--color-text);
+    font-weight: 600;
+}
+@media (max-width: 720px) {
+    .vibe-rails-ai-view .insp-learn { grid-template-columns: 1fr; }
+    .vibe-rails-ai-view .insp-learn-stats { grid-template-columns: 1fr 1fr; }
+    .vibe-rails-ai-view .insp-learn-llms { grid-template-columns: 1fr; }
+}
+
+/* ─── Vibe AI: session-browse single-column view ─────────────────────────── */
+.vibe-rails-ai-view .insp-col.full {
+    grid-column: 1 / -1;
+}
+.vibe-rails-ai-view .insp-col.full .insp-col-body-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.5rem;
+    align-content: start;
+}
+@media (max-width: 720px) {
+    .vibe-rails-ai-view .insp-col.full .insp-col-body-grid { grid-template-columns: 1fr; }
+}

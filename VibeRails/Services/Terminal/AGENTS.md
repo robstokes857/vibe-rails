@@ -65,7 +65,7 @@ Validation:
 ## Component Responsibilities
 
 ### `Terminal.cs`
-- Spawns PTY (`pwsh.exe` on Windows, `bash` otherwise).
+- Spawns PTY (`pwsh.exe` on Windows, `/bin/zsh` on macOS, `bash` on Linux).
 - Stores last 16KB output in `CircularBuffer`.
 - Dispatches every PTY read chunk to current consumer snapshot.
 - Exposes `GetReplayBuffer()` and `Resize(cols, rows)`.
