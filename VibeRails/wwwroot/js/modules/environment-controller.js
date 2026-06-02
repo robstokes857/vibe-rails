@@ -563,7 +563,7 @@ export class EnvironmentController {
         }
 
         if (yoloMode) {
-            args.push('--yolo');
+            args.push('--approval-mode', 'yolo');
         } else if (approvalMode && approvalMode !== 'default') {
             args.push('--approval-mode', approvalMode);
         }
@@ -1143,7 +1143,7 @@ export class EnvironmentController {
                         <input class="form-check-input" type="checkbox" id="gemini-yolo" ${geminiYoloMode ? 'checked' : ''}>
                         <label class="form-check-label" for="gemini-yolo">YOLO Mode</label>
                     </div>
-                    <small class="form-text text-muted text-warning">Launches Gemini with <code>--yolo</code> and bypasses approval prompts</small>
+                    <small class="form-text text-muted text-warning">Launches Gemini with <code>--approval-mode yolo</code> and bypasses approval prompts</small>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Approval Mode</label>
