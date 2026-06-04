@@ -16,6 +16,14 @@ public class LlmParserTests
     }
 
     [Fact]
+    public void Parse_ReturnsShell_ForShellValue()
+    {
+        var result = _parser.Parse("shell");
+
+        Assert.Equal(LLM.Shell, result);
+    }
+
+    [Fact]
     public void Parse_ReturnsNotSet_ForUnknownValue()
     {
         var result = _parser.Parse("unknown");

@@ -14,6 +14,13 @@ public interface IRemoteTerminalConnection : IAsyncDisposable
     event Action<byte[]> OnInputReceived;
     event Action? OnReplayRequested;
     event Action? OnBrowserDisconnected;
+
+    /// <summary>
+    /// Raised after the connection drops and is automatically re-established.
+    /// Handlers should treat the remote viewer as fresh (re-lock / re-snapshot)
+    /// since browser state was lost during the gap.
+    /// </summary>
+    event Action? OnReconnected;
     event Action<int, int>? OnResizeRequested;
     event Action<string, string?>? OnCommandReceived;
     bool IsConnected { get; }

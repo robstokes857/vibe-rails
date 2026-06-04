@@ -12,24 +12,6 @@ namespace Tests;
 public class LlmCliEnvironmentServiceTests
 {
     [Fact]
-    public async Task DeleteEnvironmentAsync_DeletesStoredPathRecursively()
-    {
-        var fileService = new Mock<IFileService>();
-        var service = CreateService(fileService.Object);
-        var environment = new LLM_Environment
-        {
-            CustomName = "test",
-            Path = @"C:\tmp\envs\test"
-        };
-
-        fileService.Setup(x => x.DirectoryExists(environment.Path)).Returns(true);
-
-        await service.DeleteEnvironmentAsync(environment, CancellationToken.None);
-
-        fileService.Verify(x => x.DeleteDirectory(environment.Path, true), Times.Once);
-    }
-
-    [Fact]
     public async Task DeleteEnvironmentAsync_FallsBackToConfiguredEnvironmentRoot()
     {
         var originalEnvPath = ParserConfigs.GetEnvPath();

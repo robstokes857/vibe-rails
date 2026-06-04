@@ -291,7 +291,10 @@ public class TerminalStateService : ITerminalStateService, IDisposable
     private static bool ShouldRegisterRemoteSession(bool makeRemoteRequested)
     {
         _ = makeRemoteRequested;
-        return ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey());
+        // Must match TerminalRunner.ShouldEnableRemote: only register a session remotely when
+        // remote access is fully configured INCLUDING a PIN. (Deregistration below stays on the
+        // broad check so cleanup still runs if the PIN was cleared mid-session.)
+        return RemoteConfig.IsEnabled;
     }
 
     private void StartIdleMonitor(string sessionId)

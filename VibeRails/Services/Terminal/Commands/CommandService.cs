@@ -48,6 +48,21 @@ public class CommandService : ICommandService
             return new PreparedTerminalSession(fakeCmd, fakeCmd, Array.Empty<string>(), fakeEnv);
         }
 
+        // Plain shell: no agent, no custom environment, no prompt/args. The PTY already
+        // spawns the OS default shell, so we hand back an empty command — TerminalRunner
+        // skips SendCommandAsync and the shell simply sits at its prompt. Only the base
+        // locale env vars apply.
+        if (llm == LLM.Shell)
+        {
+            var shellEnv = new Dictionary<string, string>
+            {
+                ["LANG"] = "en_US.UTF-8",
+                ["LC_ALL"] = "en_US.UTF-8",
+                ["PYTHONIOENCODING"] = "utf-8"
+            };
+            return new PreparedTerminalSession(string.Empty, string.Empty, Array.Empty<string>(), shellEnv);
+        }
+
         var cli = llm.ToString().ToLower();
         var cliCommand = extraArgs?.Length > 0
             ? $"{cli} {BuildSafeArgString(extraArgs)}"

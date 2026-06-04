@@ -62,6 +62,26 @@ public class CommandServiceTests : IDisposable
             $"CLAUDE_CODE_FORCE_SYNC_OUTPUT must only be set for LLM.Claude, not {llm}.");
     }
 
+    [Fact]
+    public void PrepareSession_Shell_ReturnsEmptyCommandAndIgnoresEnvAndArgs()
+    {
+        var service = CreateService();
+
+        // A plain shell must not type any agent command, and must ignore custom
+        // environments / args / prompts entirely.
+        var prepared = service.PrepareSession(
+            LLM.Shell,
+            envName: "some-env",
+            extraArgs: new[] { "--dangerous" },
+            initialPrompt: "do something",
+            summary: "a summary");
+
+        Assert.Equal(string.Empty, prepared.Command);
+        Assert.Equal(string.Empty, prepared.LaunchCommand);
+        Assert.Empty(prepared.SetupCommands);
+        Assert.False(prepared.Environment.ContainsKey("CLAUDE_CODE_FORCE_SYNC_OUTPUT"));
+    }
+
     private static CommandService CreateService()
     {
         var fileService = new Mock<IFileService>().Object;
