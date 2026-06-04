@@ -39,6 +39,13 @@ public static class CliLaunchRoutes
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {cli}"));
             }
 
+            // LLM.Shell is a terminal-only type (a bare PTY, no agent) and has no launcher;
+            // reject it here so it returns 400 instead of throwing 500 inside LaunchLLMService.
+            if (llm == LLM.Shell)
+            {
+                return Results.BadRequest(new ErrorResponse("The plain shell terminal is not a launchable agent CLI."));
+            }
+
             var workingDirectory = request?.WorkingDirectory ?? launchDirectory;
             var args = request?.Args?.ToList() ?? new List<string>();
             var envName = request?.EnvironmentName;

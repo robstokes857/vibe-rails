@@ -2,19 +2,18 @@ namespace VibeRails.DTOs
 {
     public class ClaudeSettingsDto
     {
-        public string Effort { get; set; } = "";                                // low | medium | high | xhigh | max
+        // Fields persisted to settings.json.
+        public string Effort { get; set; } = "";                                // effortLevel; low | medium | high | xhigh | max
+        public string Model { get; set; } = "";                                 // model; pinned IDs e.g. claude-opus-4-8; empty = Claude default
+        public bool FastMode { get; set; } = false;                             // "fastMode": true (same as /fast); no launch flag — Opus-only
+
+        // Permission posture is YOLO-or-nothing: DangerouslySkipPermissions is the single
+        // "YOLO" toggle. These are launch-only flags carried in CustomArgs, NOT settings.json —
+        // VibeRails never reads or edits Claude's permissions block.
+        public bool DangerouslySkipPermissions { get; set; } = false;           // YOLO -> --dangerously-skip-permissions
         public bool NoSessionPersistence { get; set; } = false;                 // --no-session-persistence
-        public string PermissionMode { get; set; } = "default";                 // default | acceptEdits | plan | auto | dontAsk | bypassPermissions
-        public string SystemPrompt { get; set; } = "";                         // --system-prompt
-        public bool AllowDangerouslySkipPermissions { get; set; } = false;      // --allow-dangerously-skip-permissions
-        public string DangerouslyLoadDevelopmentChannels { get; set; } = "";    // --dangerously-load-development-channels
-        public bool DangerouslySkipPermissions { get; set; } = false;           // --dangerously-skip-permissions
-        public string AllowedTools { get; set; } = "";                         // --allowedTools
-        public string AppendSystemPrompt { get; set; } = "";                   // --append-system-prompt
+        public string SystemPrompt { get; set; } = "";                          // --system-prompt
         public bool Bare { get; set; } = false;                                 // --bare
-        public string Betas { get; set; } = "";                                // --betas
-        public string Channels { get; set; } = "";                             // --channels
         public bool Debug { get; set; } = false;                                // --debug
-        public string DebugFilter { get; set; } = "";                          // optional --debug category filter
     }
 }

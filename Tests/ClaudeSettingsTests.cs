@@ -39,39 +39,29 @@ public class ClaudeSettingsTests : IDisposable
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
         Assert.Equal("", settings.Effort);
-        Assert.False(settings.NoSessionPersistence);
-        Assert.Equal("default", settings.PermissionMode);
-        Assert.Equal("", settings.SystemPrompt);
-        Assert.False(settings.AllowDangerouslySkipPermissions);
-        Assert.Equal("", settings.DangerouslyLoadDevelopmentChannels);
+        Assert.Equal("", settings.Model);
+        Assert.False(settings.FastMode);
         Assert.False(settings.DangerouslySkipPermissions);
-        Assert.Equal("", settings.AllowedTools);
-        Assert.Equal("", settings.AppendSystemPrompt);
+        Assert.False(settings.NoSessionPersistence);
+        Assert.Equal("", settings.SystemPrompt);
         Assert.False(settings.Bare);
-        Assert.Equal("", settings.Betas);
-        Assert.Equal("", settings.Channels);
         Assert.False(settings.Debug);
-        Assert.Equal("", settings.DebugFilter);
     }
 
     [Fact]
-    public async Task GetSettings_ReadsAllSupportedValues_FromValidJson()
+    public async Task GetSettings_ReadsEffortLevel_FromValidJson()
     {
+        // effortLevel is the only settings-file key VibeRails reads. The permissions block
+        // is intentionally ignored (permission posture is YOLO-or-nothing via CustomArgs).
         var json = @"{
-    ""effort"": ""high"",
-    ""noSessionPersistence"": true,
-    ""permissionMode"": ""plan"",
-    ""systemPrompt"": ""You are a Python expert"",
-    ""allowDangerouslySkipPermissions"": true,
-    ""dangerouslyLoadDevelopmentChannels"": ""server:webhook plugin:test@local"",
-    ""dangerouslySkipPermissions"": true,
-    ""allowedTools"": ""Bash(git log *)\nRead"",
-    ""appendSystemPrompt"": ""Always use TypeScript"",
-    ""bare"": true,
-    ""betas"": ""interleaved-thinking"",
-    ""channels"": ""plugin:my-notifier@my-marketplace"",
-    ""debug"": true,
-    ""debugFilter"": ""api,mcp""
+    ""effortLevel"": ""high"",
+    ""permissions"": {
+        ""defaultMode"": ""plan"",
+        ""allow"": [
+            ""Bash(git log *)"",
+            ""Read""
+        ]
+    }
 }";
 
         _mockFileService.SetFileExists(true);
@@ -80,41 +70,31 @@ public class ClaudeSettingsTests : IDisposable
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
         Assert.Equal("high", settings.Effort);
-        Assert.True(settings.NoSessionPersistence);
-        Assert.Equal("plan", settings.PermissionMode);
-        Assert.Equal("You are a Python expert", settings.SystemPrompt);
-        Assert.True(settings.AllowDangerouslySkipPermissions);
-        Assert.Equal("server:webhook plugin:test@local", settings.DangerouslyLoadDevelopmentChannels);
-        Assert.True(settings.DangerouslySkipPermissions);
-        Assert.Equal("Bash(git log *)\nRead", settings.AllowedTools);
-        Assert.Equal("Always use TypeScript", settings.AppendSystemPrompt);
-        Assert.True(settings.Bare);
-        Assert.Equal("interleaved-thinking", settings.Betas);
-        Assert.Equal("plugin:my-notifier@my-marketplace", settings.Channels);
-        Assert.True(settings.Debug);
-        Assert.Equal("api,mcp", settings.DebugFilter);
+        Assert.False(settings.DangerouslySkipPermissions);
+        Assert.False(settings.NoSessionPersistence);
     }
 
-    [Fact]
-    public async Task GetSettings_MapsLegacySkipPermissions_ToDangerouslySkipPermissions()
+    [Theory]
+    [InlineData("max")]
+    [InlineData("xhigh")]
+    public async Task GetSettings_AcceptsAllEffortLevels(string level)
     {
-        var json = @"{
-    ""skipPermissions"": true
-}";
-
         _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(json);
+        _mockFileService.SetFileContent($@"{{ ""effortLevel"": ""{level}"" }}");
 
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
-        Assert.True(settings.DangerouslySkipPermissions);
+        Assert.Equal(level, settings.Effort);
     }
 
     [Fact]
-    public async Task GetSettings_ReturnsDefaults_ForMissingFields()
+    public async Task GetSettings_IgnoresOldVibeRailsCompatibilityKeys()
     {
         var json = @"{
-    ""permissionMode"": ""auto""
+    ""effort"": ""high"",
+    ""permissionMode"": ""auto"",
+    ""allowedTools"": ""Read"",
+    ""skipPermissions"": true
 }";
 
         _mockFileService.SetFileExists(true);
@@ -123,139 +103,159 @@ public class ClaudeSettingsTests : IDisposable
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
         Assert.Equal("", settings.Effort);
-        Assert.Equal("auto", settings.PermissionMode);
-        Assert.Equal("", settings.AllowedTools);
-        Assert.False(settings.Debug);
+        Assert.False(settings.DangerouslySkipPermissions);
     }
 
     [Fact]
-    public async Task SaveSettings_WritesSupportedValues_ToJson()
+    public async Task SaveSettings_WritesEffortLevel_ToJson()
     {
         _mockFileService.SetFileExists(false);
 
-        var settings = new ClaudeSettingsDto
-        {
-            Effort = "xhigh",
-            NoSessionPersistence = true,
-            PermissionMode = "dontAsk",
-            SystemPrompt = "You are a Python expert",
-            AllowDangerouslySkipPermissions = true,
-            DangerouslyLoadDevelopmentChannels = "server:webhook",
-            DangerouslySkipPermissions = true,
-            AllowedTools = "Bash(git log *)\nRead",
-            AppendSystemPrompt = "Always use TypeScript",
-            Bare = true,
-            Betas = "interleaved-thinking",
-            Channels = "plugin:my-notifier@my-marketplace",
-            Debug = true,
-            DebugFilter = "api,mcp"
-        };
+        var settings = new ClaudeSettingsDto { Effort = "xhigh" };
 
         await _service.SaveSettings("test-env", settings, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("\"effort\": \"xhigh\"", writtenContent);
-        Assert.Contains("\"noSessionPersistence\": true", writtenContent);
-        Assert.Contains("\"permissionMode\": \"dontAsk\"", writtenContent);
-        Assert.Contains("\"systemPrompt\": \"You are a Python expert\"", writtenContent);
-        Assert.Contains("\"allowDangerouslySkipPermissions\": true", writtenContent);
-        Assert.Contains("\"dangerouslyLoadDevelopmentChannels\": \"server:webhook\"", writtenContent);
-        Assert.Contains("\"dangerouslySkipPermissions\": true", writtenContent);
-        Assert.Contains("\"allowedTools\": \"Bash(git log *)\\nRead\"", writtenContent);
-        Assert.Contains("\"appendSystemPrompt\": \"Always use TypeScript\"", writtenContent);
-        Assert.Contains("\"bare\": true", writtenContent);
-        Assert.Contains("\"betas\": \"interleaved-thinking\"", writtenContent);
-        Assert.Contains("\"channels\": \"plugin:my-notifier@my-marketplace\"", writtenContent);
-        Assert.Contains("\"debug\": true", writtenContent);
-        Assert.Contains("\"debugFilter\": \"api,mcp\"", writtenContent);
+        Assert.Contains("\"effortLevel\": \"xhigh\"", writtenContent);
     }
 
     [Fact]
-    public async Task SaveSettings_PreservesUnknownAndUnmappedLegacyFields()
+    public async Task SaveSettings_LeavesUserPermissionsBlockUntouched()
+    {
+        // Regression guard: VibeRails must never edit Claude's permissions block. A user's
+        // curated allow/deny lists and defaultMode survive a save even though the UI cannot
+        // set them — permission posture is YOLO-or-nothing via CustomArgs launch flags.
+        var existingJson = @"{
+    ""effortLevel"": ""low"",
+    ""permissions"": {
+        ""allow"": [""Bash(git log *)"", ""Read""],
+        ""deny"": [""WebFetch""],
+        ""defaultMode"": ""acceptEdits""
+    }
+}";
+
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(existingJson);
+
+        // Even a DTO that flips YOLO on must not rewrite the permissions block.
+        var settings = new ClaudeSettingsDto { Effort = "high", DangerouslySkipPermissions = true };
+
+        await _service.SaveSettings("test-env", settings, CancellationToken.None);
+
+        var writtenContent = _mockFileService.GetWrittenContent();
+        Assert.Contains("\"effortLevel\": \"high\"", writtenContent);
+        Assert.Contains("\"allow\"", writtenContent);
+        Assert.Contains("\"Bash(git log *)\"", writtenContent);
+        Assert.Contains("\"deny\"", writtenContent);
+        Assert.Contains("\"WebFetch\"", writtenContent);
+        Assert.Contains("\"defaultMode\": \"acceptEdits\"", writtenContent);
+        // YOLO is a launch flag, not a settings-file key.
+        Assert.DoesNotContain("\"dangerouslySkipPermissions\"", writtenContent);
+    }
+
+    [Fact]
+    public async Task SaveSettings_PreservesUnknownFields_ButRemovesStaleTopLevelKeys()
     {
         var existingJson = @"{
-    ""permissions"": { ""allow"": [""Read""] },
     ""model"": ""old-model"",
-    ""disallowedTools"": ""Bash"",
-    ""verbose"": true,
+    ""effort"": ""medium"",
+    ""permissionMode"": ""plan"",
+    ""allowedTools"": ""Read"",
+    ""systemPrompt"": ""old"",
+    ""debug"": true,
+    ""fastModePerSessionOptIn"": true,
     ""customField"": ""preserved""
 }";
 
         _mockFileService.SetFileExists(true);
         _mockFileService.SetFileContent(existingJson);
 
-        var settings = new ClaudeSettingsDto
-        {
-            Effort = "high",
-            PermissionMode = "plan",
-            AllowedTools = "Read"
-        };
+        var settings = new ClaudeSettingsDto { Effort = "high" };
 
         await _service.SaveSettings("test-env", settings, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("\"permissions\"", writtenContent);
         Assert.Contains("\"customField\": \"preserved\"", writtenContent);
-        Assert.Contains("\"effort\": \"high\"", writtenContent);
-        Assert.Contains("\"permissionMode\": \"plan\"", writtenContent);
-        Assert.Contains("\"allowedTools\": \"Read\"", writtenContent);
-        // Legacy fields with no VibeRails mapping are left alone — user's manual edits stick.
-        Assert.Contains("\"model\": \"old-model\"", writtenContent);
-        Assert.Contains("\"disallowedTools\": \"Bash\"", writtenContent);
-        Assert.Contains("\"verbose\": true", writtenContent);
-    }
-
-    [Fact]
-    public async Task SaveSettings_ClearsLegacySkipPermissions_WhenItShadowsTheNewKey()
-    {
-        // skipPermissions is a legacy alias for dangerouslySkipPermissions; GetSettings
-        // falls back to it. Without clearing it on save, the legacy value would shadow
-        // the user's new choice on the next read.
-        var existingJson = @"{
-    ""skipPermissions"": true
-}";
-
-        _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(existingJson);
-
-        var settings = new ClaudeSettingsDto
-        {
-            DangerouslySkipPermissions = false
-        };
-
-        await _service.SaveSettings("test-env", settings, CancellationToken.None);
-
-        var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.DoesNotContain("\"skipPermissions\"", writtenContent);
-    }
-
-    [Fact]
-    public async Task SaveSettings_RemovesEmptyAndDefaultValues()
-    {
-        var existingJson = @"{
-    ""effort"": ""high"",
-    ""permissionMode"": ""plan"",
-    ""systemPrompt"": ""old"",
-    ""debug"": true,
-    ""debugFilter"": ""api""
-}";
-
-        _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(existingJson);
-
-        var settings = new ClaudeSettingsDto
-        {
-            PermissionMode = "default"
-        };
-
-        await _service.SaveSettings("test-env", settings, CancellationToken.None);
-
-        var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.DoesNotContain("\"effort\"", writtenContent);
+        // fastModePerSessionOptIn is an admin/managed key VibeRails does not own — preserved.
+        Assert.Contains("\"fastModePerSessionOptIn\": true", writtenContent);
+        Assert.Contains("\"effortLevel\": \"high\"", writtenContent);
+        // model is now a VibeRails-managed key: an empty DTO removes it on save.
+        Assert.DoesNotContain("\"model\"", writtenContent);
+        // Stale top-level keys older VibeRails builds wrote are cleaned up.
+        Assert.DoesNotContain("\"effort\":", writtenContent);
         Assert.DoesNotContain("\"permissionMode\"", writtenContent);
+        Assert.DoesNotContain("\"allowedTools\"", writtenContent);
         Assert.DoesNotContain("\"systemPrompt\"", writtenContent);
         Assert.DoesNotContain("\"debug\"", writtenContent);
-        Assert.DoesNotContain("\"debugFilter\"", writtenContent);
+    }
+
+    [Fact]
+    public async Task SaveSettings_RemovesEffortLevel_WhenEmpty()
+    {
+        var existingJson = @"{
+    ""effortLevel"": ""high""
+}";
+
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(existingJson);
+
+        await _service.SaveSettings("test-env", new ClaudeSettingsDto(), CancellationToken.None);
+
+        var writtenContent = _mockFileService.GetWrittenContent();
+        Assert.DoesNotContain("\"effortLevel\"", writtenContent);
+    }
+
+    [Fact]
+    public async Task GetSettings_ReadsModelAndFastMode_FromValidJson()
+    {
+        var json = @"{
+    ""effortLevel"": ""high"",
+    ""model"": ""claude-opus-4-8"",
+    ""fastMode"": true
+}";
+
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(json);
+
+        var settings = await _service.GetSettings("test-env", CancellationToken.None);
+
+        Assert.Equal("high", settings.Effort);
+        Assert.Equal("claude-opus-4-8", settings.Model);
+        Assert.True(settings.FastMode);
+    }
+
+    [Fact]
+    public async Task SaveSettings_WritesModelAndFastMode_ToJson()
+    {
+        _mockFileService.SetFileExists(false);
+
+        var settings = new ClaudeSettingsDto { Effort = "xhigh", Model = "claude-opus-4-8", FastMode = true };
+
+        await _service.SaveSettings("test-env", settings, CancellationToken.None);
+
+        var writtenContent = _mockFileService.GetWrittenContent();
+        Assert.Contains("\"effortLevel\": \"xhigh\"", writtenContent);
+        Assert.Contains("\"model\": \"claude-opus-4-8\"", writtenContent);
+        // fastMode is a settings-file-only key (no --fast launch flag exists).
+        Assert.Contains("\"fastMode\": true", writtenContent);
+    }
+
+    [Fact]
+    public async Task SaveSettings_RemovesModelAndFastMode_WhenDefault()
+    {
+        var existingJson = @"{
+    ""model"": ""claude-opus-4-8"",
+    ""fastMode"": true
+}";
+
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(existingJson);
+
+        await _service.SaveSettings("test-env", new ClaudeSettingsDto(), CancellationToken.None);
+
+        var writtenContent = _mockFileService.GetWrittenContent();
+        Assert.DoesNotContain("\"model\"", writtenContent);
+        Assert.DoesNotContain("\"fastMode\"", writtenContent);
     }
 
     private class MockFileService : IFileService

@@ -90,6 +90,13 @@ export function getCliBrand(cli) {
             logo: getAssetPath('assets/img/copilot.svg'),
             className: 'badge-cli-copilot',
             accentColor: '#ab7df8'
+        },
+        shell: {
+            label: 'Terminal',
+            logo: getAssetPath('assets/img/terminal.svg'),
+            className: 'badge-cli-shell',
+            accentColor: '#7d8590',
+            logoFilter: 'brightness(0) invert(1)'
         }
     };
 
@@ -102,6 +109,11 @@ const BASE_LLM_CHOICES = Object.freeze([
     { cli: 'gemini', label: 'Gemini' },
     { cli: 'copilot', label: 'Copilot' }
 ]);
+
+// Plain shell — a no-agent terminal. Kept out of BASE_LLM_CHOICES so it only surfaces
+// where explicitly opted in (the in-app terminal tab picker), not in multi-run /
+// chat-history / sandbox pickers where a bare shell has no meaning.
+const SHELL_LLM_CHOICE = Object.freeze({ cli: 'shell', label: 'Terminal' });
 
 function normalizeCliValue(value) {
     return (value || '').toString().trim().toLowerCase();
@@ -127,7 +139,8 @@ export function buildLlmSelectionValue(cli, environmentId = null) {
 export function buildLlmSelectionOptions(environments = [], options = {}) {
     const {
         includeGroups = true,
-        includeDefaultSuffix = true
+        includeDefaultSuffix = true,
+        includeShell = false
     } = options;
 
     const items = [];
@@ -163,6 +176,18 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
             kind: 'base'
         });
     });
+
+    if (includeShell) {
+        items.push({
+            group: includeGroups ? 'Base CLIs' : null,
+            value: buildLlmSelectionValue(SHELL_LLM_CHOICE.cli),
+            label: SHELL_LLM_CHOICE.label,
+            cli: SHELL_LLM_CHOICE.cli,
+            environmentId: null,
+            environmentName: null,
+            kind: 'base'
+        });
+    }
 
     return items;
 }
@@ -227,12 +252,14 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
         selectedValue = '',
         includeGroups = true,
         includeDefaultSuffix = true,
+        includeShell = false,
         enhance = true
     } = options;
 
     const optionItems = buildLlmSelectionOptions(environments, {
         includeGroups,
-        includeDefaultSuffix
+        includeDefaultSuffix,
+        includeShell
     });
 
     if (selectEl.tomselect) {
@@ -384,7 +411,7 @@ export function parseLlmSelection(selection, environments = []) {
 
     if (value.startsWith('base:')) {
         const cli = normalizeCliValue(value.slice(5));
-        const baseCli = BASE_LLM_CHOICES.find((item) => item.cli === cli);
+        const baseCli = [...BASE_LLM_CHOICES, SHELL_LLM_CHOICE].find((item) => item.cli === cli);
         return {
             kind: 'base',
             value,

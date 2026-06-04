@@ -2809,7 +2809,7 @@ code {
     color: #cdd6f4;
 }
 
-/* Rename pencil — revealed on hover / for the active tab only. */
+/* Rename pencil — available after session start, revealed only on hover. */
 #vb-terminal-panel .vb-terminal-tab-edit {
     border: none;
     background: transparent;
@@ -2829,8 +2829,11 @@ code {
     cursor: pointer;
 }
 
-#vb-terminal-panel .vb-terminal-tab-item:hover .vb-terminal-tab-edit,
-#vb-terminal-panel .vb-terminal-tab-item.active .vb-terminal-tab-edit {
+#vb-terminal-panel .vb-terminal-tab-edit[hidden] {
+    display: none !important;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.has-active-session:hover .vb-terminal-tab-edit {
     display: inline-flex;
 }
 
@@ -3358,7 +3361,14 @@ code {
     background: var(--terminal-body-bg);
     transition: height 0.28s ease;
     overflow: hidden;
-    padding: 0;
+    /* A little bottom breathing room so the last (input) row is never pressed
+       against the panel edge — especially in the VS Code webview where the
+       terminal sits just above the editor/panel divider. box-sizing is
+       border-box (Bootstrap reboot), so this padding shrinks the content box
+       and the xterm FitAddon simply computes one fewer row — it can never
+       clip the input line. The margin keeps a gap below the whole window. */
+    padding: 0 0 12px;
+    margin-bottom: 10px;
     height: var(--terminal-default-height);
     min-height: var(--terminal-min-height);
 }
@@ -5021,6 +5031,130 @@ input.form-control:disabled {
 #vb-terminal-panel #terminal-menu-btn[aria-expanded="true"] {
     background: rgba(255, 255, 255, 0.1);
     color: #cdd6f4;
+}
+
+/* ── "Open in text editor" discovery nudge ──────────────────────────────────
+   A one-time flash on the editor button plus a small dismissible callout, shown
+   when the user types a long run into the terminal. Mirrors the chat-history
+   sidebar's pulse-hint pattern. */
+@keyframes vb-editor-nudge-pulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent, #06b6d4) 0%, transparent);
+    }
+    50% {
+        box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent, #06b6d4) 36%, transparent);
+    }
+}
+
+#vb-terminal-panel #terminal-editor-btn.vb-editor-nudge-pulse {
+    animation: vb-editor-nudge-pulse 1.5s ease-in-out 3;
+    color: var(--color-accent, #06b6d4);
+}
+
+.vb-terminal-editor-nudge {
+    position: fixed;
+    z-index: 1300;
+    width: 280px;
+    max-width: calc(100vw - 16px);
+    background: #1a1b2e;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+    padding: 12px 12px 10px;
+    color: #d4d4d4;
+    font-size: 0.8rem;
+    animation: vb-editor-nudge-in 160ms ease-out;
+}
+
+@keyframes vb-editor-nudge-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.vb-terminal-editor-nudge-arrow {
+    position: absolute;
+    top: -6px;
+    width: 11px;
+    height: 11px;
+    background: #1a1b2e;
+    border-left: 1px solid rgba(255, 255, 255, 0.15);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    transform: rotate(45deg);
+}
+
+.vb-terminal-editor-nudge-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+}
+
+.vb-terminal-editor-nudge-icon {
+    color: var(--color-accent, #06b6d4);
+    font-size: 0.95rem;
+    margin-top: 1px;
+    flex-shrink: 0;
+}
+
+.vb-terminal-editor-nudge-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.35;
+}
+
+.vb-terminal-editor-nudge-text strong {
+    color: #fff;
+    font-weight: 600;
+}
+
+.vb-terminal-editor-nudge-text span {
+    color: #a9b1d6;
+}
+
+.vb-terminal-editor-nudge-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.vb-terminal-editor-nudge-actions button {
+    border: none;
+    border-radius: 5px;
+    padding: 5px 10px;
+    font-size: 0.74rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.vb-terminal-editor-nudge-open {
+    background: var(--color-accent, #06b6d4);
+    color: #0d0e1c;
+    font-weight: 600;
+}
+
+.vb-terminal-editor-nudge-open:hover {
+    filter: brightness(1.08);
+}
+
+.vb-terminal-editor-nudge-dismiss {
+    background: transparent;
+    color: #8b93b3;
+}
+
+.vb-terminal-editor-nudge-dismiss:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: #cdd6f4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #vb-terminal-panel #terminal-editor-btn.vb-editor-nudge-pulse {
+        animation: none;
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent, #06b6d4) 32%, transparent);
+    }
+    .vb-terminal-editor-nudge {
+        animation: none;
+    }
 }
 
 .vb-multirun-modal {

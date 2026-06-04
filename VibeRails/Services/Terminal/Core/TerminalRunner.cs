@@ -40,6 +40,9 @@ public class TerminalRunner
         bool isNativeCli = false,
         string? initialUserInput = null)
     {
+        // Plain shell sessions are shared remotely like any other session when remote is
+        // enabled. A remote viewer of an agent session can already Ctrl+C out of the prompt
+        // into the underlying shell, so a dedicated shell tab is no more sensitive to share.
         var shouldEnableRemote = ShouldEnableRemote(makeRemote, isNativeCli);
         // Web flow passes the env's CustomPrompt as initialPrompt and we record the
         // same text. CLI flow bakes the prompt into extraArgs so initialPrompt is
@@ -79,6 +82,11 @@ public class TerminalRunner
                     var remoteViewerAuthorized = RemoteConfig.IsPinConfigured ? 0 : 1;
                     var remoteTakeoverNotified = false;
                     var lockPromptSent = false;
+                    // Deliberately persists for the whole session and is reset ONLY on a
+                    // successful PIN. The disconnect / reconnect handlers re-lock the viewer but
+                    // must NOT reset this, or an attacker could refill the guess budget by forcing
+                    // a reconnect (network blip, idle timeout, output-overflow resync) or by
+                    // disconnect/reconnect cycling — defeating the 3-strikes lockout.
                     var failedPinAttempts = 0;
                     var remoteOutputConsumer = new RemoteOutputConsumer(
                         remoteConn,
@@ -281,7 +289,8 @@ public class TerminalRunner
                                     RemoteConfig.IsPinConfigured ? 0 : 1);
                                 remoteTakeoverNotified = false;
                                 lockPromptSent = false;
-                                failedPinAttempts = 0;
+                                // failedPinAttempts is intentionally NOT reset here — the lockout
+                                // must survive a disconnect/reconnect so it can't be brute-forced.
                             }
                             finally
                             {
@@ -297,6 +306,43 @@ public class TerminalRunner
                         catch (Exception ex)
                         {
                             Log.Error(ex, "[Remote] Failed to process remote browser disconnect");
+                        }
+                    }
+
+                    async Task HandleRemoteReconnectedAsync()
+                    {
+                        try
+                        {
+                            // The relay socket dropped and was re-established. The browser
+                            // viewer (if any) lost its pairing during the gap, so treat the
+                            // reconnect as a brand-new viewer: re-lock behind the PIN and
+                            // force a fresh lock prompt. A correct PIN re-pushes the snapshot
+                            // via the normal input path.
+                            await takeoverGate.WaitAsync(CancellationToken.None);
+                            try
+                            {
+                                System.Threading.Volatile.Write(
+                                    ref remoteViewerAuthorized,
+                                    RemoteConfig.IsPinConfigured ? 0 : 1);
+                                remoteTakeoverNotified = false;
+                                lockPromptSent = false;
+                                // failedPinAttempts is intentionally NOT reset here — the lockout
+                                // must survive a reconnect so it can't be brute-forced by forcing
+                                // the relay socket to drop and re-establish.
+                            }
+                            finally
+                            {
+                                takeoverGate.Release();
+                            }
+
+                            if (RemoteConfig.IsPinConfigured)
+                                await SendLockedAsync(force: true);
+                            else
+                                terminal.PushSnapshotTo(remoteOutputConsumer);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error(ex, "[Remote] Failed to handle reconnect");
                         }
                     }
 
@@ -323,6 +369,10 @@ public class TerminalRunner
                     {
                         _ = HandleRemoteBrowserDisconnectedAsync();
                     };
+                    remoteConn.OnReconnected += () =>
+                    {
+                        _ = HandleRemoteReconnectedAsync();
+                    };
                     activeRemoteConn = remoteConn;
                 }
                 else
@@ -331,8 +381,10 @@ public class TerminalRunner
                 }
             }
 
-            // Send the CLI command to the shell
-            await terminal.SendCommandAsync(preparedSession.Command, ct);
+            // Send the CLI command to the shell. Plain shell sessions have no command,
+            // so we leave the shell at its prompt rather than typing a stray newline.
+            if (!string.IsNullOrWhiteSpace(preparedSession.Command))
+                await terminal.SendCommandAsync(preparedSession.Command, ct);
 
             if (activeRemoteConn != null)
             {
@@ -384,7 +436,12 @@ public class TerminalRunner
             return false;
 
         _ = makeRemoteRequested;
-        return ParserConfigs.GetRemoteAccess() && !string.IsNullOrWhiteSpace(ParserConfigs.GetApiKey());
+        // RemoteConfig.IsEnabled is the single source of truth: remote access on, an API key
+        // set, AND a PIN configured. Gate session enablement on the PIN here too — not just at
+        // settings-save time. Otherwise clearing the PIN (DELETE /settings/pin leaves
+        // RemoteAccess on) would keep serving remote sessions with remoteViewerAuthorized == 1,
+        // i.e. no lock screen at all.
+        return RemoteConfig.IsEnabled;
     }
 
     private void RequestEmergencyShutdown(string message)

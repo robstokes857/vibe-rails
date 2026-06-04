@@ -314,6 +314,9 @@ export class EnvironmentController {
         if (cliLower === 'claude' && env.customPrompt) {
             cliSettings.initialMessage = env.customPrompt;
         }
+        if (cliLower === 'claude') {
+            this.mergeClaudeSettingsFromCustomArgs(cliSettings, env.customArgs || '');
+        }
         if (cliLower === 'gemini') {
             if (env.customPrompt) {
                 cliSettings.initialMessage = env.customPrompt;
@@ -514,7 +517,6 @@ export class EnvironmentController {
         const s = settings || {};
         const args = [];
         const model = this.normalizeCodexModel(s.model);
-        const approval = this.normalizeCodexApproval(s.askForApproval);
 
         if (model) {
             args.push('--model', model);
@@ -524,17 +526,9 @@ export class EnvironmentController {
             args.push('-c', `model_reasoning_effort=${s.effort}`);
         }
 
+        // YOLO Mode for Codex: bypass approvals and sandboxing entirely.
         if (s.yolo) {
             args.push('--dangerously-bypass-approvals-and-sandbox');
-        } else {
-            if (s.fullAuto) {
-                args.push('--sandbox', 'workspace-write');
-            }
-
-            const approvalToUse = approval || (s.fullAuto ? 'on-request' : '');
-            if (approvalToUse) {
-                args.push('--ask-for-approval', approvalToUse);
-            }
         }
 
         if (s.noAltScreen) {
@@ -552,25 +546,43 @@ export class EnvironmentController {
     buildGeminiCustomArgs(settings) {
         const s = settings || {};
         const args = [];
-        const normalizedApprovalMode = this.normalizeGeminiApprovalMode(s.approvalMode);
-        const yoloMode = Boolean(s.yoloMode || normalizedApprovalMode === 'yolo');
-        const approvalMode = yoloMode
-            ? ''
-            : this.normalizeGeminiApprovalMode(s.approvalMode || (s.autoApproveTools ? 'auto_edit' : ''));
 
         if (s.sandboxEnabled) {
             args.push('--sandbox');
         }
 
-        if (yoloMode) {
+        let additional = this.parseArgString(s.additionalArgs || '');
+
+        // YOLO Mode for Gemini: auto-approve all actions. YOLO owns the approval mode, so strip
+        // any preserved --approval-mode flag from the additional args first; otherwise we'd emit
+        // a conflicting, order-dependent pair like `--approval-mode yolo --approval-mode auto_edit`
+        // (a non-YOLO mode is intentionally preserved in additionalArgs by the merge step).
+        if (s.yoloMode) {
+            additional = this.stripGeminiApprovalModeArgs(additional);
             args.push('--approval-mode', 'yolo');
-        } else if (approvalMode && approvalMode !== 'default') {
-            args.push('--approval-mode', approvalMode);
         }
 
-        args.push(...this.parseArgString(s.additionalArgs || ''));
+        args.push(...additional);
 
         return args.map(arg => this.quoteCustomArg(arg)).join(' ');
+    }
+
+    // Remove any --approval-mode (and its value), --approval-mode=..., --yolo, or -y tokens from
+    // a parsed arg list. Used when YOLO is first-class so it solely owns the approval flag.
+    stripGeminiApprovalModeArgs(args) {
+        const result = [];
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+            if (arg === '--approval-mode') {
+                if (i + 1 < args.length) i++; // also drop its value
+                continue;
+            }
+            if (arg.startsWith('--approval-mode=') || arg === '--yolo' || arg === '-y') {
+                continue;
+            }
+            result.push(arg);
+        }
+        return result;
     }
 
     mergeGeminiSettingsFromCustomArgs(settings, customArgs) {
@@ -588,25 +600,15 @@ export class EnvironmentController {
                 continue;
             }
 
-            if (arg === '--yolo' || arg === '-y') {
-                settings.approvalMode = 'yolo';
+            // YOLO Mode for Gemini. Other --approval-mode values (auto_edit/plan) are no
+            // longer modeled, so they fall through to additionalArgs and are preserved verbatim.
+            if (arg === '--yolo' || arg === '-y' || arg === '--approval-mode=yolo') {
                 settings.yoloMode = true;
                 continue;
             }
 
-            if (arg.startsWith('--approval-mode=')) {
-                const approvalMode = this.normalizeGeminiApprovalMode(arg.slice('--approval-mode='.length));
-                settings.approvalMode = approvalMode;
-                settings.autoApproveTools = approvalMode === 'auto_edit';
-                settings.yoloMode = approvalMode === 'yolo';
-                continue;
-            }
-
-            if (arg === '--approval-mode' && next) {
-                const approvalMode = this.normalizeGeminiApprovalMode(next);
-                settings.approvalMode = approvalMode;
-                settings.autoApproveTools = approvalMode === 'auto_edit';
-                settings.yoloMode = approvalMode === 'yolo';
+            if (arg === '--approval-mode' && next === 'yolo') {
+                settings.yoloMode = true;
                 i++;
                 continue;
             }
@@ -621,30 +623,9 @@ export class EnvironmentController {
         return settings;
     }
 
-    normalizeGeminiApprovalMode(value) {
-        const raw = (value || '').trim().toLowerCase();
-        if (['default', 'auto_edit', 'yolo', 'plan'].includes(raw)) return raw;
-        return '';
-    }
-
     bindCliSettingsInteractions(cli) {
-        const cliLower = (cli || '').toLowerCase();
-        if (cliLower === 'gemini') {
-            this.bindGeminiYoloModeControls();
-        }
-    }
-
-    bindGeminiYoloModeControls() {
-        const yoloSwitch = document.getElementById('gemini-yolo');
-        const approvalSelect = document.getElementById('gemini-approval-mode');
-        if (!yoloSwitch || !approvalSelect) return;
-
-        const syncApprovalState = () => {
-            approvalSelect.disabled = yoloSwitch.checked;
-        };
-
-        yoloSwitch.addEventListener('change', syncApprovalState);
-        syncApprovalState();
+        // Permission posture is a single YOLO toggle per CLI, so no cross-control wiring
+        // remains. Kept as a hook in case future settings need interactions.
     }
 
     mergeCodexSettingsFromCustomArgs(settings, customArgs) {
@@ -680,18 +661,13 @@ export class EnvironmentController {
                 continue;
             }
 
-            if ((arg === '--ask-for-approval' || arg === '-a') && next) {
-                settings.askForApproval = this.normalizeCodexApproval(next);
-                i++;
-                continue;
-            }
-
             if (arg === '--enable' && next === 'fast_mode') {
                 sawFastFeature = true;
                 i++;
                 continue;
             }
 
+            // YOLO Mode for Codex.
             if (arg === '--dangerously-bypass-approvals-and-sandbox' || arg === '--yolo') {
                 settings.yolo = true;
                 continue;
@@ -699,12 +675,6 @@ export class EnvironmentController {
 
             if (arg === '--no-alt-screen') {
                 settings.noAltScreen = true;
-                continue;
-            }
-
-            if ((arg === '--sandbox' || arg === '-s') && next === 'workspace-write') {
-                settings.fullAuto = true;
-                i++;
                 continue;
             }
         }
@@ -782,15 +752,10 @@ export class EnvironmentController {
         return raw;
     }
 
-    normalizeCodexApproval(value) {
-        const raw = (value || '').trim().toLowerCase();
-        if (raw === 'on-failure') return 'on-request';
-        if (['untrusted', 'on-request', 'never'].includes(raw)) return raw;
-        return '';
-    }
-
     renderCodexModelOptions(selectedModel) {
         const selected = this.normalizeCodexModel(selectedModel);
+        // Hand-maintained pinned list — see runbooks/custom_envs/CLI_OPTIONS.md
+        // ("Model Lists") to add a newly released model or drop a retired one.
         const options = [
             ['', 'Default (Codex recommended)'],
             ['gpt-5.5', 'gpt-5.5'],
@@ -799,6 +764,33 @@ export class EnvironmentController {
             ['gpt-5.3-codex', 'gpt-5.3-codex'],
             ['gpt-5.3-codex-spark', 'gpt-5.3-codex-spark'],
             ['gpt-5.2', 'gpt-5.2']
+        ];
+        const known = new Set(options.map(([value]) => value));
+        const rendered = options.map(([value, label]) =>
+            `<option value="${this.app.escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${this.app.escapeHtml(label)}</option>`
+        );
+
+        if (selected && !known.has(selected)) {
+            rendered.push(`<option value="${this.app.escapeHtml(selected)}" selected>${this.app.escapeHtml(selected)} (custom)</option>`);
+        }
+
+        return rendered.join('');
+    }
+
+    normalizeClaudeModel(model) {
+        return (model || '').trim();
+    }
+
+    renderClaudeModelOptions(selectedModel) {
+        const selected = this.normalizeClaudeModel(selectedModel);
+        // Hand-maintained pinned list — see runbooks/custom_envs/CLI_OPTIONS.md
+        // ("Model Lists") to add a newly released model or drop a retired one.
+        const options = [
+            ['', 'Default (Claude recommended)'],
+            ['claude-opus-4-8', 'claude-opus-4-8'],
+            ['claude-opus-4-7', 'claude-opus-4-7'],
+            ['claude-sonnet-4-6', 'claude-sonnet-4-6'],
+            ['claude-haiku-4-5', 'claude-haiku-4-5']
         ];
         const known = new Set(options.map(([value]) => value));
         const rendered = options.map(([value, label]) =>
@@ -963,9 +955,64 @@ export class EnvironmentController {
         return '';
     }
 
+    mergeClaudeSettingsFromCustomArgs(settings, customArgs) {
+        const args = this.parseArgString(customArgs);
+        if (args.length === 0) return settings;
+
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+            const next = args[i + 1];
+
+            if (arg === '--model' && next) {
+                settings.model = this.normalizeClaudeModel(next);
+                i++;
+                continue;
+            }
+
+            if (arg === '--effort' && next) {
+                settings.effort = next;
+                i++;
+                continue;
+            }
+
+            if (arg === '--no-session-persistence') {
+                settings.noSessionPersistence = true;
+                continue;
+            }
+
+            if (arg === '--system-prompt' && next) {
+                settings.systemPrompt = next;
+                i++;
+                continue;
+            }
+
+            // YOLO Mode for Claude.
+            if (arg === '--dangerously-skip-permissions') {
+                settings.dangerouslySkipPermissions = true;
+                continue;
+            }
+
+            if (arg === '--bare') {
+                settings.bare = true;
+                continue;
+            }
+
+            if (arg === '--debug') {
+                settings.debug = true;
+            }
+        }
+
+        return settings;
+    }
+
     buildClaudeCustomArgs(settings) {
         const s = settings || {};
         const args = [];
+        const model = this.normalizeClaudeModel(s.model);
+
+        if (model) {
+            args.push('--model', model);
+        }
 
         if (s.effort) {
             args.push('--effort', s.effort);
@@ -975,19 +1022,9 @@ export class EnvironmentController {
             args.push('--no-session-persistence');
         }
 
-        // Only emit --permission-mode when the user picked a non-default value;
-        // otherwise the generated args list is noisier than what they configured.
-        const permissionMode = s.permissionMode || 'default';
-        if (permissionMode !== 'default') {
-            args.push('--permission-mode', permissionMode);
-        }
-
         this.pushStringArg(args, '--system-prompt', s.systemPrompt);
 
-        if (s.allowDangerouslySkipPermissions) {
-            args.push('--allow-dangerously-skip-permissions');
-        }
-
+        // YOLO Mode for Claude: bypass all permission prompts.
         if (s.dangerouslySkipPermissions) {
             args.push('--dangerously-skip-permissions');
         }
@@ -1060,28 +1097,20 @@ export class EnvironmentController {
     extractCliSettingsPayload(cli) {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'gemini') {
-            const yoloMode = document.getElementById('gemini-yolo').checked;
-            const approvalMode = yoloMode
-                ? 'yolo'
-                : this.normalizeGeminiApprovalMode(document.getElementById('gemini-approval-mode').value);
             return {
                 initialMessage: document.getElementById('gemini-initial-message').value,
                 sandboxEnabled: document.getElementById('gemini-sandbox').checked,
-                approvalMode,
-                autoApproveTools: !yoloMode && approvalMode === 'auto_edit',
                 vimMode: document.getElementById('gemini-vim').checked,
                 checkForUpdates: document.getElementById('gemini-updates').checked,
-                yoloMode,
+                yoloMode: document.getElementById('gemini-yolo').checked,
                 additionalArgs: document.getElementById('gemini-additional-args').value
             };
         }
         if (cliLower === 'codex') {
             return {
                 yolo: document.getElementById('codex-yolo').checked,
-                fullAuto: document.getElementById('codex-full-auto').checked,
                 noAltScreen: document.getElementById('codex-no-alt-screen').checked,
                 prompt: document.getElementById('codex-prompt').value,
-                askForApproval: this.normalizeCodexApproval(document.getElementById('codex-approval').value),
                 model: this.normalizeCodexModel(document.getElementById('codex-model').value),
                 effort: document.getElementById('codex-effort').value,
                 fastMode: document.getElementById('codex-fast-mode').checked
@@ -1089,12 +1118,12 @@ export class EnvironmentController {
         }
         if (cliLower === 'claude') {
             return {
+                model: this.normalizeClaudeModel(document.getElementById('claude-model').value),
                 effort: document.getElementById('claude-effort').value,
+                fastMode: document.getElementById('claude-fast-mode').checked,
                 initialMessage: document.getElementById('claude-initial-message').value,
                 noSessionPersistence: document.getElementById('claude-no-session-persistence').checked,
-                permissionMode: document.getElementById('claude-permission-mode').value,
                 systemPrompt: document.getElementById('claude-system-prompt').value,
-                allowDangerouslySkipPermissions: document.getElementById('claude-allow-dangerously-skip-permissions').checked,
                 dangerouslySkipPermissions: document.getElementById('claude-dangerously-skip-permissions').checked,
                 bare: document.getElementById('claude-bare').checked,
                 debug: document.getElementById('claude-debug').checked
@@ -1119,9 +1148,7 @@ export class EnvironmentController {
 
         if (cliLower === 'gemini') {
             const geminiInitialMessage = this.app.escapeHtml(s.initialMessage || '');
-            const normalizedApprovalMode = this.normalizeGeminiApprovalMode(s.approvalMode || (s.autoApproveTools ? 'auto_edit' : ''));
-            const geminiYoloMode = Boolean(s.yoloMode || normalizedApprovalMode === 'yolo');
-            const geminiApprovalMode = geminiYoloMode ? '' : normalizedApprovalMode;
+            const geminiYoloMode = Boolean(s.yoloMode);
             const geminiAdditionalArgs = this.app.escapeHtml(s.additionalArgs || '');
             return `
                 <hr class="my-4">
@@ -1144,15 +1171,6 @@ export class EnvironmentController {
                         <label class="form-check-label" for="gemini-yolo">YOLO Mode</label>
                     </div>
                     <small class="form-text text-muted text-warning">Launches Gemini with <code>--approval-mode yolo</code> and bypasses approval prompts</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Approval Mode</label>
-                    <select class="form-select" id="gemini-approval-mode">
-                        <option value="" ${geminiApprovalMode === '' ? 'selected' : ''}>Default prompts</option>
-                        <option value="auto_edit" ${geminiApprovalMode === 'auto_edit' ? 'selected' : ''}>Auto-approve edits</option>
-                        <option value="plan" ${geminiApprovalMode === 'plan' ? 'selected' : ''}>Plan: read-only</option>
-                    </select>
-                    <small class="form-text text-muted">Passed as <code>--approval-mode</code>; disabled while YOLO mode is enabled</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
@@ -1180,7 +1198,6 @@ export class EnvironmentController {
             const promptValue = this.app.escapeHtml(s.prompt || '');
             const codexModel = this.normalizeCodexModel(s.model);
             const codexEffort = s.effort || '';
-            const codexApproval = this.normalizeCodexApproval(s.askForApproval);
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Codex CLI Settings</h6>
@@ -1209,16 +1226,6 @@ export class EnvironmentController {
                     <small class="form-text text-muted">Passed as <code>-c model_reasoning_effort=&lt;level&gt;</code></small>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Ask For Approval</label>
-                    <select class="form-select" id="codex-approval">
-                        <option value="" ${codexApproval === '' ? 'selected' : ''}>Default</option>
-                        <option value="on-request" ${codexApproval === 'on-request' ? 'selected' : ''}>On Request</option>
-                        <option value="untrusted" ${codexApproval === 'untrusted' ? 'selected' : ''}>Untrusted</option>
-                        <option value="never" ${codexApproval === 'never' ? 'selected' : ''}>Never</option>
-                    </select>
-                    <small class="form-text text-muted">Passed as <code>--ask-for-approval</code>; ignored when YOLO mode is enabled</small>
-                </div>
-                <div class="mb-3">
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" id="codex-fast-mode" ${s.fastMode ? 'checked' : ''}>
                         <label class="form-check-label" for="codex-fast-mode">Fast Mode</label>
@@ -1230,14 +1237,7 @@ export class EnvironmentController {
                         <input class="form-check-input" type="checkbox" id="codex-yolo" ${s.yolo ? 'checked' : ''}>
                         <label class="form-check-label" for="codex-yolo">YOLO Mode</label>
                     </div>
-                    <small class="form-text text-muted text-warning">Runs commands without approvals or sandboxing</small>
-                </div>
-                <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="codex-full-auto" ${s.fullAuto ? 'checked' : ''}>
-                        <label class="form-check-label" for="codex-full-auto">Full-Auto Mode</label>
-                    </div>
-                    <small class="form-text text-muted">Sets approval to on-request and sandbox to workspace-write</small>
+                    <small class="form-text text-muted text-warning">Launches with <code>--dangerously-bypass-approvals-and-sandbox</code>, running commands without approvals or sandboxing</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
@@ -1307,7 +1307,7 @@ export class EnvironmentController {
 
         if (cliLower === 'claude') {
             const effort = s.effort || '';
-            const permissionMode = s.permissionMode || 'default';
+            const claudeModel = this.normalizeClaudeModel(s.model);
             const initialMessage = this.app.escapeHtml(s.initialMessage || '');
             const systemPrompt = this.app.escapeHtml(s.systemPrompt || '');
 
@@ -1316,17 +1316,17 @@ export class EnvironmentController {
                 <h6 class="text-muted mb-3">Claude CLI Settings</h6>
                 <div class="mb-3">
                     <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="claude-allow-dangerously-skip-permissions" ${s.allowDangerouslySkipPermissions ? 'checked' : ''}>
-                        <label class="form-check-label" for="claude-allow-dangerously-skip-permissions">Allow Dangerous Skip Permissions</label>
+                        <input class="form-check-input" type="checkbox" id="claude-dangerously-skip-permissions" ${s.dangerouslySkipPermissions ? 'checked' : ''}>
+                        <label class="form-check-label" for="claude-dangerously-skip-permissions">YOLO Mode</label>
                     </div>
-                    <small class="form-text text-muted">Adds bypassPermissions to the mode cycle without starting in it</small>
+                    <small class="form-text text-muted text-warning">Launches with <code>--dangerously-skip-permissions</code>, bypassing all permission prompts</small>
                 </div>
                 <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="claude-dangerously-skip-permissions" ${s.dangerouslySkipPermissions ? 'checked' : ''}>
-                        <label class="form-check-label" for="claude-dangerously-skip-permissions">Dangerously Skip Permissions</label>
-                    </div>
-                    <small class="form-text text-muted text-warning">Starts Claude with permission prompts bypassed</small>
+                    <label class="form-label">Model</label>
+                    <select class="form-select" id="claude-model">
+                        ${this.renderClaudeModelOptions(claudeModel)}
+                    </select>
+                    <small class="form-text text-muted">Passed as <code>--model</code> when launching Claude</small>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Effort</label>
@@ -1341,6 +1341,13 @@ export class EnvironmentController {
                     <small class="form-text text-muted">Sets the effort level for this session</small>
                 </div>
                 <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="claude-fast-mode" ${s.fastMode ? 'checked' : ''}>
+                        <label class="form-check-label" for="claude-fast-mode">Fast Mode</label>
+                    </div>
+                    <small class="form-text text-muted">Sets <code>fastMode</code> in settings.json (same as <code>/fast</code>). Opus-only — Claude switches to Opus when on. Research preview; billed via usage credits.</small>
+                </div>
+                <div class="mb-3">
                     <label class="form-label">Initial Message</label>
                     <textarea class="form-control" id="claude-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to Claude as soon as the session starts.">${initialMessage}</textarea>
                     <small class="form-text text-muted">Passed as <code>claude "&lt;text&gt;"</code> and recorded as the session's first user input.</small>
@@ -1351,18 +1358,6 @@ export class EnvironmentController {
                         <label class="form-check-label" for="claude-no-session-persistence">No Session Persistence</label>
                     </div>
                     <small class="form-text text-muted">Do not save sessions to disk for print-mode runs</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Permission Mode</label>
-                    <select class="form-select" id="claude-permission-mode">
-                        <option value="default" ${permissionMode === 'default' ? 'selected' : ''}>Default</option>
-                        <option value="acceptEdits" ${permissionMode === 'acceptEdits' ? 'selected' : ''}>Accept Edits</option>
-                        <option value="plan" ${permissionMode === 'plan' ? 'selected' : ''}>Plan</option>
-                        <option value="auto" ${permissionMode === 'auto' ? 'selected' : ''}>Auto</option>
-                        <option value="dontAsk" ${permissionMode === 'dontAsk' ? 'selected' : ''}>Don't Ask</option>
-                        <option value="bypassPermissions" ${permissionMode === 'bypassPermissions' ? 'selected' : ''}>Bypass Permissions</option>
-                    </select>
-                    <small class="form-text text-muted">Controls permission handling behavior</small>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">System Prompt</label>

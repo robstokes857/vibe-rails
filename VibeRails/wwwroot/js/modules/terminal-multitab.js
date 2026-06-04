@@ -31,6 +31,9 @@ const ACTIVE_TAB_KEY = 'viberails_terminal_active_tab_id';
 const TAB_SELECTION_PREFIX = 'viberails_terminal_tab_selection_';
 const TAB_TITLE_PREFIX = 'viberails_terminal_tab_title_';
 const TAB_META_PREFIX = 'viberails_terminal_tab_meta_';
+// One-time "compose long input in the text editor" nudge. '1' once the user has
+// dismissed it or opened the editor at least once — then we never nudge again.
+const EDITOR_NUDGE_SEEN_KEY = 'viberails_terminal_editor_nudge_seen';
 
 function lower(value) {
     return (value || '').toString().trim().toLowerCase();
@@ -92,6 +95,12 @@ class TerminalManager {
         this.lockBtn = null;
         this.focusBtn = null;
         this.keyboardBtn = null;
+        this.editorBtn = null;
+
+        // "Open in text editor" discovery nudge — shown at most once until dismissed.
+        this._editorNudgeShown = false;
+        this._editorNudgeCallout = null;
+        this._editorNudgeTimer = null;
 
         this.lockLayoutHandler = null;
         this.lockedPanel = null;
@@ -165,6 +174,7 @@ class TerminalManager {
         this.lockBtn = this.container.querySelector('#terminal-lock-btn');
         this.focusBtn = this.container.querySelector('#terminal-popout-btn');
         this.keyboardBtn = this.container.querySelector('#terminal-keyboard-btn');
+        this.editorBtn = this.container.querySelector('#terminal-editor-btn');
 
         this.zoomInBtn     = this.container.querySelector('#terminal-zoom-in-btn');
         this.zoomOutBtn    = this.container.querySelector('#terminal-zoom-out-btn');
@@ -222,6 +232,7 @@ class TerminalManager {
         this.terminalMenu = null;
         this.downloadMenu?.destroy();
         this.downloadMenu = null;
+        this._dismissEditorNudge();
         document.body.classList.remove('vb-terminal-active-session');
 
         // Fire-and-forget DELETE for any tabs still in pending-close so we don't leak
@@ -338,11 +349,14 @@ class TerminalManager {
             menuId: 'vb-terminal-menu',
             items: [
                 { id: 'terminal-multirun-btn', onClick: () => this._showMultiRunModal() },
-                { id: 'terminal-editor-btn', onClick: () => this._showEditorModal() },
                 { id: 'terminal-senddebug-btn', onClick: () => this._sendDebugLog() }
             ]
         });
         this.terminalMenu.mount();
+
+        // "Open in text editor" is now a top-level control button (pulled out of the
+        // kebab menu), so it gets its own click handler instead of a menu item.
+        this.editorBtn?.addEventListener('click', () => this._showEditorModal());
 
         // VS Code mode has no file-system download path — hide the wrap entirely.
         if (window.__viberails_VSCODE__) {
@@ -367,7 +381,118 @@ class TerminalManager {
     }
 
     _showEditorModal() {
+        // Opening the editor once means the user found the feature — retire the nudge.
+        this._editorNudgeShown = true;
+        this._markEditorNudgeSeen();
+        this._dismissEditorNudge();
         void new TerminalEditorModal(this).show();
+    }
+
+    // ── "Open in text editor" discovery nudge ────────────────────────────────
+    //
+    // Called by a tab when the user types a long run on one input line. Shows a
+    // one-time button flash + dismissible callout pointing at the editor button.
+    // Idempotent and self-gating: only ever fires once per session, and never at
+    // all once the user has dismissed it or opened the editor (localStorage).
+    maybeShowEditorNudge() {
+        if (this._editorNudgeShown || this._destroyed || !this.editorBtn) {
+            return;
+        }
+
+        try {
+            if (window.localStorage.getItem(EDITOR_NUDGE_SEEN_KEY) === '1') {
+                // Permanently dismissed — stop re-checking for the rest of the session.
+                this._editorNudgeShown = true;
+                return;
+            }
+        } catch { /* localStorage blocked — fall through and show it */ }
+
+        this._editorNudgeShown = true;
+        this._showEditorNudge();
+    }
+
+    _markEditorNudgeSeen() {
+        try { window.localStorage.setItem(EDITOR_NUDGE_SEEN_KEY, '1'); } catch { /* no-op */ }
+    }
+
+    _showEditorNudge() {
+        const btn = this.editorBtn;
+        if (!btn) {
+            return;
+        }
+
+        // Flash the button (CSS animation runs a few iterations then stops).
+        btn.classList.remove('vb-editor-nudge-pulse');
+        void btn.offsetWidth; // force reflow so the animation restarts
+        btn.classList.add('vb-editor-nudge-pulse');
+
+        this._dismissEditorNudge({ keepPulse: true });
+
+        const callout = document.createElement('div');
+        callout.className = 'vb-terminal-editor-nudge';
+        callout.setAttribute('role', 'status');
+        callout.innerHTML = `
+            <div class="vb-terminal-editor-nudge-arrow" aria-hidden="true"></div>
+            <div class="vb-terminal-editor-nudge-row">
+                <i class="fa-solid fa-file-pen vb-terminal-editor-nudge-icon" aria-hidden="true"></i>
+                <div class="vb-terminal-editor-nudge-text">
+                    <strong>Composing something long?</strong>
+                    <span>Open it in the text editor for a better experience.</span>
+                </div>
+            </div>
+            <div class="vb-terminal-editor-nudge-actions">
+                <button type="button" class="vb-terminal-editor-nudge-open">Open editor</button>
+                <button type="button" class="vb-terminal-editor-nudge-dismiss">Don't show again</button>
+            </div>
+        `;
+
+        callout.querySelector('.vb-terminal-editor-nudge-open')
+            ?.addEventListener('click', () => this._showEditorModal());
+        callout.querySelector('.vb-terminal-editor-nudge-dismiss')
+            ?.addEventListener('click', () => {
+                this._markEditorNudgeSeen();
+                this._dismissEditorNudge();
+            });
+
+        document.body.appendChild(callout);
+        this._editorNudgeCallout = callout;
+
+        // Anchor below the button, right-aligned to it (button lives top-right of
+        // the panel). fixed positioning avoids assuming any DOM nesting; the nudge
+        // is transient so it doesn't need to track scroll/resize.
+        const rect = btn.getBoundingClientRect();
+        const margin = 8;
+        callout.style.top = `${Math.round(rect.bottom + margin)}px`;
+        const calloutWidth = callout.offsetWidth || 280;
+        let left = Math.round(rect.right - calloutWidth);
+        left = Math.max(margin, Math.min(left, window.innerWidth - calloutWidth - margin));
+        callout.style.left = `${left}px`;
+        // Point the arrow up at the button.
+        const arrow = callout.querySelector('.vb-terminal-editor-nudge-arrow');
+        if (arrow) {
+            const arrowLeft = Math.round(rect.left + rect.width / 2 - left);
+            arrow.style.left = `${Math.max(12, Math.min(arrowLeft, calloutWidth - 12))}px`;
+        }
+
+        // Auto-dismiss after a while so it never lingers. We deliberately do NOT
+        // mark it permanently seen here — only an explicit "Don't show again" or
+        // actually opening the editor does that. The per-session _editorNudgeShown
+        // flag still prevents it from popping again until the next page load.
+        this._editorNudgeTimer = setTimeout(() => this._dismissEditorNudge(), 14000);
+    }
+
+    _dismissEditorNudge({ keepPulse = false } = {}) {
+        if (this._editorNudgeTimer) {
+            clearTimeout(this._editorNudgeTimer);
+            this._editorNudgeTimer = null;
+        }
+        if (this._editorNudgeCallout) {
+            this._editorNudgeCallout.remove();
+            this._editorNudgeCallout = null;
+        }
+        if (!keepPulse) {
+            this.editorBtn?.classList.remove('vb-editor-nudge-pulse');
+        }
     }
 
     async restoreTabs() {
@@ -452,8 +577,11 @@ class TerminalManager {
             void this.activateTab(state.id, { connectIfNeeded: false });
         });
 
-        // Right-click a tab to rename it (companion to the hover pencil below).
+        // Right-click rename follows the same availability rule as the hover pencil.
         button.addEventListener('contextmenu', (event) => {
+            if (!state.hasActiveSession) {
+                return;
+            }
             event.preventDefault();
             this.beginRenameTab(state.id);
         });
@@ -969,7 +1097,8 @@ class TerminalManager {
         }
 
         tab.state.hasActiveSession = true;
-        tab.state.title = `${meta.displayName} Terminal`;
+        // The plain shell's display name is already "Terminal"; avoid "Terminal Terminal".
+        tab.state.title = meta.cli === 'shell' ? meta.displayName : `${meta.displayName} Terminal`;
         this.saveTabTitle(tab.state.id, tab.state.title);
         this.updateUi();
     }
@@ -1115,7 +1244,10 @@ class TerminalManager {
 
         tab.state.hasActiveSession = false;
         tab.state.sessionId = null;
-        tab.state.title = `${tab.state.label} Terminal`;
+        // Mirror the start path: the plain shell's label is already "Terminal", so don't
+        // append " Terminal" again (avoids "Terminal Terminal").
+        const stopMeta = this.getSelectionMeta(tab.state.selection);
+        tab.state.title = stopMeta.cli === 'shell' ? tab.state.label : `${tab.state.label} Terminal`;
         this.saveTabTitle(tab.state.id, tab.state.title);
         this.updateUi();
 
@@ -1214,7 +1346,22 @@ class TerminalManager {
         return colorPattern.test(color) ? color : null;
     }
 
+    syncTabRenameAction(tab) {
+        const item = tab?.state?.ui?.item;
+        const edit = tab?.state?.ui?.edit;
+        const canRename = tab?.state?.hasActiveSession === true;
+
+        item?.classList.toggle('has-active-session', canRename);
+        if (!edit) return;
+
+        edit.hidden = !canRename;
+        edit.disabled = !canRename;
+        edit.setAttribute('aria-hidden', canRename ? 'false' : 'true');
+    }
+
     renderTabButton(tab) {
+        this.syncTabRenameAction(tab);
+
         if (tab?.instance?.statusController) {
             tab.instance.statusController.render();
             return;
@@ -1336,7 +1483,7 @@ class TerminalManager {
     // cancels, an empty value reverts to the auto-generated CLI label.
     beginRenameTab(tabId) {
         const tab = this.tabs.get(tabId);
-        if (!tab || tab.state.renaming) return;
+        if (!tab || tab.state.renaming || tab.state.hasActiveSession !== true) return;
 
         const item = tab.state.ui?.item;
         const button = tab.state.ui?.button;
@@ -1425,7 +1572,8 @@ class TerminalManager {
     populateSelect() {
         if (!this.headerSelect || this.headerSelect.tagName !== 'SELECT') return;
         populateLlmSelectionSelect(this.headerSelect, this.app.data.environments || [], {
-            placeholder: 'Select LLM...'
+            placeholder: 'Select LLM...',
+            includeShell: true
         });
     }
 
@@ -2485,10 +2633,13 @@ export class TerminalController {
                                     <select id="vb-terminal-tab-undo-select" multiple></select>
                                 </div>
                             </div>
-                            ${renderTerminalMenuHtml()}
+                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-editor-btn" title="Open in text editor" aria-label="Open in text editor">
+                                <i class="fa-solid fa-file-pen"></i>
+                            </button>
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
                             <span class="vb-terminal-font-size-label" id="vb-terminal-font-size-label">14</span>
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
+                            ${renderTerminalMenuHtml()}
                             <div class="vb-terminal-download-wrap" id="vb-terminal-download-wrap">
                                 <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-download-btn" title="Save session" aria-label="Save session">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">

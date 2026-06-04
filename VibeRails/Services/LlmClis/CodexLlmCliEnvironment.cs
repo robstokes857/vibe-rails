@@ -35,6 +35,8 @@ namespace VibeRails.Services.LlmClis
 
                     # approval_policy = "on-request"
                     # sandbox_mode = "workspace-write"
+                    # tui.alternate_screen = "never"
+                    # model_provider = "oss"
 
                     [features]
                     # fast_mode = true
@@ -64,20 +66,13 @@ namespace VibeRails.Services.LlmClis
 
             var content = await _fileService.ReadAllTextAsync(configPath, cancellationToken);
 
-            // Parse TOML-style config (simple key = value format)
-            dto.AskForApproval = NormalizeApproval(
-                GetTomlValue(content, "approval_policy")
-                ?? GetTomlValue(content, "ask_for_approval")
-                ?? GetTomlValue(content, "approval")
-                ?? "");
-            dto.Yolo = GetTomlBoolValue(content, "yolo") ?? false;
-            dto.FullAuto = GetTomlBoolValue(content, "full_auto") ?? false;
-            dto.NoAltScreen = GetTomlBoolValue(content, "no_alt_screen") ?? false;
-            dto.Oss = GetTomlBoolValue(content, "oss") ?? false;
-            dto.Prompt = GetTomlValue(content, "prompt") ?? "";
-            dto.Model = NormalizeModel(GetTomlValue(content, "model"));
-            dto.Effort = NormalizeEffort(GetTomlValue(content, "model_reasoning_effort"));
+            // Parse TOML-style config (simple key = value format). Permission posture
+            // (approval_policy / sandbox_mode) and model_provider are YOLO-or-nothing via
+            // CustomArgs, so VibeRails neither reads nor edits them here.
+            dto.Model = NormalizeModel(GetRootTomlValue(content, "model"));
+            dto.Effort = NormalizeEffort(GetRootTomlValue(content, "model_reasoning_effort"));
             dto.FastMode = IsFastModeEnabled(content);
+            dto.NoAltScreen = IsAlternateScreenDisabled(content);
 
             return dto;
         }
@@ -100,20 +95,22 @@ namespace VibeRails.Services.LlmClis
                 existingContent = await _fileService.ReadAllTextAsync(configPath, cancellationToken);
             }
 
-            // Clear old aliases so they cannot shadow the current Codex key.
+            // Clear legacy VibeRails-managed keys so saved environments use current Codex
+            // config names only. approval_policy / sandbox_mode / model_provider are NOT in
+            // this list on purpose: permission posture is YOLO-or-nothing via CustomArgs, so
+            // we leave any user-set values for those keys untouched.
             existingContent = RemoveTomlValue(existingContent, "ask_for_approval");
             existingContent = RemoveTomlValue(existingContent, "approval");
+            existingContent = RemoveTomlValue(existingContent, "yolo");
+            existingContent = RemoveTomlValue(existingContent, "full_auto");
+            existingContent = RemoveTomlValue(existingContent, "no_alt_screen");
+            existingContent = RemoveTomlValue(existingContent, "oss");
+            existingContent = RemoveTomlValue(existingContent, "prompt");
 
-            // Update or add each supported setting.
-            existingContent = SetTomlValue(existingContent, "approval_policy", NormalizeApproval(settings.AskForApproval));
-            existingContent = SetTomlBoolValue(existingContent, "yolo", settings.Yolo);
-            existingContent = SetTomlBoolValue(existingContent, "full_auto", settings.FullAuto);
-            existingContent = SetTomlBoolValue(existingContent, "no_alt_screen", settings.NoAltScreen);
-            existingContent = SetTomlBoolValue(existingContent, "oss", settings.Oss);
-            existingContent = SetTomlValue(existingContent, "prompt", settings.Prompt);
             existingContent = SetTomlValue(existingContent, "model", NormalizeModel(settings.Model));
             existingContent = SetTomlValue(existingContent, "model_reasoning_effort", NormalizeEffort(settings.Effort));
             existingContent = SetFastMode(existingContent, settings.FastMode);
+            existingContent = SetAlternateScreen(existingContent, settings.NoAltScreen);
 
             await _fileService.WriteAllTextAsync(configPath, existingContent, FileMode.Create, FileShare.None, cancellationToken);
         }
@@ -126,15 +123,24 @@ namespace VibeRails.Services.LlmClis
 
         private static bool IsFastModeEnabled(string content)
         {
-            var serviceTier = GetTomlValue(content, "service_tier");
+            var serviceTier = GetRootTomlValue(content, "service_tier");
             if (!string.Equals(serviceTier, "fast", StringComparison.OrdinalIgnoreCase))
                 return false;
 
             var featureEnabled =
-                GetTomlBoolValue(content, "features.fast_mode") ??
+                GetRootTomlBoolValue(content, "features.fast_mode") ??
                 GetTomlSectionBoolValue(content, "features", "fast_mode");
 
             return featureEnabled != false;
+        }
+
+        private static bool IsAlternateScreenDisabled(string content)
+        {
+            var value =
+                GetRootTomlValue(content, "tui.alternate_screen") ??
+                GetTomlSectionValue(content, "tui", "alternate_screen");
+
+            return string.Equals(value, "never", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string? GetTomlValue(string content, string key)
@@ -205,30 +211,11 @@ namespace VibeRails.Services.LlmClis
             return sb.ToString();
         }
 
-        private static bool? GetTomlBoolValue(string content, string key)
-        {
-            var value = GetTomlValue(content, key);
-            if (value == null) return null;
-            return value.Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
-
         private static bool? GetTomlSectionBoolValue(string content, string section, string key)
         {
             var value = GetTomlSectionValue(content, section, key);
             if (value == null) return null;
             return value.Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string NormalizeApproval(string? value)
-        {
-            return value?.Trim().ToLowerInvariant() switch
-            {
-                "on-request" => "on-request",
-                "never" => "never",
-                "on-failure" => "on-request",
-                "untrusted" => "untrusted",
-                _ => ""
-            };
         }
 
         private static string NormalizeEffort(string? value)
@@ -256,10 +243,34 @@ namespace VibeRails.Services.LlmClis
             };
         }
 
+        // TOML keys before the first [table] header belong to the root table. VibeRails only
+        // manages root-table keys, so root edits/reads are restricted to this region — a save
+        // must never delete or rewrite a key inside a user's [profiles.x] / nested table that
+        // happens to share a name (e.g. `prompt`, `model`).
+        private static (string Root, string Tail) SplitRootTable(string content)
+        {
+            var firstTable = Regex.Match(content, @"(?m)^\s*\[");
+            return firstTable.Success
+                ? (content[..firstTable.Index], content[firstTable.Index..])
+                : (content, "");
+        }
+
+        private static string? GetRootTomlValue(string content, string key)
+            => GetTomlValue(SplitRootTable(content).Root, key);
+
+        private static bool? GetRootTomlBoolValue(string content, string key)
+        {
+            var value = GetRootTomlValue(content, key);
+            if (value == null) return null;
+            return value.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static string RemoveTomlValue(string content, string key)
         {
+            var (root, rest) = SplitRootTable(content);
             var removePattern = $@"^\s*{Regex.Escape(key)}\s*=.*$\r?\n?";
-            return Regex.Replace(content, removePattern, "", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            root = Regex.Replace(root, removePattern, "", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            return root + rest;
         }
 
         private static string SetTomlValue(string content, string key, string value)
@@ -274,17 +285,20 @@ namespace VibeRails.Services.LlmClis
             // Use a MatchEvaluator (not a replacement string) so `$1`/`$0`/etc. inside
             // the user's value aren't interpreted by Regex.Replace.
             var escapedValue = EscapeTomlBasicString(value);
+            var (root, rest) = SplitRootTable(content);
             var pattern = $@"^(\s*){Regex.Escape(key)}\s*=.*$";
 
-            if (Regex.IsMatch(content, pattern, RegexOptions.Multiline | RegexOptions.IgnoreCase))
+            if (Regex.IsMatch(root, pattern, RegexOptions.Multiline | RegexOptions.IgnoreCase))
             {
-                return Regex.Replace(
-                    content,
+                root = Regex.Replace(
+                    root,
                     pattern,
                     m => $"{m.Groups[1].Value}{key} = {escapedValue}",
                     RegexOptions.Multiline | RegexOptions.IgnoreCase);
+                return root + rest;
             }
 
+            // AddRootTomlLine inserts before the first table, i.e. into the root region.
             return AddRootTomlLine(content, $"{key} = {escapedValue}");
         }
 
@@ -315,33 +329,35 @@ namespace VibeRails.Services.LlmClis
             return sb.ToString();
         }
 
-        private static string SetTomlBoolValue(string content, string key, bool value)
-        {
-            var pattern = $@"^(\s*){Regex.Escape(key)}\s*=.*$";
-            var replacement = $"$1{key} = {value.ToString().ToLowerInvariant()}";
-
-            if (Regex.IsMatch(content, pattern, RegexOptions.Multiline | RegexOptions.IgnoreCase))
-            {
-                return Regex.Replace(content, pattern, replacement, RegexOptions.Multiline | RegexOptions.IgnoreCase);
-            }
-            else
-            {
-                return AddRootTomlLine(content, $"{key} = {value.ToString().ToLowerInvariant()}");
-            }
-        }
-
         private static string SetFastMode(string content, bool enabled)
         {
             if (enabled)
             {
                 content = SetTomlValue(content, "service_tier", "fast");
+                // Strip any root dotted form so we don't leave both `features.fast_mode` and a
+                // [features] fast_mode key (a duplicate-key TOML error).
+                content = RemoveTomlValue(content, "features.fast_mode");
                 return SetTomlSectionBoolValue(content, "features", "fast_mode", true);
             }
 
-            var serviceTier = GetTomlValue(content, "service_tier");
-            return string.Equals(serviceTier, "fast", StringComparison.OrdinalIgnoreCase)
-                ? RemoveTomlValue(content, "service_tier")
-                : content;
+            var serviceTier = GetRootTomlValue(content, "service_tier");
+            if (string.Equals(serviceTier, "fast", StringComparison.OrdinalIgnoreCase))
+                content = RemoveTomlValue(content, "service_tier");
+
+            content = RemoveTomlValue(content, "features.fast_mode");
+            return RemoveTomlSectionValue(content, "features", "fast_mode");
+        }
+
+        private static string SetAlternateScreen(string content, bool disabled)
+        {
+            // Always clear any root dotted form first; we manage this via the [tui] section.
+            // Leaving a dotted `tui.alternate_screen` next to a [tui] block would be a
+            // duplicate-key TOML error, and IsAlternateScreenDisabled would read the stale value.
+            content = RemoveTomlValue(content, "tui.alternate_screen");
+
+            return disabled
+                ? SetTomlSectionValue(content, "tui", "alternate_screen", "never")
+                : RemoveTomlSectionValue(content, "tui", "alternate_screen");
         }
 
         private static string SetTomlSectionBoolValue(string content, string section, string key, bool value)
@@ -378,6 +394,61 @@ namespace VibeRails.Services.LlmClis
                 sb.AppendLine(rendered);
                 body = sb.ToString();
             }
+
+            return content[..bodyGroup.Index] + body + content[(bodyGroup.Index + bodyGroup.Length)..];
+        }
+
+        private static string SetTomlSectionValue(string content, string section, string key, string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return RemoveTomlSectionValue(content, section, key);
+
+            var rendered = $"{key} = {EscapeTomlBasicString(value)}";
+            var sectionPattern = $@"(?ms)^\s*\[{Regex.Escape(section)}\]\s*(?<body>.*?)(?=^\s*\[|\z)";
+            var sectionMatch = Regex.Match(content, sectionPattern, RegexOptions.IgnoreCase);
+
+            if (!sectionMatch.Success)
+            {
+                var sb = new StringBuilder(content.TrimEnd());
+                if (sb.Length > 0) sb.AppendLine().AppendLine();
+                sb.AppendLine($"[{section}]");
+                sb.AppendLine(rendered);
+                return sb.ToString();
+            }
+
+            var bodyGroup = sectionMatch.Groups["body"];
+            var body = bodyGroup.Value;
+            var keyPattern = $@"^(\s*){Regex.Escape(key)}\s*=.*$";
+
+            if (Regex.IsMatch(body, keyPattern, RegexOptions.Multiline | RegexOptions.IgnoreCase))
+            {
+                body = Regex.Replace(
+                    body,
+                    keyPattern,
+                    m => $"{m.Groups[1].Value}{rendered}",
+                    RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            }
+            else
+            {
+                var sb = new StringBuilder(body.TrimEnd());
+                if (sb.Length > 0) sb.AppendLine();
+                sb.AppendLine(rendered);
+                body = sb.ToString();
+            }
+
+            return content[..bodyGroup.Index] + body + content[(bodyGroup.Index + bodyGroup.Length)..];
+        }
+
+        private static string RemoveTomlSectionValue(string content, string section, string key)
+        {
+            var sectionPattern = $@"(?ms)^\s*\[{Regex.Escape(section)}\]\s*(?<body>.*?)(?=^\s*\[|\z)";
+            var sectionMatch = Regex.Match(content, sectionPattern, RegexOptions.IgnoreCase);
+            if (!sectionMatch.Success)
+                return content;
+
+            var bodyGroup = sectionMatch.Groups["body"];
+            var keyPattern = $@"^\s*{Regex.Escape(key)}\s*=.*$\r?\n?";
+            var body = Regex.Replace(bodyGroup.Value, keyPattern, "", RegexOptions.Multiline | RegexOptions.IgnoreCase);
 
             return content[..bodyGroup.Index] + body + content[(bodyGroup.Index + bodyGroup.Length)..];
         }
