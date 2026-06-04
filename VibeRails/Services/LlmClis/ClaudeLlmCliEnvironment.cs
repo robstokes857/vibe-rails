@@ -85,26 +85,12 @@ namespace VibeRails.Services.LlmClis
                 var json = JsonNode.Parse(content);
                 if (json == null) return dto;
 
-                // Per-field readers are tolerant: a key whose value is the wrong JSON
-                // type (e.g. allowedTools as Claude's native array form) just yields
-                // the default for that one field instead of poisoning the whole DTO.
-                dto.Effort = TryReadString(json, "effort") ?? "";
-                dto.NoSessionPersistence = TryReadBool(json, "noSessionPersistence") ?? false;
-                dto.PermissionMode = TryReadString(json, "permissionMode") ?? "default";
-                dto.SystemPrompt = TryReadString(json, "systemPrompt") ?? "";
-                dto.AllowDangerouslySkipPermissions = TryReadBool(json, "allowDangerouslySkipPermissions") ?? false;
-                dto.DangerouslyLoadDevelopmentChannels = TryReadString(json, "dangerouslyLoadDevelopmentChannels") ?? "";
-                dto.DangerouslySkipPermissions =
-                    TryReadBool(json, "dangerouslySkipPermissions") ??
-                    TryReadBool(json, "skipPermissions") ??
-                    false;
-                dto.AllowedTools = TryReadString(json, "allowedTools") ?? "";
-                dto.AppendSystemPrompt = TryReadString(json, "appendSystemPrompt") ?? "";
-                dto.Bare = TryReadBool(json, "bare") ?? false;
-                dto.Betas = TryReadString(json, "betas") ?? "";
-                dto.Channels = TryReadString(json, "channels") ?? "";
-                dto.Debug = TryReadBool(json, "debug") ?? false;
-                dto.DebugFilter = TryReadString(json, "debugFilter") ?? "";
+                // effortLevel, model, and fastMode are the keys VibeRails reads. Permission
+                // posture is YOLO-or-nothing and lives in CustomArgs (launch flags), so we
+                // never read or touch Claude's permissions block here.
+                dto.Effort = NormalizeSettingsEffort(TryReadString(json, "effortLevel"));
+                dto.Model = TryReadString(json, "model") ?? "";
+                dto.FastMode = TryReadBool(json, "fastMode");
             }
             catch (JsonException)
             {
@@ -114,20 +100,35 @@ namespace VibeRails.Services.LlmClis
             return dto;
         }
 
-        private static string? TryReadString(JsonNode root, string key)
+        private static string? TryReadString(JsonNode? root, string key)
         {
+            if (root is null) return null;
             var node = root[key];
             if (node is null) return null;
             try { return node.GetValue<string>(); }
             catch { return null; }
         }
 
-        private static bool? TryReadBool(JsonNode root, string key)
+        private static bool TryReadBool(JsonNode? root, string key)
         {
+            if (root is null) return false;
             var node = root[key];
-            if (node is null) return null;
+            if (node is null) return false;
             try { return node.GetValue<bool>(); }
-            catch { return null; }
+            catch { return false; }
+        }
+
+        private static string NormalizeSettingsEffort(string? value)
+        {
+            return value?.Trim().ToLowerInvariant() switch
+            {
+                "low" => "low",
+                "medium" => "medium",
+                "high" => "high",
+                "xhigh" => "xhigh",
+                "max" => "max",
+                _ => ""
+            };
         }
 
         public async Task SaveSettings(string envName, ClaudeSettingsDto settings, CancellationToken cancellationToken)
@@ -159,32 +160,28 @@ namespace VibeRails.Services.LlmClis
             json ??= new JsonObject();
             var obj = json.AsObject();
 
-            // Update or add our managed settings
-            SetString(obj, "effort", settings.Effort);
-            SetBool(obj, "noSessionPersistence", settings.NoSessionPersistence);
+            // effortLevel, model, and fastMode are the keys VibeRails writes. Permission
+            // posture is YOLO-or-nothing via CustomArgs launch flags, so we deliberately leave
+            // the user's permissions block (allow / deny / defaultMode) untouched and only
+            // strip stale top-level keys older VibeRails builds used to write.
+            SetString(obj, "effortLevel", NormalizeSettingsEffort(settings.Effort));
+            SetString(obj, "model", settings.Model);
+            SetBool(obj, "fastMode", settings.FastMode);
 
-            if (settings.PermissionMode != "default")
-                obj["permissionMode"] = settings.PermissionMode;
-            else
-                obj.Remove("permissionMode");
-
-            SetString(obj, "systemPrompt", settings.SystemPrompt);
-            SetBool(obj, "allowDangerouslySkipPermissions", settings.AllowDangerouslySkipPermissions);
-            SetString(obj, "dangerouslyLoadDevelopmentChannels", settings.DangerouslyLoadDevelopmentChannels);
-            SetBool(obj, "dangerouslySkipPermissions", settings.DangerouslySkipPermissions);
-            SetString(obj, "allowedTools", settings.AllowedTools);
-            SetString(obj, "appendSystemPrompt", settings.AppendSystemPrompt);
-            SetBool(obj, "bare", settings.Bare);
-            SetString(obj, "betas", settings.Betas);
-            SetString(obj, "channels", settings.Channels);
-            SetBool(obj, "debug", settings.Debug);
-            SetString(obj, "debugFilter", settings.DebugFilter);
-
-            // skipPermissions is a legacy alias for dangerouslySkipPermissions: GetSettings
-            // falls back to it when the new key is missing, so we must clear it whenever we
-            // write the new key — otherwise the legacy value would shadow the user's choice.
-            // Other previously-managed fields (model, disallowedTools, verbose) have no
-            // VibeRails mapping anymore; leave them untouched so a user's manual edits stick.
+            obj.Remove("effort");
+            obj.Remove("noSessionPersistence");
+            obj.Remove("permissionMode");
+            obj.Remove("systemPrompt");
+            obj.Remove("allowDangerouslySkipPermissions");
+            obj.Remove("dangerouslyLoadDevelopmentChannels");
+            obj.Remove("dangerouslySkipPermissions");
+            obj.Remove("allowedTools");
+            obj.Remove("appendSystemPrompt");
+            obj.Remove("bare");
+            obj.Remove("betas");
+            obj.Remove("channels");
+            obj.Remove("debug");
+            obj.Remove("debugFilter");
             obj.Remove("skipPermissions");
 
             var options = new JsonSerializerOptions { WriteIndented = true };

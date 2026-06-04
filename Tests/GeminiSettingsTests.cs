@@ -49,16 +49,16 @@ public class GeminiSettingsTests : IDisposable
 
         Assert.Equal("Default", settings.Theme);
         Assert.True(settings.SandboxEnabled);
-        Assert.False(settings.AutoApproveTools);
         Assert.False(settings.VimMode);
         Assert.True(settings.CheckForUpdates);
-        Assert.Equal("default", settings.ApprovalMode);
         Assert.False(settings.YoloMode);
     }
 
     [Fact]
-    public async Task GetSettings_ReadsAllValues_FromValidJson()
+    public async Task GetSettings_ReadsManagedValues_FromValidJson()
     {
+        // Permission posture (defaultApprovalMode) is YOLO-or-nothing via CustomArgs, so it
+        // is not read into the DTO.
         var json = @"{
             ""theme"": ""Dark"",
             ""general"": {
@@ -78,10 +78,8 @@ public class GeminiSettingsTests : IDisposable
 
         Assert.Equal("Dark", settings.Theme);
         Assert.False(settings.SandboxEnabled);
-        Assert.True(settings.AutoApproveTools);
         Assert.True(settings.VimMode);
         Assert.False(settings.CheckForUpdates);
-        Assert.Equal("auto_edit", settings.ApprovalMode);
         Assert.False(settings.YoloMode);
     }
 
@@ -100,20 +98,22 @@ public class GeminiSettingsTests : IDisposable
 
         Assert.Equal("Light", settings.Theme);
         Assert.True(settings.SandboxEnabled); // Default
-        Assert.False(settings.AutoApproveTools); // Default
         Assert.False(settings.VimMode); // Default
         Assert.True(settings.CheckForUpdates); // Default
-        Assert.Equal("default", settings.ApprovalMode);
         Assert.False(settings.YoloMode); // Default
     }
 
     [Fact]
-    public async Task GetSettings_HandlesPartialNestedObjects()
+    public async Task GetSettings_IgnoresOldCompatibilityFields()
     {
         var json = @"{
             ""general"": {},
             ""sandbox"": {
                 ""enabled"": false
+            },
+            ""checkForUpdates"": false,
+            ""tools"": {
+                ""autoAccept"": true
             }
         }";
 
@@ -123,28 +123,22 @@ public class GeminiSettingsTests : IDisposable
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
         Assert.Equal("Default", settings.Theme);
-        Assert.False(settings.SandboxEnabled);
+        Assert.True(settings.SandboxEnabled);
+        Assert.True(settings.CheckForUpdates);
         Assert.False(settings.VimMode); // general.vimMode not present
     }
 
     [Fact]
-    public async Task GetSettings_ReadsApprovalMode_FromGeneralDefaultApprovalMode()
+    public async Task GetSettings_IgnoresApprovalMode()
     {
-        var jsonAutoEdit = @"{ ""general"": { ""defaultApprovalMode"": ""auto_edit"" } }";
+        // defaultApprovalMode is no longer read: YOLO is a launch flag, not a DTO field.
+        var json = @"{ ""general"": { ""defaultApprovalMode"": ""yolo"" } }";
         _mockFileService.SetFileExists(true);
-        _mockFileService.SetFileContent(jsonAutoEdit);
+        _mockFileService.SetFileContent(json);
 
-        var settings1 = await _service.GetSettings("test-env", CancellationToken.None);
-        Assert.Equal("auto_edit", settings1.ApprovalMode);
-        Assert.True(settings1.AutoApproveTools);
-        Assert.False(settings1.YoloMode);
+        var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
-        var jsonYolo = @"{ ""general"": { ""defaultApprovalMode"": ""yolo"" } }";
-        _mockFileService.SetFileContent(jsonYolo);
-
-        var settings2 = await _service.GetSettings("test-env", CancellationToken.None);
-        Assert.Equal("yolo", settings2.ApprovalMode);
-        Assert.True(settings2.YoloMode);
+        Assert.False(settings.YoloMode);
     }
 
     // ===========================================
@@ -152,7 +146,7 @@ public class GeminiSettingsTests : IDisposable
     // ===========================================
 
     [Fact]
-    public async Task SaveSettings_WritesAllValues_ToJson()
+    public async Task SaveSettings_WritesManagedValues_ToJson()
     {
         _mockFileService.SetFileExists(false);
 
@@ -160,21 +154,20 @@ public class GeminiSettingsTests : IDisposable
         {
             Theme = "Dark",
             SandboxEnabled = false,
-            AutoApproveTools = true,
             VimMode = true,
             CheckForUpdates = false,
-            ApprovalMode = "auto_edit",
             YoloMode = false
         };
 
         await _service.SaveSettings("test-env", settings, CancellationToken.None);
 
         var writtenJson = _mockFileService.GetWrittenContent();
-        Assert.DoesNotContain("\"theme\":", writtenJson);
+        Assert.DoesNotContain("\"theme\":", writtenJson); // VibeRails does not write theme
         Assert.Contains("\"enableAutoUpdate\": false", writtenJson);
         Assert.Contains("\"vimMode\": true", writtenJson);
         Assert.Contains("\"sandbox\": false", writtenJson); // tools.sandbox
-        Assert.Contains("\"defaultApprovalMode\": \"auto_edit\"", writtenJson);
+        // Permission posture is YOLO-or-nothing via CustomArgs; never persisted here.
+        Assert.DoesNotContain("\"defaultApprovalMode\"", writtenJson);
         Assert.DoesNotContain("\"disableYoloMode\"", writtenJson);
     }
 
@@ -205,6 +198,32 @@ public class GeminiSettingsTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveSettings_RemovesOldCompatibilityFields()
+    {
+        var existingJson = @"{
+            ""checkForUpdates"": false,
+            ""sandbox"": {
+                ""enabled"": false
+            },
+            ""tools"": {
+                ""autoAccept"": true
+            }
+        }";
+
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(existingJson);
+
+        await _service.SaveSettings("test-env", new GeminiSettingsDto(), CancellationToken.None);
+
+        var writtenJson = _mockFileService.GetWrittenContent();
+        Assert.DoesNotContain("\"checkForUpdates\"", writtenJson);
+        Assert.DoesNotContain("\"enabled\"", writtenJson);
+        Assert.DoesNotContain("\"autoAccept\"", writtenJson);
+        Assert.Contains("\"enableAutoUpdate\": true", writtenJson);
+        Assert.Contains("\"sandbox\": true", writtenJson);
+    }
+
+    [Fact]
     public async Task SaveSettings_CreatesNestedObjects_WhenMissing()
     {
         _mockFileService.SetFileExists(false);
@@ -224,15 +243,23 @@ public class GeminiSettingsTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveSettings_DoesNotPersistYoloAsSecurityToggle()
+    public async Task SaveSettings_LeavesUserApprovalModeUntouched()
     {
-        _mockFileService.SetFileExists(false);
+        // Regression guard: VibeRails must not edit Gemini's defaultApprovalMode — even a
+        // YOLO save (YOLO is a launch flag) leaves any user-set approval mode alone.
+        var existingJson = @"{
+            ""general"": {
+                ""defaultApprovalMode"": ""auto_edit""
+            }
+        }";
 
-        // YOLO is a launch argument, not a persisted security.disableYoloMode setting.
-        var settings1 = new GeminiSettingsDto { ApprovalMode = "yolo", YoloMode = true };
-        await _service.SaveSettings("test-env", settings1, CancellationToken.None);
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(existingJson);
+
+        await _service.SaveSettings("test-env", new GeminiSettingsDto { YoloMode = true }, CancellationToken.None);
+
         var writtenJson = _mockFileService.GetWrittenContent();
-        Assert.Contains("\"defaultApprovalMode\": \"default\"", writtenJson);
+        Assert.Contains("\"defaultApprovalMode\": \"auto_edit\"", writtenJson);
         Assert.DoesNotContain("\"disableYoloMode\"", writtenJson);
     }
 

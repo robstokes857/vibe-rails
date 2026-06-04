@@ -35,6 +35,11 @@ function resolveResizeDebounceMs() {
 const OUTPUT_CURSOR_IDLE_MS = 90;
 const CONNECT_FOCUS_RETRY_MS = 180;
 
+// Once the user has typed this many plain characters on a single input line
+// (no Enter yet), nudge them toward the "Open in text editor" button — long
+// prompts are far nicer to compose in the editor than in a raw TUI line.
+const EDITOR_NUDGE_CHAR_THRESHOLD = 120;
+
 export class TerminalTab {
     getSafeTabTokenForWebSocket(tabToken) {
         if (!tabToken || typeof tabToken !== 'string') {
@@ -61,6 +66,12 @@ export class TerminalTab {
         this._initialConnectActive = false;
         this._connectFocusTimeouts = [];
         this.statusController = null;
+
+        // Discovery-nudge counter: length of the current run of plain typed
+        // characters since the last Enter. Purely passive — we only count, never
+        // buffer the text or send anything to the PTY. Reset on Enter/Ctrl+C.
+        this._typedRunLength = 0;
+        this._nudgeRequestedThisRun = false;
     }
 
     hasOpenSocket() {
@@ -91,6 +102,42 @@ export class TerminalTab {
         return true;
     }
 
+    // Passive keystroke counter behind the "Open in text editor" discovery nudge.
+    // We only COUNT plain printable characters typed on the current line — we never
+    // store the text and never send anything to the PTY, so this cannot affect the
+    // terminal. The run resets on Enter (\r/\n) or Ctrl+C (\x03); Backspace shrinks
+    // it; any chunk containing a control/escape byte (arrow keys, history recall,
+    // bracketed-paste markers, function keys) is ignored rather than counted, since
+    // it isn't plain typing. When a single run crosses the threshold we ask the
+    // manager to surface the one-time nudge (the manager dedupes + honors dismissal).
+    _trackTypingForNudge(data) {
+        if (typeof data !== 'string' || data.length === 0) {
+            return;
+        }
+
+        if (data === '\r' || data === '\n' || data === '\x03') {
+            this._typedRunLength = 0;
+            this._nudgeRequestedThisRun = false;
+            return;
+        }
+
+        if (data === '\x7f' || data === '\b') {
+            this._typedRunLength = Math.max(0, this._typedRunLength - 1);
+            return;
+        }
+
+        // Skip anything that isn't a clean run of printable characters.
+        if (/[\x00-\x1f\x7f]/.test(data)) {
+            return;
+        }
+
+        this._typedRunLength += data.length;
+        if (this._typedRunLength >= EDITOR_NUDGE_CHAR_THRESHOLD && !this._nudgeRequestedThisRun) {
+            this._nudgeRequestedThisRun = true;
+            this.manager?.maybeShowEditorNudge();
+        }
+    }
+
     ensureTerminal() {
         if (this.vibeTerminal || !this.state.ui?.terminalElement) {
             return;
@@ -116,6 +163,7 @@ export class TerminalTab {
 
         this.onDataDispose = this.vibeTerminal.onData((data) => {
             this.statusController?.onTerminalData(data);
+            this._trackTypingForNudge(data);
             if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                 this.socket.send(data);
             }

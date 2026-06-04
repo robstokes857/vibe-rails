@@ -93,6 +93,13 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {request.Cli}"));
             }
 
+            // LLM.Shell is a terminal-only type — there is no per-environment config to manage
+            // for a bare shell, and CreateEnvironmentAsync would throw. Reject with 400.
+            if (llm == LLM.Shell)
+            {
+                return Results.BadRequest(new ErrorResponse("The plain shell terminal cannot back a custom environment."));
+            }
+
             var argsError = ShellArgSanitizer.Validate(request.CustomArgs);
             if (argsError != null)
             {

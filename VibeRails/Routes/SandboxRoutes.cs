@@ -201,6 +201,10 @@ public static class SandboxRoutes
             if (llm == LLM.NotSet)
                 return Results.BadRequest(new ErrorResponse($"Unknown CLI type: {cli}"));
 
+            // LLM.Shell is a terminal-only type with no launcher — reject rather than 500.
+            if (llm == LLM.Shell)
+                return Results.BadRequest(new ErrorResponse("The plain shell terminal is not a launchable agent CLI."));
+
             var args = request?.Args?.ToList() ?? new List<string>();
             var envName = request?.EnvironmentName;
 

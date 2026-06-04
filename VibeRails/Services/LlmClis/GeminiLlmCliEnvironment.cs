@@ -43,7 +43,12 @@ namespace VibeRails.Services.LlmClis
                     {
                       "theme": "Default",
                       "selectedAuthType": "oauth-personal",
-                      "checkForUpdates": true
+                      "general": {
+                        "enableAutoUpdate": true
+                      },
+                      "tools": {
+                        "sandbox": true
+                      }
                     }
                     """;
                 await _fileService.WriteAllTextAsync(settingsFile, defaultSettings, FileMode.Create, FileShare.None, cancellationToken);
@@ -66,28 +71,12 @@ namespace VibeRails.Services.LlmClis
             var node = JsonNode.Parse(json);
             if (node == null) return dto;
 
-            // Map Gemini CLI settings to our DTO. Keep legacy keys as fallbacks
-            // because older VibeRails builds wrote them.
+            // Permission posture (defaultApprovalMode) is YOLO-or-nothing via CustomArgs,
+            // so VibeRails neither reads nor edits it here.
             dto.Theme = node["theme"]?.GetValue<string>() ?? "Default";
-            dto.CheckForUpdates =
-                node["general"]?["enableAutoUpdate"]?.GetValue<bool>()
-                ?? node["checkForUpdates"]?.GetValue<bool>()
-                ?? true;
+            dto.CheckForUpdates = node["general"]?["enableAutoUpdate"]?.GetValue<bool>() ?? true;
             dto.VimMode = node["general"]?["vimMode"]?.GetValue<bool>() ?? false;
-            dto.SandboxEnabled =
-                node["tools"]?["sandbox"]?.GetValue<bool>()
-                ?? node["sandbox"]?["enabled"]?.GetValue<bool>()
-                ?? true;
-
-            dto.ApprovalMode = NormalizeApprovalMode(node["general"]?["defaultApprovalMode"]?.GetValue<string>());
-            var legacyAutoAccept = node["tools"]?["autoAccept"]?.GetValue<bool>() ?? false;
-            if (dto.ApprovalMode == "default" && legacyAutoAccept)
-            {
-                dto.ApprovalMode = "auto_edit";
-            }
-
-            dto.AutoApproveTools = dto.ApprovalMode == "auto_edit";
-            dto.YoloMode = dto.ApprovalMode == "yolo";
+            dto.SandboxEnabled = node["tools"]?["sandbox"]?.GetValue<bool>() ?? true;
 
             return dto;
         }
@@ -112,35 +101,25 @@ namespace VibeRails.Services.LlmClis
             }
             node ??= new JsonObject();
 
-            // Nested settings - ensure parent objects exist
+            // Nested settings - ensure parent objects exist. defaultApprovalMode is NOT
+            // written here: permission posture is YOLO-or-nothing via CustomArgs, so any
+            // user-set approval mode is left untouched.
             node["general"] ??= new JsonObject();
             node["general"]!["vimMode"] = settings.VimMode;
             node["general"]!["enableAutoUpdate"] = settings.CheckForUpdates;
-            var approvalMode = NormalizeApprovalMode(settings.ApprovalMode);
-            if (approvalMode == "default" && settings.AutoApproveTools)
-            {
-                approvalMode = "auto_edit";
-            }
-            node["general"]!["defaultApprovalMode"] = approvalMode == "yolo" ? "default" : approvalMode;
 
             node["tools"] ??= new JsonObject();
             node["tools"]!["sandbox"] = settings.SandboxEnabled;
 
+            var root = node.AsObject();
+            root.Remove("checkForUpdates");
+            root.Remove("sandbox");
+            if (node["tools"] is JsonObject tools)
+                tools.Remove("autoAccept");
+
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = node.ToJsonString(options);
             await _fileService.WriteAllTextAsync(settingsPath, json, FileMode.Create, FileShare.None, cancellationToken);
-        }
-
-        private static string NormalizeApprovalMode(string? value)
-        {
-            var raw = (value ?? "").Trim().ToLowerInvariant();
-            return raw switch
-            {
-                "auto_edit" => "auto_edit",
-                "yolo" => "yolo",
-                "plan" => "plan",
-                _ => "default"
-            };
         }
 
         private string GetSettingsFilePath(string envName)
