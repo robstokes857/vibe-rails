@@ -1,4 +1,4 @@
-import { escapeHtml } from './utils.js';
+import { escapeHtml, escapeHtmlWithLineBreaks } from './utils.js';
 
 const DEFAULT_THEME = 'glassmorphism';
 const DEFAULT_POSITION = 'top-right';
@@ -40,7 +40,7 @@ function normalizeToastType(type) {
 function formatToastMessage(title, message, { compact = false } = {}) {
     const safeTitle = escapeHtml(title || 'Notification');
     const safeMessage = escapeHtml(message || '');
-    const formattedMessage = safeMessage.replace(/\n/g, '<br>');
+    const formattedMessage = escapeHtmlWithLineBreaks(message || '');
     const modifier = compact ? ' vr-toast-compact' : '';
 
     if (!safeMessage) {

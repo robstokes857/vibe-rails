@@ -44,6 +44,9 @@ export class TabStatusController {
      *   getCliKey:      () => string|null
      *   isActiveTab:    () => boolean
      *   setProgress:    (progress) => void   – calls manager.updateTabProgress
+     *   notifyReady:    () => void           – fired when a *background* tab
+     *                                          finishes its turn (→ READY), at
+     *                                          the same point as the ready flash
      */
     constructor(tabState, ui, options) {
         this._tabState = tabState;
@@ -214,6 +217,18 @@ export class TabStatusController {
     }
 
     onSessionIdle() {
+        // Shell tabs: backend idle (5s of no PTY output) means the command/server
+        // went quiet — drop the spinner. Return to CONNECTED rather than READY so
+        // we don't fire the "ready" flash/toast every time a dev server settles
+        // between requests. Only act when we were actually spinning; idle pings in
+        // CONNECTED (already quiet) are left alone.
+        if (this._isShellTab()) {
+            if (this._status === TAB_STATUS.THINKING) {
+                this._transitionTo(TAB_STATUS.CONNECTED);
+            }
+            return;
+        }
+
         if (this._awaitingFirstIdle) {
             this._transitionTo(TAB_STATUS.READY);
         }
@@ -225,10 +240,23 @@ export class TabStatusController {
     }
 
     onSessionBusy() {
-        // No-op. Enter detection via onTerminalData is the sole trigger for
-        // entering THINKING. The backend fires session_busy on any PTY activity
-        // (including initial prompt output), so we cannot use it to infer user
-        // intent.
+        // Shell tabs only: trust backend PTY activity as the busy signal. A plain
+        // shell has no agent "turn" to misread, so output (a dev server logging a
+        // request, a build step) is exactly what the user wants the spinner to
+        // track. Skip if already THINKING (no churn), DISCONNECTED, or WAITING — an
+        // attention prompt must outlive incidental output (mirrors the agent rule;
+        // shells don't enter WAITING today, so the WAITING guard is defensive).
+        if (this._isShellTab() &&
+            this._status !== TAB_STATUS.DISCONNECTED &&
+            this._status !== TAB_STATUS.THINKING &&
+            this._status !== TAB_STATUS.WAITING) {
+            this._transitionTo(TAB_STATUS.THINKING);
+            return;
+        }
+        // CLI/agent tabs: no-op. Enter detection via onTerminalData is the sole
+        // trigger for entering THINKING. The backend fires session_busy on any PTY
+        // activity (including the agent's own prompt redraws), so we cannot use it
+        // to infer user intent there.
     }
 
     onWaitingForUserSelection() {
@@ -238,8 +266,22 @@ export class TabStatusController {
     }
 
     onSessionCompleted() {
+        // A completed session means the process *exited* (the event carries an exit
+        // code, and the dispatcher already pops a global "session completed" toast).
+        // That's distinct from an agent "finished its turn and is waiting", so:
+        //   • Shell tabs mirror their idle carve-out — settle THINKING → CONNECTED,
+        //     never flashing/toasting READY (see onSessionIdle / onSessionBusy).
+        //   • Agent tabs still flash READY, but we suppress the in-panel "is ready"
+        //     toast (notify:false): completion is already surfaced globally, and
+        //     "ready" misreads a process that just exited.
+        if (this._isShellTab()) {
+            if (this._status === TAB_STATUS.THINKING) {
+                this._transitionTo(TAB_STATUS.CONNECTED);
+            }
+            return;
+        }
         if (this._awaitingFirstIdle) {
-            this._transitionTo(TAB_STATUS.READY);
+            this._transitionTo(TAB_STATUS.READY, { notify: false });
         }
     }
 
@@ -253,7 +295,14 @@ export class TabStatusController {
 
     // ── Internal ────────────────────────────────────────────────────────
 
-    _transitionTo(newStatus) {
+    // The plain shell tab (CLI key 'shell') is the one place we trust the
+    // backend busy/idle signals to drive the spinner — see onSessionBusy /
+    // onSessionIdle. Agent tabs keep the Enter-driven heuristic.
+    _isShellTab() {
+        return this._options.getCliKey?.() === 'shell';
+    }
+
+    _transitionTo(newStatus, { notify = true } = {}) {
         const prev = this._status;
         if (prev === newStatus) {
             if (newStatus === TAB_STATUS.WAITING) {
@@ -290,6 +339,11 @@ export class TabStatusController {
         // Ready flash — only for background tabs
         if (newStatus === TAB_STATUS.READY && !this._options.isActiveTab?.()) {
             this._flashReady();
+            // The completion path passes notify:false (see onSessionCompleted) so
+            // an exited process doesn't also pop the "is ready" toast.
+            if (notify) {
+                this._options.notifyReady?.();
+            }
         }
 
         // Waiting flash — only for background tabs (active tab gets the

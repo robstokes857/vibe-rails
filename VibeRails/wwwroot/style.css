@@ -3394,6 +3394,13 @@ body.vb-terminal-focus-active #vb-terminal-panel #terminal-container {
     touch-action: manipulation;
 }
 
+/* Containing block for the terminal toast overlay. `position: relative` with no
+   offsets does not change the panel's box, so the xterm host (.vb-terminal-element)
+   it wraps is measured by FitAddon exactly as before. */
+#vb-terminal-panel .vb-terminal-tab-panel {
+    position: relative;
+}
+
 #vb-terminal-panel .vb-terminal-element {
     width: 100%;
     height: 100%;
@@ -5033,127 +5040,145 @@ input.form-control:disabled {
     color: #cdd6f4;
 }
 
-/* ── "Open in text editor" discovery nudge ──────────────────────────────────
-   A one-time flash on the editor button plus a small dismissible callout, shown
-   when the user types a long run into the terminal. Mirrors the chat-history
-   sidebar's pulse-hint pattern. */
-@keyframes vb-editor-nudge-pulse {
-    0%, 100% {
-        box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent, #06b6d4) 0%, transparent);
-    }
-    50% {
-        box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent, #06b6d4) 36%, transparent);
-    }
-}
-
-#vb-terminal-panel #terminal-editor-btn.vb-editor-nudge-pulse {
-    animation: vb-editor-nudge-pulse 1.5s ease-in-out 3;
-    color: var(--color-accent, #06b6d4);
-}
-
-.vb-terminal-editor-nudge {
-    position: fixed;
-    z-index: 1300;
-    width: 280px;
-    max-width: calc(100vw - 16px);
-    background: #1a1b2e;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
-    padding: 12px 12px 10px;
-    color: #d4d4d4;
-    font-size: 0.8rem;
-    animation: vb-editor-nudge-in 160ms ease-out;
-}
-
-@keyframes vb-editor-nudge-in {
-    from { opacity: 0; transform: translateY(-4px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
-
-.vb-terminal-editor-nudge-arrow {
+/* ── Terminal toast overlay ──────────────────────────────────────────────────
+   Toasts shown over the active tab's terminal (e.g. the "Open in text editor"
+   discovery tip). The layer is a sibling of the xterm host (.vb-terminal-element),
+   so xterm's FitAddon never measures it; it's absolutely positioned and
+   pointer-transparent so it adds no layout and can't steal terminal input.
+   See js/modules/terminal-toast.js. */
+.vb-terminal-toast-layer {
     position: absolute;
-    top: -6px;
-    width: 11px;
-    height: 11px;
-    background: #1a1b2e;
-    border-left: 1px solid rgba(255, 255, 255, 0.15);
-    border-top: 1px solid rgba(255, 255, 255, 0.15);
-    transform: rotate(45deg);
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;   /* clicks fall through to the terminal... */
+    /* Above xterm's own positioned layers (overview ruler ~z:7, accessibility
+       ~z:10), which share THIS panel's stacking context because neither
+       .vb-terminal-element nor .xterm establishes one — otherwise the viewport
+       scrollbar / ruler at the right edge would paint over a top-right toast and
+       its close button. Still well below the app's fixed menus/modals (z:1300+). */
+    z-index: 12;
 }
 
-.vb-terminal-editor-nudge-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 9px;
-}
-
-.vb-terminal-editor-nudge-icon {
-    color: var(--color-accent, #06b6d4);
-    font-size: 0.95rem;
-    margin-top: 1px;
-    flex-shrink: 0;
-}
-
-.vb-terminal-editor-nudge-text {
+.vb-term-toast-region {
+    position: absolute;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    line-height: 1.35;
-}
-
-.vb-terminal-editor-nudge-text strong {
-    color: #fff;
-    font-weight: 600;
-}
-
-.vb-terminal-editor-nudge-text span {
-    color: #a9b1d6;
-}
-
-.vb-terminal-editor-nudge-actions {
-    display: flex;
-    justify-content: flex-end;
     gap: 8px;
-    margin-top: 10px;
 }
 
-.vb-terminal-editor-nudge-actions button {
-    border: none;
-    border-radius: 5px;
-    padding: 5px 10px;
-    font-size: 0.74rem;
+/* Full-width banner, just under the tab strip. */
+.vb-term-toast-region-banner {
+    top: 10px;
+    left: 12px;
+    right: 12px;
+    align-items: stretch;
+}
+
+/* Compact column hugging the top-right corner. */
+.vb-term-toast-region-small {
+    top: 10px;
+    right: 12px;
+    width: min(320px, calc(100% - 24px));
+    align-items: stretch;
+}
+
+.vb-term-toast {
+    pointer-events: auto;   /* ...except the cards themselves */
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(26, 27, 46, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-left: 3px solid var(--color-accent, #06b6d4);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    color: #e8ebf5;
+    font-size: 0.82rem;
+    line-height: 1.4;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.vb-term-toast-in {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.vb-term-toast-leaving {
+    opacity: 0;
+    transform: translateY(-8px);
+}
+
+.vb-term-toast-small {
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+
+.vb-term-toast-icon {
+    flex: 0 0 auto;
+    font-size: 0.95rem;
+    color: var(--color-accent, #06b6d4);
+}
+
+/* Per-type accents (default/info uses the terminal accent above). */
+.vb-term-toast-success { border-left-color: #22c55e; }
+.vb-term-toast-success .vb-term-toast-icon { color: #22c55e; }
+.vb-term-toast-warning { border-left-color: #f59e0b; }
+.vb-term-toast-warning .vb-term-toast-icon { color: #f59e0b; }
+.vb-term-toast-error { border-left-color: #ef4444; }
+.vb-term-toast-error .vb-term-toast-icon { color: #ef4444; }
+
+.vb-term-toast-msg {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.vb-term-toast-action {
+    flex: 0 0 auto;
+    border: 1px solid color-mix(in srgb, var(--color-accent, #06b6d4) 55%, transparent);
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 16%, transparent);
+    color: #e8ebf5;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.76rem;
+    font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
 }
 
-.vb-terminal-editor-nudge-open {
-    background: var(--color-accent, #06b6d4);
-    color: #0d0e1c;
-    font-weight: 600;
+.vb-term-toast-action:hover {
+    background: color-mix(in srgb, var(--color-accent, #06b6d4) 28%, transparent);
 }
 
-.vb-terminal-editor-nudge-open:hover {
-    filter: brightness(1.08);
-}
-
-.vb-terminal-editor-nudge-dismiss {
+.vb-term-toast-close {
+    flex: 0 0 auto;
+    border: none;
     background: transparent;
     color: #8b93b3;
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: 0 2px;
+    cursor: pointer;
 }
 
-.vb-terminal-editor-nudge-dismiss:hover {
-    background: rgba(255, 255, 255, 0.07);
-    color: #cdd6f4;
+.vb-term-toast-close:hover {
+    color: #e8ebf5;
 }
 
 @media (prefers-reduced-motion: reduce) {
-    #vb-terminal-panel #terminal-editor-btn.vb-editor-nudge-pulse {
-        animation: none;
-        box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent, #06b6d4) 32%, transparent);
+    .vb-term-toast {
+        transition: none;
+        opacity: 1;
+        transform: none;
     }
-    .vb-terminal-editor-nudge {
-        animation: none;
+    .vb-term-toast-leaving {
+        opacity: 0;
     }
 }
 
@@ -6452,6 +6477,22 @@ input.form-control:disabled {
     font-size: 0.7rem;
     font-weight: 600;
     color: #a6adc8;
+}
+
+/* Plain shell / terminal sessions render a terminal glyph (not a logo image),
+   tinted with the brand accent. Falls back to terminal green outside an item
+   (filter badges, resume relationship rows) where --ch-item-accent is unset. */
+.ch-brand-terminal-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ch-item-accent, #3fb950);
+    font-size: 11px;
+    line-height: 1;
+}
+
+.ch-item-logo.ch-brand-terminal-glyph {
+    font-size: 14px;
 }
 
 .ch-item-content {

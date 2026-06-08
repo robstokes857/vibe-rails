@@ -205,6 +205,14 @@ export class TerminalTab {
             if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                 const payload = this.vibeTerminal?.createBracketedPastePayload(text) ?? text;
                 this.socket.send(payload);
+
+                // A long paste is exactly when the editor scratchpad shines, so
+                // surface the one-time discovery nudge for pasted prompts too. The
+                // typing counter (_trackTypingForNudge) deliberately ignores paste,
+                // so without this a big pasted prompt would never trigger the tip.
+                if (typeof text === 'string' && text.length >= EDITOR_NUDGE_CHAR_THRESHOLD) {
+                    this.manager?.maybeShowEditorNudge();
+                }
             }
         });
 

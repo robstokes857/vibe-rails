@@ -53,15 +53,17 @@ writeFileSync(path.join(tmpDir, 'utils-stub.mjs'), 'export function getCliBrand(
 const { TabStatusController, TAB_STATUS } = await import(pathToFileURL(stagedModule).href);
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
-function makeController({ isActiveTab = () => true } = {}) {
+function makeController({ isActiveTab = () => true, cliKey = null } = {}) {
     const tabState = { label: 'Test', accentColor: null };
     const ui = { item: fakeElement(), button: fakeElement(), close: fakeElement() };
     const flashes = { ready: 0, waiting: 0 };
+    const notifications = { ready: 0 };
     const progress = [];
     const controller = new TabStatusController(tabState, ui, {
-        getCliKey: () => null,
+        getCliKey: () => cliKey,
         isActiveTab,
         setProgress: (p) => progress.push(p),
+        notifyReady: () => { notifications.ready++; },
     });
     // Patch flash methods so we can assert on them deterministically.
     controller._flashReady = () => { flashes.ready++; };
@@ -69,7 +71,7 @@ function makeController({ isActiveTab = () => true } = {}) {
     // Suppress the emoji animation timer during tests.
     controller._startEmojiCycle = () => {};
     controller._stopEmojiCycle = () => {};
-    return { controller, flashes, progress, ui, tabState };
+    return { controller, flashes, notifications, progress, ui, tabState };
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -267,4 +269,161 @@ test('same-state WAITING re-entry re-flashes background tabs', () => {
     const firstFlashes = flashes.waiting;
     controller.onWaitingForUserSelection();
     assert.ok(flashes.waiting > firstFlashes, 'repeated waiting signal should re-flash');
+});
+
+test('background tab → READY fires notifyReady (alongside the flash)', () => {
+    // A different tab finishing its turn should both flash the tab and pop the
+    // small "ready" toast — they share the same background-only branch.
+    const { controller, flashes, notifications } = makeController({ isActiveTab: () => false });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r'); // → THINKING
+    controller.onSessionIdle();      // → READY (background)
+    assert.equal(controller._status, TAB_STATUS.READY);
+    assert.equal(flashes.ready, 1, 'background ready should flash');
+    assert.equal(notifications.ready, 1, 'background ready should fire the toast notification');
+});
+
+test('active tab → READY does NOT fire notifyReady (nor flash)', () => {
+    // The user is already looking at the active tab, so neither the flash nor
+    // the toast should fire — only background completions are surfaced.
+    const { controller, flashes, notifications } = makeController({ isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r'); // → THINKING
+    controller.onSessionIdle();      // → READY (foreground)
+    assert.equal(controller._status, TAB_STATUS.READY);
+    assert.equal(flashes.ready, 0, 'active ready should not flash');
+    assert.equal(notifications.ready, 0, 'active ready should not toast');
+});
+
+// ── Shell-tab backend busy/idle driving (CLI key 'shell') ─────────────────────
+// A plain shell has no agent "turn", so PTY output IS the signal the user wants:
+// running a dev server / build and watching the spinner track activity. Unlike
+// agent tabs, the shell tab acts on backend session_busy / session_idle.
+
+test('shell: session_busy from CONNECTED → THINKING (spinner + progress on)', () => {
+    const { controller, progress } = makeController({ cliKey: 'shell', isActiveTab: () => true });
+    controller.onSocketOpen();               // → CONNECTED
+    controller.onSessionBusy();              // backend saw PTY output
+    assert.equal(controller._status, TAB_STATUS.THINKING);
+    assert.deepEqual(progress.at(-1), { state: 3, value: 0 }, 'busy should arm the indeterminate progress bar');
+});
+
+test('shell: session_idle from THINKING → CONNECTED (not READY), no flash/toast', () => {
+    // Settle to CONNECTED so a dev server going quiet between requests does not
+    // spam the "ready" flash + toast every cycle.
+    const { controller, flashes, notifications, progress } = makeController({ cliKey: 'shell', isActiveTab: () => false });
+    controller.onSocketOpen();
+    controller.onSessionBusy();              // → THINKING
+    controller.onSessionIdle();              // server went quiet
+    assert.equal(controller._status, TAB_STATUS.CONNECTED);
+    assert.equal(flashes.ready, 0, 'shell idle must not fire the ready flash');
+    assert.equal(notifications.ready, 0, 'shell idle must not fire the ready toast');
+    assert.deepEqual(progress.at(-1), { state: 0, value: 0 }, 'leaving THINKING should turn the progress bar off');
+});
+
+test('shell: busy → idle → busy toggles the spinner each cycle', () => {
+    const { controller } = makeController({ cliKey: 'shell', isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onSessionBusy();
+    assert.equal(controller._status, TAB_STATUS.THINKING, 'first request lights spinner');
+    controller.onSessionIdle();
+    assert.equal(controller._status, TAB_STATUS.CONNECTED, 'quiet drops spinner');
+    controller.onSessionBusy();
+    assert.equal(controller._status, TAB_STATUS.THINKING, 'next request lights spinner again');
+});
+
+test('shell: session_busy while already THINKING is a no-op (no churn)', () => {
+    const { controller, progress } = makeController({ cliKey: 'shell', isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onSessionBusy();              // → THINKING
+    const progressLen = progress.length;
+    controller.onSessionBusy();              // continued output
+    assert.equal(controller._status, TAB_STATUS.THINKING);
+    assert.equal(progress.length, progressLen, 'repeated busy should not re-emit progress updates');
+});
+
+test('shell: session_busy while DISCONNECTED is ignored', () => {
+    const { controller } = makeController({ cliKey: 'shell', isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onSocketClose();              // → DISCONNECTED
+    controller.onSessionBusy();
+    assert.equal(controller._status, TAB_STATUS.DISCONNECTED);
+});
+
+test('shell: session_idle while already CONNECTED (quiet) is a no-op', () => {
+    const { controller } = makeController({ cliKey: 'shell', isActiveTab: () => true });
+    controller.onSocketOpen();               // → CONNECTED
+    controller.onSessionIdle();
+    assert.equal(controller._status, TAB_STATUS.CONNECTED);
+});
+
+test('shell: Enter-armed idle still settles to CONNECTED, never READY', () => {
+    // Even when the user's Enter armed _awaitingFirstIdle, a shell tab must take
+    // the shell branch and land in CONNECTED rather than the agent READY path.
+    const { controller } = makeController({ cliKey: 'shell', isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r');         // → THINKING, arms _awaitingFirstIdle
+    assert.equal(controller._awaitingFirstIdle, true);
+    controller.onSessionIdle();
+    assert.equal(controller._status, TAB_STATUS.CONNECTED);
+});
+
+test('agent tab (non-shell): session_busy stays a no-op', () => {
+    // Regression guard for the agent path: busy fires on the agent's own prompt
+    // redraws, so it must NOT move an agent tab into THINKING.
+    const { controller } = makeController({ cliKey: 'claude', isActiveTab: () => true });
+    controller.onSocketOpen();               // → CONNECTED
+    controller.onSessionBusy();
+    assert.equal(controller._status, TAB_STATUS.CONNECTED, 'agent busy must remain inert');
+});
+
+test('shell: session_busy does NOT clobber WAITING', () => {
+    // A user-attention prompt must outlive incidental PTY output. (Shells don't
+    // enter WAITING today, so this guards the path defensively.)
+    const { controller } = makeController({ cliKey: 'shell', isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onWaitingForUserSelection();  // → WAITING
+    assert.equal(controller._status, TAB_STATUS.WAITING);
+    controller.onSessionBusy();              // incidental output
+    assert.equal(controller._status, TAB_STATUS.WAITING, 'waiting must survive busy');
+});
+
+// ── session_completed: process exit ≠ "ready for input" ───────────────────────
+
+test('shell: session_completed settles THINKING → CONNECTED, no flash/toast', () => {
+    // A shell process exiting is "done", not "ready" — mirror the idle carve-out
+    // so it never fires the READY flash/toast (the global "completed" toast covers
+    // the exit).
+    const { controller, flashes, notifications } = makeController({ cliKey: 'shell', isActiveTab: () => false });
+    controller.onSocketOpen();
+    controller.onSessionBusy();              // → THINKING
+    controller.onSessionCompleted();         // process exited
+    assert.equal(controller._status, TAB_STATUS.CONNECTED);
+    assert.equal(flashes.ready, 0, 'shell completion must not flash READY');
+    assert.equal(notifications.ready, 0, 'shell completion must not fire the ready toast');
+});
+
+test('agent tab: background session_completed flashes READY but does NOT toast', () => {
+    // Completion still flashes the tab, but the in-panel "is ready" toast is
+    // reserved for the idle (turn-finished) path — an exited process announcing
+    // itself as "ready" would mislead and duplicate the global completed toast.
+    const { controller, flashes, notifications } = makeController({ isActiveTab: () => false });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r');         // → THINKING, arms _awaitingFirstIdle
+    controller.onSessionCompleted();         // process exited
+    assert.equal(controller._status, TAB_STATUS.READY);
+    assert.equal(flashes.ready, 1, 'completion still flashes the tab');
+    assert.equal(notifications.ready, 0, 'completion must not pop the ready toast');
+});
+
+test('agent tab: background session_idle (turn finished) still flashes AND toasts', () => {
+    // Guard the contrast with completion: the idle path is the one that should
+    // both flash and toast "is ready".
+    const { controller, flashes, notifications } = makeController({ isActiveTab: () => false });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r');         // → THINKING
+    controller.onSessionIdle();              // → READY (turn finished)
+    assert.equal(controller._status, TAB_STATUS.READY);
+    assert.equal(flashes.ready, 1, 'idle ready flashes');
+    assert.equal(notifications.ready, 1, 'idle ready toasts');
 });
