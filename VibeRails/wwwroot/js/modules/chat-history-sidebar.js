@@ -1155,8 +1155,27 @@ export class ChatHistorySidebar {
         return rawName.replace(/^Chat from\s+.+?\s*->\s*.+?\s+/i, '').trim();
     }
 
+    _isShellBrand(brand) {
+        if (!brand) {
+            return false;
+        }
+        // The shell brand from getCliBrand carries this className. Legacy sessions
+        // recorded before the shell brand existed fall through to the default
+        // brand, where label is the raw cli string ("Shell"/"shell"/"terminal").
+        const label = (brand.label || '').toLowerCase();
+        return brand.className === 'badge-cli-shell'
+            || label === 'shell'
+            || label === 'terminal';
+    }
+
     _renderBrandLogo(brand, className) {
         const logoClass = className || 'ch-item-logo';
+        // Plain shell / terminal sessions: render a crisp terminal glyph tinted
+        // with the brand accent instead of the flat white-filtered SVG (or the
+        // bare "S" letter fallback for pre-shell-brand sessions).
+        if (this._isShellBrand(brand)) {
+            return `<span class="${logoClass} ch-brand-terminal-glyph"><i class="fa-solid fa-terminal" aria-hidden="true"></i></span>`;
+        }
         const logoStyle = brand.logoFilter ? ` style="filter: ${brand.logoFilter}"` : '';
         return brand.logo
             ? `<img src="${escapeHtml(brand.logo)}" alt="${escapeHtml(brand.label)}" class="${logoClass}"${logoStyle}>`

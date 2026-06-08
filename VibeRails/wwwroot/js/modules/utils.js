@@ -95,7 +95,7 @@ export function getCliBrand(cli) {
             label: 'Terminal',
             logo: getAssetPath('assets/img/terminal.svg'),
             className: 'badge-cli-shell',
-            accentColor: '#7d8590',
+            accentColor: '#3fb950',
             logoFilter: 'brightness(0) invert(1)'
         }
     };
@@ -461,4 +461,11 @@ export function escapeHtml(text) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+// Escape HTML, then turn newlines into <br>. The escape runs FIRST so any markup
+// in the input is neutralized and only literal newlines become breaks. Shared by
+// the global app toast (toast-service.js) and the terminal toast (terminal-toast.js).
+export function escapeHtmlWithLineBreaks(text) {
+    return escapeHtml(text).replace(/\n/g, '<br>');
 }

@@ -11,6 +11,7 @@ import { TerminalMenu, renderTerminalMenuHtml } from './terminal-menu.js';
 import { TerminalTab } from './terminal-tab.js';
 import { TerminalMultiRun } from './terminal-multirun.js';
 import { TerminalEditorModal } from './terminal-editor-modal.js';
+import { TerminalToast } from './terminal-toast.js';
 import { showSendDebugLogModal } from './debug-bundle.js';
 
 // Pending-close grace window: how long a closed tab is held in the undo
@@ -97,10 +98,12 @@ class TerminalManager {
         this.keyboardBtn = null;
         this.editorBtn = null;
 
-        // "Open in text editor" discovery nudge — shown at most once until dismissed.
+        // "Open in text editor" discovery nudge — surfaced at most once per
+        // session (and never again once dismissed/opened; see EDITOR_NUDGE_SEEN_KEY).
         this._editorNudgeShown = false;
-        this._editorNudgeCallout = null;
-        this._editorNudgeTimer = null;
+        // Handle to the live nudge toast (if any), so opening the editor by any
+        // route can dismiss it. Nulled when the toast closes.
+        this._editorNudgeHandle = null;
 
         this.lockLayoutHandler = null;
         this.lockedPanel = null;
@@ -118,6 +121,10 @@ class TerminalManager {
         // the manager (not a tab) because it's a composing surface independent of
         // which tab is active; cleared on a successful send, dropped on destroy.
         this._editorDraft = '';
+
+        // Terminal-scoped toast surface. Renders over the active tab's panel
+        // (never inside the xterm host), so it can't disturb terminal sizing.
+        this.toast = new TerminalToast(this);
     }
 
     isDestroyed() {
@@ -232,7 +239,7 @@ class TerminalManager {
         this.terminalMenu = null;
         this.downloadMenu?.destroy();
         this.downloadMenu = null;
-        this._dismissEditorNudge();
+        this.toast?.dispose();
         document.body.classList.remove('vb-terminal-active-session');
 
         // Fire-and-forget DELETE for any tabs still in pending-close so we don't leak
@@ -381,21 +388,32 @@ class TerminalManager {
     }
 
     _showEditorModal() {
-        // Opening the editor once means the user found the feature — retire the nudge.
+        // The editor pastes into a live session; with none there's nothing to send
+        // to. The button is hidden in that state (see updateUi) — this guard is
+        // just defense-in-depth against any stray caller (e.g. the discovery toast).
+        const active = this.getActiveTab();
+        if (!active?.state?.hasActiveSession) {
+            return;
+        }
+
+        // Opening the editor once means the user found the feature — retire the
+        // nudge and dismiss its toast if still on screen (e.g. the user clicked the
+        // toolbar button rather than the toast's own "Open editor" action).
         this._editorNudgeShown = true;
         this._markEditorNudgeSeen();
-        this._dismissEditorNudge();
+        this._editorNudgeHandle?.close();
+        this._editorNudgeHandle = null;
         void new TerminalEditorModal(this).show();
     }
 
     // ── "Open in text editor" discovery nudge ────────────────────────────────
     //
-    // Called by a tab when the user types a long run on one input line. Shows a
-    // one-time button flash + dismissible callout pointing at the editor button.
-    // Idempotent and self-gating: only ever fires once per session, and never at
-    // all once the user has dismissed it or opened the editor (localStorage).
+    // Called by a tab when the user types (or pastes) a long run of input. Surfaces
+    // a one-time terminal toast pointing at the editor, with an inline "Open editor"
+    // action. Self-gating: fires at most once per session, and never again once the
+    // user has dismissed it or opened the editor (persisted under EDITOR_NUDGE_SEEN_KEY).
     maybeShowEditorNudge() {
-        if (this._editorNudgeShown || this._destroyed || !this.editorBtn) {
+        if (this._editorNudgeShown || this._destroyed) {
             return;
         }
 
@@ -407,91 +425,67 @@ class TerminalManager {
             }
         } catch { /* localStorage blocked — fall through and show it */ }
 
-        this._editorNudgeShown = true;
-        this._showEditorNudge();
+        const handle = this.toast.showToast(
+            'Composing something long? Open it in the text editor for a nicer experience.',
+            {
+                type: 'info',
+                durationSec: 14,
+                action: {
+                    label: 'Open editor',
+                    onClick: () => this._showEditorModal()
+                },
+                // Auto-close leaves the tip eligible again next session; an explicit
+                // dismiss (the ×) means "don't show again" and is persisted.
+                onClose: (reason) => {
+                    this._editorNudgeHandle = null;
+                    if (reason === 'manual') {
+                        this._markEditorNudgeSeen();
+                    }
+                }
+            }
+        );
+
+        // Only burn the once-per-session shot if the toast actually rendered — it
+        // needs an active terminal panel to live in. Otherwise let a later long
+        // input try again.
+        if (handle) {
+            this._editorNudgeShown = true;
+            this._editorNudgeHandle = handle;
+        }
     }
 
     _markEditorNudgeSeen() {
         try { window.localStorage.setItem(EDITOR_NUDGE_SEEN_KEY, '1'); } catch { /* no-op */ }
     }
 
-    _showEditorNudge() {
-        const btn = this.editorBtn;
-        if (!btn) {
-            return;
-        }
+    // A background tab finished its turn (TabStatusController → READY off-screen,
+    // fired alongside the ready-flash). Pop a small toast over whatever tab the
+    // user is currently looking at, with a one-click jump to the tab that's ready.
+    _notifyTabReady(state) {
+        const label = state?.label || state?.title || 'Terminal';
 
-        // Flash the button (CSS animation runs a few iterations then stops).
-        btn.classList.remove('vb-editor-nudge-pulse');
-        void btn.offsetWidth; // force reflow so the animation restarts
-        btn.classList.add('vb-editor-nudge-pulse');
+        // The in-panel toast is only actually visible when the active tab is
+        // showing a live terminal — if the user is parked on a placeholder (no
+        // session) or there's no active tab, its panel is hidden and the toast
+        // would render into nothing. Only use it when it'll be seen; otherwise
+        // (and if showSmallToast still returns null) fall back to the always-
+        // visible global toast so a background tab finishing is never silently
+        // dropped. (The global toast has no inline action, so the user taps the
+        // flashing tab to jump.)
+        const active = this.getActiveTab();
+        const handle = active?.state?.hasActiveSession
+            ? this.toast.showSmallToast(`${label} is ready`, {
+                type: 'success',
+                durationSec: 6,
+                action: {
+                    label: 'View',
+                    onClick: () => { void this.activateTab(state.id); }
+                }
+            })
+            : null;
 
-        this._dismissEditorNudge({ keepPulse: true });
-
-        const callout = document.createElement('div');
-        callout.className = 'vb-terminal-editor-nudge';
-        callout.setAttribute('role', 'status');
-        callout.innerHTML = `
-            <div class="vb-terminal-editor-nudge-arrow" aria-hidden="true"></div>
-            <div class="vb-terminal-editor-nudge-row">
-                <i class="fa-solid fa-file-pen vb-terminal-editor-nudge-icon" aria-hidden="true"></i>
-                <div class="vb-terminal-editor-nudge-text">
-                    <strong>Composing something long?</strong>
-                    <span>Open it in the text editor for a better experience.</span>
-                </div>
-            </div>
-            <div class="vb-terminal-editor-nudge-actions">
-                <button type="button" class="vb-terminal-editor-nudge-open">Open editor</button>
-                <button type="button" class="vb-terminal-editor-nudge-dismiss">Don't show again</button>
-            </div>
-        `;
-
-        callout.querySelector('.vb-terminal-editor-nudge-open')
-            ?.addEventListener('click', () => this._showEditorModal());
-        callout.querySelector('.vb-terminal-editor-nudge-dismiss')
-            ?.addEventListener('click', () => {
-                this._markEditorNudgeSeen();
-                this._dismissEditorNudge();
-            });
-
-        document.body.appendChild(callout);
-        this._editorNudgeCallout = callout;
-
-        // Anchor below the button, right-aligned to it (button lives top-right of
-        // the panel). fixed positioning avoids assuming any DOM nesting; the nudge
-        // is transient so it doesn't need to track scroll/resize.
-        const rect = btn.getBoundingClientRect();
-        const margin = 8;
-        callout.style.top = `${Math.round(rect.bottom + margin)}px`;
-        const calloutWidth = callout.offsetWidth || 280;
-        let left = Math.round(rect.right - calloutWidth);
-        left = Math.max(margin, Math.min(left, window.innerWidth - calloutWidth - margin));
-        callout.style.left = `${left}px`;
-        // Point the arrow up at the button.
-        const arrow = callout.querySelector('.vb-terminal-editor-nudge-arrow');
-        if (arrow) {
-            const arrowLeft = Math.round(rect.left + rect.width / 2 - left);
-            arrow.style.left = `${Math.max(12, Math.min(arrowLeft, calloutWidth - 12))}px`;
-        }
-
-        // Auto-dismiss after a while so it never lingers. We deliberately do NOT
-        // mark it permanently seen here — only an explicit "Don't show again" or
-        // actually opening the editor does that. The per-session _editorNudgeShown
-        // flag still prevents it from popping again until the next page load.
-        this._editorNudgeTimer = setTimeout(() => this._dismissEditorNudge(), 14000);
-    }
-
-    _dismissEditorNudge({ keepPulse = false } = {}) {
-        if (this._editorNudgeTimer) {
-            clearTimeout(this._editorNudgeTimer);
-            this._editorNudgeTimer = null;
-        }
-        if (this._editorNudgeCallout) {
-            this._editorNudgeCallout.remove();
-            this._editorNudgeCallout = null;
-        }
-        if (!keepPulse) {
-            this.editorBtn?.classList.remove('vb-editor-nudge-pulse');
+        if (!handle) {
+            this.app?.showToast?.(label, 'Ready', 'success', { compact: true });
         }
     }
 
@@ -622,10 +616,18 @@ class TerminalManager {
         terminalElement.style.height = '100%';
         panel.appendChild(terminalElement);
 
+        // Toast overlay: a sibling of the xterm host (NOT a child of it), so
+        // xterm's FitAddon — which measures `.vb-terminal-element` for cols/rows
+        // — never sees it. Absolutely positioned + pointer-events:none (see CSS),
+        // so it adds no layout and can't trigger a resize or steal terminal input.
+        const toastLayer = document.createElement('div');
+        toastLayer.className = 'vb-terminal-toast-layer';
+        panel.appendChild(toastLayer);
+
         this.tabList?.appendChild(item);
         this.tabPanels?.appendChild(panel);
 
-        state.ui = { item, button, edit, close, panel, terminalElement };
+        state.ui = { item, button, edit, close, panel, terminalElement, toastLayer };
 
         const instance = new TerminalTab(this, state);
         instance.statusController = new TabStatusController(state, state.ui, {
@@ -634,7 +636,8 @@ class TerminalManager {
                 return meta.cli || null;
             },
             isActiveTab: () => this.activeTabId === state.id,
-            setProgress: (progress) => this.updateTabProgress(state.id, progress)
+            setProgress: (progress) => this.updateTabProgress(state.id, progress),
+            notifyReady: () => this._notifyTabReady(state)
         });
         // Sync status controller with restored tab state (e.g. page reload
         // where the tab had an active session — state.status is 'disconnected'
@@ -1665,6 +1668,7 @@ class TerminalManager {
         if (!active) {
             this.updateWindowTitleBar(null);
             this.keyboardBtn?.classList.add('d-none');
+            this.editorBtn?.classList.add('d-none');
             this.setBadge('Not Started', 'bg-secondary');
             this.updateActionButtons({ start: true, reconnect: false, stop: false });
             this.showPlaceholder();
@@ -1683,6 +1687,13 @@ class TerminalManager {
 
         if (this.keyboardBtn) {
             this.keyboardBtn.classList.toggle('d-none', !active.state.hasActiveSession);
+        }
+
+        // "Open in text editor" only makes sense with a live session to paste into
+        // — hide it otherwise (it used to be clickable with no session, opening an
+        // editor that could only error on send).
+        if (this.editorBtn) {
+            this.editorBtn.classList.toggle('d-none', !active.state.hasActiveSession);
         }
 
         if (active.state.hasActiveSession) {
@@ -2633,7 +2644,7 @@ export class TerminalController {
                                     <select id="vb-terminal-tab-undo-select" multiple></select>
                                 </div>
                             </div>
-                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-editor-btn" title="Open in text editor" aria-label="Open in text editor">
+                            <button type="button" class="vb-terminal-control-btn icon-btn d-none" id="terminal-editor-btn" title="Open in text editor" aria-label="Open in text editor">
                                 <i class="fa-solid fa-file-pen"></i>
                             </button>
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>

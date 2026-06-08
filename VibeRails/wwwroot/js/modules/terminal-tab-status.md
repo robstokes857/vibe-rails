@@ -92,9 +92,10 @@ events are routed into `onSessionIdle()` / `onSessionCompleted()` /
 
 ### `onSessionIdle()` / `onSessionCompleted()`
 
-Only transition to `READY` if `_awaitingFirstIdle` is true — i.e. we had
-previously entered `THINKING` and have not already been moved out of it.
-This prevents the backend's noisy idle pings from spuriously flashing tabs.
+**Agent tabs (default).** Only transition to `READY` if `_awaitingFirstIdle`
+is true — i.e. we had previously entered `THINKING` and have not already been
+moved out of it. This prevents the backend's noisy idle pings from spuriously
+flashing tabs.
 
 Crucially, a `session_idle` arriving while the tab is parked in `WAITING`
 is **ignored**. The backend idle threshold is only 5 seconds of no PTY
@@ -103,11 +104,58 @@ definition — so treating idle as "prompt must have gone away" was firing
 on the common case, not the edge case. `WAITING` only leaves on the user's
 Enter press (→ `THINKING`) or socket close (→ `DISCONNECTED`).
 
+**Shell tab (CLI key `shell`).** Idle settles `THINKING` → `CONNECTED`
+(see the shell carve-out under `onSessionBusy()`). We deliberately go to
+`CONNECTED`, **not** `READY`, so a dev server going quiet between requests
+doesn't fire the `READY` flash + "is ready" toast on every cycle. Idle in any
+other state (already `CONNECTED`/quiet) is a no-op. `onSessionCompleted()`
+follows the same carve-out: a shell whose process *exits* settles `THINKING` →
+`CONNECTED` rather than flashing `READY`.
+
+**Completion ≠ "ready" (all tabs).** `session_completed` means the process
+*exited* — it carries an exit code, and the dispatcher already pops a global
+"session completed" toast. So agent tabs still flash `READY` on completion but
+pass `notify:false` to suppress the in-panel "is ready" toast; otherwise an
+exited/crashed process would misleadingly announce itself as "ready" *and*
+duplicate the global completion toast. The "is ready" toast is reserved for the
+`session_idle` turn-finished path.
+
 ### `onSessionBusy()`
 
-No-op. The backend fires `session_busy` on *any* PTY activity (including
-initial prompt output), so we can't use it to infer user intent. Enter
-detection via `onTerminalData` is the only trigger for entering `THINKING`.
+**Agent tabs (default): no-op.** The backend fires `session_busy` on *any* PTY
+activity — including the agent's own prompt redraws — so we can't use it to
+infer user intent. Enter detection via `onTerminalData` is the only trigger
+for entering `THINKING`.
+
+**Shell tab (CLI key `shell`): drives the spinner.** A plain shell has no agent
+"turn" to misread, so PTY output *is* the signal the user wants — running a dev
+server / build and watching the spinner track activity. For a shell tab,
+`session_busy` moves `CONNECTED`/`READY` → `THINKING` (skipped when already
+`THINKING`, `DISCONNECTED`, or `WAITING` — an attention prompt must outlive
+incidental output), and `session_idle` settles it back to
+`CONNECTED`. The backend emits these for *every* session — shell included,
+no CLI gating (`TerminalStateService.RegisterSession` → `StartIdleMonitor`) —
+so no backend change is needed; the controller just stops ignoring them for the
+shell. `_isShellTab()` reads the CLI key from `options.getCliKey()`.
+
+> **Caveat — the coarse 5s busy/idle signal.** The spinner rides the backend's
+> PTY-activity heuristic, which has three rough edges, all currently accepted:
+> - **Chatty servers never settle.** `session_idle` fires after 5s of no PTY
+>   output (`TerminalStateService.s_idleThreshold`); a server logging more often
+>   than every 5s (heartbeats, HMR pings) keeps `LastActivityUtc` fresh and never
+>   crosses the threshold — so the spinner stays on continuously.
+> - **Typing lights the spinner.** The *first* keystroke after an idle period
+>   emits `session_busy` (`MarkInputActivity`), so merely starting to type the
+>   next command at a quiet prompt flips the tab to `THINKING` before anything
+>   actually runs.
+> - **Long commands flicker.** A single command that pauses output for >5s
+>   (compile/test phase, network wait) trips `session_idle` → `CONNECTED`
+>   mid-run, then re-arms `THINKING` when output resumes.
+>
+> Separating "typing" from "command output", or "paused" from "finished", would
+> need the busy event to carry its source (input vs output) and/or job-control
+> awareness — a backend change deferred until the heuristic proves too noisy in
+> practice.
 
 ### `onWaitingForUserSelection()`
 
