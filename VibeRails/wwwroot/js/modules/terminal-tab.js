@@ -657,7 +657,10 @@ export class TerminalTab {
                 }
                 pendingChunks = [];
 
-                this.vibeTerminal?.suppressCursorDuringOutput?.(OUTPUT_CURSOR_IDLE_MS);
+                // Do NOT suppress the cursor during output: it hid the cursor on every
+                // flush and restored it on a 90ms timer, so output with >90ms gaps (CLI
+                // spinner/status redraws) flickered the cursor ~3x/sec. The CLI's own
+                // \e[?25l/\e[?25h already manage cursor visibility. (hotfix 2026-06-08)
                 this.vibeTerminal?.write(data);
 
                 // Re-focus once after the replay renders. Scheduled here (after write)
