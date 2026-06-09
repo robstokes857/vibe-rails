@@ -91,6 +91,14 @@ public static class AgentRoutes
             CreateAgentRequest request,
             CancellationToken cancellationToken) =>
         {
+            // Agent files are git-gated for now (listing via GetAgentFiles already is),
+            // so block creation when not in a git repo to avoid orphan files the UI
+            // then refuses to display.
+            if (!Utils.ParserConfigs.GetIsInGit())
+            {
+                return Results.BadRequest(new ErrorResponse("Agent files require a git repository"));
+            }
+
             if (string.IsNullOrEmpty(request.Path))
             {
                 return Results.BadRequest(new ErrorResponse("Path is required"));

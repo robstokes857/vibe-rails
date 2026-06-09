@@ -93,10 +93,6 @@ namespace VibeRails.Utils
         {
             return _rootPath;
         }
-        public static void SetRootPath(string path)
-        {
-            _rootPath = path;
-        }
 
         private static string? _gitBranch;
         private static string? _gitRemoteUrl;
@@ -105,6 +101,30 @@ namespace VibeRails.Utils
         public static void SetGitBranch(string? value) => _gitBranch = value;
         public static string? GetGitRemoteUrl() => _gitRemoteUrl;
         public static void SetGitRemoteUrl(string? value) => _gitRemoteUrl = value;
+
+        // Whether the current root is an actual git repository. Decoupled from RootPath:
+        // RootPath is always populated (git root when in a repo, otherwise the launch
+        // directory), while this flag is the single source of truth for git-presence.
+        private static bool _isInGit = false;
+        public static bool GetIsInGit() => _isInGit;
+
+        /// <summary>
+        /// Applies a git-detection result as one grouped update so request threads are far
+        /// less likely to observe a torn (RootPath, IsInGit) pair. This is the single place
+        /// that mutates the related git fields — keep Init, ProjectCacheRefreshJob and the
+        /// git/init route routed through here so the logic can't drift into stale copies.
+        /// RootPath is always set to a usable working directory (git root when in a repo,
+        /// otherwise the launch/fallback dir); IsInGit is written last so a reader that
+        /// gates on it will already see the matching RootPath. (Single-user process — not a
+        /// full memory barrier; add a lock here if this ever needs strict atomicity.)
+        /// </summary>
+        public static void SetGitState(string rootPath, bool isInGit, string? gitBranch = null, string? gitRemoteUrl = null)
+        {
+            _rootPath = rootPath;
+            _gitBranch = gitBranch;
+            _gitRemoteUrl = gitRemoteUrl;
+            _isInGit = isInGit;
+        }
 
         private static bool _remoteAccess = false;
         private static string _apiKey = string.Empty;

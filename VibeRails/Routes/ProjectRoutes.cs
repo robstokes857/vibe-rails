@@ -41,7 +41,7 @@ public static class ProjectRoutes
             // Git detection runs in the background during startup — ParserConfigs
             // is updated when it completes. The frontend polls or re-fetches as needed.
             var rootPath = Utils.ParserConfigs.GetRootPath();
-            var isInGit = !string.IsNullOrEmpty(rootPath);
+            var isInGit = Utils.ParserConfigs.GetIsInGit();
 
             var sandboxesDir = Path.Combine(Utils.PathConstants.GetInstallDirPath(), Utils.PathConstants.SANDBOXES_SUBDIR);
             var isSandbox = launchDirectory.StartsWith(sandboxesDir, StringComparison.OrdinalIgnoreCase);
@@ -92,13 +92,15 @@ public static class ProjectRoutes
 
             // Re-detect git root and update state
             var detected = await fileService.TryGetProjectRootPathAsync(cancellationToken: cancellationToken);
-            Utils.ParserConfigs.SetRootPath(detected.projectRoot);
 
             if (!detected.inGet)
             {
+                // Leave the existing launch-directory fallback in place rather than
+                // blanking RootPath in this rare "init succeeded but root undetectable" case.
                 return Results.BadRequest(new ErrorResponse("Git initialized but could not detect repository root."));
             }
 
+            Utils.ParserConfigs.SetGitState(detected.projectRoot, isInGit: true);
             fileService.InitLocal(detected.projectRoot);
 
             // Update ProjectCache with new git state
