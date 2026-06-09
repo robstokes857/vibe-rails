@@ -16,8 +16,8 @@ public static class SandboxRoutes
             CancellationToken cancellationToken) =>
         {
             var projectPath = ParserConfigs.GetRootPath();
-            if (string.IsNullOrEmpty(projectPath))
-                return Results.BadRequest(new ErrorResponse("Not in a local project context"));
+            if (!ParserConfigs.GetIsInGit())
+                return Results.BadRequest(new ErrorResponse("Sandboxes require a git repository"));
 
             var sandboxes = await sandboxService.GetSandboxesAsync(projectPath, cancellationToken);
             var response = sandboxes.Select(s => new SandboxResponse(
@@ -34,8 +34,8 @@ public static class SandboxRoutes
             CancellationToken cancellationToken) =>
         {
             var projectPath = ParserConfigs.GetRootPath();
-            if (string.IsNullOrEmpty(projectPath))
-                return Results.BadRequest(new ErrorResponse("Not in a local project context"));
+            if (!ParserConfigs.GetIsInGit())
+                return Results.BadRequest(new ErrorResponse("Sandboxes require a git repository"));
 
             if (string.IsNullOrWhiteSpace(request?.Name))
                 return Results.BadRequest(new ErrorResponse("Sandbox name is required"));

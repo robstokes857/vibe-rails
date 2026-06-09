@@ -43,9 +43,9 @@ public sealed class ProjectCacheRefreshJob(
             if (!isLocal.inGet)
             {
                 logger.LogInformation("[ProjectCacheRefreshJob] {Path} is no longer a git repo", projectPath);
-                ParserConfigs.SetRootPath(string.Empty);
-                ParserConfigs.SetGitBranch(null);
-                ParserConfigs.SetGitRemoteUrl(null);
+                // Git is optional — keep the launch directory as the working root rather
+                // than blanking it (which would undo the non-git fallback).
+                ParserConfigs.SetGitState(projectPath, isInGit: false);
                 await repository.SetProjectCacheValueAsync(projectPath, LastRunCacheKey, DateTime.UtcNow.ToString("O"));
                 return;
             }
@@ -63,9 +63,7 @@ public sealed class ProjectCacheRefreshJob(
                 if (remoteUrl != null)
                     await repository.SetProjectCacheValueAsync(projectPath, ProjectCacheKeys.GitRemoteUrl, remoteUrl);
 
-                ParserConfigs.SetRootPath(isLocal.projectRoot);
-                ParserConfigs.SetGitBranch(branch);
-                ParserConfigs.SetGitRemoteUrl(remoteUrl);
+                ParserConfigs.SetGitState(isLocal.projectRoot, isInGit: true, gitBranch: branch, gitRemoteUrl: remoteUrl);
             }
             catch (Exception ex)
             {

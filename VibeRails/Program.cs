@@ -382,15 +382,12 @@ if (parsedArgs.IsVsCodeMode)
 }
 else
 {
-    // Terminal/browser mode: wait for git detection so we can decide whether to launch the browser.
-    var status = await gitDetectionTask;
+    // Terminal/browser mode: wait for git detection so rootPath/isInGit are populated
+    // before we print the URL. Git is optional — we no longer block (or force-open the
+    // browser) when the directory isn't a git repo.
+    await gitDetectionTask;
 
-    if (status == StartUpStatus.RequirementsNotMet_NotInGIT)
-    {
-        Console.WriteLine($"[VibeRails] Not in a git repository. Opening browser to fix...");
-        LaunchBrowser.Launch(bootstrapUrl);
-    }
-    else if (parsedArgs.OpenBrowser)
+    if (parsedArgs.OpenBrowser)
     {
         LaunchBrowser.Launch(bootstrapUrl);
     }

@@ -11,8 +11,7 @@ namespace VibeRails
     {
         Success,
         Failed,
-        RequiresRestart,
-        RequirementsNotMet_NotInGIT
+        RequiresRestart
     }
 
     public static class Init
@@ -64,9 +63,7 @@ namespace VibeRails
                             var cachedBranch = await repository.GetProjectCacheValueAsync(projectPath, ProjectCacheKeys.GitBranch);
                             var cachedRemoteUrl = await repository.GetProjectCacheValueAsync(projectPath, ProjectCacheKeys.GitRemoteUrl);
 
-                            ParserConfigs.SetRootPath(cachedRoot);
-                            ParserConfigs.SetGitBranch(cachedBranch);
-                            ParserConfigs.SetGitRemoteUrl(cachedRemoteUrl);
+                            ParserConfigs.SetGitState(cachedRoot, isInGit: true, gitBranch: cachedBranch, gitRemoteUrl: cachedRemoteUrl);
                             fileService.InitLocal(cachedRoot);
 
                             Log.Information("[Init] Fast path: loaded git info from ProjectCache for {Path}", projectPath);
@@ -77,9 +74,13 @@ namespace VibeRails
                             return StartUpStatus.Success;
                         }
 
-                        // Cached as not-a-git-repo — still do a background refresh in case user ran git init
+                        // Cached as not-a-git-repo — git is optional, so fall back to using the
+                        // launch directory as the working root and let the app run normally.
+                        // Still refresh in the background in case the user ran git init.
+                        ParserConfigs.SetGitState(projectPath, isInGit: false);
+                        fileService.InitLocal(projectPath);
                         _ = RefreshProjectCacheInBackgroundAsync(serviceProvider, projectPath);
-                        return StartUpStatus.RequirementsNotMet_NotInGIT;
+                        return StartUpStatus.Success;
                     }
 
                     // Slow path: no cache, run full git detection
@@ -88,7 +89,11 @@ namespace VibeRails
                 catch (Exception ex)
                 {
                     Log.Warning(ex, "[Init] Background git detection failed");
-                    return StartUpStatus.RequirementsNotMet_NotInGIT;
+                    // Git is optional — even if detection blows up, fall back to the launch
+                    // directory so the app still runs instead of being blocked.
+                    var fallbackRoot = launchDirectory ?? Directory.GetCurrentDirectory();
+                    ParserConfigs.SetGitState(fallbackRoot, isInGit: false);
+                    return StartUpStatus.Success;
                 }
             });
         }
@@ -100,15 +105,19 @@ namespace VibeRails
             IFileService fileService, IRepository repository, string projectPath)
         {
             var isLocal = await fileService.TryGetProjectRootPathAsync(projectPath);
-            ParserConfigs.SetRootPath(isLocal.projectRoot);
 
             await repository.SetProjectCacheValueAsync(projectPath, ProjectCacheKeys.IsGitRepo, isLocal.inGet.ToString());
 
             if (!isLocal.inGet)
             {
-                return StartUpStatus.RequirementsNotMet_NotInGIT;
+                // Git is optional — fall back to the launch directory as the working root
+                // so the app runs normally without a .git.
+                ParserConfigs.SetGitState(projectPath, isInGit: false);
+                fileService.InitLocal(projectPath);
+                return StartUpStatus.Success;
             }
 
+            ParserConfigs.SetGitState(isLocal.projectRoot, isInGit: true);
             await repository.SetProjectCacheValueAsync(projectPath, ProjectCacheKeys.GitRootPath, isLocal.projectRoot);
             fileService.InitLocal(isLocal.projectRoot);
 
@@ -154,13 +163,9 @@ namespace VibeRails
 
                 if (!isLocal.inGet)
                 {
-                    // Git repo was removed — update ParserConfigs if it was previously set
-                    if (!string.IsNullOrEmpty(ParserConfigs.GetRootPath()))
-                    {
-                        ParserConfigs.SetRootPath(string.Empty);
-                        ParserConfigs.SetGitBranch(null);
-                        ParserConfigs.SetGitRemoteUrl(null);
-                    }
+                    // Git repo was removed (or never existed) — fall back to the launch
+                    // directory as the working root rather than blanking it.
+                    ParserConfigs.SetGitState(projectPath, isInGit: false);
                     return;
                 }
 
@@ -177,9 +182,7 @@ namespace VibeRails
                     await repository.SetProjectCacheValueAsync(projectPath, ProjectCacheKeys.GitRemoteUrl, remoteUrl);
 
                 // Update ParserConfigs with fresh values
-                ParserConfigs.SetRootPath(isLocal.projectRoot);
-                ParserConfigs.SetGitBranch(branch);
-                ParserConfigs.SetGitRemoteUrl(remoteUrl);
+                ParserConfigs.SetGitState(isLocal.projectRoot, isInGit: true, gitBranch: branch, gitRemoteUrl: remoteUrl);
 
                 Log.Debug("[Init] Background refresh: updated ProjectCache for {Path}", projectPath);
             }
