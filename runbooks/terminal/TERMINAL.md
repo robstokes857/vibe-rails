@@ -1,5 +1,43 @@
 # TERMINAL.md
 
+> **Rob's note (2026-06-09): the long-running cursor flicker is FIXED — and the
+> cause was OURS, not the CLI and not the env var.** Shipped in 1.7.3 (`d1d273d`).
+> This is the sneaky one that plagued **Codex for months** and recently started
+> showing in **Claude** too.
+>
+> **Symptom:** the text cursor blinks/flickers continuously (~3×/sec) in the live
+> terminal while a CLI is producing output. NOT `cursorBlink` (it's `false`), NOT
+> the hidden helper-textarea caret (already killed via `caret-color: transparent`),
+> NOT the `CLAUDE_CODE_FORCE_SYNC_OUTPUT` env var.
+>
+> **Cause:** our own `suppressCursorDuringOutput()` in `terminal-tab.js`, called on
+> *every* WebSocket output flush. It hid the cursor (transparent theme +
+> `.vb-terminal-cursor-suppressed` CSS) and armed a **90 ms** timer to restore it.
+> CLIs emit redraws in bursts with gaps that straddle 90 ms (spinner/status at
+> ~10–15 Hz with jitter), so the timer fires in each gap → cursor flashes **ON** →
+> the next chunk hides it again → **OFF**. That on/off cycle is the flicker.
+> Measured **66 cycles in a 22 s Claude session** (`750e672f`) ≈ 3/sec. It shipped
+> **2026-04-16** in the "codex fixes" commit (`3ea2f30`, present since **v1.6.0**) —
+> it is the *"small residual flicker"* the **"Codex: Status-line cursor flash"**
+> entry below shrugged off.
+>
+> **Fix:** delete the single `suppressCursorDuringOutput()` call. CLIs already
+> bracket their own redraws with DECTCEM (`\e[?25l` / `\e[?25h`), which xterm
+> renders atomically, so the app-layer suppression was redundant *and* the cause.
+>
+> **`CLAUDE_CODE_FORCE_SYNC_OUTPUT` was a red herring — do not re-chase it.** Two
+> clean falsifiers: (1) **v1.6.15 never set the env var** (added at v1.7.0) **and
+> still flickered** (confirmed on a second machine); (2) **replaying the exact same
+> bytes** (BSU/ESU pairs and all) through the session viewer **never flickers**.
+> The flicker lives in the live render path, not the byte stream. A parallel
+> session's env-var-removal "fix" is parked in a local git stash, unmerged — drop it.
+>
+> **What cracked it:** session **replay never flickers, even with a focused/visible
+> cursor**, because `session-viewer.js` never calls `suppressCursorDuringOutput()`.
+> Same bytes, no suppression → no flicker. Full writeup + the follow-up cleanup
+> (rip out the dead suppression layer and the user-facing cursor-style options) are
+> in the **"## 2026-06-09"** entry below.
+
 > **Rob's note (2026-05-21):** Overall happy with where the terminal sits
 > right now. The stacked-repaints situation is well-understood, the
 > diagnosis below holds up, and day-to-day terminal work is not being
@@ -71,6 +109,124 @@
 > nothing. Harmless to leave in (and may help once Claude Code's
 > wrapping is fixed upstream), but it's belt-only — not the
 > suspenders. Full triage below.
+
+## 2026-06-09 Cursor flicker (the long-running Codex/Claude one) — root cause and fix
+
+**Status:** FIXED, shipped in **1.7.3** (commit `d1d273d`). Verified visually by Rob
+(flicker gone in a fresh browser session). This supersedes the "small residual
+flicker" left open by the **2026-04-16 "Codex: Status-line cursor flash"** entry
+below — it is the *same* bug, and that entry's mitigation was its cause.
+
+### Symptom
+
+The text cursor flickers/blinks continuously in the live Web UI / VS Code terminal
+while a CLI is producing output — roughly **3×/sec**. Present in **every recent
+Claude session** and in **Codex for a long time** (months — the bug we could never
+pin down). It is **not**:
+
+- cursor blink — `vibe-terminal.js` sets `cursorBlink: false`;
+- the hidden helper-textarea browser caret — already suppressed with
+  `caret-color: transparent` (see "Cursor flickering during TUI loading" below);
+- the DEC 2026 `CLAUDE_CODE_FORCE_SYNC_OUTPUT` env var — see "The env-var red herring".
+
+### Root cause — our own `suppressCursorDuringOutput()`
+
+`terminal-tab.js`'s WebSocket flush path called, on **every** output chunk:
+
+```js
+this.vibeTerminal?.suppressCursorDuringOutput?.(OUTPUT_CURSOR_IDLE_MS); // 90 ms
+this.vibeTerminal?.write(data);
+```
+
+`suppressCursorDuringOutput(90)` (in `vibe-terminal.js`):
+
+1. **hides** the cursor — swaps the xterm theme `cursor`/`cursorAccent` to transparent
+   **and** toggles the `vb-terminal-cursor-suppressed` CSS class
+   (`.xterm-cursor { opacity: 0 }`);
+2. arms a **90 ms** `setTimeout` → `restoreSuppressedCursor()` (un-hide), re-armed on
+   every subsequent chunk.
+
+During a *continuous* burst (gaps < 90 ms) the cursor stays hidden — fine. But CLIs
+don't stream continuously: spinner/status redraws arrive in **bursts separated by
+gaps that straddle 90 ms** (~10–15 Hz with jitter). Each gap > 90 ms fires the
+restore timer → cursor flashes **ON**; the next chunk suppresses it again → **OFF**.
+That on/off cycle *is* the flicker.
+
+**Quantified** against real bytes (session `750e672f`, 22 s Claude session): median
+inter-chunk gap was **7 ms**, but **66 gaps exceeded 90 ms** → ~66 restore→hide
+cycles → **~3 flickers/sec**. (Reproduce with `decode_session.py` + a per-chunk
+timestamp pass over `SessionLogs`.)
+
+### Why Codex forever, Claude only recently
+
+`suppressCursorDuringOutput` was added **2026-04-16** (commit `3ea2f30`,
+"codex fixes…"; present since **v1.6.0**) to mitigate the *status-line cursor hop* —
+see the 2026-04-16 entry below. Codex's output cadence has always straddled the
+90 ms threshold, so **Codex flickered the entire time** (the "small residual flicker"
+that entry left open). Claude's TUI only recently changed to a comparable
+steady-state redraw cadence (frequent spinner/status repaints; on 1.7.x the env var
+also injects an ~11.5 Hz stream of empty `?2026h/l` chunks), so Claude crossed the
+same threshold and started flickering too.
+
+### The env-var red herring (do not re-chase)
+
+A parallel investigation blamed `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1` (it makes Claude
+emit empty `\e[?2026h\e[?2026l` pairs every render tick). That is **wrong**. Two
+clean falsifiers:
+
+1. **v1.6.15 never set the env var** (added at v1.7.0) **and still flickered** —
+   confirmed on a second Windows machine.
+2. **Replaying the exact same bytes** — BSU/ESU pairs included — through the session
+   viewer **never flickers**.
+
+The env var only changes the *byte stream*; the flicker is in the *live render path*.
+The env-var-removal change is parked in a local git stash, **unmerged** — it does not
+fix this and should be dropped (or have its rationale rewritten before it ever lands).
+
+### What cracked it (method worth repeating)
+
+Rob noticed that **session replay never flickers — even when you focus the replay
+terminal and a real cursor appears.** The replay path (`session-viewer.js`) feeds the
+*same recorded bytes* into xterm but **never calls `suppressCursorDuringOutput()`**
+and never wires up our live cursor handling. Same bytes + no suppression = no flicker
+→ the cause must be something the *live* path does to the cursor, not the bytes and
+not the CLI. That differential pointed straight at our suppression code. (Same shape
+as the stacked-repaints lesson: when identical bytes render cleanly on one path but
+not another, the bug is on the path, not in the bytes.)
+
+### The fix
+
+Deleted the single `suppressCursorDuringOutput()` call in `terminal-tab.js`'s flush
+path (commit `d1d273d`, shipped 1.7.3). The CLIs already manage cursor visibility via
+DECTCEM (`\e[?25l` hide / `\e[?25h` show) around their redraws, and xterm renders
+those atomically — so the app-layer suppression was both redundant and the actual
+cause. One-line behavioral change; the now-unused methods/constant/CSS were left in
+place for the hotfix.
+
+### Follow-up (not done yet)
+
+- **Remove the dead suppression layer:** `suppressCursorDuringOutput` /
+  `restoreSuppressedCursor` / `_cursorSuppressed` / `_cursorRestoreTimeoutId` /
+  the `_getAppliedTheme` hidden-cursor branch / `_syncCursorVisibilityClass`,
+  `OUTPUT_CURSOR_IDLE_MS`, and the `.vb-terminal-cursor-suppressed` CSS.
+- **Remove the user-facing cursor-style options** (per Rob — "let the TUI handle it"):
+  the `terminal-settings.js` cursor-style / inactive-style selects + their
+  `viberails_terminal_cursorStyle` / `…cursorInactiveStyle` localStorage keys,
+  `setCursorStyle` / `setCursorInactiveStyle`, and the `cursorStyle` /
+  `cursorInactiveStyle` / `cursorBlink` Terminal options. Let xterm defaults + the
+  CLI's own escape sequences govern the cursor entirely.
+- **Drop the env-var change** parked in the git stash.
+
+### Lesson
+
+A "mitigation" that hides a symptom on a **timer** can quietly *become* the next bug.
+The 2026-04-16 entry literally documented a *"small residual flicker"* right after
+adding output-driven cursor suppression, and waved it off as "Codex still legitimately
+repainting." That residual was the suppression's own restore→re-suppress cycle. When a
+fix leaves behind a residual artifact of the **same kind** it was meant to fix, suspect
+the fix.
+
+---
 
 ## 2026-05-15 Stacked repaints during drag-resize — diagnosis, fix, and lessons
 
@@ -2336,7 +2492,22 @@ The problem is **ConPTY's redraw after `ResizePseudoConsole` is not always compl
 
 ## Codex: Status-line cursor flash / cursor hop during TUI redraw
 
-**Status:** Improved / mitigated — 2026-04-16
+**Status:** Mitigated 2026-04-16 — **but superseded 2026-06-09: the cursor
+suppression this entry added was itself the cause of the long-running flicker.
+Removed in 1.7.3.**
+
+> **⚠️ Root-caused & superseded 2026-06-09 — see the top-of-file note and the
+> "## 2026-06-09" entry.** The "output-driven cursor suppression window" this entry
+> introduced (hide the xterm cursor during inbound redraw bursts, restore after a
+> brief idle period — `suppressCursorDuringOutput` / `restoreSuppressedCursor`) is
+> what caused the continuous ~3 Hz cursor flicker that dogged Codex for months and
+> later Claude — i.e. the *"small residual flicker"* called out in **Result** below
+> was never Codex "legitimately repainting"; it was this mitigation's own
+> restore→re-suppress cycle. The suppression call was removed in 1.7.3 (`d1d273d`).
+> The original footer/status **cursor hop** this entry describes was real and that
+> diagnosis stands — but **do not reintroduce output-driven cursor suppression** to
+> chase it; it trades a rare hop for a continuous blink. The CLI's own
+> `\e[?25l`/`\e[?25h` already hide the cursor during its redraws.
 
 **Symptom:** In the Web UI terminal, Codex's visible cursor could appear to jump off the input line and flash on the bottom status/footer line while pressing arrow keys, space, or during active thinking/redraw. The flashed cursor sometimes took on the footer line's gray styling, which made it look like a browser caret or renderer bug.
 
