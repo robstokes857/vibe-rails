@@ -66,9 +66,10 @@ Where they live in code
 
 Current pinned values:
 
-- Claude (full model IDs): `claude-opus-4-8`, `claude-opus-4-7`,
-  `claude-sonnet-4-6`, `claude-haiku-4-5`, plus an empty "Default (Claude
-  recommended)" entry.
+- Claude (full model IDs): `claude-fable-5`, `claude-opus-4-8`,
+  `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`, plus an empty
+  "Default (Claude recommended)" entry. (Fable is the tier above Opus, so it
+  sits at the top; its ID has no version-dot suffix pattern like the others.)
 - Codex: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`,
   `gpt-5.3-codex-spark`, `gpt-5.2`, plus an empty "Default (Codex recommended)"
   entry.
