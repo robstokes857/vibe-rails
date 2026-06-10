@@ -49,7 +49,6 @@ export class BackendManager {
         this.outputChannel.appendLine(`Working directory: ${cwd}`);
         this.outputChannel.appendLine(`Extension host PID: ${process.pid}`);
         this.outputChannel.appendLine(`Launch args: ${launchArgs.join(' ')}`);
-        this.outputChannel.show(true);
 
         // Ensure a crash dump location exists so native crashes (0xC0000005 etc.)
         // produce a minidump we can actually debug. The .NET runtime writes
