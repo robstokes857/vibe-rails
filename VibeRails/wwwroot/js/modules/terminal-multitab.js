@@ -544,6 +544,7 @@ class TerminalManager {
             renaming: false,
             hasActiveSession: tabInfo.hasActiveSession === true,
             sessionId: tabInfo.sessionId || null,
+            cli: tabInfo.cli || null,
             status: tabInfo.hasActiveSession ? 'disconnected' : 'not-started',
             viewState: {
                 mode: 'normal',

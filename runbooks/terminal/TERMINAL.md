@@ -37,6 +37,19 @@
 > Same bytes, no suppression → no flicker. Full writeup + the follow-up cleanup
 > (rip out the dead suppression layer and the user-facing cursor-style options) are
 > in the **"## 2026-06-09"** entry below.
+>
+> **⚠️ Update 2026-06-10/11 — half superseded.** The blink fix above stands, but
+> removing the suppression **unmasked the ORIGINAL Codex status-line cursor hop**.
+> Root cause (confirmed 2026-06-11): the **in-box Windows ConPTY** re-emits
+> Codex's transient mid-frame cursor states outside the `?2026` sync brackets;
+> the modern conpty.dll (VS Code ≥1.121) does not — that's why VS Code's terminal
+> is clean. Fix shipped: the suppression call is BACK but **gated to Codex tabs
+> only** (Codex's ~32 ms cadence stays under the 90 ms timer, so the blink that
+> killed it for Claude doesn't manifest). The "CLIs already bracket their own
+> redraws with DECTCEM" claim is **Claude-only**. The follow-up cleanup of the
+> suppression layer is **CANCELLED** — the machinery is in active use again
+> (Codex-scoped). Status summary: the **"## 2026-06-11"** entry. **Full saga
+> write-up (canonical): [`TERMINAL-FLICKER.md`](TERMINAL-FLICKER.md).**
 
 > **Rob's note (2026-05-21):** Overall happy with where the terminal sits
 > right now. The stacked-repaints situation is well-understood, the
@@ -110,12 +123,180 @@
 > wrapping is fixed upstream), but it's belt-only — not the
 > suspenders. Full triage below.
 
+## 2026-06-11 Codex cursor hop — root cause found (in-box ConPTY) + Codex-only suppression shipped
+
+> **📕 The full story lives in [`TERMINAL-FLICKER.md`](TERMINAL-FLICKER.md)** —
+> a complete write-up of the whole flicker saga: the two distinct bugs that
+> shared one name, the timeline (hop masked in v1.6.0 → blink fixed / hop
+> unmasked in 1.7.3 → root-caused and re-masked today), the full causal chain
+> with byte evidence and codex-rs source references, why it is **Windows-only**,
+> how VS Code handles it, every confirmation test Rob ran, the red herrings,
+> the shipped fix, the durable alternative we shelved, tooling, verification
+> gate, and lessons. **Read that document before touching anything
+> cursor-related.**
+
+**Status:** Root cause CONFIRMED. **The Codex hop is the only open terminal
+bug** — reintroduced (unmasked) by the 1.7.3 blink fix, now re-masked in the
+web/webview terminal. It is **Windows-only**: Mac on 1.7.3 is confirmed clean
+(no ConPTY middleman).
+
+**One-paragraph version:** Codex makes its cursor visible *before* moving it to
+the composer, split across write() syscalls inside a DEC-2026 sync bracket. The
+**in-box Windows ConPTY** (what Pty.Net gets from `kernel32!CreatePseudoConsole`)
+re-renders between those syscalls and re-emits the transient
+cursor-on-the-spinner-row state *outside* the bracket — making it renderable, so
+xterm paints the cursor hopping ~10×/sec while Codex thinks. The modern conhost
+(`conpty.dll`, bundled + default in VS Code since 1.121, ~2026-05-19) brackets
+its re-emissions, so the same transient states are never paintable — which is
+why VS Code's terminal is clean, and why **Rob reproduced our exact flicker in
+VS Code's own terminal by flipping `terminal.integrated.windowsUseConptyDll` to
+`false`**. A/B capture through both conhosts: renderable cursor oscillation
+**60 → 0**. Env vars: no effect (tested in a 4-config matrix + confirmed in
+codex-rs source).
+
+**Fix shipped today (Rob's call — cheapest sound option):** revived the
+pre-1.7.3 `suppressCursorDuringOutput()` call in `terminal-tab.js`, **gated to
+Codex tabs only**. Safe because Codex's ~32 ms output cadence stays under the
+90 ms restore timer, so the blink that killed global suppression for Claude
+can't manifest — matches the clean 1.6.15 experience Rob confirmed. Plumbing:
+`TerminalSessionService.ActiveCli` → optional `Cli` on the terminal status DTOs
+(child status → root → tabs list) → client `state.cli` (set on start, hydrated
+on reload, cleared on stop). **Never enable suppression for Claude or globally**
+— that re-creates the 1.7.3 blink. Accepted limitations (external-terminal
+launches still hop; focused replays of old recordings still hop; cadence
+tripwire), the verification gate, and the shelved conpty.dll-bundling option
+are all in `TERMINAL-FLICKER.md` §10–§13.
+
+---
+
+## 2026-06-10 Codex cursor flicker is BACK after 1.7.3 — it's the original status-line hop, unmasked (there were always TWO flickers)
+
+**Status:** Root-caused at the byte level + upstream. ~~Not fixed yet — mitigation
+decision pending (Rob).~~ **Superseded 2026-06-11:** real root cause is the
+in-box ConPTY re-exposing Codex's transient cursor states (see entry above); the
+fix shipped is Codex-only revival of the old suppression, NOT the position-settle
+gate recommended below. Do **not** revert `d1d273d` for Claude.
+
+### TL;DR — two distinct cursor flickers were conflated
+
+| | Blink (fixed in 1.7.3) | Hop (back since 1.7.3) |
+|---|---|---|
+| Symptom | cursor blinks on/off **in place** ~3×/s | cursor **teleports** between composer and status/paint rows ~10×/s while Codex thinks |
+| Cause | OUR `suppressCursorDuringOutput()` 90 ms restore timer | CODEX's own emission: every frame parks a *visible* cursor at the end of the status/spinner line, then re-parks at the composer in a separate write 6–35 ms later |
+| Affected | Claude + Codex | Codex only (Claude parks only at the prompt) |
+| In the bytes? | No — live render path only | **YES** — every Codex session, pre- and post-1.7.3, byte-identical shape |
+
+`d1d273d` fixed the blink and was right to. Its justification — "CLIs already
+bracket their own redraws with DECTCEM" — is true for **Claude**, **false for
+Codex**. That over-generalization is what the 2026-06-09 entry got wrong, and
+why deleting the suppression resurrected the pre-v1.6.0 hop the suppression had
+been masking all along.
+
+### Byte evidence (session `33ee4a66-8841-4e3b-9eb0-500ea4838653`, Codex v0.139.0, 2026-06-10, post-1.7.3)
+
+Per render tick during thinking, Codex emits (SessionLogs rows are raw per-PTY-read
+payloads — `SessionOutputWriter.HandleDataAsync` writes "always the original
+payload"; analyzer: `python-scripts/analyze_cursor_state.py`):
+
+```
+#9306108  \e[?2026h\e[0 q                                       BSU + cursor-style pulse
+#9306109  \e[?25l\e[12;2H\e[K…status repaint…\e[13;65H\e[?25h   frame; parks cursor VISIBLE at 13;65
+                                                                (end of "(0s • esc to interrupt)")
+#9306110  \e[?2026l                                             ESU
+   …6–35 ms gap — real producer-side timing, not our coalescing…
+#9306111  \e[?25l\e[16;3H\e[?25h                                unbracketed re-park at composer 16;3
+```
+
+- Frame-final park positions vary frame to frame: composer (`16;3`), status-line
+  end (`13;65`), end of painted region (`18;39`). The visible cursor genuinely
+  oscillates composer ↔ status-line at the spinner cadence.
+- `analyze_cursor_state.py` on `33ee4a66` (post-fix): cursor VISIBLE at **532/533**
+  active chunk boundaries; visible-row **moves at 172** of them. On `4026ff95`
+  (2026-06-08, **pre**-fix, 31k chunks): visible at 31,133/31,134, **10,833**
+  row-moves — same shape. **The bytes did not change; 1.7.3 only unmasked them.**
+- Claude contrast (`c8bac352`, same day): hide-only chunks bracket whole repaint
+  bursts, parks ONLY at the prompt row — visible-row moves 8/169. The DECTCEM
+  discipline asymmetry is the entire story.
+
+### Why the pipeline is not to blame
+
+- `WebSocketConsumer` already does protocol-correct sync-aware batching (holds
+  ≤100 ms while a `?2026` frame is open, ships whole frames). The frame and the
+  re-park are **separate WS messages** because Codex emits them 6–35 ms apart —
+  beyond the 4 ms coalesce, and both commits are sync-CLOSED states, so perfect
+  DEC 2026 handling cannot help.
+- The 2026-06-09 "replay never flickers" differential was run on **Claude**
+  sessions, whose bytes can't hop. `session-viewer.js` preserves inter-chunk
+  delays (`delayMs` → `setTimeout`), so a **focused 1× replay of `33ee4a66`
+  should visibly reproduce the hop** — that's the 30-second confirmation repro.
+
+### Upstream: known Codex CLI behavior, native terminals affected too
+
+- [openai/codex#9081](https://github.com/openai/codex/issues/9081) — cursor
+  "jumps/sweeps" during TUI redraws on Windows Terminal / cmd / pwsh —
+  **closed "not planned"**.
+- [openai/codex#11063](https://github.com/openai/codex/issues/11063) — cursor
+  jank during streaming; proposes hiding the cursor while writing scrollback —
+  open, no PR.
+- No `[tui]` config knob and no env var controls this (nothing analogous to
+  Claude's `CLAUDE_CODE_FORCE_SYNC_OUTPUT`).
+
+So: pre-1.7.3 VibeRails was *better than native terminals* on the hop (masked)
+and worse on the blink (caused). Post-1.7.3 we have **native parity** — the same
+hop is visible in Windows Terminal running the same Codex version.
+
+### Mitigation options (decision pending)
+
+1. **Do nothing** — accept native parity, point at upstream. Zero risk; flicker stays.
+2. **Recommended: position-settle cursor render gate, Codex tabs only, render-clock-driven (no timers).**
+   Hide the *rendered* cursor (reuse `vb-terminal-cursor-suppressed` +
+   `_syncCursorVisibilityClass`) only while its position is "unsettled":
+   - After each `write()` resolves, read `term.buffer.active.cursorX/Y`.
+   - Cursor moved **cross-row** → hide; after ~3 consecutive rAF ticks at the
+     same position, promote it to "settled" and show.
+   - Returns to the already-settled position, or moves **within the same row**
+     (typing echo) → show immediately.
+   - Status-line park dwells 6–35 ms < settle window → never rendered. Composer
+     is the settled position → solid the whole time. Typing unaffected.
+   - Cannot recreate the 3 Hz blink: restore is position-stability-driven, not
+     output-idle-driven — a transient position never satisfies it.
+   - rAF only — no `setTimeout`, no receive-path changes, no occlusion-throttle
+     exposure (occluded ⇒ nothing renders anyway). No byte-stream involvement
+     (read-only position observation + CSS), so the no-stripping rule holds.
+3. **Report upstream with these byte captures** (complements 1 or 2). The clean
+   producer-side fix is parking the cursor at the composer *inside* the sync
+   frame (or keeping it DECTCEM-hidden while thinking) — aligns with the
+   #11063 proposal.
+
+**Rejected:** reverting `d1d273d` (restores the blink); re-adding the 90 ms
+suppression for Codex only (same blink, Codex's cadence straddles 90 ms — that
+was the original months-long complaint); server-side post-ESU hold to merge the
+re-park (cadence-guessing timer, adds latency to every frame — the exact
+"mitigation becomes the next bug" trap); waiting-state-driven cursor hide
+(seconds of latency + false-positive history per the waiting-observer playbook).
+
+### Guardrails
+
+- The 2026-06-09 follow-up "rip out the dead suppression layer" is **ON HOLD** —
+  option 2 reuses that CSS/class machinery. Decide the mitigation first.
+- Everything else in the 2026-06-09 entry stands: the env-var red herring
+  falsifiers, the blink mechanics, dropping the stashed env-var removal.
+
+---
+
 ## 2026-06-09 Cursor flicker (the long-running Codex/Claude one) — root cause and fix
 
 **Status:** FIXED, shipped in **1.7.3** (commit `d1d273d`). Verified visually by Rob
 (flicker gone in a fresh browser session). This supersedes the "small residual
 flicker" left open by the **2026-04-16 "Codex: Status-line cursor flash"** entry
 below — it is the *same* bug, and that entry's mitigation was its cause.
+
+> **⚠️ Correction 2026-06-10:** the claim that the suppression timer explains why
+> "Codex flickered the entire time" is only half right, and "CLIs already bracket
+> their own redraws with DECTCEM" is **false for Codex**. Codex's bytes park a
+> *visible* cursor at the status line every frame and re-park it at the composer
+> 6–35 ms later — a real cursor hop that this entry's fix **unmasked**. The blink
+> diagnosis and fix below remain correct. See the "## 2026-06-10" entry above.
 
 ### Symptom
 

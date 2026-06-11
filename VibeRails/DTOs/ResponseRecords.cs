@@ -262,14 +262,16 @@ namespace VibeRails.DTOs
     // Terminal Session DTOs
     public record TerminalStatusResponse(
         bool HasActiveSession,
-        string? SessionId = null
+        string? SessionId = null,
+        string? Cli = null
     );
 
     public record TerminalTabStatusResponse(
         string TabId,
         DateTime CreatedUTC,
         bool HasActiveSession,
-        string? SessionId = null
+        string? SessionId = null,
+        string? Cli = null
     );
 
     public record TerminalTabListResponse(

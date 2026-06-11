@@ -28,6 +28,7 @@ public class TerminalSessionService : ITerminalSessionService
     private static readonly SemaphoreSlim s_lifecycleGate = new(1, 1);
     private static Terminal? s_terminal;
     private static string? s_sessionId;
+    private static string? s_cli;
     private static WebSocket? s_activeWebSocket;
     private static string? s_sessionOwnerId;
     private static bool s_externallyOwned;
@@ -47,6 +48,19 @@ public class TerminalSessionService : ITerminalSessionService
         {
             lock (s_lock)
                 return s_sessionId;
+        }
+    }
+
+    // CLI of the active session ("Claude", "Codex", ...). Null for externally
+    // owned sessions. The web client uses this to apply per-CLI rendering
+    // behavior (Codex-only cursor suppression) after a reconnect, when the
+    // launch request that carried the CLI is no longer in hand.
+    public string? ActiveCli
+    {
+        get
+        {
+            lock (s_lock)
+                return s_cli;
         }
     }
 
@@ -101,6 +115,7 @@ public class TerminalSessionService : ITerminalSessionService
             {
                 s_terminal = terminal;
                 s_sessionId = sessionId;
+                s_cli = llm.ToString();
                 s_sessionOwnerId = BuildSessionOwnerId(sessionId);
             }
             _localClientTracker.AcquireOwner(BuildSessionOwnerId(sessionId));
@@ -216,6 +231,7 @@ public class TerminalSessionService : ITerminalSessionService
                     throw new InvalidOperationException("A terminal session is already active");
                 s_terminal = terminal;
                 s_sessionId = sessionId;
+                s_cli = null; // external sessions don't report a CLI; web-side per-CLI behavior stays off
                 s_sessionOwnerId = BuildSessionOwnerId(sessionId);
                 s_externallyOwned = true;
             }
@@ -639,6 +655,7 @@ public class TerminalSessionService : ITerminalSessionService
 
             s_terminal = null;
             s_sessionId = null;
+            s_cli = null;
             s_sessionOwnerId = null;
             s_activeWebSocket = null;
             s_externallyOwned = false;
