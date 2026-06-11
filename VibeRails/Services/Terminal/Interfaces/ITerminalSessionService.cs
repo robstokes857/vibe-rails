@@ -7,6 +7,7 @@ public interface ITerminalSessionService
 {
     bool HasActiveSession { get; }
     string? ActiveSessionId { get; }
+    string? ActiveCli { get; }
     bool IsExternallyOwned { get; }
     Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null, string summary = "");
     Task HandleWebSocketAsync(WebSocket webSocket, CancellationToken cancellationToken, int? cols = null, int? rows = null);

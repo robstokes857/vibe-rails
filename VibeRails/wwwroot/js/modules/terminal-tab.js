@@ -657,10 +657,19 @@ export class TerminalTab {
                 }
                 pendingChunks = [];
 
-                // Do NOT suppress the cursor during output: it hid the cursor on every
-                // flush and restored it on a 90ms timer, so output with >90ms gaps (CLI
-                // spinner/status redraws) flickered the cursor ~3x/sec. The CLI's own
-                // \e[?25l/\e[?25h already manage cursor visibility. (hotfix 2026-06-08)
+                // Cursor suppression is CODEX-ONLY (TERMINAL.md "## 2026-06-11").
+                // Codex's repaints briefly park a visible cursor on its status line,
+                // and the in-box Windows ConPTY re-emits that transient state outside
+                // the ?2026 sync brackets, so xterm paints it (~10x/sec hop while
+                // thinking). Hiding the cursor during output masks it; Codex's ~32ms
+                // output cadence stays under the 90ms restore timer, so the timer's
+                // own blink artifact doesn't manifest for Codex.
+                // Do NOT extend this to Claude: its output gaps straddle 90ms and the
+                // suppression itself becomes a ~3Hz blink — the bug fixed in 1.7.3
+                // (d1d273d). Claude manages cursor visibility fine via DECTCEM.
+                if ((this.state.cli || '').toLowerCase() === 'codex') {
+                    this.vibeTerminal?.suppressCursorDuringOutput?.(OUTPUT_CURSOR_IDLE_MS);
+                }
                 this.vibeTerminal?.write(data);
 
                 // Re-focus once after the replay renders. Scheduled here (after write)
@@ -739,6 +748,7 @@ export class TerminalTab {
             const response = await this.manager.app.apiCall(`/api/v1/terminal/tabs/${encodeURIComponent(this.state.id)}/start`, 'POST', body);
             this.state.hasActiveSession = response?.hasActiveSession === true;
             this.state.sessionId = response?.sessionId || null;
+            this.state.cli = response?.cli || body?.cli || null;
             if (!this.state.hasActiveSession) {
                 this.state.status = 'not-started';
                 this.manager.updateUi();
@@ -758,6 +768,7 @@ export class TerminalTab {
         } catch (error) {
             this.state.hasActiveSession = false;
             this.state.sessionId = null;
+            this.state.cli = null;
             this.state.status = 'not-started';
             this.manager.updateUi();
             this.manager.app.showError(`Failed to start terminal: ${error.message}`);
@@ -775,6 +786,7 @@ export class TerminalTab {
 
         this.state.hasActiveSession = false;
         this.state.sessionId = null;
+        this.state.cli = null;
         this.state.status = 'not-started';
         this.disconnect({ disposeTerminal: true, preserveStatus: true });
         this.manager.updateUi();

@@ -14,7 +14,7 @@ public static class TerminalRoutes
         // GET /api/v1/terminal/status - Check if terminal session is active
         app.MapGet("/api/v1/terminal/status", (ITerminalSessionService terminalService) =>
         {
-            return Results.Ok(new TerminalStatusResponse(terminalService.HasActiveSession, terminalService.ActiveSessionId));
+            return Results.Ok(new TerminalStatusResponse(terminalService.HasActiveSession, terminalService.ActiveSessionId, terminalService.ActiveCli));
         }).WithName("GetTerminalStatus");
 
         // POST /api/v1/terminal/start - Start a terminal session with LLM CLI
@@ -100,7 +100,7 @@ public static class TerminalRoutes
                     await sessionResumeService.LinkParentSessionAsync(terminalService.ActiveSessionId, request.ResumeSessionId, llm.ToString(), cancellationToken);
                 }
 
-                return Results.Ok(new TerminalStatusResponse(true, terminalService.ActiveSessionId));
+                return Results.Ok(new TerminalStatusResponse(true, terminalService.ActiveSessionId, terminalService.ActiveCli));
             }
             catch (Exception ex)
             {

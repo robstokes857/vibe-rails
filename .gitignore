@@ -28,6 +28,9 @@ bundles/
 # Decoded/forensic session dumps (real terminal output) — keep local, never commit.
 *.decoded.txt
 **/*.decoded.txt
+# Raw PTY capture dumps from tools/pty-capture (timestamped real terminal output,
+# used for the 2026-06-11 ConPTY cursor-hop investigation) — keep local, never commit.
+tools/pty-capture/captures/
 # Approved, sanitized terminal regression fixtures. Keep the broad raw-capture
 # ignores above; add exact exceptions only after review.
 !Tests/Services/Terminal/Fixtures/session_e910eb94_codex_working_falsefire.fixture.bin
