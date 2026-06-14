@@ -2169,7 +2169,12 @@ code {
     --terminal-min-height: 500px;
     --terminal-header-bg: #181818;
     --terminal-body-bg: #0d0d0d;
-    --vb-terminal-tab-width: 250px;
+    /* Terminal tabs use the strip like a real terminal: a few tabs grow wide
+       enough to read, then each tab shrinks as more tabs are opened. Once every
+       tab hits the floor, the strip scrolls instead of crushing the names. */
+    --vb-terminal-tab-width: 420px;
+    --vb-terminal-tab-basis: 280px;
+    --vb-terminal-tab-min-width: 148px;
     --vb-terminal-tab-bg: #1e1e1e;
     --vb-terminal-tab-active-bg: #252525;
     --vb-terminal-tab-hover-bg: #2a2a2a;
@@ -2265,14 +2270,6 @@ code {
     justify-content: center;
     font-size: 0.75rem;
     transition: all 0.45s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.ch-sidebar-close-btn i {
-    transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.vb-terminal-focus-layout.vb-history-under .ch-sidebar-close-btn i {
-    transform: rotate(180deg);
 }
 
 .ch-sidebar-close-btn:hover {
@@ -2506,7 +2503,10 @@ code {
 }
 
 #vb-terminal-panel .vb-terminal-tab-list {
-    flex: 0 1 auto;
+    /* Fill the strip so child tabs can flex against the available space. The +
+       button lives inside this row after the tab items, so it stays beside the
+       last tab instead of being pushed to the far right of the window chrome. */
+    flex: 1 1 auto;
     min-width: 0;
     max-width: 100%;
     display: flex;
@@ -2515,7 +2515,7 @@ code {
     overflow-y: hidden;
     scrollbar-width: none;
     gap: 1px;
-    background: var(--terminal-border);
+    background: transparent;
 }
 
 #vb-terminal-panel .vb-terminal-tab-list::-webkit-scrollbar {
@@ -2550,20 +2550,74 @@ code {
 #vb-terminal-panel .vb-terminal-tab-item {
     display: inline-flex;
     align-items: center;
-    padding: 0 6px 0 0;
+    padding: 0;
     height: 100%;
     background: var(--vb-terminal-tab-bg);
     color: #a6adc8;
     transition: background 0.2s, color 0.2s;
-    width: var(--vb-terminal-tab-width);
-    min-width: var(--vb-terminal-tab-width);
+    /* Grow first, shrink later. With 1-3 tabs this yields readable names; with
+       many tabs the items compress toward the min-width, then the list scrolls.
+       Purely horizontal: the strip never wraps, so terminal geometry is stable. */
+    min-width: var(--vb-terminal-tab-min-width);
     max-width: var(--vb-terminal-tab-width);
-    flex: 0 0 var(--vb-terminal-tab-width);
+    flex: 1 1 var(--vb-terminal-tab-basis);
+    /* Each tab is its own size container for the staged action-cluster
+       queries below (rename/minimize drop out as the tab narrows). The status
+       TEXT is deliberately not width-hidden — see the NOTE after this rule. */
+    container-type: inline-size;
     font-size: 0.75rem;
     position: relative;
     overflow: hidden;
     user-select: none;
     border: none;
+}
+
+/* NOTE: status text stays visible while there is real room. When a tab is
+   compressed by a busy strip, the status collapses to its icon so the tab name
+   remains useful; the full label + status is still exposed through the title
+   and aria-label maintained by terminal-tab-status.js. */
+
+/* Stage the hover action cluster down as the tab narrows, so hovering does not
+   turn the middle of a small tab into buttons. Rename drops first; minimize and
+   close remain available at normal tab widths. */
+@container (max-width: 220px) {
+    #vb-terminal-panel .vb-terminal-tab-item:not(.is-minimized) .vb-terminal-tab-edit {
+        display: none !important;
+    }
+}
+
+@container (max-width: 150px) {
+    #vb-terminal-panel .vb-terminal-tab-item:not(.is-minimized) .vb-terminal-tab-min {
+        display: none !important;
+    }
+}
+
+@container (max-width: 220px) {
+    #vb-terminal-panel .vb-terminal-tab-item:not(.is-minimized) .vb-tab-status-text {
+        display: none;
+    }
+
+    #vb-terminal-panel .vb-terminal-tab-item:not(.is-minimized) .vb-tab-status-section {
+        padding-left: 3px;
+    }
+}
+
+@container (max-width: 170px) {
+    #vb-terminal-panel .vb-terminal-tab-button {
+        padding-left: 8px;
+        padding-right: 6px;
+        gap: 3px;
+    }
+
+    #vb-terminal-panel .vb-tab-identity {
+        gap: 5px;
+        min-width: 0;
+    }
+
+    #vb-terminal-panel .vb-tab-brand-logo {
+        width: 16px;
+        height: 16px;
+    }
 }
 
 #vb-terminal-panel .vb-terminal-tab-item.active {
@@ -2753,7 +2807,7 @@ code {
     background: transparent;
     color: inherit;
     font-weight: 600;
-    padding: 0 4px 0 10px;
+    padding: 0 10px 0 12px;
     flex: 1;
     min-width: 0;
     height: 100%;
@@ -2785,67 +2839,120 @@ code {
     font-weight: 600;
 }
 
-#vb-terminal-panel .vb-terminal-tab-close {
+/* ── Tab action cluster (rename / minimize / close) ─────────────────────────
+   Lives in an absolutely-positioned overlay on the right edge of the tab, so
+   revealing it on hover covers the status section instead of reflowing the
+   label. `background: inherit` tracks the tab's normal/hover/active background.
+   Hidden via opacity (not visibility/display) so its geometry is always
+   measurable; pointer-events gating keeps clicks falling through to the tab
+   button while hidden. */
+#vb-terminal-panel .vb-terminal-tab-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    padding: 0 5px 0 4px;
+    background: inherit;
+    opacity: 0;
+    /* The cluster itself NEVER takes pointer events — only its buttons do,
+       and only while revealed (rules below). Clicks on the padding/gaps
+       between buttons fall through to the tab button underneath and activate
+       the tab, so the overlay doesn't carve dead zones out of the click
+       target. */
+    pointer-events: none;
+    transition: opacity 0.12s;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item:hover .vb-terminal-tab-actions,
+#vb-terminal-panel .vb-terminal-tab-item:has(:focus-visible) .vb-terminal-tab-actions {
+    opacity: 1;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item:hover .vb-terminal-tab-actions button,
+#vb-terminal-panel .vb-terminal-tab-item:has(:focus-visible) .vb-terminal-tab-actions button {
+    pointer-events: auto;
+}
+
+/* Hovering a tab swaps its status for the action cluster. (The overlay already
+   covers the status icon; this also fades the text, which can be wider.) */
+#vb-terminal-panel .vb-terminal-tab-item:hover .vb-tab-status-section,
+#vb-terminal-panel .vb-terminal-tab-item:has(:focus-visible) .vb-tab-status-section {
+    opacity: 0;
+}
+
+#vb-terminal-panel .vb-terminal-tab-actions button {
     border: none;
     background: transparent;
     color: #6c7086;
-    padding: 6px 8px;
-    margin-left: 2px;
+    padding: 3px 5px;
     border-radius: 4px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     line-height: 1;
-    font-size: 1.4rem;
-    min-width: 30px;
-    min-height: 30px;
+    min-width: 22px;
+    min-height: 22px;
     transition: background 0.2s, color 0.2s;
     flex-shrink: 0;
     cursor: pointer;
+    /* Inert until the cluster is revealed — see the reveal rules above. */
+    pointer-events: none;
 }
 
-#vb-terminal-panel .vb-terminal-tab-close:hover {
+#vb-terminal-panel .vb-terminal-tab-actions button:hover {
     background: rgba(255, 255, 255, 0.1);
     color: #cdd6f4;
 }
 
-/* Rename pencil — available after session start, revealed only on hover. */
-#vb-terminal-panel .vb-terminal-tab-edit {
-    border: none;
-    background: transparent;
-    color: #6c7086;
-    padding: 4px 6px;
-    margin-left: 2px;
-    border-radius: 4px;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-    font-size: 0.78rem;
-    min-width: 24px;
-    min-height: 24px;
-    transition: background 0.2s, color 0.2s;
-    flex-shrink: 0;
-    cursor: pointer;
+#vb-terminal-panel .vb-terminal-tab-close {
+    font-size: 1.15rem;
 }
 
-#vb-terminal-panel .vb-terminal-tab-edit[hidden] {
+#vb-terminal-panel .vb-terminal-tab-edit,
+#vb-terminal-panel .vb-terminal-tab-min {
+    font-size: 0.72rem;
+}
+
+/* Tab actions only make sense once a session exists (syncTabActionAvailability
+   sets [hidden] otherwise). Author display rules override the UA [hidden]
+   default, so keep this explicit. */
+#vb-terminal-panel .vb-terminal-tab-edit[hidden],
+#vb-terminal-panel .vb-terminal-tab-min[hidden],
+#vb-terminal-panel .vb-terminal-tab-close[hidden] {
     display: none !important;
 }
 
-#vb-terminal-panel .vb-terminal-tab-item.has-active-session:hover .vb-terminal-tab-edit {
-    display: inline-flex;
-}
-
-#vb-terminal-panel .vb-terminal-tab-edit:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #cdd6f4;
-}
-
-/* While renaming, the pencil and close button step aside for the input. */
-#vb-terminal-panel .vb-terminal-tab-item.is-renaming .vb-terminal-tab-edit,
-#vb-terminal-panel .vb-terminal-tab-item.is-renaming .vb-terminal-tab-close {
+/* While renaming, the whole action cluster steps aside for the input. */
+#vb-terminal-panel .vb-terminal-tab-item.is-renaming .vb-terminal-tab-actions {
     display: none;
+}
+
+/* Touch devices have no hover: keep minimize/close inline and always visible
+   (the pencil stays hover-discovery-only — rename remains reachable via
+   long-press → context menu). */
+@media (hover: none) {
+    /* Inline (always-visible) actions take ~54px of in-flow width, so touch
+       tabs need a higher floor to keep the name + status readable. */
+    #vb-terminal-panel {
+        --vb-terminal-tab-min-width: 200px;
+    }
+
+    #vb-terminal-panel .vb-terminal-tab-actions {
+        position: static;
+        opacity: 1;
+        background: transparent;
+    }
+
+    #vb-terminal-panel .vb-terminal-tab-actions button {
+        pointer-events: auto;
+    }
+
+    #vb-terminal-panel .vb-terminal-tab-edit {
+        display: none !important;
+    }
 }
 
 #vb-terminal-panel .vb-terminal-tab-rename-input {
@@ -2866,14 +2973,16 @@ code {
 
 /* ═══════════ Tab Status Overhaul ═══════════ */
 
-/* Identity section (left side of tab) */
+/* Identity section (left side of tab). It carries most shrink while the tab is
+   roomy, then container queries above collapse status text so the label gets
+   the space back in dense tab strips. */
 #vb-terminal-panel .vb-tab-identity {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-width: 0;
+    min-width: min(120px, 100%);
     overflow: hidden;
-    flex: 1 1 auto;
+    flex: 1 4 auto;
 }
 
 #vb-terminal-panel .vb-tab-brand-logo {
@@ -2893,13 +3002,15 @@ code {
     font-family: monospace;
 }
 
-/* Status section (right side of tab) */
+/* Status section (right side of tab). It stays intact on roomy tabs and becomes
+   icon-only once the tab is forced below 220px. */
 #vb-terminal-panel .vb-tab-status-section {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     margin-left: auto;
     flex-shrink: 0;
+    min-width: 0;
     white-space: nowrap;
     padding-left: 6px;
 }
@@ -2911,6 +3022,9 @@ code {
     letter-spacing: 0.02em;
     opacity: 0.5;
     white-space: nowrap;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* State-specific status text colors */
@@ -2940,7 +3054,8 @@ code {
     opacity: 0.9;
 }
 
-/* Status icon — FA icons for static states, emoji for thinking */
+/* Status icon — FA icons for static states, spinner for thinking. Never
+   shrinks: when the section runs out of room the text ellipsizes, not this. */
 #vb-terminal-panel .vb-tab-status-icon {
     display: inline-flex;
     align-items: center;
@@ -2950,6 +3065,7 @@ code {
     width: 1.4em;
     height: 1.4em;
     overflow: hidden;
+    flex-shrink: 0;
 }
 
 #vb-terminal-panel .vb-tab-status-icon i {
@@ -2959,6 +3075,9 @@ code {
 
 #vb-terminal-panel .tab-status-connected .vb-tab-status-icon i {
     color: #94a3b8;
+    /* Smaller than the other glyphs so the filled dot reads as a quiet
+       "connected" LED, not a bullet. */
+    font-size: 0.42rem;
 }
 
 #vb-terminal-panel .tab-status-ready .vb-tab-status-icon i {
@@ -3021,6 +3140,67 @@ code {
     40%, 60% { background: color-mix(in srgb, #f9e2af 32%, transparent); }
 }
 
+/* ── Minimized tabs (icon chips) ────────────────────────────────────────────
+   A minimized tab collapses to brand-logo + status-icon and is grouped at the
+   RIGHT edge of the strip via `order` (visual only — DOM/tabOrder untouched;
+   "parked" tabs live out of the way next to the + button, per Rob). Width is
+   explicit: the item is a size container (container-type above), so it must
+   not rely on content-based auto sizing. Status flashes, the accent
+   underline, and the progress bar all still apply — a minimized Waiting tab
+   still pulses for attention. */
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized {
+    order: 999;
+    flex: 0 0 64px;
+    width: 64px;
+    min-width: 64px;
+    max-width: 64px;
+    padding: 0;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-button {
+    padding: 0 8px;
+    justify-content: space-between;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-label,
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-tab-status-text {
+    display: none;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-tab-identity {
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-tab-status-section {
+    padding-left: 0;
+}
+
+/* Chip hover offers exactly one action — restore. Rename/close need the full
+   tab (restore first); clicking anywhere else on the chip activates it. */
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-edit,
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-close {
+    display: none !important;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-actions {
+    padding: 0 4px;
+}
+
+/* Touch devices render the action cluster in-flow (see the hover:none block
+   above), so an icon chip needs room for logo + status icon + restore button.
+   Width stays explicit because the item is an inline-size container (no
+   content-based auto sizing). Must come after the base .is-minimized rules —
+   same specificity, source order decides. */
+@media (hover: none) {
+    #vb-terminal-panel .vb-terminal-tab-item.is-minimized {
+        flex: 0 0 88px;
+        width: 88px;
+        min-width: 88px;
+        max-width: 88px;
+    }
+}
+
 /* ═══════════ End Tab Status Overhaul ═══════════ */
 
 #vb-terminal-panel .vb-terminal-tab-action-group {
@@ -3031,6 +3211,7 @@ code {
 }
 
 #vb-terminal-panel .vb-terminal-tab-add {
+    order: 1000;
     background: transparent;
     border: none;
     color: #6c7086;
@@ -3631,14 +3812,11 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
 }
 
 @media (max-width: 992px) {
-    #vb-terminal-panel {
-        --vb-terminal-tab-width: 200px;
-    }
-
-    /* Hide status text on tablet, keep icon */
-    #vb-terminal-panel .vb-tab-status-text {
-        display: none;
-    }
+    /* (No tab-width override here — narrow viewports used to cap tabs at
+       200px, but a VS Code panel webview is always "narrow" by viewport
+       width. Tabs shrink via flexbox only when the strip itself is tight.
+       The old "hide status text on tablet" rule is gone for the same reason —
+       the status words stay visible and ellipsize instead.) */
 
     #vb-terminal-panel .card-header {
         padding: 10px 12px;
@@ -3742,26 +3920,9 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
 }
 
 @media (max-width: 480px) {
-    #vb-terminal-panel {
-        --vb-terminal-tab-width: 100px;
-    }
-
-    /* Show only icon + first ~5 chars */
-    #vb-terminal-panel .vb-terminal-tab-label {
-        max-width: 3.5em;
-    }
-
-    /* Hide entire status section */
-    #vb-terminal-panel .vb-tab-status-section {
-        display: none;
-    }
-
-    #vb-terminal-panel .vb-terminal-tab-close {
-        min-width: 22px;
-        min-height: 22px;
-        padding: 3px 5px;
-        font-size: 1.1rem;
-    }
+    /* (No tab width caps / label truncation / status hiding here anymore —
+       see the tab-width var comment. Readable names + visible status beat
+       cramming more tabs on screen; the strip scrolls.) */
 
     #vb-terminal-panel .vb-terminal-tab-add,
     #vb-terminal-panel .vb-terminal-tab-undo {
@@ -4984,15 +5145,14 @@ input.form-control:disabled {
    Terminal Settings Panel + Zoom Controls
    ========================================================================= */
 
-/* Download/action buttons + dropdowns */
-#vb-terminal-panel .vb-terminal-download-wrap,
-#vb-terminal-panel .vb-terminal-menu-wrap {
+/* Download button + dropdown. (The old kebab "Terminal actions" menu merged
+   into the settings panel's Actions block — see terminal-settings.js.) */
+#vb-terminal-panel .vb-terminal-download-wrap {
     position: relative;
     display: inline-flex;
 }
 
-#vb-terminal-panel .vb-terminal-download-menu,
-#vb-terminal-panel .vb-terminal-menu {
+#vb-terminal-panel .vb-terminal-download-menu {
     position: absolute;
     top: calc(100% + 4px);
     right: 0;
@@ -5007,13 +5167,11 @@ input.form-control:disabled {
     gap: 2px;
 }
 
-#vb-terminal-panel .vb-terminal-download-menu[hidden],
-#vb-terminal-panel .vb-terminal-menu[hidden] {
+#vb-terminal-panel .vb-terminal-download-menu[hidden] {
     display: none;
 }
 
-#vb-terminal-panel .vb-terminal-download-menu button,
-#vb-terminal-panel .vb-terminal-menu button {
+#vb-terminal-panel .vb-terminal-download-menu button {
     background: none;
     border: none;
     color: #d4d4d4;
@@ -5029,15 +5187,9 @@ input.form-control:disabled {
     width: 100%;
 }
 
-#vb-terminal-panel .vb-terminal-download-menu button:hover,
-#vb-terminal-panel .vb-terminal-menu button:hover {
+#vb-terminal-panel .vb-terminal-download-menu button:hover {
     background: rgba(255, 255, 255, 0.07);
     color: #fff;
-}
-
-#vb-terminal-panel #terminal-menu-btn[aria-expanded="true"] {
-    background: rgba(255, 255, 255, 0.1);
-    color: #cdd6f4;
 }
 
 /* ── Terminal toast overlay ──────────────────────────────────────────────────
@@ -5289,6 +5441,54 @@ input.form-control:disabled {
     border-radius: 2px;
 }
 
+/* Actions block — always visible at the top of the panel (not a collapsible
+   section). Hosts Multi Run / Send debug log, merged here from the old kebab. */
+#vb-terminal-panel .vb-terminal-settings-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.025);
+    flex: 0 0 auto;
+}
+
+#vb-terminal-panel .vb-terminal-settings-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: #cdd6f4;
+    font-family: inherit;
+    font-size: 0.8rem;
+    text-align: left;
+    padding: 9px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+#vb-terminal-panel .vb-terminal-settings-action-btn:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: #fff;
+}
+
+#vb-terminal-panel .vb-terminal-settings-action-btn:focus-visible {
+    outline: 2px solid rgba(137, 180, 250, 0.45);
+    outline-offset: -2px;
+}
+
+#vb-terminal-panel .vb-terminal-settings-action-btn i {
+    color: #89b4fa;
+    font-size: 0.78rem;
+    width: 14px;
+    text-align: center;
+    flex: 0 0 14px;
+}
+
 #vb-terminal-panel .vb-terminal-settings-section {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
@@ -5522,7 +5722,11 @@ input.form-control:disabled {
 /* ── Chat History Sidebar ─────────────────────────────────────────────────── */
 .vb-terminal-focus-layout {
     --ch-sidebar-width: 268px;
-    --ch-sidebar-peek: 56px;
+    /* Collapsed rail width: one 30px icon button + breathing room. The
+       collapsed sidebar genuinely shrinks to this (no longer a full-width box
+       sliding under the terminal card behind a fade mask — that read as
+       visual chaos; Rob, 2026-06-12). */
+    --ch-sidebar-peek: 44px;
     display: grid;
     grid-template-columns: var(--ch-sidebar-width) minmax(0, 1fr);
     column-gap: 0.5rem;
@@ -5564,7 +5768,7 @@ input.form-control:disabled {
     justify-self: start;
     position: relative;
     z-index: 1;
-    transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.55s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.35s ease, filter 0.35s ease, opacity 0.25s ease;
+    transition: width 0.55s cubic-bezier(0.22, 1, 0.36, 1), transform 0.55s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.55s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.35s ease, filter 0.35s ease, opacity 0.25s ease;
 }
 
 .ch-sidebar-main {
@@ -5594,7 +5798,11 @@ input.form-control:disabled {
     transition: opacity 0.45s ease;
 }
 
+/* Collapsed rail: the sidebar shrinks to the rail width for real — its wide
+   content (header text, search, items) fades out and is clipped by
+   overflow:hidden while the width animates in step with the grid column. */
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar {
+    width: var(--ch-sidebar-peek);
     box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.05), 0 18px 36px rgba(0, 0, 0, 0.24);
     border-color: rgba(255, 255, 255, 0.05);
     filter: saturate(0.92) brightness(0.93);
@@ -5605,8 +5813,8 @@ input.form-control:disabled {
 }
 
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar-header {
-    justify-content: flex-start;
-    padding: 10px 12px;
+    justify-content: center;
+    padding: 7px 0;
     border-bottom-color: transparent;
 }
 
@@ -5630,14 +5838,16 @@ input.form-control:disabled {
     transition: left 0.45s cubic-bezier(0.22, 1, 0.36, 1), right 0.45s cubic-bezier(0.22, 1, 0.36, 1), top 0.45s cubic-bezier(0.22, 1, 0.36, 1), gap 0.25s ease, opacity 0.35s ease;
 }
 
+/* Collapsed: the actions stay in flow inside the (now centered) header — the
+   old absolute top:36px placement overlapped the peek icon that used to sit
+   at top:12px, which is exactly the squashed-buttons mess Rob screenshotted. */
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar-actions {
-    position: absolute;
-    top: 36px;
-    left: 0;
-    right: 0;
     gap: 0;
     justify-content: center;
-    flex-direction: row-reverse;
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-refresh-btn {
+    display: none;
 }
 
 .ch-sidebar-refresh-btn,
@@ -6106,6 +6316,14 @@ input.form-control:disabled {
     transform: translateX(-16px);
 }
 
+/* The invisible title must also take no width, or it would shove the centered
+   toggle button out of the 44px rail. width snaps on expand but the title is
+   at opacity 0 right then, so the fade-in still reads smoothly. */
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-title {
+    width: 0;
+    overflow: hidden;
+}
+
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar-search {
     max-height: 0;
     padding-top: 0;
@@ -6114,68 +6332,36 @@ input.form-control:disabled {
     overflow: hidden;
 }
 
+/* Collapsed: the toggle button is the rail's single control — it shows the
+   history clock (icon swapped in syncCloseButtonState), opens on click, and
+   carries the first-visit pulse hint. Replaces both the old gradient pill and
+   the separate non-focusable .ch-sidebar-collapsed-icon div. */
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar-close-btn {
     opacity: 1;
     pointer-events: auto;
     transform: none;
-    width: 24px;
-    height: 60px;
+    width: 30px;
+    height: 30px;
     padding: 0;
-    color: #e5eeff;
-    border-radius: 999px;
-    background: linear-gradient(180deg, rgba(91, 117, 184, 0.88) 0%, rgba(42, 54, 91, 0.98) 100%);
-    border: 1px solid rgba(156, 182, 255, 0.22);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 12px 24px rgba(5, 10, 20, 0.32);
-}
-
-.vb-terminal-focus-layout.vb-history-under .ch-sidebar-close-btn:hover {
-    color: #ffffff;
-    background: linear-gradient(180deg, rgba(112, 141, 221, 0.96) 0%, rgba(54, 70, 118, 0.98) 100%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 14px 28px rgba(5, 10, 20, 0.4);
-}
-
-.vb-terminal-focus-layout.vb-history-under .ch-sidebar-close-btn i {
-    transform: translateX(1px);
-}
-
-/* Collapsed icon – only visible when sidebar is collapsed */
-.ch-sidebar-collapsed-icon {
-    position: absolute;
-    top: 12px;
-    left: 10px;
-    width: 34px;
-    height: 34px;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.72);
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 15px;
-    cursor: pointer;
-    pointer-events: auto;
-    z-index: 2;
-    line-height: 34px;
-    text-align: center;
-    opacity: 0;
-    pointer-events: none;
-    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.45s ease, transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
-    transform: scale(0.8);
 }
 
-.ch-sidebar-collapsed-icon:hover {
+/* Hovering anywhere on the rail lights the button up — the whole rail is one
+   "open history" target, the glow says so. */
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-close-btn:hover,
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar:hover .ch-sidebar-close-btn {
+    color: #ffffff;
     background: rgba(112, 141, 221, 0.18);
     border-color: rgba(112, 141, 221, 0.35);
-    color: #ffffff;
     box-shadow: 0 2px 8px rgba(112, 141, 221, 0.2);
 }
 
-.vb-terminal-focus-layout.vb-history-under .ch-sidebar-collapsed-icon {
-    opacity: 1;
-    pointer-events: auto;
-    transform: scale(1);
-}
-
-/* One-time discovery pulse on the peek icon for first-time visitors. JS
-   removes the .ch-sidebar-pulse-hint class on first toggle. */
+/* One-time discovery pulse on the collapsed rail's toggle button for
+   first-time visitors. JS removes .ch-sidebar-pulse-hint on first toggle. */
 @keyframes ch-collapsed-icon-pulse-hint {
     0%, 100% {
         box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent, #06b6d4) 0%, transparent);
@@ -6185,47 +6371,94 @@ input.form-control:disabled {
     }
 }
 
-.vb-terminal-focus-layout.vb-history-under .ch-sidebar-collapsed-icon.ch-sidebar-pulse-hint {
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-close-btn.ch-sidebar-pulse-hint {
     animation: ch-collapsed-icon-pulse-hint 1.6s ease-in-out 3;
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .vb-terminal-focus-layout.vb-history-under .ch-sidebar-collapsed-icon.ch-sidebar-pulse-hint {
+    .vb-terminal-focus-layout.vb-history-under .ch-sidebar-close-btn.ch-sidebar-pulse-hint {
         animation: none;
         box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent, #06b6d4) 32%, transparent);
     }
 }
 
-.vb-terminal-focus-layout.vb-history-under .ch-sidebar:hover .ch-sidebar-collapsed-icon {
-    color: #ffffff;
-}
-
-/* Collapsed peek strip is clickable to re-open */
+/* Collapsed rail is clickable to re-open */
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar {
     cursor: pointer;
 }
 
+/* Collapsed rail: the session list stays visible as a clean icon-only stack
+   below the wordmark (Rob liked the icons; the OLD mess wasn't the icons,
+   it was the full-width rows fade-masked under the terminal card). Items are
+   pointer-inert — clicking anywhere on the rail opens the sidebar — and the
+   body doesn't scroll; the bottom fade hints there's more inside. Keeping the
+   body rendered also keeps its dimensions real for _shouldLoadNextPage()
+   (a 0x0 body would read as "not full" and auto-paginate all history). */
 .vb-terminal-focus-layout.vb-history-under .ch-sidebar-body {
     pointer-events: none;
-    -webkit-mask-image: linear-gradient(90deg, rgba(0, 0, 0, 1) 0, rgba(0, 0, 0, 1) 40px, rgba(0, 0, 0, 0.92) 56px, rgba(0, 0, 0, 0.25) 88px, rgba(0, 0, 0, 0) 116px);
-    mask-image: linear-gradient(90deg, rgba(0, 0, 0, 1) 0, rgba(0, 0, 0, 1) 40px, rgba(0, 0, 0, 0.92) 56px, rgba(0, 0, 0, 0.25) 88px, rgba(0, 0, 0, 0) 116px);
+    overflow: hidden;
+    padding-top: 84px; /* clear the absolutely-positioned HISTORY wordmark */
+    -webkit-mask-image: linear-gradient(180deg, #000 0, #000 78%, transparent 98%);
+    mask-image: linear-gradient(180deg, #000 0, #000 78%, transparent 98%);
 }
 
-/* Collapsed rows – shrink to just the icon */
+/* Rail items: just the 32px icon tile, centered. The tile keeps its brand
+   accent gradient/border; the row chrome (bg, border, hover lift, left rail
+   ::before) is stripped. !important beats the .ch-item-active border-left /
+   padding-left !important overrides further down (higher specificity wins
+   among !important rules, but the width/padding longhands need the flag). */
 .vb-terminal-focus-layout.vb-history-under .ch-item {
-    padding: 8px 10px;
+    width: 32px;
+    padding: 0 !important;
+    margin: 6px auto;
     gap: 0;
-    justify-content: flex-start;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent !important;
+    box-shadow: none;
 }
 
-.vb-terminal-focus-layout.vb-history-under .ch-item-active {
-    border-left: 2px solid #a6e3a1;
-    padding-left: 8px;
+.vb-terminal-focus-layout.vb-history-under .ch-item::before {
+    display: none;
 }
 
 .vb-terminal-focus-layout.vb-history-under .ch-item-content,
 .vb-terminal-focus-layout.vb-history-under .ch-item-actions {
     display: none;
+}
+
+/* Live session: green cue moves onto the icon tile itself. */
+.vb-terminal-focus-layout.vb-history-under .ch-item.ch-item-active .ch-item-icon {
+    border-color: color-mix(in srgb, var(--color-success, #10b981) 55%, transparent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--color-success, #10b981) 28%, transparent);
+}
+
+/* Empty/error/loading states are full-width prose — meaningless at 44px. */
+.vb-terminal-focus-layout.vb-history-under .ch-empty,
+.vb-terminal-focus-layout.vb-history-under .ch-loading {
+    display: none;
+}
+
+/* Vertical wordmark on the collapsed rail, under the toggle button. */
+.ch-sidebar-rail-label {
+    position: absolute;
+    top: 54px;
+    left: 50%;
+    transform: translateX(-50%);
+    writing-mode: vertical-rl;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.28);
+    pointer-events: none;
+    user-select: none;
+    opacity: 0;
+    transition: opacity 0.3s ease 0.2s;
+}
+
+.vb-terminal-focus-layout.vb-history-under .ch-sidebar-rail-label {
+    opacity: 1;
 }
 
 
@@ -8117,7 +8350,7 @@ kbd:not(.ch-search-kbd) {
 }
 .vibe-rails-ai-view .insp-learn-llm.cli-codex   .bar .fill { background: #34d399; }
 .vibe-rails-ai-view .insp-learn-llm.cli-claude  .bar .fill { background: #f59e0b; }
-.vibe-rails-ai-view .insp-learn-llm.cli-gemini  .bar .fill { background: #60a5fa; }
+.vibe-rails-ai-view .insp-learn-llm.cli-antigravity .bar .fill { background: #4d9de0; }
 .vibe-rails-ai-view .insp-learn-llm.cli-copilot .bar .fill { background: #c084fc; }
 .vibe-rails-ai-view .insp-learn-llm.cli-other   .bar .fill { background: color-mix(in srgb, var(--color-text) 35%, transparent); }
 .vibe-rails-ai-view .insp-learn-llm .cnt {

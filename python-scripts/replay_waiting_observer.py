@@ -23,8 +23,11 @@ DEFAULT_DB = os.path.expanduser("~/.vibe_rails/state.db")
 SAMPLE_WINDOW = timedelta(seconds=5)
 IDLE_CHUNK_SIZE_THRESHOLD = 50
 IDLE_MAX_UNIQUE_BIG_CHUNKS = 5
-IDLE_MIN_TOP_CHUNK_COUNT = 20
-IDLE_MIN_BIG_CHUNK_SAMPLES = 40
+IDLE_MIN_TOP_CHUNK_COUNT = 2
+IDLE_MIN_BIG_CHUNK_SAMPLES = 4
+QUIET_BUFFER_THRESHOLD = 5
+SMALL_CHUNK_CONCENTRATION_MIN_SAMPLES = 6
+IDLE_MIN_OBSERVATION_SPAN = timedelta(seconds=2)
 MAX_QUEUED_CHUNKS = 20_000
 
 
@@ -44,21 +47,52 @@ def parse_ts(s):
 
 
 def classify(chunks):
-    """Returns 'idle' | 'working' | 'indeterminate'."""
-    big_counts = {}
-    big_total = 0
-    for _, content in chunks:
-        if len(content) < IDLE_CHUNK_SIZE_THRESHOLD:
-            continue
-        big_counts[content] = big_counts.get(content, 0) + 1
-        big_total += 1
+    """Returns ('idle'|'working'|'indeterminate', snapshot dict).
 
-    if big_total < IDLE_MIN_BIG_CHUNK_SAMPLES:
-        return "indeterminate"
-    if len(big_counts) > IDLE_MAX_UNIQUE_BIG_CHUNKS:
-        return "working"
-    top = max(big_counts.values())
-    return "idle" if top >= IDLE_MIN_TOP_CHUNK_COUNT else "indeterminate"
+    Faithful mirror of WaitingForUserInputObserver.Classify (C#).
+    """
+    big_counts = {}
+    small_counts = {}
+    big_total = 0
+    small_total = 0
+    total_chunks = 0
+    for _, content in chunks:
+        total_chunks += 1
+        if len(content) >= IDLE_CHUNK_SIZE_THRESHOLD:
+            big_counts[content] = big_counts.get(content, 0) + 1
+            big_total += 1
+        else:
+            small_counts[content] = small_counts.get(content, 0) + 1
+            small_total += 1
+
+    big_uniq = len(big_counts)
+    small_uniq = len(small_counts)
+    big_top = max(big_counts.values()) if big_counts else 0
+    small_top = max(small_counts.values()) if small_counts else 0
+    snap = dict(total=total_chunks, big_total=big_total, big_uniq=big_uniq,
+                big_top=big_top, small_total=small_total, small_uniq=small_uniq,
+                small_top=small_top)
+
+    # Buffer effectively silent — don't disturb the gate.
+    if total_chunks < QUIET_BUFFER_THRESHOLD:
+        return "indeterminate", snap
+
+    # Plenty of chunks but none look idle — treat as Working (releases gate).
+    if not big_counts or big_total < IDLE_MIN_BIG_CHUNK_SAMPLES:
+        return "working", snap
+
+    if big_uniq > IDLE_MAX_UNIQUE_BIG_CHUNKS:
+        return "working", snap
+
+    if big_top < IDLE_MIN_TOP_CHUNK_COUNT:
+        return "working", snap
+
+    # Small-chunk concentration gate.
+    if small_counts and small_total >= SMALL_CHUNK_CONCENTRATION_MIN_SAMPLES:
+        if small_top < small_uniq:
+            return "working", snap
+
+    return "idle", snap
 
 
 def replay(db_path, session_id, verbose):
@@ -89,20 +123,28 @@ def replay(db_path, session_id, verbose):
         while chunks and chunks[0][0] < cutoff:
             chunks.popleft()
 
-        verdict = classify(chunks)
+        # Observation-span gate: don't classify until the buffer has been
+        # collecting for nearly a full SampleWindow (see IdleMinObservationSpan).
+        oldest = chunks[0][0] if chunks else ts
+        if ts - oldest < IDLE_MIN_OBSERVATION_SPAN:
+            continue
+
+        verdict, snap = classify(chunks)
         if verdict == "working":
             has_fired = False
         elif verdict == "idle":
             if not has_fired:
                 has_fired = True
-                fires.append((cid, ts_str))
+                fires.append((cid, ts_str, snap))
                 if verbose:
-                    print(f">>> FIRE at chunk {cid} @ {ts_str} (window={len(chunks)} chunks)")
+                    print(f">>> FIRE at chunk {cid} @ {ts_str} {snap}")
         # 'indeterminate': leave has_fired alone
 
     print(f"\nProcessed {chunk_count} chunks. Detected {len(fires)} fires.")
-    for cid, ts in fires:
-        print(f"  fire @ chunk {cid} {ts}")
+    for entry in fires:
+        cid, ts = entry[0], entry[1]
+        snap = entry[2] if len(entry) > 2 else ""
+        print(f"  fire @ chunk {cid} {ts} {snap}")
 
 
 def main():

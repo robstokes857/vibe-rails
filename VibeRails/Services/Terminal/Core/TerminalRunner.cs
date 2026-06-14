@@ -55,18 +55,19 @@ public class TerminalRunner
 
         try
         {
+            var sessionTitle = ResolveSessionTitle(workDir, title);
             var preparedSession = _commandService.PrepareSession(llm, envName, extraArgs, initialPrompt, summary);
             _stateService.PublishSessionStart(sessionId, llm.ToString(), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
 
-            terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: title, ct: ct);
+            terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: sessionTitle, ct: ct);
 
             // Always wire up DB logging
             terminal.Subscribe(new DbLoggingConsumer(_stateService, sessionId));
 
             // Publish title changes on the output path rather than PTY stdin.
-            if (!string.IsNullOrWhiteSpace(title))
+            if (!string.IsNullOrWhiteSpace(sessionTitle))
             {
-                terminal.PublishOutput(System.Text.Encoding.UTF8.GetBytes($"\u001b]0;{title}\u0007"));
+                terminal.PublishOutput(System.Text.Encoding.UTF8.GetBytes($"\u001b]0;{sessionTitle}\u0007"));
             }
 
             // For now, any configured instance defaults to remote-enabled sessions.
@@ -301,7 +302,7 @@ public class TerminalRunner
 
                             // Restore the native terminal title bar now that the remote viewer is gone.
                             terminal.PublishOutput(
-                                System.Text.Encoding.UTF8.GetBytes("\u001b]0;VibeRails Terminal\u0007"));
+                                System.Text.Encoding.UTF8.GetBytes($"\u001b]0;{sessionTitle}\u0007"));
                         }
                         catch (Exception ex)
                         {
@@ -573,7 +574,7 @@ public class TerminalRunner
             terminal.StartReadLoop();
 
             // Register so web UI can find this terminal
-            sessionService.RegisterExternalTerminal(terminal, sessionId);
+            sessionService.RegisterExternalTerminal(terminal, sessionId, workDir);
 
             try
             {
@@ -624,5 +625,34 @@ public class TerminalRunner
                     ct);
             }
         }
+    }
+
+    private static string ResolveSessionTitle(string workingDirectory, string? requestedTitle)
+    {
+        var title = string.IsNullOrWhiteSpace(requestedTitle)
+            ? GetFolderName(workingDirectory)
+            : requestedTitle.Trim();
+
+        return StripTitleControlChars(title);
+    }
+
+    private static string GetFolderName(string workingDirectory)
+    {
+        try
+        {
+            var trimmed = Path.TrimEndingDirectorySeparator(workingDirectory);
+            var name = Path.GetFileName(trimmed);
+            return string.IsNullOrWhiteSpace(name) ? workingDirectory : name;
+        }
+        catch
+        {
+            return string.IsNullOrWhiteSpace(workingDirectory) ? "Terminal" : workingDirectory;
+        }
+    }
+
+    private static string StripTitleControlChars(string title)
+    {
+        var clean = new string(title.Where(ch => !char.IsControl(ch)).ToArray()).Trim();
+        return string.IsNullOrWhiteSpace(clean) ? "Terminal" : clean;
     }
 }

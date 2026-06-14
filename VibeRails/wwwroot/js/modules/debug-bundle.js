@@ -18,33 +18,20 @@ export function showSendDebugLogModal(app, sessionId) {
                     placeholder="e.g. the terminal froze after I resized the window"></textarea>
                 <small class="form-text text-muted">
                     This uploads an encrypted copy of this session to VibeRails support so the issue
-                    can be debugged. It includes the full terminal output <strong>and the commands and
-                    prompts you typed</strong> — including text that wasn't shown on screen — which may
-                    contain secrets. Requires a valid API key.
+                    can be debugged. Requires a valid API key.
                 </small>
-            </div>
-            <div class="mb-3 form-check">
-                <input type="checkbox" class="form-check-input" id="send-debug-log-consent">
-                <label class="form-check-label" for="send-debug-log-consent">
-                    I understand this whole session — including what I typed — will be uploaded.
-                </label>
             </div>
             <div class="d-flex gap-2 justify-content-end">
                 <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
-                <button type="submit" class="btn btn-primary" id="send-debug-log-submit" disabled>Send</button>
+                <button type="submit" class="btn btn-primary" id="send-debug-log-submit" >Send</button>
             </div>
         </form>
     `);
 
-    const form = document.getElementById('send-debug-log-form');
-    const consent = document.getElementById('send-debug-log-consent');
-    const consentSubmitBtn = document.getElementById('send-debug-log-submit');
-    consent?.addEventListener('change', () => {
-        if (consentSubmitBtn) consentSubmitBtn.disabled = !consent.checked;
-    });
+    const form = document.getElementById('send-debug-log-form');    
+    const consentSubmitBtn = document.getElementById('send-debug-log-submit');   
     form?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        if (!consent?.checked) return; // Send stays gated on explicit consent.
+        e.preventDefault();       
         const message = document.getElementById('send-debug-log-message')?.value?.trim() || '';
         const submitBtn = form.querySelector('button[type="submit"]');
         if (submitBtn) {

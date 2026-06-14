@@ -263,7 +263,8 @@ namespace VibeRails.DTOs
     public record TerminalStatusResponse(
         bool HasActiveSession,
         string? SessionId = null,
-        string? Cli = null
+        string? Cli = null,
+        string? WorkingDirectory = null
     );
 
     public record TerminalTabStatusResponse(
@@ -271,7 +272,8 @@ namespace VibeRails.DTOs
         DateTime CreatedUTC,
         bool HasActiveSession,
         string? SessionId = null,
-        string? Cli = null
+        string? Cli = null,
+        string? WorkingDirectory = null
     );
 
     public record TerminalTabListResponse(
@@ -664,8 +666,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(EnvironmentResponse))]
     [JsonSerializable(typeof(EnvironmentListResponse))]
     [JsonSerializable(typeof(List<EnvironmentResponse>))]
-    // Gemini Settings DTOs
-    [JsonSerializable(typeof(GeminiSettingsDto))]
     // Codex Settings DTOs
     [JsonSerializable(typeof(CodexSettingsDto))]
     // Claude Settings DTOs

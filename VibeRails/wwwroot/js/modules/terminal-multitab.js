@@ -7,7 +7,7 @@ import {
 } from './utils.js';
 import { TabStatusController } from './terminal-tab-status.js';
 import { TerminalSettings, renderTerminalSettingsPanelHtml } from './terminal-settings.js';
-import { TerminalMenu, renderTerminalMenuHtml } from './terminal-menu.js';
+import { TerminalMenu } from './terminal-menu.js';
 import { TerminalTab } from './terminal-tab.js';
 import { TerminalMultiRun } from './terminal-multirun.js';
 import { TerminalEditorModal } from './terminal-editor-modal.js';
@@ -63,6 +63,7 @@ class TerminalManager {
         this.tabs = new Map();
         this.tabOrder = [];
         this.activeTabId = null;
+        this.launchSelection = null;
 
         this._pendingCloses = new Map();
         this._pendingCloseMs = PENDING_CLOSE_MS;
@@ -111,7 +112,6 @@ class TerminalManager {
         this.isScrollLocked = false;
         this.focusLayoutHandler = null;
         this.focusLayoutRaf = null;
-        this.terminalMenu = null;
         this.downloadMenu = null;
         this._themeSwatches = [];
 
@@ -235,8 +235,6 @@ class TerminalManager {
         this._tabScrollRO = null;
         this.removeFocusLayoutHandler();
         this.disableLockedLayout(this.lockedPanel);
-        this.terminalMenu?.destroy();
-        this.terminalMenu = null;
         this.downloadMenu?.destroy();
         this.downloadMenu = null;
         this.toast?.dispose();
@@ -312,9 +310,11 @@ class TerminalManager {
         });
 
         this.headerSelect?.addEventListener('change', (e) => {
+            const selection = e.target.value || null;
+            this.launchSelection = selection;
             const active = this.getActiveTab();
             if (active && !active.state.hasActiveSession) {
-                this.applySelection(active, e.target.value);
+                this.applySelection(active, selection);
             }
         });
 
@@ -351,18 +351,12 @@ class TerminalManager {
     }
 
     _mountDropdowns() {
-        this.terminalMenu = new TerminalMenu(this.container, {
-            buttonId: 'terminal-menu-btn',
-            menuId: 'vb-terminal-menu',
-            items: [
-                { id: 'terminal-multirun-btn', onClick: () => this._showMultiRunModal() },
-                { id: 'terminal-senddebug-btn', onClick: () => this._sendDebugLog() }
-            ]
-        });
-        this.terminalMenu.mount();
+        // Multi Run and Send debug log moved from the old kebab (⋮) dropdown into
+        // the settings panel's Actions block — see TerminalSettings.init(), which
+        // binds them back to _showMultiRunModal / _sendDebugLog on this manager.
 
-        // "Open in text editor" is now a top-level control button (pulled out of the
-        // kebab menu), so it gets its own click handler instead of a menu item.
+        // "Open in text editor" is a top-level control button, so it gets its own
+        // click handler instead of a menu item.
         this.editorBtn?.addEventListener('click', () => this._showEditorModal());
 
         // VS Code mode has no file-system download path — hide the wrap entirely.
@@ -512,14 +506,17 @@ class TerminalManager {
             const selection = this.getTabSelectionFromStorage(tabInfo.tabId) || DEFAULT_SELECTION;
             const title = this.getTabTitleFromStorage(tabInfo.tabId);
             const metadata = this.getTabMetaFromStorage(tabInfo.tabId);
+            const workingDirectory = metadata?.workingDirectory || tabInfo.workingDirectory || null;
             this.addLocalTab(tabInfo, {
                 selection,
                 title,
-                label: metadata?.label || null,
+                label: metadata?.customLabel === true ? metadata?.label || null : null,
                 icon: metadata?.icon || null,
                 accentColor: metadata?.accentColor || null,
                 taskKey: metadata?.taskKey || null,
-                customLabel: metadata?.customLabel === true
+                customLabel: metadata?.customLabel === true,
+                minimized: metadata?.minimized === true,
+                workingDirectory
             });
         });
     }
@@ -531,16 +528,23 @@ class TerminalManager {
 
         const selection = options.selection || DEFAULT_SELECTION;
         const meta = this.getSelectionMeta(selection);
+        const workingDirectory = cleanString(options.workingDirectory) || cleanString(tabInfo.workingDirectory);
+        // Tab labels are CLI-based (Claude/Codex/…). The working directory is tracked
+        // for the launch cwd + native title only — it does NOT drive the tab label
+        // (every tab shares the project root, so folder names would all be identical).
+        const autoLabel = meta.displayName;
 
         const state = {
             id: tabInfo.tabId,
             selection,
-            label: cleanString(options.label) || meta.displayName,
+            label: cleanString(options.label) || autoLabel,
             title: options.title || null,
             icon: options.icon || null,
             accentColor: this.normalizeAccentColor(options.accentColor),
             taskKey: cleanString(options.taskKey),
             customLabel: options.customLabel === true,
+            minimized: options.minimized === true,
+            workingDirectory,
             renaming: false,
             hasActiveSession: tabInfo.hasActiveSession === true,
             sessionId: tabInfo.sessionId || null,
@@ -571,6 +575,13 @@ class TerminalManager {
             }
             void this.activateTab(state.id, { connectIfNeeded: false });
         });
+        button.addEventListener('dblclick', (event) => {
+            if (!state.hasActiveSession) {
+                return;
+            }
+            event.preventDefault();
+            this.beginRenameTab(state.id);
+        });
 
         // Right-click rename follows the same availability rule as the hover pencil.
         button.addEventListener('contextmenu', (event) => {
@@ -592,19 +603,37 @@ class TerminalManager {
             this.beginRenameTab(state.id);
         });
 
+        const min = document.createElement('button');
+        min.type = 'button';
+        min.className = 'vb-terminal-tab-min';
+        min.addEventListener('click', (event) => {
+            event.stopPropagation();
+            this.toggleTabMinimized(state.id);
+        });
+
         const close = document.createElement('button');
         close.type = 'button';
         close.className = 'vb-terminal-tab-close';
         close.innerHTML = '&times;';
         close.title = 'Close tab';
+        close.setAttribute('aria-label', 'Close tab');
         close.addEventListener('click', (event) => {
             event.stopPropagation();
             void this.closeTab(state.id);
         });
 
+        // Action cluster: hidden until the tab is hovered (CSS overlays it on the
+        // status section, so revealing it never shifts the tab's layout). Narrow
+        // tabs stage the cluster down via container queries in style.css — rename
+        // drops first, then minimize — so center-clicks always activate the tab.
+        const actions = document.createElement('span');
+        actions.className = 'vb-terminal-tab-actions';
+        actions.appendChild(edit);
+        actions.appendChild(min);
+        actions.appendChild(close);
+
         item.appendChild(button);
-        item.appendChild(edit);
-        item.appendChild(close);
+        item.appendChild(actions);
 
         const panel = document.createElement('div');
         panel.className = 'vb-terminal-tab-panel';
@@ -625,10 +654,13 @@ class TerminalManager {
         toastLayer.className = 'vb-terminal-toast-layer';
         panel.appendChild(toastLayer);
 
-        this.tabList?.appendChild(item);
+        if (this.tabList) {
+            const addButtonInList = this.tabAdd?.parentElement === this.tabList ? this.tabAdd : null;
+            this.tabList.insertBefore(item, addButtonInList);
+        }
         this.tabPanels?.appendChild(panel);
 
-        state.ui = { item, button, edit, close, panel, terminalElement, toastLayer };
+        state.ui = { item, button, edit, min, close, actions, panel, terminalElement, toastLayer };
 
         const instance = new TerminalTab(this, state);
         instance.statusController = new TabStatusController(state, state.ui, {
@@ -663,10 +695,13 @@ class TerminalManager {
             icon: state.icon,
             accentColor: state.accentColor,
             taskKey: state.taskKey,
-            customLabel: state.customLabel
+            customLabel: state.customLabel,
+            minimized: state.minimized,
+            workingDirectory: state.workingDirectory
         });
         this.renderTabButton(tab);
         this.applyTabAccent(tab);
+        this.applyTabMinimized(tab);
 
         this.updateAddButtonState();
         return tab;
@@ -773,6 +808,9 @@ class TerminalManager {
     }
 
     async closeTab(tabId) {
+        // Sessionless (blank/stopped) tabs are closeable too — otherwise + and Stop
+        // leak un-dismissable tabs. _enterPendingClose handles the no-session case
+        // (the DELETE 404s and falls through to local cleanup).
         return this._enterPendingClose(tabId);
     }
 
@@ -1090,7 +1128,13 @@ class TerminalManager {
             return;
         }
 
-        const body = { cli: meta.cli };
+        const workingDirectory = this.getDefaultWorkingDirectory();
+        const sessionTitle = meta.cli === 'shell' ? meta.displayName : `${meta.displayName} Terminal`;
+        const body = {
+            cli: meta.cli,
+            workingDirectory: workingDirectory || null,
+            title: sessionTitle
+        };
         if (meta.environmentName) {
             body.environmentName = meta.environmentName;
         }
@@ -1101,15 +1145,19 @@ class TerminalManager {
         }
 
         tab.state.hasActiveSession = true;
-        // The plain shell's display name is already "Terminal"; avoid "Terminal Terminal".
-        tab.state.title = meta.cli === 'shell' ? meta.displayName : `${meta.displayName} Terminal`;
-        this.saveTabTitle(tab.state.id, tab.state.title);
+        const responseWorkingDirectory = cleanString(started?.workingDirectory) || workingDirectory;
+        this.updateTabMetadata(tab, {
+            label: meta.displayName,
+            title: sessionTitle,
+            workingDirectory: responseWorkingDirectory
+        });
         this.updateUi();
     }
 
     async startWithOptions(options) {
         const selection = this.resolveSelectionFromOptions(options);
         const meta = this.getSelectionMeta(selection);
+        const requestedWorkingDirectory = cleanString(options?.workingDirectory) || this.getDefaultWorkingDirectory();
         const requestedLabel = cleanString(options?.tabLabel)
             || cleanString(options?.title)
             || meta.displayName;
@@ -1151,7 +1199,8 @@ class TerminalManager {
                     label: requestedLabel,
                     icon: requestedIcon,
                     accentColor: requestedColor,
-                    taskKey: requestedTaskKey
+                    taskKey: requestedTaskKey,
+                    workingDirectory: requestedWorkingDirectory
                 });
             } else {
                 this.applySelection(tab, selection);
@@ -1169,7 +1218,8 @@ class TerminalManager {
             title: requestedTitle,
             icon: requestedIcon,
             accentColor: requestedColor,
-            taskKey: requestedTaskKey
+            taskKey: requestedTaskKey,
+            workingDirectory: requestedWorkingDirectory
         });
 
         if (tab.state.hasActiveSession) {
@@ -1188,8 +1238,8 @@ class TerminalManager {
         const body = {
             cli: lower(options.cli),
             environmentName: options.environmentName || null,
-            workingDirectory: options.workingDirectory || null,
-            title: options.title || null,
+            workingDirectory: requestedWorkingDirectory || null,
+            title: requestedTitle || null,
             resumeSessionId: options.resumeSessionId || null,
             resumeSummary: options.resumeSummary || null
         };
@@ -1204,12 +1254,14 @@ class TerminalManager {
         }
 
         tab.state.hasActiveSession = true;
+        const responseWorkingDirectory = cleanString(started?.workingDirectory) || requestedWorkingDirectory;
         this.updateTabMetadata(tab, {
             label: requestedLabel,
             title: requestedTitle,
             icon: requestedIcon,
             accentColor: requestedColor,
-            taskKey: requestedTaskKey
+            taskKey: requestedTaskKey,
+            workingDirectory: responseWorkingDirectory
         });
         this.updateUi();
 
@@ -1221,18 +1273,13 @@ class TerminalManager {
     }
 
     async startActiveTab() {
-        const tab = this.getActiveTab();
-        if (tab && tab.state.hasActiveSession) {
-            this.app.showToast('Terminal Running', 'The active tab already has a running session.', 'info');
-            return;
-        }
-
-        if (!tab?.state.selection) {
+        const selection = this.getLaunchSelection();
+        if (!selection) {
             this.showSelectionRequiredFeedback(this.startBtn);
             return;
         }
 
-        await this.startFromSelection(tab.state.selection);
+        await this.startFromSelection(selection);
     }
 
     async stopActiveTab() {
@@ -1289,7 +1336,7 @@ class TerminalManager {
                 cli: null,
                 envId: null,
                 environmentName: null,
-                displayName: 'Select LLM to launch Terminal. Terminals run safely in the background even if you navigate away.'
+                displayName: 'Select LLM to launch.'
             };
         }
 
@@ -1299,6 +1346,12 @@ class TerminalManager {
             environmentName: parsed.environmentName,
             displayName: parsed.displayName
         };
+    }
+
+    getDefaultWorkingDirectory() {
+        return cleanString(this.app.data.configs?.rootPath)
+            || cleanString(this.app.data.configs?.launchDirectory)
+            || null;
     }
 
     resolveSelectionFromOptions(options) {
@@ -1335,7 +1388,9 @@ class TerminalManager {
             icon: tab.state.icon,
             accentColor: tab.state.accentColor,
             taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel
+            customLabel: tab.state.customLabel,
+            minimized: tab.state.minimized === true,
+            workingDirectory: tab.state.workingDirectory
         });
         this.renderTabButton(tab);
         this.applyTabAccent(tab);
@@ -1350,21 +1405,44 @@ class TerminalManager {
         return colorPattern.test(color) ? color : null;
     }
 
-    syncTabRenameAction(tab) {
+    syncTabActionAvailability(tab) {
         const item = tab?.state?.ui?.item;
         const edit = tab?.state?.ui?.edit;
-        const canRename = tab?.state?.hasActiveSession === true;
+        const min = tab?.state?.ui?.min;
+        const close = tab?.state?.ui?.close;
+        const hasSession = tab?.state?.hasActiveSession === true;
 
-        item?.classList.toggle('has-active-session', canRename);
-        if (!edit) return;
+        item?.classList.toggle('has-active-session', hasSession);
 
-        edit.hidden = !canRename;
-        edit.disabled = !canRename;
-        edit.setAttribute('aria-hidden', canRename ? 'false' : 'true');
+        if (!hasSession && tab?.state?.minimized === true) {
+            tab.state.minimized = false;
+            this.applyTabMinimized(tab);
+            this.saveTabMeta(tab.state.id, {
+                label: tab.state.label,
+                icon: tab.state.icon,
+                accentColor: tab.state.accentColor,
+                taskKey: tab.state.taskKey,
+                customLabel: tab.state.customLabel,
+                minimized: false,
+                workingDirectory: tab.state.workingDirectory
+            });
+        }
+
+        [
+            [edit, hasSession],
+            [min, hasSession],
+            // Close stays available even with no session, so blank/stopped tabs can be dismissed.
+            [close, true]
+        ].forEach(([button, enabled]) => {
+            if (!button) return;
+            button.hidden = !enabled;
+            button.disabled = !enabled;
+            button.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+        });
     }
 
     renderTabButton(tab) {
-        this.syncTabRenameAction(tab);
+        this.syncTabActionAvailability(tab);
 
         if (tab?.instance?.statusController) {
             tab.instance.statusController.render();
@@ -1410,6 +1488,52 @@ class TerminalManager {
         item.style.setProperty('--vb-terminal-tab-accent', accent);
     }
 
+    // ── Per-tab minimize (collapse to an icon chip) ───────────────────────
+    //
+    // A minimized tab shrinks to a brand-logo + status-icon chip and is grouped
+    // at the right edge of the strip, next to the + button (CSS `order`, so
+    // tabOrder/DOM order — which drive close/undo/restore logic — are
+    // untouched). Clicking the chip still
+    // activates the tab (its terminal panel is unaffected by minimizing); the
+    // chip's hover button restores it. Built for "this tab just runs in the
+    // background" sessions like a dev server.
+    toggleTabMinimized(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab || tab.state.hasActiveSession !== true) return;
+
+        tab.state.minimized = tab.state.minimized !== true;
+        this.saveTabMeta(tab.state.id, {
+            label: tab.state.label,
+            icon: tab.state.icon,
+            accentColor: tab.state.accentColor,
+            taskKey: tab.state.taskKey,
+            customLabel: tab.state.customLabel,
+            minimized: tab.state.minimized === true,
+            workingDirectory: tab.state.workingDirectory
+        });
+        this.applyTabMinimized(tab);
+        requestAnimationFrame(() => this._updateTabScrollArrows());
+    }
+
+    applyTabMinimized(tab) {
+        const item = tab?.state?.ui?.item;
+        const min = tab?.state?.ui?.min;
+        if (!item) return;
+
+        const minimized = tab.state.minimized === true;
+        item.classList.toggle('is-minimized', minimized);
+
+        if (min) {
+            min.innerHTML = minimized
+                ? '<i class="fa-solid fa-up-right-and-down-left-from-center"></i>'
+                : '<i class="fa-solid fa-down-left-and-up-right-to-center"></i>';
+            const title = minimized ? 'Restore tab' : 'Minimize tab to icon';
+            min.title = title;
+            min.setAttribute('aria-label', title);
+            min.setAttribute('aria-pressed', String(minimized));
+        }
+    }
+
     findTabByTaskKey(taskKey) {
         const key = cleanString(taskKey);
         if (!key) return null;
@@ -1449,7 +1573,13 @@ class TerminalManager {
         const taskKey = Object.prototype.hasOwnProperty.call(metadata, 'taskKey')
             ? cleanString(metadata.taskKey)
             : undefined;
+        const workingDirectory = Object.prototype.hasOwnProperty.call(metadata, 'workingDirectory')
+            ? cleanString(metadata.workingDirectory)
+            : undefined;
 
+        if (workingDirectory !== undefined) {
+            tab.state.workingDirectory = workingDirectory;
+        }
         if (label) {
             tab.state.label = label;
         }
@@ -1472,7 +1602,9 @@ class TerminalManager {
             icon: tab.state.icon,
             accentColor: tab.state.accentColor,
             taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel
+            customLabel: tab.state.customLabel,
+            minimized: tab.state.minimized === true,
+            workingDirectory: tab.state.workingDirectory
         });
 
         this.applyTabAccent(tab);
@@ -1488,6 +1620,8 @@ class TerminalManager {
     beginRenameTab(tabId) {
         const tab = this.tabs.get(tabId);
         if (!tab || tab.state.renaming || tab.state.hasActiveSession !== true) return;
+        // An icon-only chip has no room for the inline rename input — restore first.
+        if (tab.state.minimized === true) return;
 
         const item = tab.state.ui?.item;
         const button = tab.state.ui?.button;
@@ -1567,7 +1701,9 @@ class TerminalManager {
             icon: tab.state.icon,
             accentColor: tab.state.accentColor,
             taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel
+            customLabel: tab.state.customLabel,
+            minimized: tab.state.minimized === true,
+            workingDirectory: tab.state.workingDirectory
         });
 
         this.renderTabButton(tab);
@@ -1681,7 +1817,7 @@ class TerminalManager {
         this.setBadge(badge.text, badge.className);
 
         this.updateActionButtons({
-            start: !active.state.hasActiveSession,
+            start: true,
             reconnect: active.state.hasActiveSession && active.state.status === 'disconnected',
             stop: active.state.hasActiveSession
         });
@@ -1755,10 +1891,7 @@ class TerminalManager {
         this.reconnectBtn?.classList.add('d-none');
         this.stopBtn?.classList.toggle('d-none', !stop);
         this.updateConnectionButtonMode(reconnect);
-
-        // connected = has active session AND not in disconnected state
-        const connected = stop && !reconnect;
-        this.controlsBar?.classList.toggle('d-none', connected);
+        this.controlsBar?.classList.remove('d-none');
     }
 
     updateConnectionButtonMode(reconnect) {
@@ -1792,30 +1925,69 @@ class TerminalManager {
     }
 
     updateAddButtonState() {
+        const active = this.getActiveTab();
+        const atLimit = this.tabOrder.length >= this.maxTabs;
+
         if (this.tabAdd) {
-            const atLimit = this.tabOrder.length >= this.maxTabs;
             this.tabAdd.disabled = atLimit;
             this.tabAdd.title = atLimit
                 ? `Maximum of ${this.maxTabs} tabs reached`
                 : 'Open a new terminal tab';
         }
 
+        if (this.startBtn) {
+            const canUseActiveBlankTab = !!active && !active.state.hasActiveSession;
+            const disabled = atLimit && !canUseActiveBlankTab;
+            this.startBtn.disabled = disabled;
+            const title = disabled
+                ? `Maximum of ${this.maxTabs} tabs reached`
+                : active?.state.hasActiveSession
+                    ? 'Start selected CLI in a new terminal tab'
+                    : 'Start selected CLI';
+            this.startBtn.title = title;
+            this.startBtn.setAttribute('aria-label', title);
+        }
+
         if (this.headerSelect) {
-            const active = this.getActiveTab();
-            const canSelect = active && !active.state.hasActiveSession;
-            this.headerSelect.disabled = !canSelect;
             const ts = this.headerSelect.tomselect;
             if (ts) {
-                if (canSelect) ts.enable();
-                else ts.disable();
+                ts.enable();
             }
-            const nextValue = active ? (active.state.selection || '') : '';
+
+            if (this.headerSelect.disabled) {
+                this.headerSelect.disabled = false;
+            }
+
+            const nextValue = active && !active.state.hasActiveSession
+                ? (active.state.selection || '')
+                : (this.launchSelection || active?.state.selection || '');
+            if (active && !active.state.hasActiveSession) {
+                this.launchSelection = active.state.selection || null;
+            }
             if (ts) {
                 ts.setValue(nextValue, true);
             } else {
                 this.headerSelect.value = nextValue;
             }
         }
+    }
+
+    getLaunchSelection() {
+        const tsValue = this.headerSelect?.tomselect?.getValue?.();
+        const rawValue = Array.isArray(tsValue) ? tsValue[0] : tsValue;
+        const selectedValue = cleanString(rawValue) || cleanString(this.headerSelect?.value);
+        if (selectedValue) {
+            this.launchSelection = selectedValue;
+            return selectedValue;
+        }
+
+        const active = this.getActiveTab();
+        if (active && !active.state.hasActiveSession) {
+            return cleanString(active.state.selection) || DEFAULT_SELECTION;
+        }
+
+        const fallback = cleanString(this.launchSelection) || cleanString(active?.state?.selection);
+        return fallback || DEFAULT_SELECTION;
     }
 
     _initTabScrollArrows() {
@@ -2244,7 +2416,9 @@ class TerminalManager {
                 icon: cleanString(metadata.icon) || null,
                 accentColor: this.normalizeAccentColor(metadata.accentColor),
                 taskKey: cleanString(metadata.taskKey) || null,
-                customLabel: metadata.customLabel === true
+                customLabel: metadata.customLabel === true,
+                minimized: metadata.minimized === true,
+                workingDirectory: cleanString(metadata.workingDirectory) || null
             };
             window.sessionStorage.setItem(`${TAB_META_PREFIX}${tabId}`, JSON.stringify(payload));
         } catch {}
@@ -2260,7 +2434,9 @@ class TerminalManager {
                 icon: cleanString(parsed?.icon) || null,
                 accentColor: this.normalizeAccentColor(parsed?.accentColor),
                 taskKey: cleanString(parsed?.taskKey) || null,
-                customLabel: parsed?.customLabel === true
+                customLabel: parsed?.customLabel === true,
+                minimized: parsed?.minimized === true,
+                workingDirectory: cleanString(parsed?.workingDirectory) || null
             };
         } catch {
             return null;
@@ -2331,8 +2507,6 @@ class TerminalManager {
 
     applyTheme(key) { this.settings?.applyTheme(key); }
     applyRendererPreference(renderer) { this.settings?.applyRendererPreference(renderer); }
-    applyCursorStyle(style) { this.settings?.applyCursorStyle(style); }
-    applyCursorInactiveStyle(style) { this.settings?.applyCursorInactiveStyle(style); }
 }
 
 export class TerminalController {
@@ -2627,11 +2801,12 @@ export class TerminalController {
                             <button type="button" class="vb-terminal-tab-scroll vb-terminal-tab-scroll-left" id="vb-terminal-tab-scroll-left" aria-label="Scroll tabs left" hidden>
                                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/></svg>
                             </button>
-                            <div class="vb-terminal-tab-list" id="vb-terminal-tab-list"></div>
+                            <div class="vb-terminal-tab-list" id="vb-terminal-tab-list">
+                                <button type="button" class="vb-terminal-tab-add" id="vb-terminal-tab-add-btn" title="Open a new terminal tab" aria-label="Open a new terminal tab">+</button>
+                            </div>
                             <button type="button" class="vb-terminal-tab-scroll vb-terminal-tab-scroll-right" id="vb-terminal-tab-scroll-right" aria-label="Scroll tabs right" hidden>
                                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708"/></svg>
                             </button>
-                            <button type="button" class="vb-terminal-tab-add" id="vb-terminal-tab-add-btn" title="Open a new terminal tab" aria-label="Open a new terminal tab">+</button>
                         </div>
                         <div class="vb-terminal-window-controls vb-terminal-window-controls-right">
                             <div class="vb-terminal-tab-undo-wrapper" id="vb-terminal-tab-undo-wrapper" hidden>
@@ -2651,7 +2826,6 @@ export class TerminalController {
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-out-btn" title="Decrease font size" aria-label="Decrease font size">&#x2212;</button>
                             <span class="vb-terminal-font-size-label" id="vb-terminal-font-size-label">14</span>
                             <button type="button" class="vb-terminal-control-btn icon-btn vb-terminal-zoom-btn" id="terminal-zoom-in-btn" title="Increase font size" aria-label="Increase font size">+</button>
-                            ${renderTerminalMenuHtml()}
                             <div class="vb-terminal-download-wrap" id="vb-terminal-download-wrap">
                                 <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-download-btn" title="Save session" aria-label="Save session">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
@@ -2664,7 +2838,7 @@ export class TerminalController {
                                     <button type="button" id="terminal-save-html">Save as HTML (.html)</button>
                                 </div>
                             </div>
-                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-settings-btn" title="Terminal settings" aria-label="Terminal settings">&#x2699;</button>
+                            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-settings-btn" title="Terminal settings &amp; actions" aria-label="Terminal settings and actions">&#x2699;</button>
                             ${focusButtonHtml}
                         </div>
                     </div>

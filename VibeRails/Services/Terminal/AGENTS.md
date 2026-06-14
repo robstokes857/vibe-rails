@@ -301,7 +301,7 @@ These issues regressed in production-like usage and should be treated as guardra
   - if replay is ever reintroduced, limit it to plain shell / line-oriented sessions and re-test every AI CLI separately.
 - Current experiment:
   - this branch is intentionally trying atomic snapshot attach (`SubscribeWithSnapshot` / `PushSnapshotTo`) to see whether removing snapshot/live interleaving fixes the duplication without redraw pokes.
-  - treat that behavior as experimental until Claude/Codex/Gemini/Copilot reconnect and takeover flows are re-tested.
+  - treat that behavior as experimental until Claude/Codex/Antigravity/Copilot reconnect and takeover flows are re-tested.
 
 3. **Font size / font family changes duplicated full-screen UI blocks**
 - Symptom: changing terminal text size or font could leave several historical full-screen redraws visible in the browser.
@@ -309,7 +309,7 @@ These issues regressed in production-like usage and should be treated as guardra
 - Fix:
   - display-metric changes reset the local xterm view first, then perform one geometry sync to the PTY.
 - Guardrail:
-  - re-test active Claude/Codex/Gemini/Copilot sessions while changing font size and font family.
+  - re-test active Claude/Codex/Antigravity/Copilot sessions while changing font size and font family.
 
 ## If You Modify This Area
 1. Update both control protocol helpers if command names or parsing rules change:
@@ -323,5 +323,5 @@ These issues regressed in production-like usage and should be treated as guardra
    - remote takeover from local
    - resize sync in both viewers
    - remote-only session survives beyond 120s with no local browser connected
-   - Claude/Codex/Gemini/Copilot local reconnect do not show duplicated welcome/prompt blocks
-   - Claude/Codex/Gemini/Copilot font size and font family changes do not leave duplicated full-screen UI blocks
+   - Claude/Codex/Antigravity/Copilot local reconnect do not show duplicated welcome/prompt blocks
+   - Claude/Codex/Antigravity/Copilot font size and font family changes do not leave duplicated full-screen UI blocks

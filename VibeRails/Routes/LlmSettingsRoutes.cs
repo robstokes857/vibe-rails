@@ -7,47 +7,8 @@ public static class LlmSettingsRoutes
 {
     public static void Map(WebApplication app)
     {
-        MapGeminiSettings(app);
         MapCodexSettings(app);
         MapClaudeSettings(app);
-    }
-
-    private static void MapGeminiSettings(WebApplication app)
-    {
-        // GET /api/v1/gemini/settings/{envName} - Get Gemini settings for an environment
-        app.MapGet("/api/v1/gemini/settings/{envName}", async (
-            IGeminiLlmCliEnvironment geminiEnv,
-            string envName,
-            CancellationToken cancellationToken) =>
-        {
-            try
-            {
-                var settings = await geminiEnv.GetSettings(envName, cancellationToken);
-                return Results.Ok(settings);
-            }
-            catch (Exception ex)
-            {
-                return Results.BadRequest(new ErrorResponse($"Failed to read Gemini settings: {ex.Message}"));
-            }
-        }).WithName("GetGeminiSettings");
-
-        // PUT /api/v1/gemini/settings/{envName} - Update Gemini settings for an environment
-        app.MapPut("/api/v1/gemini/settings/{envName}", async (
-            IGeminiLlmCliEnvironment geminiEnv,
-            string envName,
-            GeminiSettingsDto settings,
-            CancellationToken cancellationToken) =>
-        {
-            try
-            {
-                await geminiEnv.SaveSettings(envName, settings, cancellationToken);
-                return Results.Ok(settings);
-            }
-            catch (Exception ex)
-            {
-                return Results.BadRequest(new ErrorResponse($"Failed to save Gemini settings: {ex.Message}"));
-            }
-        }).WithName("UpdateGeminiSettings");
     }
 
     private static void MapCodexSettings(WebApplication app)

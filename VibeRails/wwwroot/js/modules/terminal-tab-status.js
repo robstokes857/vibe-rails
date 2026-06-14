@@ -19,14 +19,22 @@ export const TAB_STATUS = Object.freeze({
 
 const STATUS_CLASS_PREFIX = 'tab-status-';
 
-// Font Awesome icon classes per state
+// Font Awesome icon classes per state. CONNECTED uses a small filled dot — a
+// calm "session is live / idle" status LED. (Was fa-link; the chain-link read
+// as a hyperlink, not a connection — Rob, 2026-06-12.) Kept distinct from
+// READY's outlined circle-check so the two resting states don't look alike.
 const STATUS_FA_ICON = {
-    [TAB_STATUS.CONNECTED]:    'fa-solid fa-link',
+    [TAB_STATUS.CONNECTED]:    'fa-solid fa-circle',
     [TAB_STATUS.READY]:        'fa-solid fa-circle-check',
     [TAB_STATUS.WAITING]:      'fa-solid fa-hand-point-up',
     [TAB_STATUS.DISCONNECTED]: 'fa-solid fa-plug-circle-xmark',
 };
 
+// These exact strings — "Thinking", "Ready", "Waiting for user input" — are
+// deliberate product voice and a feature Rob actively reads off the tabs.
+// Do NOT rename or hide them (a 2026-06-12 attempt to rename THINKING's text
+// to "Working" everywhere was vetoed same day). The one sanctioned exception
+// is the shell tab while THINKING — see SHELL_THINKING_TEXT below.
 const STATUS_TEXT = {
     [TAB_STATUS.CONNECTED]:    'Connected',
     [TAB_STATUS.THINKING]:     'Thinking',
@@ -34,6 +42,11 @@ const STATUS_TEXT = {
     [TAB_STATUS.WAITING]:      'Waiting for user input',
     [TAB_STATUS.DISCONNECTED]: 'Disconnected'
 };
+
+// Shell tabs alone say "Working" while THINKING — a dev server or build
+// emitting output isn't "thinking", an agent is. Resolved per tab in
+// _statusTextFor().
+const SHELL_THINKING_TEXT = 'Working';
 
 // ── Controller ──────────────────────────────────────────────────────────────
 export class TabStatusController {
@@ -56,6 +69,11 @@ export class TabStatusController {
         this._status = null;
         this._awaitingFirstIdle = false;
         this._startAsThinking = false;
+        // True while the user is typing an unsent message in a resting state
+        // (CONNECTED/READY). Gates onWaitingForUserSelection so a stale
+        // "waiting for user input" event can't flip the tab mid-keystroke.
+        // Cleared on submit (→ THINKING). See onTerminalData.
+        this._userComposing = false;
 
         // DOM refs (populated by render())
         this._statusTextEl = null;
@@ -90,7 +108,7 @@ export class TabStatusController {
             if (this._labelEl.textContent !== nextLabel) {
                 this._labelEl.textContent = nextLabel;
             }
-            button.title = nextLabel;
+            this._syncButtonLabel();
             return;
         }
 
@@ -144,7 +162,7 @@ export class TabStatusController {
         this._statusIconEl = icon;
 
         button.appendChild(section);
-        button.title = this._tabState.label || 'Terminal';
+        this._syncButtonLabel();
 
         if (this._status) {
             this._applyVisuals(this._status);
@@ -187,32 +205,45 @@ export class TabStatusController {
             this._transitionTo(TAB_STATUS.CONNECTED);
             return;
         }
-        // If the user starts typing while WAITING, the "Codex is waiting for
-        // you" signal is stale — they're already engaging. Clear back to
-        // CONNECTED so the indicator reflects reality. Narrowly scoped to a
-        // single printable byte (0x20–0x7E) to avoid re-introducing the
-        // ACTIVE-state false positives that motivated its retirement:
+        // Recognise a single printable byte (0x20–0x7E) as the user typing a
+        // character. Narrowly scoped to avoid re-introducing the ACTIVE-state
+        // false positives that motivated its retirement:
         //   - CSI sequences (arrow keys "\x1b[B", function keys, focus
         //     reports "\x1b[I/O", DSR auto-replies "\x1b[24;80R") have
         //     length > 1 and start with ESC — excluded.
         //   - Bracketed-paste wrappers ("\x1b[200~…\x1b[201~") and clipboard
         //     pastes arrive as one large multi-byte chunk — excluded.
-        // Enter is handled above; this guards the *typing* path only.
         //
         // ASCII-only by design: xterm.js delivers user input to onData as
         // UTF-8 bytes packed into a JS string (one byte per char), so a
         // typed non-ASCII character ("é", "中", emoji) arrives as a 2–4
         // char chunk and falls out via `data.length === 1`. We accept that
-        // gap: a user typing a non-ASCII first character will still need
-        // Enter (or any subsequent ASCII char) to clear WAITING. Widening
-        // beyond 0x7E would re-admit single-byte C1 controls and Latin-1
-        // glyphs that xterm.js could emit during DCS/OSC responses, which
-        // is exactly the ACTIVE-state failure mode this carve-out avoids.
-        if (this._status === TAB_STATUS.WAITING && data.length === 1) {
-            const code = data.charCodeAt(0);
-            if (code >= 0x20 && code <= 0x7e) {
-                this._transitionTo(TAB_STATUS.CONNECTED);
-            }
+        // gap. Widening beyond 0x7E would re-admit single-byte C1 controls
+        // and Latin-1 glyphs that xterm.js could emit during DCS/OSC
+        // responses, which is exactly the ACTIVE-state failure mode this avoids.
+        const code = data.length === 1 ? data.charCodeAt(0) : -1;
+        const isPrintableKeystroke = code >= 0x20 && code <= 0x7e;
+        if (!isPrintableKeystroke) {
+            return;
+        }
+
+        // In a resting state, a typed character means the user is composing an
+        // unsent message. Mark it so a backend "waiting for user input" event
+        // (which can false-fire on the composer repainting per keystroke —
+        // session dd6819b6) doesn't flip the tab to WAITING mid-sentence. The
+        // flag clears on submit (→ THINKING), so a genuine prompt — which only
+        // appears after a submit — is never suppressed. THINKING is excluded on
+        // purpose: type-ahead while the agent works must not arm the guard.
+        if (this._status === TAB_STATUS.CONNECTED || this._status === TAB_STATUS.READY) {
+            this._userComposing = true;
+            return;
+        }
+
+        // If we were parked in WAITING, a typed character means the user is
+        // already engaging — the "Codex is waiting for you" signal is stale.
+        // Clear back to CONNECTED so the indicator reflects reality.
+        if (this._status === TAB_STATUS.WAITING) {
+            this._transitionTo(TAB_STATUS.CONNECTED);
         }
     }
 
@@ -260,7 +291,13 @@ export class TabStatusController {
     }
 
     onWaitingForUserSelection() {
-        if (this._status !== TAB_STATUS.DISCONNECTED) {
+        // Don't flip to WAITING while the user is actively composing an unsent
+        // message — they're plainly already engaged, and the backend detector
+        // can fire on the composer repainting per keystroke (session dd6819b6).
+        // _userComposing is set on a resting-state keystroke and cleared on
+        // submit (→ THINKING), so a genuine prompt — which only appears after a
+        // submit — is never suppressed.
+        if (this._status !== TAB_STATUS.DISCONNECTED && !this._userComposing) {
             this._transitionTo(TAB_STATUS.WAITING);
         }
     }
@@ -302,6 +339,13 @@ export class TabStatusController {
         return this._options.getCliKey?.() === 'shell';
     }
 
+    _statusTextFor(status) {
+        if (status === TAB_STATUS.THINKING && this._isShellTab()) {
+            return SHELL_THINKING_TEXT;
+        }
+        return STATUS_TEXT[status] || '';
+    }
+
     _transitionTo(newStatus, { notify = true } = {}) {
         const prev = this._status;
         if (prev === newStatus) {
@@ -318,6 +362,9 @@ export class TabStatusController {
 
         if (newStatus === TAB_STATUS.THINKING) {
             this._awaitingFirstIdle = true;
+            // Submitting (the path into THINKING) ends a compose session, so a
+            // prompt during the upcoming turn is a genuine wait, not stale.
+            this._userComposing = false;
         } else if (newStatus === TAB_STATUS.READY) {
             this._awaitingFirstIdle = false;
         } else if (newStatus === TAB_STATUS.CONNECTED) {
@@ -363,8 +410,9 @@ export class TabStatusController {
         item.classList.remove('tab-idle', 'tab-busy', 'tab-completed', 'is-connected', 'is-disconnected');
 
         if (this._statusTextEl) {
-            this._statusTextEl.textContent = STATUS_TEXT[status] || '';
+            this._statusTextEl.textContent = this._statusTextFor(status);
         }
+        this._syncButtonLabel(status);
 
         // Icon area
         if (this._statusIconEl) {
@@ -375,7 +423,7 @@ export class TabStatusController {
                 const spinner = document.createElement('span');
                 spinner.className = 'vb-spinner vb-spinner-sm';
                 spinner.setAttribute('role', 'status');
-                spinner.setAttribute('aria-label', 'Thinking');
+                spinner.setAttribute('aria-label', this._statusTextFor(TAB_STATUS.THINKING));
                 this._statusIconEl.appendChild(spinner);
             } else {
                 const faClass = STATUS_FA_ICON[status];
@@ -385,6 +433,19 @@ export class TabStatusController {
                     this._statusIconEl.appendChild(i);
                 }
             }
+        }
+    }
+
+    _syncButtonLabel(status = this._status) {
+        const button = this._ui.button;
+        if (!button) return;
+
+        const label = this._tabState.label || 'Terminal';
+        const statusText = status ? this._statusTextFor(status) : '';
+        const title = statusText ? `${label} - ${statusText}` : label;
+        button.title = title;
+        if (typeof button.setAttribute === 'function') {
+            button.setAttribute('aria-label', statusText ? `${label}, ${statusText}` : label);
         }
     }
 

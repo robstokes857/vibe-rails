@@ -53,7 +53,7 @@ public class LlmParserTests
         Assert.DoesNotContain(LLM.NotSet, _parser.All);
         Assert.Contains(LLM.Codex, _parser.All);
         Assert.Contains(LLM.Claude, _parser.All);
-        Assert.Contains(LLM.Gemini, _parser.All);
+        Assert.Contains(LLM.Antigravity, _parser.All);
         Assert.Contains(LLM.Copilot, _parser.All);
     }
 }

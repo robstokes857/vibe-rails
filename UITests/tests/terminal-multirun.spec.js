@@ -9,15 +9,18 @@ const { test, expect, selectors } = require('./fixtures');
 
 async function navigateToDashboard(page) {
     await page.goto('/');
-    await expect(page.locator('#terminal-menu-btn')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('#terminal-settings-btn')).toBeVisible({ timeout: 15_000 });
     // The terminal manager's init() asynchronously creates a placeholder tab
-    // when the server has none — visible kebab doesn't mean init is done.
+    // when the server has none — a visible gear doesn't mean init is done.
     // Wait for at least one tab item so initialCount reads consistently.
     await expect(page.locator(selectors.tabItems).first()).toBeVisible({ timeout: 10_000 });
 }
 
 async function openMultiRunModal(page) {
-    await page.locator('#terminal-menu-btn').click();
+    // Multi Run lives in the settings panel's Actions block (the old kebab
+    // dropdown was merged into it). Opening the panel animates a 0.3s slide;
+    // Playwright's actionability checks wait for the button to be stable.
+    await page.locator('#terminal-settings-btn').click();
     await page.locator('#terminal-multirun-btn').click();
     await page.waitForSelector('#vb-multirun-input', { timeout: 5_000 });
 }
@@ -88,7 +91,7 @@ test.describe('terminal-multirun', () => {
         });
 
         expect(optionValues.sort()).toEqual(
-            ['base:claude', 'base:codex', 'base:copilot', 'base:gemini'].sort()
+            ['base:claude', 'base:codex', 'base:copilot', 'base:antigravity'].sort()
         );
     });
 

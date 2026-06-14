@@ -250,7 +250,7 @@ export class VibeControlApp {
     }
 
     async applyDocumentTitle() {
-        const path = this.data.configs?.rootPath;
+        const path = this.data.configs?.rootPath || this.data.configs?.launchDirectory;
         let customName = null;
         if (path) {
             // Race the fetch against a 2s timer so a hung backend doesn't block app
@@ -268,8 +268,10 @@ export class VibeControlApp {
             finally { if (timeoutHandle) clearTimeout(timeoutHandle); }
         }
         const folderName = path ? this.getProjectNameFromPath(path) : null;
-        const name = customName || folderName;
-        const title = name ? `${name} — Vibe Rails` : 'Vibe Rails';
+        // Browser tab + VS Code preview title only: custom project name beats the folder
+        // name. The "— Vibe Rails" suffix was intentionally dropped (bare name now).
+        // Terminal tab labels are separate and unaffected (they use the CLI name).
+        const title = customName || folderName || 'Vibe Rails';
         document.title = title;
         // Browser tab title only; in VS Code, the panel tab is owned by the
         // extension, so notify it via postMessage.

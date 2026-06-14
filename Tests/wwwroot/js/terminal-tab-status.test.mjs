@@ -219,6 +219,61 @@ test('multi-byte data during WAITING does not clear it (paste / CSI)', () => {
     assert.equal(controller._status, TAB_STATUS.WAITING, 'DSR auto-reply must not clear');
 });
 
+test('typing a draft in READY does not flip the tab to WAITING (Rob, session dd6819b6)', () => {
+    // Session dd6819b6: the user had finished a turn (tab READY) and was typing
+    // their next message into the Codex composer. The composer repaints per
+    // keystroke; the backend's waiting detector misread that slow repaint as an
+    // idle keepalive and fired session_waiting_for_user — flipping the tab to
+    // "Waiting for user input" while the user was plainly mid-sentence.
+    //
+    // A printable keystroke in a resting state (CONNECTED/READY) now marks the
+    // user as composing, so a stale waiting signal is ignored. A genuine prompt
+    // only appears after a submit (which clears the flag), so this can't eat a
+    // real wait — that boundary is pinned by the next test.
+    const { controller } = makeController({ isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r');         // submit msg1 → THINKING
+    controller.onSessionIdle();              // turn finishes → READY
+    assert.equal(controller._status, TAB_STATUS.READY, 'setup: should be READY');
+
+    controller.onTerminalData('a');          // start typing msg2 into the composer
+    controller.onTerminalData('n');
+    controller.onTerminalData('d');
+    controller.onWaitingForUserSelection();  // backend false-fires mid-typing
+    assert.equal(controller._status, TAB_STATUS.READY,
+        'a waiting event while the user is composing must NOT flip to WAITING');
+});
+
+test('after submitting, a genuine waiting event still fires (composing flag cleared on submit)', () => {
+    // Safety boundary for the fix above: typing then submitting (Enter →
+    // THINKING) clears the composing flag, so the real prompt Codex shows
+    // during its turn must still reach WAITING. This is the false-negative
+    // guard — the failure mode we must never reintroduce.
+    const { controller } = makeController({ isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onTerminalData('y');          // typed chars (composing)
+    controller.onTerminalData('e');
+    controller.onTerminalData('s');
+    controller.onTerminalData('\r');         // submit → THINKING (clears composing)
+    controller.onWaitingForUserSelection();  // Codex asks for approval
+    assert.equal(controller._status, TAB_STATUS.WAITING,
+        'a prompt after submit must still reach WAITING');
+});
+
+test('type-ahead while THINKING does not arm the composing guard', () => {
+    // A single printable byte typed *during* THINKING (type-ahead while the
+    // agent works) must NOT mark the user as composing — otherwise a real
+    // prompt arriving mid-turn would be suppressed. Only resting-state
+    // (CONNECTED/READY) keystrokes count as composing a draft.
+    const { controller } = makeController({ isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r');         // → THINKING
+    controller.onTerminalData('x');          // type-ahead during the turn
+    controller.onWaitingForUserSelection();  // genuine prompt appears
+    assert.equal(controller._status, TAB_STATUS.WAITING,
+        'type-ahead during THINKING must not suppress a real prompt');
+});
+
 test('session idle while WAITING does NOT pop the tab to READY', () => {
     // Regression: Claude shows a selection prompt, PTY goes quiet, backend
     // fires session_idle after its 5s threshold — the previous "defensive
@@ -426,4 +481,36 @@ test('agent tab: background session_idle (turn finished) still flashes AND toast
     assert.equal(controller._status, TAB_STATUS.READY);
     assert.equal(flashes.ready, 1, 'idle ready flashes');
     assert.equal(notifications.ready, 1, 'idle ready toasts');
+});
+
+// ── Status display text — product voice (Rob, 2026-06-12) ─────────────────────
+// "Thinking" / "Ready" / "Waiting for user input" are deliberate wording. A
+// same-day attempt to rename THINKING's text to "Working" everywhere was
+// vetoed; the rename is sanctioned ONLY for the shell tab. These tests pin the
+// strings so a future refactor can't silently change the voice.
+
+test('agent tab status text: Connected → Thinking → Waiting for user input → Ready', () => {
+    const { controller } = makeController({ cliKey: 'claude', isActiveTab: () => true });
+    controller._statusTextEl = fakeElement();
+    controller.onSocketOpen();
+    assert.equal(controller._statusTextEl.textContent, 'Connected');
+    controller.onTerminalData('\r');            // → THINKING
+    assert.equal(controller._statusTextEl.textContent, 'Thinking',
+        'agent tabs must say "Thinking" — "Working" is shell-only');
+    controller.onWaitingForUserSelection();     // → WAITING
+    assert.equal(controller._statusTextEl.textContent, 'Waiting for user input',
+        'the full waiting string is part of the product voice');
+    controller.onTerminalData('\r');            // → THINKING
+    controller.onSessionIdle();                 // → READY
+    assert.equal(controller._statusTextEl.textContent, 'Ready');
+});
+
+test('shell tab status text: THINKING displays "Working" (the one sanctioned rename)', () => {
+    const { controller } = makeController({ cliKey: 'shell', isActiveTab: () => true });
+    controller._statusTextEl = fakeElement();
+    controller.onSocketOpen();
+    controller.onSessionBusy();                 // shell output → THINKING
+    assert.equal(controller._statusTextEl.textContent, 'Working');
+    controller.onSessionIdle();                 // quiet → CONNECTED
+    assert.equal(controller._statusTextEl.textContent, 'Connected');
 });

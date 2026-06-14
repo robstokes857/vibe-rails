@@ -63,7 +63,7 @@ public class LlmCliEnvironmentServiceTests
         return new LlmCliEnvironmentService(
             new ClaudeLlmCliEnvironment(fileService),
             new CodexLlmCliEnvironment(fileService),
-            new GeminiLlmCliEnvironment(fileService),
+            new AntigravityLlmCliEnvironment(fileService),
             new CopilotLlmCliEnvironment(fileService),
             fileService);
     }

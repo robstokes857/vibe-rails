@@ -41,7 +41,7 @@ export class ChatHistorySidebar {
     static renderHtml() {
         return `
             <div class="ch-sidebar" id="ch-sidebar">
-                <div class="ch-sidebar-collapsed-icon" title="Open chat history"><i class="fa-solid fa-clock-rotate-left"></i></div>
+                <span class="ch-sidebar-rail-label" aria-hidden="true">History</span>
                 <div class="ch-sidebar-header">
                     <span class="ch-sidebar-title">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16" style="opacity:0.7">
@@ -140,8 +140,10 @@ export class ChatHistorySidebar {
             this.closeButton.setAttribute('aria-expanded', String(isOpen));
 
             if (icon) {
-                // Use a single base class; rotation is handled in CSS via .vb-history-under
-                icon.className = 'fa-solid fa-chevron-left';
+                // Expanded: a collapse chevron. Collapsed: the history clock —
+                // the button is then the rail's identity AND its open control
+                // (it replaced the old separate non-focusable collapsed-icon div).
+                icon.className = isOpen ? 'fa-solid fa-chevron-left' : 'fa-solid fa-clock-rotate-left';
             }
         };
         // First-time visitors: cue the peek icon with a one-time pulse so they
@@ -150,7 +152,7 @@ export class ChatHistorySidebar {
             try { return localStorage.getItem(HISTORY_SEEN_STORAGE_KEY) !== '1'; } catch { return true; }
         })();
         if (isFirstVisit) {
-            sidebar?.querySelector('.ch-sidebar-collapsed-icon')?.classList.add('ch-sidebar-pulse-hint');
+            sidebar?.querySelector('.ch-sidebar-close-btn')?.classList.add('ch-sidebar-pulse-hint');
         }
 
         const persistToggle = (open) => {
@@ -158,7 +160,7 @@ export class ChatHistorySidebar {
                 localStorage.setItem(HISTORY_OPEN_STORAGE_KEY, open ? '1' : '0');
                 localStorage.setItem(HISTORY_SEEN_STORAGE_KEY, '1');
             } catch {}
-            sidebar?.querySelector('.ch-sidebar-collapsed-icon')?.classList.remove('ch-sidebar-pulse-hint');
+            sidebar?.querySelector('.ch-sidebar-close-btn')?.classList.remove('ch-sidebar-pulse-hint');
             onToggle?.(open);
         };
 
@@ -1011,6 +1013,7 @@ export class ChatHistorySidebar {
             manager.startWithOptions({
                 cli: parsedLlm.cli,
                 environmentName: parsedLlm.environmentName || null,
+                workingDirectory: activeItemSnapshot.workingDirectory || null,
                 resumeSummary: summaryText,
                 resumeSessionId: sessionId,
                 title: this._getDisplayName(activeItemSnapshot),
@@ -1275,7 +1278,7 @@ export class ChatHistorySidebar {
     _getLlmFilterOptions() {
         return [
             { value: 'reset', label: 'Reset', logoHtml: '<i class="fa-solid fa-rotate-left"></i>' },
-            ...['claude', 'codex', 'gemini', 'copilot'].map((cli) => {
+            ...['claude', 'codex', 'antigravity', 'copilot'].map((cli) => {
                 const brand = this.app.getCliBrand(cli);
                 return {
                     value: cli,

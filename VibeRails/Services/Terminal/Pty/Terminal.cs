@@ -71,7 +71,7 @@ public sealed class Terminal : IAsyncDisposable
         var shell = GetDefaultShellPath();
         var options = new PtyOptions
         {
-            Name = title ?? "VibeRails-Terminal",
+            Name = string.IsNullOrWhiteSpace(title) ? GetFallbackTerminalName(workingDirectory) : title,
             Cols = cols,
             Rows = rows,
             Cwd = workingDirectory,
@@ -85,6 +85,20 @@ public sealed class Terminal : IAsyncDisposable
         terminal.Subscribe(new TerminalEmulatorConsumer(terminal._emulator, terminal._emulatorLock));
 
         return terminal;
+    }
+
+    private static string GetFallbackTerminalName(string workingDirectory)
+    {
+        try
+        {
+            var trimmed = Path.TrimEndingDirectorySeparator(workingDirectory);
+            var folderName = Path.GetFileName(trimmed);
+            return string.IsNullOrWhiteSpace(folderName) ? "Terminal" : folderName;
+        }
+        catch
+        {
+            return "Terminal";
+        }
     }
 
     /// <summary>

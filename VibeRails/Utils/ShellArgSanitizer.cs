@@ -5,7 +5,7 @@ namespace VibeRails.Utils;
 
 /// <summary>
 /// Validates and escapes CLI arguments to prevent shell command injection.
-/// CustomArgs are intended to be flags/values passed to LLM CLIs (claude, codex, gemini).
+/// CustomArgs are intended to be flags/values passed to LLM CLIs (claude, codex, agy).
 /// </summary>
 public static partial class ShellArgSanitizer
 {

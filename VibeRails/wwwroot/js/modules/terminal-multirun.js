@@ -150,8 +150,13 @@ export class TerminalMultiRun {
         }
 
         const meta = this.manager.getSelectionMeta(tab.state.selection);
-        tab.state.title = `${meta.displayName} Terminal`;
-        this.manager.saveTabTitle(tab.state.id, tab.state.title);
+        const workingDirectory = started?.workingDirectory || this.manager.getDefaultWorkingDirectory();
+        const title = meta.cli === 'shell' ? meta.displayName : `${meta.displayName} Terminal`;
+        this.manager.updateTabMetadata(tab, {
+            label: meta.displayName,
+            title,
+            workingDirectory
+        });
         this.manager.updateUi();
     }
 }

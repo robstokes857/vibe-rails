@@ -9,20 +9,20 @@ namespace VibeRails.Services.LlmClis
     {
         private readonly IClaudeLlmCliEnvironment _claudeLlmCliEnvironment;
         private readonly ICodexLlmCliEnvironment _codexLlmCliEnvironment;
-        private readonly IGeminiLlmCliEnvironment _geminiLlmCliEnvironment;
+        private readonly IAntigravityLlmCliEnvironment _antigravityLlmCliEnvironment;
         private readonly ICopilotLlmCliEnvironment _copilotLlmCliEnvironment;
         private readonly IFileService _fileService;
 
         public LlmCliEnvironmentService(
             IClaudeLlmCliEnvironment claudeLlmCliEnvironment,
             ICodexLlmCliEnvironment codexLlmCliEnvironment,
-            IGeminiLlmCliEnvironment geminiLlmCliEnvironment,
+            IAntigravityLlmCliEnvironment antigravityLlmCliEnvironment,
             ICopilotLlmCliEnvironment copilotLlmCliEnvironment,
             IFileService fileService)
         {
             _claudeLlmCliEnvironment = claudeLlmCliEnvironment;
             _codexLlmCliEnvironment = codexLlmCliEnvironment;
-            _geminiLlmCliEnvironment = geminiLlmCliEnvironment;
+            _antigravityLlmCliEnvironment = antigravityLlmCliEnvironment;
             _copilotLlmCliEnvironment = copilotLlmCliEnvironment;
             _fileService = fileService;
         }
@@ -42,8 +42,8 @@ namespace VibeRails.Services.LlmClis
                 case LLM.Claude:
                     await _claudeLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
                     break;
-                case LLM.Gemini:
-                    await _geminiLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
+                case LLM.Antigravity:
+                    await _antigravityLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
                     break;
                 case LLM.Copilot:
                     await _copilotLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
@@ -103,13 +103,9 @@ namespace VibeRails.Services.LlmClis
                 {
                     ["CODEX_HOME"] = Path.Combine(envPath, "codex")
                 },
-                LLM.Gemini => new Dictionary<string, string>
-                {
-                    ["XDG_CONFIG_HOME"] = Path.Combine(envPath, "gemini", "config"),
-                    ["XDG_DATA_HOME"] = Path.Combine(envPath, "gemini", "data"),
-                    ["XDG_CACHE_HOME"] = Path.Combine(envPath, "gemini", "cache"),
-                    ["XDG_STATE_HOME"] = Path.Combine(envPath, "gemini", "state")
-                },
+                // Antigravity (agy) is launch-flag-only: no verified per-environment config-dir
+                // env var, so (like Copilot) we inject none.
+                LLM.Antigravity => new Dictionary<string, string>(),
                 LLM.Copilot => new Dictionary<string, string>(),
                 _ => new Dictionary<string, string>()
             };

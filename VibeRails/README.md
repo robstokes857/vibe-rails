@@ -7,13 +7,13 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
-## Status: This repo is a lightweight, local-focused version of my personal setup. I'm stripping out multi-GPU/cluster support, heavy eval tooling, and other framework dependencies so it runs fast with Claude, Codex, and Gemini CLIs. I'm rebuilding it around the features I think most people will actually want for local workflows.
+## Status: This repo is a lightweight, local-focused version of my personal setup. I'm stripping out multi-GPU/cluster support, heavy eval tooling, and other framework dependencies so it runs fast with Claude, Codex, and Antigravity CLIs. I'm rebuilding it around the features I think most people will actually want for local workflows.
 
 ## Overview
-- **Environment Isolation** - Like Conda for LLMs. Create separate environments to experiment with Claude, Codex, or Gemini settings without breaking your primary setup
-- **Cross-LLM Learning** - Share context and learnings between different LLM providers (Claude, Codex, Gemini)
+- **Environment Isolation** - Like Conda for LLMs. Create separate environments to experiment with Claude, Codex, or Antigravity settings without breaking your primary setup
+- **Cross-LLM Learning** - Share context and learnings between different LLM providers (Claude, Codex, Antigravity)
 - **RAG (Without The Rot) For Your Code** - Track things like repeated fixes the LLM forgets, including when you have to tell it the same thing 6 or 7 times in one session and it still doesn't understand, how you describe a feature and where that code lives, and file change summaries with commits, then only provide what’s useful at call time to prevent context rot.
-- **Few Shot Prompting** - Get Gemini or codex to code like Claude for code that has been done before with few shot prompting... Making them up to 20% better (research paper and eval data coming soon.)
+- **Few Shot Prompting** - Get Antigravity or codex to code like Claude for code that has been done before with few shot prompting... Making them up to 20% better (research paper and eval data coming soon.)
 - **Rule Enforcement** - Define and enforce coding standards like test coverage, cyclomatic complexity, logging practices, and more. LLMs fix their errors before code can be pushed or before the tech debt get astronomical.
 - **Token Savings** - Learn your codebase and how you describe it, providing LLMs with smart file hints to reduce token usage and costs
 - **AGENTS.md Management** - Create and manage agent instruction files following the [agents.md specification](https://agents.md/)
@@ -42,7 +42,7 @@
 - [.NET 10.0 SDK](https://dotnet.microsoft.com/download) or later
 - [Node.js 20+](https://nodejs.org/) (for VS Code extension development)
 - Git
-- One or more LLM CLIs: Claude, Codex, or Gemini
+- One or more LLM CLIs: Claude, Codex, or Antigravity
 
 ### Installation
 
@@ -147,7 +147,7 @@ The core ASP.NET application providing:
 - **Web Server** - Auto-detects available port, serves REST API and static files
 - **Service Layer** - Business logic for agents, rules, sessions, and MCP
 - **Data Layer** - SQLite repository with WAL mode
-- **LLM CLI Support** - Environment-specific configurations for Claude, Codex, Gemini
+- **LLM CLI Support** - Environment-specific configurations for Claude, Codex, Antigravity
 
 **Key Services:**
 
@@ -374,7 +374,7 @@ echo "## Rules\n- WARN: log_files_changed" > agent.md
 
 Create isolated environments for different contexts:
 
-Use the Environments page to create named Claude, Codex, Gemini, or Copilot profiles. Launch them through the Web Terminal, the environment row's **Web UI** button, or the native terminal action.
+Use the Environments page to create named Claude, Codex, Antigravity, or Copilot profiles. Launch them through the Web Terminal, the environment row's **Web UI** button, or the native terminal action.
 
 **Environment Configuration:**
 ```
@@ -384,8 +384,7 @@ Use the Environments page to create named Claude, Codex, Gemini, or Copilot prof
 │   │   └── config.json
 │   ├── codex/
 │   │   └── config.json
-│   └── gemini/
-│       └── config.json
+│   └── antigravity/        # Antigravity (agy) — launch-flag-only (no config file)
 └── production/
     └── ...
 ```
@@ -460,13 +459,9 @@ CLAUDE_CONFIG_DIR=~/.vibe_rails/envs/myenv/claude
 CODEX_HOME=~/.vibe_rails/envs/myenv/codex
 ```
 
-#### Gemini
-```bash
-XDG_CONFIG_HOME=~/.vibe_rails/envs/myenv/gemini/config
-XDG_DATA_HOME=~/.vibe_rails/envs/myenv/gemini/data
-XDG_STATE_HOME=~/.vibe_rails/envs/myenv/gemini/state
-XDG_CACHE_HOME=~/.vibe_rails/envs/myenv/gemini/cache
-```
+#### Antigravity (agy)
+Launch-flag-only — VibeRails injects no per-environment config env vars for agy
+(sandbox/permissions are launch flags).
 
 ### VS Code Extension Settings
 
@@ -824,7 +819,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [Claude CLI](https://docs.anthropic.com/claude/docs/cli) - Anthropic's Claude command-line interface
 - [OpenAI Codex](https://openai.com/blog/openai-codex) - OpenAI Codex command-line tool
-- [Google Gemini](https://ai.google.dev/) - Google Gemini command-line interface
+- [Google Antigravity](https://antigravity.google/) - Google Antigravity command-line interface (`agy`)
 
 ### Key Dependencies
 

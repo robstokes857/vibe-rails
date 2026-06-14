@@ -340,7 +340,7 @@ namespace VibeRails.DB
             FROM Environments
             WHERE CustomName != 'Default'
               AND NOT (
-                  CustomName IN ('Claude', 'Codex', 'Gemini')
+                  CustomName IN ('Claude', 'Codex', 'Antigravity')
                   AND (CustomArgs IS NULL OR CustomArgs = '')
                   AND (CustomPrompt IS NULL OR CustomPrompt = '')
               )

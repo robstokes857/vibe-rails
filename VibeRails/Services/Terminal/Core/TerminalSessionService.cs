@@ -29,6 +29,7 @@ public class TerminalSessionService : ITerminalSessionService
     private static Terminal? s_terminal;
     private static string? s_sessionId;
     private static string? s_cli;
+    private static string? s_workingDirectory;
     private static WebSocket? s_activeWebSocket;
     private static string? s_sessionOwnerId;
     private static bool s_externallyOwned;
@@ -61,6 +62,15 @@ public class TerminalSessionService : ITerminalSessionService
         {
             lock (s_lock)
                 return s_cli;
+        }
+    }
+
+    public string? ActiveWorkingDirectory
+    {
+        get
+        {
+            lock (s_lock)
+                return s_workingDirectory;
         }
     }
 
@@ -116,6 +126,7 @@ public class TerminalSessionService : ITerminalSessionService
                 s_terminal = terminal;
                 s_sessionId = sessionId;
                 s_cli = llm.ToString();
+                s_workingDirectory = workingDirectory;
                 s_sessionOwnerId = BuildSessionOwnerId(sessionId);
             }
             _localClientTracker.AcquireOwner(BuildSessionOwnerId(sessionId));
@@ -220,7 +231,7 @@ public class TerminalSessionService : ITerminalSessionService
         }
     }
 
-    public void RegisterExternalTerminal(Terminal terminal, string sessionId)
+    public void RegisterExternalTerminal(Terminal terminal, string sessionId, string workingDirectory)
     {
         s_lifecycleGate.Wait();
         try
@@ -232,6 +243,7 @@ public class TerminalSessionService : ITerminalSessionService
                 s_terminal = terminal;
                 s_sessionId = sessionId;
                 s_cli = null; // external sessions don't report a CLI; web-side per-CLI behavior stays off
+                s_workingDirectory = workingDirectory;
                 s_sessionOwnerId = BuildSessionOwnerId(sessionId);
                 s_externallyOwned = true;
             }
@@ -656,6 +668,7 @@ public class TerminalSessionService : ITerminalSessionService
             s_terminal = null;
             s_sessionId = null;
             s_cli = null;
+            s_workingDirectory = null;
             s_sessionOwnerId = null;
             s_activeWebSocket = null;
             s_externallyOwned = false;

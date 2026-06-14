@@ -445,6 +445,7 @@ public sealed class SessionParseV4 : ISessionOutputParser
         // CLI version/header lines
         if (line.Contains("Claude Code v", StringComparison.OrdinalIgnoreCase)
             || line.Contains("OpenAI Codex", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("Antigravity CLI", StringComparison.OrdinalIgnoreCase)
             || line.Contains("Gemini CLI", StringComparison.OrdinalIgnoreCase)
             || line.Contains("Gemini Code Assist", StringComparison.OrdinalIgnoreCase)
             || line.Contains("Copilot CLI", StringComparison.OrdinalIgnoreCase))

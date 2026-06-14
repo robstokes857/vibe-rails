@@ -3,7 +3,7 @@ export function getLlmName(llmEnum) {
         0: 'Unknown',
         1: 'Codex',
         2: 'Claude',
-        3: 'Gemini',
+        3: 'Antigravity',
         4: 'Copilot'
     };
     return names[llmEnum] || 'Unknown';
@@ -79,11 +79,11 @@ export function getCliBrand(cli) {
             className: 'badge-cli-claude',
             accentColor: '#c47055'
         },
-        gemini: {
-            label: 'Gemini',
-            logo: getAssetPath('assets/img/gemini-color.svg'),
-            className: 'badge-cli-gemini',
-            accentColor: '#568be0'
+        antigravity: {
+            label: 'Antigravity',
+            logo: getAssetPath('assets/img/agy.png'),
+            className: 'badge-cli-antigravity',
+            accentColor: '#4d9de0'
         },
         copilot: {
             label: 'Copilot',
@@ -106,7 +106,7 @@ export function getCliBrand(cli) {
 const BASE_LLM_CHOICES = Object.freeze([
     { cli: 'claude', label: 'Claude' },
     { cli: 'codex', label: 'Codex' },
-    { cli: 'gemini', label: 'Gemini' },
+    { cli: 'antigravity', label: 'Antigravity' },
     { cli: 'copilot', label: 'Copilot' }
 ]);
 

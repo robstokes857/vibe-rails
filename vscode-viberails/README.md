@@ -14,14 +14,14 @@
 
 ## AI Coding, With Guardrails
 
-VibeRails is the control layer for AI coding inside VS Code. Work faster with Claude, Codex, Gemini, and Copilot while keeping output consistent, reviewable, and secure.
+VibeRails is the control layer for AI coding inside VS Code. Work faster with Claude, Codex, Antigravity, and Copilot while keeping output consistent, reviewable, and secure.
 
 ## Key Features
 
 - Environment Isolation: Like Conda for LLMs. Experiment with settings without breaking your primary setup.
-- Cross-LLM Learning: Share context and learnings across Claude, Codex, and Gemini.
+- Cross-LLM Learning: Share context and learnings across Claude, Codex, and Antigravity.
 - RAG Without The Rot: Track repeated fixes, feature descriptions, and file changes so context stays useful.
-- Few Shot Prompting: Get Gemini or Codex to code like Claude, with up to 20% better performance.
+- Few Shot Prompting: Get Antigravity or Codex to code like Claude, with up to 20% better performance.
 - Rule Enforcement: Enforce standards before code gets pushed.
 - Token Savings: Use smarter file hints to reduce token usage and cost.
 
@@ -35,7 +35,7 @@ VibeRails is the control layer for AI coding inside VS Code. Work faster with Cl
 
 - Claude
 - Codex
-- Gemini
+- Antigravity
 - Copilot
 - VS Code
 

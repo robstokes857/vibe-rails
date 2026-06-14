@@ -49,7 +49,7 @@ public class CommandServiceTests : IDisposable
 
     [Theory]
     [InlineData(LLM.Codex)]
-    [InlineData(LLM.Gemini)]
+    [InlineData(LLM.Antigravity)]
     [InlineData(LLM.Copilot)]
     public void PrepareSession_NonClaude_DoesNotSetForceSyncOutputEnvVar(LLM llm)
     {
@@ -60,6 +60,31 @@ public class CommandServiceTests : IDisposable
         Assert.False(
             prepared.Environment.ContainsKey("CLAUDE_CODE_FORCE_SYNC_OUTPUT"),
             $"CLAUDE_CODE_FORCE_SYNC_OUTPUT must only be set for LLM.Claude, not {llm}.");
+    }
+
+    [Fact]
+    public void PrepareSession_Antigravity_UsesAgyExecutable()
+    {
+        var service = CreateService();
+
+        // Antigravity's binary is `agy`, not the lowercased enum name ("antigravity").
+        // The in-app PTY must launch `agy`, or the session fails to start.
+        var prepared = service.PrepareSession(LLM.Antigravity, envName: null, extraArgs: null);
+
+        Assert.Equal("agy", prepared.LaunchCommand);
+    }
+
+    [Fact]
+    public void PrepareSession_Antigravity_PassesPromptViaPromptInteractiveFlag()
+    {
+        var service = CreateService();
+
+        // agy has no positional-prompt form; the initial prompt rides on
+        // --prompt-interactive=<text> (mirrors Copilot's --interactive=).
+        var prepared = service.PrepareSession(
+            LLM.Antigravity, envName: null, extraArgs: null, initialPrompt: "hello world");
+
+        Assert.StartsWith("agy --prompt-interactive=", prepared.LaunchCommand);
     }
 
     [Fact]
@@ -88,7 +113,7 @@ public class CommandServiceTests : IDisposable
         var envService = new LlmCliEnvironmentService(
             new ClaudeLlmCliEnvironment(fileService),
             new CodexLlmCliEnvironment(fileService),
-            new GeminiLlmCliEnvironment(fileService),
+            new AntigravityLlmCliEnvironment(fileService),
             new CopilotLlmCliEnvironment(fileService),
             fileService);
         return new CommandService(envService, new McpSettings(""));

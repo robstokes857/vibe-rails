@@ -22,7 +22,7 @@ This document describes how Environments, Sandboxes, AgentMetadata, and Sessions
 
 ### Business Logic
 
-An **Environment** is a reusable configuration for a specific LLM CLI (Claude, Codex, or Gemini). Environments are **global** — they are not tied to any project.
+An **Environment** is a reusable configuration for a specific LLM CLI (Claude, Codex, or Antigravity). Environments are **global** — they are not tied to any project.
 
 | Rule | Details |
 |---|---|
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS Environments (
 | 0 | NotSet |
 | 1 | Codex |
 | 2 | Claude |
-| 3 | Gemini |
+| 3 | Antigravity |
 
 **Key operations:**
 
