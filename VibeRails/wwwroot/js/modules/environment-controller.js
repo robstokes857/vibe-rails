@@ -317,11 +317,11 @@ export class EnvironmentController {
         if (cliLower === 'claude') {
             this.mergeClaudeSettingsFromCustomArgs(cliSettings, env.customArgs || '');
         }
-        if (cliLower === 'gemini') {
+        if (cliLower === 'antigravity') {
             if (env.customPrompt) {
                 cliSettings.initialMessage = env.customPrompt;
             }
-            this.mergeGeminiSettingsFromCustomArgs(cliSettings, env.customArgs || '');
+            this.mergeAntigravitySettingsFromCustomArgs(cliSettings, env.customArgs || '');
         }
         if (cliLower === 'copilot') {
             if (env.customPrompt) {
@@ -341,7 +341,7 @@ export class EnvironmentController {
             return div.innerHTML;
         };
 
-        const cliOptions = ['codex', 'claude', 'gemini', 'copilot'];
+        const cliOptions = ['codex', 'claude', 'antigravity', 'copilot'];
         const initialCli = isEdit ? env.cli : cliOptions[0];
         const title = isEdit ? `Edit Environment: ${env.name}` : 'Create New Environment';
         const submitLabel = isEdit ? 'Save Changes' : 'Create Environment';
@@ -444,7 +444,8 @@ export class EnvironmentController {
 
     cliSettingsEndpoint(cli) {
         const cliLower = (cli || '').toLowerCase();
-        if (cliLower === 'gemini' || cliLower === 'codex' || cliLower === 'claude') {
+        // Antigravity (agy) is launch-flag-only — no settings-file API (like Copilot).
+        if (cliLower === 'codex' || cliLower === 'claude') {
             return cliLower;
         }
         return null;
@@ -452,7 +453,7 @@ export class EnvironmentController {
 
     usesManagedCustomArgs(cli) {
         const cliLower = (cli || '').toLowerCase();
-        return cliLower === 'codex' || cliLower === 'claude' || cliLower === 'gemini' || cliLower === 'copilot';
+        return cliLower === 'codex' || cliLower === 'claude' || cliLower === 'antigravity' || cliLower === 'copilot';
     }
 
     async loadCliSettings(cli, envName) {
@@ -492,11 +493,11 @@ export class EnvironmentController {
             };
         }
 
-        if (cliLower === 'gemini') {
-            const geminiSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+        if (cliLower === 'antigravity') {
+            const antigravitySettings = settingsPayload || this.extractCliSettingsPayload(cli);
             return {
-                customArgs: this.buildGeminiCustomArgs(geminiSettings),
-                customPrompt: geminiSettings?.initialMessage ?? ''
+                customArgs: this.buildAntigravityCustomArgs(antigravitySettings),
+                customPrompt: antigravitySettings?.initialMessage ?? ''
             };
         }
 
@@ -543,49 +544,60 @@ export class EnvironmentController {
         return args.join(' ');
     }
 
-    buildGeminiCustomArgs(settings) {
+    renderAntigravityModelOptions(selectedModel) {
+        const selected = (selectedModel || '').trim();
+        // Hand-maintained pinned list — see runbooks/custom_envs/CLI_OPTIONS.md ("Model Lists").
+        // Values are the exact display strings `agy models` prints and that `--model` accepts,
+        // spaces + parens included (e.g. "Gemini 3.5 Flash (Low)"). `agy models` is an
+        // interactive picker with no scriptable/JSON output, so this list is updated by hand.
+        const options = [
+            ['', 'Default (Antigravity recommended)'],
+            ['Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (Medium)'],
+            ['Gemini 3.5 Flash (High)', 'Gemini 3.5 Flash (High)'],
+            ['Gemini 3.5 Flash (Low)', 'Gemini 3.5 Flash (Low)'],
+            ['Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (Low)'],
+            ['Gemini 3.1 Pro (High)', 'Gemini 3.1 Pro (High)'],
+            ['Claude Sonnet 4.6 (Thinking)', 'Claude Sonnet 4.6 (Thinking)'],
+            ['Claude Opus 4.6 (Thinking)', 'Claude Opus 4.6 (Thinking)'],
+            ['GPT-OSS 120B (Medium)', 'GPT-OSS 120B (Medium)']
+        ];
+        const known = new Set(options.map(([value]) => value));
+        const rendered = options.map(([value, label]) =>
+            `<option value="${this.app.escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${this.app.escapeHtml(label)}</option>`
+        );
+
+        if (selected && !known.has(selected)) {
+            rendered.push(`<option value="${this.app.escapeHtml(selected)}" selected>${this.app.escapeHtml(selected)} (custom)</option>`);
+        }
+
+        return rendered.join('');
+    }
+
+    buildAntigravityCustomArgs(settings) {
         const s = settings || {};
         const args = [];
+
+        // Model is the full display string from `agy models`, e.g. "Gemini 3.5 Flash (Low)"
+        // (spaces + parens) — quoteCustomArg wraps it so it survives as a single argument.
+        if (s.model) {
+            args.push('--model', s.model);
+        }
 
         if (s.sandboxEnabled) {
             args.push('--sandbox');
         }
 
-        let additional = this.parseArgString(s.additionalArgs || '');
-
-        // YOLO Mode for Gemini: auto-approve all actions. YOLO owns the approval mode, so strip
-        // any preserved --approval-mode flag from the additional args first; otherwise we'd emit
-        // a conflicting, order-dependent pair like `--approval-mode yolo --approval-mode auto_edit`
-        // (a non-YOLO mode is intentionally preserved in additionalArgs by the merge step).
+        // YOLO Mode for Antigravity (agy): auto-approve all tool permission requests.
         if (s.yoloMode) {
-            additional = this.stripGeminiApprovalModeArgs(additional);
-            args.push('--approval-mode', 'yolo');
+            args.push('--dangerously-skip-permissions');
         }
 
-        args.push(...additional);
+        args.push(...this.parseArgString(s.additionalArgs || ''));
 
         return args.map(arg => this.quoteCustomArg(arg)).join(' ');
     }
 
-    // Remove any --approval-mode (and its value), --approval-mode=..., --yolo, or -y tokens from
-    // a parsed arg list. Used when YOLO is first-class so it solely owns the approval flag.
-    stripGeminiApprovalModeArgs(args) {
-        const result = [];
-        for (let i = 0; i < args.length; i++) {
-            const arg = args[i];
-            if (arg === '--approval-mode') {
-                if (i + 1 < args.length) i++; // also drop its value
-                continue;
-            }
-            if (arg.startsWith('--approval-mode=') || arg === '--yolo' || arg === '-y') {
-                continue;
-            }
-            result.push(arg);
-        }
-        return result;
-    }
-
-    mergeGeminiSettingsFromCustomArgs(settings, customArgs) {
+    mergeAntigravitySettingsFromCustomArgs(settings, customArgs) {
         const args = this.parseArgString(customArgs);
         if (args.length === 0) return settings;
 
@@ -595,21 +607,26 @@ export class EnvironmentController {
             const arg = args[i];
             const next = args[i + 1];
 
-            if (arg === '--sandbox' || arg === '-s') {
+            // Model value is a display string with spaces/parens; parseArgString already
+            // unquoted it, so `next` is the whole "Gemini 3.5 Flash (Low)" token.
+            if (arg === '--model' && next) {
+                settings.model = next;
+                i++;
+                continue;
+            }
+            if (arg.startsWith('--model=')) {
+                settings.model = arg.slice('--model='.length);
+                continue;
+            }
+
+            if (arg === '--sandbox') {
                 settings.sandboxEnabled = true;
                 continue;
             }
 
-            // YOLO Mode for Gemini. Other --approval-mode values (auto_edit/plan) are no
-            // longer modeled, so they fall through to additionalArgs and are preserved verbatim.
-            if (arg === '--yolo' || arg === '-y' || arg === '--approval-mode=yolo') {
+            // YOLO Mode for Antigravity (agy).
+            if (arg === '--dangerously-skip-permissions') {
                 settings.yoloMode = true;
-                continue;
-            }
-
-            if (arg === '--approval-mode' && next === 'yolo') {
-                settings.yoloMode = true;
-                i++;
                 continue;
             }
 
@@ -1097,14 +1114,13 @@ export class EnvironmentController {
 
     extractCliSettingsPayload(cli) {
         const cliLower = (cli || '').toLowerCase();
-        if (cliLower === 'gemini') {
+        if (cliLower === 'antigravity') {
             return {
-                initialMessage: document.getElementById('gemini-initial-message').value,
-                sandboxEnabled: document.getElementById('gemini-sandbox').checked,
-                vimMode: document.getElementById('gemini-vim').checked,
-                checkForUpdates: document.getElementById('gemini-updates').checked,
-                yoloMode: document.getElementById('gemini-yolo').checked,
-                additionalArgs: document.getElementById('gemini-additional-args').value
+                initialMessage: document.getElementById('antigravity-initial-message').value,
+                model: document.getElementById('antigravity-model').value,
+                sandboxEnabled: document.getElementById('antigravity-sandbox').checked,
+                yoloMode: document.getElementById('antigravity-yolo').checked,
+                additionalArgs: document.getElementById('antigravity-additional-args').value
             };
         }
         if (cliLower === 'codex') {
@@ -1147,49 +1163,42 @@ export class EnvironmentController {
         const s = settings || {};
         const cliLower = (cli || '').toLowerCase();
 
-        if (cliLower === 'gemini') {
-            const geminiInitialMessage = this.app.escapeHtml(s.initialMessage || '');
-            const geminiYoloMode = Boolean(s.yoloMode);
-            const geminiAdditionalArgs = this.app.escapeHtml(s.additionalArgs || '');
+        if (cliLower === 'antigravity') {
+            const antigravityInitialMessage = this.app.escapeHtml(s.initialMessage || '');
+            const antigravityYoloMode = Boolean(s.yoloMode);
+            const antigravityAdditionalArgs = this.app.escapeHtml(s.additionalArgs || '');
             return `
                 <hr class="my-4">
-                <h6 class="text-muted mb-3">Gemini CLI Settings</h6>
+                <h6 class="text-muted mb-3">Antigravity CLI Settings</h6>
                 <div class="mb-3">
                     <label class="form-label">Initial Message</label>
-                    <textarea class="form-control" id="gemini-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to Gemini as soon as the session starts.">${geminiInitialMessage}</textarea>
-                    <small class="form-text text-muted">Passed as <code>gemini "&lt;text&gt;"</code> and recorded as the session's first user input.</small>
+                    <textarea class="form-control" id="antigravity-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to agy as soon as the session starts.">${antigravityInitialMessage}</textarea>
+                    <small class="form-text text-muted">Passed as <code>agy --prompt-interactive=&lt;text&gt;</code> and recorded as the session's first user input.</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Model</label>
+                    <select class="form-select" id="antigravity-model">
+                        ${this.renderAntigravityModelOptions(s.model)}
+                    </select>
+                    <small class="form-text text-muted">Passed as <code>--model</code> when launching agy (names from <code>agy models</code>)</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="gemini-sandbox" ${s.sandboxEnabled ? 'checked' : ''}>
-                        <label class="form-check-label" for="gemini-sandbox">Sandbox Mode</label>
+                        <input class="form-check-input" type="checkbox" id="antigravity-sandbox" ${s.sandboxEnabled ? 'checked' : ''}>
+                        <label class="form-check-label" for="antigravity-sandbox">Sandbox Mode</label>
                     </div>
-                    <small class="form-text text-muted">Run tools in a containerized sandbox for safety</small>
+                    <small class="form-text text-muted">Launches with <code>--sandbox</code> to run with terminal restrictions enabled</small>
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="gemini-yolo" ${geminiYoloMode ? 'checked' : ''}>
-                        <label class="form-check-label" for="gemini-yolo">YOLO Mode</label>
+                        <input class="form-check-input" type="checkbox" id="antigravity-yolo" ${antigravityYoloMode ? 'checked' : ''}>
+                        <label class="form-check-label" for="antigravity-yolo">YOLO Mode</label>
                     </div>
-                    <small class="form-text text-muted text-warning">Launches Gemini with <code>--approval-mode yolo</code> and bypasses approval prompts</small>
-                </div>
-                <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="gemini-vim" ${s.vimMode ? 'checked' : ''}>
-                        <label class="form-check-label" for="gemini-vim">Vim Mode</label>
-                    </div>
-                    <small class="form-text text-muted">Enable Vim keybindings</small>
-                </div>
-                <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="gemini-updates" ${s.checkForUpdates ? 'checked' : ''}>
-                        <label class="form-check-label" for="gemini-updates">Check for Updates</label>
-                    </div>
-                    <small class="form-text text-muted">Automatically check for CLI updates</small>
+                    <small class="form-text text-muted text-warning">Launches with <code>--dangerously-skip-permissions</code>, auto-approving every tool permission request</small>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Additional Arguments</label>
-                    <input type="text" class="form-control" id="gemini-additional-args" value="${geminiAdditionalArgs}" placeholder="Optional extra Gemini flags">
+                    <input type="text" class="form-control" id="antigravity-additional-args" value="${antigravityAdditionalArgs}" placeholder="Optional extra agy flags (e.g. --add-dir ...)">
                     <small class="form-text text-muted">Preserves advanced flags not covered above</small>
                 </div>
             `;

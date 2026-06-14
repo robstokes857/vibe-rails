@@ -1,0 +1,245 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e1]:
+  - navigation [ref=e2]:
+    - button "Vibe Rails logo Vibe Rails" [ref=e4] [cursor=pointer]:
+      - img "Vibe Rails logo" [ref=e5]
+      - generic [ref=e6]: Vibe Rails
+    - generic [ref=e7]:
+      - button "Terminals" [ref=e8] [cursor=pointer]:
+        - generic [ref=e9]: Terminals
+      - button "Dashboard" [ref=e10] [cursor=pointer]:
+        - generic [ref=e12]: Dashboard
+      - button "ENVS" [ref=e13] [cursor=pointer]:
+        - generic [ref=e14]: ENVS
+      - button "Agents" [ref=e15] [cursor=pointer]:
+        - generic [ref=e17]: Agents
+      - button "Vibe AI" [ref=e18] [cursor=pointer]:
+        - generic [ref=e20]: Vibe AI
+      - button "MCP" [ref=e21] [cursor=pointer]:
+        - generic [ref=e23]: MCP
+      - button "Settings" [ref=e24] [cursor=pointer]:
+        - generic [ref=e25]: Settings
+    - button "Exit" [ref=e27] [cursor=pointer]:
+      - img [ref=e28]
+      - generic [ref=e31]: Exit
+  - generic [ref=e34]:
+    - generic [ref=e37]:
+      - heading "vibe-rails" [level=2] [ref=e38]
+      - button "Rename project" [ref=e39] [cursor=pointer]:
+        - generic [ref=e41]: Rename project
+    - generic [ref=e44]:
+      - generic [ref=e46]: Quick Launch
+      - generic [ref=e49]:
+        - generic [ref=e51]:
+          - img "VS Code" [ref=e53]
+          - generic [ref=e54]: VS Code
+          - button "Open" [ref=e56] [cursor=pointer]:
+            - generic [ref=e58]: Open
+        - generic [ref=e60]:
+          - img "Claude" [ref=e62]
+          - generic [ref=e63]: Claude
+          - generic [ref=e64]:
+            - button "Native" [ref=e65] [cursor=pointer]:
+              - generic [ref=e67]: Native
+            - button "Web" [ref=e68] [cursor=pointer]:
+              - generic [ref=e70]: Web
+        - generic [ref=e72]:
+          - img "Antigravity" [ref=e74]
+          - generic [ref=e75]: Antigravity
+          - generic [ref=e76]:
+            - button "Native" [ref=e77] [cursor=pointer]:
+              - generic [ref=e79]: Native
+            - button "Web" [ref=e80] [cursor=pointer]:
+              - generic [ref=e82]: Web
+        - generic [ref=e84]:
+          - img "Codex" [ref=e86]
+          - generic [ref=e87]: Codex
+          - generic [ref=e88]:
+            - button "Native" [ref=e89] [cursor=pointer]:
+              - generic [ref=e91]: Native
+            - button "Web" [active] [ref=e92] [cursor=pointer]:
+              - generic [ref=e94]: Web
+        - generic [ref=e96]:
+          - img "Copilot" [ref=e98]
+          - generic [ref=e99]: Copilot
+          - generic [ref=e100]:
+            - button "Native" [ref=e101] [cursor=pointer]:
+              - generic [ref=e103]: Native
+            - button "Web" [ref=e104] [cursor=pointer]:
+              - generic [ref=e106]: Web
+    - generic [ref=e107]:
+      - generic [ref=e109]:
+        - generic [ref=e110]:
+          - generic [ref=e111]: Sandboxes
+          - button "Add" [ref=e113] [cursor=pointer]
+        - generic [ref=e114]:
+          - paragraph [ref=e116]: No sandboxes yet. Create one to work in an isolated copy of your project.
+          - button "Show More" [ref=e117] [cursor=pointer]
+      - generic [ref=e119]:
+        - generic [ref=e120]:
+          - generic [ref=e121]: Environments
+          - button "Add" [ref=e123] [cursor=pointer]
+        - generic [ref=e124]:
+          - generic [ref=e125]:
+            - generic [ref=e126]:
+              - generic [ref=e127]:
+                - img "Claude logo" [ref=e129]
+                - generic [ref=e130]:
+                  - heading "Claude Code Review" [level=6] [ref=e132]
+                  - generic [ref=e133]: 15 minutes ago
+              - generic [ref=e134]:
+                - button "Native" [ref=e136] [cursor=pointer]:
+                  - generic [ref=e138]: Native
+                - button "Web" [ref=e140] [cursor=pointer]:
+                  - generic [ref=e142]: Web
+                - button "Delete" [ref=e144] [cursor=pointer]:
+                  - generic [ref=e146]: Delete
+            - generic [ref=e147]:
+              - generic [ref=e148]:
+                - img "Codex logo" [ref=e150]
+                - generic [ref=e151]:
+                  - heading "code review" [level=6] [ref=e153]
+                  - generic [ref=e154]: 30 minutes ago
+              - generic [ref=e155]:
+                - button "Native" [ref=e157] [cursor=pointer]:
+                  - generic [ref=e159]: Native
+                - button "Web" [ref=e161] [cursor=pointer]:
+                  - generic [ref=e163]: Web
+                - button "Delete" [ref=e165] [cursor=pointer]:
+                  - generic [ref=e167]: Delete
+            - generic [ref=e168]:
+              - generic [ref=e169]:
+                - img "Codex logo" [ref=e171]
+                - generic [ref=e172]:
+                  - heading "CODEX YOLO" [level=6] [ref=e174]
+                  - generic [ref=e175]: 14 hours ago
+              - generic [ref=e176]:
+                - button "Native" [ref=e178] [cursor=pointer]:
+                  - generic [ref=e180]: Native
+                - button "Web" [ref=e182] [cursor=pointer]:
+                  - generic [ref=e184]: Web
+                - button "Delete" [ref=e186] [cursor=pointer]:
+                  - generic [ref=e188]: Delete
+            - generic [ref=e189]:
+              - generic [ref=e190]:
+                - img "Claude logo" [ref=e192]
+                - generic [ref=e193]:
+                  - heading "CLAUDE YOLO" [level=6] [ref=e195]
+                  - generic [ref=e196]: 5/25/2026
+              - generic [ref=e197]:
+                - button "Native" [ref=e199] [cursor=pointer]:
+                  - generic [ref=e201]: Native
+                - button "Web" [ref=e203] [cursor=pointer]:
+                  - generic [ref=e205]: Web
+                - button "Delete" [ref=e207] [cursor=pointer]:
+                  - generic [ref=e209]: Delete
+          - button "Show More" [ref=e210] [cursor=pointer]
+    - generic [ref=e215]:
+      - generic [ref=e217]:
+        - generic [ref=e218]:
+          - img [ref=e219]
+          - text: VibeRails Sessions
+        - generic "C:/source/vibe-rails" [ref=e221]: C:/source/vibe-rails
+      - generic [ref=e223]:
+        - combobox [disabled] [ref=e224]:
+          - option "Select LLM..." [disabled] [selected]
+          - option "Claude Code Review (claude)"
+          - option "code review (codex)"
+          - option "CODEX YOLO (codex)"
+          - option "CLAUDE YOLO (claude)"
+          - option "Claude (default)"
+          - option "Codex (default)"
+          - option "Antigravity (default)"
+          - option "Copilot (default)"
+          - option "Terminal"
+        - combobox [ref=e226]:
+          - generic [ref=e230]: Select LLM...
+        - button "Start" [ref=e232] [cursor=pointer]:
+          - img [ref=e233]
+          - generic [ref=e236]: Start
+      - generic [ref=e237]:
+        - generic [ref=e238]:
+          - button "Open a new terminal tab" [ref=e241] [cursor=pointer]: +
+          - generic [ref=e242]:
+            - button "Decrease font size" [ref=e243] [cursor=pointer]: −
+            - generic [ref=e244]: "14"
+            - button "Increase font size" [ref=e245] [cursor=pointer]: +
+            - button "Save session" [ref=e247] [cursor=pointer]:
+              - img [ref=e248]
+            - button "Terminal settings and actions" [ref=e251] [cursor=pointer]: ⚙
+            - button "Open in fullscreen" [ref=e252] [cursor=pointer]:
+              - generic [ref=e254]: Open In Fullscreen
+        - generic [ref=e257]: Terminals run safely in the background even if you navigate away.
+        - generic [ref=e258]:
+          - paragraph [ref=e259]: Select a LLM to continue
+          - paragraph [ref=e260]:
+            - text: Use the
+            - strong [ref=e261]: +
+            - text: button to open a tab, then pick a CLI/environment.
+        - generic [ref=e262]:
+          - generic [ref=e263]:
+            - generic [ref=e264]: Features and Settings
+            - button "✕" [ref=e265] [cursor=pointer]
+          - generic [ref=e266]:
+            - group "Terminal actions" [ref=e267]:
+              - button "Multi Run" [ref=e268] [cursor=pointer]:
+                - generic [ref=e270]: Multi Run
+              - button "Send debug log" [ref=e271] [cursor=pointer]:
+                - generic [ref=e273]: Send debug log
+            - generic [ref=e274]:
+              - button "Theme" [expanded] [ref=e275] [cursor=pointer]:
+                - generic [ref=e278]: Theme
+              - region "Theme" [ref=e280]:
+                - generic [ref=e282]:
+                  - generic "Tokyo Night Moon" [ref=e283] [cursor=pointer]:
+                    - generic [ref=e289]: Tokyo Night Moon
+                  - generic "Catppuccin Mocha" [ref=e290] [cursor=pointer]:
+                    - generic [ref=e296]: Catppuccin Mocha
+                  - generic "Kanagawa Wave" [ref=e297] [cursor=pointer]:
+                    - generic [ref=e303]: Kanagawa Wave
+                  - generic "Dracula" [ref=e304] [cursor=pointer]:
+                    - generic [ref=e310]: Dracula
+                  - generic "Nord" [ref=e311] [cursor=pointer]:
+                    - generic [ref=e317]: Nord
+                  - generic "One Dark" [ref=e318] [cursor=pointer]:
+                    - generic [ref=e324]: One Dark
+                  - generic "Ayu Dark" [ref=e325] [cursor=pointer]:
+                    - generic [ref=e331]: Ayu Dark
+                  - generic "Everforest Dark" [ref=e332] [cursor=pointer]:
+                    - generic [ref=e338]: Everforest Dark
+                  - generic "Gruvbox" [ref=e339] [cursor=pointer]:
+                    - generic [ref=e345]: Gruvbox
+                  - generic "Rose Pine" [ref=e346] [cursor=pointer]:
+                    - generic [ref=e352]: Rose Pine
+                  - generic "Shades of Purple" [ref=e353] [cursor=pointer]:
+                    - generic [ref=e359]: Shades of Purple
+                  - generic "Night Owl" [ref=e360] [cursor=pointer]:
+                    - generic [ref=e366]: Night Owl
+                  - generic "Snazzy" [ref=e367] [cursor=pointer]:
+                    - generic [ref=e373]: Snazzy
+                  - generic "Ayu Light" [ref=e374] [cursor=pointer]:
+                    - generic [ref=e380]: Ayu Light
+                  - generic "Catppuccin Latte" [ref=e381] [cursor=pointer]:
+                    - generic [ref=e387]: Catppuccin Latte
+                  - generic "Solarized Light" [ref=e388] [cursor=pointer]:
+                    - generic [ref=e394]: Solarized Light
+            - generic [ref=e395]:
+              - button "Rendering —" [ref=e396] [cursor=pointer]:
+                - generic [ref=e399]: Rendering
+                - generic [ref=e401]: —
+              - generic [ref=e403]:
+                - generic [ref=e404]: Renderer
+                - combobox [ref=e405]
+              - generic [ref=e406]:
+                - generic [ref=e407]: Resize debounce
+                - combobox [ref=e408]
+            - generic [ref=e409]:
+              - button "Font" [ref=e410] [cursor=pointer]:
+                - generic [ref=e413]: Font
+              - generic [ref=e415]:
+                - generic [ref=e416]: Size
+                - spinbutton [ref=e417]: "14"
+  - img
+```

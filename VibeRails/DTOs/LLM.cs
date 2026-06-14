@@ -5,7 +5,8 @@ namespace VibeRails.Services
         NotSet,
         Codex,
         Claude,
-        Gemini,
+        // Google Antigravity CLI — binary is `agy` (mapped in CommandService.PrepareSession).
+        Antigravity,
         Copilot,
 
         // Plain shell terminal — no AI agent. The PTY always spawns a real OS shell

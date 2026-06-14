@@ -123,6 +123,290 @@
 > wrapping is fixed upstream), but it's belt-only — not the
 > suspenders. Full triage below.
 
+## 2026-06-13 Small typing-echo lag while the CLI is streaming — OPEN, watching (do NOT fix yet)
+
+> **Status: OPEN / observation phase.** Rob's call (2026-06-13): pin down *when*
+> this happens before attempting a fix. No code change yet. This entry is a
+> watch-list — log every recurrence against the checklist at the bottom.
+
+**Symptom (Rob, on 1.7.5):** a *small* lag on typed characters that shows up **only
+while the child CLI is actively producing output** (e.g. typing a follow-up message
+while the agent streams its reply). When the CLI is idle, typing is crisp.
+
+**This is NOT the old lag.** The historical "unusable typing" lag was the cold-start
+`setTimeout` occlusion-throttle (Chromium clamps `setTimeout` to 1 s in an occluded
+webview), fixed in **1.6.12** by moving the xterm coalesce to `queueMicrotask` (see
+the `project_cold_start_settimeout_throttle` memory). That one was 1–3 s per
+keystroke and present from boot. This new one is **small (tens of ms),
+output-correlated, and only while streaming.** Different bug.
+
+**Rob's anchor:** "1.7.2 felt clean, 1.7.5 has it." Treat as a hint, not a fact —
+the archaeology below does *not* (yet) find a VibeRails delta that explains it.
+
+### What actually changed on the input/output hot path, 1.7.2 → 1.7.5
+
+Version → SHA: 1.7.2 `4592026` · 1.7.3 `0ac9253` (`d1d273d` flicker fix) ·
+1.7.4 `ff37730` · 1.7.5 `0335cc4` (`d96d646` codex-flicker revival).
+
+The two hot paths (`terminal-tab.js`):
+- **INPUT (keystroke):** `onData → statusController.onTerminalData(data);
+  _trackTypingForNudge(data); socket.send(data)` (~line 164).
+- **OUTPUT:** `socket.onmessage → pendingChunks.push → queueMicrotask(flush) →
+  (Codex-only) suppressCursorDuringOutput → vibeTerminal.write(data)` (~line 640).
+
+**Suspects RULED OUT** — none survives the "did it regress *for the same CLI*" test:
+
+| Candidate | Commit | Why it's not it |
+|---|---|---|
+| Cursor-suppression revival | `d96d646` | Re-added on the output path but **gated to Codex tabs only**. For **Claude**, 1.7.5 does *less* per-chunk work than 1.7.2 (which called it unconditionally). For **Codex**, it's identical to 1.7.2 — `vibe-terminal.js` (the impl) has **zero** committed changes in 1.7.2..1.7.5. No new cost for either CLI. |
+| "stop showing output in vs code" | `5a936cd` | One-line removal of a VS Code output-pane auto-reveal (`outputChannel.show`). Nothing to do with the terminal byte path. |
+| Tab-status / shell-spinner changes | range | `terminal-tab-status.js` busy/idle transitions are driven by backend session *events*, not per-output-chunk. Not obviously output-correlated. |
+| `terminal-multitab.js` 196-line refactor | range | UI/manager refactor; a per-output `updateUi` churn check is still in progress, but no smoking gun yet. |
+
+### Leading hypotheses — ranked after the 2026-06-13 archaeology (nothing scored > 0.5)
+
+Headline from the 13-agent run: **the 1.7.2→1.7.5 VibeRails diff is innocent on the
+typing hot path.** `WebSocketConsumer.cs`, `vibe-terminal.js`, and the env-var path
+(`LlmCliEnvironmentService.cs`) are **byte-identical** in range; the only hot-path JS
+change (`d96d646`'s Codex gate) *removes* work for Claude and is byte-equivalent for
+Codex. So a *new* lag for the *same CLI version* almost certainly originates **upstream
+in the child CLI's output**, feeding a pre-existing, unchanged server sync-hold.
+
+1. **PRIMARY (~0.45) — upstream Claude Code now emits *real* multi-chunk DEC-2026
+   frames → the unchanged 100 ms server sync-hold withholds your typing echo.**
+   Keystrokes are **not** locally echoed (`terminal-tab.js:164` only `socket.send`s);
+   the "echo" you see is Claude Code re-emitting your keystroke as **output** through
+   the PTY. Server-side: `TerminalEmulatorConsumer` parses each chunk and flips
+   `_syncOutputActive` on `?2026h`/`?2026l` (`AnsiParser.cs:419`); `WebSocketConsumer`
+   reads `IsSyncOutputActive` and, while a frame is open, enters a **hold branch** —
+   poll every 4 ms, **don't ship**, until `?2026l` closes the frame or
+   **`MaxSyncOutputHoldMs = 100`** elapses (`WebSocketConsumer.cs:14-16, 67-94`; wired
+   at `TerminalSessionService.cs:195`). `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1`
+   (`LlmCliEnvironmentService.cs:128`, Claude-only) is what makes Claude bracket at
+   all. **Gating fact:** with Claude Code 2.1.142 the BSU+ESU arrive **together in one
+   16-byte chunk** (see §2026-05-15 forensics, session 2c93b090), so the frame closes
+   before tagging and **the hold never engages today.** It can only fire on a frame
+   that **straddles chunks** (BSU in one, paint+ESU in a later one) — which is exactly
+   what an upstream Claude Code change from "empty no-op pairs" to "proper
+   redraw-bracketing" would produce. Echo enqueued inside an open frame then rides the
+   hold up to ~100 ms (usually tens); idle → no open frame → 4 ms path → instant.
+   Matches the symptom shape exactly. **Weaknesses keeping it at 0.45:** the upstream
+   trigger can't be proven from the repo (only old empty-pair captures exist); it is
+   **version-gated** (if Rob's `claude` binary was the same at 1.7.2 and 1.7.5, this is
+   dead); and it is **Claude-only** (does not cover a Codex repro — see #3).
+2. **CONTRIBUTING (~0.10) — the 4 ms `NormalCoalesceDelayMs` floor.** Even with no
+   upstream change, a streaming-time echo rides the 4 ms coalesce window instead of
+   shipping instantly (`WebSocketConsumer.cs:14, 69-90`). Real but sub-perceptible,
+   constant, and unchanged — fails D2. It's just the floor *under* the primary.
+3. **CODEX-ONLY (~0.18, only if the repro is on a Codex tab) —
+   `suppressCursorDuringOutput` → `_applyTheme()` glyph-atlas clear on WebGL.** On the
+   first chunk of each burst the Codex-gated suppression sets `term.options.theme`,
+   firing `clearTextureAtlas()` + full-viewport `_fullRefresh()`
+   (`vibe-terminal.js:312-319, 688-708`; `OUTPUT_CURSOR_IDLE_MS=90` at
+   `terminal-tab.js:35`), serialized ahead of the merged write carrying the echo.
+   **Fails D2 vs Rob's stated 1.7.2 baseline** (1.7.2 called suppress unconditionally →
+   ran for Codex too, byte-equivalent). It would only qualify if Rob's mental "before"
+   is actually **1.7.3/1.7.4**, where suppression was *absent* (removed by `d1d273d`).
+
+Cleared (fail D1/D2): status-observer path, input-send/`_trackTypingForNudge`, and the
+new toast/`_notifyTabReady` layer — all byte-identical or not output-correlated.
+
+### Discriminators any real cause must satisfy
+- **D1 output-correlated:** lag only while bytes stream, gone when idle. ✔ (the symptom).
+- **D2 regressed for the same CLI:** must be newly worse 1.7.2→1.7.5 for the CLI
+  Rob is using — OR be an upstream/CLI-version interaction (hypothesis 1). The
+  VibeRails-only candidates all **fail D2** so far.
+- **D3 magnitude:** tens of ms, not seconds.
+
+### WATCH CHECKLIST — capture this the next time it lags
+
+**Best instrument first — the probe already exists:**
+0. **Turn on the `[TypingLag]` Debug probe.** `WebSocketConsumer.cs:119-121` already
+   logs each send with `syncOut` and `holdMs`. Run a local Debug build, type during a
+   Claude stream, read the log:
+   - `syncOut=True` with `holdMs` in the **tens** → **PRIMARY CONFIRMED** (echo held
+     inside a straddling sync frame).
+   - every send `syncOut=False holdMs~4` → the hold is **not** engaging; primary dead,
+     it's the 4 ms floor (negligible) or something else.
+
+**Then the cheap triage:**
+1. **`claude --version` now vs the build you ran at 1.7.2.** *(30 s, highest gain — the
+   one fact the repo can't supply.)* Bumped past 2.1.142 → smoking gun for the upstream
+   theory. Unchanged → primary is dead; pivot to Codex/#3.
+2. **Per-CLI triage: Claude vs Codex vs plain shell tab, typing while streaming.**
+   *(2 min, decisive.)* Claude-only → primary. Codex-only → #3. Plain-shell too →
+   neither; look at VS Code webview scheduling. (A plain shell has no agent output
+   stream, so it isolates "the CLI's bytes" from "our input path.")
+3. **Env-var A/B:** launch with `CLAUDE_CODE_FORCE_SYNC_OUTPUT=0` (comment
+   `LlmCliEnvironmentService.cs:128`), re-test Claude. Lag gone → sync-hold confirmed
+   independently of version archaeology.
+4. **Idle vs streaming / webview vs browser**, and **capture the session UUID** so we
+   can replay and check for real (vs empty) `?2026` frames with
+   `python python-scripts/analyze_cursor_state.py <session-id>` — straddling frames
+   confirm the upstream trigger; single-chunk 16-byte empty pairs refute it.
+5. **Magnitude preview:** lower `MaxSyncOutputHoldMs` 100→16 (`WebSocketConsumer.cs:16`)
+   and re-test — a proportional drop in perceived lag confirms the hold is the cause.
+
+### The fix IF/WHEN confirmed (NOT applied — do not pre-empt the watch)
+- **Primary:** an **input-echo fast-path** in `WebSocketConsumer`'s send loop — ship
+  interleaved echo bytes without honoring the full hold, or lower
+  `MaxSyncOutputHoldMs`, or ship small/echo-sized frames immediately. **Frame it
+  correctly: this would be a VibeRails *accommodation* for an upstream emission change,
+  not a regression we introduced** — our code didn't break; Claude Code's bytes changed.
+- **Codex (#3):** stop `suppressCursorDuringOutput` from calling `_applyTheme()` — hide
+  the cursor via the cheaper `_syncCursorVisibilityClass()` CSS path instead of swapping
+  `options.theme`, so it no longer triggers a WebGL atlas clear + full refresh.
+
+**Guardrails:** no stripping the byte stream (`feedback_no_stripping_terminal_stream`);
+the receive path stays on `queueMicrotask`, never `setTimeout` (the 2026-05-05
+occlusion landmine). The echo fix belongs at the **server send-loop**, shipping
+interleaved echo out of the hold — not by filtering bytes.
+
+> Diagnosis from the 2026-06-13 13-agent archaeology run (691k tokens, 242 tool calls):
+> the VibeRails 1.7.2..1.7.5 hot-path diff is **innocent**; primary suspect is upstream
+> Claude Code DEC-2026 bracketing × the pre-existing 100 ms server sync-hold. **Awaiting
+> Rob's watch-data — the `[TypingLag]` probe + `claude --version` — before any fix.**
+
+---
+
+## 2026-06-12 Tab bar + terminal settings redesign (UI-only; PTY/byte/resize paths untouched)
+
+**What changed (all in tab-strip DOM, settings panel, and CSS):**
+
+1. **Tabs shrink with count.** `.vb-terminal-tab-item` went from a fixed
+   `--vb-terminal-tab-width` (250px) to `flex: 1 1 250px` with
+   `min-width: var(--vb-terminal-tab-min-width)` (150px; shipped at 120px,
+   raised the same day — see the clickability fix in item 2). The strip's
+   existing scroll arrows only engage once every tab is at min width.
+   **Shrink priority is logo > status text > label** (flex-shrink 4 on
+   `.vb-tab-identity` vs 1 on `.vb-tab-status-section`): the label ellipsizes
+   away first, then the status text ellipsizes — the status words are never
+   hidden (Rob's veto, same day; an initial ~190px container query that hid
+   the text was removed, as was the pre-existing ≤992px media rule that hid
+   it — VS Code panel viewports routinely sit under 992px). Only the ≤480px
+   phone rule still drops the section. `container-type: inline-size` remains
+   for the staged action-cluster queries (item 2). Strictly horizontal: the
+   strip never wraps and the window-header height is fixed, so the terminal
+   viewport size never changes → no fit/SIGWINCH activity from any of this.
+2. **Hover swaps status for actions.** The status section fades on hover and a
+   rename/minimize/close cluster (`.vb-terminal-tab-actions`) overlays it
+   (absolute, `background: inherit` — no reflow). Close is no longer
+   permanently visible. `@media (hover: none)` keeps minimize/close inline for
+   touch.
+   **Same-day clickability fix (Rob's screenshot: center-click on a small
+   hovered tab hit the rename pen):** (a) min width 120 → 150px; (b) the
+   cluster stages down with tab width via container queries — ≤200px drops
+   rename (right-click still renames), ≤149px drops minimize, close always
+   survives (icon chips exempt via `:not(.is-minimized)` so their restore
+   button stays); (c) the cluster keeps `pointer-events: none` at all times —
+   only the *buttons* accept pointer events, and only while revealed — so
+   clicks on the padding/gaps between buttons fall through and activate the
+   tab instead of dying on the overlay.
+3. **Per-tab minimize-to-icon.** New tab-strip button collapses a tab to a
+   64px logo+status-icon chip, grouped at the left edge via CSS `order: -1`
+   (DOM order and `tabOrder` untouched). State persists in the existing
+   sessionStorage tab-meta payload (`minimized`). Clicking a chip activates
+   the tab without restoring it; the chip's hover button restores. Built for
+   park-a-dev-server tabs. Minimizing does not touch the tab's panel,
+   socket, or terminal — chrome only.
+4. **THINKING display text: "Working" is SHELL-TAB-ONLY.** Agent tabs say
+   "Thinking", exactly as before. First shipped as a global rename to
+   "Working"; Rob vetoed it the same day — the status wording ("Thinking" /
+   "Ready" / "Waiting for user input") is deliberate product voice and must
+   not be renamed or hidden. The shell carve-out lives in
+   `SHELL_THINKING_TEXT` / `_statusTextFor()`; the strings are now pinned by
+   unit tests. State machine untouched throughout.
+5. **Kebab (⋮) menu merged into settings.** Multi Run + Send debug log now sit
+   in an always-visible Actions block at the top of the settings panel (same
+   `terminal-multirun-btn`/`terminal-senddebug-btn` ids; Playwright specs
+   updated). `renderTerminalMenuHtml` deleted; the `TerminalMenu` class stays
+   (download menu still uses it).
+6. **Focus-view history sidebar: collapsed state rebuilt as a clean rail.**
+   The old collapse kept the full 268px sidebar sliding under the terminal
+   card behind a fade mask (icon slivers peeking out, plus a clock div at
+   `top:12px` overlapping a gradient chevron pill at `top:36px` — Rob's
+   "messy" screenshot). Now the sidebar genuinely shrinks to a 44px rail
+   (`--ch-sidebar-peek`, width animated in step with the grid column) holding
+   ONE real toggle button — history-clock icon when collapsed, chevron when
+   open, carries the first-visit pulse; the non-focusable
+   `.ch-sidebar-collapsed-icon` div is deleted — plus a vertical "History"
+   wordmark. The whole rail click-opens (unchanged handler). The collapsed
+   list is opacity-hidden, deliberately NOT `display:none`:
+   `_shouldLoadNextPage()` compares scrollHeight/clientHeight, and a
+   zero-size body reads as "not full" → would auto-paginate the entire
+   history.
+7. **User-facing cursor settings removed** — executes the remaining item from
+   the 2026-06-09 follow-up list (per Rob: "let the terminal decide"). Gone:
+   the settings-panel Cursor section, `viberails_terminal_cursorStyle` /
+   `…cursorInactiveStyle` localStorage reads/writes, `setCursorStyle` /
+   `setCursorInactiveStyle`, and the `cursorStyle`/`cursorInactiveStyle`
+   Terminal options. xterm defaults (block/outline — identical to our old
+   defaults) + the CLI's own escape sequences now own the cursor.
+
+**Round 3 (same day, Rob's screenshots: "Cl…" next to a full "Connect…",
+hover showing only ×) — supersedes the sizing specifics in items 1–3:**
+
+- **Viewport width caps REMOVED.** The pre-existing `≤992px` (200px) and
+  `≤480px` (100px/84px) tab-width media overrides are gone — a VS Code panel
+  webview is always "phone-width" by viewport, so the caps gave desktop users
+  unreadably tiny tabs. The ≤480 label-truncation (`max-width: 3.5em`) and
+  status-section hide went with them. Tabs now shrink ONLY when the strip
+  itself runs out of room (flexbox), then the strip scrolls.
+- **Preferred width 250px → 300px**, min stays 150px; `@media (hover: none)`
+  raises the min to 200px because inline actions take in-flow width there.
+- **Name readability floor.** `.vb-tab-identity` got a 100px min-width floor
+  (logo + ~70px of label; 110 clipped the spinner at the 150px tab min, so
+  100). The **status section is `flex-shrink: 0`** — it never shrinks, so the
+  status word ("Thinking"/"Connected"/"Waiting for user input") is always
+  fully readable and ONLY the label ellipsizes. Priority: logo > readable
+  name > full status text > rest of the label. (With the earlier `shrink: 1`
+  a longer tab name squeezed the status text to an ellipsis and it vanished —
+  Rob: "add back the text for thinking and stuff.")
+- **CONNECTED icon: `fa-link` → `fa-circle`** (a small slate dot / "session
+  live" LED, sized 0.42rem so it reads as an indicator not a bullet). The
+  chain-link looked like a hyperlink, not a connection. Distinct from READY's
+  outlined `fa-circle-check` so the two resting states don't blur together.
+- **Action-cluster staging relaxed: ≤200/≤149 → ≤170/≤110.** The ≤149px
+  minimize cutoff sat at the 150px tab minimum, so minimize vanished exactly
+  when tabs were at min — Rob hovers FOR that button. Minimize + close now
+  survive at every real tab width (the ≤110 guard is below min-width by
+  design); only the rename pen drops on tight tabs (right-click still
+  renames). Center-click stays safe: [min][close] starts ~96px into a 150px
+  tab, past the 75px center.
+- **Minimized chips grouped at the RIGHT edge** (`order: -1` → `order: 999`),
+  parked next to the + button per Rob — not Chrome-style pinned-left.
+- **Tabs are content-sized + left-aligned (like VS Code) — NOT full-width.**
+  Rob first asked to "use the nav bar width"; the literal read (grow tabs to
+  fill the strip) made a single tab span the entire bar with "Thinking" pinned
+  at the far edge — "not the entire thing... like a normal ass terminal."
+  Final model: `flex: 0 1 auto` (basis auto = content width), clamped between
+  `min-width` 150px and `max-width` 300px; tabs never grow to fill. The tab
+  list is `flex: 0 1 auto` too (content-width, left-aligned) so the + button
+  sits right after the last tab; it still shrinks/scrolls on overflow. List
+  background is transparent so empty space (e.g. all tabs minimized to chips)
+  doesn't paint a bar — the 1px gaps still read as hairline separators. Chips
+  stay fixed at 64px (`flex: 0 0`).
+- **History rail icons restored.** Supersedes item 6's "collapsed list is
+  opacity-hidden": Rob liked the session icons — the old mess was the
+  full-width fade-masked rows, not the icons. The rail now shows an icon-only
+  stack (32px brand tiles, centered, below the wordmark; live sessions get a
+  green-tinted tile). Items stay pointer-inert (any rail click opens the
+  sidebar), the body doesn't scroll, a bottom fade hints at more, and the
+  empty/loading prose states are hidden at rail width.
+
+**Deliberately untouched (the guardrail list):**
+
+- `terminal-tab.js` — zero changes. Resize debounce path, `queueMicrotask`
+  receive path, and the **Codex-only `suppressCursorDuringOutput` gate** are
+  exactly as the 2026-06-11 entry left them. (Cursor-options removal ≠ the
+  cancelled suppression-layer removal — that machinery is load-bearing.)
+- `cursorBlink: false` stays explicit in `vibe-terminal.js`.
+- The **Resize debounce** select (Rendering section) survives the settings
+  redesign unchanged — same `viberails_terminal_resizeDebounce` key.
+- No byte-stream involvement anywhere (no-stripping rule holds).
+
+---
+
 ## 2026-06-11 Codex cursor hop — root cause found (in-box ConPTY) + Codex-only suppression shipped
 
 > **📕 The full story lives in [`TERMINAL-FLICKER.md`](TERMINAL-FLICKER.md)** —
@@ -390,12 +674,12 @@ place for the hotfix.
   `restoreSuppressedCursor` / `_cursorSuppressed` / `_cursorRestoreTimeoutId` /
   the `_getAppliedTheme` hidden-cursor branch / `_syncCursorVisibilityClass`,
   `OUTPUT_CURSOR_IDLE_MS`, and the `.vb-terminal-cursor-suppressed` CSS.
-- **Remove the user-facing cursor-style options** (per Rob — "let the TUI handle it"):
-  the `terminal-settings.js` cursor-style / inactive-style selects + their
-  `viberails_terminal_cursorStyle` / `…cursorInactiveStyle` localStorage keys,
+- ~~**Remove the user-facing cursor-style options**~~ **DONE 2026-06-12** (see
+  that entry): cursor-style / inactive-style selects, their localStorage keys,
   `setCursorStyle` / `setCursorInactiveStyle`, and the `cursorStyle` /
-  `cursorInactiveStyle` / `cursorBlink` Terminal options. Let xterm defaults + the
-  CLI's own escape sequences govern the cursor entirely.
+  `cursorInactiveStyle` Terminal options are gone. `cursorBlink: false` was
+  deliberately KEPT explicit (this file's diagnoses reference it; xterm's
+  default happens to match).
 - **Drop the env-var change** parked in the git stash.
 
 ### Lesson
@@ -1629,7 +1913,7 @@ missing after one unexpected sequence.
 
 #### 10. The code no longer enforces the documented "managed AI CLI skip replay" rule
 
-This file currently says managed AI CLIs (`Claude`, `Codex`, `Gemini`, `Copilot`) should skip local
+This file currently says managed AI CLIs (`Claude`, `Codex`, `Antigravity`, `Copilot`) should skip local
 replay and use redraw-first attach. The current C# implementation does **not** do that. It reads
 `s_activeCli`, but does not branch on it. It always sends `GetGridReplay()`, then subscribes the
 consumer, then sends `Ctrl+L`.
@@ -2310,7 +2594,7 @@ Key files:
 
 On reconnect and especially on hard refresh, the browser could repaint the top/full screen
 twice or replay the entire visible AI CLI session again. This was most noticeable with
-full-screen TUI CLIs like Codex/Claude/Gemini/Copilot.
+full-screen TUI CLIs like Codex/Claude/Antigravity/Copilot.
 
 **Root cause:** the local WebSocket attach path unconditionally sent `terminal.GetGridReplay()`
 before subscribing the live WebSocket consumer. For managed AI CLI sessions, this conflicted
@@ -2319,7 +2603,7 @@ refresh. Plain shell / line-oriented sessions could still use replay, but manage
 needed redraw-first attach instead.
 
 **Fix:** updated `VibeRails/Services/Terminal/TerminalSessionService.cs` so managed AI CLIs
-(`Claude`, `Codex`, `Gemini`, `Copilot`) now skip local replay on attach and instead subscribe
+(`Claude`, `Codex`, `Antigravity`, `Copilot`) now skip local replay on attach and instead subscribe
 the WebSocket first, then request a redraw with `Ctrl+L`. Plain shell / line-oriented sessions
 still use `GetGridReplay()`.
 

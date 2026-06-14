@@ -1,22 +1,6 @@
-export function renderTerminalMenuHtml() {
-    return `
-        <div class="vb-terminal-menu-wrap" id="vb-terminal-menu-wrap">
-            <button type="button" class="vb-terminal-control-btn icon-btn" id="terminal-menu-btn" title="Terminal actions" aria-label="Terminal actions" aria-haspopup="menu" aria-expanded="false">
-                <i class="fa-solid fa-ellipsis-vertical"></i>
-            </button>
-            <div class="vb-terminal-menu" id="vb-terminal-menu" role="menu" hidden>
-                <button type="button" id="terminal-multirun-btn" role="menuitem">
-                    <i class="fa-solid fa-layer-group"></i>
-                    <span>Multi Run</span>
-                </button>
-                <button type="button" id="terminal-senddebug-btn" role="menuitem">
-                    <i class="fa-solid fa-bug"></i>
-                    <span>Send debug log</span>
-                </button>
-            </div>
-        </div>
-    `;
-}
+// The kebab (⋮) "Terminal actions" dropdown that used to live here was merged
+// into the settings panel's Actions block (terminal-settings.js) on 2026-06-12.
+// The generic TerminalMenu controller below is still used by the download menu.
 
 /**
  * Generic dropdown menu controller. Each instance owns its own outside-click

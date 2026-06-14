@@ -108,7 +108,7 @@ namespace VibeRails
             // LLM CLI Environment services
             serviceCollection.AddScoped<IClaudeLlmCliEnvironment, ClaudeLlmCliEnvironment>();
             serviceCollection.AddScoped<ICodexLlmCliEnvironment, CodexLlmCliEnvironment>();
-            serviceCollection.AddScoped<IGeminiLlmCliEnvironment, GeminiLlmCliEnvironment>();
+            serviceCollection.AddScoped<IAntigravityLlmCliEnvironment, AntigravityLlmCliEnvironment>();
             serviceCollection.AddScoped<ICopilotLlmCliEnvironment, CopilotLlmCliEnvironment>();
             serviceCollection.AddScoped<LlmCliEnvironmentService>();
 
@@ -118,7 +118,7 @@ namespace VibeRails
             // LLM CLI Launcher services
             serviceCollection.AddScoped<IClaudeLlmCliLauncher, ClaudeLlmCliLauncher>();
             serviceCollection.AddScoped<ICodexLlmCliLauncher, CodexLlmCliLauncher>();
-            serviceCollection.AddScoped<IGeminiLlmCliLauncher, GeminiLlmCliLauncher>();
+            serviceCollection.AddScoped<IAntigravityLlmCliLauncher, AntigravityLlmCliLauncher>();
             serviceCollection.AddScoped<ICopilotLlmCliLauncher, CopilotLlmCliLauncher>();
             serviceCollection.AddScoped<ILaunchLLMService, LaunchLLMService>();
 

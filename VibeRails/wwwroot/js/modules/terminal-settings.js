@@ -8,10 +8,20 @@ export function renderTerminalSettingsPanelHtml() {
     return `
         <div class="vb-terminal-settings-panel" id="vb-terminal-settings-panel">
             <div class="vb-terminal-settings-header">
-                <span>Terminal Settings</span>
+                <span>Features and Settings</span>
                 <button type="button" id="terminal-settings-close">&#x2715;</button>
             </div>
             <div class="vb-terminal-settings-body">
+                <div class="vb-terminal-settings-actions" role="group" aria-label="Terminal actions">
+                    <button type="button" class="vb-terminal-settings-action-btn" id="terminal-multirun-btn">
+                        <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
+                        <span>Multi Run</span>
+                    </button>
+                    <button type="button" class="vb-terminal-settings-action-btn" id="terminal-senddebug-btn">
+                        <i class="fa-solid fa-bug" aria-hidden="true"></i>
+                        <span>Send debug log</span>
+                    </button>
+                </div>
                 <div class="vb-terminal-settings-section open" data-settings-section="theme">
                     <button type="button" class="vb-terminal-settings-section-title" id="terminal-settings-section-theme" aria-expanded="true" aria-controls="terminal-settings-section-theme-content" data-settings-toggle="theme">
                         <span class="vb-terminal-settings-section-label">
@@ -73,41 +83,14 @@ export function renderTerminalSettingsPanelHtml() {
                         </div>
                     </div>
                 </div>
-                <div class="vb-terminal-settings-section" data-settings-section="cursor">
-                    <button type="button" class="vb-terminal-settings-section-title" id="terminal-settings-section-cursor" aria-expanded="false" aria-controls="terminal-settings-section-cursor-content" data-settings-toggle="cursor">
-                        <span class="vb-terminal-settings-section-label">
-                            <i class="fa-solid fa-i-cursor" aria-hidden="true"></i>
-                            <span>Cursor</span>
-                        </span>
-                        <i class="fa-solid fa-chevron-down vb-terminal-settings-section-chevron" aria-hidden="true"></i>
-                    </button>
-                    <div class="vb-terminal-settings-section-content" id="terminal-settings-section-cursor-content" role="region" aria-labelledby="terminal-settings-section-cursor">
-                        <div class="vb-terminal-settings-section-inner">
-                            <div class="vb-terminal-settings-row">
-                                <label>Active style</label>
-                                <select id="terminal-settings-cursor-style">
-                                    <option value="block">Block</option>
-                                    <option value="bar">Bar</option>
-                                    <option value="underline">Underline</option>
-                                </select>
-                            </div>
-                            <div class="vb-terminal-settings-row">
-                                <label>Inactive style</label>
-                                <select id="terminal-settings-cursor-inactive">
-                                    <option value="outline">Outline</option>
-                                    <option value="block">Block</option>
-                                    <option value="bar">Bar</option>
-                                    <option value="underline">Underline</option>
-                                    <option value="none">None</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
     `;
 }
+// NOTE: the Cursor section (active/inactive style selects) was deliberately
+// removed 2026-06-12 — the cursor is owned by the TUI/xterm defaults now.
+// Do not reintroduce user-facing cursor styling; see TERMINAL.md
+// ("Cursor flicker" entries) for the history that motivated this.
 
 export class TerminalSettings {
     constructor(container, manager) {
@@ -124,8 +107,6 @@ export class TerminalSettings {
         this._rendererSelect = null;
         this._rendererStatusEl = null;
         this._resizeDebounceSelect = null;
-        this._cursorStyleSelect = null;
-        this._cursorInactiveSelect = null;
         this._themeListEl = null;
         this._sectionToggles = [];
     }
@@ -151,16 +132,6 @@ export class TerminalSettings {
         catch { return null; }
     }
 
-    loadCursorStyle() {
-        try { return localStorage.getItem('viberails_terminal_cursorStyle') || 'block'; }
-        catch { return 'block'; }
-    }
-
-    loadCursorInactiveStyle() {
-        try { return localStorage.getItem('viberails_terminal_cursorInactiveStyle') || 'outline'; }
-        catch { return 'outline'; }
-    }
-
     // 'default' = 140 ms (matches community xterm fit-addon norm)
     // 'extended' = 2 s (opt-in; suppresses stacked-repaints during slow drags).
     // See runbooks/terminal/TERMINAL.md "Stacked repaints during drag-resize".
@@ -181,8 +152,6 @@ export class TerminalSettings {
         this._rendererSelect    = this._container.querySelector('#terminal-settings-renderer');
         this._rendererStatusEl  = this._container.querySelector('#terminal-settings-renderer-active');
         this._resizeDebounceSelect = this._container.querySelector('#terminal-settings-resize-debounce');
-        this._cursorStyleSelect = this._container.querySelector('#terminal-settings-cursor-style');
-        this._cursorInactiveSelect = this._container.querySelector('#terminal-settings-cursor-inactive');
         this._themeListEl       = this._container.querySelector('#vb-terminal-settings-theme-list');
         this._sectionToggles    = Array.from(this._container.querySelectorAll('[data-settings-toggle]'));
 
@@ -192,13 +161,22 @@ export class TerminalSettings {
             toggle.addEventListener('click', () => this.toggleSection(toggle.dataset.settingsToggle));
         });
 
+        // Actions block (top of panel, always visible) — these open modals, so
+        // close the slide-over first or it would sit on top of the backdrop.
+        this._container.querySelector('#terminal-multirun-btn')?.addEventListener('click', () => {
+            this.togglePanel(false);
+            this._manager._showMultiRunModal();
+        });
+        this._container.querySelector('#terminal-senddebug-btn')?.addEventListener('click', () => {
+            this.togglePanel(false);
+            this._manager._sendDebugLog();
+        });
+
         this._fontSizeInput?.addEventListener('change', (e) => {
             this._manager.adjustFontSize(0, parseInt(e.target.value, 10));
         });
         this._rendererSelect?.addEventListener('change', (e) => this.applyRendererPreference(e.target.value));
         this._resizeDebounceSelect?.addEventListener('change', (e) => this.applyResizeDebounce(e.target.value));
-        this._cursorStyleSelect?.addEventListener('change', (e) => this.applyCursorStyle(e.target.value));
-        this._cursorInactiveSelect?.addEventListener('change', (e) => this.applyCursorInactiveStyle(e.target.value));
 
         this._populate();
         this._restoreSections();
@@ -243,8 +221,6 @@ export class TerminalSettings {
 
         if (this._rendererSelect) this._rendererSelect.value = this.loadRenderer();
         if (this._resizeDebounceSelect) this._resizeDebounceSelect.value = this.loadResizeDebounce();
-        if (this._cursorStyleSelect) this._cursorStyleSelect.value = this.loadCursorStyle();
-        if (this._cursorInactiveSelect) this._cursorInactiveSelect.value = this.loadCursorInactiveStyle();
 
         const savedTheme = this.loadTheme();
         if (savedTheme) {
@@ -316,8 +292,8 @@ export class TerminalSettings {
         if (themeKey && window.CXL_THEMES?.[themeKey]) {
             vibeTerminal.setTheme(window.CXL_THEMES[themeKey]);
         }
-        vibeTerminal.setCursorStyle(this.loadCursorStyle());
-        vibeTerminal.setCursorInactiveStyle(this.loadCursorInactiveStyle());
+        // Cursor style is intentionally NOT applied here — the TUI and xterm
+        // defaults own the cursor (user-facing cursor settings removed 2026-06-12).
     }
 
     applyTheme(key) {
@@ -345,20 +321,6 @@ export class TerminalSettings {
         // takes effect on the next resize event — no tab restart needed.
         const normalized = value === 'extended' ? 'extended' : 'default';
         try { localStorage.setItem('viberails_terminal_resizeDebounce', normalized); } catch {}
-    }
-
-    applyCursorStyle(style) {
-        try { localStorage.setItem('viberails_terminal_cursorStyle', style); } catch {}
-        for (const tab of this._manager.tabs.values()) {
-            tab.instance.vibeTerminal?.setCursorStyle(style);
-        }
-    }
-
-    applyCursorInactiveStyle(style) {
-        try { localStorage.setItem('viberails_terminal_cursorInactiveStyle', style); } catch {}
-        for (const tab of this._manager.tabs.values()) {
-            tab.instance.vibeTerminal?.setCursorInactiveStyle(style);
-        }
     }
 
     syncFontSizeInput(size) {

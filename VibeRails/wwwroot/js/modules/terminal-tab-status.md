@@ -6,13 +6,22 @@ tab button (e.g. `Connected`, `Thinking`, `Ready`, `Disconnected`).
 
 ## States
 
-| State          | Meaning                                                                                  | Icon              | Text color       |
-| -------------- | ---------------------------------------------------------------------------------------- | ----------------- | ---------------- |
-| `CONNECTED`    | Socket is open, no user interaction yet.                                                 | link              | slate `#94a3b8`  |
-| `THINKING`     | User pressed Enter; backend is working. Animated emoji cycle + indeterminate progress.   | cycling emoji     | shimmer gradient |
-| `READY`        | Backend signaled idle/completion after a `THINKING` turn. Background tabs get a flash.   | circle-check      | slate `#94a3b8`  |
-| `WAITING`      | Backend detected an interactive selection prompt (e.g. `•`/`◦` menu). Pulsing icon; background tabs get a yellow flash. | hand-point-up     | yellow `#f9e2af` |
-| `DISCONNECTED` | WebSocket closed.                                                                        | plug-circle-xmark | peach `#fab387`  |
+| State          | Display text                                  | Meaning                                                                                  | Icon              | Text color       |
+| -------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------- | ---------------- |
+| `CONNECTED`    | "Connected"                                   | Socket is open, no user interaction yet.                                                 | dot (LED)         | slate `#94a3b8`  |
+| `THINKING`     | "Thinking" (agents) / "Working" (shell tab)   | User pressed Enter (or shell PTY output); backend is working. Spinner + indeterminate progress. | spinner           | shimmer gradient |
+| `READY`        | "Ready"                                       | Backend signaled idle/completion after a `THINKING` turn. Background tabs get a flash.   | circle-check      | slate `#94a3b8`  |
+| `WAITING`      | "Waiting for user input"                      | Backend detected an interactive selection prompt (e.g. `•`/`◦` menu). Pulsing icon; background tabs get a yellow flash. | hand-point-up     | yellow `#f9e2af` |
+| `DISCONNECTED` | "Disconnected"                                | WebSocket closed.                                                                        | plug-circle-xmark | peach `#fab387`  |
+
+> **Wording note (2026-06-12).** The status strings — "Thinking", "Ready",
+> "Waiting for user input" — are deliberate product voice; do **not** rename
+> or hide them (a same-day attempt to rename THINKING's text to "Working"
+> everywhere was vetoed by Rob). The one sanctioned exception: the **shell
+> tab** says "Working" while `THINKING`, because a dev server emitting output
+> isn't thinking (`SHELL_THINKING_TEXT` / `_statusTextFor`). Internal state
+> names, CSS classes, and transitions are unchanged either way; the strings
+> are pinned by unit tests.
 
 > **Note on the retired `ACTIVE` state.** An earlier version had a separate
 > `ACTIVE` ("user is composing") state driven by a `_hasPrintableChar` heuristic
@@ -57,7 +66,8 @@ tab button (e.g. `Connected`, `Thinking`, `Ready`, `Disconnected`).
 And on socket close from *any* state: → `DISCONNECTED`.
 
 `onWaitingForUserSelection()` can move us into `WAITING` from any state except
-`DISCONNECTED`. From `WAITING`:
+`DISCONNECTED` **and except while the user is composing** (`_userComposing` —
+see below). From `WAITING`:
 
 - Enter (`\r`) → `THINKING`.
 - A single printable byte (0x20–0x7E) → `CONNECTED` — the user has started
@@ -84,9 +94,13 @@ events are routed into `onSessionIdle()` / `onSessionCompleted()` /
    reports `\x1b[I/O`, DSR auto-replies `\x1b[24;80R`), bracketed-paste
    wrappers, and clipboard pastes all arrive as multi-byte chunks and are
    excluded — re-introducing the false positives that retired the ACTIVE
-   state would defeat the purpose. This is the only printable-byte transition
-   in the machine; THINKING, CONNECTED, and READY all still ignore typing.
-4. Everything else is ignored. Typed characters during `THINKING`, arrow
+   state would defeat the purpose.
+4. A single printable byte (0x20–0x7E) while in `CONNECTED` / `READY` sets
+   `_userComposing = true` (state itself is unchanged — typing at a resting
+   tab is still inert). This is the *only* effect typing has outside `WAITING`;
+   `THINKING` deliberately ignores it (type-ahead while the agent works must
+   not arm the guard).
+5. Everything else is ignored. Typed characters during `THINKING`, arrow
    keys, function keys, and xterm auto-responses to server queries all flow
    through without changing the state.
 
@@ -163,7 +177,32 @@ Fired when the backend detects an interactive selection prompt in PTY output
 (Claude-style `•`/`◦` menus or Codex-style "enter to submit / esc to cancel"
 footers — see `WaitingForUserInputObserver`). The backend debounces this to
 at most once per 30 seconds per session so a redrawing menu doesn't spam
-events. Moves the tab into `WAITING` unless the tab is `DISCONNECTED`.
+events. Moves the tab into `WAITING` unless the tab is `DISCONNECTED` **or
+`_userComposing`** (see below).
+
+## The `_userComposing` flag
+
+`_userComposing` suppresses a *stale* `WAITING` flip while the user is mid-type.
+
+The backend detector can false-fire while the user is typing their next message:
+the agent's composer repaints per keystroke, and a slow per-keystroke repaint
+looks enough like an idle keepalive that `WaitingForUserInputObserver`
+classifies it as a wait (session `dd6819b6`: the tab flipped to "Waiting for
+user input" while the user was typing "…few **and** then…"). Flagging the user
+as composing lets `onWaitingForUserSelection` ignore that event.
+
+| Trigger | `_userComposing` |
+| ------- | ---------------- |
+| Printable keystroke (0x20–0x7E) in `CONNECTED` / `READY` | `true` |
+| Entering `THINKING` (i.e. the user submitted) | `false` |
+
+The clear-on-submit is what makes this safe against false *negatives* — the
+failure mode we care most about. A genuine prompt (approval menu, etc.) only
+appears *after* the user submits a turn, and submitting clears the flag, so a
+real wait is never suppressed. Keystrokes during `THINKING` (type-ahead) do not
+set the flag, for the same reason. We guard on "is composing", **not** on
+"state is `READY`": a plain `READY`-blocks-`WAITING` rule would also eat a real
+prompt that arrives after the tab has settled to `READY`.
 
 ## The `_awaitingFirstIdle` flag
 
@@ -195,10 +234,42 @@ Beyond updating `_status` and calling `_applyVisuals`:
   accent) so "waiting for you" looks the same on every tab — it's a
   per-user-attention signal, not a per-CLI one. The active tab gets the
   pulsing `hand-point-up` icon instead.
-- **Thinking emoji cycle.** `_applyVisuals` stops any running emoji timer
-  and, if the new state is `THINKING`, starts a 2-second cycle picking a
-  random emoji from `THINKING_EMOJI` (never repeating the previous one
-  back-to-back).
+- **Working spinner.** `_applyVisuals` renders a small `vb-spinner` in the
+  icon slot while in `THINKING` (the earlier emoji-cycle implementation was
+  replaced by the spinner; the `vb-emoji-*` CSS keyframes are leftovers).
+
+## How the tab chrome presents the status (2026-06-12 redesign)
+
+The state machine is unaware of these — they're pure CSS/manager behavior in
+`terminal-multitab.js` + `style.css`, listed here because they affect when the
+status is actually *visible*:
+
+- **Hover swaps status for actions.** Hovering a tab fades out
+  `.vb-tab-status-section` and reveals the rename/minimize/close cluster
+  (`.vb-terminal-tab-actions`), absolutely positioned over the status area so
+  nothing reflows. The status (and its state) is untouched underneath. On
+  tight tabs only the rename pen stages out (≤170px; right-click still
+  renames) — minimize + close survive at every real tab width — and gaps
+  between buttons click through to activation (cluster is
+  `pointer-events: none`; only revealed buttons accept events).
+- **Narrow tabs ellipsize — they never hide the status words.** Tabs are
+  content-sized + left-aligned (`flex: 0 1 auto`), clamped between
+  `min-width: 150px` and `max-width: 300px` — they do NOT grow to fill the
+  strip. They shrink toward the min only when the strip runs out of room (no
+  viewport-based width caps — VS Code panels are always "narrow" by viewport).
+  The **status section is `flex-shrink: 0`** — the status word never shrinks
+  away; only the label ellipsizes (a longer name used to squeeze "Thinking"
+  down to nothing). The tab NAME keeps a readable floor
+  (`.vb-tab-identity` `min-width: 100px` — budget math in style.css; 110px
+  overflowed the 150px minimum and clipped the spinner); above that floor a long label
+  yields before the status text ellipsizes — priority is logo > readable
+  name > status text > rest of the label (Rob, 2026-06-12: the name must
+  never crop to "Cl…" while "Connected" stays fully spelled out).
+- **Minimized tabs (icon chips).** A tab minimized via its tab-strip button
+  collapses to brand-logo + status-icon (`.is-minimized`, managed by
+  `toggleTabMinimized`/`applyTabMinimized` in `terminal-multitab.js`). All
+  status-driven visuals — spinner, waiting pulse, ready/waiting flashes,
+  progress bar, accent underline — still apply to the chip.
 
 ## CSS hooks
 

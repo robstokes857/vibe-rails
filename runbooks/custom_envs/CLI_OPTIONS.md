@@ -1,7 +1,7 @@
 # Custom Environment CLI Options
 
 This runbook explains how to change, add, or delete custom environment options
-for the four managed TUI CLIs: Claude, Codex, Gemini, and Copilot.
+for the four managed TUI CLIs: Claude, Codex, Antigravity, and Copilot.
 
 Use it when editing the Environments page's create/edit modal, the per-CLI
 settings APIs, or the generated launch arguments stored in `CustomArgs`.
@@ -15,11 +15,13 @@ and launch behavior before changing generated arguments:
 - Claude settings: https://code.claude.com/docs/en/settings
 - Codex: https://developers.openai.com/codex/cli/reference
 - Codex config: https://developers.openai.com/codex/config-reference
-- Gemini: https://geminicli.com/docs/cli/cli-reference/
-- Gemini settings: https://geminicli.com/docs/reference/configuration/
+- Antigravity (agy): https://antigravity.google/docs/cli-using (also `cli-getting-started`, `cli-settings`)
+- Antigravity authoritative flags: run `agy --help` (and `agy models` for the live model catalog)
 - Copilot: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference
 
-Status checked against the upstream references above on June 4, 2026.
+Status checked against the upstream references above on June 13, 2026. Gemini was
+replaced by Antigravity (agy) on 2026-06-13; agy flags were verified against
+`agy --help` (v1.0.8), since the third-party write-ups conflicted with each other.
 
 Important distinction: `CustomArgs` and `CustomPrompt` are VibeRails' launch
 contract. The DTO field lists below describe fields VibeRails currently
@@ -42,7 +44,9 @@ settings services must never read, write, or remove these native keys:
 
 - Claude: `permissions.*` (`permissions.allow`, `permissions.deny`, `permissions.defaultMode`).
 - Codex: `approval_policy`, `sandbox_mode`, `model_provider`.
-- Gemini: `general.defaultApprovalMode`.
+- Antigravity (agy): none — agy is launch-flag-only (no settings file), so there
+  are no native settings keys to manage. YOLO is the `--dangerously-skip-permissions`
+  launch flag.
 
 Why this rule exists: a settings-file key that the UI cannot fully drive becomes
 destructive. A previous build "managed" `permissions.allow` while no UI control
@@ -52,7 +56,7 @@ otherwise leave it alone (preserve it like any unknown field).
 
 ## Model Lists (hand-maintained — refresh these)
 
-The Claude and Codex **Model** dropdowns are pinned, hand-curated lists. They do
+The Claude, Codex, and Antigravity **Model** dropdowns are pinned, hand-curated lists. They do
 not auto-discover models, so this runbook is the place that owns them: when an
 upstream model ships or is retired, update the list here and in code. This is the
 main reason this section exists — a future change ("Claude shipped 4.9", "Haiku
@@ -63,6 +67,7 @@ Where they live in code
 
 - Claude: `renderClaudeModelOptions()`.
 - Codex: `renderCodexModelOptions()`.
+- Antigravity: `renderAntigravityModelOptions()`.
 
 Current pinned values:
 
@@ -73,6 +78,12 @@ Current pinned values:
 - Codex: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`,
   `gpt-5.3-codex-spark`, `gpt-5.2`, plus an empty "Default (Codex recommended)"
   entry.
+- Antigravity (agy): `Gemini 3.5 Flash (Medium)`, `Gemini 3.5 Flash (High)`,
+  `Gemini 3.5 Flash (Low)`, `Gemini 3.1 Pro (Low)`, `Gemini 3.1 Pro (High)`,
+  `Claude Sonnet 4.6 (Thinking)`, `Claude Opus 4.6 (Thinking)`, `GPT-OSS 120B (Medium)`,
+  plus an empty "Default (Antigravity recommended)" entry. NOTE: agy's `--model` value
+  is the full display string verbatim — spaces and parens included — e.g.
+  `--model "Gemini 3.5 Flash (Low)"`, not a slug. (Verified on this host 2026-06-13.)
 
 The rule:
 
@@ -92,6 +103,10 @@ How to verify what's current:
   maps to which version).
 - Codex: run `codex debug models` to print Codex's live model catalog as JSON, and
   the Codex config reference at https://developers.openai.com/codex/config-reference.
+- Antigravity: run `agy models` — it prints the catalog, but as an INTERACTIVE picker
+  with no `--json`/scriptable flag (it hangs in a non-TTY), so read the printed names
+  and update the list by hand. Hands-on reference:
+  https://codelabs.developers.google.com/antigravity-cli-hands-on
 
 ## Current Managed Settings
 
@@ -159,38 +174,32 @@ Starting messages live in `CustomPrompt`. Legacy VibeRails alias keys still
 stripped on save: `prompt`, `yolo`, `full_auto`, `no_alt_screen`, `oss`,
 `ask_for_approval`, and `approval`.
 
-### Gemini
+### Antigravity (agy)
 
-UI-managed launch and prompt settings:
+Antigravity is **launch-flag-only** — no settings file, so it is managed exactly
+like Copilot (everything rides in `CustomArgs` / `CustomPrompt`). The flags below
+are verified against `agy --help` (v1.0.8), not third-party docs.
 
-- Initial Message: stored in `CustomPrompt`; sent as the first prompt.
-- Sandbox Mode: `--sandbox` (settings file `tools.sandbox`).
-- YOLO Mode: `--approval-mode yolo`; legacy `--yolo` is still read from saved
-  args. This is the only permission control.
-- Vim Mode: stored in settings file.
-- Check for Updates: stored in settings file.
-- Additional Arguments: preserved in `CustomArgs` for advanced Gemini flags not
-  modeled by VibeRails (an unmodeled `--approval-mode auto_edit`/`plan` lands here).
+- Initial Message: stored in `CustomPrompt`; sent as
+  `agy --prompt-interactive=<text>` (agy has no positional-prompt form — `--print`/`-p`
+  is a one-shot, non-interactive mode that would exit the session).
+- Model: `--model`; pinned dropdown from `renderAntigravityModelOptions()` (see Model
+  Lists). The value is the full display string `agy models` prints, e.g.
+  `--model "Gemini 3.5 Flash (Low)"` — spaces + parens are part of the value, and they
+  round-trip safely because `ShellArgSanitizer` quotes each arg at emit.
+- Sandbox Mode: `--sandbox` (run with terminal restrictions enabled).
+- YOLO Mode: `--dangerously-skip-permissions` — auto-approves every tool
+  permission request. This is the only permission control.
+- Additional Arguments: preserved in `CustomArgs` for advanced agy flags not
+  modeled by VibeRails (e.g. `--add-dir <dir>`, `--conversation <id>`).
 
-Settings file fields persisted through `GeminiSettingsDto`:
-
-- `general.vimMode`
-- `general.enableAutoUpdate`
-- `tools.sandbox`
-
-`theme` is read (preserved) but not written. Per the permissions policy,
-VibeRails never reads, writes, or removes `general.defaultApprovalMode`; YOLO is
-launch-only.
-
-Old fields intentionally not supported in settings files:
-
-- `checkForUpdates`
-- `sandbox.enabled`
-- `tools.autoAccept`
-
-Launch arg compatibility still handled by the frontend:
-
-- `--yolo` / `-y` in saved launch args
+There is no `AntigravitySettingsDto`, no settings file, and no
+`/api/v1/antigravity/settings` route. Vim Mode and Check-for-Updates (Gemini
+settings-file features) were dropped in the switch: agy's per-environment
+config-dir mechanism is not a documented/verifiable env var, so per the
+compatibility policy VibeRails writes no config for it. Model IS a pinned UI dropdown
+(`renderAntigravityModelOptions()`, see Model Lists) — its `--model` value is the full
+display string `agy models` prints, e.g. `--model "Gemini 3.5 Flash (Low)"`.
 
 ### Copilot
 
@@ -222,8 +231,8 @@ Custom environments have two layers:
 
 1. `CustomArgs` and `CustomPrompt` live in the `Environments` table and apply
    to every launch path.
-2. Per-CLI settings files exist for Claude, Codex, and Gemini only. Copilot is
-   currently frontend-managed through `CustomArgs` and `CustomPrompt`.
+2. Per-CLI settings files exist for Claude and Codex only. Antigravity and Copilot
+   are frontend-managed through `CustomArgs` and `CustomPrompt`.
 
 The important rule: a visible control is not enough. Every CLI option must
 round-trip through render, read, save, parse existing args, and launch.
@@ -258,16 +267,13 @@ Settings APIs for CLIs that have config files:
 - `VibeRails/Routes/LlmSettingsRoutes.cs`
 - `VibeRails/DTOs/ClaudeSettingsDto.cs`
 - `VibeRails/DTOs/CodexSettingsDto.cs`
-- `VibeRails/DTOs/GeminiSettingsDto.cs`
 - `VibeRails/Services/LlmClis/ClaudeLlmCliEnvironment.cs`
 - `VibeRails/Services/LlmClis/CodexLlmCliEnvironment.cs`
-- `VibeRails/Services/LlmClis/GeminiLlmCliEnvironment.cs`
 
 Tests:
 
 - `Tests/ClaudeSettingsTests.cs`
 - `Tests/CodexSettingsTests.cs`
-- `Tests/GeminiSettingsTests.cs`
 - `Tests/ShellArgSanitizerTests.cs` if changing accepted argument syntax.
 
 ## Frontend Checklist
@@ -283,7 +289,7 @@ For a new or changed CLI option, update the matching branch in
 6. Add interactions in `bindCliSettingsInteractions()` only when controls affect each other.
 
 The managed CLIs hide the raw `Custom Arguments` field through
-`usesManagedCustomArgs()`. Gemini and Copilot expose an `Additional Arguments`
+`usesManagedCustomArgs()`. Antigravity and Copilot expose an `Additional Arguments`
 field to preserve flags not covered by first-class controls. If you add a new
 first-class option for those CLIs, remove its flags from `additionalArgs` in the
 merge function so the option is not emitted twice after save.
@@ -302,7 +308,7 @@ Before adding any settings-file option, apply two hard rules:
   user's value on every save. If VibeRails does not fully own the key, leave it
   alone (preserve it like an unknown field).
 
-For Claude, Codex, or Gemini settings-file options:
+For Claude or Codex settings-file options:
 
 1. Add the property to the relevant settings DTO.
 2. Read it in `GetSettings()`.
@@ -339,16 +345,19 @@ Codex:
 - Remove old VibeRails-managed keys instead of adding compatibility read paths.
 - `customPrompt` is populated from the Codex starting message.
 
-Gemini:
+Antigravity (agy):
 
-- Settings file: `{envBasePath}/{envName}/gemini/config/gemini/settings.json`.
-- API endpoint prefix: `/api/v1/gemini/settings/{envName}`.
-- Current launch args come from `buildGeminiCustomArgs()`.
-- Current settings payload comes from `GeminiSettingsDto`.
-- YOLO mode is a launch flag (`--approval-mode yolo`), not a persisted
-  `security.disableYoloMode` setting. Legacy `--yolo` saved args are still
-  parsed.
-- `customPrompt` is populated from the Gemini initial message.
+- No settings file — launch-flag-only (like Copilot). There is no DTO and no
+  `/api/v1/antigravity/settings` route.
+- Executable is `agy` (not "antigravity"); the in-app PTY maps it in
+  `CommandService.PrepareSession`, and the initial-prompt convention lives in
+  `LlmPromptArgvBuilder` (`--prompt-interactive=<text>`).
+- Current launch args come from `buildAntigravityCustomArgs()`; existing args are
+  round-tripped by `mergeAntigravitySettingsFromCustomArgs()`.
+- Sandbox is `--sandbox`; YOLO is `--dangerously-skip-permissions` (the only
+  permission control). Model is `--model` via `renderAntigravityModelOptions()` (values
+  are the full display strings with spaces/parens, e.g. `"Gemini 3.5 Flash (Low)"`).
+- `customPrompt` is populated from the Antigravity initial message.
 
 Copilot:
 
@@ -419,7 +428,6 @@ dotnet build --artifacts-path .codex-test-artifacts
 Targeted tests when settings DTOs or services change:
 
 ```powershell
-dotnet test Tests\Tests.csproj --artifacts-path .codex-test-artifacts --filter FullyQualifiedName~GeminiSettingsTests
 dotnet test Tests\Tests.csproj --artifacts-path .codex-test-artifacts --filter FullyQualifiedName~CodexSettingsTests
 dotnet test Tests\Tests.csproj --artifacts-path .codex-test-artifacts --filter FullyQualifiedName~ClaudeSettingsTests
 ```

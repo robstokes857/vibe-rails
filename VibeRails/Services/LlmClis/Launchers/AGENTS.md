@@ -15,7 +15,7 @@ All launchers build commands using the unified `--env` flag:
 - **Base CLI (no custom env)**: `vb --env {cliName} --workdir "{dir}"`
 
 Only `--env` is supported for environment bootstrap mode. The value is resolved smartly:
-1. If it matches an LLM enum name (claude/codex/gemini, case-insensitive) → base CLI launch
+1. If it matches an LLM enum name (claude/codex/antigravity, case-insensitive) → base CLI launch
 2. Otherwise → custom environment name, looked up in DB via `FindEnvironmentByNameAsync()`
 
 The old `--environment` / `--lmbootstrap` aliases and broader CLI command router have been removed.
@@ -29,7 +29,8 @@ IBaseLlmCliLauncher (Interface)
     │       │
     │       ├── ClaudeLlmCliLauncher   → CLAUDE_CONFIG_DIR
     │       ├── CodexLlmCliLauncher    → CODEX_HOME
-    │       └── GeminiLlmCliLauncher   → XDG_* (multiple env vars)
+    │       ├── AntigravityLlmCliLauncher → (none — launch-flag-only)
+    │       └── CopilotLlmCliLauncher  → (none — launch-flag-only)
     │
     └── LaunchLLMService (Orchestrator - selects launcher by LLM type)
 ```
@@ -46,154 +47,31 @@ IBaseLlmCliLauncher (Interface)
 - **Config Env Var**: `CODEX_HOME`
 - **Config Path**: `{envBasePath}/{envName}/codex`
 
-### GeminiLlmCliLauncher
-- **Executable**: `gemini`
-- **Config Env Vars**: Uses XDG Base Directory specification
-  - `XDG_CONFIG_HOME` → `{envBasePath}/{envName}/gemini/config`
-  - `XDG_DATA_HOME` → `{envBasePath}/{envName}/gemini/data`
-  - `XDG_CACHE_HOME` → `{envBasePath}/{envName}/gemini/cache`
-  - `XDG_STATE_HOME` → `{envBasePath}/{envName}/gemini/state`
+### AntigravityLlmCliLauncher
+- **Executable**: `agy` (note: the binary name differs from the product/enum name "Antigravity"; the in-app PTY maps it in `CommandService.PrepareSession`)
+- **Config Env Var**: none — agy is launch-flag-only. There is no verified per-environment
+  config-dir env var (the Node-era Gemini CLI used XDG; the Go-based agy exposes no documented
+  equivalent), so `GetEnvironmentVariables` returns an empty dictionary, like Copilot.
 
-## Gemini Settings Feature
+## Antigravity (agy) — no settings feature
 
-### Business Logic
+Antigravity is **launch-flag-only** (like Copilot): there is no settings file, no
+`AntigravitySettingsDto`, no `IAntigravityLlmCliEnvironment.GetSettings/SaveSettings`,
+and no `/api/v1/antigravity/settings` route. All options are launch flags carried in
+`CustomArgs` / `CustomPrompt`:
 
-The Gemini CLI supports per-environment settings configuration. Settings are stored in `settings.json` within the environment's config directory.
+- Sandbox → `--sandbox`
+- YOLO → `--dangerously-skip-permissions` (the only permission control)
+- Initial message → `agy --prompt-interactive=<text>`
+- Model → `--model <id>` (via Additional Arguments; not a UI dropdown)
 
-**Settings File Location**:
-```
-{envBasePath}/{envName}/gemini/config/gemini/settings.json
-```
-
-**Supported Settings**:
-
-| Setting | DTO Property | JSON Path | Type | Default | Description |
-|---------|--------------|-----------|------|---------|-------------|
-| Theme | `Theme` | `theme` | string | "Default" | UI theme (Default/Dark/Light) |
-| Sandbox | `SandboxEnabled` | `sandbox.enabled` | bool | true | Containerized tool execution |
-| Auto-Approve | `AutoApproveTools` | `tools.autoAccept` | bool | false | Skip confirmations for safe ops |
-| Vim Mode | `VimMode` | `general.vimMode` | bool | false | Vim keybindings |
-| Updates | `CheckForUpdates` | `checkForUpdates` | bool | true | Auto-update checking |
-| YOLO Mode | `YoloMode` | `security.disableYoloMode` (inverted) | bool | false | Auto-approve everything |
-
-**JSON Mapping**:
-```json
-{
-  "theme": "Default",
-  "checkForUpdates": true,
-  "general": {
-    "vimMode": false
-  },
-  "sandbox": {
-    "enabled": true
-  },
-  "tools": {
-    "autoAccept": false
-  },
-  "security": {
-    "disableYoloMode": true
-  }
-}
-```
-
-Note: `YoloMode` is inverted from `disableYoloMode` - when `YoloMode=true`, we set `disableYoloMode=false`.
-
-### Technical Specs
-
-#### DTO: `GeminiSettingsDto`
-**File**: [DTOs/GeminiSettingsDto.cs](../../DTOs/GeminiSettingsDto.cs)
-
-```csharp
-public class GeminiSettingsDto
-{
-    public string Theme { get; set; } = "Default";
-    public bool SandboxEnabled { get; set; } = true;
-    public bool AutoApproveTools { get; set; } = false;
-    public bool VimMode { get; set; } = false;
-    public bool CheckForUpdates { get; set; } = true;
-    public bool YoloMode { get; set; } = false;
-}
-```
-
-#### Interface: `IGeminiLlmCliEnvironment`
-**File**: [Interfaces/IGeminiLlmCliEnvironment.cs](../../Interfaces/IGeminiLlmCliEnvironment.cs)
-
-```csharp
-public interface IGeminiLlmCliEnvironment : IBaseLlmCliEnvironment
-{
-    Task<GeminiSettingsDto> GetSettings(string envName, CancellationToken cancellationToken);
-    Task SaveSettings(string envName, GeminiSettingsDto settings, CancellationToken cancellationToken);
-}
-```
-
-#### Service Implementation: `GeminiLlmCliEnvironment`
-**File**: [GeminiLlmCliEnvironment.cs](../GeminiLlmCliEnvironment.cs)
-
-Key methods:
-- `GetSettings(envName)` - Reads `settings.json`, maps to DTO
-- `SaveSettings(envName, dto)` - Merges DTO into existing JSON, preserves other fields
-- `GetSettingsFilePath(envName)` - Resolves full path to `settings.json`
-
-**Read Logic**:
-1. Build path: `{envBasePath}/{envName}/gemini/config/gemini/settings.json`
-2. If file doesn't exist, return default DTO
-3. Parse JSON, extract values with null-coalescing defaults
-4. Handle nested paths (e.g., `node["general"]?["vimMode"]`)
-
-**Write Logic**:
-1. Read existing JSON (or create new `JsonObject`)
-2. Update only our managed fields
-3. Create nested objects if missing (e.g., `node["sandbox"] ??= new JsonObject()`)
-4. Serialize with `WriteIndented = true`
-5. Write back to file
-
-#### API Routes
-**File**: [Routes.cs](../../Routes.cs)
-
-```
-GET  /api/v1/gemini/settings/{envName}  → GetGeminiSettings
-PUT  /api/v1/gemini/settings/{envName}  → UpdateGeminiSettings
-```
-
-#### UI Integration
-**File**: [wwwroot/js/modules/environment-controller.js](../../wwwroot/js/modules/environment-controller.js)
-
-The `editEnvironment()` method:
-1. Detects if environment is Gemini type
-2. Fetches settings via API
-3. Renders toggle switches and dropdown in modal
-4. Saves both environment and Gemini settings on submit
-
-## Adding New Settings
-
-To add a new Gemini setting:
-
-1. **Update DTO** - Add property to `GeminiSettingsDto`
-2. **Update GetSettings()** - Add JSON path extraction
-3. **Update SaveSettings()** - Add JSON path write
-4. **Update UI** - Add form control in `editEnvironment()`
-
-Example for adding a new boolean setting:
-```csharp
-// In GetSettings():
-dto.NewSetting = node["section"]?["newSetting"]?.GetValue<bool>() ?? false;
-
-// In SaveSettings():
-node["section"] ??= new JsonObject();
-node["section"]!["newSetting"] = settings.NewSetting;
-```
-
-## Testing
-
-Unit tests are located in [Tests/GeminiSettingsTests.cs](../../../Tests/GeminiSettingsTests.cs).
-
-Test coverage includes:
-- Reading settings from valid JSON
-- Reading with missing file (defaults)
-- Reading with partial JSON (missing fields)
-- Writing settings preserves existing fields
-- Writing creates nested objects
-- YOLO mode inversion logic
+`AntigravityLlmCliEnvironment.CreateEnvironment` only ensures the env subdirectory
+exists. The frontend builds/parses args via `buildAntigravityCustomArgs()` /
+`mergeAntigravitySettingsFromCustomArgs()`. Vim Mode and Check-for-Updates (old
+Gemini settings-file features) were dropped: agy exposes no verified config-dir env
+var, so per the compatibility policy VibeRails writes no config for it. Flags are
+verified against `agy --help` (v1.0.8). The binary is `agy` even though the enum/
+product name is "Antigravity" — see `CommandService.PrepareSession`.
 
 ---
 

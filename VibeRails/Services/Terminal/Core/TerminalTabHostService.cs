@@ -481,7 +481,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             child.CreatedUtc,
             hasActiveSession,
             sessionId,
-            status?.Cli);
+            status?.Cli,
+            status?.WorkingDirectory);
     }
 
     private async Task<TerminalChildProcess> SpawnChildAsync(CancellationToken cancellationToken)

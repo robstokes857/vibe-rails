@@ -77,7 +77,10 @@ namespace VibeRails.Services.LlmClis.Launchers
 
         private string[] BuildVbArgv(string workingDirectory, string[] args, string? envName)
         {
-            var envValue = !string.IsNullOrEmpty(envName) ? envName : CliExecutable;
+            // Base-CLI launches pass the LLM enum name as --env (that's what the bootstrap
+            // resolves), NOT the executable. These coincide for claude/codex/copilot, but
+            // Antigravity's binary is `agy` while its env/enum name is `antigravity`.
+            var envValue = !string.IsNullOrEmpty(envName) ? envName : LlmType.ToString().ToLowerInvariant();
             var argv = new List<string> { "--env", envValue, "--workdir", workingDirectory };
             if (args.Length > 0)
             {

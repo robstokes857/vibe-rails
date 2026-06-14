@@ -65,9 +65,7 @@ export class VibeTerminal {
         desktopLineHeight = 1.12,
         mobileLineHeight = 1.2,
         scrollOnWrite = true,
-        scrollback = DEFAULT_TERMINAL_SCROLLBACK,
-        cursorStyle = 'block',
-        cursorInactiveStyle = 'outline'
+        scrollback = DEFAULT_TERMINAL_SCROLLBACK
     } = {}) {
         if (!outputEl) {
             throw new Error('VibeTerminal requires { outputEl }.');
@@ -121,9 +119,11 @@ export class VibeTerminal {
             scrollback,
             minimumContrastRatio: 3,
             rightClickSelectsWord: true,
+            // cursorBlink stays explicitly false (see TERMINAL.md cursor-flicker
+            // entries). Style/inactive-style are deliberately NOT set: xterm
+            // defaults + the CLI's own escape sequences own the cursor — the
+            // user-facing cursor settings were removed 2026-06-12.
             cursorBlink: false,
-            cursorStyle,
-            cursorInactiveStyle,
             theme: this._getAppliedTheme()
         });
 
@@ -655,16 +655,6 @@ export class VibeTerminal {
     setTheme(theme) {
         this._theme = buildTerminalTheme(theme);
         this._applyTheme();
-    }
-
-    setCursorStyle(style) {
-        if (!this._terminal) return;
-        this._terminal.options.cursorStyle = style;
-    }
-
-    setCursorInactiveStyle(style) {
-        if (!this._terminal) return;
-        this._terminal.options.cursorInactiveStyle = style;
     }
 
     getActiveRenderer() {

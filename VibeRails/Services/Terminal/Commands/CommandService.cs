@@ -63,7 +63,13 @@ public class CommandService : ICommandService
             return new PreparedTerminalSession(string.Empty, string.Empty, Array.Empty<string>(), shellEnv);
         }
 
-        var cli = llm.ToString().ToLower();
+        // Every CLI's enum name lowercased is its executable — except Antigravity, whose
+        // binary is `agy`. Map it explicitly so the in-app PTY launches the right command.
+        var cli = llm switch
+        {
+            LLM.Antigravity => "agy",
+            _ => llm.ToString().ToLower()
+        };
         var cliCommand = extraArgs?.Length > 0
             ? $"{cli} {BuildSafeArgString(extraArgs)}"
             : cli;
@@ -79,6 +85,7 @@ public class CommandService : ICommandService
             cliCommand = llm switch
             {
                 LLM.Copilot => $"{cliCommand} --interactive={quoted}",
+                LLM.Antigravity => $"{cliCommand} --prompt-interactive={quoted}",
                 _ => $"{cliCommand} {quoted}"
             };
         }
@@ -94,7 +101,6 @@ public class CommandService : ICommandService
         //    {
         //        LLM.Claude => $"claude mcp add viberails-mcp \"{_mcpSettings.ServerPath}\"",
         //        LLM.Codex => $"codex mcp add viberails-mcp -- \"{_mcpSettings.ServerPath}\"",
-        //        LLM.Gemini => $"gemini mcp add --scope user viberails-mcp \"{_mcpSettings.ServerPath}\"",
         //        _ => null
         //    };
 

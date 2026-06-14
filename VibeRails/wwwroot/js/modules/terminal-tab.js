@@ -749,6 +749,7 @@ export class TerminalTab {
             this.state.hasActiveSession = response?.hasActiveSession === true;
             this.state.sessionId = response?.sessionId || null;
             this.state.cli = response?.cli || body?.cli || null;
+            this.state.workingDirectory = response?.workingDirectory || body?.workingDirectory || this.state.workingDirectory || null;
             if (!this.state.hasActiveSession) {
                 this.state.status = 'not-started';
                 this.manager.updateUi();
@@ -764,7 +765,7 @@ export class TerminalTab {
                 this.statusController?.markInitialPrompt();
             }
             await this.connect();
-            return true;
+            return response || true;
         } catch (error) {
             this.state.hasActiveSession = false;
             this.state.sessionId = null;

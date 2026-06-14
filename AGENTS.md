@@ -2,18 +2,18 @@
 
 ## Terminology Note
 
-**"Web UI Chat"** refers to the xterm.js-based terminal interface where users interact with CLI tools (Claude, Codex, Gemini) through a browser-based terminal emulator. This is NOT a separate chat UI - it's the PTY-backed terminal that runs actual CLI sessions.
+**"Web UI Chat"** refers to the xterm.js-based terminal interface where users interact with CLI tools (Claude, Codex, Antigravity) through a browser-based terminal emulator. This is NOT a separate chat UI - it's the PTY-backed terminal that runs actual CLI sessions.
 
 ## Project Overview
 
-**VibeRails** is a sophisticated desktop/web application for managing and enforcing coding standards across AI-powered development workflows. It serves as a unified control panel for multiple LLM CLIs (Claude, Codex, Gemini) with comprehensive rule enforcement, session logging, and MCP integration.
+**VibeRails** is a sophisticated desktop/web application for managing and enforcing coding standards across AI-powered development workflows. It serves as a unified control panel for multiple LLM CLIs (Claude, Codex, Antigravity) with comprehensive rule enforcement, session logging, and MCP integration.
 
 **Live Site**: [https://viberails.ai/](https://viberails.ai/)
 
 ### Core Capabilities
 - **Agent File Management** - Create and manage `agent.md` files with customizable coding rules
 - **Rule Enforcement** - Define standards with three enforcement levels (WARN/COMMIT/STOP)
-- **Multi-LLM Support** - Unified interface for Claude, Codex, and Gemini CLIs
+- **Multi-LLM Support** - Unified interface for Claude, Codex, and Antigravity CLIs
 - **Environment Management** - Configure separate environments for different LLM providers with custom args and prompts. Launch environments directly in the Web UI terminal with the "Web UI" button or select from the terminal's environment dropdown
 - **Sandbox Management** - Create isolated git clone sandboxes for parallel AI workflows. Shallow clones current branch with all dirty/untracked files. Launch terminals or VS Code directly into sandbox directories.
 - **Session Logging** - Track and monitor all CLI session history and outputs
@@ -67,7 +67,7 @@ VibeControl2/
 │   │       ├── BaseLlmCliEnvironment.cs
 │   │       ├── ClaudeLlmCliEnvironment.cs
 │   │       ├── CodexLlmCliEnvironment.cs
-│   │       ├── GeminiLlmCliEnvironment.cs
+│   │       ├── AntigravityLlmCliEnvironment.cs
 │   │       └── Launchers/         # Platform-specific terminal launchers
 │   │
 │   ├── DB/                         # Data access layer
@@ -80,7 +80,7 @@ VibeControl2/
 │   ├── DTOs/                       # Data transfer objects
 │   │   ├── ResponseRecords.cs      # API response types
 │   │   ├── Sandbox.cs              # Sandbox entity model
-│   │   ├── LLM.cs                  # LLM enum (Claude, Codex, Gemini)
+│   │   ├── LLM.cs                  # LLM enum (Claude, Codex, Antigravity)
 │   │   ├── LLM_Environment.cs      # Environment configuration
 │   │   ├── McpDtos.cs              # MCP protocol DTOs
 │   │   └── StateFileObject.cs
@@ -157,7 +157,7 @@ vb --vs-code-v1 [--parent-pid <pid>]
 ```bash
 vb --env claude                    # Launch base CLI with session tracking + web viewer
 vb --env "my-research-setup"       # Launch custom environment (DB lookup)
-vb --env gemini --workdir /project # Explicit working directory
+vb --env antigravity --workdir /project # Explicit working directory
 ```
 - Used by Web UI and VS Code launch paths when a tracked native terminal is needed
 - Smart resolution: LLM name → base CLI, otherwise → custom environment DB lookup
@@ -225,8 +225,8 @@ LlmCliEnvironmentService
   ├─→ ICodexLlmCliEnvironment
   │     └─ Config: CODEX_HOME
   │
-  └─→ IGeminiLlmCliEnvironment
-        └─ Config: XDG_CONFIG_HOME, XDG_DATA_HOME, etc.
+  └─→ IAntigravityLlmCliEnvironment
+        └─ Config: none (agy is launch-flag-only)
 
 Each environment defines isolated config directories
 ```
@@ -254,14 +254,14 @@ Preselected environment auto-selected in dropdown
 User clicks "Start" → startTerminal() parses selection
   ↓
 Single API call: POST /api/v1/terminal/start
-  Body: { cli: "Gemini", environmentName: "test_g" }
+  Body: { cli: "Antigravity", environmentName: "test_g" }
   ↓
 Backend: TerminalRoutes.cs resolves LLM enum, fetches custom args from DB
   ↓
 TerminalSessionService.StartSessionAsync() spawns LLM CLI directly in PTY
   ↓ Creates TerminalSession for tracking
-  ↓ Sets isolated environment vars (XDG_CONFIG_HOME, etc.)
-  ↓ Spawns: gemini --yolo (with environment isolation)
+  ↓ Sets isolated environment vars for Claude/Codex (agy has none)
+  ↓ Spawns: agy --dangerously-skip-permissions
   ↓
 Frontend connects WebSocket to /api/v1/terminal/ws
   ↓
@@ -582,8 +582,7 @@ Different LLM CLI environments implement `IBaseLlmCliEnvironment` with specific 
     │   │   └── config.json
     │   ├── codex/                  # Codex CLI config
     │   │   └── config.json
-    │   └── gemini/                 # Gemini CLI config
-    │       └── config.json
+    │   └── antigravity/            # Antigravity (agy) env dir — launch-flag-only, no config file
     └── production/
         └── ...
 ```
@@ -610,13 +609,8 @@ CLAUDE_CONFIG_DIR=~/.vibe_rails/envs/myenv/claude
 CODEX_HOME=~/.vibe_rails/envs/myenv/codex
 ```
 
-**Gemini**:
-```bash
-XDG_CONFIG_HOME=~/.vibe_rails/envs/myenv/gemini/config
-XDG_DATA_HOME=~/.vibe_rails/envs/myenv/gemini/data
-XDG_STATE_HOME=~/.vibe_rails/envs/myenv/gemini/state
-XDG_CACHE_HOME=~/.vibe_rails/envs/myenv/gemini/cache
-```
+**Antigravity (agy)**: none — agy is launch-flag-only, so VibeRails injects no
+per-environment config env vars (sandbox/permissions are launch flags).
 
 ## Development Workflows
 
@@ -968,7 +962,7 @@ vb --web  # Explicit web-dashboard launch
 ### Related Projects
 - **Claude CLI** - Anthropic's Claude command-line interface
 - **Codex CLI** - OpenAI Codex command-line tool
-- **Gemini CLI** - Google Gemini command-line interface
+- **Antigravity CLI** - Google Antigravity command-line interface (`agy`)
 - **MCP SDK** - Model Context Protocol development kit
 
 ### Key Dependencies

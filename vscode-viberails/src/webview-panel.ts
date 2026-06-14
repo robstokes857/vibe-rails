@@ -32,7 +32,7 @@ export class WebviewPanelManager {
 
         this.panel = vscode.window.createWebviewPanel(
             'viberailsDashboard',
-            'VibeRails Dashboard',
+            this.getInitialPanelTitle(),
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
@@ -65,6 +65,11 @@ export class WebviewPanelManager {
         });
 
         return this.panel;
+    }
+
+    private getInitialPanelTitle(): string {
+        const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name?.trim();
+        return workspaceName && workspaceName.length > 0 ? workspaceName : 'Vibe Rails';
     }
 
     private buildHtml(webview: vscode.Webview, port: number, sessionToken: string | null, tabToken: string | null): string {

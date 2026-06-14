@@ -58,6 +58,8 @@ const selectors = {
     tabItem: (tabId) => `#vb-terminal-tab-list .vb-terminal-tab-item[data-tab-id="${tabId}"]`,
     tabClose: (tabId) =>
         `#vb-terminal-tab-list .vb-terminal-tab-item[data-tab-id="${tabId}"] .vb-terminal-tab-close`,
+    tabMinimize: (tabId) =>
+        `#vb-terminal-tab-list .vb-terminal-tab-item[data-tab-id="${tabId}"] .vb-terminal-tab-min`,
     tabPanel: (tabId) => `.vb-terminal-tab-panel[data-tab-id="${tabId}"]`,
     tabAddBtn: '#vb-terminal-tab-add-btn',
     undoWrapper: '#vb-terminal-tab-undo-wrapper',

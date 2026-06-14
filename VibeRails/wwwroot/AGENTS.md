@@ -17,7 +17,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 ## Terminal Environment Integration
 
 The terminal dropdown shows two groups:
-- **Base CLIs**: Claude (default), Codex (default), Gemini (default) — sends bare CLI name to PTY
+- **Base CLIs**: Claude (default), Codex (default), Antigravity (default) — resolved to its executable server-side (Antigravity → `agy`)
 - **Custom Environments**: User-created environments — launches via LMBootstrap
 
 ### Flow: Launching a Custom Environment
@@ -56,7 +56,7 @@ The sandbox section appears on the dashboard when running in a local git project
 
 ### Flow: Launching Terminal in Sandbox
 
-1. User clicks a CLI button (Claude/Codex/Gemini) on a sandbox card
+1. User clicks a CLI button (Claude/Codex/Antigravity) on a sandbox card
 2. `sandboxController.launchInWebUI(sandboxId, sandboxName, cli)` calls `terminalController.startTerminalWithOptions()`
 3. `startTerminalWithOptions()` POSTs to `/api/v1/terminal/start` with `{ cli, workingDirectory: sandboxPath, title: "Sandbox: {name}" }`
 4. Terminal starts in sandbox directory with title bar showing sandbox name
