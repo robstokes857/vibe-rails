@@ -54,6 +54,53 @@ public sealed class TerminalGridSerializerTests
         Assert.Contains("\x1b>", replay);
     }
 
+    [Fact]
+    public void SnapshotReplay_RestoresBracketedPasteMode_WhenServerHasItActive()
+    {
+        // A CLI (e.g. Claude Code) enables bracketed paste once at startup and never
+        // re-sends it. A reconnecting viewer resets its modes and relies on the
+        // snapshot to restore them — so the snapshot must re-enable ?2004h, or the
+        // webview's Shift+Enter→newline gate (which reads xterm's bracketed-paste
+        // mode) silently breaks for that tab.
+        var server = new TerminalEmulator.Terminal(cols: 20, rows: 5, scrollbackSize: 100);
+        server.Write("\x1b[?2004hprompt");
+        Assert.True(server.BracketedPasteActive);
+
+        var snapshot = Serialize(server);
+
+        var client = new TerminalEmulator.Terminal(cols: 20, rows: 5, scrollbackSize: 100);
+        client.Write(snapshot.AsSpan());
+
+        Assert.True(client.BracketedPasteActive);
+    }
+
+    [Fact]
+    public void SnapshotReplay_LeavesBracketedPasteOff_WhenServerInactive()
+    {
+        var server = new TerminalEmulator.Terminal(cols: 20, rows: 5, scrollbackSize: 100);
+        server.Write("plain shell");
+        Assert.False(server.BracketedPasteActive);
+
+        var replay = Encoding.UTF8.GetString(Serialize(server));
+
+        // Prologue still disables it; nothing re-enables it.
+        Assert.Contains("2004;2026l", replay);
+        Assert.DoesNotContain("\x1b[?2004h", replay);
+    }
+
+    [Fact]
+    public void Emulator_TracksBracketedPasteMode_OnSetAndReset()
+    {
+        var t = new TerminalEmulator.Terminal(cols: 20, rows: 5, scrollbackSize: 100);
+        Assert.False(t.BracketedPasteActive);
+
+        t.Write("\x1b[?2004h");
+        Assert.True(t.BracketedPasteActive);
+
+        t.Write("\x1b[?2004l");
+        Assert.False(t.BracketedPasteActive);
+    }
+
     private static byte[] Serialize(TerminalEmulator.Terminal terminal)
         => TerminalGridSerializer.Serialize(
             terminal.GetScrollback(),
@@ -64,5 +111,6 @@ public sealed class TerminalGridSerializerTests
             terminal.CursorCol,
             terminal.CursorVisible,
             terminal.CursorShape,
-            terminal.IsAlternateScreen);
+            terminal.IsAlternateScreen,
+            terminal.BracketedPasteActive);
 }
