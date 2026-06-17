@@ -1,8 +1,12 @@
 using System.ComponentModel;
 using ModelContextProtocol.Server;
 
-namespace MCP_Server.Tools;
+namespace VibeRails.Services.Mcp.Tools;
 
+/// <summary>
+/// Connectivity-test MCP tool. Exposed over the in-process HTTP transport at /mcp.
+/// MCP normalizes the method name to snake_case, so this is invoked as <c>echo</c>.
+/// </summary>
 [McpServerToolType]
 public class EchoTool
 {

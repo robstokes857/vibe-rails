@@ -3,8 +3,12 @@ using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 using Serilog;
 
-namespace MCP_Server.Tools;
+namespace VibeRails.Services.Mcp.Tools;
 
+/// <summary>
+/// Content + VCA rule-validation MCP tools. Exposed over the in-process HTTP transport at /mcp.
+/// MCP normalizes method names to snake_case (<c>check_rules</c>, <c>validate_vca</c>).
+/// </summary>
 [McpServerToolType]
 public class RulesTool
 {

@@ -15,13 +15,11 @@ public sealed record PreparedTerminalSession(
 public class CommandService : ICommandService
 {
     private readonly LlmCliEnvironmentService _envService;
-    private readonly McpSettings _mcpSettings;
     private static int _fakeCliWarningEmitted;
 
-    public CommandService(LlmCliEnvironmentService envService, McpSettings mcpSettings)
+    public CommandService(LlmCliEnvironmentService envService)
     {
         _envService = envService;
-        _mcpSettings = mcpSettings;
     }
 
     public PreparedTerminalSession PrepareSession(
@@ -94,24 +92,12 @@ public class CommandService : ICommandService
             .SetLaunchCommand(cliCommand);
         var setupCommands = new List<string>();
 
-        //// Register MCP server before launch
-        //if (!string.IsNullOrEmpty(_mcpSettings.ServerPath) && File.Exists(_mcpSettings.ServerPath))
-        //{
-        //    var mcpSetup = llm switch
-        //    {
-        //        LLM.Claude => $"claude mcp add viberails-mcp \"{_mcpSettings.ServerPath}\"",
-        //        LLM.Codex => $"codex mcp add viberails-mcp -- \"{_mcpSettings.ServerPath}\"",
-        //        _ => null
-        //    };
-
-        //    if (mcpSetup != null)
-        //    {
-        //        builder.AddSetup(mcpSetup);
-        //        setupCommands.Add(mcpSetup);
-        //        // Clear screen to hide MCP setup messages (e.g., "already added" warnings)
-        //        //builder.AddSetup("clear");
-        //    }
-        //}
+        // MCP tools are exposed two ways (see Services/Mcp/AGENTS.md): in-process HTTP at /mcp
+        // (for the dashboard Explorer) and a spawnable stdio server, `vb mcp` (for CLIs — no port,
+        // no auth). Per-CLI auto-registration is intentionally not wired here yet, pending further
+        // validation. When enabled, register the stdio server per CLI, e.g.:
+        //   claude mcp add viberails -- "{Environment.ProcessPath}" mcp
+        //   codex  mcp add viberails -- "{Environment.ProcessPath}" mcp
 
         var environment = new Dictionary<string, string>
         {

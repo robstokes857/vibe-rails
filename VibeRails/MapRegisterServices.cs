@@ -10,6 +10,7 @@ using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
+using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.Messaging;
 using VibeRails.Services.Terminal;
 
@@ -122,8 +123,27 @@ namespace VibeRails
             serviceCollection.AddScoped<ICopilotLlmCliLauncher, CopilotLlmCliLauncher>();
             serviceCollection.AddScoped<ILaunchLLMService, LaunchLLMService>();
 
-            // MCP Services
-            serviceCollection.AddSingleton(CreateMcpSettings());
+            // In-process MCP server, exposed over HTTP at /mcp (see app.MapMcp in Program.cs).
+            // Only the root backend hosts it — terminal-tab child processes skip it so we don't
+            // stand up a redundant MCP endpoint per tab. The MapMcp call is gated the same way,
+            // so resolving these services and mapping the endpoint always happen together.
+            if (!isTerminalTabChildProcess)
+            {
+                // SessionSearchTool is an instance tool with constructor injection; register it
+                // so the MCP server can resolve it (and its IUnifiedSearchService dependency)
+                // from the per-request scope.
+                serviceCollection.AddScoped<SessionSearchTool>();
+
+                serviceCollection
+                    .AddMcpServer(options =>
+                    {
+                        options.ServerInfo = new() { Name = "viberails-mcp", Version = "1.0.0" };
+                    })
+                    .WithHttpTransport()
+                    .WithTools<EchoTool>()
+                    .WithTools<RulesTool>()
+                    .WithTools<SessionSearchTool>();
+            }
 
             // Claude Agent Sync Service (syncs CLAUDE.md to AGENTS.md on session lifecycle)
             serviceCollection.AddSingleton<IClaudeAgentSyncService, ClaudeAgentSyncService>();
@@ -207,32 +227,13 @@ namespace VibeRails
             serviceCollection.AddSingleton<IUnconsumedBootstrapCodeShutdownWatchdog, UnconsumedBootstrapCodeShutdownWatchdog>();
         }
 
-        private static bool IsTerminalTabChildProcess(IEnumerable<string> args)
+        internal static bool IsTerminalTabChildProcess(IEnumerable<string> args)
         {
             return args.Any(static arg =>
                 arg.Equals("--parent-pid", StringComparison.OrdinalIgnoreCase) ||
                 arg.StartsWith("--parent-pid=", StringComparison.OrdinalIgnoreCase));
         }
 
-        private static McpSettings CreateMcpSettings()
-        {
-            // Search for MCP server executable in common locations
-            var possiblePaths = new[]
-            {
-                // Deployed alongside main app
-                Path.Combine(AppContext.BaseDirectory, "MCP_Server", "MCP_Server.exe"),
-                Path.Combine(AppContext.BaseDirectory, "..", "MCP_Server", "MCP_Server.exe"),
-                // Development paths
-                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "MCP_Server", "bin", "Debug", "net10.0", "MCP_Server.exe"),
-                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "MCP_Server", "bin", "Release", "net10.0", "MCP_Server.exe"),
-            };
-
-            var serverPath = possiblePaths
-                .Select(Path.GetFullPath)
-                .FirstOrDefault(File.Exists) ?? "";
-
-            return new McpSettings(serverPath);
-        }
     }
 }
 

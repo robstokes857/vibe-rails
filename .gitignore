@@ -424,7 +424,6 @@ bin_check/
 *.sqlite-wal
 *.sqlite-shm
 /IntegrationTest/IntegrationTest.csproj.lscache
-/MCP_Server/MCP_Server.csproj.lscache
 /Pty.Net/Pty.Net.csproj.lscache
 /TerminalEmulator/TerminalEmulator.csproj.lscache
 /TerminalEmulator.Tests/TerminalEmulator.Tests.csproj.lscache

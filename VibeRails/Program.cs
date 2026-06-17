@@ -7,6 +7,7 @@ using VibeRails.DTOs;
 using VibeRails.Middleware;
 using VibeRails.Routes;
 using VibeRails.Services;
+using VibeRails.Services.Mcp;
 using VibeRails.Services.Terminal;
 
 using VibeRails.Utils;
@@ -113,6 +114,16 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         ShutdownDiagnostics.FormatSnapshot(snapshot));
     Log.CloseAndFlush();
 };
+
+// MCP stdio server mode: `vb mcp`. Speaks MCP over stdin/stdout for CLIs that spawn it
+// (claude/codex `mcp add`). No web server, no port, no auth — stdio is inherently scoped to the
+// spawning process. Branch out BEFORE any Console/Kestrel setup so stdout stays clean for the
+// JSON-RPC stream. The static Serilog file logger configured above still applies.
+if (McpStdioHost.IsRequested(args))
+{
+    await McpStdioHost.RunAsync(args);
+    return;
+}
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
@@ -278,6 +289,16 @@ if (Directory.Exists(webRootPath))
 }
 
 app.MapApiEndpoints(launchDirectory);
+
+// In-process MCP server over HTTP. Root backend only (terminal-tab children skip both
+// the DI registration and this endpoint — see MapRegisterServices). Sits behind
+// CookieAuthMiddleware, so callers must present a valid viberails_session token: the
+// MCP Explorer forwards the caller's token to its own loopback /mcp, and external CLIs
+// would pass it as a request header. /mcp is not under /api, so no per-tab token applies.
+if (!MapRegisterServices.IsTerminalTabChildProcess(args))
+{
+    app.MapMcp("/mcp");
+}
 
 // Handle all CLI modes (env, agent, rules, validate, hooks, launch, etc.)
 // --env falls through with exit=false so the web server starts alongside the CLI terminal
