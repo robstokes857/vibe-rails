@@ -25,13 +25,24 @@ internal static class TerminalGridSerializer
         int cursorRow, int cursorCol,
         bool cursorVisible = true,
         int cursorShape = 0,
-        bool isAlternateScreen = false)
+        bool isAlternateScreen = false,
+        bool bracketedPaste = false)
     {
         int scrollbackCount = scrollback.Length;
         // Rough capacity: reset prologue + per-row(cols*8 avg + newline) for scrollback + screen
         var sb = new StringBuilder((scrollbackCount + rows) * cols * 4 + (scrollbackCount + rows) * 16 + 64);
 
         AppendSnapshotResetPrologue(sb);
+
+        // The prologue resets bracketed-paste (?2004) off. CLIs emit ?2004h once at
+        // startup and never re-send it, so a reconnecting viewer that only gets the
+        // snapshot would lose the mode — breaking the webview's Shift+Enter→newline
+        // and multi-line paste, which gate on xterm tracking ?2004. Restore it here
+        // (screen-independent, like alt-screen below) to match the live app's state.
+        if (bracketedPaste)
+        {
+            sb.Append("\x1b[?2004h");
+        }
 
         if (isAlternateScreen)
         {

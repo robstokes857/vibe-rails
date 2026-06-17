@@ -116,6 +116,6 @@ public class CommandServiceTests : IDisposable
             new AntigravityLlmCliEnvironment(fileService),
             new CopilotLlmCliEnvironment(fileService),
             fileService);
-        return new CommandService(envService, new McpSettings(""));
+        return new CommandService(envService);
     }
 }

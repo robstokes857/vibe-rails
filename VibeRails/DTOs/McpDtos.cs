@@ -1,11 +1,6 @@
 namespace VibeRails.DTOs;
 
 /// <summary>
-/// Configuration for locating the MCP server executable.
-/// </summary>
-public record McpSettings(string ServerPath = "");
-
-/// <summary>
 /// Information about an MCP tool.
 /// </summary>
 public record McpToolInfo(string Name, string Description);

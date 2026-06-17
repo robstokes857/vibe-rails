@@ -108,12 +108,10 @@ VibeRails consists of four main components:
 │  ┌──────────────┬──────────────┬──────────────────────┐ │
 │  │  Services    │  Repository  │  LLM Environments    │ │
 │  └──────────────┴──────────────┴──────────────────────┘ │
-└────────────────────┬────────────────────────────────────┘
-                     │ Stdio Transport
-┌────────────────────▼────────────────────────────────────┐
-│                   MCP Server                             │
-│           (ModelContextProtocol + Tools)                 │
-│    Echo | Rules Validation | Vector Search              │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │  In-process MCP server  →  HTTP /mcp                  │ │
+│  │  echo | check_rules | validate_vca | search_history  │ │
+│  └──────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -199,18 +197,20 @@ TypeScript extension that:
 
 ### 4. MCP Server
 
-Standalone process with custom tools:
+Hosted **in-process inside `vb.exe`** over HTTP at `/mcp` (Streamable HTTP, root backend only).
+Tools (snake_case wire names):
 
 | Tool | Purpose |
 |------|---------|
-| **EchoTool** | Test/debug MCP communication |
-| **RulesTool** | Validate content against coding rules |
-| **VectorSearchTool** | Semantic search using SharpVector |
+| `echo` | Test/debug MCP communication |
+| `check_rules` | Validate content against safety/style rules (secrets, length, TODOs) |
+| `validate_vca` | Validate staged git files against AGENTS.md enforcement rules |
+| `search_history` | Semantic + keyword search over captured agent history (real BGE/sqlite-vec/RRF — the same `IUnifiedSearchService` as the "Vibe AI" inspector) |
 
 **Architecture:**
-- Stdio transport (no network overhead)
-- Async tool execution
-- Process kept alive between calls
+- Streamable HTTP transport, served by the dashboard's Kestrel — no separate process
+- Behind `CookieAuthMiddleware` (session token required)
+- See [`Services/Mcp/AGENTS.md`](Services/Mcp/AGENTS.md) for the full design
 
 ---
 
@@ -277,14 +277,7 @@ npx vsce package
 code --install-extension vscode-viberails-0.1.0.vsix
 ```
 
-### Building MCP Server
-
-```bash
-cd MCP_Server
-dotnet publish -c Release
-
-# Output: bin/Release/net10.0/publish/MCP_Server.exe
-```
+> The MCP server is built into `vb.exe` (in-process) — there is no separate MCP build step.
 
 ---
 
@@ -401,24 +394,27 @@ Launch from the Web Terminal or an environment action, then navigate to Sessions
 
 ### MCP Integration
 
-Call MCP tools via REST API or programmatically:
+The MCP server runs in-process at `/mcp` (Streamable HTTP). Call its tools through the dashboard
+Explorer REST routes (which proxy to the in-process endpoint over loopback):
 
 ```bash
-# Via REST API
-curl -X POST http://localhost:5000/api/v1/mcp/tools/vector_search \
+# Via REST API (requires the auth session + tab tokens from /auth/bootstrap)
+curl -X POST http://localhost:5000/api/v1/mcp/tools/search_history \
   -H "Content-Type: application/json" \
-  -d '{"query": "find authentication code"}'
+  -d '{"arguments": {"query": "find authentication code", "maxResults": 5}}'
 ```
 
 ```csharp
-// Via C# SDK
-var service = await McpClientService.ConnectAsync(
-    transport: new StdioClientTransport("MCP_Server.exe"),
-    clientName: "vibecontrol-client",
-    version: "1.0.0"
-);
+// Via C# SDK — connect to the in-process HTTP endpoint
+var transport = new HttpClientTransport(new HttpClientTransportOptions
+{
+    Endpoint = new Uri("http://127.0.0.1:5000/mcp"),
+    TransportMode = HttpTransportMode.StreamableHttp,
+    AdditionalHeaders = new Dictionary<string, string> { ["viberails_session"] = sessionToken }
+});
+await using var service = await McpClientService.ConnectAsync(transport);
 
-var result = await service.CallToolAsync("vector_search", new Dictionary<string, object> {
+var result = await service.CallToolAsync("search_history", new Dictionary<string, object?> {
     ["query"] = "find authentication code"
 });
 ```
@@ -442,7 +438,6 @@ var result = await service.CallToolAsync("vector_search", new Dictionary<string,
 {
   "defaultEnvironment": "development",
   "enableSessionLogging": true,
-  "mcpServerPath": "MCP_Server.exe",
   "browserAutoLaunch": true
 }
 ```
@@ -497,10 +492,6 @@ VibeControl2/
 │   │   ├── backend-manager.ts
 │   │   └── webview-panel.ts
 │   └── package.json
-│
-├── MCP_Server/                 # MCP server
-│   ├── Tools/
-│   └── Program.cs
 │
 ├── Pty.Net/                    # Cross-platform PTY library
 ├── Tests/                      # xUnit tests
@@ -564,33 +555,22 @@ builder.Services.AddSingleton<IMyLlmCliEnvironment, MyLlmCliEnvironment>();
 
 ### Adding a New MCP Tool
 
-1. **Create tool class** in [MCP_Server/Tools/](MCP_Server/Tools/):
+1. **Create tool class** in [VibeRails/Services/Mcp/Tools/](VibeRails/Services/Mcp/Tools/):
 ```csharp
-public class MyCustomTool : IMcpTool
+[McpServerToolType]
+public class MyCustomTool
 {
-    public string Name => "my_tool";
-    public string Description => "Tool description";
-
-    public async Task<McpToolResult> ExecuteAsync(
-        Dictionary<string, object> arguments,
-        CancellationToken cancellationToken)
-    {
-        // Implementation
-        return new McpToolResult { Success = true };
-    }
+    [McpServerTool, Description("Tool description")]
+    public static string MyTool([Description("…")] string input) => /* … */;
 }
 ```
 
-2. **Register in [MCP_Server/Program.cs](MCP_Server/Program.cs)**:
-```csharp
-.WithTools<MyCustomTool>()
-```
+2. **Register** in [MapRegisterServices.cs](VibeRails/MapRegisterServices.cs) — add
+   `.WithTools<MyCustomTool>()` to the `AddMcpServer()` chain (and `AddScoped<MyCustomTool>()`
+   if it needs app services injected, like `SessionSearchTool`).
 
-3. **Rebuild MCP_Server**:
-```bash
-cd MCP_Server
-dotnet build
-```
+3. **Add a test** in [Tests/Services/Mcp/](Tests/Services/Mcp/). See
+   [Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md) for the full design.
 
 ### Build Scripts
 
@@ -780,9 +760,9 @@ dotnet run
 - **Cause**: Database connection issue or insufficient permissions
 - **Solution**: Check `~/.vibe_rails/` directory permissions, verify SQLite access
 
-**Issue: MCP server not connecting**
-- **Cause**: MCP_Server.exe not found or stdio transport corruption
-- **Solution**: Ensure MCP_Server.exe is built and in correct location
+**Issue: MCP tools not available / Explorer can't connect**
+- **Cause**: `/mcp` is auth-gated (needs the `viberails_session` token) and hosted only by the root backend.
+- **Solution**: Use it from the dashboard (the Explorer forwards the session token). See [Services/Mcp/AGENTS.md](Services/Mcp/AGENTS.md).
 
 **Issue: VS Code extension not finding backend**
 - **Cause**: Incorrect `viberails.executablePath` setting
@@ -794,8 +774,6 @@ Enable verbose logging in [Program.cs](VibeRails/Program.cs:1):
 ```csharp
 builder.Logging.SetMinimumLevel(LogLevel.Debug);
 ```
-
-**Note**: For MCP_Server, logging is disabled by default to prevent stdio corruption.
 
 ---
 
@@ -823,9 +801,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Key Dependencies
 
-- **Microsoft.Data.Sqlite** (v10.0.2) - SQLite database access
-- **ModelContextProtocol** (v0.5.0-preview.1) - MCP foundation
-- **Build5Nines.SharpVector** (v1.0.0) - Vector embeddings
+- **Microsoft.Data.Sqlite** (v10.0.x) - SQLite database access
+- **ModelContextProtocol / ModelContextProtocol.AspNetCore** (v1.4.0) - in-process MCP server + client
+- **Microsoft.ML.OnnxRuntime + sqlite-vec** - BGE embeddings + vector search (the real `search_history` backend)
 - **Pty.Net** (git submodule) - Pseudo-terminal support
 
 ---
