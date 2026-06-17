@@ -27,6 +27,12 @@
     <ProjectReference Include="..\VibeRails\VibeRails.csproj" />
   </ItemGroup>
 
+  <!-- Needed to host the in-process MCP server (Kestrel + MapMcp) inside the
+       MCP HTTP-handshake integration test. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="test_agent.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

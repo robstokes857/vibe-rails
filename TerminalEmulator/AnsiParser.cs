@@ -415,7 +415,7 @@ public sealed class AnsiParser
                 if (enable) { _buffer.SaveCursor(); _buffer.EnterAlternateScreen(); }
                 else         { _buffer.ExitAlternateScreen(); _buffer.RestoreCursor(); }
                 break;
-            case 2004: break; // bracketed paste
+            case 2004: _buffer.SetBracketedPaste(enable); break; // bracketed paste
             case 2026: _buffer.SetSyncOutput(enable); break; // synchronized output
             case 9001: break; // win32 input mode
         }

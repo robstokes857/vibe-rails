@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
-using System.Text.Json.Serialization;
 using VibeRails.Interfaces;
 
 namespace VibeRails.Services.Mcp;
@@ -146,14 +145,4 @@ public class McpClientBuilder
         var client = await McpClient.CreateAsync(_transport, options, null, cancellationToken);
         return new McpClientService(client, _logger ?? NullLogger<McpClientService>.Instance);
     }
-}
-
-/// <summary>
-/// Required for Native AOT to handle JSON serialization of MCP tool arguments.
-/// </summary>
-[JsonSourceGenerationOptions(WriteIndented = true)]
-[JsonSerializable(typeof(Dictionary<string, object?>))]
-[JsonSerializable(typeof(string))]
-internal partial class McpSdkJsonContext : JsonSerializerContext
-{
 }

@@ -26,6 +26,7 @@ public sealed class Terminal
     public bool CursorVisible => _buffer.CursorVisible;
     public int CursorShape => _buffer.CursorShape;
     public bool SyncOutputActive => _buffer.SyncOutputActive;
+    public bool BracketedPasteActive => _buffer.BracketedPasteActive;
     public bool IsAlternateScreen => _buffer.IsAlternateScreen;
     public CellAttributes CurrentAttributes => _buffer.CurrentAttributes;
     public CellColor CurrentFg => _buffer.CurrentFg;

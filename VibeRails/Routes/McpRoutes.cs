@@ -1,38 +1,39 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
 using VibeRails.DTOs;
 using VibeRails.Services.Mcp;
 
 namespace VibeRails.Routes;
 
+/// <summary>
+/// MCP Explorer API. The MCP server itself is hosted in-process and exposed over HTTP at
+/// <c>/mcp</c> (see <c>app.MapMcp</c> in Program.cs). These endpoints are a thin convenience
+/// layer for the dashboard's MCP Explorer: they connect to that same in-process endpoint over
+/// loopback HTTP — exercising the exact Streamable-HTTP path an external CLI would use — and
+/// surface the tool list / tool-call results to the UI.
+/// </summary>
 public static class McpRoutes
 {
+    private const string SessionCookieName = "viberails_session";
+
     public static void Map(WebApplication app)
     {
-        // MCP Endpoints
-        app.MapGet("/api/v1/mcp/status", (McpSettings settings) =>
+        // Reports that the in-process MCP server is reachable and at what loopback URL.
+        app.MapGet("/api/v1/mcp/status", (HttpContext ctx) =>
         {
-            var available = !string.IsNullOrEmpty(settings.ServerPath) && File.Exists(settings.ServerPath);
-            var message = available
-                ? "MCP server executable found"
-                : "MCP server executable not found. Build MCP_Server project first.";
-            return Results.Ok(new McpStatusResponse(available, settings.ServerPath, message));
+            var endpoint = BuildLoopbackEndpoint(ctx);
+            return Results.Ok(new McpStatusResponse(
+                ServerAvailable: true,
+                ServerPath: endpoint.ToString(),
+                Message: "In-process MCP server hosted at /mcp"));
         }).WithName("GetMcpStatus");
 
-        app.MapGet("/api/v1/mcp/tools", async (McpSettings settings, CancellationToken cancellationToken) =>
+        // Lists the tools the in-process MCP server exposes.
+        app.MapGet("/api/v1/mcp/tools", async (HttpContext ctx, CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrEmpty(settings.ServerPath) || !File.Exists(settings.ServerPath))
-            {
-                return Results.BadRequest(new ErrorResponse("MCP server executable not found. Build MCP_Server project first."));
-            }
-
             try
             {
-                var transport = new StdioClientTransport(new StdioClientTransportOptions
-                {
-                    Command = settings.ServerPath
-                });
-
-                await using var client = await McpClientService.ConnectAsync(transport, cancellationToken: cancellationToken);
+                await using var client = await ConnectLoopbackAsync(ctx, cancellationToken);
                 var tools = await client.GetAvailableToolsAsync(cancellationToken);
                 var toolInfos = tools.Select(t => new McpToolInfo(t.Name, t.Description ?? "")).ToList();
                 return Results.Ok(toolInfos);
@@ -43,27 +44,17 @@ public static class McpRoutes
             }
         }).WithName("GetMcpTools");
 
+        // Calls a single tool by name with caller-supplied JSON arguments.
         app.MapPost("/api/v1/mcp/tools/{name}", async (
-            McpSettings settings,
+            HttpContext ctx,
             string name,
             McpToolCallRequest request,
             CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrEmpty(settings.ServerPath) || !File.Exists(settings.ServerPath))
-            {
-                return Results.BadRequest(new McpToolCallResponse(false, "", "MCP server executable not found."));
-            }
-
             try
             {
-                var transport = new StdioClientTransport(new StdioClientTransportOptions
-                {
-                    Command = settings.ServerPath
-                });
-
-                await using var client = await McpClientService.ConnectAsync(transport, cancellationToken: cancellationToken);
+                await using var client = await ConnectLoopbackAsync(ctx, cancellationToken);
                 var result = await client.CallToolAsync(name, request.Arguments, cancellationToken);
-
                 return Results.Ok(new McpToolCallResponse(true, result));
             }
             catch (Exception ex)
@@ -71,5 +62,38 @@ public static class McpRoutes
                 return Results.BadRequest(new McpToolCallResponse(false, "", ex.Message));
             }
         }).WithName("CallMcpTool");
+    }
+
+    /// <summary>
+    /// Connects to the in-process /mcp endpoint over loopback HTTP, forwarding the caller's
+    /// session token so the request clears CookieAuthMiddleware. Kestrel serves the loopback
+    /// request on a separate connection, so there is no self-deadlock.
+    /// </summary>
+    private static async Task<McpClientService> ConnectLoopbackAsync(HttpContext ctx, CancellationToken cancellationToken)
+    {
+        var sessionToken = ctx.Request.Cookies[SessionCookieName]
+            ?? ctx.Request.Headers[SessionCookieName].FirstOrDefault()
+            ?? string.Empty;
+
+        var options = new HttpClientTransportOptions
+        {
+            Endpoint = BuildLoopbackEndpoint(ctx),
+            Name = "viberails-mcp",
+            TransportMode = HttpTransportMode.StreamableHttp,
+            AdditionalHeaders = new Dictionary<string, string>
+            {
+                [SessionCookieName] = sessionToken
+            }
+        };
+
+        var transport = new HttpClientTransport(options, NullLoggerFactory.Instance);
+        return await McpClientService.ConnectAsync(transport, cancellationToken: cancellationToken);
+    }
+
+    private static Uri BuildLoopbackEndpoint(HttpContext ctx)
+    {
+        // The server binds localhost; reach /mcp on the same port via the loopback address.
+        var port = ctx.Request.Host.Port ?? 80;
+        return new Uri($"http://127.0.0.1:{port}/mcp");
     }
 }

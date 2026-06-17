@@ -110,13 +110,6 @@ VibeControl2/
 │       │   └── dashboard-controller.js  # Dashboard with state passing for preselection
 │       └── assets/                 # Images, fonts, icons
 │
-├── MCP_Server/                     # Standalone custom MCP server
-│   ├── Program.cs                  # MCP server entry point (Stdio transport)
-│   ├── Tools/                      # Custom MCP tools
-│   │   ├── EchoTool.cs            # Echo/test tool
-│   │   └── RulesTool.cs           # Content validation rules
-│   └── Models/                     # MCP message models
-│
 ├── Pty.Net/                        # Cross-platform PTY library (ConPTY/forkpty)
 │
 ├── Tests/                          # xUnit test suite
@@ -274,18 +267,14 @@ CLI runs with full session tracking (same as CLI path)
 
 #### MCP Architecture
 ```
-VibeRails (Main App)
-  ↓
-McpClientService (Custom service layer)
-  ↓ Uses ModelContextProtocol NuGet package
-  ↓ Stdio transport
-  ↓
-MCP_Server.exe (Separate process)
-  ↓ Uses ModelContextProtocol NuGet package
-  ↓ Custom tools:
-  ├─→ EchoTool (test/debug)
-  └─→ RulesTool (content validation)
+vb.exe (Main App)
+  ├─ AddMcpServer().WithHttpTransport().WithTools<...>()   # in-process MCP server
+  ├─ app.MapMcp("/mcp")                                    # Streamable HTTP endpoint (root backend only)
+  └─ Tools: echo · check_rules · validate_vca · search_history (real BGE/sqlite-vec search)
+
+McpClientService — thin client wrapper used by the dashboard MCP Explorer to call /mcp.
 ```
+See [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md) for the full design.
 
 ## Key Components
 
@@ -381,49 +370,33 @@ MCP_Server.exe (Separate process)
 **Architecture**:
 - Wraps `ModelContextProtocol.Client.McpClient` with custom logic
 - Provides builder pattern for configuration
-- Handles Stdio transport communication with MCP_Server
+- Connects to the in-process `/mcp` endpoint over HTTP (Streamable HTTP transport)
 
 **Key Methods**:
 - `ConnectAsync()` - Establish connection to MCP server
 - `GetAvailableToolsAsync()` - List available MCP tools
 - `CallToolAsync(name, args)` - Execute MCP tool with arguments
-- `DisconnectAsync()` - Close MCP server connection
 
 **Usage**:
 ```csharp
-var service = await McpClientService.ConnectAsync(
-    transport: new StdioClientTransport("MCP_Server.exe"),
-    clientName: "vibecontrol-client",
-    version: "1.0.0"
-);
-var tools = await service.GetAvailableToolsAsync();
-var result = await service.CallToolAsync("vector_search", args);
+var transport = new HttpClientTransport(new HttpClientTransportOptions
+{
+    Endpoint = new Uri("http://127.0.0.1:{port}/mcp"),
+    TransportMode = HttpTransportMode.StreamableHttp,
+    AdditionalHeaders = new Dictionary<string, string> { ["viberails_session"] = sessionToken }
+});
+await using var service = await McpClientService.ConnectAsync(transport);
+var result = await service.CallToolAsync("search_history", args);
 ```
 
-### MCP Server
+### MCP Server (in-process)
 
-#### MCP_Server ([MCP_Server/Program.cs](MCP_Server/Program.cs))
-**Purpose**: Standalone MCP server with custom tools
+The MCP server is hosted inside `vb.exe` over HTTP at `/mcp` (root backend only). There is no
+separate process. Full design: [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md).
 
-**Implementation**:
-- Built on `ModelContextProtocol.Server` NuGet package
-- Stdio transport for process-to-process communication
-- Registered as hosted service in .NET Generic Host
-- Logging disabled to prevent stdio corruption
-
-**Custom Tools**:
-
-##### EchoTool ([MCP_Server/Tools/EchoTool.cs](MCP_Server/Tools/EchoTool.cs))
-- **Purpose**: Test/debug tool
-- **Input**: Any message string
-- **Output**: Echoes the message back
-- **Use Case**: Verify MCP communication working
-
-##### RulesTool ([MCP_Server/Tools/RulesTool.cs](MCP_Server/Tools/RulesTool.cs))
-- **Purpose**: Content validation against defined rules
-- **Input**: Content string, rule definitions
-- **Output**: Validation results with violations
-- **Use Case**: Pre-commit validation, code review automation
+**Tools** (snake_case wire names): `echo` (connectivity), `check_rules` (secrets/length/TODO
+checks), `validate_vca` (staged-file AGENTS.md rule validation), `search_history` (semantic +
+keyword search over captured agent history via the real `IUnifiedSearchService` — BGE/sqlite-vec/RRF).
 
 ### Data Layer
 
@@ -662,33 +635,25 @@ builder.Services.AddSingleton<IMyLlmCliEnvironment, MyLlmCliEnvironment>();
 
 ### Adding a New MCP Tool
 
-1. **Create tool class** in MCP_Server/Tools:
+1. **Create tool class** in [VibeRails/Services/Mcp/Tools/](VibeRails/Services/Mcp/Tools/):
 ```csharp
-public class MyCustomTool : IMcpTool
+[McpServerToolType]
+public class MyCustomTool
 {
-    public string Name => "my_tool";
-    public string Description => "Tool description";
-
-    public Task<McpToolResult> ExecuteAsync(
-        Dictionary<string, object> arguments,
-        CancellationToken cancellationToken)
-    {
-        // Tool implementation
-    }
+    [McpServerTool, Description("Tool description")]
+    public static string MyTool([Description("…")] string input) => /* … */;
 }
 ```
+   (Use an instance class with constructor injection if the tool needs app services —
+   see `SessionSearchTool`.)
 
-2. **Register in MCP_Server/Program.cs**:
-```csharp
-.WithTools<MyCustomTool>()
-```
+2. **Register in [MapRegisterServices.cs](VibeRails/MapRegisterServices.cs)**: add
+   `.WithTools<MyCustomTool>()` to the `AddMcpServer()` chain (and `AddScoped<MyCustomTool>()`
+   if it's an instance tool).
 
-3. **Rebuild MCP_Server** project
+3. **Add a test** in [Tests/Services/Mcp/](Tests/Services/Mcp/).
 
-4. **Call from client**:
-```csharp
-await mcpService.CallToolAsync("my_tool", arguments);
-```
+> MCP exposes the method as snake_case (`MyTool` → `my_tool`); that's the name callers use.
 
 ### Testing Changes
 
@@ -721,12 +686,6 @@ dotnet build
 
 ### Release Build (Native AOT)
 ```bash
-dotnet publish -c Release
-```
-
-### Building MCP Server Separately
-```bash
-cd MCP_Server
 dotnet publish -c Release
 ```
 
@@ -787,10 +746,8 @@ var result = await mcpService.CallToolAsync(
 ```
 
 ### Task: Add custom MCP tool
-1. Create new class in `MCP_Server/Tools/`
-2. Implement `IMcpTool` interface
-3. Register in `MCP_Server/Program.cs`
-4. Rebuild and restart server
+See "Adding a New MCP Tool" above: add a `[McpServerToolType]` class under
+`VibeRails/Services/Mcp/Tools/`, chain `.WithTools<…>()` in `MapRegisterServices.cs`, and test it.
 
 ## Troubleshooting
 
@@ -808,13 +765,11 @@ var result = await mcpService.CallToolAsync(
 - **Cause**: Database connection issue or insufficient permissions
 - **Solution**: Check `~/.vibe_rails/` directory permissions, verify SQLite access
 
-**Issue**: MCP server not connecting
-- **Cause**: MCP_Server.exe not found or port conflict
-- **Solution**: Ensure MCP_Server.exe built and located correctly, check process spawning
-
-**Issue**: MCP tools not available
-- **Cause**: Server not initialized or stdio transport corrupted
-- **Solution**: Check server logging (if enabled for debug), verify stdio not blocked by console output
+**Issue**: MCP tools not available / Explorer can't connect
+- **Cause**: `/mcp` is auth-gated (needs the `viberails_session` token) and is hosted only by the
+  root backend (not terminal-tab children).
+- **Solution**: Hit `/mcp` from the dashboard (the Explorer forwards the session token); confirm
+  you're talking to the root backend's port. See [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md).
 
 ### Debug Logging
 
@@ -823,8 +778,6 @@ Enable verbose logging in [Program.cs](VibeRails/Program.cs):
 // Modify logging level
 builder.Logging.SetMinimumLevel(LogLevel.Debug);
 ```
-
-**Note**: For MCP_Server, logging is disabled by default to prevent stdio corruption. Enable only for debugging with file-based logging.
 
 ## Contributing Guidelines
 
@@ -895,9 +848,8 @@ vb --web  # Explicit web-dashboard launch
 - Session logs stored securely with proper permissions
 
 ### MCP Security
-- MCP server runs as separate process with limited privileges
-- Stdio transport prevents network-based attacks
-- Tool execution sandboxed within server process
+- `/mcp` is bound to localhost and gated by `CookieAuthMiddleware` (session token required)
+- Hosted only by the root backend, not terminal-tab child processes
 - Input validation on all MCP tool calls
 
 ### Process Security
@@ -926,9 +878,8 @@ vb --web  # Explicit web-dashboard launch
 - Smaller deployment size
 
 ### MCP Performance
-- Stdio transport for efficient IPC (no network overhead)
-- Tools executed asynchronously
-- Server process kept alive between calls
+- In-process HTTP — no separate process to spawn, no IPC; rides the dashboard's Kestrel
+- Tools executed within the running web host
 
 ## Future Enhancements
 

@@ -39,6 +39,11 @@ public sealed class TerminalBuffer
     // Synchronized output mode (?2026) — true while TUI is mid-frame redraw
     private bool _syncOutputActive;
 
+    // Bracketed-paste mode (?2004) — true while the app wants pastes wrapped in
+    // ESC[200~ / ESC[201~. Tracked so a reconnect snapshot can restore it; the
+    // webview gates Shift+Enter→newline and paste-wrapping on this being on.
+    private bool _bracketedPasteActive;
+
     // Tab stops — true at columns where a tab stop is set
     private bool[] _tabStops;
 
@@ -51,6 +56,7 @@ public sealed class TerminalBuffer
     public bool CursorVisible => ActiveCursor.Visible;
     public int CursorShape => _cursorShape;
     public bool SyncOutputActive => _syncOutputActive;
+    public bool BracketedPasteActive => _bracketedPasteActive;
 
     public int ScrollTop => _scrollTop;
     public int ScrollBottom => _scrollBottom;
@@ -401,6 +407,7 @@ public sealed class TerminalBuffer
     public void SetCursorVisible(bool visible) => ActiveCursor.Visible = visible;
     public void SetCursorShape(int shape) => _cursorShape = shape;
     public void SetSyncOutput(bool active) => _syncOutputActive = active;
+    public void SetBracketedPaste(bool active) => _bracketedPasteActive = active;
 
     // Resize — preserve as much content as possible
     public void Resize(int newCols, int newRows)

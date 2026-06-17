@@ -617,7 +617,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(FileChangeInfo))]
     [JsonSerializable(typeof(List<FileChangeInfo>))]
     // MCP DTOs
-    [JsonSerializable(typeof(McpSettings))]
     [JsonSerializable(typeof(McpToolInfo))]
     [JsonSerializable(typeof(List<McpToolInfo>))]
     [JsonSerializable(typeof(McpToolCallRequest))]
