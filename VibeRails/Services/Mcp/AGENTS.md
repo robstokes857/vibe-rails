@@ -76,18 +76,29 @@ exact Streamable-HTTP path an external CLI would use — forwarding the caller's
 token so the loopback request clears auth. Kestrel serves the loopback request on a separate
 connection, so there is no self-deadlock.
 
-## CLI auto-registration — intentionally OFF
+## CLI auto-registration
 
-Wiring launched agents (Claude/Codex/etc.) to auto-register this MCP server is **not enabled** yet
-— pending further validation. With the stdio transport it's a one-liner per CLI (no port, no token):
+Managed agent launches run a VibeRails MCP setup step before the agent starts. Setup removes the
+managed `viberails-mcp` entry first, then adds it back, so old configs that pointed at the removed
+standalone `MCP_Server.exe` are repaired on the next launch. With the stdio transport this needs no
+port and no auth token:
 
 ```
-claude mcp add viberails -- "<path-to-vb>" mcp
-codex  mcp add viberails -- "<path-to-vb>" mcp
+claude mcp remove viberails-mcp
+claude mcp add --scope user viberails-mcp -- "<path-to-vb>" mcp
+codex  mcp remove viberails-mcp
+codex  mcp add viberails-mcp -- "<path-to-vb>" mcp
+agy    mcp remove viberails-mcp
+agy    mcp add viberails-mcp -- "<path-to-vb>" mcp
+copilot mcp remove viberails-mcp
+copilot mcp add viberails-mcp -- "<path-to-vb>" mcp
 ```
 
-At launch time the path is `Environment.ProcessPath`. To turn it on, add the per-CLI setup command
-in the disabled block in `Services/Terminal/Commands/CommandService.cs`.
+At launch time `CommandService` resolves the server command as either the published executable
+(`Environment.ProcessPath`, e.g. `vb.exe mcp`) or `dotnet <path-to-vb.dll> mcp` for
+framework-dependent/dev builds. Setup failures are non-blocking: commands are chained with `;`,
+so the agent still launches if the server was absent, already present, or the CLI rejects an MCP
+management command.
 
 ## Tests
 

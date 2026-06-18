@@ -48,6 +48,34 @@ public class CommandServiceTests : IDisposable
     }
 
     [Theory]
+    [InlineData(LLM.Claude, "claude mcp remove viberails-mcp", "claude mcp add --scope user viberails-mcp -- ")]
+    [InlineData(LLM.Codex, "codex mcp remove viberails-mcp", "codex mcp add viberails-mcp -- ")]
+    [InlineData(LLM.Antigravity, "agy mcp remove viberails-mcp", "agy mcp add viberails-mcp -- ")]
+    [InlineData(LLM.Copilot, "copilot mcp remove viberails-mcp", "copilot mcp add viberails-mcp -- ")]
+    public void PrepareSession_SupportedMcpClis_AddsVibeRailsMcpSetupCommand(
+        LLM llm,
+        string expectedRemoveCommand,
+        string expectedAddPrefix)
+    {
+        var service = CreateService();
+
+        var prepared = service.PrepareSession(llm, envName: null, extraArgs: null);
+
+        Assert.Collection(
+            prepared.SetupCommands,
+            remove => Assert.Equal(expectedRemoveCommand, remove),
+            add =>
+            {
+                Assert.StartsWith(expectedAddPrefix, add);
+                Assert.Contains(" mcp", add);
+            });
+
+        Assert.StartsWith(expectedRemoveCommand + "; ", prepared.Command);
+        Assert.Contains(expectedAddPrefix, prepared.Command);
+        Assert.EndsWith(prepared.LaunchCommand, prepared.Command);
+    }
+
+    [Theory]
     [InlineData(LLM.Codex)]
     [InlineData(LLM.Antigravity)]
     [InlineData(LLM.Copilot)]

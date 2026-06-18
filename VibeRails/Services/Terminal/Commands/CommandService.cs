@@ -15,6 +15,7 @@ public sealed record PreparedTerminalSession(
 public class CommandService : ICommandService
 {
     private readonly LlmCliEnvironmentService _envService;
+    private const string VibeRailsMcpServerName = "viberails-mcp";
     private static int _fakeCliWarningEmitted;
 
     public CommandService(LlmCliEnvironmentService envService)
@@ -94,10 +95,14 @@ public class CommandService : ICommandService
 
         // MCP tools are exposed two ways (see Services/Mcp/AGENTS.md): in-process HTTP at /mcp
         // (for the dashboard Explorer) and a spawnable stdio server, `vb mcp` (for CLIs — no port,
-        // no auth). Per-CLI auto-registration is intentionally not wired here yet, pending further
-        // validation. When enabled, register the stdio server per CLI, e.g.:
-        //   claude mcp add viberails -- "{Environment.ProcessPath}" mcp
-        //   codex  mcp add viberails -- "{Environment.ProcessPath}" mcp
+        // no auth). Register it before launching managed CLIs; setup failures remain non-blocking.
+        // This keeps custom environments isolated because the setup command runs inside the same
+        // PTY environment as the agent launch (CLAUDE_CONFIG_DIR / CODEX_HOME already set below).
+        foreach (var setupCommand in BuildMcpSetupCommands(llm))
+        {
+            setupCommands.Add(setupCommand);
+            builder.AddSetup(setupCommand);
+        }
 
         var environment = new Dictionary<string, string>
         {
@@ -124,6 +129,80 @@ public class CommandService : ICommandService
             cliCommand,
             setupCommands.AsReadOnly(),
             environment);
+    }
+
+    private static IReadOnlyList<string> BuildMcpSetupCommands(LLM llm)
+    {
+        var commandParts = ResolveMcpServerCommandParts();
+        var serverCommand = BuildSafeArgString(commandParts);
+
+        // Remove first so older installs that registered the deleted standalone MCP_Server.exe
+        // get repaired on the next launch. Failures are non-blocking because the shell command
+        // chain uses ';' between setup steps and the final agent launch.
+        return llm switch
+        {
+            LLM.Claude =>
+            [
+                $"claude mcp remove {VibeRailsMcpServerName}",
+                $"claude mcp add --scope user {VibeRailsMcpServerName} -- {serverCommand}"
+            ],
+            LLM.Codex =>
+            [
+                $"codex mcp remove {VibeRailsMcpServerName}",
+                $"codex mcp add {VibeRailsMcpServerName} -- {serverCommand}"
+            ],
+            LLM.Antigravity =>
+            [
+                $"agy mcp remove {VibeRailsMcpServerName}",
+                $"agy mcp add {VibeRailsMcpServerName} -- {serverCommand}"
+            ],
+            LLM.Copilot =>
+            [
+                $"copilot mcp remove {VibeRailsMcpServerName}",
+                $"copilot mcp add {VibeRailsMcpServerName} -- {serverCommand}"
+            ],
+            _ => []
+        };
+    }
+
+    private static string[] ResolveMcpServerCommandParts()
+    {
+        var processPath = Environment.ProcessPath;
+        if (IsVibeRailsExecutable(processPath))
+        {
+            return [processPath!, "mcp"];
+        }
+
+        var appBaseDll = Path.Combine(AppContext.BaseDirectory, "vb.dll");
+        if (File.Exists(appBaseDll))
+        {
+            return [ResolveDotNetHost(processPath), appBaseDll, "mcp"];
+        }
+
+        return ["vb", "mcp"];
+    }
+
+    private static bool IsVibeRailsExecutable(string? processPath)
+    {
+        if (string.IsNullOrWhiteSpace(processPath) || !File.Exists(processPath))
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileNameWithoutExtension(processPath);
+        return fileName.Equals("vb", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveDotNetHost(string? processPath)
+    {
+        if (!string.IsNullOrWhiteSpace(processPath)
+            && File.Exists(processPath)
+            && Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+        {
+            return processPath;
+        }
+
+        return "dotnet";
     }
 
     /// <summary>

@@ -16,7 +16,7 @@ namespace VibeRails.DTOs
         public static string DefaultPrompt => """
             Before starting work, read the AGENTS.md file in the project root and any .agents.md files in subdirectories for project-specific rules and context.
 
-            You have a "viberails-mcp" MCP server connected. Use its tools throughout the session -- especially call ValidateVca before any git commit, and SearchUserTerms when the user refers to code informally.
+            When the "viberails-mcp" MCP server is available, use its tools throughout the session -- especially call validate_vca before any git commit and search_history when prior VibeRails session context would help.
             """;
     }
 }
