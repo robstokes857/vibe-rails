@@ -19,9 +19,9 @@ and launch behavior before changing generated arguments:
 - Antigravity authoritative flags: run `agy --help` (and `agy models` for the live model catalog)
 - Copilot: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference
 
-Status checked against the upstream references above on June 13, 2026. Gemini was
-replaced by Antigravity (agy) on 2026-06-13; agy flags were verified against
-`agy --help` (v1.0.8), since the third-party write-ups conflicted with each other.
+Status checked against the upstream references above on June 13, 2026. agy flags
+were verified against `agy --help` (v1.0.8), since the third-party write-ups
+conflicted with each other.
 
 Important distinction: `CustomArgs` and `CustomPrompt` are VibeRails' launch
 contract. The DTO field lists below describe fields VibeRails currently
@@ -71,10 +71,12 @@ Where they live in code
 
 Current pinned values:
 
-- Claude (full model IDs): `claude-fable-5`, `claude-opus-4-8`,
-  `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`, plus an empty
-  "Default (Claude recommended)" entry. (Fable is the tier above Opus, so it
-  sits at the top; its ID has no version-dot suffix pattern like the others.)
+- Claude (full model IDs): `claude-opus-4-8`, `claude-opus-4-7`,
+  `claude-sonnet-4-6`, `claude-haiku-4-5`, plus an empty "Default (Claude
+  recommended)" entry. (Fable — `claude-fable-5` — is still an active upstream
+  model but is intentionally NOT pinned here; it's a deliberate product choice,
+  not a retirement. Don't re-add it without a reason. Existing environments
+  pinned to it survive via the `… (custom)` fallback.)
 - Codex: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`,
   `gpt-5.3-codex-spark`, `gpt-5.2`, plus an empty "Default (Codex recommended)"
   entry.
@@ -194,10 +196,9 @@ are verified against `agy --help` (v1.0.8), not third-party docs.
   modeled by VibeRails (e.g. `--add-dir <dir>`, `--conversation <id>`).
 
 There is no `AntigravitySettingsDto`, no settings file, and no
-`/api/v1/antigravity/settings` route. Vim Mode and Check-for-Updates (Gemini
-settings-file features) were dropped in the switch: agy's per-environment
-config-dir mechanism is not a documented/verifiable env var, so per the
-compatibility policy VibeRails writes no config for it. Model IS a pinned UI dropdown
+`/api/v1/antigravity/settings` route: agy is launch-flag-only, and its
+per-environment config-dir mechanism is not a documented/verifiable env var, so
+per the compatibility policy VibeRails writes no config for it. Model IS a pinned UI dropdown
 (`renderAntigravityModelOptions()`, see Model Lists) — its `--model` value is the full
 display string `agy models` prints, e.g. `--model "Gemini 3.5 Flash (Low)"`.
 
