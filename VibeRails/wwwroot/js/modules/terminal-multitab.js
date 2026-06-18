@@ -36,6 +36,12 @@ const TAB_META_PREFIX = 'viberails_terminal_tab_meta_';
 // dismissed it or opened the editor at least once — then we never nudge again.
 const EDITOR_NUDGE_SEEN_KEY = 'viberails_terminal_editor_nudge_seen';
 
+// Glyphs for the dual-mode connection button (#terminal-stop-btn). It flips
+// between a red "Disconnect" (X) and a green "Connect" (play) — swap the icon
+// with the label so green never shows the X, which reads as "disconnect".
+const DISCONNECT_ICON_PATH = '<path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>';
+const CONNECT_ICON_PATH = '<path d="m11.596 8.697-6.363 3.692C4.53 12.793 4 12.49 4 11.998V4.002c0-.492.53-.795.997-.51l6.363 3.692a.802.802 0 0 1 0 1.393z"/>';
+
 function lower(value) {
     return (value || '').toString().trim().toLowerCase();
 }
@@ -1898,6 +1904,7 @@ class TerminalManager {
         if (!this.stopBtn) return;
 
         const label = this.stopBtn.querySelector('span');
+        const icon = this.stopBtn.querySelector('svg');
         const nextLabel = reconnect ? 'Connect' : 'Disconnect';
         const nextTitle = reconnect ? 'Reconnect terminal session' : 'Disconnect terminal session';
 
@@ -1905,6 +1912,10 @@ class TerminalManager {
         this.stopBtn.setAttribute('aria-label', nextTitle);
         this.stopBtn.classList.toggle('btn-outline-success', reconnect);
         this.stopBtn.classList.toggle('btn-outline-danger', !reconnect);
+
+        if (icon) {
+            icon.innerHTML = reconnect ? CONNECT_ICON_PATH : DISCONNECT_ICON_PATH;
+        }
 
         if (label) {
             label.textContent = nextLabel;
