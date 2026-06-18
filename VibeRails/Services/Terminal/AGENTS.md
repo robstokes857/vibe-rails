@@ -99,7 +99,8 @@ Session orchestrator.
 
 `PrepareSession(...)`
 - Builds launch command and optional extra args.
-- Adds MCP registration setup command if MCP server path exists.
+- Adds the VibeRails MCP stdio registration setup command for managed CLIs
+  (Claude, Codex, Antigravity, Copilot).
 - Builds base env vars (`LANG`, `LC_ALL`, `PYTHONIOENCODING`).
 - Merges CLI-specific env vars via `LlmCliEnvironmentService` when environment name is provided.
 
