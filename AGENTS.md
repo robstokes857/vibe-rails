@@ -270,7 +270,7 @@ CLI runs with full session tracking (same as CLI path)
 vb.exe (Main App)
   ├─ AddMcpServer().WithHttpTransport().WithTools<...>()   # in-process MCP server
   ├─ app.MapMcp("/mcp")                                    # Streamable HTTP endpoint (root backend only)
-  └─ Tools: echo · check_rules · validate_vca · search_history (real BGE/sqlite-vec search)
+  └─ Tools: validate_vca · search_history (real BGE/sqlite-vec search)
 
 McpClientService — thin client wrapper used by the dashboard MCP Explorer to call /mcp.
 ```
@@ -394,9 +394,9 @@ var result = await service.CallToolAsync("search_history", args);
 The MCP server is hosted inside `vb.exe` over HTTP at `/mcp` (root backend only). There is no
 separate process. Full design: [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md).
 
-**Tools** (snake_case wire names): `echo` (connectivity), `check_rules` (secrets/length/TODO
-checks), `validate_vca` (staged-file AGENTS.md rule validation), `search_history` (semantic +
-keyword search over captured agent history via the real `IUnifiedSearchService` — BGE/sqlite-vec/RRF).
+**Tools** (snake_case wire names): `validate_vca` (staged-file AGENTS.md rule validation),
+`search_history` (semantic + keyword search over captured agent history via the real
+`IUnifiedSearchService` — BGE/sqlite-vec/RRF).
 
 ### Data Layer
 

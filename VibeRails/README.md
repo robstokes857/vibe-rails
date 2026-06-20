@@ -110,7 +110,7 @@ VibeRails consists of four main components:
 │  └──────────────┴──────────────┴──────────────────────┘ │
 │  ┌──────────────────────────────────────────────────────┐ │
 │  │  In-process MCP server  →  HTTP /mcp                  │ │
-│  │  echo | check_rules | validate_vca | search_history  │ │
+│  │  validate_vca | search_history                       │ │
 │  └──────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -202,8 +202,6 @@ Tools (snake_case wire names):
 
 | Tool | Purpose |
 |------|---------|
-| `echo` | Test/debug MCP communication |
-| `check_rules` | Validate content against safety/style rules (secrets, length, TODOs) |
 | `validate_vca` | Validate staged git files against AGENTS.md enforcement rules |
 | `search_history` | Semantic + keyword search over captured agent history (real BGE/sqlite-vec/RRF — the same `IUnifiedSearchService` as the "Vibe AI" inspector) |
 

@@ -1,7 +1,7 @@
 # MCP Server (in-process)
 
 VibeRails hosts a Model Context Protocol (MCP) server **inside `vb.exe`** — no separate binary to
-build or ship. The same three tools are exposed over **two transports** so each consumer gets its
+build or ship. The same two tools are exposed over **two transports** so each consumer gets its
 natural one:
 
 - **HTTP** at `/mcp` (Streamable HTTP) — for the dashboard MCP Explorer.
@@ -15,13 +15,13 @@ natural one:
 vb.exe — Native AOT, two MCP entry points sharing the same tool classes
 │
 ├── HTTP (dashboard's Kestrel, root backend only)
-│     MapRegisterServices: AddMcpServer().WithHttpTransport().WithTools<Echo/Rules/SessionSearch>()
+│     MapRegisterServices: AddMcpServer().WithHttpTransport().WithTools<Rules/SessionSearch>()
 │     Program.cs:          app.MapMcp("/mcp")
 │     CookieAuthMiddleware in front of /mcp     ← viberails_session token required
 │
 └── stdio (`vb mcp`, McpStdioHost.cs)
       Program.cs branches BEFORE the web host:  if (McpStdioHost.IsRequested(args)) …
-      AddMcpServer().WithStdioServerTransport().WithTools<Echo/Rules/SessionSearch>()
+      AddMcpServer().WithStdioServerTransport().WithTools<Rules/SessionSearch>()
       No web server, no port, no auth           ← inherently scoped to the spawning CLI
 ```
 
@@ -48,12 +48,10 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 
 | Wire name (snake_case) | Method | Description |
 |------------------------|--------|-------------|
-| `echo` | `EchoTool.Echo` | Connectivity test — echoes the message back. |
-| `check_rules` | `RulesTool.CheckRules` | Static content checks: hardcoded secrets, max length, unresolved `TODO:`. |
 | `validate_vca` | `RulesTool.ValidateVca` | Validates staged git files against `- [ENFORCEMENT] …` rules in AGENTS.md files. |
 | `search_history` | `SessionSearchTool.SearchHistory` | Semantic + keyword search over the developer's captured agent history. |
 
-> The wire names are what tool callers use. Calling `Echo` (PascalCase) returns "Unknown tool".
+> The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
 
 ### `search_history` — the real search
 
@@ -102,7 +100,6 @@ management command.
 
 ## Tests
 
-- `Tests/Services/Mcp/McpToolTests.cs` — pure-logic unit tests for the stateless tools.
 - `Tests/Services/Mcp/McpServerHttpTests.cs` — hosts the real `AddMcpServer().WithHttpTransport()
   + MapMcp` wiring on a loopback Kestrel and drives it through `McpClientService` over Streamable
   HTTP; asserts the tool list, tool execution, and that the DI-injected `SessionSearchTool`

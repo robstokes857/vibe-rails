@@ -55,7 +55,7 @@ public class McpClientService : IMcpService
         }
     }
 
-    public async Task<string> CallToolAsync(string toolName, Dictionary<string, object?> arguments, CancellationToken cancellationToken = default)
+    public async Task<McpToolCallOutcome> CallToolAsync(string toolName, Dictionary<string, object?> arguments, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Calling MCP tool '{ToolName}'...", toolName);
         try
@@ -67,15 +67,22 @@ public class McpClientService : IMcpService
                 null,
                 cancellationToken);
 
-            // Extract text from the first content block
+            // MCP reports tool-level failures as a normal result with IsError=true (not a thrown
+            // fault), so surface that flag instead of returning the error text as if it were output.
+            // IsError is nullable on the wire; an absent flag means success.
+            var isError = result.IsError ?? false;
             var text = result.Content.OfType<TextContentBlock>().FirstOrDefault()?.Text ?? string.Empty;
 
-            if (string.IsNullOrEmpty(text))
+            if (isError)
+            {
+                _logger.LogWarning("Tool '{ToolName}' reported an error: {Error}", toolName, text);
+            }
+            else if (string.IsNullOrEmpty(text))
             {
                 _logger.LogWarning("Tool '{ToolName}' returned no text content.", toolName);
             }
 
-            return text;
+            return new McpToolCallOutcome(isError, text);
         }
         catch (Exception ex)
         {

@@ -140,7 +140,6 @@ namespace VibeRails
                         options.ServerInfo = new() { Name = "viberails-mcp", Version = "1.0.0" };
                     })
                     .WithHttpTransport()
-                    .WithTools<EchoTool>()
                     .WithTools<RulesTool>()
                     .WithTools<SessionSearchTool>();
             }

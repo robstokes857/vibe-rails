@@ -1,5 +1,12 @@
 const esc = v => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 
+// Starter arguments per tool so a bare "Call Tool" works without hand-writing JSON.
+// Keyed by the snake_case wire name; tools not listed here fall back to {}.
+const MCP_ARG_EXAMPLES = {
+    search_history: { query: 'websocket timeout' },
+    validate_vca: {},
+};
+
 export class McpController {
     constructor(app) {
         this.app = app;
@@ -100,11 +107,13 @@ export class McpController {
         const tool = this.state.tools.find(t => t.name === this.state.selectedTool);
         if (!tool) { detail.innerHTML = '<div class="mcp-empty">Tool not found.</div>'; return; }
 
+        const exampleJson = JSON.stringify(MCP_ARG_EXAMPLES[tool.name] ?? {}, null, 2);
+
         detail.innerHTML = `
             <h3 style="margin:0 0 4px;font-size:16px;color:var(--mcp-accent);">${esc(tool.name)}</h3>
             <p style="margin:0 0 16px;color:var(--mcp-muted);font-size:13px;line-height:1.5;">${esc(tool.description || 'No description')}</p>
             <div style="font-size:12px;color:var(--mcp-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Arguments (JSON)</div>
-            <textarea class="mcp-control" data-mcp-tool-args rows="6" placeholder='{"key": "value"}' style="resize:vertical;font-size:13px;">{}</textarea>
+            <textarea class="mcp-control" data-mcp-tool-args rows="6" placeholder='{"key": "value"}' style="resize:vertical;font-size:13px;">${esc(exampleJson)}</textarea>
             <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
                 <button class="mcp-button primary" data-mcp-call-btn type="button">Call Tool</button>
                 <span class="mcp-banner" data-mcp-call-banner></span>
