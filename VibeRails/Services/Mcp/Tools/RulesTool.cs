@@ -6,52 +6,16 @@ using Serilog;
 namespace VibeRails.Services.Mcp.Tools;
 
 /// <summary>
-/// Content + VCA rule-validation MCP tools. Exposed over the in-process HTTP transport at /mcp.
-/// MCP normalizes method names to snake_case (<c>check_rules</c>, <c>validate_vca</c>).
+/// VCA rule-validation MCP tool. Exposed over the in-process HTTP transport at /mcp.
+/// MCP normalizes the method name to snake_case (<c>validate_vca</c>).
 /// </summary>
 [McpServerToolType]
 public class RulesTool
 {
-    private static readonly Regex SecretPattern = new Regex(
-        @"(?i)(api[_-]?key|password|secret|token)[\s:=]+([a-zA-Z0-9_\-]+)",
-        RegexOptions.Compiled);
-
     // Pattern to extract rules from AGENTS.md: - [ENFORCEMENT] Rule text
     private static readonly Regex RulePattern = new Regex(
         @"^-\s*\[(WARN|COMMIT|STOP|SKIP|DISABLED)\]\s*(.+)$",
         RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
-
-    [McpServerTool]
-    [Description("Checks if the provided content follows the project's safety and style rules. Returns PASS or FAIL with reason.")]
-    public static string CheckRules([Description("The content to check.")] string content)
-    {
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return "FAIL: Content cannot be empty.";
-        }
-
-        // Security Check: Look for potential hardcoded secrets
-        var secretMatch = SecretPattern.Match(content);
-        if (secretMatch.Success)
-        {
-            return $"FAIL: Content contains potential secret (detected keyword: '{secretMatch.Groups[1].Value}'). Please remove sensitive information.";
-        }
-
-        // Style Check: Length limit
-        const int MaxLength = 2000;
-        if (content.Length > MaxLength)
-        {
-            return $"FAIL: Content exceeds maximum length of {MaxLength} characters (Current: {content.Length}).";
-        }
-
-        // Style Check: No TODOs in final output
-        if (content.Contains("TODO:", StringComparison.OrdinalIgnoreCase))
-        {
-            return "FAIL: Content contains unresolved 'TODO:' items.";
-        }
-
-        return "PASS: All rules satisfied.";
-    }
 
     [McpServerTool]
     [Description("Validates staged files against VCA rules defined in AGENTS.md files. Call this BEFORE attempting to commit changes. Returns validation results with any COMMIT-level violations that require acknowledgment.")]

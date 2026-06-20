@@ -13,8 +13,8 @@ namespace VibeRails.Services.Mcp;
 /// MCP server is a child process the CLI owns and talks to over pipes, so it is inherently scoped
 /// to the spawning process and needs no token.
 ///
-/// Exposes the SAME tools as the in-process HTTP server (<see cref="EchoTool"/>,
-/// <see cref="RulesTool"/>, <see cref="SessionSearchTool"/>), so the two transports stay in lockstep.
+/// Exposes the SAME tools as the in-process HTTP server (<see cref="RulesTool"/>,
+/// <see cref="SessionSearchTool"/>), so the two transports stay in lockstep.
 ///
 /// CRITICAL: nothing may be written to stdout except MCP protocol frames. Default host console
 /// logging is cleared; the static Serilog logger (configured in Program.cs) writes to file only,
@@ -49,7 +49,7 @@ public static class McpStdioHost
     {
         // Minimal BERT read-path for the real semantic search (mirrors MapRegisterServices, read
         // side only — no write-path stores, no background jobs). The model is loaded lazily on the
-        // first search_history call; echo/check_rules/validate_vca never touch it.
+        // first search_history call; validate_vca never touches it.
         services.AddSingleton<IBertSettings, BertV2BgeSmallEnSettings>();
         services.AddSingleton<IBertV2BgeEmbedder>(sp =>
         {
@@ -67,7 +67,6 @@ public static class McpStdioHost
                 options.ServerInfo = new() { Name = "viberails-mcp", Version = "1.0.0" };
             })
             .WithStdioServerTransport()
-            .WithTools<EchoTool>()
             .WithTools<RulesTool>()
             .WithTools<SessionSearchTool>();
     }

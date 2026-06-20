@@ -54,8 +54,14 @@ public static class McpRoutes
             try
             {
                 await using var client = await ConnectLoopbackAsync(ctx, cancellationToken);
-                var result = await client.CallToolAsync(name, request.Arguments, cancellationToken);
-                return Results.Ok(new McpToolCallResponse(true, result));
+                var outcome = await client.CallToolAsync(name, request.Arguments, cancellationToken);
+
+                // A tool-level error (isError=true) is a well-formed response, not a transport
+                // failure: return 200 with Success=false so the Explorer shows "Call failed" plus
+                // the tool's own message. The catch below stays for actual connection faults.
+                return outcome.IsError
+                    ? Results.Ok(new McpToolCallResponse(false, "", outcome.Text))
+                    : Results.Ok(new McpToolCallResponse(true, outcome.Text));
             }
             catch (Exception ex)
             {

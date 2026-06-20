@@ -29,8 +29,6 @@ public class McpServerHttpTests : IAsyncLifetime
 
     private static readonly string[] ExpectedTools =
     {
-        "echo",
-        "check_rules",
         "validate_vca",
         "search_history",
     };
@@ -52,7 +50,6 @@ public class McpServerHttpTests : IAsyncLifetime
                 options.ServerInfo = new() { Name = "viberails-mcp-test", Version = "1.0.0" };
             })
             .WithHttpTransport()
-            .WithTools<EchoTool>()
             .WithTools<RulesTool>()
             .WithTools<SessionSearchTool>();
 
@@ -97,20 +94,15 @@ public class McpServerHttpTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CallEcho_RoundTripsMessage()
+    public async Task CallTool_MissingRequiredArgument_ReportsToolError()
     {
+        // Regression: the Explorer used to send {} and report "Call succeeded" because IsError was
+        // ignored. A missing required parameter must now surface as a tool error (IsError=true).
+        // search_history's `query` is required, so an empty argument map trips schema validation.
         await using var client = await ConnectAsync();
-        var result = await client.CallToolAsync("echo", new Dictionary<string, object?> { ["message"] = "ping-42" });
-        Assert.Equal("Echo: ping-42", result);
-    }
-
-    [Fact]
-    public async Task CallCheckRules_DetectsSecret()
-    {
-        await using var client = await ConnectAsync();
-        var result = await client.CallToolAsync("check_rules", new Dictionary<string, object?> { ["content"] = "password = hunter2longvalue" });
-        Assert.StartsWith("FAIL", result);
-        Assert.Contains("secret", result, StringComparison.OrdinalIgnoreCase);
+        var result = await client.CallToolAsync("search_history", new Dictionary<string, object?>());
+        Assert.True(result.IsError);
+        Assert.NotEmpty(result.Text);
     }
 
     [Fact]
@@ -119,10 +111,11 @@ public class McpServerHttpTests : IAsyncLifetime
         await using var client = await ConnectAsync();
         var result = await client.CallToolAsync("search_history", new Dictionary<string, object?> { ["query"] = "websocket timeout" });
 
+        Assert.False(result.IsError);
         // The fake returns one fused hit; the tool should surface its session id, agent, and preview.
-        Assert.Contains("sess-abc", result);
-        Assert.Contains("claude", result);
-        Assert.Contains("websocket reconnect", result);
+        Assert.Contains("sess-abc", result.Text);
+        Assert.Contains("claude", result.Text);
+        Assert.Contains("websocket reconnect", result.Text);
     }
 
     [Fact]
@@ -130,7 +123,9 @@ public class McpServerHttpTests : IAsyncLifetime
     {
         await using var client = await ConnectAsync();
         var result = await client.CallToolAsync("search_history", new Dictionary<string, object?> { ["query"] = "   " });
-        Assert.StartsWith("FAIL", result);
+        // Empty query is a graceful "FAIL" verdict, not a tool error.
+        Assert.False(result.IsError);
+        Assert.StartsWith("FAIL", result.Text);
     }
 
     [Fact]
