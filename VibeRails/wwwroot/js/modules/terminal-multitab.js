@@ -522,6 +522,7 @@ class TerminalManager {
                 taskKey: metadata?.taskKey || null,
                 customLabel: metadata?.customLabel === true,
                 minimized: metadata?.minimized === true,
+                pinned: metadata?.pinned === true,
                 workingDirectory
             });
         });
@@ -550,6 +551,7 @@ class TerminalManager {
             taskKey: cleanString(options.taskKey),
             customLabel: options.customLabel === true,
             minimized: options.minimized === true,
+            pinned: options.pinned === true,
             workingDirectory,
             renaming: false,
             hasActiveSession: tabInfo.hasActiveSession === true,
@@ -617,6 +619,14 @@ class TerminalManager {
             this.toggleTabMinimized(state.id);
         });
 
+        const pin = document.createElement('button');
+        pin.type = 'button';
+        pin.className = 'vb-terminal-tab-pin';
+        pin.addEventListener('click', (event) => {
+            event.stopPropagation();
+            this.toggleTabPinned(state.id);
+        });
+
         const close = document.createElement('button');
         close.type = 'button';
         close.className = 'vb-terminal-tab-close';
@@ -635,6 +645,7 @@ class TerminalManager {
         const actions = document.createElement('span');
         actions.className = 'vb-terminal-tab-actions';
         actions.appendChild(edit);
+        actions.appendChild(pin);
         actions.appendChild(min);
         actions.appendChild(close);
 
@@ -666,7 +677,7 @@ class TerminalManager {
         }
         this.tabPanels?.appendChild(panel);
 
-        state.ui = { item, button, edit, min, close, actions, panel, terminalElement, toastLayer };
+        state.ui = { item, button, edit, pin, min, close, actions, panel, terminalElement, toastLayer };
 
         const instance = new TerminalTab(this, state);
         instance.statusController = new TabStatusController(state, state.ui, {
@@ -703,10 +714,12 @@ class TerminalManager {
             taskKey: state.taskKey,
             customLabel: state.customLabel,
             minimized: state.minimized,
+            pinned: state.pinned,
             workingDirectory: state.workingDirectory
         });
         this.renderTabButton(tab);
         this.applyTabAccent(tab);
+        this.applyTabPinned(tab);
         this.applyTabMinimized(tab);
 
         this.updateAddButtonState();
@@ -817,12 +830,19 @@ class TerminalManager {
         // Sessionless (blank/stopped) tabs are closeable too — otherwise + and Stop
         // leak un-dismissable tabs. _enterPendingClose handles the no-session case
         // (the DELETE 404s and falls through to local cleanup).
+        const tab = this.tabs.get(tabId);
+        if (tab?.state?.pinned === true) {
+            return;
+        }
         return this._enterPendingClose(tabId);
     }
 
     async _enterPendingClose(tabId) {
         const tab = this.tabs.get(tabId);
         if (!tab || this._pendingCloses.has(tabId)) {
+            return;
+        }
+        if (tab.state.pinned === true) {
             return;
         }
 
@@ -878,6 +898,9 @@ class TerminalManager {
     async _commitClose(tabId) {
         const tab = this.tabs.get(tabId);
         if (!tab) {
+            return;
+        }
+        if (tab.state.pinned === true && !this._pendingCloses.has(tabId)) {
             return;
         }
 
@@ -1396,6 +1419,7 @@ class TerminalManager {
             taskKey: tab.state.taskKey,
             customLabel: tab.state.customLabel,
             minimized: tab.state.minimized === true,
+            pinned: tab.state.pinned === true,
             workingDirectory: tab.state.workingDirectory
         });
         this.renderTabButton(tab);
@@ -1414,13 +1438,16 @@ class TerminalManager {
     syncTabActionAvailability(tab) {
         const item = tab?.state?.ui?.item;
         const edit = tab?.state?.ui?.edit;
+        const pin = tab?.state?.ui?.pin;
         const min = tab?.state?.ui?.min;
         const close = tab?.state?.ui?.close;
         const hasSession = tab?.state?.hasActiveSession === true;
+        const pinned = tab?.state?.pinned === true;
 
         item?.classList.toggle('has-active-session', hasSession);
+        this.applyTabPinned(tab);
 
-        if (!hasSession && tab?.state?.minimized === true) {
+        if ((!hasSession || pinned) && tab?.state?.minimized === true) {
             tab.state.minimized = false;
             this.applyTabMinimized(tab);
             this.saveTabMeta(tab.state.id, {
@@ -1430,15 +1457,18 @@ class TerminalManager {
                 taskKey: tab.state.taskKey,
                 customLabel: tab.state.customLabel,
                 minimized: false,
+                pinned: tab.state.pinned === true,
                 workingDirectory: tab.state.workingDirectory
             });
         }
 
         [
             [edit, hasSession],
-            [min, hasSession],
+            [pin, true],
+            [min, hasSession && !pinned],
             // Close stays available even with no session, so blank/stopped tabs can be dismissed.
-            [close, true]
+            // Pinned tabs are the exception: unpin first, then close.
+            [close, !pinned]
         ].forEach(([button, enabled]) => {
             if (!button) return;
             button.hidden = !enabled;
@@ -1494,6 +1524,49 @@ class TerminalManager {
         item.style.setProperty('--vb-terminal-tab-accent', accent);
     }
 
+    toggleTabPinned(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+
+        tab.state.pinned = tab.state.pinned !== true;
+        if (tab.state.pinned && tab.state.minimized === true) {
+            tab.state.minimized = false;
+            this.applyTabMinimized(tab);
+        }
+
+        this.saveTabMeta(tab.state.id, {
+            label: tab.state.label,
+            icon: tab.state.icon,
+            accentColor: tab.state.accentColor,
+            taskKey: tab.state.taskKey,
+            customLabel: tab.state.customLabel,
+            minimized: tab.state.minimized === true,
+            pinned: tab.state.pinned === true,
+            workingDirectory: tab.state.workingDirectory
+        });
+        this.applyTabPinned(tab);
+        this.renderTabButton(tab);
+        requestAnimationFrame(() => this._updateTabScrollArrows());
+    }
+
+    applyTabPinned(tab) {
+        const item = tab?.state?.ui?.item;
+        const pin = tab?.state?.ui?.pin;
+        if (!item) return;
+
+        const pinned = tab.state.pinned === true;
+        item.classList.toggle('is-pinned', pinned);
+        item.dataset.pinned = pinned ? 'true' : 'false';
+
+        if (pin) {
+            pin.innerHTML = '<i class="fa-solid fa-thumbtack"></i>';
+            const title = pinned ? 'Unpin tab' : 'Pin tab';
+            pin.title = title;
+            pin.setAttribute('aria-label', title);
+            pin.setAttribute('aria-pressed', String(pinned));
+        }
+    }
+
     // ── Per-tab minimize (collapse to an icon chip) ───────────────────────
     //
     // A minimized tab shrinks to a brand-logo + status-icon chip and is grouped
@@ -1506,6 +1579,7 @@ class TerminalManager {
     toggleTabMinimized(tabId) {
         const tab = this.tabs.get(tabId);
         if (!tab || tab.state.hasActiveSession !== true) return;
+        if (tab.state.pinned === true) return;
 
         tab.state.minimized = tab.state.minimized !== true;
         this.saveTabMeta(tab.state.id, {
@@ -1515,6 +1589,7 @@ class TerminalManager {
             taskKey: tab.state.taskKey,
             customLabel: tab.state.customLabel,
             minimized: tab.state.minimized === true,
+            pinned: tab.state.pinned === true,
             workingDirectory: tab.state.workingDirectory
         });
         this.applyTabMinimized(tab);
@@ -1610,6 +1685,7 @@ class TerminalManager {
             taskKey: tab.state.taskKey,
             customLabel: tab.state.customLabel,
             minimized: tab.state.minimized === true,
+            pinned: tab.state.pinned === true,
             workingDirectory: tab.state.workingDirectory
         });
 
@@ -1709,6 +1785,7 @@ class TerminalManager {
             taskKey: tab.state.taskKey,
             customLabel: tab.state.customLabel,
             minimized: tab.state.minimized === true,
+            pinned: tab.state.pinned === true,
             workingDirectory: tab.state.workingDirectory
         });
 
@@ -2429,6 +2506,7 @@ class TerminalManager {
                 taskKey: cleanString(metadata.taskKey) || null,
                 customLabel: metadata.customLabel === true,
                 minimized: metadata.minimized === true,
+                pinned: metadata.pinned === true,
                 workingDirectory: cleanString(metadata.workingDirectory) || null
             };
             window.sessionStorage.setItem(`${TAB_META_PREFIX}${tabId}`, JSON.stringify(payload));
@@ -2447,6 +2525,7 @@ class TerminalManager {
                 taskKey: cleanString(parsed?.taskKey) || null,
                 customLabel: parsed?.customLabel === true,
                 minimized: parsed?.minimized === true,
+                pinned: parsed?.pinned === true,
                 workingDirectory: cleanString(parsed?.workingDirectory) || null
             };
         } catch {

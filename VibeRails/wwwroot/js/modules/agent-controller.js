@@ -38,15 +38,14 @@ export class AgentController {
                     this.app.navigate(view);
                 }
             });
-            this.app.bindAction(root, '[data-action="select-agent"]', () => this.showAgentSelector());
-            this.app.bindAction(root, '[data-action="available-rules"]', () => this.showAvailableRules());
             this.app.bindAction(root, '[data-action="create-agent-file"]', () => this.app.navigate('agent-create'));
 
             const fileTree = root.querySelector('[data-agent-file-tree]');
             if (fileTree) {
                 // Ensure we have data to render
                 if (this.app.data.agents && this.app.data.agents.length > 0) {
-                    fileTree.innerHTML = this.app.renderLocalFileTree(fileTree);
+                    fileTree.innerHTML = this.app.renderLocalFileTree();
+                    this.bindAgentListItems(fileTree);
                 } else if (this.app.data.isInGit) {
                     fileTree.innerHTML = '<p class="text-muted text-center">No agent files found in this project.</p>';
                 } else {
@@ -58,32 +57,27 @@ export class AgentController {
         content.appendChild(fragment);
     }
 
-    showAgentSelector() {
-        const agents = this.app.data.agents.map((agent, idx) => `
-            <div class="list-group-item" data-agent-select-index="${idx}" style="cursor:pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <strong>${agent.name}</strong>
-                        <br>
-                        <small class="text-muted">${agent.path}</small>
-                    </div>
-                    <span class="badge badge-primary">${agent.ruleCount || 0} rules</span>
-                </div>
-            </div>
-        `).join('');
-
-        this.app.showModal('Select Agent File', `
-            <div class="list-group">
-                ${agents || '<p class="text-muted text-center">No agents found</p>'}
-            </div>
-        `);
-
-        // Bind click handlers (CSP-safe, no inline onclick)
-        document.querySelectorAll('[data-agent-select-index]').forEach(el => {
-            const idx = parseInt(el.dataset.agentSelectIndex);
+    // Wire up the agent-file list rendered by app.renderLocalFileTree():
+    // clicking a row opens the editor; clicking the inline rename button opens
+    // the custom-name modal without leaving the list.
+    bindAgentListItems(container) {
+        container.querySelectorAll('[data-agent-tree-index]').forEach(el => {
+            const idx = parseInt(el.dataset.agentTreeIndex);
             const agent = this.app.data.agents[idx];
             if (agent) {
                 el.addEventListener('click', () => this.app.navigate('agent-edit', agent));
+            }
+        });
+
+        container.querySelectorAll('[data-agent-rename]').forEach(el => {
+            const idx = parseInt(el.dataset.agentRename);
+            const agent = this.app.data.agents[idx];
+            if (agent) {
+                el.addEventListener('click', (e) => {
+                    // Don't let the click bubble to the row (which would navigate in).
+                    e.stopPropagation();
+                    this.showAgentCustomNameModal(agent, { onSaved: () => this.loadAgents() });
+                });
             }
         });
     }
@@ -191,10 +185,11 @@ export class AgentController {
                     element.addEventListener('click', handler);
                 }
 
-                // Disable edit/remove buttons initially
+                // Dim edit/remove until a rule is selected. We deliberately keep
+                // them clickable so the handler's "select a rule first" toast can
+                // fire — a fully inert card just reads as a broken/dead button.
                 if (action === 'edit-rule' || action === 'remove-rule') {
                     element.closest('.card').classList.add('disabled-card');
-                    element.style.pointerEvents = 'none';
                     element.style.opacity = '0.5';
                 }
 
@@ -418,14 +413,13 @@ export class AgentController {
         element.classList.add('active');
         this.selectedRuleIndex = index;
 
-        // Enable buttons
+        // Light up the edit/remove cards now that a rule is selected.
         const root = document.querySelector('[data-view="agent-edit"]');
         if (root) {
             root.querySelectorAll('[data-agent-action="edit-rule"], [data-agent-action="remove-rule"]').forEach(btn => {
                 const card = btn.closest('.card');
                 if (card) {
                     card.classList.remove('disabled-card');
-                    card.style.pointerEvents = 'auto';
                     card.style.opacity = '1';
                 }
             });
@@ -606,14 +600,14 @@ export class AgentController {
         }
     }
 
-    showAgentCustomNameModal(agent) {
+    showAgentCustomNameModal(agent, { onSaved = null } = {}) {
         const currentName = agent.customName || agent.name;
 
         this.app.showModal('Set Custom Agent Name', `
             <form id="agent-custom-name-form">
                 <div class="mb-3">
                     <label class="form-label">Custom Name</label>
-                    <input type="text" class="form-control" id="agent-custom-name" placeholder="${currentName}" required>
+                    <input type="text" class="form-control" id="agent-custom-name" value="${this.app.escapeHtml(currentName)}" placeholder="${this.app.escapeHtml(currentName)}" required>
                     <small class="form-text text-muted">Enter a friendly name to identify this agent file.</small>
                 </div>
                 <div class="d-flex gap-2 justify-content-end">
@@ -639,11 +633,17 @@ export class AgentController {
                 });
                 this.app.showToast('Success', `Agent name updated to "${newName}"`, 'success');
                 this.app.closeModal();
-                // Refresh data and reload the view
+                // Refresh data, then let the caller decide how to re-render. The
+                // list passes onSaved to stay on the list; the editor view falls
+                // back to reloading itself with the updated agent.
                 await this.app.refreshDashboardData();
-                const updatedAgent = this.app.data.agents.find(a => a.path === agent.path);
-                if (updatedAgent) {
-                    this.loadAgentEdit(updatedAgent);
+                if (onSaved) {
+                    onSaved();
+                } else {
+                    const updatedAgent = this.app.data.agents.find(a => a.path === agent.path);
+                    if (updatedAgent) {
+                        this.loadAgentEdit(updatedAgent);
+                    }
                 }
             } catch (error) {
                 this.app.showError('Failed to update agent name');
