@@ -2839,7 +2839,7 @@ code {
     font-weight: 600;
 }
 
-/* ── Tab action cluster (rename / minimize / close) ─────────────────────────
+/* ── Tab action cluster (rename / pin / minimize / close) ───────────────────
    Lives in an absolutely-positioned overlay on the right edge of the tab, so
    revealing it on hover covers the status section instead of reflowing the
    label. `background: inherit` tracks the tab's normal/hover/active background.
@@ -2912,14 +2912,24 @@ code {
 }
 
 #vb-terminal-panel .vb-terminal-tab-edit,
+#vb-terminal-panel .vb-terminal-tab-pin,
 #vb-terminal-panel .vb-terminal-tab-min {
     font-size: 0.72rem;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-pinned .vb-terminal-tab-pin {
+    color: #ff5c5c;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-pinned .vb-terminal-tab-pin:hover {
+    color: #ff8a8a;
 }
 
 /* Tab actions only make sense once a session exists (syncTabActionAvailability
    sets [hidden] otherwise). Author display rules override the UA [hidden]
    default, so keep this explicit. */
 #vb-terminal-panel .vb-terminal-tab-edit[hidden],
+#vb-terminal-panel .vb-terminal-tab-pin[hidden],
 #vb-terminal-panel .vb-terminal-tab-min[hidden],
 #vb-terminal-panel .vb-terminal-tab-close[hidden] {
     display: none !important;
@@ -2930,14 +2940,14 @@ code {
     display: none;
 }
 
-/* Touch devices have no hover: keep minimize/close inline and always visible
+/* Touch devices have no hover: keep pin/minimize/close inline and always visible
    (the pencil stays hover-discovery-only — rename remains reachable via
    long-press → context menu). */
 @media (hover: none) {
-    /* Inline (always-visible) actions take ~54px of in-flow width, so touch
+    /* Inline (always-visible) actions take ~76px of in-flow width, so touch
        tabs need a higher floor to keep the name + status readable. */
     #vb-terminal-panel {
-        --vb-terminal-tab-min-width: 200px;
+        --vb-terminal-tab-min-width: 220px;
     }
 
     #vb-terminal-panel .vb-terminal-tab-actions {
@@ -3000,6 +3010,19 @@ code {
     font-weight: 700;
     color: #6c7086;
     font-family: monospace;
+}
+
+#vb-terminal-panel .vb-tab-pin-logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #ff5c5c;
+    font-size: 0.78rem;
+}
+
+#vb-terminal-panel .vb-tab-pin-logo i {
+    line-height: 1;
+    transform: rotate(-18deg);
 }
 
 /* Status section (right side of tab). It stays intact on roomy tabs and becomes
@@ -3176,9 +3199,10 @@ code {
     padding-left: 0;
 }
 
-/* Chip hover offers exactly one action — restore. Rename/close need the full
-   tab (restore first); clicking anywhere else on the chip activates it. */
+/* Chip hover offers exactly one action — restore. Rename/pin/close need the
+   full tab (restore first); clicking anywhere else on the chip activates it. */
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-edit,
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-pin,
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-close {
     display: none !important;
 }

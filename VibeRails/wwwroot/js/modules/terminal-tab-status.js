@@ -81,6 +81,7 @@ export class TabStatusController {
         this._brandLogoEl = null;
         this._labelEl = null;
         this._lastCliKey = undefined;
+        this._lastPinned = undefined;
     }
 
     // ── Public API ──────────────────────────────────────────────────────
@@ -91,6 +92,7 @@ export class TabStatusController {
 
         const cliKey = this._options.getCliKey?.() ?? null;
         const brand = getCliBrand(cliKey);
+        const pinned = this._tabState.pinned === true;
 
         // Set brand accent on the tab state so applyTabAccent() preserves it
         if (brand.accentColor && !this._tabState.accentColor) {
@@ -103,7 +105,7 @@ export class TabStatusController {
         // looked like a flicker on the Thinking tab. Update only the bits
         // that actually mutate (label) and leave status visuals — managed by
         // _transitionTo / _applyVisuals on real status changes — alone.
-        if (this._labelEl && this._lastCliKey === cliKey) {
+        if (this._labelEl && this._lastCliKey === cliKey && this._lastPinned === pinned) {
             const nextLabel = this._tabState.label || 'Terminal';
             if (this._labelEl.textContent !== nextLabel) {
                 this._labelEl.textContent = nextLabel;
@@ -113,13 +115,23 @@ export class TabStatusController {
         }
 
         this._lastCliKey = cliKey;
+        this._lastPinned = pinned;
         button.innerHTML = '';
 
         // ── Left: Identity ──────────────────────────────────────────────
         const identity = document.createElement('span');
         identity.className = 'vb-tab-identity';
 
-        if (brand.logo) {
+        if (pinned) {
+            const pin = document.createElement('span');
+            pin.className = 'vb-tab-brand-logo vb-tab-pin-logo';
+            pin.setAttribute('aria-hidden', 'true');
+            const i = document.createElement('i');
+            i.className = 'fa-solid fa-thumbtack';
+            pin.appendChild(i);
+            identity.appendChild(pin);
+            this._brandLogoEl = pin;
+        } else if (brand.logo) {
             const img = document.createElement('img');
             img.className = 'vb-tab-brand-logo';
             img.src = brand.logo;
@@ -442,10 +454,17 @@ export class TabStatusController {
 
         const label = this._tabState.label || 'Terminal';
         const statusText = status ? this._statusTextFor(status) : '';
-        const title = statusText ? `${label} - ${statusText}` : label;
+        const titleParts = [label];
+        if (this._tabState.pinned === true) {
+            titleParts.push('Pinned');
+        }
+        if (statusText) {
+            titleParts.push(statusText);
+        }
+        const title = titleParts.join(' - ');
         button.title = title;
         if (typeof button.setAttribute === 'function') {
-            button.setAttribute('aria-label', statusText ? `${label}, ${statusText}` : label);
+            button.setAttribute('aria-label', titleParts.join(', '));
         }
     }
 

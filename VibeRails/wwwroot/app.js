@@ -316,22 +316,20 @@ export class VibeControlApp {
             const goHome = e.target.closest('[data-action="navigate-home"]');
             if (goHome) {
                 e.preventDefault();
-                this.navigationStack = ['dashboard'];
-                this.currentView = 'dashboard';
-                this.loadView('dashboard');
+                this.navigate('dashboard', {}, { resetStack: true });
             }
 
             const goSettings = e.target.closest('[data-action="navigate-settings"]');
             if (goSettings) {
                 e.preventDefault();
-                this.navigate('settings');
+                this.navigate('settings', {}, { resetStack: true });
             }
 
             const goNav = e.target.closest('.app-subnav [data-action="navigate"]');
             if (goNav) {
                 e.preventDefault();
                 const view = goNav.dataset.view;
-                if (view) this.navigate(view);
+                if (view) this.navigate(view, {}, { resetStack: true });
             }
         });
     }
@@ -608,16 +606,24 @@ export class VibeControlApp {
     // Navigation & Routing
     // ============================================ 
 
-    navigate(view, data = {}) {
+    navigate(view, data = {}, { resetStack = false } = {}) {
         this.closeModal();
 
-        const currentStackItem = this.navigationStack[this.navigationStack.length - 1];
-        const currentViewName = typeof currentStackItem === 'string' ? currentStackItem : currentStackItem.view;
-
-        if (currentViewName === view) {
-             this.navigationStack[this.navigationStack.length - 1] = { view, data };
+        if (resetStack) {
+            // Top-level tab switches start a fresh history so "Back" from a detail
+            // view returns to its parent tab instead of replaying every tab the
+            // user has ever clicked. Detail views (agent-edit, check-violations…)
+            // omit this flag, so they push and keep a working Back.
+            this.navigationStack = [{ view, data }];
         } else {
-             this.navigationStack.push({ view, data });
+            const currentStackItem = this.navigationStack[this.navigationStack.length - 1];
+            const currentViewName = typeof currentStackItem === 'string' ? currentStackItem : currentStackItem.view;
+
+            if (currentViewName === view) {
+                this.navigationStack[this.navigationStack.length - 1] = { view, data };
+            } else {
+                this.navigationStack.push({ view, data });
+            }
         }
 
         this.currentView = view;
@@ -709,7 +715,10 @@ export class VibeControlApp {
     // Shared Logic (Used by multiple controllers)
     // ============================================ 
 
-    renderLocalFileTree(container) {
+    // Pure renderer for the agent-file list. Returns HTML only; callers are
+    // responsible for binding handlers (see AgentController.bindAgentListItems),
+    // which keeps the render/bind split explicit instead of relying on setTimeout.
+    renderLocalFileTree() {
         if (this.data.agents.length === 0) {
             return `
                 <div class="agent-files-empty py-4">
@@ -723,12 +732,14 @@ export class VibeControlApp {
             `;
         }
 
-        const html = `
+        return `
             <div class="agent-files-tree d-flex flex-column gap-2">
                 ${this.data.agents.map((agent, idx) => {
                     const parts = agent.path.split(/[\\/]/);
                     const fileName = parts.pop();
                     const dirPath = parts.length > 0 ? parts.join('/') + '/' : '';
+                    const displayName = this.escapeHtml(agent.customName || fileName);
+                    const fullPath = this.escapeHtml(dirPath + fileName);
 
                     return `
                     <div class="agent-file-tree-item p-2 px-3 d-flex align-items-center gap-3 border border-secondary border-opacity-10 rounded bg-dark bg-opacity-25" data-agent-tree-index="${idx}" style="cursor:pointer;">
@@ -739,29 +750,20 @@ export class VibeControlApp {
                             </svg>
                         </div>
                         <div class="agent-file-tree-info flex-grow-1 min-w-0">
-                            <div class="fw-bold text-white text-truncate" style="font-size: 0.9rem;">${agent.customName || fileName}</div>
-                            <div class="text-muted small opacity-50 font-monospace text-truncate" style="font-size: 0.7rem;">${dirPath}${fileName}</div>
+                            <div class="fw-bold text-white text-truncate" style="font-size: 0.9rem;">${displayName}</div>
+                            <div class="text-muted small opacity-50 font-monospace text-truncate" style="font-size: 0.7rem;">${fullPath}</div>
                         </div>
+                        <button type="button" class="btn btn-sm btn-link text-muted p-1 agent-file-tree-rename" data-agent-rename="${idx}" title="Rename this agent file">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/>
+                            </svg>
+                            <span class="visually-hidden">Rename</span>
+                        </button>
                         <span class="badge bg-dark border border-secondary border-opacity-25 text-muted x-small fw-normal">${agent.ruleCount || 0} rules</span>
                     </div>
                 `}).join('')}
             </div>
         `;
-
-        // If a container is provided, bind click handlers after setting innerHTML
-        if (container) {
-            setTimeout(() => {
-                container.querySelectorAll('[data-agent-tree-index]').forEach(el => {
-                    const idx = parseInt(el.dataset.agentTreeIndex);
-                    const agent = this.data.agents[idx];
-                    if (agent) {
-                        el.addEventListener('click', () => this.navigate('agent-edit', agent));
-                    }
-                });
-            }, 0);
-        }
-
-        return html;
     }
 
     async launchCliForProject(projectPath, cliName) {
@@ -783,30 +785,6 @@ export class VibeControlApp {
         } catch (error) {
             this.showError(`Failed to launch ${cliName} CLI`);
         }
-    }
-
-    // ============================================
-    // Remaining View Logic (To be moved if AgentController expands)
-    // ============================================
-
-    loadAgentCreate() {
-        const content = document.getElementById('app-content');
-        if (!content) return;
-
-        content.innerHTML = '';
-        const fragment = this.cloneTemplate('agent-create-template');
-        const root = fragment.querySelector('[data-view="agent-create"]');
-
-        if (root) {
-            this.bindAction(root, '[data-action="go-back"]', () => this.goBack());
-            this.bindAction(root, '[data-action="wizard-next"]', () => this.wizardNext());
-        }
-
-        content.appendChild(fragment);
-    }
-
-    wizardNext() {
-        alert('Fix me: Agent Wizard navigation not implemented');
     }
 
     // ============================================
