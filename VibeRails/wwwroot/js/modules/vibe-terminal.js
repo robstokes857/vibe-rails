@@ -586,20 +586,16 @@ export class VibeTerminal {
         if (!this._terminal || data == null) return;
 
         const shouldFollow = this._scrollOnWrite && this._followOutput && this._isNearBottom(1);
+        const afterWrite = shouldFollow
+            ? () => this.scrollToBottom()
+            : undefined;
 
         if (typeof data === 'string') {
-            this._terminal.write(data);
+            this._terminal.write(data, afterWrite);
         } else if (data instanceof ArrayBuffer) {
-            this._terminal.write(new Uint8Array(data));
+            this._terminal.write(new Uint8Array(data), afterWrite);
         } else if (ArrayBuffer.isView(data)) {
-            this._terminal.write(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-        }
-
-        if (shouldFollow && !this._scrollRafId) {
-            this._scrollRafId = requestAnimationFrame(() => {
-                this._scrollRafId = null;
-                this._terminal?.scrollToBottom();
-            });
+            this._terminal.write(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), afterWrite);
         }
     }
 
@@ -611,6 +607,21 @@ export class VibeTerminal {
         const buffer = this._terminal.buffer.active;
         const gap = buffer.baseY - buffer.viewportY;
         return gap <= threshold;
+    }
+
+    scrollToBottom({ preserveFollow = false } = {}) {
+        if (!this._terminal || this._scrollRafId) {
+            return;
+        }
+
+        if (!preserveFollow) {
+            this._followOutput = true;
+        }
+
+        this._scrollRafId = requestAnimationFrame(() => {
+            this._scrollRafId = null;
+            this._terminal?.scrollToBottom();
+        });
     }
 
     setFontSize(size, { fit = true, notify = true, forceNotify = false } = {}) {

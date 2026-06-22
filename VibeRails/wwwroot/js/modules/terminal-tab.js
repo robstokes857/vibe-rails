@@ -680,6 +680,9 @@ export class TerminalTab {
                     replayFocusDone = true;
                     requestAnimationFrame(() => {
                         if (this.socket === socket && this.isActive) {
+                            this.manager?.updateFocusContainerHeight?.();
+                            this.vibeTerminal?.scrollToBottom?.();
+                            this.scheduleFitPasses();
                             this.focusInput();
                         }
                     });

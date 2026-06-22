@@ -52,6 +52,9 @@ export class VibeControlApp {
         this.lifecycleHeartbeatTimer = null;
         this.lifecycleClientId = this.getOrCreateLifecycleClientId();
         this.navbarsCollapsed = false;
+        this.loadingOverlayPendingCount = 0;
+        this.loadingOverlayTimer = null;
+        this.loadingOverlayVisibleSince = 0;
 
         this.init();
     }
@@ -878,11 +881,60 @@ export class VibeControlApp {
 
     showLoading(show = true) {
         const overlay = document.getElementById('loading-overlay');
+        if (!overlay) return;
         if (show) {
             overlay.classList.remove('d-none');
         } else {
             overlay.classList.add('d-none');
         }
+    }
+
+    beginLoadingOverlay() {
+        this.loadingOverlayPendingCount += 1;
+        if (this.loadingOverlayPendingCount > 1) {
+            return;
+        }
+
+        if (this.loadingOverlayTimer) {
+            clearTimeout(this.loadingOverlayTimer);
+        }
+
+        this.loadingOverlayTimer = setTimeout(() => {
+            this.loadingOverlayTimer = null;
+            if (this.loadingOverlayPendingCount <= 0) {
+                return;
+            }
+
+            this.loadingOverlayVisibleSince = Date.now();
+            this.showLoading(true);
+        }, 250);
+    }
+
+    endLoadingOverlay() {
+        this.loadingOverlayPendingCount = Math.max(0, this.loadingOverlayPendingCount - 1);
+        if (this.loadingOverlayPendingCount > 0) {
+            return;
+        }
+
+        if (this.loadingOverlayTimer) {
+            clearTimeout(this.loadingOverlayTimer);
+            this.loadingOverlayTimer = null;
+        }
+
+        const visibleFor = this.loadingOverlayVisibleSince > 0
+            ? Date.now() - this.loadingOverlayVisibleSince
+            : 0;
+        const hideDelay = this.loadingOverlayVisibleSince > 0
+            ? Math.max(0, 180 - visibleFor)
+            : 0;
+
+        setTimeout(() => {
+            if (this.loadingOverlayPendingCount > 0) {
+                return;
+            }
+            this.loadingOverlayVisibleSince = 0;
+            this.showLoading(false);
+        }, hideDelay);
     }
 
     getHostUnreachableMessage() {
@@ -1001,7 +1053,7 @@ export class VibeControlApp {
     async apiCall(endpoint, method = 'GET', data = null, requestOptions = {}) {
         const showLoadingOverlay = requestOptions?.showLoading !== false;
         if (showLoadingOverlay) {
-            this.showLoading(true);
+            this.beginLoadingOverlay();
         }
         try {
             const tabToken = sessionStorage.getItem('viberails_tab');
@@ -1040,7 +1092,7 @@ export class VibeControlApp {
             throw error;
         } finally {
             if (showLoadingOverlay) {
-                this.showLoading(false);
+                this.endLoadingOverlay();
             }
         }
     }
@@ -1053,7 +1105,7 @@ export class VibeControlApp {
         try {
             // Fetch environments (global, always available)
             try {
-                const envResponse = await this.apiCall('/api/v1/environments', 'GET');
+                const envResponse = await this.apiCall('/api/v1/environments', 'GET', null, { showLoading: false });
                 this.data.environments = (envResponse.environments || []).map(env => ({
                     id: env.id,
                     name: env.name,
@@ -1070,7 +1122,7 @@ export class VibeControlApp {
 
             if (this.data.isInGit) {
                 try {
-                    const agentsResponse = await this.apiCall('/api/v1/agents', 'GET');
+                    const agentsResponse = await this.apiCall('/api/v1/agents', 'GET', null, { showLoading: false });
                     this.data.agents = (agentsResponse.agents || []).map((agent, index) => ({
                         id: index + 1,
                         name: agent.name,
@@ -1088,7 +1140,7 @@ export class VibeControlApp {
                 }
 
                 try {
-                    const rulesResponse = await this.apiCall('/api/v1/rules/details', 'GET');
+                    const rulesResponse = await this.apiCall('/api/v1/rules/details', 'GET', null, { showLoading: false });
                     this.data.availableRulesWithDescriptions = rulesResponse.rules || [];
                 } catch (error) {
                     console.error('Failed to fetch available rules:', error);

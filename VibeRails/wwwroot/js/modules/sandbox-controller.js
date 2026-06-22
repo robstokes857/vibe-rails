@@ -10,7 +10,7 @@ export class SandboxController {
     // Fetch sandboxes from API
     async refreshSandboxes() {
         try {
-            const response = await this.app.apiCall('/api/v1/sandboxes', 'GET');
+            const response = await this.app.apiCall('/api/v1/sandboxes', 'GET', null, { showLoading: false });
             this.app.data.sandboxes = (response.sandboxes || []).map(sb => ({
                 id: sb.id,
                 name: sb.name,
