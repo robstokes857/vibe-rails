@@ -202,6 +202,7 @@ namespace VibeRails
             ParserConfigs.SetApiKey(settings.ApiKey);
             ParserConfigs.SetDeveloperOptions(settings.DeveloperOptions);
             ParserConfigs.SetUseVsCodeTheme(settings.UseVsCodeTheme);
+            ParserConfigs.SetMcpEnabled(settings.McpEnabled);
         }
     }
 }

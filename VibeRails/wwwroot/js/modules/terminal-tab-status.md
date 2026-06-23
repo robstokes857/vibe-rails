@@ -80,7 +80,15 @@ see below). From `WAITING`:
 User input is routed into `onTerminalData(data)` from `terminal-multitab.js`,
 which subscribes to xterm's `onData` (keystrokes + paste). Backend session
 events are routed into `onSessionIdle()` / `onSessionCompleted()` /
-`onSessionBusy()` / `onWaitingForUserSelection()`.
+`onSessionBusy()` / `onSessionInput()` / `onWaitingForUserSelection()`.
+
+`session_input` is a sanitized metadata event from `SessionStateEventObserver`.
+It carries only `sessionId`, `kind` (currently `submit`), and `source`, never
+raw typed text. It exists because not all real input comes through this browser
+tab's local xterm `onData` path: CLI-owned sessions, remote viewers, and other
+attached browser views can all send input while the tab chrome is being observed
+elsewhere. A tab cannot remain "Waiting for user input" after a recognized
+submit has reached the PTY.
 
 ### `onTerminalData(data)`
 
@@ -103,6 +111,21 @@ events are routed into `onSessionIdle()` / `onSessionCompleted()` /
 5. Everything else is ignored. Typed characters during `THINKING`, arrow
    keys, function keys, and xterm auto-responses to server queries all flow
    through without changing the state.
+
+### `onSessionInput(kind)`
+
+Consumes the narrow, privacy-preserving subset of `onTerminalData` that can be
+published without raw input:
+
+1. `kind === 'submit'` while in `CONNECTED` / `READY` / `WAITING`
+   → `THINKING`.
+2. `kind === 'printable'` while in `WAITING` → `CONNECTED`.
+3. `kind === 'printable'` while in `CONNECTED` / `READY` sets
+   `_userComposing = true`.
+4. Other kinds are ignored. The backend deliberately publishes only submit
+   events today so ordinary typing does not become app-event WebSocket traffic;
+   CSI sequences, bracketed-paste payloads, DSR auto-replies, and raw text are
+   never published.
 
 ### `onSessionIdle()` / `onSessionCompleted()`
 
@@ -252,19 +275,15 @@ status is actually *visible*:
   renames) — minimize + close survive at every real tab width — and gaps
   between buttons click through to activation (cluster is
   `pointer-events: none`; only revealed buttons accept events).
-- **Narrow tabs ellipsize — they never hide the status words.** Tabs are
+- **Narrow tabs preserve logo + status icon; text yields first.** Tabs are
   content-sized + left-aligned (`flex: 0 1 auto`), clamped between
   `min-width: 150px` and `max-width: 300px` — they do NOT grow to fill the
   strip. They shrink toward the min only when the strip runs out of room (no
   viewport-based width caps — VS Code panels are always "narrow" by viewport).
-  The **status section is `flex-shrink: 0`** — the status word never shrinks
-  away; only the label ellipsizes (a longer name used to squeeze "Thinking"
-  down to nothing). The tab NAME keeps a readable floor
-  (`.vb-tab-identity` `min-width: 100px` — budget math in style.css; 110px
-  overflowed the 150px minimum and clipped the spinner); above that floor a long label
-  yields before the status text ellipsizes — priority is logo > readable
-  name > status text > rest of the label (Rob, 2026-06-12: the name must
-  never crop to "Cl…" while "Connected" stays fully spelled out).
+  The logo and status icon are the hard minimums. The status text is allowed to
+  ellipsize before it can squeeze the brand logo out of view; below 220px the
+  existing container query collapses the status to icon-only. Priority is logo
+  > status icon > readable name/status text.
 - **Minimized tabs (icon chips).** A tab minimized via its tab-strip button
   collapses to brand-logo + status-icon (`.is-minimized`, managed by
   `toggleTabMinimized`/`applyTabMinimized` in `terminal-multitab.js`). All

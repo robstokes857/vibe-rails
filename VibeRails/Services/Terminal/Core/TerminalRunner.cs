@@ -56,7 +56,7 @@ public class TerminalRunner
         try
         {
             var sessionTitle = ResolveSessionTitle(workDir, title);
-            var preparedSession = _commandService.PrepareSession(llm, envName, extraArgs, initialPrompt, summary);
+            var preparedSession = await _commandService.PrepareSessionAsync(llm, envName, extraArgs, initialPrompt, summary);
             _stateService.PublishSessionStart(sessionId, llm.ToString(), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
 
             terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: sessionTitle, ct: ct);
