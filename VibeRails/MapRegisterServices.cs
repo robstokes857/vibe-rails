@@ -76,6 +76,7 @@ namespace VibeRails
             });
             serviceCollection.AddScoped<IGetUserText, GetUserText>();
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
+            serviceCollection.AddScoped<IGlobalCache, GlobalCache>();
             serviceCollection.AddScoped<IChatHistoryService, ChatHistoryService>();
             serviceCollection.AddSingleton<ISessionOutputParser, SessionParseV4>();
             serviceCollection.AddScoped<IGitService, GitService>();

@@ -131,6 +131,7 @@ namespace VibeRails.Utils
         private static bool _enablePrerelease = false;
         private static bool _developerOptions = false;
         private static bool _useVsCodeTheme = false;
+        private static bool _mcpEnabled = false;
         private static string _frontendUrl = string.Empty;
 
         public static bool GetRemoteAccess()
@@ -172,6 +173,14 @@ namespace VibeRails.Utils
         public static void SetUseVsCodeTheme(bool value)
         {
             _useVsCodeTheme = value;
+        }
+        public static bool GetMcpEnabled()
+        {
+            return _mcpEnabled;
+        }
+        public static void SetMcpEnabled(bool value)
+        {
+            _mcpEnabled = value;
         }
         public static string GetFrontendUrl()
         {

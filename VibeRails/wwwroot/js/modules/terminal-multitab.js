@@ -2730,6 +2730,15 @@ export class TerminalController {
             tab.instance?.statusController?.onSessionBusy();
         });
 
+        appEventClient.on('session_input', (payload) => {
+            const tab = findTab(payload);
+            if (!tab) return;
+            if ((payload?.kind || '').toLowerCase() === 'submit') {
+                setSessionState(tab, 'tab-busy');
+            }
+            tab.instance?.statusController?.onSessionInput(payload?.kind);
+        });
+
         appEventClient.on('session_waiting_for_user', (payload) => {
             const tab = findTab(payload);
             if (!tab) return;

@@ -9,7 +9,7 @@ export class SettingsController {
         const content = document.getElementById('app-content');
         if (!content) return;
 
-        let settings = { remoteAccess: false, apiKey: '', enablePrerelease: false, developerOptions: false, useVsCodeTheme: false };
+        let settings = { remoteAccess: false, apiKey: '', enablePrerelease: false, developerOptions: false, useVsCodeTheme: false, mcpEnabled: false };
         try {
             settings = await this.app.apiCall('/api/v1/settings', 'GET');
             this.app.setAppSettings(settings);
@@ -31,6 +31,7 @@ export class SettingsController {
             const developerOptionsToggle = root.querySelector('#setting-developer-options');
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
             const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
+            const mcpEnabledToggle = root.querySelector('#setting-enable-mcp');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
@@ -65,6 +66,9 @@ export class SettingsController {
             if (useVsCodeThemeToggle) {
                 useVsCodeThemeToggle.checked = settings.useVsCodeTheme || false;
             }
+            if (mcpEnabledToggle) {
+                mcpEnabledToggle.checked = settings.mcpEnabled || false;
+            }
 
             const form = root.querySelector('#app-settings-form');
             if (form) {
@@ -83,7 +87,8 @@ export class SettingsController {
                         apiKeyChanged ? apiKeyValue : '',
                         enablePrereleaseToggle?.checked || false,
                         developerOptionsToggle?.checked || false,
-                        useVsCodeThemeToggle?.checked || false
+                        useVsCodeThemeToggle?.checked || false,
+                        mcpEnabledToggle?.checked || false
                     );
                 });
             }
@@ -94,14 +99,15 @@ export class SettingsController {
         content.appendChild(fragment);
     }
 
-    async saveSettings(remoteAccess, apiKey, enablePrerelease, developerOptions, useVsCodeTheme) {
+    async saveSettings(remoteAccess, apiKey, enablePrerelease, developerOptions, useVsCodeTheme, mcpEnabled) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
                 apiKey: apiKey,
                 enablePrerelease: enablePrerelease,
                 developerOptions: developerOptions,
-                useVsCodeTheme: useVsCodeTheme
+                useVsCodeTheme: useVsCodeTheme,
+                mcpEnabled: mcpEnabled
             });
             this.app.setAppSettings(savedSettings);
             this.app.showToast('Settings', 'Settings saved successfully', 'success');

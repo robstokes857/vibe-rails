@@ -578,6 +578,68 @@ namespace VibeRails.DB
 
         #endregion
 
+        #region GlobalCache
+
+        public async Task<string?> GetGlobalCacheValueAsync(string key, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectGlobalCacheByKey;
+            cmd.Parameters.AddWithValue("$key", key);
+
+            var result = await cmd.ExecuteScalarAsync(cancellationToken);
+            return result == null || result == DBNull.Value ? null : Convert.ToString(result);
+        }
+
+        public async Task SetGlobalCacheValueAsync(string key, string value, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.UpsertGlobalCache;
+            cmd.Parameters.AddWithValue("$key", key);
+            cmd.Parameters.AddWithValue("$value", value);
+            cmd.Parameters.AddWithValue("$updatedUTC", DateTime.UtcNow.ToString("O"));
+
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        public async Task<Dictionary<string, string>> GetAllGlobalCacheAsync(CancellationToken cancellationToken = default)
+        {
+            var result = new Dictionary<string, string>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectAllGlobalCache;
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                result[reader.GetString(0)] = reader.GetString(1);
+            }
+
+            return result;
+        }
+
+        public async Task RemoveGlobalCacheValueAsync(string key, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.DeleteGlobalCacheByKey;
+            cmd.Parameters.AddWithValue("$key", key);
+
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        #endregion
+
         #region ChatSummary CRUD
 
         public async Task<ChatSummary> SaveChatSummaryAsync(ChatSummary chatSummary, CancellationToken cancellationToken = default)

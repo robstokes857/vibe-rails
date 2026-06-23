@@ -87,6 +87,12 @@ namespace VibeRails.DB
         Task<Dictionary<string, string>> GetAllProjectCacheAsync(string projectPath, CancellationToken cancellationToken = default);
         Task RemoveProjectCacheValueAsync(string projectPath, string key, CancellationToken cancellationToken = default);
 
+        // GlobalCache operations (key-value store NOT scoped to a project)
+        Task<string?> GetGlobalCacheValueAsync(string key, CancellationToken cancellationToken = default);
+        Task SetGlobalCacheValueAsync(string key, string value, CancellationToken cancellationToken = default);
+        Task<Dictionary<string, string>> GetAllGlobalCacheAsync(CancellationToken cancellationToken = default);
+        Task RemoveGlobalCacheValueAsync(string key, CancellationToken cancellationToken = default);
+
         // ChatSummary operations
         Task<ChatSummary> SaveChatSummaryAsync(ChatSummary chatSummary, CancellationToken cancellationToken = default);
         Task<ChatSummary?> GetChatSummaryByIdAsync(int id, CancellationToken cancellationToken = default);
