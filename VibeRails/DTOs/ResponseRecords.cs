@@ -326,7 +326,8 @@ namespace VibeRails.DTOs
         string ApiKey,
         bool EnablePrerelease,
         bool DeveloperOptions,
-        bool UseVsCodeTheme
+        bool UseVsCodeTheme,
+        bool McpEnabled
     );
 
     // Remote PIN DTOs
@@ -570,6 +571,7 @@ namespace VibeRails.DTOs
     public record SessionStartedPayload(string SessionId, string Cli);
     public record SessionIdlePayload(string SessionId, string Cli, double IdleForSeconds);
     public record SessionBusyPayload(string SessionId, string Cli);
+    public record SessionInputPayload(string SessionId, string Kind, string Source);
     public record SessionWaitingForUserPayload(string SessionId);
     public record SessionCompletedPayload(string SessionId, string Cli, int? ExitCode);
 
@@ -578,6 +580,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SessionStartedPayload))]
     [JsonSerializable(typeof(SessionIdlePayload))]
     [JsonSerializable(typeof(SessionBusyPayload))]
+    [JsonSerializable(typeof(SessionInputPayload))]
     [JsonSerializable(typeof(SessionWaitingForUserPayload))]
     [JsonSerializable(typeof(SessionCompletedPayload))]
     [JsonSerializable(typeof(EventMessage))]

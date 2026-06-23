@@ -308,6 +308,32 @@ test('Enter from WAITING → THINKING; backend pings + CSI do not leave WAITING'
     assert.equal(controller._status, TAB_STATUS.THINKING);
 });
 
+test('backend submit input from WAITING → THINKING when local xterm did not send onData', () => {
+    // Session f8b906d9: a Codex tab was in WAITING, the user pressed Enter
+    // through a path that did not update this tab's local onData-driven status,
+    // and the tab stayed on "Waiting for user input". The sanitized backend
+    // session_input event is the cross-view/source signal for that submit.
+    const { controller } = makeController({ isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r');
+    controller.onWaitingForUserSelection();
+    assert.equal(controller._status, TAB_STATUS.WAITING, 'setup: should be WAITING');
+
+    controller.onSessionInput('submit');
+    assert.equal(controller._status, TAB_STATUS.THINKING);
+});
+
+test('sanitized printable input clears WAITING when provided by a compatible event source', () => {
+    const { controller } = makeController({ isActiveTab: () => true });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r');
+    controller.onWaitingForUserSelection();
+    assert.equal(controller._status, TAB_STATUS.WAITING, 'setup: should be WAITING');
+
+    controller.onSessionInput('printable');
+    assert.equal(controller._status, TAB_STATUS.CONNECTED);
+});
+
 test('onWaitingForUserSelection blocked while DISCONNECTED', () => {
     const { controller } = makeController({ isActiveTab: () => true });
     controller.onSocketOpen();

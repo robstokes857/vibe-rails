@@ -260,7 +260,8 @@ namespace VibeRails.DB
             CreateInputFileChangesPathIndex,
             CreateTerminalSessionLogsTable,
             CreateTerminalSessionLogsIndex,
-            CreateProjectCacheTable
+            CreateProjectCacheTable,
+            CreateGlobalCacheTable
         ];
 
         public const string AddProcessedColumn = "ALTER TABLE Sessions ADD COLUMN Processed INTEGER NOT NULL DEFAULT 0";
@@ -785,6 +786,38 @@ namespace VibeRails.DB
         public const string DeleteProjectCacheByKey = """
             DELETE FROM ProjectCache
             WHERE ProjectPath = $projectPath AND Key = $key;
+            """;
+
+        // GlobalCache Table — generic key-value store NOT scoped to a project. Use for
+        // machine/user-wide flags that must persist across projects (e.g. whether the MCP
+        // server has already been removed from a given CLI's user-scope registration).
+        public const string CreateGlobalCacheTable = """
+            CREATE TABLE IF NOT EXISTS GlobalCache (
+                Key TEXT NOT NULL PRIMARY KEY,
+                Value TEXT NOT NULL DEFAULT '',
+                UpdatedUTC TEXT NOT NULL
+            )
+            """;
+
+        public const string UpsertGlobalCache = """
+            INSERT INTO GlobalCache (Key, Value, UpdatedUTC)
+            VALUES ($key, $value, $updatedUTC)
+            ON CONFLICT(Key) DO UPDATE SET
+                Value = excluded.Value,
+                UpdatedUTC = excluded.UpdatedUTC;
+            """;
+        public const string SelectGlobalCacheByKey = """
+            SELECT Value
+            FROM GlobalCache
+            WHERE Key = $key;
+            """;
+        public const string SelectAllGlobalCache = """
+            SELECT Key, Value
+            FROM GlobalCache;
+            """;
+        public const string DeleteGlobalCacheByKey = """
+            DELETE FROM GlobalCache
+            WHERE Key = $key;
             """;
     }
 }

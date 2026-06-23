@@ -18,7 +18,32 @@ public sealed class SessionStateEventObserver : ITerminalIoObserver
     }
 
     public ValueTask OnTerminalIoAsync(TerminalIoEvent ioEvent, CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
+    {
+        if (ioEvent.Direction != TerminalIoDirection.Input)
+            return ValueTask.CompletedTask;
+
+        var kind = ClassifyUserInput(ioEvent.Text);
+        if (kind is null)
+            return ValueTask.CompletedTask;
+
+        // Metadata only: never publish raw terminal input. This lets tab status
+        // leave WAITING for input that arrives through a CLI console, remote UI,
+        // or another attached browser where the local xterm onData hook is not
+        // the source of truth.
+        _eventBus.Publish(
+            "session_input",
+            new SessionInputPayload(ioEvent.SessionId, kind, ioEvent.Source.ToString()),
+            AppJsonSerializerContext.Default.SessionInputPayload);
+        return ValueTask.CompletedTask;
+    }
+
+    private static string? ClassifyUserInput(string input)
+    {
+        if (input is "\r" or "\n" or "\r\n")
+            return "submit";
+
+        return null;
+    }
 
     public ValueTask OnSessionStartAsync(TerminalSessionStartEvent startEvent, CancellationToken cancellationToken = default)
     {

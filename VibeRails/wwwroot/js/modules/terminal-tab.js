@@ -285,10 +285,20 @@ export class TerminalTab {
         this.inputFocusHandler = () => {
             this.focusInput();
             this.scheduleFitPasses();
+
+            // Claude's fullscreen/background renderer enables xterm mouse tracking.
+            // In VS Code webviews the xterm mouse handler can win the bubble phase,
+            // so refocus both before and just after the click is processed.
+            window.setTimeout(() => {
+                if (this.isActive) {
+                    this.focusInput();
+                }
+            }, 0);
         };
 
-        element.addEventListener('click', this.inputFocusHandler);
-        element.addEventListener('pointerdown', this.inputFocusHandler, { passive: true });
+        element.addEventListener('pointerdown', this.inputFocusHandler, { capture: true, passive: true });
+        element.addEventListener('mousedown', this.inputFocusHandler, { capture: true, passive: true });
+        element.addEventListener('click', this.inputFocusHandler, { capture: true, passive: true });
     }
 
     teardownInputFocusHandlers() {
@@ -297,8 +307,9 @@ export class TerminalTab {
         }
 
         const element = this.state.ui.terminalElement;
-        element.removeEventListener('click', this.inputFocusHandler);
-        element.removeEventListener('pointerdown', this.inputFocusHandler);
+        element.removeEventListener('pointerdown', this.inputFocusHandler, { capture: true });
+        element.removeEventListener('mousedown', this.inputFocusHandler, { capture: true });
+        element.removeEventListener('click', this.inputFocusHandler, { capture: true });
         this.inputFocusHandler = null;
     }
 

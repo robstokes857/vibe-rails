@@ -1,6 +1,7 @@
 using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services.LlmClis;
+using VibeRails.Utils;
 using static VibeRails.Utils.ShellArgSanitizer;
 
 
@@ -15,15 +16,26 @@ public sealed record PreparedTerminalSession(
 public class CommandService : ICommandService
 {
     private readonly LlmCliEnvironmentService _envService;
+    private readonly IGlobalCache _globalCache;
     private const string VibeRailsMcpServerName = "viberails-mcp";
     private static int _fakeCliWarningEmitted;
 
-    public CommandService(LlmCliEnvironmentService envService)
+    /// <summary>
+    /// CLIs into which VibeRails registers its MCP server. Exposed so callers that need to
+    /// reset MCP bookkeeping (e.g. the settings route on opt-in) iterate the same set.
+    /// </summary>
+    public static readonly IReadOnlyList<LLM> McpClis = new[]
+    {
+        LLM.Claude, LLM.Codex, LLM.Antigravity, LLM.Copilot
+    };
+
+    public CommandService(LlmCliEnvironmentService envService, IGlobalCache globalCache)
     {
         _envService = envService;
+        _globalCache = globalCache;
     }
 
-    public PreparedTerminalSession PrepareSession(
+    public async Task<PreparedTerminalSession> PrepareSessionAsync(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "")
     {
         if (Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI") == "1")
@@ -98,7 +110,7 @@ public class CommandService : ICommandService
         // no auth). Register it before launching managed CLIs; setup failures remain non-blocking.
         // This keeps custom environments isolated because the setup command runs inside the same
         // PTY environment as the agent launch (CLAUDE_CONFIG_DIR / CODEX_HOME already set below).
-        foreach (var setupCommand in BuildMcpSetupCommands(llm))
+        foreach (var setupCommand in await BuildMcpSetupCommandsAsync(llm))
         {
             setupCommands.Add(setupCommand);
             builder.AddSetup(setupCommand);
@@ -131,37 +143,56 @@ public class CommandService : ICommandService
             environment);
     }
 
-    private static IReadOnlyList<string> BuildMcpSetupCommands(LLM llm)
+    private async Task<IReadOnlyList<string>> BuildMcpSetupCommandsAsync(LLM llm)
     {
-        var commandParts = ResolveMcpServerCommandParts();
-        var serverCommand = BuildSafeArgString(commandParts);
+        var (removeCommand, addCommand) = GetMcpCommands(llm);
+        if (removeCommand is null)
+        {
+            // This CLI doesn't support MCP registration — nothing to add or clean up.
+            return [];
+        }
 
-        // Remove first so older installs that registered the deleted standalone MCP_Server.exe
-        // get repaired on the next launch. Failures are non-blocking because the shell command
-        // chain uses ';' between setup steps and the final agent launch.
+        // Opted IN: register the server. Remove-first repairs older installs that registered
+        // the deleted standalone MCP_Server.exe. Failures are non-blocking because the shell
+        // command chain uses ';' between setup steps and the final agent launch.
+        if (ParserConfigs.GetMcpEnabled())
+        {
+            return [removeCommand, addCommand!];
+        }
+
+        // Opted OUT (default): never add. Remove it once per CLI to clean up a registration we
+        // added before, then record that we've done so — we must not re-issue `mcp remove` on
+        // every launch. The record is reset when the user opts back in (see AppSettingsRoutes).
+        var removedFlagKey = GlobalCacheKeys.McpRemovedFromCli(llm);
+        if (await _globalCache.GetAsBoolAsync(removedFlagKey))
+        {
+            return [];
+        }
+
+        await _globalCache.SetAsync(removedFlagKey, "true");
+        return [removeCommand];
+    }
+
+    // Returns the (remove, add) command pair for a CLI, or (null, null) if the CLI has no
+    // MCP registration support. Keep the supported set in sync with <see cref="McpClis"/>.
+    private static (string? remove, string? add) GetMcpCommands(LLM llm)
+    {
+        var serverCommand = BuildSafeArgString(ResolveMcpServerCommandParts());
         return llm switch
         {
-            LLM.Claude =>
-            [
+            LLM.Claude => (
                 $"claude mcp remove {VibeRailsMcpServerName}",
-                $"claude mcp add --scope user {VibeRailsMcpServerName} -- {serverCommand}"
-            ],
-            LLM.Codex =>
-            [
+                $"claude mcp add --scope user {VibeRailsMcpServerName} -- {serverCommand}"),
+            LLM.Codex => (
                 $"codex mcp remove {VibeRailsMcpServerName}",
-                $"codex mcp add {VibeRailsMcpServerName} -- {serverCommand}"
-            ],
-            LLM.Antigravity =>
-            [
+                $"codex mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
+            LLM.Antigravity => (
                 $"agy mcp remove {VibeRailsMcpServerName}",
-                $"agy mcp add {VibeRailsMcpServerName} -- {serverCommand}"
-            ],
-            LLM.Copilot =>
-            [
+                $"agy mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
+            LLM.Copilot => (
                 $"copilot mcp remove {VibeRailsMcpServerName}",
-                $"copilot mcp add {VibeRailsMcpServerName} -- {serverCommand}"
-            ],
-            _ => []
+                $"copilot mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
+            _ => (null, null)
         };
     }
 

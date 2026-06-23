@@ -259,6 +259,31 @@ export class TabStatusController {
         }
     }
 
+    onSessionInput(kind) {
+        const normalized = typeof kind === 'string' ? kind.toLowerCase() : '';
+
+        if (normalized === 'submit' &&
+            (this._status === TAB_STATUS.CONNECTED ||
+             this._status === TAB_STATUS.READY ||
+             this._status === TAB_STATUS.WAITING)) {
+            this._transitionTo(TAB_STATUS.THINKING);
+            return;
+        }
+
+        if (normalized !== 'printable') {
+            return;
+        }
+
+        if (this._status === TAB_STATUS.CONNECTED || this._status === TAB_STATUS.READY) {
+            this._userComposing = true;
+            return;
+        }
+
+        if (this._status === TAB_STATUS.WAITING) {
+            this._transitionTo(TAB_STATUS.CONNECTED);
+        }
+    }
+
     onSessionIdle() {
         // Shell tabs: backend idle (5s of no PTY output) means the command/server
         // went quiet — drop the spinner. Return to CONNECTED rather than READY so
