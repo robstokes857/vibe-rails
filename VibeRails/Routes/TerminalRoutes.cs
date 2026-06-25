@@ -88,6 +88,13 @@ public static class TerminalRoutes
             if (string.IsNullOrWhiteSpace(initialPrompt) && !string.IsNullOrWhiteSpace(environmentPrompt))
                 initialPrompt = environmentPrompt;
 
+            // MCP opt-in is consulted at launch by CommandService via ParserConfigs. A terminal tab
+            // runs in a child process whose ParserConfigs snapshot is from its own startup, so
+            // re-read settings.json — which the parent persists on every settings change — to honor
+            // an opt-out toggled after this child started. Without this an already-open tab could
+            // still run `mcp add` after the user disabled MCP.
+            ParserConfigs.SetMcpEnabled(Config.LoadFresh().McpEnabled);
+
             // Start the terminal session with the LLM CLI
             try
             {

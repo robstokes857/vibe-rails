@@ -75,4 +75,16 @@ public static class Config
         _settings = null;
         Load();
     }
+
+    /// <summary>
+    /// Re-reads settings.json from disk, bypassing the in-memory cache, and returns it. Terminal
+    /// tabs run in child processes that snapshot settings at their own startup; the parent persists
+    /// every change to disk, so a caller that must honor a just-toggled setting (e.g. the MCP
+    /// opt-out) reads fresh here instead of trusting this process's stale in-memory copy.
+    /// </summary>
+    public static Settings LoadFresh()
+    {
+        _settings = null;
+        return Load();
+    }
 }

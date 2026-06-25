@@ -215,7 +215,10 @@ export class VibeTerminal {
         const tryWebgl = () => {
             if (!preferWebgl || !window.WebglAddon?.WebglAddon) return false;
             try {
-                const addon = new window.WebglAddon.WebglAddon();
+                // preserveDrawingBuffer=true keeps the WebGL canvas readable via
+                // toDataURL/drawImage (otherwise readback is blank after compositing),
+                // which captureImage() relies on for screenshot push notifications.
+                const addon = new window.WebglAddon.WebglAddon(true);
                 this._terminal.loadAddon(addon);
                 addon.onContextLoss(() => {
                     try { addon.dispose(); } catch {}
@@ -670,6 +673,45 @@ export class VibeTerminal {
 
     getActiveRenderer() {
         return this._activeRenderer;
+    }
+
+    // Rasterize the current terminal screen to a PNG data URL for screenshot push
+    // notifications. Composites the xterm render-layer canvases (WebGL = one canvas,
+    // Canvas addon = stacked layers); needs WebglAddon(preserveDrawingBuffer) above.
+    // Returns null for the DOM renderer (no canvas) or on any failure — callers treat
+    // a missing image as "send the text notification only". Width is capped to keep
+    // the upload within the Front's size limit.
+    captureImage() {
+        try {
+            const screen = this._outputEl?.querySelector('.xterm-screen');
+            const layers = screen ? Array.from(screen.querySelectorAll('canvas')) : [];
+            if (!layers.length) return null;
+
+            const w = layers[0].width;
+            const h = layers[0].height;
+            if (!w || !h) return null;
+
+            const maxWidth = 1400;
+            const scale = w > maxWidth ? maxWidth / w : 1;
+
+            const out = document.createElement('canvas');
+            out.width = Math.round(w * scale);
+            out.height = Math.round(h * scale);
+
+            const ctx = out.getContext('2d');
+            if (!ctx) return null;
+            // Terminal canvases are transparent over the themed background; fill it in
+            // so the screenshot isn't black/transparent.
+            ctx.fillStyle = this._terminal?.options?.theme?.background || '#1e1e2e';
+            ctx.fillRect(0, 0, out.width, out.height);
+            ctx.scale(scale, scale);
+            for (const c of layers) {
+                try { ctx.drawImage(c, 0, 0); } catch { /* skip unreadable layer */ }
+            }
+            return out.toDataURL('image/png');
+        } catch {
+            return null;
+        }
     }
 
     onRendererChange(listener) {

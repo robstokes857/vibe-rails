@@ -60,6 +60,10 @@ export class TabStatusController {
      *   notifyReady:    () => void           – fired when a *background* tab
      *                                          finishes its turn (→ READY), at
      *                                          the same point as the ready flash
+     *   isPushEnabled:  () => boolean        – tab opted into push notifications
+     *   notifyPush:     (statusKey) => void  – fired on READY/WAITING when opted
+     *                                          in, regardless of focus. statusKey
+     *                                          is 'ready' | 'waiting'.
      */
     constructor(tabState, ui, options) {
         this._tabState = tabState;
@@ -434,6 +438,17 @@ export class TabStatusController {
         // pulsing icon instead, which is enough in-view signal).
         if (newStatus === TAB_STATUS.WAITING && !this._options.isActiveTab?.()) {
             this._flashWaiting();
+        }
+
+        // Opt-in push notification (fires regardless of focus — the per-tab bell is
+        // the gate). READY respects the `notify` flag so a process *exit* (which passes
+        // notify:false via onSessionCompleted) doesn't push a misleading "Ready".
+        if (this._options.isPushEnabled?.()) {
+            if (newStatus === TAB_STATUS.READY && notify) {
+                this._options.notifyPush?.('ready');
+            } else if (newStatus === TAB_STATUS.WAITING) {
+                this._options.notifyPush?.('waiting');
+            }
         }
     }
 

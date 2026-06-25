@@ -310,6 +310,14 @@ namespace VibeRails.DTOs
         string Message
     );
 
+    // Push Notification DTOs (per-tab opt-in push, proxied to VibeRails-Front)
+    public record PushSendRequest(
+        string? Title = null,
+        string? Body = null,
+        string? Tag = null,
+        string? ImageBase64 = null
+    );
+
     // Debug Bundle DTOs (remote debug-log export)
     public record DebugBundleSendRequest(
         string? Message
@@ -686,6 +694,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(VersionResponse))]
     [JsonSerializable(typeof(ApiVersionResponse))]
     [JsonSerializable(typeof(MessageResponse))]
+    // Push Notification DTOs
+    [JsonSerializable(typeof(PushSendRequest))]
     // Debug Bundle DTOs
     [JsonSerializable(typeof(DebugBundleSendRequest))]
     [JsonSerializable(typeof(DebugBundleSendResponse))]

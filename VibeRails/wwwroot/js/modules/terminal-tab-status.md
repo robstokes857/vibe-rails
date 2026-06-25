@@ -260,6 +260,16 @@ Beyond updating `_status` and calling `_applyVisuals`:
 - **Working spinner.** `_applyVisuals` renders a small `vb-spinner` in the
   icon slot while in `THINKING` (the earlier emoji-cycle implementation was
   replaced by the spinner; the `vb-emoji-*` CSS keyframes are leftovers).
+- **Opt-in push notification.** When the tab is opted in (`isPushEnabled` — the
+  per-tab bell button next to PIN/Shrink), entering `READY` (only on the
+  `notify:true` turn-finished path, **not** on a process-exit completion) or
+  `WAITING` fires `notifyPush('ready'|'waiting')`. Unlike the flash/toast, this
+  is **not** gated on background-ness — the explicit opt-in is the only gate, so
+  it fires regardless of focus. The manager handler (`_notifyTabPush` in
+  `terminal-multitab.js`) builds a "tab name + status" web push, attaches a
+  terminal screenshot when available, and posts it to the local
+  `/api/v1/push/send` proxy, which forwards it (with the cloud `X-Api-Key`) to
+  the VibeRails-Front push API. Fire-and-forget; no-ops when no API key is set.
 
 ## How the tab chrome presents the status (2026-06-12 redesign)
 

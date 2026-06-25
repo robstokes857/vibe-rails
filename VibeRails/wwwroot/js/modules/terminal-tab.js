@@ -241,6 +241,12 @@ export class TerminalTab {
             || null;
     }
 
+    // PNG data URL of the current terminal screen for screenshot push notifications,
+    // or null if unavailable (DOM renderer / disposed). See VibeTerminal.captureImage.
+    captureImage() {
+        return this.vibeTerminal?.captureImage?.() ?? null;
+    }
+
     configureInputTarget() {
         const input = this.getHelperTextarea();
         if (!input) {
