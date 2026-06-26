@@ -440,8 +440,8 @@ export class TabStatusController {
             this._flashWaiting();
         }
 
-        // Opt-in push notification (fires regardless of focus — the per-tab bell is
-        // the gate). READY respects the `notify` flag so a process *exit* (which passes
+        // Opt-in push notification (fires regardless of focus — the per-tab watch
+        // toggle (eye) is the gate). READY respects the `notify` flag so a process *exit* (which passes
         // notify:false via onSessionCompleted) doesn't push a misleading "Ready".
         if (this._options.isPushEnabled?.()) {
             if (newStatus === TAB_STATUS.READY && notify) {

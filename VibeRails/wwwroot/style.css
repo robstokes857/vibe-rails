@@ -2554,7 +2554,7 @@ code {
     height: 100%;
     background: var(--vb-terminal-tab-bg);
     color: #a6adc8;
-    transition: background 0.2s, color 0.2s;
+    transition: background 0.2s, color 0.2s, box-shadow 0.2s;
     /* Grow first, shrink later. With 1-3 tabs this yields readable names; with
        many tabs the items compress toward the min-width, then the list scrolls.
        Purely horizontal: the strip never wraps, so terminal geometry is stable. */
@@ -2927,13 +2927,50 @@ code {
     color: #ff8a8a;
 }
 
-/* An armed tab's bell glows so it's clear (on hover) which tabs will push. */
+/* An armed tab's eye toggle glows sky so it's clear (on hover) which tabs are
+   being watched — matching the persistent badge + ring below. */
 #vb-terminal-panel .vb-terminal-tab-item.is-notify-on .vb-terminal-tab-notify {
-    color: #f9e2af;
+    color: #89dceb;
 }
 
 #vb-terminal-panel .vb-terminal-tab-item.is-notify-on .vb-terminal-tab-notify:hover {
-    color: #fdf0c4;
+    color: #b4e8f4;
+}
+
+/* ── Watching a tab (persistent) ────────────────────────────────────────────
+   The eye toggle lives in the hover-only action cluster, so an armed tab needs
+   a signal that survives when it isn't hovered. Two pieces, both keyed off
+   `.is-notify-on`: a soft sky ring around the whole tab ("a little color around
+   it") and a persistent eye badge at the left edge. Sky reads as "an eye is on
+   this" and stays clear of pin (red) and waiting (yellow). */
+#vb-terminal-panel .vb-terminal-tab-item.is-notify-on {
+    box-shadow: inset 0 0 0 1.5px rgba(137, 220, 235, 0.45);
+}
+
+/* Persistent eye badge — hidden until armed, then sits just inside the tab's
+   left edge ahead of the brand logo. flex:0 0 auto so it never collapses. */
+#vb-terminal-panel .vb-terminal-tab-watch-badge {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 15px;
+    margin-left: 7px;
+    color: #89dceb;
+    font-size: 0.72rem;
+    line-height: 1;
+    /* Decorative twin of the eye toggle — clicks fall through to the tab. */
+    pointer-events: none;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-notify-on .vb-terminal-tab-watch-badge {
+    display: inline-flex;
+}
+
+/* Minimized chips are too tight for the left badge — the ring carries the
+   watched state there instead. */
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-watch-badge {
+    display: none !important;
 }
 
 /* Tab actions only make sense once a session exists (syncTabActionAvailability
