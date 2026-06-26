@@ -492,7 +492,7 @@ class TerminalManager {
     // An opted-in tab reached READY ('ready') or "Waiting for user input" ('waiting').
     // Fire-and-forget a web-push (tab name + status, plus a terminal screenshot when
     // available) via the backend proxy → VibeRails-Front. Fires regardless of focus;
-    // the per-tab bell is the only gate (see TabStatusController._transitionTo).
+    // the per-tab watch toggle (eye) is the only gate (see TabStatusController._transitionTo).
     _notifyTabPush(state, statusKey) {
         const label = state?.label || state?.title || 'Terminal';
         const body = statusKey === 'waiting' ? 'Waiting for user input' : 'Ready';
@@ -683,6 +683,16 @@ class TerminalManager {
         actions.appendChild(min);
         actions.appendChild(close);
 
+        // Persistent "watching" badge: a small eye pinned at the tab's left edge,
+        // visible only while the tab is armed for push (is-notify-on). It's a
+        // sibling of the tab button — deliberately NOT inside it — so the status
+        // controller's periodic `button.innerHTML = ''` rebuild can never wipe it.
+        const watchBadge = document.createElement('span');
+        watchBadge.className = 'vb-terminal-tab-watch-badge';
+        watchBadge.setAttribute('aria-hidden', 'true');
+        watchBadge.innerHTML = '<i class="fa-solid fa-eye"></i>';
+
+        item.appendChild(watchBadge);
         item.appendChild(button);
         item.appendChild(actions);
 
@@ -711,7 +721,7 @@ class TerminalManager {
         }
         this.tabPanels?.appendChild(panel);
 
-        state.ui = { item, button, edit, pin, notify, min, close, actions, panel, terminalElement, toastLayer };
+        state.ui = { item, button, edit, pin, notify, min, close, actions, watchBadge, panel, terminalElement, toastLayer };
 
         const instance = new TerminalTab(this, state);
         instance.statusController = new TabStatusController(state, state.ui, {
@@ -1571,11 +1581,14 @@ class TerminalManager {
         }
     }
 
-    // ── Per-tab push notifications (opt-in) ───────────────────────────────
+    // ── Per-tab push notifications (opt-in "watch") ───────────────────────
     //
-    // When armed, a tab fires a web-push (via the backend proxy → VibeRails-Front)
-    // each time it reaches READY or "Waiting for user input" — see _notifyTabPush
-    // and TabStatusController._transitionTo. The flag persists in tab meta like pin.
+    // The eye toggle arms a tab: while watched, it fires a web-push (via the
+    // backend proxy → VibeRails-Front) each time it reaches READY or "Waiting for
+    // user input" — see _notifyTabPush and TabStatusController._transitionTo. An
+    // armed tab also wears a persistent eye badge + sky ring (applyTabNotify) so
+    // the watched state reads at a glance, not just on hover. Persists in tab meta
+    // like pin.
     toggleTabNotify(tabId) {
         const tab = this.tabs.get(tabId);
         if (!tab) return;
@@ -1596,11 +1609,11 @@ class TerminalManager {
 
         if (notify) {
             notify.innerHTML = on
-                ? '<i class="fa-solid fa-bell"></i>'
-                : '<i class="fa-solid fa-bell-slash"></i>';
+                ? '<i class="fa-solid fa-eye"></i>'
+                : '<i class="fa-solid fa-eye-slash"></i>';
             const title = on
-                ? 'Push notifications on for this tab'
-                : 'Notify me when this tab is ready';
+                ? 'Watching this tab — you’ll be notified when it’s ready or needs input'
+                : 'Watch this tab — get notified when it’s ready or needs input';
             notify.title = title;
             notify.setAttribute('aria-label', title);
             notify.setAttribute('aria-pressed', String(on));

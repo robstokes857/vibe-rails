@@ -512,9 +512,9 @@ test('agent tab: background session_idle (turn finished) still flashes AND toast
     assert.equal(notifications.ready, 1, 'idle ready toasts');
 });
 
-// ── Opt-in push notifications (per-tab bell) ──────────────────────────────────
+// ── Opt-in push notifications (per-tab watch / eye toggle) ────────────────────
 // When a tab is opted in (isPushEnabled), reaching READY or "Waiting for user
-// input" fires notifyPush — regardless of focus (the bell is the only gate).
+// input" fires notifyPush — regardless of focus (the watch toggle is the only gate).
 // READY respects the `notify` flag so a process *exit* doesn't push "Ready".
 
 test('push: opted-in tab fires notifyPush("ready") on idle READY — even when active', () => {
