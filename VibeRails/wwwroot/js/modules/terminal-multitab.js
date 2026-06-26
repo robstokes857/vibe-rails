@@ -489,6 +489,29 @@ class TerminalManager {
         }
     }
 
+    // An opted-in tab reached READY ('ready') or "Waiting for user input" ('waiting').
+    // Fire-and-forget a web-push (tab name + status, plus a terminal screenshot when
+    // available) via the backend proxy → VibeRails-Front. Fires regardless of focus;
+    // the per-tab bell is the only gate (see TabStatusController._transitionTo).
+    _notifyTabPush(state, statusKey) {
+        const label = state?.label || state?.title || 'Terminal';
+        const body = statusKey === 'waiting' ? 'Waiting for user input' : 'Ready';
+        const tab = this.tabs.get(state.id);
+        let imageBase64 = null;
+        try { imageBase64 = tab?.instance?.captureImage?.() || null; } catch { /* no-op */ }
+
+        // Fully guarded: this runs inside the status state machine, so a throw here
+        // must never break a transition.
+        try {
+            void this.app.apiCall('/api/v1/push/send', 'POST', {
+                title: label,
+                body,
+                tag: state.sessionId || state.id,
+                imageBase64
+            }, { showLoading: false }).catch(() => { /* fire-and-forget */ });
+        } catch { /* no-op */ }
+    }
+
     async restoreTabs() {
         if (this._destroyed) {
             return;
@@ -523,6 +546,7 @@ class TerminalManager {
                 customLabel: metadata?.customLabel === true,
                 minimized: metadata?.minimized === true,
                 pinned: metadata?.pinned === true,
+                notifyEnabled: metadata?.notifyEnabled === true,
                 workingDirectory
             });
         });
@@ -552,6 +576,7 @@ class TerminalManager {
             customLabel: options.customLabel === true,
             minimized: options.minimized === true,
             pinned: options.pinned === true,
+            notifyEnabled: options.notifyEnabled === true,
             workingDirectory,
             renaming: false,
             hasActiveSession: tabInfo.hasActiveSession === true,
@@ -627,6 +652,14 @@ class TerminalManager {
             this.toggleTabPinned(state.id);
         });
 
+        const notify = document.createElement('button');
+        notify.type = 'button';
+        notify.className = 'vb-terminal-tab-notify';
+        notify.addEventListener('click', (event) => {
+            event.stopPropagation();
+            this.toggleTabNotify(state.id);
+        });
+
         const close = document.createElement('button');
         close.type = 'button';
         close.className = 'vb-terminal-tab-close';
@@ -646,6 +679,7 @@ class TerminalManager {
         actions.className = 'vb-terminal-tab-actions';
         actions.appendChild(edit);
         actions.appendChild(pin);
+        actions.appendChild(notify);
         actions.appendChild(min);
         actions.appendChild(close);
 
@@ -677,7 +711,7 @@ class TerminalManager {
         }
         this.tabPanels?.appendChild(panel);
 
-        state.ui = { item, button, edit, pin, min, close, actions, panel, terminalElement, toastLayer };
+        state.ui = { item, button, edit, pin, notify, min, close, actions, panel, terminalElement, toastLayer };
 
         const instance = new TerminalTab(this, state);
         instance.statusController = new TabStatusController(state, state.ui, {
@@ -687,7 +721,9 @@ class TerminalManager {
             },
             isActiveTab: () => this.activeTabId === state.id,
             setProgress: (progress) => this.updateTabProgress(state.id, progress),
-            notifyReady: () => this._notifyTabReady(state)
+            notifyReady: () => this._notifyTabReady(state),
+            isPushEnabled: () => state.notifyEnabled === true,
+            notifyPush: (statusKey) => this._notifyTabPush(state, statusKey)
         });
         // Sync status controller with restored tab state (e.g. page reload
         // where the tab had an active session — state.status is 'disconnected'
@@ -707,20 +743,12 @@ class TerminalManager {
         if (state.title) {
             this.saveTabTitle(state.id, state.title);
         }
-        this.saveTabMeta(state.id, {
-            label: state.label,
-            icon: state.icon,
-            accentColor: state.accentColor,
-            taskKey: state.taskKey,
-            customLabel: state.customLabel,
-            minimized: state.minimized,
-            pinned: state.pinned,
-            workingDirectory: state.workingDirectory
-        });
+        this.saveTabMeta(state.id, this._tabMetaPayload(state));
         this.renderTabButton(tab);
         this.applyTabAccent(tab);
         this.applyTabPinned(tab);
         this.applyTabMinimized(tab);
+        this.applyTabNotify(tab);
 
         this.updateAddButtonState();
         return tab;
@@ -1412,16 +1440,7 @@ class TerminalManager {
         }
 
         this.saveTabSelection(tab.state.id, selection);
-        this.saveTabMeta(tab.state.id, {
-            label: tab.state.label,
-            icon: tab.state.icon,
-            accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel,
-            minimized: tab.state.minimized === true,
-            pinned: tab.state.pinned === true,
-            workingDirectory: tab.state.workingDirectory
-        });
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
         this.renderTabButton(tab);
         this.applyTabAccent(tab);
         this.updateUi();
@@ -1439,6 +1458,7 @@ class TerminalManager {
         const item = tab?.state?.ui?.item;
         const edit = tab?.state?.ui?.edit;
         const pin = tab?.state?.ui?.pin;
+        const notify = tab?.state?.ui?.notify;
         const min = tab?.state?.ui?.min;
         const close = tab?.state?.ui?.close;
         const hasSession = tab?.state?.hasActiveSession === true;
@@ -1446,25 +1466,18 @@ class TerminalManager {
 
         item?.classList.toggle('has-active-session', hasSession);
         this.applyTabPinned(tab);
+        this.applyTabNotify(tab);
 
         if ((!hasSession || pinned) && tab?.state?.minimized === true) {
             tab.state.minimized = false;
             this.applyTabMinimized(tab);
-            this.saveTabMeta(tab.state.id, {
-                label: tab.state.label,
-                icon: tab.state.icon,
-                accentColor: tab.state.accentColor,
-                taskKey: tab.state.taskKey,
-                customLabel: tab.state.customLabel,
-                minimized: false,
-                pinned: tab.state.pinned === true,
-                workingDirectory: tab.state.workingDirectory
-            });
+            this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state, { minimized: false }));
         }
 
         [
             [edit, hasSession],
             [pin, true],
+            [notify, hasSession],
             [min, hasSession && !pinned],
             // Close stays available even with no session, so blank/stopped tabs can be dismissed.
             // Pinned tabs are the exception: unpin first, then close.
@@ -1534,16 +1547,7 @@ class TerminalManager {
             this.applyTabMinimized(tab);
         }
 
-        this.saveTabMeta(tab.state.id, {
-            label: tab.state.label,
-            icon: tab.state.icon,
-            accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel,
-            minimized: tab.state.minimized === true,
-            pinned: tab.state.pinned === true,
-            workingDirectory: tab.state.workingDirectory
-        });
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
         this.applyTabPinned(tab);
         this.renderTabButton(tab);
         requestAnimationFrame(() => this._updateTabScrollArrows());
@@ -1567,6 +1571,42 @@ class TerminalManager {
         }
     }
 
+    // ── Per-tab push notifications (opt-in) ───────────────────────────────
+    //
+    // When armed, a tab fires a web-push (via the backend proxy → VibeRails-Front)
+    // each time it reaches READY or "Waiting for user input" — see _notifyTabPush
+    // and TabStatusController._transitionTo. The flag persists in tab meta like pin.
+    toggleTabNotify(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+
+        tab.state.notifyEnabled = tab.state.notifyEnabled !== true;
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
+        this.applyTabNotify(tab);
+        this.renderTabButton(tab);
+    }
+
+    applyTabNotify(tab) {
+        const item = tab?.state?.ui?.item;
+        const notify = tab?.state?.ui?.notify;
+        if (!item) return;
+
+        const on = tab.state.notifyEnabled === true;
+        item.classList.toggle('is-notify-on', on);
+
+        if (notify) {
+            notify.innerHTML = on
+                ? '<i class="fa-solid fa-bell"></i>'
+                : '<i class="fa-solid fa-bell-slash"></i>';
+            const title = on
+                ? 'Push notifications on for this tab'
+                : 'Notify me when this tab is ready';
+            notify.title = title;
+            notify.setAttribute('aria-label', title);
+            notify.setAttribute('aria-pressed', String(on));
+        }
+    }
+
     // ── Per-tab minimize (collapse to an icon chip) ───────────────────────
     //
     // A minimized tab shrinks to a brand-logo + status-icon chip and is grouped
@@ -1582,16 +1622,7 @@ class TerminalManager {
         if (tab.state.pinned === true) return;
 
         tab.state.minimized = tab.state.minimized !== true;
-        this.saveTabMeta(tab.state.id, {
-            label: tab.state.label,
-            icon: tab.state.icon,
-            accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel,
-            minimized: tab.state.minimized === true,
-            pinned: tab.state.pinned === true,
-            workingDirectory: tab.state.workingDirectory
-        });
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
         this.applyTabMinimized(tab);
         requestAnimationFrame(() => this._updateTabScrollArrows());
     }
@@ -1678,16 +1709,7 @@ class TerminalManager {
             tab.state.taskKey = taskKey;
         }
 
-        this.saveTabMeta(tab.state.id, {
-            label: tab.state.label,
-            icon: tab.state.icon,
-            accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel,
-            minimized: tab.state.minimized === true,
-            pinned: tab.state.pinned === true,
-            workingDirectory: tab.state.workingDirectory
-        });
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
 
         this.applyTabAccent(tab);
         this.renderTabButton(tab);
@@ -1778,16 +1800,7 @@ class TerminalManager {
             tab.state.label = this.getSelectionMeta(tab.state.selection).displayName;
         }
 
-        this.saveTabMeta(tab.state.id, {
-            label: tab.state.label,
-            icon: tab.state.icon,
-            accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel,
-            minimized: tab.state.minimized === true,
-            pinned: tab.state.pinned === true,
-            workingDirectory: tab.state.workingDirectory
-        });
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
 
         this.renderTabButton(tab);
     }
@@ -2497,6 +2510,25 @@ class TerminalManager {
         try { window.sessionStorage.removeItem(`${TAB_TITLE_PREFIX}${tabId}`); } catch {}
     }
 
+    // Single source of truth for the metadata persisted via saveTabMeta. Every field that must
+    // survive a reload (pin/minimize/notify/accent/…) lives here, so adding a new one can't be
+    // silently forgotten at one of the many save sites. Pass `overrides` for the rare case that
+    // diverges from tab state (e.g. forcing minimized:false).
+    _tabMetaPayload(state, overrides = {}) {
+        return {
+            label: state.label,
+            icon: state.icon,
+            accentColor: state.accentColor,
+            taskKey: state.taskKey,
+            customLabel: state.customLabel,
+            minimized: state.minimized === true,
+            pinned: state.pinned === true,
+            notifyEnabled: state.notifyEnabled === true,
+            workingDirectory: state.workingDirectory,
+            ...overrides
+        };
+    }
+
     saveTabMeta(tabId, metadata = {}) {
         try {
             const payload = {
@@ -2507,6 +2539,7 @@ class TerminalManager {
                 customLabel: metadata.customLabel === true,
                 minimized: metadata.minimized === true,
                 pinned: metadata.pinned === true,
+                notifyEnabled: metadata.notifyEnabled === true,
                 workingDirectory: cleanString(metadata.workingDirectory) || null
             };
             window.sessionStorage.setItem(`${TAB_META_PREFIX}${tabId}`, JSON.stringify(payload));
@@ -2526,6 +2559,7 @@ class TerminalManager {
                 customLabel: parsed?.customLabel === true,
                 minimized: parsed?.minimized === true,
                 pinned: parsed?.pinned === true,
+                notifyEnabled: parsed?.notifyEnabled === true,
                 workingDirectory: cleanString(parsed?.workingDirectory) || null
             };
         } catch {

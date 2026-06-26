@@ -11,7 +11,12 @@ public sealed record PreparedTerminalSession(
     string Command,
     string LaunchCommand,
     IReadOnlyList<string> SetupCommands,
-    Dictionary<string, string> Environment);
+    Dictionary<string, string> Environment,
+    // Non-null ⇒ this launch carries the one-time opted-out `mcp remove` for this CLI, and the
+    // caller MUST call ICommandService.RecordMcpRemovalIssuedAsync once the command has actually
+    // been sent to the PTY. We deliberately do NOT record removal at construction time: if startup
+    // fails before the send, cleanup must remain pending for the next launch (see TerminalRunner).
+    LLM? McpRemovalToRecord = null);
 
 public class CommandService : ICommandService
 {
@@ -110,7 +115,8 @@ public class CommandService : ICommandService
         // no auth). Register it before launching managed CLIs; setup failures remain non-blocking.
         // This keeps custom environments isolated because the setup command runs inside the same
         // PTY environment as the agent launch (CLAUDE_CONFIG_DIR / CODEX_HOME already set below).
-        foreach (var setupCommand in await BuildMcpSetupCommandsAsync(llm))
+        var (mcpSetupCommands, mcpRemovalPending) = await BuildMcpSetupCommandsAsync(llm);
+        foreach (var setupCommand in mcpSetupCommands)
         {
             setupCommands.Add(setupCommand);
             builder.AddSetup(setupCommand);
@@ -140,16 +146,21 @@ public class CommandService : ICommandService
             builder.Build(),
             cliCommand,
             setupCommands.AsReadOnly(),
-            environment);
+            environment,
+            mcpRemovalPending ? llm : null);
     }
 
-    private async Task<IReadOnlyList<string>> BuildMcpSetupCommandsAsync(LLM llm)
+    /// <summary>
+    /// Returns the MCP setup commands for this launch and whether this launch carries the
+    /// one-time opted-out `mcp remove` that the caller must record once it has been sent.
+    /// </summary>
+    private async Task<(IReadOnlyList<string> commands, bool removalPending)> BuildMcpSetupCommandsAsync(LLM llm)
     {
         var (removeCommand, addCommand) = GetMcpCommands(llm);
         if (removeCommand is null)
         {
             // This CLI doesn't support MCP registration — nothing to add or clean up.
-            return [];
+            return ([], false);
         }
 
         // Opted IN: register the server. Remove-first repairs older installs that registered
@@ -157,21 +168,26 @@ public class CommandService : ICommandService
         // command chain uses ';' between setup steps and the final agent launch.
         if (ParserConfigs.GetMcpEnabled())
         {
-            return [removeCommand, addCommand!];
+            return ([removeCommand, addCommand!], false);
         }
 
         // Opted OUT (default): never add. Remove it once per CLI to clean up a registration we
-        // added before, then record that we've done so — we must not re-issue `mcp remove` on
-        // every launch. The record is reset when the user opts back in (see AppSettingsRoutes).
+        // added before. We must NOT record the removal here — the command has only been built,
+        // not sent. If startup fails before TerminalRunner writes it to the PTY, recording now
+        // would skip cleanup forever. Signal the pending removal; the caller records it only
+        // after the command is actually sent. The record is reset on opt-in (AppSettingsRoutes).
         var removedFlagKey = GlobalCacheKeys.McpRemovedFromCli(llm);
         if (await _globalCache.GetAsBoolAsync(removedFlagKey))
         {
-            return [];
+            return ([], false);
         }
 
-        await _globalCache.SetAsync(removedFlagKey, "true");
-        return [removeCommand];
+        return ([removeCommand], true);
     }
+
+    /// <inheritdoc />
+    public Task RecordMcpRemovalIssuedAsync(LLM llm) =>
+        _globalCache.SetAsync(GlobalCacheKeys.McpRemovedFromCli(llm), "true");
 
     // Returns the (remove, add) command pair for a CLI, or (null, null) if the CLI has no
     // MCP registration support. Keep the supported set in sync with <see cref="McpClis"/>.

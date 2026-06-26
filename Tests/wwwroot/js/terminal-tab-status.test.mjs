@@ -53,17 +53,20 @@ writeFileSync(path.join(tmpDir, 'utils-stub.mjs'), 'export function getCliBrand(
 const { TabStatusController, TAB_STATUS } = await import(pathToFileURL(stagedModule).href);
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
-function makeController({ isActiveTab = () => true, cliKey = null } = {}) {
+function makeController({ isActiveTab = () => true, cliKey = null, pushEnabled = false } = {}) {
     const tabState = { label: 'Test', accentColor: null };
     const ui = { item: fakeElement(), button: fakeElement(), close: fakeElement() };
     const flashes = { ready: 0, waiting: 0 };
     const notifications = { ready: 0 };
+    const pushes = [];
     const progress = [];
     const controller = new TabStatusController(tabState, ui, {
         getCliKey: () => cliKey,
         isActiveTab,
         setProgress: (p) => progress.push(p),
         notifyReady: () => { notifications.ready++; },
+        isPushEnabled: () => pushEnabled,
+        notifyPush: (statusKey) => { pushes.push(statusKey); },
     });
     // Patch flash methods so we can assert on them deterministically.
     controller._flashReady = () => { flashes.ready++; };
@@ -71,7 +74,7 @@ function makeController({ isActiveTab = () => true, cliKey = null } = {}) {
     // Suppress the emoji animation timer during tests.
     controller._startEmojiCycle = () => {};
     controller._stopEmojiCycle = () => {};
-    return { controller, flashes, notifications, progress, ui, tabState };
+    return { controller, flashes, notifications, pushes, progress, ui, tabState };
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -507,6 +510,49 @@ test('agent tab: background session_idle (turn finished) still flashes AND toast
     assert.equal(controller._status, TAB_STATUS.READY);
     assert.equal(flashes.ready, 1, 'idle ready flashes');
     assert.equal(notifications.ready, 1, 'idle ready toasts');
+});
+
+// ── Opt-in push notifications (per-tab bell) ──────────────────────────────────
+// When a tab is opted in (isPushEnabled), reaching READY or "Waiting for user
+// input" fires notifyPush — regardless of focus (the bell is the only gate).
+// READY respects the `notify` flag so a process *exit* doesn't push "Ready".
+
+test('push: opted-in tab fires notifyPush("ready") on idle READY — even when active', () => {
+    // Focus-independent by design: the per-tab opt-in is the gate, not background-ness.
+    const { controller, pushes } = makeController({ isActiveTab: () => true, pushEnabled: true });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r'); // → THINKING
+    controller.onSessionIdle();      // → READY (turn finished)
+    assert.deepEqual(pushes, ['ready']);
+});
+
+test('push: opted-in tab fires notifyPush("waiting") on WAITING', () => {
+    const { controller, pushes } = makeController({ isActiveTab: () => false, pushEnabled: true });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r');           // → THINKING
+    controller.onWaitingForUserSelection();    // → WAITING
+    assert.deepEqual(pushes, ['waiting']);
+});
+
+test('push: completion (process exit, notify:false) does NOT push', () => {
+    // onSessionCompleted reaches READY with { notify:false } — an exited process
+    // must not announce itself as "Ready" via push.
+    const { controller, pushes } = makeController({ isActiveTab: () => false, pushEnabled: true });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r');           // → THINKING
+    controller.onSessionCompleted();           // → READY (notify:false)
+    assert.equal(controller._status, TAB_STATUS.READY);
+    assert.deepEqual(pushes, [], 'completion must not push');
+});
+
+test('push: a tab NOT opted in never pushes', () => {
+    const { controller, pushes } = makeController({ isActiveTab: () => false, pushEnabled: false });
+    controller.onSocketOpen();
+    controller.onTerminalData('\r');
+    controller.onSessionIdle();                // → READY
+    controller.onTerminalData('\r');           // → THINKING
+    controller.onWaitingForUserSelection();    // → WAITING
+    assert.deepEqual(pushes, [], 'disabled tab must never push');
 });
 
 // ── Status display text — product voice (Rob, 2026-06-12) ─────────────────────
