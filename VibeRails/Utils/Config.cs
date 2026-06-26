@@ -32,6 +32,12 @@ public static class Config
     private static Settings? _settings;
     private static readonly string _settingsPath;
 
+    // All settings.json reads/writes go through this gate. settings.json is shared mutable
+    // state: a terminal launch re-reads it (LoadFresh) on a request thread while the settings
+    // route may be writing it (Save). Serializing in-process turns "torn read of a half-written
+    // file" into "wait for the write to finish, then read it whole".
+    private static readonly object _gate = new();
+
     static Config()
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -46,13 +52,22 @@ public static class Config
 
     public static Settings Load()
     {
+        lock (_gate)
+        {
+            return LoadCore();
+        }
+    }
+
+    // Caller must hold _gate.
+    private static Settings LoadCore()
+    {
         if (_settings != null)
             return _settings;
 
         if (!File.Exists(_settingsPath))
         {
             _settings = new Settings();
-            Save(_settings);
+            SaveCore(_settings);
             return _settings;
         }
 
@@ -65,6 +80,15 @@ public static class Config
 
     public static void Save(Settings settings)
     {
+        lock (_gate)
+        {
+            SaveCore(settings);
+        }
+    }
+
+    // Caller must hold _gate.
+    private static void SaveCore(Settings settings)
+    {
         var json = JsonSerializer.Serialize(settings, ConfigJsonContext.Default.Settings);
         File.WriteAllText(_settingsPath, json);
         _settings = settings;
@@ -72,19 +96,26 @@ public static class Config
 
     public static void Reload()
     {
-        _settings = null;
-        Load();
+        lock (_gate)
+        {
+            _settings = null;
+            LoadCore();
+        }
     }
 
     /// <summary>
     /// Re-reads settings.json from disk, bypassing the in-memory cache, and returns it. Terminal
     /// tabs run in child processes that snapshot settings at their own startup; the parent persists
     /// every change to disk, so a caller that must honor a just-toggled setting (e.g. the MCP
-    /// opt-out) reads fresh here instead of trusting this process's stale in-memory copy.
+    /// opt-out) reads fresh here instead of trusting this process's stale in-memory copy. Reads
+    /// under _gate so it can't observe a concurrent Save mid-write.
     /// </summary>
     public static Settings LoadFresh()
     {
-        _settings = null;
-        return Load();
+        lock (_gate)
+        {
+            _settings = null;
+            return LoadCore();
+        }
     }
 }

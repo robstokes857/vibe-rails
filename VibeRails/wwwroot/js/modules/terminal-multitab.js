@@ -743,17 +743,7 @@ class TerminalManager {
         if (state.title) {
             this.saveTabTitle(state.id, state.title);
         }
-        this.saveTabMeta(state.id, {
-            label: state.label,
-            icon: state.icon,
-            accentColor: state.accentColor,
-            taskKey: state.taskKey,
-            customLabel: state.customLabel,
-            minimized: state.minimized,
-            pinned: state.pinned,
-            notifyEnabled: state.notifyEnabled,
-            workingDirectory: state.workingDirectory
-        });
+        this.saveTabMeta(state.id, this._tabMetaPayload(state));
         this.renderTabButton(tab);
         this.applyTabAccent(tab);
         this.applyTabPinned(tab);
@@ -1450,17 +1440,7 @@ class TerminalManager {
         }
 
         this.saveTabSelection(tab.state.id, selection);
-        this.saveTabMeta(tab.state.id, {
-            label: tab.state.label,
-            icon: tab.state.icon,
-            accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel,
-            minimized: tab.state.minimized === true,
-            pinned: tab.state.pinned === true,
-            notifyEnabled: tab.state.notifyEnabled === true,
-            workingDirectory: tab.state.workingDirectory
-        });
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
         this.renderTabButton(tab);
         this.applyTabAccent(tab);
         this.updateUi();
@@ -1491,17 +1471,7 @@ class TerminalManager {
         if ((!hasSession || pinned) && tab?.state?.minimized === true) {
             tab.state.minimized = false;
             this.applyTabMinimized(tab);
-            this.saveTabMeta(tab.state.id, {
-                label: tab.state.label,
-                icon: tab.state.icon,
-                accentColor: tab.state.accentColor,
-                taskKey: tab.state.taskKey,
-                customLabel: tab.state.customLabel,
-                minimized: false,
-                pinned: tab.state.pinned === true,
-                notifyEnabled: tab.state.notifyEnabled === true,
-                workingDirectory: tab.state.workingDirectory
-            });
+            this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state, { minimized: false }));
         }
 
         [
@@ -1577,17 +1547,7 @@ class TerminalManager {
             this.applyTabMinimized(tab);
         }
 
-        this.saveTabMeta(tab.state.id, {
-            label: tab.state.label,
-            icon: tab.state.icon,
-            accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel,
-            minimized: tab.state.minimized === true,
-            pinned: tab.state.pinned === true,
-            notifyEnabled: tab.state.notifyEnabled === true,
-            workingDirectory: tab.state.workingDirectory
-        });
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
         this.applyTabPinned(tab);
         this.renderTabButton(tab);
         requestAnimationFrame(() => this._updateTabScrollArrows());
@@ -1621,17 +1581,7 @@ class TerminalManager {
         if (!tab) return;
 
         tab.state.notifyEnabled = tab.state.notifyEnabled !== true;
-        this.saveTabMeta(tab.state.id, {
-            label: tab.state.label,
-            icon: tab.state.icon,
-            accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel,
-            minimized: tab.state.minimized === true,
-            pinned: tab.state.pinned === true,
-            notifyEnabled: tab.state.notifyEnabled === true,
-            workingDirectory: tab.state.workingDirectory
-        });
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
         this.applyTabNotify(tab);
         this.renderTabButton(tab);
     }
@@ -1672,17 +1622,7 @@ class TerminalManager {
         if (tab.state.pinned === true) return;
 
         tab.state.minimized = tab.state.minimized !== true;
-        this.saveTabMeta(tab.state.id, {
-            label: tab.state.label,
-            icon: tab.state.icon,
-            accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel,
-            minimized: tab.state.minimized === true,
-            pinned: tab.state.pinned === true,
-            notifyEnabled: tab.state.notifyEnabled === true,
-            workingDirectory: tab.state.workingDirectory
-        });
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
         this.applyTabMinimized(tab);
         requestAnimationFrame(() => this._updateTabScrollArrows());
     }
@@ -1769,17 +1709,7 @@ class TerminalManager {
             tab.state.taskKey = taskKey;
         }
 
-        this.saveTabMeta(tab.state.id, {
-            label: tab.state.label,
-            icon: tab.state.icon,
-            accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel,
-            minimized: tab.state.minimized === true,
-            pinned: tab.state.pinned === true,
-            notifyEnabled: tab.state.notifyEnabled === true,
-            workingDirectory: tab.state.workingDirectory
-        });
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
 
         this.applyTabAccent(tab);
         this.renderTabButton(tab);
@@ -1870,17 +1800,7 @@ class TerminalManager {
             tab.state.label = this.getSelectionMeta(tab.state.selection).displayName;
         }
 
-        this.saveTabMeta(tab.state.id, {
-            label: tab.state.label,
-            icon: tab.state.icon,
-            accentColor: tab.state.accentColor,
-            taskKey: tab.state.taskKey,
-            customLabel: tab.state.customLabel,
-            minimized: tab.state.minimized === true,
-            pinned: tab.state.pinned === true,
-            notifyEnabled: tab.state.notifyEnabled === true,
-            workingDirectory: tab.state.workingDirectory
-        });
+        this.saveTabMeta(tab.state.id, this._tabMetaPayload(tab.state));
 
         this.renderTabButton(tab);
     }
@@ -2588,6 +2508,25 @@ class TerminalManager {
 
     clearTabTitle(tabId) {
         try { window.sessionStorage.removeItem(`${TAB_TITLE_PREFIX}${tabId}`); } catch {}
+    }
+
+    // Single source of truth for the metadata persisted via saveTabMeta. Every field that must
+    // survive a reload (pin/minimize/notify/accent/…) lives here, so adding a new one can't be
+    // silently forgotten at one of the many save sites. Pass `overrides` for the rare case that
+    // diverges from tab state (e.g. forcing minimized:false).
+    _tabMetaPayload(state, overrides = {}) {
+        return {
+            label: state.label,
+            icon: state.icon,
+            accentColor: state.accentColor,
+            taskKey: state.taskKey,
+            customLabel: state.customLabel,
+            minimized: state.minimized === true,
+            pinned: state.pinned === true,
+            notifyEnabled: state.notifyEnabled === true,
+            workingDirectory: state.workingDirectory,
+            ...overrides
+        };
     }
 
     saveTabMeta(tabId, metadata = {}) {

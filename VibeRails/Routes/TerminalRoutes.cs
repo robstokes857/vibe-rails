@@ -4,6 +4,7 @@ using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
+using Serilog;
 
 namespace VibeRails.Routes;
 
@@ -93,7 +94,18 @@ public static class TerminalRoutes
             // re-read settings.json — which the parent persists on every settings change — to honor
             // an opt-out toggled after this child started. Without this an already-open tab could
             // still run `mcp add` after the user disabled MCP.
-            ParserConfigs.SetMcpEnabled(Config.LoadFresh().McpEnabled);
+            //
+            // Guard the disk read: a concurrent settings Save or a corrupt file can throw, and a
+            // failed re-read must not abort the launch — fall back to the cached value (mirrors the
+            // fail-safe in McpStdioHost).
+            try
+            {
+                ParserConfigs.SetMcpEnabled(Config.LoadFresh().McpEnabled);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[Terminal] Could not re-read settings for the MCP gate; using cached value");
+            }
 
             // Start the terminal session with the LLM CLI
             try

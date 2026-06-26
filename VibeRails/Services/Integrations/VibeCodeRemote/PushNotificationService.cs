@@ -61,7 +61,7 @@ public class PushNotificationService : IPushNotificationService
         if (!string.IsNullOrEmpty(imageBase64) && imageBase64.Length > MaxImageBase64Chars)
             imageBase64 = null;
 
-        var request = new HttpRequestMessage(HttpMethod.Post, $"{frontendUrl.TrimEnd('/')}/api/v1/push/notify");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{frontendUrl.TrimEnd('/')}/api/v1/push/notify");
         request.Headers.Add("X-Api-Key", apiKey);
 
         var payload = new PushNotifyRequest(
@@ -79,7 +79,9 @@ public class PushNotificationService : IPushNotificationService
 
         try
         {
-            await _httpClient.SendAsync(request, cancellationToken);
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                Log.Warning("[Push] VibeRails-Front returned {StatusCode} for push notification", (int)response.StatusCode);
         }
         catch (Exception ex)
         {

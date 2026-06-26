@@ -7,8 +7,11 @@ public static class PushRoutes
 {
     public static void Map(WebApplication app)
     {
-        // POST /api/v1/push/send - Local proxy: forwards a tab status push to the
-        // VibeRails-Front web-push API (keeps the X-Api-Key server-side). Fire-and-forget.
+        // POST /api/v1/push/send - Local proxy: forwards a tab status push to the VibeRails-Front
+        // web-push API (keeps the X-Api-Key server-side). The browser treats this as
+        // fire-and-forget; the handler still awaits the upstream send so the request scope (and the
+        // typed HttpClient) stays alive for the call. Returns a small JSON body so the client's
+        // JSON-parsing apiCall() doesn't throw on an empty 200.
         app.MapPost("/api/v1/push/send", async (
             IPushNotificationService push,
             PushSendRequest? request,
@@ -26,7 +29,7 @@ public static class PushRoutes
                 request.ImageBase64,
                 cancellationToken);
 
-            return Results.Ok();
+            return Results.Ok(new MessageResponse("ok"));
         }).WithName("PushSend");
     }
 }

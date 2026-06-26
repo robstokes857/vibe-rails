@@ -65,7 +65,11 @@ export class VibeTerminal {
         desktopLineHeight = 1.12,
         mobileLineHeight = 1.2,
         scrollOnWrite = true,
-        scrollback = DEFAULT_TERMINAL_SCROLLBACK
+        scrollback = DEFAULT_TERMINAL_SCROLLBACK,
+        // Only terminals that may be screenshotted (opt-in push tabs) need a readable WebGL
+        // drawing buffer; enabling preserveDrawingBuffer globally costs every renderer. Default
+        // off — TerminalTab passes this from the tab's notify opt-in.
+        enableImageCapture = false
     } = {}) {
         if (!outputEl) {
             throw new Error('VibeTerminal requires { outputEl }.');
@@ -81,6 +85,7 @@ export class VibeTerminal {
         this._mobileLineHeight = mobileLineHeight;
         this._scrollOnWrite = scrollOnWrite;
         this._fontFamily = fontFamily;
+        this._enableImageCapture = enableImageCapture === true;
 
         this._onFitChange = null;
         this._onProgress = null;
@@ -215,10 +220,11 @@ export class VibeTerminal {
         const tryWebgl = () => {
             if (!preferWebgl || !window.WebglAddon?.WebglAddon) return false;
             try {
-                // preserveDrawingBuffer=true keeps the WebGL canvas readable via
-                // toDataURL/drawImage (otherwise readback is blank after compositing),
-                // which captureImage() relies on for screenshot push notifications.
-                const addon = new window.WebglAddon.WebglAddon(true);
+                // preserveDrawingBuffer keeps the WebGL canvas readable via toDataURL/drawImage
+                // (otherwise readback is blank after compositing), which captureImage() relies on
+                // for screenshot push notifications. Only enabled for capture-eligible tabs so we
+                // don't pay the readback cost on every terminal.
+                const addon = new window.WebglAddon.WebglAddon(this._enableImageCapture);
                 this._terminal.loadAddon(addon);
                 addon.onContextLoss(() => {
                     try { addon.dispose(); } catch {}
@@ -682,6 +688,10 @@ export class VibeTerminal {
     // a missing image as "send the text notification only". Width is capped to keep
     // the upload within the Front's size limit.
     captureImage() {
+        // Capture needs a readable drawing buffer, only set up when this terminal was created
+        // capture-eligible (see enableImageCapture / tryWebgl). Otherwise a WebGL readback is
+        // blank, so report "no image" and let callers fall back to a text-only notification.
+        if (!this._enableImageCapture) return null;
         try {
             const screen = this._outputEl?.querySelector('.xterm-screen');
             const layers = screen ? Array.from(screen.querySelectorAll('canvas')) : [];
