@@ -151,7 +151,11 @@ export class TerminalTab {
             desktopFontSize: 14,
             mobileFontSize: 15,
             desktopLineHeight: 1.12,
-            mobileLineHeight: 1.2
+            mobileLineHeight: 1.2,
+            // Only arm a readable (screenshot-capable) renderer when this tab opted into push
+            // notifications; toggling notify on later falls back to text-only pushes until the
+            // tab is recreated (e.g. page reload), which avoids a global renderer perf hit.
+            enableImageCapture: this.state.notifyEnabled === true
         });
         this.vibeTerminal.onFitChange = () => this.scheduleResizeToPty();
         this.vibeTerminal.onProgress = (progress) => this.manager.updateTabProgress(this.state.id, progress);
@@ -239,6 +243,12 @@ export class TerminalTab {
         return this.vibeTerminal?.textarea
             || this.state.ui?.terminalElement?.querySelector('.xterm-helper-textarea')
             || null;
+    }
+
+    // PNG data URL of the current terminal screen for screenshot push notifications, or null if
+    // unavailable (not capture-eligible / DOM renderer / disposed). See VibeTerminal.captureImage.
+    captureImage() {
+        return this.vibeTerminal?.captureImage?.() ?? null;
     }
 
     configureInputTarget() {

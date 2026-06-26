@@ -19,8 +19,10 @@ namespace Tests.Services.Terminal;
 /// resize-reprint entry + anthropics/claude-code#49584, #55613.
 ///
 /// Also pins the MCP opt-in behavior: registration is gated on the MCP setting
-/// (off by default), and while opted-out each CLI is cleaned up exactly once via
-/// a per-CLI record in the global cache.
+/// (off by default), and while opted-out each CLI is cleaned up with a single
+/// `mcp remove`. That removal is recorded (so it stops repeating) only after the
+/// caller confirms it was issued via RecordMcpRemovalIssuedAsync — building the
+/// command is not success, so a pre-send failure must keep the cleanup pending.
 /// </summary>
 public class CommandServiceTests : IDisposable
 {
@@ -85,6 +87,9 @@ public class CommandServiceTests : IDisposable
         Assert.StartsWith(expectedRemoveCommand + "; ", prepared.Command);
         Assert.Contains(expectedAddPrefix, prepared.Command);
         Assert.EndsWith(prepared.LaunchCommand, prepared.Command);
+
+        // The opted-in path adds the server; there is no one-time removal to record.
+        Assert.Null(prepared.McpRemovalToRecord);
     }
 
     [Theory]
@@ -95,19 +100,24 @@ public class CommandServiceTests : IDisposable
     public async Task PrepareSession_McpDisabled_RemovesOnceThenStops(LLM llm, string expectedRemoveCommand)
     {
         // Opted out (default). First launch must clean up any prior registration with a single
-        // `mcp remove` — and never add the server.
+        // `mcp remove` — and never add the server — and flag the removal for the caller to record.
         var service = CreateService();
 
         var first = await service.PrepareSessionAsync(llm, envName: null, extraArgs: null);
 
         Assert.Equal(new[] { expectedRemoveCommand }, first.SetupCommands);
         Assert.DoesNotContain(" mcp add", first.Command);
+        Assert.Equal(llm, first.McpRemovalToRecord);
 
-        // Second launch for the same CLI: the removal was already recorded, so we must not
-        // re-issue `mcp remove` on every launch.
+        // TerminalRunner records the removal only after the command is sent to the PTY; simulate it.
+        await service.RecordMcpRemovalIssuedAsync(llm);
+
+        // Second launch for the same CLI: the removal is now recorded, so we must not re-issue
+        // `mcp remove` on every launch.
         var second = await service.PrepareSessionAsync(llm, envName: null, extraArgs: null);
 
         Assert.Empty(second.SetupCommands);
+        Assert.Null(second.McpRemovalToRecord);
     }
 
     [Fact]
@@ -119,10 +129,36 @@ public class CommandServiceTests : IDisposable
 
         var claude = await service.PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
         Assert.Equal(new[] { "claude mcp remove viberails-mcp" }, claude.SetupCommands);
+        await service.RecordMcpRemovalIssuedAsync(LLM.Claude);
 
         // Claude is now recorded as removed, but Codex still gets its own one-time removal.
         var codex = await service.PrepareSessionAsync(LLM.Codex, envName: null, extraArgs: null);
         Assert.Equal(new[] { "codex mcp remove viberails-mcp" }, codex.SetupCommands);
+        Assert.Equal(LLM.Codex, codex.McpRemovalToRecord);
+    }
+
+    [Fact]
+    public async Task PrepareSession_McpDisabled_KeepsEmittingRemoveUntilRecorded()
+    {
+        // Regression for the "marked done before it ran" bug: the per-CLI removed flag must be
+        // written only after the command is actually sent (RecordMcpRemovalIssuedAsync), never at
+        // construction. Until then, repeated launches must keep emitting the cleanup so a startup
+        // failure before the PTY send can never permanently skip it.
+        var service = CreateService();
+
+        var first = await service.PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+        Assert.Equal(new[] { "claude mcp remove viberails-mcp" }, first.SetupCommands);
+        Assert.Equal(LLM.Claude, first.McpRemovalToRecord);
+
+        // Simulate the launch aborting before the send: no RecordMcpRemovalIssuedAsync call.
+        var second = await service.PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+        Assert.Equal(new[] { "claude mcp remove viberails-mcp" }, second.SetupCommands);
+        Assert.Equal(LLM.Claude, second.McpRemovalToRecord);
+
+        // Now the command was sent and recorded; further launches stop re-issuing it.
+        await service.RecordMcpRemovalIssuedAsync(LLM.Claude);
+        var third = await service.PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
+        Assert.Empty(third.SetupCommands);
     }
 
     [Theory]

@@ -22,6 +22,7 @@ public static class RouteExtensions
         UpdateRoutes.Map(app);
         AppSettingsRoutes.Map(app);
         PinRoutes.Map(app);
+        PushRoutes.Map(app);
         LifecycleRoutes.Map(app);
         app.Services.GetRequiredService<AppEventWebSocketHandler>().MapWebSocket(app);
         BertRoutes.Map(app);

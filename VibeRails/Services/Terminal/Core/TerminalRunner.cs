@@ -387,6 +387,12 @@ public class TerminalRunner
             if (!string.IsNullOrWhiteSpace(preparedSession.Command))
                 await terminal.SendCommandAsync(preparedSession.Command, ct);
 
+            // The opted-out one-time `mcp remove` has now actually been written to the PTY. Record
+            // it here — not when CommandService built it — so a failure before this point leaves the
+            // cleanup pending for the next launch instead of being silently marked done.
+            if (preparedSession.McpRemovalToRecord is { } mcpRemovalCli)
+                await _commandService.RecordMcpRemovalIssuedAsync(mcpRemovalCli);
+
             if (activeRemoteConn != null)
             {
                 _stateService.TrackRemoteConnection(sessionId, activeRemoteConn);

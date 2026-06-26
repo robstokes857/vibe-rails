@@ -2581,7 +2581,8 @@ code {
    turn the middle of a small tab into buttons. Rename drops first; minimize and
    close remain available at normal tab widths. */
 @container (max-width: 220px) {
-    #vb-terminal-panel .vb-terminal-tab-item:not(.is-minimized) .vb-terminal-tab-edit {
+    #vb-terminal-panel .vb-terminal-tab-item:not(.is-minimized) .vb-terminal-tab-edit,
+    #vb-terminal-panel .vb-terminal-tab-item:not(.is-minimized) .vb-terminal-tab-notify {
         display: none !important;
     }
 }
@@ -2913,6 +2914,7 @@ code {
 
 #vb-terminal-panel .vb-terminal-tab-edit,
 #vb-terminal-panel .vb-terminal-tab-pin,
+#vb-terminal-panel .vb-terminal-tab-notify,
 #vb-terminal-panel .vb-terminal-tab-min {
     font-size: 0.72rem;
 }
@@ -2925,11 +2927,21 @@ code {
     color: #ff8a8a;
 }
 
+/* An armed tab's bell glows so it's clear (on hover) which tabs will push. */
+#vb-terminal-panel .vb-terminal-tab-item.is-notify-on .vb-terminal-tab-notify {
+    color: #f9e2af;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-notify-on .vb-terminal-tab-notify:hover {
+    color: #fdf0c4;
+}
+
 /* Tab actions only make sense once a session exists (syncTabActionAvailability
    sets [hidden] otherwise). Author display rules override the UA [hidden]
    default, so keep this explicit. */
 #vb-terminal-panel .vb-terminal-tab-edit[hidden],
 #vb-terminal-panel .vb-terminal-tab-pin[hidden],
+#vb-terminal-panel .vb-terminal-tab-notify[hidden],
 #vb-terminal-panel .vb-terminal-tab-min[hidden],
 #vb-terminal-panel .vb-terminal-tab-close[hidden] {
     display: none !important;
@@ -3206,6 +3218,7 @@ code {
    full tab (restore first); clicking anywhere else on the chip activates it. */
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-edit,
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-pin,
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-notify,
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-close {
     display: none !important;
 }

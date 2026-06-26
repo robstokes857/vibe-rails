@@ -206,6 +206,9 @@ namespace VibeRails
             // Debug Bundle Service (builds + encrypts + uploads a session bundle for remote debugging)
             serviceCollection.AddHttpClient<IDebugBundleService, DebugBundleService>();
 
+            // Push Notification Service (forwards per-tab "ready/waiting" pushes to VibeRails-Front)
+            serviceCollection.AddHttpClient<IPushNotificationService, PushNotificationService>();
+
             // Update Service (singleton with HttpClient)
             serviceCollection.AddHttpClient<UpdateService>();
 
