@@ -83,6 +83,23 @@ export function renderTerminalSettingsPanelHtml() {
                         </div>
                     </div>
                 </div>
+                <div class="vb-terminal-settings-section" data-settings-section="notifications">
+                    <button type="button" class="vb-terminal-settings-section-title" id="terminal-settings-section-notifications" aria-expanded="false" aria-controls="terminal-settings-section-notifications-content" data-settings-toggle="notifications">
+                        <span class="vb-terminal-settings-section-label">
+                            <i class="fa-solid fa-bell" aria-hidden="true"></i>
+                            <span>Notifications</span>
+                        </span>
+                        <i class="fa-solid fa-chevron-down vb-terminal-settings-section-chevron" aria-hidden="true"></i>
+                    </button>
+                    <div class="vb-terminal-settings-section-content" id="terminal-settings-section-notifications-content" role="region" aria-labelledby="terminal-settings-section-notifications">
+                        <div class="vb-terminal-settings-section-inner">
+                            <div class="vb-terminal-settings-row">
+                                <label for="terminal-settings-computer-name">Computer name</label>
+                                <input type="text" id="terminal-settings-computer-name" maxlength="80" autocomplete="off" placeholder="This computer">
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     `;
@@ -107,6 +124,7 @@ export class TerminalSettings {
         this._rendererSelect = null;
         this._rendererStatusEl = null;
         this._resizeDebounceSelect = null;
+        this._computerNameInput = null;
         this._themeListEl = null;
         this._sectionToggles = [];
     }
@@ -142,6 +160,11 @@ export class TerminalSettings {
         catch { return 'default'; }
     }
 
+    loadComputerName() {
+        const value = this._manager.app?.appSettings?.computerName;
+        return typeof value === 'string' ? value : '';
+    }
+
     // ---------- Mount + populate ----------
 
     init() {
@@ -152,6 +175,7 @@ export class TerminalSettings {
         this._rendererSelect    = this._container.querySelector('#terminal-settings-renderer');
         this._rendererStatusEl  = this._container.querySelector('#terminal-settings-renderer-active');
         this._resizeDebounceSelect = this._container.querySelector('#terminal-settings-resize-debounce');
+        this._computerNameInput = this._container.querySelector('#terminal-settings-computer-name');
         this._themeListEl       = this._container.querySelector('#vb-terminal-settings-theme-list');
         this._sectionToggles    = Array.from(this._container.querySelectorAll('[data-settings-toggle]'));
 
@@ -177,6 +201,15 @@ export class TerminalSettings {
         });
         this._rendererSelect?.addEventListener('change', (e) => this.applyRendererPreference(e.target.value));
         this._resizeDebounceSelect?.addEventListener('change', (e) => this.applyResizeDebounce(e.target.value));
+        this._computerNameInput?.addEventListener('change', (e) => {
+            void this.saveComputerName(e.target.value);
+        });
+        this._computerNameInput?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.currentTarget.blur();
+            }
+        });
 
         this._populate();
         this._restoreSections();
@@ -221,6 +254,12 @@ export class TerminalSettings {
 
         if (this._rendererSelect) this._rendererSelect.value = this.loadRenderer();
         if (this._resizeDebounceSelect) this._resizeDebounceSelect.value = this.loadResizeDebounce();
+        if (this._computerNameInput) {
+            this._computerNameInput.value = this.loadComputerName();
+            // Show the live machine name (the blank-field default) as the placeholder.
+            const machineName = this._manager.app?.appSettings?.machineName;
+            if (machineName) this._computerNameInput.placeholder = machineName;
+        }
 
         const savedTheme = this.loadTheme();
         if (savedTheme) {
@@ -321,6 +360,29 @@ export class TerminalSettings {
         // takes effect on the next resize event — no tab restart needed.
         const normalized = value === 'extended' ? 'extended' : 'default';
         try { localStorage.setItem('viberails_terminal_resizeDebounce', normalized); } catch {}
+    }
+
+    async saveComputerName(value) {
+        const app = this._manager.app;
+        if (!app?.apiCall) return;
+
+        const computerName = (typeof value === 'string' ? value : '').trim().slice(0, 80);
+        if (this._computerNameInput && this._computerNameInput.value !== computerName) {
+            this._computerNameInput.value = computerName;
+        }
+
+        // Narrow update: touches ONLY the computer name server-side, so it can't clobber
+        // unrelated settings (remoteAccess, mcpEnabled, theme, …) with this client's
+        // possibly-stale cache. The response is the fresh, full settings snapshot.
+        try {
+            const savedSettings = await app.apiCall('/api/v1/settings/computer-name', 'POST', {
+                computerName
+            }, { showLoading: false });
+            app.setAppSettings?.(savedSettings);
+            app.showToast?.('Notifications', 'Computer name saved', 'success', { compact: true });
+        } catch (error) {
+            app.showError?.('Failed to save computer name: ' + (error?.message || 'Unknown error'));
+        }
     }
 
     syncFontSizeInput(size) {

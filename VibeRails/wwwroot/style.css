@@ -5699,7 +5699,8 @@ input.form-control:disabled {
 }
 
 #vb-terminal-panel .vb-terminal-settings-row select,
-#vb-terminal-panel .vb-terminal-settings-row input[type="number"] {
+#vb-terminal-panel .vb-terminal-settings-row input[type="number"],
+#vb-terminal-panel .vb-terminal-settings-row input[type="text"] {
     background: #1e1e2e;
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 6px;
@@ -5713,7 +5714,8 @@ input.form-control:disabled {
 }
 
 #vb-terminal-panel .vb-terminal-settings-row select:focus,
-#vb-terminal-panel .vb-terminal-settings-row input[type="number"]:focus {
+#vb-terminal-panel .vb-terminal-settings-row input[type="number"]:focus,
+#vb-terminal-panel .vb-terminal-settings-row input[type="text"]:focus {
     border-color: #89b4fa;
     box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.2);
 }

@@ -265,8 +265,8 @@ Beyond updating `_status` and calling `_applyVisuals`:
   the `notify:true` turn-finished path, **not** on a process-exit completion) or
   `WAITING` fires `notifyPush('ready'|'waiting')`. Unlike the flash/toast, this
   is **not** gated on background-ness — the explicit opt-in is the only gate, so
-  it fires regardless of focus. The manager handler (`_notifyTabPush` in
-  `terminal-multitab.js`) builds a "tab name + status" web push, attaches a
+  it fires regardless of focus. The terminal notification module
+  (`terminal-notifications.js`) builds a "tab name + status" web push, attaches a
   terminal screenshot when available, and posts it to the local
   `/api/v1/push/send` proxy, which forwards it (with the cloud `X-Api-Key`) to
   the VibeRails-Front push API. Fire-and-forget; no-ops when no API key is set.

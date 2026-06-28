@@ -368,6 +368,9 @@ export class VibeControlApp {
             enablePrerelease: false,
             developerOptions: false,
             useVsCodeTheme: false,
+            mcpEnabled: false,
+            computerName: '',
+            machineName: '',
             ...settings
         };
     }
