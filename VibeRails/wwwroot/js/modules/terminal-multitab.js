@@ -12,6 +12,7 @@ import { TerminalTab } from './terminal-tab.js';
 import { TerminalMultiRun } from './terminal-multirun.js';
 import { TerminalEditorModal } from './terminal-editor-modal.js';
 import { TerminalToast } from './terminal-toast.js';
+import { TerminalNotifications } from './terminal-notifications.js';
 import { showSendDebugLogModal } from './debug-bundle.js';
 
 // Pending-close grace window: how long a closed tab is held in the undo
@@ -131,6 +132,7 @@ class TerminalManager {
         // Terminal-scoped toast surface. Renders over the active tab's panel
         // (never inside the xterm host), so it can't disturb terminal sizing.
         this.toast = new TerminalToast(this);
+        this.notifications = new TerminalNotifications(this);
     }
 
     isDestroyed() {
@@ -462,54 +464,14 @@ class TerminalManager {
     // fired alongside the ready-flash). Pop a small toast over whatever tab the
     // user is currently looking at, with a one-click jump to the tab that's ready.
     _notifyTabReady(state) {
-        const label = state?.label || state?.title || 'Terminal';
-
-        // The in-panel toast is only actually visible when the active tab is
-        // showing a live terminal — if the user is parked on a placeholder (no
-        // session) or there's no active tab, its panel is hidden and the toast
-        // would render into nothing. Only use it when it'll be seen; otherwise
-        // (and if showSmallToast still returns null) fall back to the always-
-        // visible global toast so a background tab finishing is never silently
-        // dropped. (The global toast has no inline action, so the user taps the
-        // flashing tab to jump.)
-        const active = this.getActiveTab();
-        const handle = active?.state?.hasActiveSession
-            ? this.toast.showSmallToast(`${label} is ready`, {
-                type: 'success',
-                durationSec: 6,
-                action: {
-                    label: 'View',
-                    onClick: () => { void this.activateTab(state.id); }
-                }
-            })
-            : null;
-
-        if (!handle) {
-            this.app?.showToast?.(label, 'Ready', 'success', { compact: true });
-        }
+        this.notifications.notifyTabReady(state);
     }
 
     // An opted-in tab reached READY ('ready') or "Waiting for user input" ('waiting').
-    // Fire-and-forget a web-push (tab name + status, plus a terminal screenshot when
-    // available) via the backend proxy → VibeRails-Front. Fires regardless of focus;
-    // the per-tab watch toggle (eye) is the only gate (see TabStatusController._transitionTo).
+    // The notification module builds and sends the web-push; this wrapper keeps
+    // TabStatusController wired to the manager without owning notification details.
     _notifyTabPush(state, statusKey) {
-        const label = state?.label || state?.title || 'Terminal';
-        const body = statusKey === 'waiting' ? 'Waiting for user input' : 'Ready';
-        const tab = this.tabs.get(state.id);
-        let imageBase64 = null;
-        try { imageBase64 = tab?.instance?.captureImage?.() || null; } catch { /* no-op */ }
-
-        // Fully guarded: this runs inside the status state machine, so a throw here
-        // must never break a transition.
-        try {
-            void this.app.apiCall('/api/v1/push/send', 'POST', {
-                title: label,
-                body,
-                tag: state.sessionId || state.id,
-                imageBase64
-            }, { showLoading: false }).catch(() => { /* fire-and-forget */ });
-        } catch { /* no-op */ }
+        this.notifications.notifyTabPush(state, statusKey);
     }
 
     async restoreTabs() {
@@ -1583,8 +1545,8 @@ class TerminalManager {
 
     // ── Per-tab push notifications (opt-in "watch") ───────────────────────
     //
-    // The eye toggle arms a tab: while watched, it fires a web-push (via the
-    // backend proxy → VibeRails-Front) each time it reaches READY or "Waiting for
+    // The eye toggle arms a tab: while watched, it fires a web-push (via
+    // TerminalNotifications) each time it reaches READY or "Waiting for
     // user input" — see _notifyTabPush and TabStatusController._transitionTo. An
     // armed tab also wears a persistent eye badge + sky ring (applyTabNotify) so
     // the watched state reads at a glance, not just on hover. Persists in tab meta

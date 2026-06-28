@@ -335,8 +335,18 @@ namespace VibeRails.DTOs
         bool EnablePrerelease,
         bool DeveloperOptions,
         bool UseVsCodeTheme,
-        bool McpEnabled
+        bool McpEnabled,
+        string? ComputerName,
+        // Read-only: the live machine name, used by the client as the placeholder
+        // and as the push-notification fallback when ComputerName is blank. Never
+        // persisted (see AppSettingsRoutes), so renaming the machine reflects live.
+        string? MachineName = null
     );
+
+    // Narrow update for just the notification computer name. Lets the terminal
+    // settings panel change ComputerName without resending (and risking clobbering)
+    // the full settings object from a possibly-stale client cache.
+    public record UpdateComputerNameDto(string? ComputerName);
 
     // Remote PIN DTOs
     public record SetPinRequest(string Pin);

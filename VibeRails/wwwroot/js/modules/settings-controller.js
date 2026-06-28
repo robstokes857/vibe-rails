@@ -9,7 +9,7 @@ export class SettingsController {
         const content = document.getElementById('app-content');
         if (!content) return;
 
-        let settings = { remoteAccess: false, apiKey: '', enablePrerelease: false, developerOptions: false, useVsCodeTheme: false, mcpEnabled: false };
+        let settings = { remoteAccess: false, apiKey: '', enablePrerelease: false, developerOptions: false, useVsCodeTheme: false, mcpEnabled: false, computerName: '', machineName: '' };
         try {
             settings = await this.app.apiCall('/api/v1/settings', 'GET');
             this.app.setAppSettings(settings);
@@ -32,6 +32,7 @@ export class SettingsController {
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
             const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
             const mcpEnabledToggle = root.querySelector('#setting-enable-mcp');
+            const computerNameInput = root.querySelector('#setting-computer-name');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
@@ -69,6 +70,12 @@ export class SettingsController {
             if (mcpEnabledToggle) {
                 mcpEnabledToggle.checked = settings.mcpEnabled || false;
             }
+            if (computerNameInput) {
+                computerNameInput.value = settings.computerName || '';
+                // Blank field defaults to the live machine name in push notifications —
+                // surface it as the placeholder so the default is visible.
+                if (settings.machineName) computerNameInput.placeholder = settings.machineName;
+            }
 
             const form = root.querySelector('#app-settings-form');
             if (form) {
@@ -88,7 +95,8 @@ export class SettingsController {
                         enablePrereleaseToggle?.checked || false,
                         developerOptionsToggle?.checked || false,
                         useVsCodeThemeToggle?.checked || false,
-                        mcpEnabledToggle?.checked || false
+                        mcpEnabledToggle?.checked || false,
+                        computerNameInput?.value || ''
                     );
                 });
             }
@@ -99,7 +107,7 @@ export class SettingsController {
         content.appendChild(fragment);
     }
 
-    async saveSettings(remoteAccess, apiKey, enablePrerelease, developerOptions, useVsCodeTheme, mcpEnabled) {
+    async saveSettings(remoteAccess, apiKey, enablePrerelease, developerOptions, useVsCodeTheme, mcpEnabled, computerName) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -107,7 +115,8 @@ export class SettingsController {
                 enablePrerelease: enablePrerelease,
                 developerOptions: developerOptions,
                 useVsCodeTheme: useVsCodeTheme,
-                mcpEnabled: mcpEnabled
+                mcpEnabled: mcpEnabled,
+                computerName: computerName
             });
             this.app.setAppSettings(savedSettings);
             this.app.showToast('Settings', 'Settings saved successfully', 'success');
