@@ -310,10 +310,17 @@ namespace VibeRails.DTOs
         string Message
     );
 
-    // Push Notification DTOs (per-tab opt-in push, proxied to VibeRails-Front)
+    // Push Notification DTOs (per-tab opt-in push, proxied to VibeRails-Front).
+    // The client sends the raw pieces — tab label, the user's (possibly blank)
+    // computer name, and the status key — and the server composes the title/body
+    // and fills the blank computer name with Environment.MachineName before
+    // forwarding. Keeping that fallback server-side makes it authoritative even
+    // for clients (remote viewers, freshly-loaded tabs) that never learned the
+    // machine name.
     public record PushSendRequest(
-        string? Title = null,
-        string? Body = null,
+        string? Label = null,
+        string? ComputerName = null,
+        string? StatusKey = null,
         string? Tag = null,
         string? ImageBase64 = null
     );

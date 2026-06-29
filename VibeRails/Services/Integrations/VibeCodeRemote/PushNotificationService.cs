@@ -11,10 +11,14 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote;
 /// web-push API (<c>POST {frontendUrl}/api/v1/push/notify</c>). Reuses the same cloud
 /// API key + frontend URL as the other remote integrations. Fire-and-forget: failures
 /// (and a missing API key / URL) never disrupt the terminal UI.
+///
+/// Composes the user-facing title/body from the raw pieces the client sends and fills a
+/// blank <paramref name="computerName"/> with <see cref="Environment.MachineName"/> so the
+/// machine-name fallback is owned here, not in the browser.
 /// </summary>
 public interface IPushNotificationService
 {
-    Task SendAsync(string title, string body, string? tag, string? imageBase64, CancellationToken cancellationToken = default);
+    Task SendAsync(string label, string? computerName, string? statusKey, string? tag, string? imageBase64, CancellationToken cancellationToken = default);
 }
 
 // AOT-compatible JSON serialization context. CamelCase matches the Front's web-default
@@ -48,7 +52,7 @@ public class PushNotificationService : IPushNotificationService
         _httpClient = httpClient;
     }
 
-    public async Task SendAsync(string title, string body, string? tag, string? imageBase64, CancellationToken cancellationToken = default)
+    public async Task SendAsync(string label, string? computerName, string? statusKey, string? tag, string? imageBase64, CancellationToken cancellationToken = default)
     {
         var apiKey = ParserConfigs.GetApiKey();
         var frontendUrl = ParserConfigs.GetFrontendUrl();
@@ -60,6 +64,8 @@ public class PushNotificationService : IPushNotificationService
         // push is the important part.
         if (!string.IsNullOrEmpty(imageBase64) && imageBase64.Length > MaxImageBase64Chars)
             imageBase64 = null;
+
+        var (title, body) = ComposeMessage(label, computerName, statusKey);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{frontendUrl.TrimEnd('/')}/api/v1/push/notify");
         request.Headers.Add("X-Api-Key", apiKey);
@@ -86,6 +92,36 @@ public class PushNotificationService : IPushNotificationService
         catch (Exception ex)
         {
             Log.Error(ex, "[Push] Failed to send push notification");
+        }
+    }
+
+    // Builds the user-facing push title/body (the strings the user reads in the OS
+    // notification). The computer name disambiguates which machine fired the alert;
+    // when the user left it blank we fall back to the live Environment.MachineName
+    // HERE — server-side — so multi-machine pushes stay labeled even if the browser
+    // never learned the machine name. Mirrors the product voice the tab status uses
+    // ("Ready" / "Waiting for user input").
+    private static (string Title, string Body) ComposeMessage(string? label, string? computerName, string? statusKey)
+    {
+        var safeLabel = string.IsNullOrWhiteSpace(label) ? "Terminal" : label.Trim();
+        var safeComputer = string.IsNullOrWhiteSpace(computerName) ? ResolveMachineName() : computerName.Trim();
+        var target = string.IsNullOrEmpty(safeComputer) ? safeLabel : $"{safeLabel} on {safeComputer}";
+
+        if (string.Equals(statusKey, "waiting", StringComparison.OrdinalIgnoreCase))
+            return ($"{target} needs input", "Waiting for user input");
+
+        return ($"{target} is ready", "Ready");
+    }
+
+    private static string ResolveMachineName()
+    {
+        try
+        {
+            return Environment.MachineName?.Trim() ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 }

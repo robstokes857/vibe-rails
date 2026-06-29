@@ -2948,7 +2948,9 @@ code {
 }
 
 /* Persistent eye badge — hidden until armed, then sits just inside the tab's
-   left edge ahead of the brand logo. flex:0 0 auto so it never collapses. */
+   left edge ahead of the brand logo. flex:0 0 auto so it never collapses. It's a
+   live un-watch control (it only shows while watching, so a click always turns
+   notifications off), hence the button reset + pointer affordance. */
 #vb-terminal-panel .vb-terminal-tab-watch-badge {
     display: none;
     align-items: center;
@@ -2956,15 +2958,26 @@ code {
     flex: 0 0 auto;
     width: 15px;
     margin-left: 7px;
+    border: 0;
+    padding: 0;
+    background: none;
     color: #89dceb;
     font-size: 0.72rem;
     line-height: 1;
-    /* Decorative twin of the eye toggle — clicks fall through to the tab. */
-    pointer-events: none;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color 0.2s, background 0.2s;
 }
 
 #vb-terminal-panel .vb-terminal-tab-item.is-notify-on .vb-terminal-tab-watch-badge {
     display: inline-flex;
+}
+
+/* Hover telegraphs "click to stop watching" — lighten + a soft sky wash,
+   matching the eye toggle's own hover. */
+#vb-terminal-panel .vb-terminal-tab-watch-badge:hover {
+    color: #b4e8f4;
+    background: rgba(137, 220, 235, 0.16);
 }
 
 /* Minimized chips are too tight for the left badge — the ring carries the
@@ -3061,15 +3074,19 @@ code {
     font-family: monospace;
 }
 
-#vb-terminal-panel .vb-tab-pin-logo {
+/* Pin marker shown beside the brand logo on pinned tabs (it no longer
+   replaces the logo). Sized smaller than the 18px logo so it reads as a
+   badge, not a second icon. */
+#vb-terminal-panel .vb-tab-pin-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
     color: #ff5c5c;
-    font-size: 0.78rem;
+    font-size: 0.62rem;
 }
 
-#vb-terminal-panel .vb-tab-pin-logo i {
+#vb-terminal-panel .vb-tab-pin-badge i {
     line-height: 1;
     transform: rotate(-18deg);
 }
