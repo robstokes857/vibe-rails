@@ -718,6 +718,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(DebugBundleSendResponse))]
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(AppSettingsDto))]
+    [JsonSerializable(typeof(UpdateComputerNameDto))]
     // Remote PIN DTOs
     [JsonSerializable(typeof(SetPinRequest))]
     [JsonSerializable(typeof(PinStatusResponse))]
