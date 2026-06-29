@@ -1,7 +1,7 @@
 # MCP Server (in-process)
 
 VibeRails hosts a Model Context Protocol (MCP) server **inside `vb.exe`** — no separate binary to
-build or ship. The same two tools are exposed over **two transports** so each consumer gets its
+build or ship. The same tool set is exposed over **two transports** so each consumer gets its
 natural one:
 
 - **HTTP** at `/mcp` (Streamable HTTP) — for the dashboard MCP Explorer.
@@ -15,14 +15,14 @@ natural one:
 vb.exe — Native AOT, two MCP entry points sharing the same tool classes
 │
 ├── HTTP (dashboard's Kestrel, root backend only)
-│     MapRegisterServices: AddMcpServer().WithHttpTransport().WithTools<Rules/SessionSearch>()
+│     MapRegisterServices: AddMcpServer().WithHttpTransport().WithTools<Rules/SessionSearch/TerminalTools>()
 │     Program.cs:          app.MapMcp("/mcp")
 │     CookieAuthMiddleware in front of /mcp     ← viberails_session token required
 │
 └── stdio (`vb mcp`, McpStdioHost.cs)
       Program.cs branches BEFORE the web host:  if (McpStdioHost.IsRequested(args)) …
-      AddMcpServer().WithStdioServerTransport().WithTools<Rules/SessionSearch>()
-      No web server, no port, no auth           ← inherently scoped to the spawning CLI
+      AddMcpServer().WithStdioServerTransport().WithTools<Rules/SessionSearch/TerminalTools>()
+      No MCP listener or MCP auth               ← terminal tools may call back to root API with injected credentials
 ```
 
 The HTTP DI registration and `MapMcp("/mcp")` are gated to the **root backend only**
@@ -36,11 +36,13 @@ path registers its own minimal services in `McpStdioHost.ConfigureServices`.
   `CookieAuthMiddleware` requires only the `viberails_session` token (cookie or header), no per-tab
   token. Used by the Explorer.
 - **stdio** (`ModelContextProtocol`, `WithStdioServerTransport`): the CLI spawns `vb mcp` and talks
-  JSON-RPC over the child's stdin/stdout. No listening socket, so **no auth** — a stdio server is
-  inherently scoped to the spawning process. `McpStdioHost` clears the default console logger and
-  relies on file-only Serilog so **nothing but MCP frames reaches stdout** (ONNX/diagnostics go to
-  stderr, which is fine). The child inherits the CLI's working directory, so `validate_vca` checks
-  the agent's project; `search_history` reads the global BERT corpus regardless of cwd.
+  JSON-RPC over the child's stdin/stdout. The MCP transport itself has no listening socket or auth
+  challenge because it is scoped to the spawning process. `McpStdioHost` clears the default console
+  logger and relies on file-only Serilog so **nothing but MCP frames reaches stdout**
+  (ONNX/diagnostics go to stderr, which is fine). The child inherits the CLI's working directory,
+  so `validate_vca` checks the agent's project; `search_history` reads the global BERT corpus
+  regardless of cwd. Terminal-control tools call the live root backend using injected localhost API
+  credentials when available.
 
 ## Tools
 
@@ -50,6 +52,10 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 |------------------------|--------|-------------|
 | `validate_vca` | `RulesTool.ValidateVca` | Validates staged git files against `- [ENFORCEMENT] …` rules in AGENTS.md files. |
 | `search_history` | `SessionSearchTool.SearchHistory` | Semantic + keyword search over the developer's captured agent history. |
+| `list_terminals` | `TerminalTools.ListTerminals` | Lists VibeRails terminal tabs available for tool-driven control. |
+| `open_terminal` | `TerminalTools.OpenTerminal` | Opens a new VibeRails terminal tab, defaulting to a plain shell. |
+| `send_terminal_input` | `TerminalTools.SendTerminalInput` | Sends text input to a terminal tab without attaching/taking over the viewer WebSocket. |
+| `get_terminal_snapshot` | `TerminalTools.GetTerminalSnapshot` | Reads the current plain-text screen snapshot from a terminal tab. |
 
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
 
@@ -65,6 +71,22 @@ It calls the same [`IUnifiedSearchService`](../BertV2/IUnifiedSearchService.cs) 
 the single best-overall ranking — formatted as readable text (agent, kind, timestamp, session id,
 preview). There is **no separate vector store for MCP**; it reuses the real corpus the app already
 builds from captured sessions.
+
+### Terminal tools
+
+`TerminalTools` is an **instance tool** backed by `IAgentTerminalToolGateway`.
+The HTTP MCP transport uses the in-process gateway and calls the tab host directly.
+The stdio transport uses `HttpAgentTerminalToolGateway`, which calls the live root backend over
+localhost with callback credentials injected into managed terminal environments:
+
+- `VIBERAILS_TOOL_API_BASE`
+- `VIBERAILS_TOOL_SESSION_TOKEN`
+- `VIBERAILS_TOOL_TAB_TOKEN`
+- `VIBERAILS_TOOL_CURRENT_TAB_ID`
+- `VIBERAILS_TOOL_CURRENT_SESSION_ID`
+
+Terminal input intentionally goes through `/api/v1/terminal/input` in the child process instead of
+the viewer WebSocket, so tool-driven input does not disconnect or take over a human viewer.
 
 ## MCP Explorer (dashboard)
 

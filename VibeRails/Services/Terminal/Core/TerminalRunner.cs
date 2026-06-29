@@ -1,5 +1,6 @@
 using Serilog;
 using VibeRails.Services.Terminal.Consumers;
+using VibeRails.Services.AgentTools;
 
 using VibeRails.Utils;
 
@@ -10,15 +11,18 @@ public class TerminalRunner
     private static int s_emergencyShutdownRequested;
     private readonly ITerminalStateService _stateService;
     private readonly ICommandService _commandService;
+    private readonly ILocalToolApiContext _toolApiContext;
     private readonly IHostApplicationLifetime? _appLifetime;
 
     public TerminalRunner(
         ITerminalStateService stateService,
         ICommandService commandService,
+        ILocalToolApiContext toolApiContext,
         IHostApplicationLifetime? appLifetime = null)
     {
         _stateService = stateService;
         _commandService = commandService;
+        _toolApiContext = toolApiContext;
         _appLifetime = appLifetime;
     }
 
@@ -57,6 +61,10 @@ public class TerminalRunner
         {
             var sessionTitle = ResolveSessionTitle(workDir, title);
             var preparedSession = await _commandService.PrepareSessionAsync(llm, envName, extraArgs, initialPrompt, summary);
+            foreach (var kvp in _toolApiContext.BuildEnvironment(sessionId))
+            {
+                preparedSession.Environment[kvp.Key] = kvp.Value;
+            }
             _stateService.PublishSessionStart(sessionId, llm.ToString(), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
 
             terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: sessionTitle, ct: ct);

@@ -152,6 +152,43 @@ public static class TerminalRoutes
             return Results.Ok(new TerminalStatusResponse(false, null));
         }).WithName("StopTerminal");
 
+        // POST /api/v1/terminal/input - Send input without attaching/taking over the viewer WebSocket
+        app.MapPost("/api/v1/terminal/input", async (
+            ITerminalSessionService terminalService,
+            TerminalInputRequest? request,
+            CancellationToken cancellationToken) =>
+        {
+            if (request == null)
+            {
+                return Results.BadRequest(new ErrorResponse("Input request is required."));
+            }
+
+            var response = await terminalService.SendInputAsync(request, cancellationToken);
+            return response.Success
+                ? Results.Ok(response)
+                : Results.BadRequest(new ErrorResponse(response.Message));
+        }).WithName("SendTerminalInput");
+
+        // GET /api/v1/terminal/snapshot - Plain-text snapshot of the current terminal screen
+        app.MapGet("/api/v1/terminal/snapshot", async (
+            ITerminalSessionService terminalService,
+            CancellationToken cancellationToken) =>
+        {
+            var snapshot = await terminalService.CaptureSnapshotAsync(cancellationToken);
+            if (snapshot == null)
+            {
+                return Results.NotFound(new ErrorResponse("No active terminal session."));
+            }
+
+            return Results.Ok(new TerminalSnapshotResponse(
+                null,
+                snapshot.SessionId,
+                snapshot.CapturedUtc,
+                snapshot.Cols,
+                snapshot.Rows,
+                snapshot.ScreenText));
+        }).WithName("GetTerminalSnapshot");
+
         // WebSocket endpoint for terminal I/O
         app.Map("/api/v1/terminal/ws", async (HttpContext context, ITerminalSessionService terminalService) =>
         {

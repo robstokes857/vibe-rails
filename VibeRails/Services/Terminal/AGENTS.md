@@ -149,6 +149,8 @@ Key behavior:
   6. runs input loop (supports fragmentation, size guard, resize control) and routes user input through `TerminalIoRouter`
 - `DisconnectLocalViewerAsync(reason)` closes local viewer with provided reason.
 - `StopSessionAsync` is blocked for externally owned sessions.
+- `SendInputAsync` writes tool/API input through `TerminalIoRouter` without attaching a viewer
+  WebSocket or changing local/remote takeover state.
 
 Important current behavior:
 - Local and remote attach currently use atomic emulator snapshots instead of the previous redraw-first reconnect path.
@@ -241,8 +243,23 @@ From `Routes/TerminalRoutes.cs`:
 - `GET /api/v1/terminal/status`
 - `POST /api/v1/terminal/start`
 - `POST /api/v1/terminal/stop`
+- `POST /api/v1/terminal/input`
+- `GET /api/v1/terminal/snapshot`
 - `GET /api/v1/terminal/bootstrap-command`
 - `WS /api/v1/terminal/ws`
+
+Agent/tool control surface:
+- `GET /api/v1/agent-tools/terminal`
+- `POST /api/v1/agent-tools/terminal/open`
+- `POST /api/v1/agent-tools/terminal/input`
+- `POST /api/v1/agent-tools/terminal/{tabId}/input`
+- `POST /api/v1/agent-tools/terminal/snapshot`
+- `GET /api/v1/agent-tools/terminal/{tabId}/snapshot`
+- `WS /api/v1/agent-tools/ws` with JSON actions `list_terminals`, `open_terminal`,
+  `send_terminal_input`, and `get_terminal_snapshot`.
+
+These tool endpoints are non-viewer control paths. They must not call `HandleWebSocketAsync`
+or connect to `/api/v1/terminal/ws`, because that route enforces viewer takeover semantics.
 
 ## Takeover Rules (Current)
 

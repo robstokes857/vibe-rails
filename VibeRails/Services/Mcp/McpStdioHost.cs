@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using VibeRails.Services.BertBaseClasses;
+using VibeRails.Services.AgentTools;
 using VibeRails.Services.BertV2;
 using VibeRails.Services.Mcp.Tools;
 using VibeRails.Utils;
@@ -87,6 +88,8 @@ public static class McpStdioHost
         services.AddSingleton<IBertDocumentResponseMapper, BertDocumentResponseMapper>();
         services.AddSingleton<IUnifiedSearchService, UnifiedSearchService>();
         services.AddScoped<SessionSearchTool>();
+        services.AddSingleton<IAgentTerminalToolGateway, HttpAgentTerminalToolGateway>();
+        services.AddScoped<TerminalTools>();
 
         services
             .AddMcpServer(options =>
@@ -95,6 +98,7 @@ public static class McpStdioHost
             })
             .WithStdioServerTransport()
             .WithTools<RulesTool>()
-            .WithTools<SessionSearchTool>();
+            .WithTools<SessionSearchTool>()
+            .WithTools<TerminalTools>();
     }
 }

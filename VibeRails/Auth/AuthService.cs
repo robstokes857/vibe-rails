@@ -29,6 +29,7 @@ public class AuthService : IAuthService
     }
 
     public string GetInstanceToken() => _instanceToken;
+    public string GetTabToken() => _tabToken;
 
     public bool ValidateToken(string? token)
     {
