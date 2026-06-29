@@ -266,10 +266,12 @@ Beyond updating `_status` and calling `_applyVisuals`:
   `WAITING` fires `notifyPush('ready'|'waiting')`. Unlike the flash/toast, this
   is **not** gated on background-ness — the explicit opt-in is the only gate, so
   it fires regardless of focus. The terminal notification module
-  (`terminal-notifications.js`) builds a "tab name + status" web push, attaches a
-  terminal screenshot when available, and posts it to the local
-  `/api/v1/push/send` proxy, which forwards it (with the cloud `X-Api-Key`) to
-  the VibeRails-Front push API. Fire-and-forget; no-ops when no API key is set.
+  (`terminal-notifications.js`) sends the raw tab label, optional computer name,
+  status key, and terminal screenshot to the local `/api/v1/push/send` proxy.
+  The backend `PushNotificationService` composes the OS notification title/body
+  from those pieces, fills a blank computer name with `Environment.MachineName`,
+  and forwards the payload (with the cloud `X-Api-Key`) to the VibeRails-Front
+  push API. Fire-and-forget; no-ops when no API key is set.
 
   A watched tab carries a **persistent** signal so the state reads at a glance
   rather than only on hover (where the eye toggle lives): the manager toggles

@@ -126,16 +126,10 @@ export class TabStatusController {
         const identity = document.createElement('span');
         identity.className = 'vb-tab-identity';
 
-        if (pinned) {
-            const pin = document.createElement('span');
-            pin.className = 'vb-tab-brand-logo vb-tab-pin-logo';
-            pin.setAttribute('aria-hidden', 'true');
-            const i = document.createElement('i');
-            i.className = 'fa-solid fa-thumbtack';
-            pin.appendChild(i);
-            identity.appendChild(pin);
-            this._brandLogoEl = pin;
-        } else if (brand.logo) {
+        // Brand logo is always shown — pinning adds a small pin badge *beside*
+        // the logo (see below) rather than replacing it, so the tab keeps its
+        // CLI identity while pinned.
+        if (brand.logo) {
             const img = document.createElement('img');
             img.className = 'vb-tab-brand-logo';
             img.src = brand.logo;
@@ -153,6 +147,17 @@ export class TabStatusController {
             fallback.textContent = '>_';
             identity.appendChild(fallback);
             this._brandLogoEl = fallback;
+        }
+
+        // Pin badge — sits next to the brand logo when the tab is pinned.
+        if (pinned) {
+            const pin = document.createElement('span');
+            pin.className = 'vb-tab-pin-badge';
+            pin.setAttribute('aria-hidden', 'true');
+            const i = document.createElement('i');
+            i.className = 'fa-solid fa-thumbtack';
+            pin.appendChild(i);
+            identity.appendChild(pin);
         }
 
         const label = document.createElement('span');

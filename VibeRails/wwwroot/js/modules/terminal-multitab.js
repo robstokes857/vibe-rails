@@ -649,10 +649,20 @@ class TerminalManager {
         // visible only while the tab is armed for push (is-notify-on). It's a
         // sibling of the tab button — deliberately NOT inside it — so the status
         // controller's periodic `button.innerHTML = ''` rebuild can never wipe it.
-        const watchBadge = document.createElement('span');
+        // It's also a live un-watch control: since it only shows while watching,
+        // clicking it always turns notifications off — so the user doesn't have to
+        // hover to find the eye toggle in the action cluster.
+        const watchBadge = document.createElement('button');
+        watchBadge.type = 'button';
         watchBadge.className = 'vb-terminal-tab-watch-badge';
-        watchBadge.setAttribute('aria-hidden', 'true');
         watchBadge.innerHTML = '<i class="fa-solid fa-eye"></i>';
+        const watchBadgeLabel = 'Stop watching this tab';
+        watchBadge.title = watchBadgeLabel;
+        watchBadge.setAttribute('aria-label', watchBadgeLabel);
+        watchBadge.addEventListener('click', (event) => {
+            event.stopPropagation();
+            this.toggleTabNotify(state.id);
+        });
 
         item.appendChild(watchBadge);
         item.appendChild(button);

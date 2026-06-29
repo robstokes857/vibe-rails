@@ -12,19 +12,24 @@ public static class PushRoutes
         // fire-and-forget; the handler still awaits the upstream send so the request scope (and the
         // typed HttpClient) stays alive for the call. Returns a small JSON body so the client's
         // JSON-parsing apiCall() doesn't throw on an empty 200.
+        //
+        // The client sends the raw label + (possibly blank) computer name + status key; the
+        // service composes the user-facing title/body and fills a blank computer name with
+        // Environment.MachineName, so that fallback is owned server-side.
         app.MapPost("/api/v1/push/send", async (
             IPushNotificationService push,
             PushSendRequest? request,
             CancellationToken cancellationToken) =>
         {
-            if (request is null || string.IsNullOrWhiteSpace(request.Title))
+            if (request is null || string.IsNullOrWhiteSpace(request.Label))
             {
-                return Results.BadRequest(new ErrorResponse("title is required"));
+                return Results.BadRequest(new ErrorResponse("label is required"));
             }
 
             await push.SendAsync(
-                request.Title,
-                request.Body ?? string.Empty,
+                request.Label,
+                request.ComputerName,
+                request.StatusKey,
                 request.Tag,
                 request.ImageBase64,
                 cancellationToken);
