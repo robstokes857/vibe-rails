@@ -1,10 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Serilog;
 using VibeRails.Services.BertBaseClasses;
+using VibeRails.Services.AgentTools;
 using VibeRails.Services.BertV2;
 using VibeRails.Services.Mcp.Tools;
-using VibeRails.Utils;
 
 namespace VibeRails.Services.Mcp;
 
@@ -29,32 +30,6 @@ public static class McpStdioHost
 
     public static async Task RunAsync(string[] args)
     {
-        // Opt-out security gate. MCP is off by default; a stale `mcp add` registration in a CLI can
-        // keep spawning `vb mcp` after the user disables MCP, so refuse to expose any tools in that
-        // case rather than relying solely on best-effort `mcp remove` cleanup. Read fresh from disk:
-        // this is a newly spawned process and the flag may have changed since the registration was
-        // created. Fail closed — if we can't confirm opt-in (settings locked mid-write, corrupt), do
-        // not serve; the next spawn re-reads. All notices go to stderr — stdout must stay a clean
-        // JSON-RPC stream.
-        bool mcpEnabled;
-        try
-        {
-            mcpEnabled = Config.LoadFresh().McpEnabled;
-        }
-        catch (Exception ex)
-        {
-            await Console.Error.WriteLineAsync(
-                $"viberails-mcp: could not read VibeRails settings ({ex.GetType().Name}); not starting.");
-            return;
-        }
-
-        if (!mcpEnabled)
-        {
-            await Console.Error.WriteLineAsync(
-                "viberails-mcp: MCP is disabled in VibeRails settings; not starting. Enable it under Settings → Enable MCP Server.");
-            return;
-        }
-
         var builder = Host.CreateApplicationBuilder(args);
 
         // Strip the default console logger so nothing pollutes the stdio transport. File logging
@@ -64,7 +39,24 @@ public static class McpStdioHost
         ConfigureServices(builder.Services);
 
         var host = builder.Build();
-        await host.RunAsync();
+        Log.Information(
+            "[MCP] Stdio server starting. processId={ProcessId} workingDirectory={WorkingDirectory}",
+            Environment.ProcessId,
+            Environment.CurrentDirectory);
+
+        try
+        {
+            await host.RunAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[MCP] Stdio server failed. processId={ProcessId}", Environment.ProcessId);
+            throw;
+        }
+        finally
+        {
+            Log.Information("[MCP] Stdio server stopped. processId={ProcessId}", Environment.ProcessId);
+        }
     }
 
     /// <summary>
@@ -87,6 +79,8 @@ public static class McpStdioHost
         services.AddSingleton<IBertDocumentResponseMapper, BertDocumentResponseMapper>();
         services.AddSingleton<IUnifiedSearchService, UnifiedSearchService>();
         services.AddScoped<SessionSearchTool>();
+        services.AddSingleton<IAgentTerminalToolGateway, HttpAgentTerminalToolGateway>();
+        services.AddScoped<TerminalTools>();
 
         services
             .AddMcpServer(options =>
@@ -95,6 +89,7 @@ public static class McpStdioHost
             })
             .WithStdioServerTransport()
             .WithTools<RulesTool>()
-            .WithTools<SessionSearchTool>();
+            .WithTools<SessionSearchTool>()
+            .WithTools<TerminalTools>();
     }
 }

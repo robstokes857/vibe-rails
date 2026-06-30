@@ -292,6 +292,63 @@ namespace VibeRails.DTOs
         string? ResumeSummary = null
     );
 
+    public record TerminalInputRequest(
+        string Text,
+        bool Submit = false
+    );
+
+    public record TerminalInputResponse(
+        bool Success,
+        string Message,
+        string? TabId = null,
+        string? SessionId = null
+    );
+
+    public record TerminalSnapshotResponse(
+        string? TabId,
+        string SessionId,
+        DateTimeOffset CapturedUtc,
+        int Cols,
+        int Rows,
+        string[] ScreenText
+    );
+
+    public record AgentToolOpenTerminalRequest(
+        string? WorkingDirectory = null,
+        string? Cli = "Shell",
+        string? EnvironmentName = null,
+        string? Title = null,
+        string? InitialPrompt = null
+    );
+
+    public record AgentToolSendInputRequest(
+        string? TabId,
+        string Text,
+        bool Submit = false
+    );
+
+    public record AgentToolSnapshotRequest(
+        string? TabId = null
+    );
+
+    public record AgentToolTerminalListResponse(
+        List<TerminalTabStatusResponse> Terminals,
+        int MaxTerminals
+    );
+
+    public record AgentToolControlRequest(
+        string? Id,
+        string Action,
+        JsonElement? Payload = null
+    );
+
+    public record AgentToolControlResponse(
+        string? Id,
+        bool Success,
+        string? Error = null,
+        JsonElement? Data = null
+    );
+
     public record BootstrapCommandResponse(
         string Command
     );
@@ -703,6 +760,15 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<TerminalTabStatusResponse>))]
     [JsonSerializable(typeof(TerminalTabListResponse))]
     [JsonSerializable(typeof(StartTerminalRequest))]
+    [JsonSerializable(typeof(TerminalInputRequest))]
+    [JsonSerializable(typeof(TerminalInputResponse))]
+    [JsonSerializable(typeof(TerminalSnapshotResponse))]
+    [JsonSerializable(typeof(AgentToolOpenTerminalRequest))]
+    [JsonSerializable(typeof(AgentToolSendInputRequest))]
+    [JsonSerializable(typeof(AgentToolSnapshotRequest))]
+    [JsonSerializable(typeof(AgentToolTerminalListResponse))]
+    [JsonSerializable(typeof(AgentToolControlRequest))]
+    [JsonSerializable(typeof(AgentToolControlResponse))]
     [JsonSerializable(typeof(BootstrapCommandResponse))]
     // Summary DTOs
     [JsonSerializable(typeof(SummaryPostDto))]

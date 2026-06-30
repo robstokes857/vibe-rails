@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
+using VibeRails.Services.AgentTools;
 
 namespace VibeRails.Services.Terminal;
 
@@ -28,6 +29,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILocalClientTracker _localClientTracker;
     private readonly IAppEventBus _appEventBus;
+    private readonly ILocalToolApiContext _toolApiContext;
 #if DEBUG
     private readonly DebugEventBus _debugEventBus;
 #endif
@@ -44,7 +46,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     public TerminalTabHostService(
         IHttpClientFactory httpClientFactory,
         ILocalClientTracker localClientTracker,
-        IAppEventBus appEventBus
+        IAppEventBus appEventBus,
+        ILocalToolApiContext toolApiContext
 #if DEBUG
         , DebugEventBus debugEventBus
 #endif
@@ -53,6 +56,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         _httpClientFactory = httpClientFactory;
         _localClientTracker = localClientTracker;
         _appEventBus = appEventBus;
+        _toolApiContext = toolApiContext;
 #if DEBUG
         _debugEventBus = debugEventBus;
 #endif
@@ -188,6 +192,36 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             "/api/v1/terminal/stop",
             payload: null,
             cancellationToken);
+    }
+
+    public async Task<TerminalInputResponse> SendInputAsync(string tabId, TerminalInputRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request == null || string.IsNullOrEmpty(request.Text))
+        {
+            throw new InvalidOperationException("Input text is required.");
+        }
+
+        var child = GetChildOrThrow(tabId);
+        var response = await SendTerminalInputRequestAsync(
+            child,
+            HttpMethod.Post,
+            "/api/v1/terminal/input",
+            request,
+            cancellationToken);
+
+        return response with { TabId = tabId };
+    }
+
+    public async Task<TerminalSnapshotResponse?> CaptureSnapshotAsync(string tabId, CancellationToken cancellationToken = default)
+    {
+        var child = GetChildOrThrow(tabId);
+        var response = await SendTerminalSnapshotRequestAsync(
+            child,
+            HttpMethod.Get,
+            "/api/v1/terminal/snapshot",
+            cancellationToken);
+
+        return response == null ? null : response with { TabId = tabId };
     }
 
     public async Task HandleWebSocketProxyAsync(string tabId, WebSocket browserSocket, int? cols = null, int? rows = null, CancellationToken cancellationToken = default)
@@ -493,7 +527,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             throw new InvalidOperationException("Unable to determine executable path for spawning terminal tabs.");
         }
 
-        var tabId = string.Empty;
+        var tabId = Guid.NewGuid().ToString("N");
         var bootstrapTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var process = new Process
@@ -513,6 +547,12 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             },
             EnableRaisingEvents = true
         };
+
+        foreach (var kvp in _toolApiContext.BuildEnvironment())
+        {
+            process.StartInfo.Environment[kvp.Key] = kvp.Value;
+        }
+        process.StartInfo.Environment[LocalToolApiContext.CurrentTabIdVariable] = tabId;
 
         process.OutputDataReceived += (_, args) =>
         {
@@ -611,7 +651,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 throw new InvalidOperationException($"Invalid bootstrap URL from child process: {bootstrapUrl}");
             }
 
-            tabId = Guid.NewGuid().ToString("N");
             await WaitForHealthyChildAsync(bootstrapUri.Port, cancellationToken);
             var (sessionToken, tabToken) = await BootstrapChildAndGetTokenAsync(bootstrapUrl, cancellationToken);
 
@@ -761,6 +800,74 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
     }
 
+    private async Task<TerminalInputResponse> SendTerminalInputRequestAsync(
+        TerminalChildProcess child,
+        HttpMethod method,
+        string path,
+        TerminalInputRequest payload,
+        CancellationToken cancellationToken)
+    {
+        if (child.Process.HasExited)
+        {
+            RemoveChild(child.TabId, child.Process.Id);
+            throw new InvalidOperationException($"Terminal tab process has exited (tab {child.TabId[..Math.Min(8, child.TabId.Length)]}).");
+        }
+
+        using var request = CreateChildRequest(child, method, path, payload);
+        var http = _httpClientFactory.CreateClient();
+        using var response = await http.SendAsync(request, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorText = await ReadErrorTextAsync(response, cancellationToken);
+            throw new InvalidOperationException(
+                $"Child request {path} failed ({(int)response.StatusCode}): {errorText}");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var inputResponse = await JsonSerializer.DeserializeAsync(
+            stream,
+            AppJsonSerializerContext.Default.TerminalInputResponse,
+            cancellationToken);
+
+        return inputResponse ?? new TerminalInputResponse(false, "Child did not return an input response.");
+    }
+
+    private async Task<TerminalSnapshotResponse?> SendTerminalSnapshotRequestAsync(
+        TerminalChildProcess child,
+        HttpMethod method,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        if (child.Process.HasExited)
+        {
+            RemoveChild(child.TabId, child.Process.Id);
+            return null;
+        }
+
+        using var request = CreateChildRequest(child, method, path, payload: (StartTerminalRequest?)null);
+        var http = _httpClientFactory.CreateClient();
+        using var response = await http.SendAsync(request, cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorText = await ReadErrorTextAsync(response, cancellationToken);
+            throw new InvalidOperationException(
+                $"Child request {path} failed ({(int)response.StatusCode}): {errorText}");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        return await JsonSerializer.DeserializeAsync(
+            stream,
+            AppJsonSerializerContext.Default.TerminalSnapshotResponse,
+            cancellationToken);
+    }
+
     private async Task<TerminalStatusResponse?> GetTerminalStatusFromChildAsync(
         TerminalChildProcess child,
         CancellationToken cancellationToken)
@@ -771,7 +878,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             return null;
         }
 
-        using var request = CreateChildRequest(child, HttpMethod.Get, "/api/v1/terminal/status", payload: null);
+        using var request = CreateChildRequest(child, HttpMethod.Get, "/api/v1/terminal/status", payload: (StartTerminalRequest?)null);
         var http = _httpClientFactory.CreateClient();
         using var response = await http.SendAsync(request, cancellationToken);
 
@@ -803,6 +910,18 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         }
 
+        return request;
+    }
+
+    private static HttpRequestMessage CreateChildRequest(
+        TerminalChildProcess child,
+        HttpMethod method,
+        string path,
+        TerminalInputRequest payload)
+    {
+        var request = CreateChildRequest(child, method, path, payload: (StartTerminalRequest?)null);
+        var json = JsonSerializer.Serialize(payload, AppJsonSerializerContext.Default.TerminalInputRequest);
+        request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         return request;
     }
 

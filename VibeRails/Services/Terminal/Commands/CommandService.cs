@@ -1,9 +1,6 @@
 using Serilog;
-using VibeRails.DTOs;
 using VibeRails.Services.LlmClis;
-using VibeRails.Utils;
 using static VibeRails.Utils.ShellArgSanitizer;
-
 
 namespace VibeRails.Services.Terminal;
 
@@ -11,36 +8,28 @@ public sealed record PreparedTerminalSession(
     string Command,
     string LaunchCommand,
     IReadOnlyList<string> SetupCommands,
-    Dictionary<string, string> Environment,
-    // Non-null ⇒ this launch carries the one-time opted-out `mcp remove` for this CLI, and the
-    // caller MUST call ICommandService.RecordMcpRemovalIssuedAsync once the command has actually
-    // been sent to the PTY. We deliberately do NOT record removal at construction time: if startup
-    // fails before the send, cleanup must remain pending for the next launch (see TerminalRunner).
-    LLM? McpRemovalToRecord = null);
+    Dictionary<string, string> Environment);
 
 public class CommandService : ICommandService
 {
     private readonly LlmCliEnvironmentService _envService;
-    private readonly IGlobalCache _globalCache;
     private const string VibeRailsMcpServerName = "viberails-mcp";
     private static int _fakeCliWarningEmitted;
 
     /// <summary>
-    /// CLIs into which VibeRails registers its MCP server. Exposed so callers that need to
-    /// reset MCP bookkeeping (e.g. the settings route on opt-in) iterate the same set.
+    /// CLIs into which VibeRails registers its MCP server.
     /// </summary>
     public static readonly IReadOnlyList<LLM> McpClis = new[]
     {
         LLM.Claude, LLM.Codex, LLM.Antigravity, LLM.Copilot
     };
 
-    public CommandService(LlmCliEnvironmentService envService, IGlobalCache globalCache)
+    public CommandService(LlmCliEnvironmentService envService)
     {
         _envService = envService;
-        _globalCache = globalCache;
     }
 
-    public async Task<PreparedTerminalSession> PrepareSessionAsync(
+    public Task<PreparedTerminalSession> PrepareSessionAsync(
         LLM llm, string? envName, string[]? extraArgs, string? initialPrompt = null, string summary = "")
     {
         if (Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI") == "1")
@@ -61,7 +50,7 @@ public class CommandService : ICommandService
                 ["LC_ALL"] = "en_US.UTF-8",
                 ["PYTHONIOENCODING"] = "utf-8"
             };
-            return new PreparedTerminalSession(fakeCmd, fakeCmd, Array.Empty<string>(), fakeEnv);
+            return Task.FromResult(new PreparedTerminalSession(fakeCmd, fakeCmd, Array.Empty<string>(), fakeEnv));
         }
 
         // Plain shell: no agent, no custom environment, no prompt/args. The PTY already
@@ -76,7 +65,7 @@ public class CommandService : ICommandService
                 ["LC_ALL"] = "en_US.UTF-8",
                 ["PYTHONIOENCODING"] = "utf-8"
             };
-            return new PreparedTerminalSession(string.Empty, string.Empty, Array.Empty<string>(), shellEnv);
+            return Task.FromResult(new PreparedTerminalSession(string.Empty, string.Empty, Array.Empty<string>(), shellEnv));
         }
 
         // Every CLI's enum name lowercased is its executable — except Antigravity, whose
@@ -115,7 +104,7 @@ public class CommandService : ICommandService
         // no auth). Register it before launching managed CLIs; setup failures remain non-blocking.
         // This keeps custom environments isolated because the setup command runs inside the same
         // PTY environment as the agent launch (CLAUDE_CONFIG_DIR / CODEX_HOME already set below).
-        var (mcpSetupCommands, mcpRemovalPending) = await BuildMcpSetupCommandsAsync(llm);
+        var mcpSetupCommands = BuildMcpSetupCommands(llm);
         foreach (var setupCommand in mcpSetupCommands)
         {
             setupCommands.Add(setupCommand);
@@ -142,52 +131,30 @@ public class CommandService : ICommandService
                 environment[kvp.Key] = kvp.Value;
         }
 
-        return new PreparedTerminalSession(
+        LogMcpSetup(llm, envName, setupCommands);
+
+        return Task.FromResult(new PreparedTerminalSession(
             builder.Build(),
             cliCommand,
             setupCommands.AsReadOnly(),
-            environment,
-            mcpRemovalPending ? llm : null);
+            environment));
     }
 
     /// <summary>
-    /// Returns the MCP setup commands for this launch and whether this launch carries the
-    /// one-time opted-out `mcp remove` that the caller must record once it has been sent.
+    /// Returns the MCP setup commands for this launch. Registration is always on for supported
+    /// CLIs; remove-first repairs stale registrations and add restores the current stdio server.
     /// </summary>
-    private async Task<(IReadOnlyList<string> commands, bool removalPending)> BuildMcpSetupCommandsAsync(LLM llm)
+    private static IReadOnlyList<string> BuildMcpSetupCommands(LLM llm)
     {
         var (removeCommand, addCommand) = GetMcpCommands(llm);
         if (removeCommand is null)
         {
             // This CLI doesn't support MCP registration — nothing to add or clean up.
-            return ([], false);
+            return [];
         }
 
-        // Opted IN: register the server. Remove-first repairs older installs that registered
-        // the deleted standalone MCP_Server.exe. Failures are non-blocking because the shell
-        // command chain uses ';' between setup steps and the final agent launch.
-        if (ParserConfigs.GetMcpEnabled())
-        {
-            return ([removeCommand, addCommand!], false);
-        }
-
-        // Opted OUT (default): never add. Remove it once per CLI to clean up a registration we
-        // added before. We must NOT record the removal here — the command has only been built,
-        // not sent. If startup fails before TerminalRunner writes it to the PTY, recording now
-        // would skip cleanup forever. Signal the pending removal; the caller records it only
-        // after the command is actually sent. The record is reset on opt-in (AppSettingsRoutes).
-        var removedFlagKey = GlobalCacheKeys.McpRemovedFromCli(llm);
-        if (await _globalCache.GetAsBoolAsync(removedFlagKey))
-        {
-            return ([], false);
-        }
-
-        return ([removeCommand], true);
+        return [removeCommand, addCommand!];
     }
-
-    /// <inheritdoc />
-    public Task RecordMcpRemovalIssuedAsync(LLM llm) =>
-        _globalCache.SetAsync(GlobalCacheKeys.McpRemovedFromCli(llm), "true");
 
     // Returns the (remove, add) command pair for a CLI, or (null, null) if the CLI has no
     // MCP registration support. Keep the supported set in sync with <see cref="McpClis"/>.
@@ -197,19 +164,26 @@ public class CommandService : ICommandService
         return llm switch
         {
             LLM.Claude => (
-                $"claude mcp remove {VibeRailsMcpServerName}",
+                SuppressCommandOutput($"claude mcp remove {VibeRailsMcpServerName}"),
                 $"claude mcp add --scope user {VibeRailsMcpServerName} -- {serverCommand}"),
             LLM.Codex => (
-                $"codex mcp remove {VibeRailsMcpServerName}",
+                SuppressCommandOutput($"codex mcp remove {VibeRailsMcpServerName}"),
                 $"codex mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
             LLM.Antigravity => (
-                $"agy mcp remove {VibeRailsMcpServerName}",
+                SuppressCommandOutput($"agy mcp remove {VibeRailsMcpServerName}"),
                 $"agy mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
             LLM.Copilot => (
-                $"copilot mcp remove {VibeRailsMcpServerName}",
+                SuppressCommandOutput($"copilot mcp remove {VibeRailsMcpServerName}"),
                 $"copilot mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
             _ => (null, null)
         };
+    }
+
+    private static string SuppressCommandOutput(string command)
+    {
+        return OperatingSystem.IsWindows()
+            ? $"{command} *> $null"
+            : $"{command} >/dev/null 2>&1";
     }
 
     private static string[] ResolveMcpServerCommandParts()
@@ -250,6 +224,22 @@ public class CommandService : ICommandService
         }
 
         return "dotnet";
+    }
+
+    private static void LogMcpSetup(LLM llm, string? envName, IReadOnlyList<string> setupCommands)
+    {
+        if (!McpClis.Contains(llm))
+        {
+            Log.Information("[MCP] Registration skipped for unsupported terminal type {Cli}", llm);
+            return;
+        }
+
+        Log.Information(
+            "[MCP] Registration setup prepared. cli={Cli} env={Env} commandCount={CommandCount} commands={Commands}",
+            llm,
+            string.IsNullOrWhiteSpace(envName) ? "(base)" : envName,
+            setupCommands.Count,
+            string.Join(" | ", setupCommands));
     }
 
     /// <summary>

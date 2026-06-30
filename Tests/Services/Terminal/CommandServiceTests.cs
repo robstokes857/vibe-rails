@@ -1,10 +1,8 @@
 using Moq;
-using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
-using VibeRails.Utils;
 using Xunit;
 
 namespace Tests.Services.Terminal;
@@ -18,16 +16,13 @@ namespace Tests.Services.Terminal;
 /// resize-reprint flash disappears. See runbooks/terminal/TERMINAL.md
 /// resize-reprint entry + anthropics/claude-code#49584, #55613.
 ///
-/// Also pins the MCP opt-in behavior: registration is gated on the MCP setting
-/// (off by default), and while opted-out each CLI is cleaned up with a single
-/// `mcp remove`. That removal is recorded (so it stops repeating) only after the
-/// caller confirms it was issued via RecordMcpRemovalIssuedAsync — building the
-/// command is not success, so a pre-send failure must keep the cleanup pending.
+/// Also pins the MCP behavior: VibeRails registers its stdio MCP server for every
+/// managed agent CLI launch. Remove-first repairs stale registrations and add
+/// restores the current server command.
 /// </summary>
 public class CommandServiceTests : IDisposable
 {
     private readonly string? _originalFakeCliFlag;
-    private readonly bool _originalMcpEnabled;
 
     public CommandServiceTests()
     {
@@ -35,16 +30,11 @@ public class CommandServiceTests : IDisposable
         // PrepareSession before the LLM-specific env injection runs.
         _originalFakeCliFlag = Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI");
         Environment.SetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI", null);
-
-        // MCP is opt-in; default the runtime flag off so each test sets what it needs.
-        _originalMcpEnabled = ParserConfigs.GetMcpEnabled();
-        ParserConfigs.SetMcpEnabled(false);
     }
 
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI", _originalFakeCliFlag);
-        ParserConfigs.SetMcpEnabled(_originalMcpEnabled);
     }
 
     [Fact]
@@ -65,100 +55,31 @@ public class CommandServiceTests : IDisposable
     [InlineData(LLM.Codex, "codex mcp remove viberails-mcp", "codex mcp add viberails-mcp -- ")]
     [InlineData(LLM.Antigravity, "agy mcp remove viberails-mcp", "agy mcp add viberails-mcp -- ")]
     [InlineData(LLM.Copilot, "copilot mcp remove viberails-mcp", "copilot mcp add viberails-mcp -- ")]
-    public async Task PrepareSession_McpEnabled_SupportedClis_AddsVibeRailsMcpSetupCommand(
+    public async Task PrepareSession_SupportedClis_AddsVibeRailsMcpSetupCommand(
         LLM llm,
         string expectedRemoveCommand,
         string expectedAddPrefix)
     {
-        ParserConfigs.SetMcpEnabled(true);
         var service = CreateService();
 
         var prepared = await service.PrepareSessionAsync(llm, envName: null, extraArgs: null);
 
         Assert.Collection(
             prepared.SetupCommands,
-            remove => Assert.Equal(expectedRemoveCommand, remove),
+            remove =>
+            {
+                Assert.StartsWith(expectedRemoveCommand, remove);
+                Assert.EndsWith(ExpectedQuietRedirect(), remove);
+            },
             add =>
             {
                 Assert.StartsWith(expectedAddPrefix, add);
                 Assert.Contains(" mcp", add);
             });
 
-        Assert.StartsWith(expectedRemoveCommand + "; ", prepared.Command);
+        Assert.StartsWith(prepared.SetupCommands[0] + "; ", prepared.Command);
         Assert.Contains(expectedAddPrefix, prepared.Command);
         Assert.EndsWith(prepared.LaunchCommand, prepared.Command);
-
-        // The opted-in path adds the server; there is no one-time removal to record.
-        Assert.Null(prepared.McpRemovalToRecord);
-    }
-
-    [Theory]
-    [InlineData(LLM.Claude, "claude mcp remove viberails-mcp")]
-    [InlineData(LLM.Codex, "codex mcp remove viberails-mcp")]
-    [InlineData(LLM.Antigravity, "agy mcp remove viberails-mcp")]
-    [InlineData(LLM.Copilot, "copilot mcp remove viberails-mcp")]
-    public async Task PrepareSession_McpDisabled_RemovesOnceThenStops(LLM llm, string expectedRemoveCommand)
-    {
-        // Opted out (default). First launch must clean up any prior registration with a single
-        // `mcp remove` — and never add the server — and flag the removal for the caller to record.
-        var service = CreateService();
-
-        var first = await service.PrepareSessionAsync(llm, envName: null, extraArgs: null);
-
-        Assert.Equal(new[] { expectedRemoveCommand }, first.SetupCommands);
-        Assert.DoesNotContain(" mcp add", first.Command);
-        Assert.Equal(llm, first.McpRemovalToRecord);
-
-        // TerminalRunner records the removal only after the command is sent to the PTY; simulate it.
-        await service.RecordMcpRemovalIssuedAsync(llm);
-
-        // Second launch for the same CLI: the removal is now recorded, so we must not re-issue
-        // `mcp remove` on every launch.
-        var second = await service.PrepareSessionAsync(llm, envName: null, extraArgs: null);
-
-        Assert.Empty(second.SetupCommands);
-        Assert.Null(second.McpRemovalToRecord);
-    }
-
-    [Fact]
-    public async Task PrepareSession_McpDisabled_TracksRemovalPerCli()
-    {
-        // Removing MCP from one CLI must not suppress the removal for another — each CLI is a
-        // separate registration, so "off" has to clean every CLI independently.
-        var service = CreateService();
-
-        var claude = await service.PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
-        Assert.Equal(new[] { "claude mcp remove viberails-mcp" }, claude.SetupCommands);
-        await service.RecordMcpRemovalIssuedAsync(LLM.Claude);
-
-        // Claude is now recorded as removed, but Codex still gets its own one-time removal.
-        var codex = await service.PrepareSessionAsync(LLM.Codex, envName: null, extraArgs: null);
-        Assert.Equal(new[] { "codex mcp remove viberails-mcp" }, codex.SetupCommands);
-        Assert.Equal(LLM.Codex, codex.McpRemovalToRecord);
-    }
-
-    [Fact]
-    public async Task PrepareSession_McpDisabled_KeepsEmittingRemoveUntilRecorded()
-    {
-        // Regression for the "marked done before it ran" bug: the per-CLI removed flag must be
-        // written only after the command is actually sent (RecordMcpRemovalIssuedAsync), never at
-        // construction. Until then, repeated launches must keep emitting the cleanup so a startup
-        // failure before the PTY send can never permanently skip it.
-        var service = CreateService();
-
-        var first = await service.PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
-        Assert.Equal(new[] { "claude mcp remove viberails-mcp" }, first.SetupCommands);
-        Assert.Equal(LLM.Claude, first.McpRemovalToRecord);
-
-        // Simulate the launch aborting before the send: no RecordMcpRemovalIssuedAsync call.
-        var second = await service.PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
-        Assert.Equal(new[] { "claude mcp remove viberails-mcp" }, second.SetupCommands);
-        Assert.Equal(LLM.Claude, second.McpRemovalToRecord);
-
-        // Now the command was sent and recorded; further launches stop re-issuing it.
-        await service.RecordMcpRemovalIssuedAsync(LLM.Claude);
-        var third = await service.PrepareSessionAsync(LLM.Claude, envName: null, extraArgs: null);
-        Assert.Empty(third.SetupCommands);
     }
 
     [Theory]
@@ -221,7 +142,7 @@ public class CommandServiceTests : IDisposable
         Assert.False(prepared.Environment.ContainsKey("CLAUDE_CODE_FORCE_SYNC_OUTPUT"));
     }
 
-    private static CommandService CreateService(IGlobalCache? globalCache = null)
+    private static CommandService CreateService()
     {
         var fileService = new Mock<IFileService>().Object;
         var envService = new LlmCliEnvironmentService(
@@ -230,36 +151,9 @@ public class CommandServiceTests : IDisposable
             new AntigravityLlmCliEnvironment(fileService),
             new CopilotLlmCliEnvironment(fileService),
             fileService);
-        return new CommandService(envService, globalCache ?? new InMemoryGlobalCache());
+        return new CommandService(envService);
     }
 
-    /// <summary>Minimal in-memory <see cref="IGlobalCache"/> so tests don't touch SQLite.</summary>
-    private sealed class InMemoryGlobalCache : IGlobalCache
-    {
-        private readonly Dictionary<string, string> _store = new();
-
-        public Task<string?> GetAsync(string key) =>
-            Task.FromResult(_store.TryGetValue(key, out var v) ? v : null);
-
-        public Task SetAsync(string key, string value)
-        {
-            _store[key] = value;
-            return Task.CompletedTask;
-        }
-
-        public Task<bool> GetAsBoolAsync(string key, bool defaultValue = false) =>
-            Task.FromResult(_store.TryGetValue(key, out var v) && bool.TryParse(v, out var b) ? b : defaultValue);
-
-        public Task<int?> GetAsIntAsync(string key) =>
-            Task.FromResult(_store.TryGetValue(key, out var v) && int.TryParse(v, out var i) ? i : (int?)null);
-
-        public Task<Dictionary<string, string>> GetAllAsync() =>
-            Task.FromResult(new Dictionary<string, string>(_store));
-
-        public Task RemoveAsync(string key)
-        {
-            _store.Remove(key);
-            return Task.CompletedTask;
-        }
-    }
+    private static string ExpectedQuietRedirect() =>
+        OperatingSystem.IsWindows() ? "*> $null" : ">/dev/null 2>&1";
 }

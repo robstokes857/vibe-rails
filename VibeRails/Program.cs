@@ -155,7 +155,7 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 // Register DI services
-MapRegisterServices.Register(builder.Services, args);
+MapRegisterServices.Register(builder.Services, args, $"http://127.0.0.1:{port}");
 
 // Add CORS support for localhost and VSCode webview
 builder.Services.AddCors(options =>
