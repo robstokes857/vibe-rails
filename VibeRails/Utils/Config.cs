@@ -16,7 +16,8 @@ public class Settings
     public bool EnablePrerelease { get; set; } = false;
     public bool DeveloperOptions { get; set; } = false;
     public bool UseVsCodeTheme { get; set; } = false;
-    public bool McpEnabled { get; set; } = false;
+    // Retained for settings.json/API compatibility. MCP registration is always on.
+    public bool McpEnabled { get; set; } = true;
     public string ComputerName { get; set; } = string.Empty;
     public string PinHash { get; set; } = string.Empty;
     public string PinSalt { get; set; } = string.Empty;
@@ -107,9 +108,9 @@ public static class Config
     /// <summary>
     /// Re-reads settings.json from disk, bypassing the in-memory cache, and returns it. Terminal
     /// tabs run in child processes that snapshot settings at their own startup; the parent persists
-    /// every change to disk, so a caller that must honor a just-toggled setting (e.g. the MCP
-    /// opt-out) reads fresh here instead of trusting this process's stale in-memory copy. Reads
-    /// under _gate so it can't observe a concurrent Save mid-write.
+    /// every change to disk, so a caller that must honor a just-toggled setting reads fresh here
+    /// instead of trusting this process's stale in-memory copy. Reads under _gate so it can't
+    /// observe a concurrent Save mid-write.
     /// </summary>
     public static Settings LoadFresh()
     {

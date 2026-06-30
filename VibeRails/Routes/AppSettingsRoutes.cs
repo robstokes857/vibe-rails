@@ -1,6 +1,5 @@
 using VibeRails.DTOs;
 using VibeRails.Services;
-using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 
 namespace VibeRails.Routes;
@@ -18,14 +17,13 @@ public static class AppSettingsRoutes
         }).WithName("GetAppSettings");
 
         // POST /api/v1/settings - Update app settings
-        app.MapPost("/api/v1/settings", async (AppSettingsDto settingsDto, IGlobalCache globalCache) =>
+        app.MapPost("/api/v1/settings", (AppSettingsDto settingsDto) =>
         {
             // Remote access requires a PIN — if none is set, force it off
             var remoteAccess = settingsDto.RemoteAccess && RemoteConfig.IsPinConfigured;
 
             // Load existing settings from settings.json
             var settings = Config.Load();
-            var mcpWasEnabled = settings.McpEnabled;
 
             // Update only the app settings fields exposed by the UI
             settings.RemoteAccess = remoteAccess;
@@ -35,7 +33,8 @@ public static class AppSettingsRoutes
             settings.EnablePrerelease = settingsDto.EnablePrerelease;
             settings.DeveloperOptions = settingsDto.DeveloperOptions;
             settings.UseVsCodeTheme = settingsDto.UseVsCodeTheme;
-            settings.McpEnabled = settingsDto.McpEnabled;
+            // MCP registration is always on. Keep the field true for old clients/settings files.
+            settings.McpEnabled = true;
             // Store the raw name (blank allowed). The machine-name default is resolved
             // at use (push notification) — never persisted — so a blank value keeps
             // tracking the live machine name and the field stays clearable.
@@ -51,16 +50,7 @@ public static class AppSettingsRoutes
             ParserConfigs.SetEnablePrerelease(settingsDto.EnablePrerelease);
             ParserConfigs.SetDeveloperOptions(settingsDto.DeveloperOptions);
             ParserConfigs.SetUseVsCodeTheme(settingsDto.UseVsCodeTheme);
-            ParserConfigs.SetMcpEnabled(settingsDto.McpEnabled);
-
-            // Opting IN to MCP: clear the per-CLI "already removed" record so that the next
-            // time the user opts out, each CLI's one-shot `mcp remove` fires again. The add
-            // itself happens at session launch (see CommandService); we only reset bookkeeping.
-            if (settingsDto.McpEnabled && !mcpWasEnabled)
-            {
-                foreach (var cli in CommandService.McpClis)
-                    await globalCache.SetAsync(GlobalCacheKeys.McpRemovedFromCli(cli), "false");
-            }
+            ParserConfigs.SetMcpEnabled(true);
 
             return Results.Ok(BuildAppSettingsDto(settings));
         }).WithName("UpdateAppSettings");
@@ -92,7 +82,7 @@ public static class AppSettingsRoutes
             settings.EnablePrerelease,
             settings.DeveloperOptions,
             settings.UseVsCodeTheme,
-            settings.McpEnabled,
+            true,
             NormalizeComputerName(settings.ComputerName),
             GetMachineName()
         );

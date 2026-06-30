@@ -98,19 +98,19 @@ connection, so there is no self-deadlock.
 
 ## CLI auto-registration
 
-Managed agent launches run a VibeRails MCP setup step before the agent starts. Setup removes the
-managed `viberails-mcp` entry first, then adds it back, so old configs that pointed at the removed
-standalone `MCP_Server.exe` are repaired on the next launch. With the stdio transport this needs no
-port and no auth token:
+Managed agent launches always run a VibeRails MCP setup step before the agent starts. Setup removes
+the managed `viberails-mcp` entry first, then adds it back, so old configs that pointed at the
+removed standalone `MCP_Server.exe` are repaired on the next launch. With the stdio transport this
+needs no port and no auth token:
 
 ```
-claude mcp remove viberails-mcp
+claude mcp remove viberails-mcp          # output suppressed by CommandService
 claude mcp add --scope user viberails-mcp -- "<path-to-vb>" mcp
-codex  mcp remove viberails-mcp
+codex  mcp remove viberails-mcp          # output suppressed by CommandService
 codex  mcp add viberails-mcp -- "<path-to-vb>" mcp
-agy    mcp remove viberails-mcp
+agy    mcp remove viberails-mcp          # output suppressed by CommandService
 agy    mcp add viberails-mcp -- "<path-to-vb>" mcp
-copilot mcp remove viberails-mcp
+copilot mcp remove viberails-mcp         # output suppressed by CommandService
 copilot mcp add viberails-mcp -- "<path-to-vb>" mcp
 ```
 
@@ -118,7 +118,10 @@ At launch time `CommandService` resolves the server command as either the publis
 (`Environment.ProcessPath`, e.g. `vb.exe mcp`) or `dotnet <path-to-vb.dll> mcp` for
 framework-dependent/dev builds. Setup failures are non-blocking: commands are chained with `;`,
 so the agent still launches if the server was absent, already present, or the CLI rejects an MCP
-management command.
+management command. Registration diagnostics are written to the normal VibeRails file log
+(`~/.vibe_rails/logs/vb-*.log`) with the `[MCP]` prefix; CLI-specific command errors still appear
+in the launching terminal. The remove step is quiet because "not registered" is a harmless repair
+case; the add step is intentionally not quiet.
 
 ## Tests
 

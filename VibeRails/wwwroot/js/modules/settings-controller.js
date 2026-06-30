@@ -9,7 +9,7 @@ export class SettingsController {
         const content = document.getElementById('app-content');
         if (!content) return;
 
-        let settings = { remoteAccess: false, apiKey: '', enablePrerelease: false, developerOptions: false, useVsCodeTheme: false, mcpEnabled: false, computerName: '', machineName: '' };
+        let settings = { remoteAccess: false, apiKey: '', enablePrerelease: false, developerOptions: false, useVsCodeTheme: false, mcpEnabled: true, computerName: '', machineName: '' };
         try {
             settings = await this.app.apiCall('/api/v1/settings', 'GET');
             this.app.setAppSettings(settings);
@@ -68,7 +68,8 @@ export class SettingsController {
                 useVsCodeThemeToggle.checked = settings.useVsCodeTheme || false;
             }
             if (mcpEnabledToggle) {
-                mcpEnabledToggle.checked = settings.mcpEnabled || false;
+                mcpEnabledToggle.checked = true;
+                mcpEnabledToggle.disabled = true;
             }
             if (computerNameInput) {
                 computerNameInput.value = settings.computerName || '';
@@ -95,7 +96,7 @@ export class SettingsController {
                         enablePrereleaseToggle?.checked || false,
                         developerOptionsToggle?.checked || false,
                         useVsCodeThemeToggle?.checked || false,
-                        mcpEnabledToggle?.checked || false,
+                        true,
                         computerNameInput?.value || ''
                     );
                 });
