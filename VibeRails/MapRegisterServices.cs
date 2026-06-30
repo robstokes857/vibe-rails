@@ -10,6 +10,7 @@ using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
+using VibeRails.Services.AgentTools;
 using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.Messaging;
 using VibeRails.Services.Terminal;
@@ -23,9 +24,10 @@ namespace VibeRails
 {
     public static class MapRegisterServices
     {
-        public static void Register(IServiceCollection serviceCollection, string[]? args = null)
+        public static void Register(IServiceCollection serviceCollection, string[]? args = null, string? localApiBaseUrl = null)
         {
             var isTerminalTabChildProcess = IsTerminalTabChildProcess(args ?? Environment.GetCommandLineArgs());
+            localApiBaseUrl ??= "http://127.0.0.1:0";
 
             serviceCollection.AddHttpClient<ISummaryService, SummaryService>(
                 x =>
@@ -67,6 +69,10 @@ namespace VibeRails
 
             serviceCollection.AddSingleton<IGitDiffCaptureService, GitDiffCaptureService>();
             serviceCollection.AddSingleton<ILlmParser, LlmParser>();
+            serviceCollection.AddSingleton<ILocalToolApiContext>(sp =>
+                new LocalToolApiContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>()));
+            serviceCollection.AddScoped<IAgentTerminalToolService, AgentTerminalToolService>();
+            serviceCollection.AddScoped<IAgentTerminalToolGateway, LocalAgentTerminalToolGateway>();
             serviceCollection.AddScoped<IRepository>(sp =>
             {
                 var connectionString = $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
@@ -134,6 +140,7 @@ namespace VibeRails
                 // so the MCP server can resolve it (and its IUnifiedSearchService dependency)
                 // from the per-request scope.
                 serviceCollection.AddScoped<SessionSearchTool>();
+                serviceCollection.AddScoped<TerminalTools>();
 
                 serviceCollection
                     .AddMcpServer(options =>
@@ -142,7 +149,8 @@ namespace VibeRails
                     })
                     .WithHttpTransport()
                     .WithTools<RulesTool>()
-                    .WithTools<SessionSearchTool>();
+                    .WithTools<SessionSearchTool>()
+                    .WithTools<TerminalTools>();
             }
 
             // Claude Agent Sync Service (syncs CLAUDE.md to AGENTS.md on session lifecycle)

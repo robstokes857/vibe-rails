@@ -13,6 +13,7 @@ public static class RouteExtensions
         DebugBundleRoutes.Map(app);
         TerminalRoutes.Map(app, launchDirectory);
         TerminalTabsRoutes.Map(app);
+        AgentToolRoutes.Map(app);
         SandboxRoutes.Map(app, launchDirectory);
         McpRoutes.Map(app);
         AgentRoutes.Map(app);

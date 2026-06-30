@@ -231,6 +231,44 @@ public class TerminalSessionService : ITerminalSessionService
         }
     }
 
+    public async Task<TerminalInputResponse> SendInputAsync(TerminalInputRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request == null || string.IsNullOrEmpty(request.Text))
+        {
+            return new TerminalInputResponse(false, "Input text is required.");
+        }
+
+        var input = request.Submit ? request.Text + "\r" : request.Text;
+        var byteCount = System.Text.Encoding.UTF8.GetByteCount(input);
+        if (byteCount > TerminalControlProtocol.MaxMessageBytes)
+        {
+            return new TerminalInputResponse(false, $"Input exceeds {TerminalControlProtocol.MaxMessageBytes} bytes.");
+        }
+
+        Terminal? terminal;
+        string? sessionId;
+        lock (s_lock)
+        {
+            terminal = s_terminal;
+            sessionId = s_sessionId;
+        }
+
+        if (terminal == null || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return new TerminalInputResponse(false, "No active terminal session.");
+        }
+
+        await TerminalIoRouter.RouteInputAsync(
+            _stateService,
+            terminal,
+            sessionId,
+            input,
+            TerminalIoSource.AgentTool,
+            cancellationToken);
+
+        return new TerminalInputResponse(true, "Input sent.", SessionId: sessionId);
+    }
+
     public void RegisterExternalTerminal(Terminal terminal, string sessionId, string workingDirectory)
     {
         s_lifecycleGate.Wait();

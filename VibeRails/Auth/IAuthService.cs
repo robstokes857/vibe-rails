@@ -3,6 +3,7 @@ namespace VibeRails.Auth;
 public interface IAuthService
 {
     string GetInstanceToken();
+    string GetTabToken();
     bool ValidateToken(string? token);
     string GenerateBootstrapCode();
     bool ValidateAndConsumeBootstrapCode(string? code);

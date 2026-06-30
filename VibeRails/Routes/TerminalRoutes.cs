@@ -4,7 +4,6 @@ using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
-using Serilog;
 
 namespace VibeRails.Routes;
 
@@ -89,24 +88,6 @@ public static class TerminalRoutes
             if (string.IsNullOrWhiteSpace(initialPrompt) && !string.IsNullOrWhiteSpace(environmentPrompt))
                 initialPrompt = environmentPrompt;
 
-            // MCP opt-in is consulted at launch by CommandService via ParserConfigs. A terminal tab
-            // runs in a child process whose ParserConfigs snapshot is from its own startup, so
-            // re-read settings.json — which the parent persists on every settings change — to honor
-            // an opt-out toggled after this child started. Without this an already-open tab could
-            // still run `mcp add` after the user disabled MCP.
-            //
-            // Guard the disk read: a concurrent settings Save or a corrupt file can throw, and a
-            // failed re-read must not abort the launch — fall back to the cached value (mirrors the
-            // fail-safe in McpStdioHost).
-            try
-            {
-                ParserConfigs.SetMcpEnabled(Config.LoadFresh().McpEnabled);
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "[Terminal] Could not re-read settings for the MCP gate; using cached value");
-            }
-
             // Start the terminal session with the LLM CLI
             try
             {
@@ -151,6 +132,43 @@ public static class TerminalRoutes
             await terminalService.StopSessionAsync();
             return Results.Ok(new TerminalStatusResponse(false, null));
         }).WithName("StopTerminal");
+
+        // POST /api/v1/terminal/input - Send input without attaching/taking over the viewer WebSocket
+        app.MapPost("/api/v1/terminal/input", async (
+            ITerminalSessionService terminalService,
+            TerminalInputRequest? request,
+            CancellationToken cancellationToken) =>
+        {
+            if (request == null)
+            {
+                return Results.BadRequest(new ErrorResponse("Input request is required."));
+            }
+
+            var response = await terminalService.SendInputAsync(request, cancellationToken);
+            return response.Success
+                ? Results.Ok(response)
+                : Results.BadRequest(new ErrorResponse(response.Message));
+        }).WithName("SendTerminalInput");
+
+        // GET /api/v1/terminal/snapshot - Plain-text snapshot of the current terminal screen
+        app.MapGet("/api/v1/terminal/snapshot", async (
+            ITerminalSessionService terminalService,
+            CancellationToken cancellationToken) =>
+        {
+            var snapshot = await terminalService.CaptureSnapshotAsync(cancellationToken);
+            if (snapshot == null)
+            {
+                return Results.NotFound(new ErrorResponse("No active terminal session."));
+            }
+
+            return Results.Ok(new TerminalSnapshotResponse(
+                null,
+                snapshot.SessionId,
+                snapshot.CapturedUtc,
+                snapshot.Cols,
+                snapshot.Rows,
+                snapshot.ScreenText));
+        }).WithName("GetTerminalSnapshot");
 
         // WebSocket endpoint for terminal I/O
         app.Map("/api/v1/terminal/ws", async (HttpContext context, ITerminalSessionService terminalService) =>

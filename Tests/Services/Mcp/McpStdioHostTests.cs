@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using VibeRails.Services.AgentTools;
 using VibeRails.Services.BertV2;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Mcp.Tools;
@@ -33,6 +34,8 @@ public class McpStdioHostTests
 
         // The search tool and its real BERT-backed dependency must be wired.
         Assert.Contains(services, d => d.ServiceType == typeof(SessionSearchTool));
+        Assert.Contains(services, d => d.ServiceType == typeof(TerminalTools));
+        Assert.Contains(services, d => d.ServiceType == typeof(IAgentTerminalToolGateway));
         Assert.Contains(services, d => d.ServiceType == typeof(IUnifiedSearchService));
         Assert.Contains(services, d => d.ServiceType == typeof(IBertV2BgeEmbedder));
         Assert.Contains(services, d => d.ServiceType == typeof(IBertSearchDbService));

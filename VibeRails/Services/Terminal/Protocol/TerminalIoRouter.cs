@@ -14,7 +14,8 @@ public enum TerminalIoSource
     LocalCli = 1,
     LocalWebUi = 2,
     RemoteWebUi = 3,
-    Pty = 4
+    Pty = 4,
+    AgentTool = 5
 }
 
 public readonly record struct TerminalIoEvent(
