@@ -200,7 +200,6 @@ namespace VibeRails
             var settings = Config.Load();
             ParserConfigs.SetRemoteAccess(settings.RemoteAccess);
             ParserConfigs.SetApiKey(settings.ApiKey);
-            ParserConfigs.SetDeveloperOptions(settings.DeveloperOptions);
             ParserConfigs.SetUseVsCodeTheme(settings.UseVsCodeTheme);
             if (!settings.McpEnabled)
             {

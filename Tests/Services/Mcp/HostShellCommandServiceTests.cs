@@ -45,6 +45,30 @@ public sealed class HostShellCommandServiceTests
     }
 
     [Fact]
+    public async Task RunAsync_DoesNotHang_WhenCommandReadsStdin()
+    {
+        // POSIX-only: the persistent worker feeds commands over one stdin pipe, so a command
+        // that reads stdin must be isolated (</dev/null) or it swallows the wrapper's completion
+        // marker and hangs until the timeout. pwsh is -NonInteractive and unaffected.
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await using var service = new HostShellCommandService(NullLogger<HostShellCommandService>.Instance);
+
+        var result = await service.RunAsync(new HostShellCommandRequest(
+            Command: "cat; echo done",
+            TimeoutSeconds: 10,
+            WaitSeconds: 20),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HostShellCommandStatus.Completed, result.Status);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("done", result.Stdout);
+    }
+
+    [Fact]
     public async Task RunAsync_PreservesPowerShellOutputThatLooksLikePrompt()
     {
         if (!OperatingSystem.IsWindows())

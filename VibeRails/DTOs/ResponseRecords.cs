@@ -410,8 +410,6 @@ namespace VibeRails.DTOs
     public record AppSettingsDto(
         bool RemoteAccess,
         string ApiKey,
-        bool EnablePrerelease,
-        bool DeveloperOptions,
         bool UseVsCodeTheme,
         bool McpEnabled,
         string? ComputerName,

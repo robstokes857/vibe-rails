@@ -1,18 +1,10 @@
+import { escapeHtml } from './utils.js';
+
 const TOKEN_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_.-]*)([^{}]*)\s*\}\}/g;
 const DEFAULT_PATTERN = /\bdefault\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s}]+))/i;
 
 function lower(value) {
     return (value || '').toString().trim().toLowerCase();
-}
-
-function escapeHtml(value) {
-    const div = document.createElement('div');
-    div.textContent = value ?? '';
-    return div.innerHTML;
-}
-
-function escapeAttr(value) {
-    return escapeHtml(value).replace(/"/g, '&quot;');
 }
 
 function unescapeQuotedValue(value) {
@@ -163,7 +155,7 @@ function buildPreviewHtml(template, values = {}) {
         const value = values[token.name] ?? '';
         const display = value.length > 0 ? value : token.token;
         const emptyClass = value.length > 0 ? '' : ' vb-prompt-template-token-empty';
-        html += `<span class="vb-prompt-template-token${emptyClass}" role="button" tabindex="0" data-prompt-template-focus="${escapeAttr(token.name)}">${escapeHtml(display)}</span>`;
+        html += `<span class="vb-prompt-template-token${emptyClass}" role="button" tabindex="0" data-prompt-template-focus="${escapeHtml(token.name)}">${escapeHtml(display)}</span>`;
 
         lastIndex = match.index + token.token.length;
     }
@@ -189,7 +181,7 @@ function renderModalHtml({ template, variables, environmentName }) {
                             <div class="mb-3">
                                 <label class="form-label" for="vb-prompt-template-input-${index}">${escapeHtml(variable.label)}</label>
                                 <textarea class="form-control" id="vb-prompt-template-input-${index}" rows="2"
-                                    data-prompt-template-input="${escapeAttr(variable.name)}"
+                                    data-prompt-template-input="${escapeHtml(variable.name)}"
                                     spellcheck="false"
                                     ${variable.hasDefault ? '' : 'required'}>${escapeHtml(variable.defaultValue)}</textarea>
                                 <small class="form-text text-muted">

@@ -18,8 +18,8 @@ namespace VibeRails.Services.Mcp;
 /// to the spawning process and needs no token.
 ///
 /// Exposes the SAME tools as the in-process HTTP server (<see cref="RulesTool"/>,
-/// <see cref="SessionSearchTool"/>, terminal controls, host shell commands, and web research),
-/// so the two transports stay in lockstep.
+/// <see cref="SessionSearchTool"/>, and terminal controls), so the two transports stay in
+/// lockstep.
 ///
 /// CRITICAL: nothing may be written to stdout except MCP protocol frames. Default host console
 /// logging is cleared; the static Serilog logger (configured in Program.cs) writes to file only,
@@ -84,14 +84,9 @@ public static class McpStdioHost
         services.AddScoped<SessionSearchTool>();
         services.AddSingleton<IAgentTerminalToolGateway, HttpAgentTerminalToolGateway>();
         services.AddScoped<TerminalTools>();
-        services.AddSingleton<IHostShellCommandService, HostShellCommandService>();
-        services.AddScoped<HostShellTools>();
-        services.AddHttpClient<IWebResearchService, WebResearchService>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(20);
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("VibeRails-MCP-WebResearch/1.0");
-        });
-        services.AddScoped<WebResearchTools>();
+        // HostShellTools (run_shell_command) and WebResearchTools (web_search/web_fetch) are
+        // intentionally not exposed for now (security review 2026-07-02); mirrors MapRegisterServices.
+        // Classes kept in-tree for re-add.
 
         services
             .AddMcpServer(options =>
@@ -101,8 +96,6 @@ public static class McpStdioHost
             .WithStdioServerTransport()
             .WithTools<RulesTool>()
             .WithTools<SessionSearchTool>()
-            .WithTools<TerminalTools>()
-            .WithTools<HostShellTools>()
-            .WithTools<WebResearchTools>();
+            .WithTools<TerminalTools>();
     }
 }

@@ -15,14 +15,20 @@ public class RulesTool
 {
     private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(10);
 
+    // Enforcement vocabulary understood in AGENTS.md rule lines. This is a deliberate SUPERSET of
+    // Services.EnforcementParser (WARN/COMMIT/STOP): the MCP tool additionally honors the bracket
+    // form and the SKIP/DISABLED opt-outs, which the UI-side parser has no concept of. Kept as one
+    // constant so the two patterns below can't drift apart from each other.
+    private const string EnforcementAlternation = "WARN|COMMIT|STOP|SKIP|DISABLED";
+
     // Patterns to extract rules from AGENTS.md. The bracket form is the MCP-native
     // format; the suffix form matches agent files produced by the current UI.
     private static readonly Regex BracketRulePattern = new Regex(
-        @"^-\s*\[(WARN|COMMIT|STOP|SKIP|DISABLED)\]\s*(.+)$",
+        $@"^-\s*\[({EnforcementAlternation})\]\s*(.+)$",
         RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
 
     private static readonly Regex SuffixRulePattern = new Regex(
-        @"^-\s*(.+?)\s*\((WARN|COMMIT|STOP|SKIP|DISABLED)\)\s*$",
+        $@"^-\s*(.+?)\s*\(({EnforcementAlternation})\)\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
 
     [McpServerTool]

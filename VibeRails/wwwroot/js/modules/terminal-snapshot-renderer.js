@@ -1,11 +1,5 @@
 import { VibeTerminal } from './vibe-terminal.js';
-
-const esc = value => String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+import { escapeHtml } from './utils.js';
 
 function nextFrame() {
     return new Promise(resolve => requestAnimationFrame(() => resolve()));
@@ -104,7 +98,7 @@ export async function renderXtermPayload(container, payload) {
         }
     } catch (error) {
         if (terminalHost) {
-            terminalHost.innerHTML = `<div class="mcp-xterm-fallback">Unable to render xterm payload: ${esc(error?.message || error)}</div>`;
+            terminalHost.innerHTML = `<div class="mcp-xterm-fallback">Unable to render xterm payload: ${escapeHtml(error?.message || error)}</div>`;
         }
     }
 

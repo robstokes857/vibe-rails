@@ -6,7 +6,13 @@ namespace VibeRails.Services.Mcp.WebResearch;
 
 public partial class WebResearchService : IWebResearchService
 {
-    private const int MaxDownloadBytes = 2_000_000;  
+    private const int MaxDownloadBytes = 2_000_000;
+
+    // HttpClient.Timeout with ResponseHeadersRead only bounds header receipt, so a server that
+    // sends headers then trickles the body could otherwise keep the read loop — and the calling
+    // agent — blocked indefinitely. We bound the whole request (headers + body) with our own
+    // deadline instead of relying on the transport-specific HttpClient.Timeout.
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
 
     private readonly HttpClient _http;
     private readonly ILogger<WebResearchService> _logger;
@@ -30,8 +36,11 @@ public partial class WebResearchService : IWebResearchService
         maxResults = Math.Clamp(maxResults, 1, 10);
         var uri = new Uri($"https://duckduckgo.com/html/?q={Uri.EscapeDataString(query.Trim())}");
         var html = await GetStringAsync(uri, cancellationToken);
-        var results = ParseDuckDuckGoResults(html, uri, maxResults);
-        return results.Count > 0 ? results : ParseLinks(html, uri, maxResults);
+        // Only return real DuckDuckGo result anchors. Previously this fell back to scraping every
+        // <a> on the page, which turned a captcha / challenge / markup-change page into a list of
+        // nav/footer/ad links presented as "results" — confidently wrong. An empty list is the
+        // honest signal that the search yielded nothing usable.
+        return ParseDuckDuckGoResults(html, uri, maxResults);
     }
 
     public async Task<WebPageFetchResult> FetchAsync(
@@ -64,40 +73,108 @@ public partial class WebResearchService : IWebResearchService
 
     private async Task<string> GetStringAsync(Uri uri, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5");
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(RequestTimeout);
+        var token = timeoutCts.Token;
 
-        using var response = await _http.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        if (response.Content.Headers.ContentLength is > MaxDownloadBytes)
+        try
         {
-            throw new InvalidOperationException($"Response is larger than {MaxDownloadBytes} bytes.");
-        }
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5");
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var buffer = new MemoryStream();
-        var bytes = new byte[8192];
-        while (true)
-        {
-            var read = await stream.ReadAsync(bytes, cancellationToken);
-            if (read == 0)
+            using var response = await _http.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                token);
+            response.EnsureSuccessStatusCode();
+
+            if (response.Content.Headers.ContentLength is > MaxDownloadBytes)
             {
-                break;
+                throw new InvalidOperationException($"Response is larger than {MaxDownloadBytes} bytes.");
             }
 
-            if (buffer.Length + read > MaxDownloadBytes)
+            await using var stream = await response.Content.ReadAsStreamAsync(token);
+            using var buffer = new MemoryStream();
+            var bytes = new byte[8192];
+            while (true)
             {
-                throw new InvalidOperationException($"Response exceeded {MaxDownloadBytes} bytes.");
+                var read = await stream.ReadAsync(bytes, token);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                if (buffer.Length + read > MaxDownloadBytes)
+                {
+                    throw new InvalidOperationException($"Response exceeded {MaxDownloadBytes} bytes.");
+                }
+
+                buffer.Write(bytes, 0, read);
             }
 
-            buffer.Write(bytes, 0, read);
+            return Decode(response, buffer);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"Web request to {uri.Host} timed out after {(int)RequestTimeout.TotalSeconds} seconds.");
+        }
+    }
+
+    // Decode the body using the charset the server actually declared (a leading BOM, then the
+    // Content-Type header) instead of assuming UTF-8, which turns ISO-8859-1 / Windows-1252 /
+    // UTF-16 pages into mojibake. Reads straight from the MemoryStream's backing buffer to avoid
+    // copying the (up to 2 MB) payload a second time.
+    private static string Decode(HttpResponseMessage response, MemoryStream buffer)
+    {
+        var raw = buffer.GetBuffer();
+        var length = (int)buffer.Length;
+
+        // A byte-order mark is unambiguous, so it wins over the header.
+        if (length >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF)
+        {
+            return Encoding.UTF8.GetString(raw, 3, length - 3);
+        }
+        if (length >= 2 && raw[0] == 0xFF && raw[1] == 0xFE)
+        {
+            return Encoding.Unicode.GetString(raw, 2, length - 2);
+        }
+        if (length >= 2 && raw[0] == 0xFE && raw[1] == 0xFF)
+        {
+            return Encoding.BigEndianUnicode.GetString(raw, 2, length - 2);
         }
 
-        return Encoding.UTF8.GetString(buffer.ToArray());
+        return ResolveEncoding(response.Content.Headers.ContentType?.CharSet).GetString(raw, 0, length);
+    }
+
+    private static Encoding ResolveEncoding(string? charset)
+    {
+        if (string.IsNullOrWhiteSpace(charset))
+        {
+            return Encoding.UTF8;
+        }
+
+        charset = charset.Trim().Trim('"', '\'');
+
+        // Windows-1252 needs the CodePages provider (not referenced here); ISO-8859-1 / Latin1 is
+        // built in. Both are common legacy web charsets and near-identical, so map them to the
+        // built-in Latin1 rather than take a new dependency or crash the fetch.
+        if (charset.Equals("windows-1252", StringComparison.OrdinalIgnoreCase)
+            || charset.Equals("cp1252", StringComparison.OrdinalIgnoreCase)
+            || charset.Equals("iso-8859-1", StringComparison.OrdinalIgnoreCase)
+            || charset.Equals("latin1", StringComparison.OrdinalIgnoreCase))
+        {
+            return Encoding.Latin1;
+        }
+
+        try
+        {
+            return Encoding.GetEncoding(charset);
+        }
+        catch
+        {
+            return Encoding.UTF8;
+        }
     }
 
     private static List<WebSearchResult> ParseDuckDuckGoResults(string html, Uri baseUri, int maxResults)
@@ -210,7 +287,9 @@ public partial class WebResearchService : IWebResearchService
             .Replace("</h1>", "\n", StringComparison.OrdinalIgnoreCase)
             .Replace("</h2>", "\n", StringComparison.OrdinalIgnoreCase)
             .Replace("</h3>", "\n", StringComparison.OrdinalIgnoreCase);
-        return CleanText(TagRegex.Replace(withBreaks, " "));
+        // CleanText already strips remaining tags with TagRegex; don't run the same
+        // full-document pass twice.
+        return CleanText(withBreaks);
     }
 
     private static string CleanText(string value)

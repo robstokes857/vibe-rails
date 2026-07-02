@@ -38,11 +38,6 @@ public class McpServerHttpTests : IAsyncLifetime
         "open_terminal",
         "send_terminal_input",
         "get_terminal_snapshot",
-        "run_shell_command",
-        "get_shell_command_status",
-        "cancel_shell_command",
-        "web_search",
-        "web_fetch",
     };
 
     public async ValueTask InitializeAsync()
@@ -55,12 +50,8 @@ public class McpServerHttpTests : IAsyncLifetime
         // Stand in for the real BGE/sqlite-vec search so the test is hermetic.
         builder.Services.AddSingleton<IUnifiedSearchService>(new FakeUnifiedSearchService());
         builder.Services.AddSingleton<IAgentTerminalToolGateway>(new FakeTerminalToolGateway());
-        builder.Services.AddSingleton<IHostShellCommandService>(new FakeHostShellCommandService());
-        builder.Services.AddSingleton<IWebResearchService>(new FakeWebResearchService());
         builder.Services.AddScoped<SessionSearchTool>();
         builder.Services.AddScoped<TerminalTools>();
-        builder.Services.AddScoped<HostShellTools>();
-        builder.Services.AddScoped<WebResearchTools>();
 
         builder.Services
             .AddMcpServer(options =>
@@ -70,9 +61,7 @@ public class McpServerHttpTests : IAsyncLifetime
             .WithHttpTransport()
             .WithTools<RulesTool>()
             .WithTools<SessionSearchTool>()
-            .WithTools<TerminalTools>()
-            .WithTools<HostShellTools>()
-            .WithTools<WebResearchTools>();
+            .WithTools<TerminalTools>();
 
         _app = builder.Build();
         _app.MapMcp("/mcp");
@@ -221,46 +210,5 @@ public class McpServerHttpTests : IAsyncLifetime
                     IncludesScrollback: true,
                     RendererHint: "xterm.js"),
                 XtermPngString: null));
-    }
-
-    private sealed class FakeHostShellCommandService : IHostShellCommandService
-    {
-        private readonly HostShellCommandResult _result = new(
-            JobId: "shell-test",
-            Status: HostShellCommandStatus.Completed,
-            Shell: "pwsh",
-            WorkingDirectory: "/repo",
-            CreatedUtc: DateTimeOffset.UtcNow,
-            StartedUtc: DateTimeOffset.UtcNow,
-            CompletedUtc: DateTimeOffset.UtcNow,
-            ExitCode: 0,
-            Stdout: "ok",
-            Stderr: "",
-            Message: null,
-            WorkerId: "worker-test");
-
-        public Task<HostShellCommandResult> RunAsync(HostShellCommandRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_result);
-
-        public HostShellCommandResult? GetStatus(string jobId) => _result;
-
-        public Task<HostShellCommandResult?> CancelAsync(string jobId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<HostShellCommandResult?>(_result with { Status = HostShellCommandStatus.Cancelled });
-    }
-
-    private sealed class FakeWebResearchService : IWebResearchService
-    {
-        public Task<IReadOnlyList<WebSearchResult>> SearchAsync(string query, int maxResults = 5, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<WebSearchResult>>(new List<WebSearchResult>
-            {
-                new("Example", "https://example.com", "Example result")
-            });
-
-        public Task<WebPageFetchResult> FetchAsync(string url, int maxChars = 12000, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new WebPageFetchResult(
-                url,
-                "Example",
-                "Example page",
-                new List<WebSearchResult>()));
     }
 }

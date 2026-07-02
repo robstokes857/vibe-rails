@@ -205,8 +205,9 @@ Tools (snake_case wire names):
 | `validate_vca` | Validate staged git files against AGENTS.md enforcement rules |
 | `search_history` | Semantic + keyword search over captured agent history (real BGE/sqlite-vec/RRF — the same `IUnifiedSearchService` as the "Vibe AI" inspector) |
 | `list_terminals` / `open_terminal` / `send_terminal_input` / `get_terminal_snapshot` | Inspect and control VibeRails terminal tabs; snapshots include `screenText` plus reserved `xterm_ui_bytes` / `xterm_png_string` renderer fields |
-| `run_shell_command` / `get_shell_command_status` / `cancel_shell_command` | Run host shell commands through a reusable backend shell worker pool |
-| `web_search` / `web_fetch` | Search the web and fetch any absolute HTTP/HTTPS URL as the local VibeRails process |
+
+> `run_shell_command` / `get_shell_command_status` / `cancel_shell_command` and `web_search` / `web_fetch` are
+> present in the codebase but **not currently exposed** as MCP tools (security review 2026-07-02).
 
 **Architecture:**
 - Streamable HTTP transport, served by the dashboard's Kestrel — no separate process
