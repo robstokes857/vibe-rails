@@ -310,7 +310,21 @@ namespace VibeRails.DTOs
         DateTimeOffset CapturedUtc,
         int Cols,
         int Rows,
-        string[] ScreenText
+        string[] ScreenText,
+        [property: JsonPropertyName("xterm_ui_bytes")] TerminalXtermUiBytes? XtermUiBytes = null,
+        [property: JsonPropertyName("xterm_png_string")] string? XtermPngString = null
+    );
+
+    public record TerminalXtermUiBytes(
+        [property: JsonPropertyName("content_type")] string ContentType,
+        string Encoding,
+        string Format,
+        string Base64,
+        [property: JsonPropertyName("byte_length")] int ByteLength,
+        int Cols,
+        int Rows,
+        [property: JsonPropertyName("includes_scrollback")] bool IncludesScrollback,
+        [property: JsonPropertyName("renderer_hint")] string RendererHint
     );
 
     public record AgentToolOpenTerminalRequest(
@@ -704,6 +718,8 @@ namespace VibeRails.DTOs
     // MCP DTOs
     [JsonSerializable(typeof(McpToolInfo))]
     [JsonSerializable(typeof(List<McpToolInfo>))]
+    [JsonSerializable(typeof(McpServerTargetRequest))]
+    [JsonSerializable(typeof(McpInspectResponse))]
     [JsonSerializable(typeof(McpToolCallRequest))]
     [JsonSerializable(typeof(McpToolCallResponse))]
     [JsonSerializable(typeof(McpStatusResponse))]
@@ -763,6 +779,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(TerminalInputRequest))]
     [JsonSerializable(typeof(TerminalInputResponse))]
     [JsonSerializable(typeof(TerminalSnapshotResponse))]
+    [JsonSerializable(typeof(TerminalXtermUiBytes))]
     [JsonSerializable(typeof(AgentToolOpenTerminalRequest))]
     [JsonSerializable(typeof(AgentToolSendInputRequest))]
     [JsonSerializable(typeof(AgentToolSnapshotRequest))]

@@ -2376,103 +2376,237 @@
                     color: var(--color-text);
                     font-family: inherit;
                     --mcp-ok: var(--color-success);
-                    --mcp-warn: var(--color-warning);
                     --mcp-bad: var(--color-danger);
                     --mcp-accent: var(--color-accent);
                     --mcp-muted: var(--color-text-muted);
-                    --mcp-text: var(--color-text);
                 }
-                .mcp-view .mcp-shell { display:grid; gap:1rem; }
-                .mcp-view .mcp-hero, .mcp-view .mcp-panel { border:1px solid var(--color-border); border-radius:8px; background: var(--color-bg-surface); }
-                .mcp-view .mcp-hero { padding:1.5rem; display:flex; justify-content:space-between; gap:1.25rem; align-items:flex-start; }
-                .mcp-view .mcp-hero h3 { margin:0.25rem 0; font-size:clamp(1.1rem, 2vw, 1.5rem); line-height:1.25; color: var(--color-text); font-weight:600; }
-                .mcp-view .mcp-eyebrow { font-size:0.65rem; text-transform:uppercase; letter-spacing:0.1em; color: var(--color-text-muted); font-weight:700; opacity:0.8; }
-                .mcp-view .mcp-hero p { margin:0.5rem 0 0; color: var(--color-text-muted); line-height:1.55; font-size:0.875rem; }
-                .mcp-view .mcp-counts { display:flex; gap:0.65rem; flex-wrap:wrap; justify-content:flex-end; }
-                .mcp-view .mcp-count { min-width:130px; padding:0.75rem 0.85rem; border-radius:6px; background: rgba(255,255,255,0.02); border:1px solid var(--color-border); display:grid; gap:0.2rem; }
-                .mcp-view .mcp-count span { font-size:0.6rem; color: var(--color-text-muted); text-transform:uppercase; letter-spacing:0.08em; font-weight:700; }
-                .mcp-view .mcp-count strong { font-size:1.5rem; color: var(--color-text); font-weight:700; }
-                .mcp-view .mcp-main { display:grid; grid-template-columns:340px 1fr; gap:1rem; min-height:0; }
-                .mcp-view .mcp-panel { display:flex; flex-direction:column; min-height:0; }
-                .mcp-view .mcp-head { padding:0.85rem 1rem; border-bottom:1px solid var(--color-border); display:flex; justify-content:space-between; gap:0.75rem; align-items:center; background: rgba(255,255,255,0.02); }
-                .mcp-view .mcp-head strong { font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color: var(--color-text); font-weight:700; }
-                .mcp-view .mcp-subtitle { margin:0.15rem 0 0; color: var(--color-text-muted); line-height:1.5; font-size:0.7rem; }
+                .mcp-view .mcp-workbench { display:grid; gap:1rem; min-width:0; }
+                .mcp-view .mcp-topbar,
+                .mcp-view .mcp-panel {
+                    border:1px solid var(--color-border);
+                    border-radius:8px;
+                    background:var(--color-bg-surface);
+                }
+                .mcp-view .mcp-topbar { padding:1rem; display:grid; gap:1rem; }
+                .mcp-view .mcp-title-row { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; }
+                .mcp-view .mcp-title-row h4 { margin:0.1rem 0 0; font-size:1.1rem; line-height:1.25; font-weight:700; color:var(--color-text); }
+                .mcp-view .mcp-kicker,
+                .mcp-view label {
+                    display:block;
+                    margin:0 0 0.35rem;
+                    color:var(--color-text-muted);
+                    font-size:0.72rem;
+                    font-weight:700;
+                }
+                .mcp-view .mcp-summary { min-width:96px; padding:0.55rem 0.7rem; border:1px solid var(--color-border); border-radius:6px; display:grid; gap:0.1rem; justify-items:end; background:rgba(255,255,255,0.02); }
+                .mcp-view .mcp-summary span { color:var(--color-text-muted); font-size:0.72rem; font-weight:700; }
+                .mcp-view .mcp-summary strong { color:var(--color-text); font-size:1.35rem; line-height:1; }
+                .mcp-view .mcp-target-grid { display:grid; grid-template-columns:minmax(240px,1fr) minmax(220px,360px) auto; gap:0.75rem; align-items:end; }
+                .mcp-view .mcp-field { min-width:0; }
+                .mcp-view .mcp-control {
+                    width:100%;
+                    min-height:38px;
+                    padding:0.5rem 0.65rem;
+                    border-radius:4px;
+                    border:1px solid var(--color-border);
+                    background:var(--color-bg-base);
+                    color:var(--color-text);
+                    font:inherit;
+                    font-size:0.86rem;
+                    line-height:1.35;
+                }
+                .mcp-view .mcp-control:focus { outline:none; border-color:var(--color-primary); box-shadow:0 0 0 2px rgba(59,130,246,0.15); }
+                .mcp-view .mcp-header-box { min-width:0; }
+                .mcp-view .mcp-header-box summary { cursor:pointer; color:var(--color-text-muted); font-size:0.72rem; font-weight:700; list-style:none; margin-bottom:0.35rem; }
+                .mcp-view .mcp-header-box summary::-webkit-details-marker { display:none; }
+                .mcp-view .mcp-header-box textarea { height:38px; resize:vertical; min-height:38px; max-height:150px; font-family:'JetBrains Mono', 'Fira Code', monospace; }
+                .mcp-view .mcp-actions { display:flex; gap:0.5rem; align-items:center; justify-content:flex-end; }
+                .mcp-view .mcp-button {
+                    min-height:38px;
+                    padding:0.5rem 0.75rem;
+                    border-radius:4px;
+                    border:1px solid var(--color-border);
+                    background:var(--color-bg-surface-hover);
+                    color:var(--color-text);
+                    font:inherit;
+                    font-size:0.82rem;
+                    font-weight:700;
+                    display:inline-flex;
+                    align-items:center;
+                    justify-content:center;
+                    gap:0.4rem;
+                    cursor:pointer;
+                    white-space:nowrap;
+                }
+                .mcp-view .mcp-button:hover { border-color:var(--color-primary); }
+                .mcp-view .mcp-button.primary { background:var(--color-primary); border-color:var(--color-primary); color:#fff; }
+                .mcp-view .mcp-button.primary:hover { background:var(--color-primary-dark); border-color:var(--color-primary-dark); }
+                .mcp-view .mcp-button:disabled { opacity:0.55; cursor:not-allowed; }
+                .mcp-view .mcp-status-line { display:flex; justify-content:space-between; gap:1rem; align-items:center; color:var(--color-text-muted); font-size:0.78rem; min-width:0; }
+                .mcp-view .mcp-status { display:inline-flex; align-items:center; gap:0.45rem; min-width:120px; }
+                .mcp-view .mcp-status-dot { width:0.55rem; height:0.55rem; border-radius:999px; background:var(--color-text-muted); flex:0 0 auto; }
+                .mcp-view .mcp-status.success { color:var(--mcp-ok); }
+                .mcp-view .mcp-status.success .mcp-status-dot { background:var(--mcp-ok); }
+                .mcp-view .mcp-status.error { color:var(--mcp-bad); }
+                .mcp-view .mcp-status.error .mcp-status-dot { background:var(--mcp-bad); }
+                .mcp-view .mcp-status.loading .mcp-status-dot { background:var(--mcp-accent); }
+                .mcp-view .mcp-target-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:'JetBrains Mono', 'Fira Code', monospace; color:var(--mcp-muted); }
+                .mcp-view .mcp-layout { display:grid; grid-template-columns:minmax(260px,330px) minmax(0,1fr); gap:1rem; min-height:520px; }
+                .mcp-view .mcp-panel { min-height:0; display:flex; flex-direction:column; }
+                .mcp-view .mcp-panel-head { padding:0.85rem 1rem; border-bottom:1px solid var(--color-border); display:flex; justify-content:space-between; gap:0.75rem; align-items:center; background:rgba(255,255,255,0.02); }
+                .mcp-view .mcp-panel-head strong { font-size:0.82rem; font-weight:700; color:var(--color-text); }
+                .mcp-view .mcp-panel-head .mcp-control { max-width:190px; min-height:34px; font-size:0.78rem; }
                 .mcp-view .mcp-body { padding:1rem; overflow:auto; min-height:0; }
                 .mcp-view .mcp-body::-webkit-scrollbar { width:8px; height:8px; }
-                .mcp-view .mcp-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius:4px; }
-                .mcp-view .mcp-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0.65rem; }
-                .mcp-view .mcp-card { padding:0.75rem; border-radius:6px; border:1px solid var(--color-border); background: rgba(255,255,255,0.02); display:grid; gap:0.25rem; }
-                .mcp-view .mcp-card span { font-size:0.6rem; color: var(--color-text-muted); text-transform:uppercase; letter-spacing:0.08em; font-weight:700; }
-                .mcp-view .mcp-card strong { font-size:1.25rem; color: var(--color-text); font-weight:700; }
-                .mcp-view .mcp-pill { display:inline-flex; align-items:center; padding:0.2rem 0.5rem; border-radius:4px; font-size:0.7rem; border:1px solid transparent; font-weight:600; }
-                .mcp-view .mcp-pill.ok { background: rgba(16,185,129,0.15); color: var(--color-success); border-color: rgba(16,185,129,0.3); }
-                .mcp-view .mcp-pill.warn { background: rgba(245,158,11,0.15); color: var(--color-warning); border-color: rgba(245,158,11,0.3); }
-                .mcp-view .mcp-pill.bad { background: rgba(239,68,68,0.15); color: var(--color-danger); border-color: rgba(239,68,68,0.3); }
+                .mcp-view .mcp-body::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.1); border-radius:4px; }
                 .mcp-view .mcp-tool-list { display:grid; gap:0.5rem; }
-                .mcp-view .mcp-tool-item { padding:0.85rem; border-radius:6px; border:1px solid var(--color-border); background: rgba(255,255,255,0.02); cursor:pointer; transition: all var(--transition-speed) ease; }
-                .mcp-view .mcp-tool-item:hover { border-color: var(--color-primary); background: rgba(59,130,246,0.06); }
-                .mcp-view .mcp-tool-item.sel { border-color: var(--color-primary); background: rgba(59,130,246,0.1); }
-                .mcp-view .mcp-tool-name { font-weight:700; font-size:0.875rem; margin-bottom:0.25rem; color: var(--color-text); }
-                .mcp-view .mcp-tool-desc { font-size:0.75rem; color: var(--color-text-muted); line-height:1.5; }
-                .mcp-view .mcp-control { width:100%; padding:0.5rem 0.75rem; border-radius:4px; border:1px solid var(--color-border); background: var(--color-bg-base); color: var(--color-text); font:inherit; font-size:0.875rem; transition: border-color var(--transition-speed) ease; }
-                .mcp-view .mcp-control:focus { outline:none; border-color: var(--color-primary); box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
-                .mcp-view .mcp-button { padding:0.5rem 0.9rem; border-radius:4px; border:1px solid var(--color-border); background: var(--color-bg-surface-hover); color: var(--color-text); font:inherit; font-size:0.8rem; font-weight:600; cursor:pointer; transition: all var(--transition-speed) ease; }
-                .mcp-view .mcp-button:hover { border-color: var(--color-primary); }
-                .mcp-view .mcp-button.primary { background: var(--color-primary); border-color: var(--color-primary); color:#fff; }
-                .mcp-view .mcp-button.primary:hover { background: var(--color-primary-dark); border-color: var(--color-primary-dark); }
-                .mcp-view .mcp-button:disabled { opacity:0.5; cursor:not-allowed; }
-                .mcp-view pre.mcp-pre { margin:0; padding:0.85rem 1rem; border-radius:6px; border:1px solid var(--color-border); background: var(--color-bg-base); color: var(--color-text); white-space:pre-wrap; word-break:break-word; line-height:1.55; overflow:auto; font-size:0.8rem; font-family: 'JetBrains Mono', 'Fira Code', monospace; }
-                .mcp-view .mcp-empty { display:grid; place-items:center; min-height:100px; padding:1.5rem; text-align:center; color: var(--color-text-muted); border:1px dashed var(--color-border); border-radius:6px; background: rgba(255,255,255,0.02); line-height:1.6; font-size:0.825rem; }
-                .mcp-view .mcp-banner { color: var(--color-text-muted); font-size:0.75rem; margin-top:0.5rem; }
-                .mcp-view .mcp-banner.error { color: var(--color-danger); }
-                .mcp-view .mcp-banner.success { color: var(--color-success); }
-                .mcp-view .mcp-paths { padding:0 1rem 1rem; display:grid; gap:0.65rem; }
-                .mcp-view .mcp-paths label { font-size:0.6rem; color: var(--color-text-muted); text-transform:uppercase; letter-spacing:0.08em; font-weight:700; }
-                .mcp-view .mcp-paths code { display:block; padding:0.55rem 0.7rem; border-radius:4px; background: var(--color-bg-base); border:1px solid var(--color-border); white-space:pre-wrap; word-break:break-word; color: var(--color-accent); line-height:1.5; font-size:0.75rem; font-family: 'JetBrains Mono', 'Fira Code', monospace; }
-                .mcp-view details.mcp-details { margin-top:0.85rem; border:1px solid var(--color-border); border-radius:6px; background: rgba(255,255,255,0.02); }
-                .mcp-view details.mcp-details summary { cursor:pointer; padding:0.75rem 0.9rem; color: var(--color-text); list-style:none; font-size:0.8rem; font-weight:600; }
-                .mcp-view details.mcp-details summary::-webkit-details-marker { display:none; }
-                @media (max-width:1180px){ .mcp-view .mcp-main { grid-template-columns:1fr; } }
-                @media (max-width:820px){ .mcp-view .mcp-hero { padding:1.25rem; flex-direction:column; } .mcp-view .mcp-grid { grid-template-columns:1fr; } .mcp-view .mcp-counts { justify-content:flex-start; } }
+                .mcp-view .mcp-tool-item {
+                    width:100%;
+                    min-height:70px;
+                    padding:0.75rem;
+                    border-radius:6px;
+                    border:1px solid var(--color-border);
+                    background:rgba(255,255,255,0.02);
+                    color:var(--color-text);
+                    text-align:left;
+                    cursor:pointer;
+                    display:grid;
+                    gap:0.25rem;
+                }
+                .mcp-view .mcp-tool-item:hover,
+                .mcp-view .mcp-tool-item.selected { border-color:var(--color-primary); background:rgba(59,130,246,0.08); }
+                .mcp-view .mcp-tool-name { font-weight:700; font-size:0.88rem; overflow-wrap:anywhere; }
+                .mcp-view .mcp-tool-desc { color:var(--color-text-muted); font-size:0.76rem; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+                .mcp-view .mcp-empty {
+                    display:grid;
+                    place-items:center;
+                    min-height:130px;
+                    padding:1.25rem;
+                    text-align:center;
+                    color:var(--color-text-muted);
+                    border:1px dashed var(--color-border);
+                    border-radius:6px;
+                    background:rgba(255,255,255,0.02);
+                    font-size:0.84rem;
+                    line-height:1.45;
+                }
+                .mcp-view .mcp-detail-head { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; margin-bottom:1rem; }
+                .mcp-view .mcp-detail-head h5 { margin:0; color:var(--mcp-accent); font-size:1rem; line-height:1.25; overflow-wrap:anywhere; }
+                .mcp-view .mcp-detail-head p { margin:0.35rem 0 0; color:var(--color-text-muted); font-size:0.84rem; line-height:1.5; }
+                .mcp-view .mcp-detail-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:1rem; }
+                .mcp-view .mcp-section { min-width:0; display:grid; gap:0.45rem; align-content:start; }
+                .mcp-view .mcp-textarea { min-height:230px; resize:vertical; font-family:'JetBrains Mono', 'Fira Code', monospace; font-size:0.8rem; }
+                .mcp-view pre.mcp-pre {
+                    margin:0;
+                    min-height:230px;
+                    max-height:360px;
+                    padding:0.75rem;
+                    border-radius:6px;
+                    border:1px solid var(--color-border);
+                    background:var(--color-bg-base);
+                    color:var(--color-text);
+                    white-space:pre-wrap;
+                    word-break:break-word;
+                    overflow:auto;
+                    font-size:0.78rem;
+                    line-height:1.5;
+                    font-family:'JetBrains Mono', 'Fira Code', monospace;
+                }
+                .mcp-view .mcp-call-line { min-height:20px; }
+                .mcp-view .mcp-call-banner { color:var(--color-text-muted); font-size:0.8rem; }
+                .mcp-view .mcp-call-banner.error { color:var(--mcp-bad); }
+                .mcp-view .mcp-call-banner.success { color:var(--mcp-ok); }
+                .mcp-view .mcp-schema-details { margin-top:1rem; border:1px solid var(--color-border); border-radius:6px; background:rgba(255,255,255,0.02); }
+                .mcp-view .mcp-schema-details summary { cursor:pointer; padding:0.7rem 0.85rem; color:var(--color-text); font-size:0.84rem; font-weight:700; list-style:none; }
+                .mcp-view .mcp-schema-details summary::-webkit-details-marker { display:none; }
+                .mcp-view .mcp-schema-details .mcp-pre { border-left:0; border-right:0; border-bottom:0; border-radius:0 0 6px 6px; min-height:120px; }
+                .mcp-view .mcp-result { margin-top:1rem; }
+                .mcp-view .mcp-result .mcp-pre { min-height:120px; max-height:420px; }
+                @media (max-width:1180px){ .mcp-view .mcp-layout { grid-template-columns:1fr; } .mcp-view .mcp-target-grid { grid-template-columns:1fr; } .mcp-view .mcp-actions { justify-content:flex-start; } }
+                @media (max-width:820px){ .mcp-view .mcp-title-row, .mcp-view .mcp-status-line, .mcp-view .mcp-detail-head { flex-direction:column; align-items:stretch; } .mcp-view .mcp-detail-grid { grid-template-columns:1fr; } .mcp-view .mcp-panel-head { align-items:stretch; flex-direction:column; } .mcp-view .mcp-panel-head .mcp-control { max-width:none; } }
+                .mcp-view .mcp-mode-toggle { display:flex; gap:0.4rem; }
+                .mcp-view .mcp-mode-btn.is-active { background:var(--color-primary); border-color:var(--color-primary); color:#fff; }
+                .mcp-view .mcp-mode-panel[hidden] { display:none; }
+                .mcp-view .mcp-danger-banner { display:flex; gap:0.6rem; align-items:flex-start; padding:0.75rem 0.9rem; margin-bottom:1rem; border:1px solid var(--mcp-bad); border-radius:8px; background:rgba(239,68,68,0.12); color:var(--mcp-bad); font-size:0.82rem; line-height:1.5; }
+                .mcp-view .mcp-danger-banner i { margin-top:0.15rem; flex:0 0 auto; }
+                .mcp-view .mcp-remote-frame { width:100%; min-height:560px; margin-top:1rem; border:1px solid var(--color-border); border-radius:8px; background:#16181d; display:block; }
             </style>
 
-            <div class="row">
-                <div class="col-12 mb-3">
-                    <h4 class="text-uppercase fw-bold mb-0" style="letter-spacing: 0.05em;"><span class="text-gradient">MCP Explorer</span></h4>
-                </div>
-            </div>
-
-            <div class="mcp-shell">
-                <header class="mcp-hero">
-                    <div>
-                        <div class="mcp-eyebrow">MCP Explorer</div>
-                        <h3>Inspect and call tools on the local MCP server.</h3>
-                        <p>Connects to the VibeRails MCP server, lists available tools, and lets you call them with custom arguments.</p>
-                    </div>
-                    <div class="mcp-counts">
-                        <div class="mcp-count"><span>Server</span><strong data-mcp-server-status>—</strong></div>
-                        <div class="mcp-count"><span>Tools</span><strong data-mcp-tool-count>0</strong></div>
+            <div class="mcp-workbench">
+                <header class="mcp-topbar">
+                    <div class="mcp-title-row">
+                        <div>
+                            <div class="mcp-kicker">MCP</div>
+                            <h4>MCP Explorer</h4>
+                        </div>
+                        <div class="mcp-mode-toggle" role="tablist">
+                            <button class="mcp-button mcp-mode-btn is-active" data-mcp-mode="local" type="button"><i class="fas fa-house-lock"></i><span>Local</span></button>
+                            <button class="mcp-button mcp-mode-btn" data-mcp-mode="remote" type="button"><i class="fas fa-globe"></i><span>Remote</span></button>
+                        </div>
+                        <div class="mcp-summary">
+                            <span>Tools</span>
+                            <strong data-mcp-tool-count>0</strong>
+                        </div>
                     </div>
                 </header>
-                <div class="mcp-main">
-                    <aside class="mcp-panel">
-                        <div class="mcp-head">
-                            <div><strong>Status</strong><div class="mcp-subtitle">MCP server health</div></div>
-                            <button class="mcp-button" data-mcp-refresh type="button" style="padding:6px 12px;font-size:11px;">Refresh</button>
+
+                <!-- LOCAL: trusted. Always the in-process /mcp on loopback; no endpoint editing. -->
+                <section class="mcp-mode-panel" data-mcp-local>
+                    <div class="mcp-layout">
+                        <aside class="mcp-panel">
+                            <div class="mcp-panel-head">
+                                <strong>Tools</strong>
+                                <input class="mcp-control" data-mcp-filter type="search" placeholder="Search">
+                            </div>
+                            <div class="mcp-body mcp-tool-list" data-mcp-tool-list>
+                                <div class="mcp-empty">Loading tools.</div>
+                            </div>
+                        </aside>
+                        <section class="mcp-panel">
+                            <div class="mcp-panel-head">
+                                <strong>Inspector</strong>
+                            </div>
+                            <div class="mcp-body" data-mcp-tool-detail>
+                                <div class="mcp-empty">Connect to inspect tools.</div>
+                            </div>
+                        </section>
+                    </div>
+                </section>
+
+                <!-- REMOTE: UNTRUSTED external endpoint. Rendered inside a sandboxed, cookieless
+                     iframe (mcp-remote.html); the parent only brokers the backend calls. -->
+                <section class="mcp-mode-panel" data-mcp-remote hidden>
+                    <div class="mcp-danger-banner" role="alert">
+                        <i class="fas fa-triangle-exclamation"></i>
+                        <div>
+                            <strong>Remote MCP is dangerous.</strong>
+                            You are pointing VibeRails' backend at an external server you do not control — it can return
+                            arbitrary content and sees whatever you send it. Responses render in an isolated sandbox with
+                            no access to your VibeRails session. Never send secrets, and only connect to servers you trust.
                         </div>
-                        <div class="mcp-body">
-                            <div class="mcp-grid" data-mcp-status-grid></div>
-                            <details class="mcp-details" open><summary>Server Path</summary><div class="mcp-paths"><div><label>Executable</label><code data-mcp-server-path>—</code></div></div></details>
+                    </div>
+                    <div class="mcp-topbar">
+                        <div class="mcp-target-grid">
+                            <div class="mcp-field">
+                                <label for="mcp-endpoint">Endpoint</label>
+                                <input id="mcp-endpoint" class="mcp-control" data-mcp-endpoint type="url" spellcheck="false" autocomplete="off" placeholder="https://example.com/mcp">
+                            </div>
+                            <details class="mcp-header-box">
+                                <summary>Headers JSON</summary>
+                                <textarea class="mcp-control" data-mcp-headers spellcheck="false">{}</textarea>
+                            </details>
+                            <div class="mcp-actions">
+                                <button class="mcp-button primary" data-mcp-connect type="button"><i class="fas fa-plug"></i><span>Connect</span></button>
+                            </div>
                         </div>
-                    </aside>
-                    <section class="mcp-panel" style="min-height:400px;">
-                        <div class="mcp-head"><div><strong>Tools</strong><div class="mcp-subtitle">Available MCP tools on the server</div></div></div>
-                        <div class="mcp-body" style="display:grid;grid-template-columns:280px 1fr;gap:16px;min-height:0;">
-                            <div class="mcp-tool-list" data-mcp-tool-list><div class="mcp-empty">Loading tools...</div></div>
-                            <div data-mcp-tool-detail><div class="mcp-empty">Select a tool from the list to inspect and call it.</div></div>
+                        <div class="mcp-status-line">
+                            <div class="mcp-status" data-mcp-status><span class="mcp-status-dot"></span><span>Idle</span></div>
+                            <div class="mcp-target-text" data-mcp-target>No endpoint</div>
                         </div>
-                    </section>
-                </div>
+                    </div>
+                    <iframe class="mcp-remote-frame" data-mcp-remote-frame title="Isolated remote MCP inspector"
+                        sandbox="allow-scripts" referrerpolicy="no-referrer" src="mcp-remote.html"></iframe>
+                </section>
             </div>
         </div>
     </template>

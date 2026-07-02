@@ -1161,6 +1161,7 @@ export class EnvironmentController {
     buildCliSettingsHtml(cli, settings) {
         const s = settings || {};
         const cliLower = (cli || '').toLowerCase();
+        const initialMessageHelp = this.renderInitialMessageHelpText();
 
         if (cliLower === 'antigravity') {
             const antigravityInitialMessage = this.app.escapeHtml(s.initialMessage || '');
@@ -1172,7 +1173,7 @@ export class EnvironmentController {
                 <div class="mb-3">
                     <label class="form-label">Initial Message</label>
                     <textarea class="form-control" id="antigravity-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to agy as soon as the session starts.">${antigravityInitialMessage}</textarea>
-                    <small class="form-text text-muted">Passed as <code>agy --prompt-interactive=&lt;text&gt;</code> and recorded as the session's first user input.</small>
+                    ${initialMessageHelp}
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Model</label>
@@ -1213,7 +1214,7 @@ export class EnvironmentController {
                 <div class="mb-3">
                     <label class="form-label">Initial Message</label>
                     <textarea class="form-control" id="codex-prompt" rows="3" maxlength="6000" placeholder="Please review the code changes. Look for bugs, code smells, and security issues.">${promptValue}</textarea>
-                    <small class="form-text text-muted">Passed as <code>codex "&lt;text&gt;"</code> and recorded as the session's first user input.</small>
+                    ${initialMessageHelp}
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Model</label>
@@ -1271,7 +1272,7 @@ export class EnvironmentController {
                 <div class="mb-3">
                     <label class="form-label">Initial Message</label>
                     <textarea class="form-control" id="copilot-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to Copilot as soon as the session starts.">${initialMessage}</textarea>
-                    <small class="form-text text-muted">Passed as <code>copilot --interactive=&lt;text&gt;</code> and recorded as the session's first user input.</small>
+                    ${initialMessageHelp}
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Mode</label>
@@ -1359,7 +1360,7 @@ export class EnvironmentController {
                 <div class="mb-3">
                     <label class="form-label">Initial Message</label>
                     <textarea class="form-control" id="claude-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to Claude as soon as the session starts.">${initialMessage}</textarea>
-                    <small class="form-text text-muted">Passed as <code>claude "&lt;text&gt;"</code> and recorded as the session's first user input.</small>
+                    ${initialMessageHelp}
                 </div>
                 <div class="mb-3">
                     <div class="form-check form-switch">
@@ -1391,6 +1392,15 @@ export class EnvironmentController {
         }
 
         return '';
+    }
+
+    renderInitialMessageHelpText() {
+        return `
+            <small class="form-text text-muted">
+                Optional startup message. Use <code>{{branch_name}}</code> placeholders to fill values when launching.
+                Defaults use <code>{{path default=&quot;docs/runbook.md&quot;}}</code>.
+            </small>
+        `;
     }
 
     async removeEnvironment(name) {

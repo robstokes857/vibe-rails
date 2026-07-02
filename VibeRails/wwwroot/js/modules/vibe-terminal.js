@@ -592,11 +592,28 @@ export class VibeTerminal {
     }
 
     write(data) {
-        if (!this._terminal || data == null) return;
+        this._writeInternal(data);
+    }
 
+    writeAsync(data) {
+        return new Promise(resolve => {
+            if (!this._terminal || data == null) {
+                resolve();
+                return;
+            }
+
+            this._writeInternal(data, resolve);
+        });
+    }
+
+    _writeInternal(data, onDone = null) {
+        if (!this._terminal || data == null) return;
         const shouldFollow = this._scrollOnWrite && this._followOutput && this._isNearBottom(1);
-        const afterWrite = shouldFollow
-            ? () => this.scrollToBottom()
+        const afterWrite = shouldFollow || typeof onDone === 'function'
+            ? () => {
+                if (shouldFollow) this.scrollToBottom();
+                onDone?.();
+            }
             : undefined;
 
         if (typeof data === 'string') {
@@ -605,6 +622,8 @@ export class VibeTerminal {
             this._terminal.write(new Uint8Array(data), afterWrite);
         } else if (ArrayBuffer.isView(data)) {
             this._terminal.write(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), afterWrite);
+        } else {
+            onDone?.();
         }
     }
 

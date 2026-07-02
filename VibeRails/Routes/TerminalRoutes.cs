@@ -167,7 +167,9 @@ public static class TerminalRoutes
                 snapshot.CapturedUtc,
                 snapshot.Cols,
                 snapshot.Rows,
-                snapshot.ScreenText));
+                snapshot.ScreenText,
+                snapshot.XtermUiBytes,
+                snapshot.XtermPngString));
         }).WithName("GetTerminalSnapshot");
 
         // WebSocket endpoint for terminal I/O

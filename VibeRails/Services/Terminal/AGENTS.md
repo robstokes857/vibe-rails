@@ -261,6 +261,12 @@ Agent/tool control surface:
 These tool endpoints are non-viewer control paths. They must not call `HandleWebSocketAsync`
 or connect to `/api/v1/terminal/ws`, because that route enforces viewer takeover semantics.
 
+Terminal snapshot responses include plain `screenText` and reserved renderer hints. `xterm_ui_bytes`
+contains base64 ANSI replay bytes generated from the backend `TerminalEmulator` grid serializer, so
+xterm.js consumers can render the current TUI state without taking over the terminal WebSocket.
+`xterm_png_string` is nullable on the backend and is intended to be filled by browser consumers after
+they render/capture the xterm canvas.
+
 ## Takeover Rules (Current)
 
 1. Local viewer A -> local viewer B:

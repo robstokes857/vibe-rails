@@ -11,7 +11,9 @@ using VibeRails.Interfaces;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
 using VibeRails.Services.AgentTools;
+using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
+using VibeRails.Services.Mcp.WebResearch;
 using VibeRails.Services.Messaging;
 using VibeRails.Services.Terminal;
 
@@ -112,6 +114,11 @@ namespace VibeRails
 
             // Shell service (cross-platform process runner)
             serviceCollection.AddScoped<IShellService, ShellService>();
+            serviceCollection.AddSingleton<IHostShellCommandService, HostShellCommandService>();
+            serviceCollection.AddHttpClient<IWebResearchService, WebResearchService>(client =>
+            {
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("VibeRails-MCP-WebResearch/1.0");
+            });
 
             // LLM CLI Environment services
             serviceCollection.AddScoped<IClaudeLlmCliEnvironment, ClaudeLlmCliEnvironment>();
@@ -141,6 +148,8 @@ namespace VibeRails
                 // from the per-request scope.
                 serviceCollection.AddScoped<SessionSearchTool>();
                 serviceCollection.AddScoped<TerminalTools>();
+                serviceCollection.AddScoped<HostShellTools>();
+                serviceCollection.AddScoped<WebResearchTools>();
 
                 serviceCollection
                     .AddMcpServer(options =>
@@ -150,7 +159,9 @@ namespace VibeRails
                     .WithHttpTransport()
                     .WithTools<RulesTool>()
                     .WithTools<SessionSearchTool>()
-                    .WithTools<TerminalTools>();
+                    .WithTools<TerminalTools>()
+                    .WithTools<HostShellTools>()
+                    .WithTools<WebResearchTools>();
             }
 
             // Claude Agent Sync Service (syncs CLAUDE.md to AGENTS.md on session lifecycle)

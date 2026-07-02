@@ -11,7 +11,9 @@ public sealed record TerminalSnapshot(
     DateTimeOffset CapturedUtc,
     int Cols,
     int Rows,
-    string[] ScreenText);
+    string[] ScreenText,
+    TerminalXtermUiBytes? XtermUiBytes = null,
+    string? XtermPngString = null);
 
 public sealed record TerminalImageCaptureResult(
     bool Success,
@@ -365,12 +367,24 @@ public class TerminalSessionService : ITerminalSessionService
         if (terminal == null || sessionId == null)
             return Task.FromResult<TerminalSnapshot?>(null);
 
+        var capture = terminal.CaptureSnapshotData();
         var snapshot = new TerminalSnapshot(
             sessionId,
             DateTimeOffset.UtcNow,
-            terminal.Cols,
-            terminal.Rows,
-            terminal.GetScreenText());
+            capture.Cols,
+            capture.Rows,
+            capture.ScreenText,
+            new TerminalXtermUiBytes(
+                ContentType: "application/vnd.viberails.xterm-ui-bytes",
+                Encoding: "base64",
+                Format: "ansi-replay",
+                Base64: Convert.ToBase64String(capture.XtermReplayBytes),
+                ByteLength: capture.XtermReplayBytes.Length,
+                Cols: capture.Cols,
+                Rows: capture.Rows,
+                IncludesScrollback: false,
+                RendererHint: "xterm.js"),
+            XtermPngString: null);
 
         return Task.FromResult<TerminalSnapshot?>(snapshot);
     }

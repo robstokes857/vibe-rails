@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 using Serilog;
+using VibeRails.Services;
 
 namespace VibeRails.Services.Mcp.Tools;
 
@@ -12,15 +13,28 @@ namespace VibeRails.Services.Mcp.Tools;
 [McpServerToolType]
 public class RulesTool
 {
-    // Pattern to extract rules from AGENTS.md: - [ENFORCEMENT] Rule text
-    private static readonly Regex RulePattern = new Regex(
+    private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(10);
+
+    // Patterns to extract rules from AGENTS.md. The bracket form is the MCP-native
+    // format; the suffix form matches agent files produced by the current UI.
+    private static readonly Regex BracketRulePattern = new Regex(
         @"^-\s*\[(WARN|COMMIT|STOP|SKIP|DISABLED)\]\s*(.+)$",
         RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
 
+    private static readonly Regex SuffixRulePattern = new Regex(
+        @"^-\s*(.+?)\s*\((WARN|COMMIT|STOP|SKIP|DISABLED)\)\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
+
     [McpServerTool]
-    [Description("Validates staged files against VCA rules defined in AGENTS.md files. Call this BEFORE attempting to commit changes. Returns validation results with any COMMIT-level violations that require acknowledgment.")]
+    [Description("Validates staged files against VCA rules defined in AGENTS.md files. Supports '- [WARN] Rule' and '- Rule (WARN)' formats. Call this BEFORE attempting to commit changes. Returns validation results with any COMMIT-level violations that require acknowledgment.")]
     public static async Task<string> ValidateVca(
         [Description("Optional working directory. If not provided, uses current directory.")] string? workingDirectory = null)
+    {
+        var report = await ValidateVcaReportAsync(workingDirectory);
+        return report.Output;
+    }
+
+    internal static async Task<VcaToolValidationReport> ValidateVcaReportAsync(string? workingDirectory = null)
     {
         try
         {
@@ -30,21 +44,21 @@ public class RulesTool
             var gitRoot = FindGitRoot(workDir);
             if (gitRoot == null)
             {
-                return "SKIP: Not in a git repository.";
+                return VcaToolValidationReport.Pass("SKIP: Not in a git repository.");
             }
 
             // Get staged files
             var stagedFiles = await GetStagedFilesAsync(gitRoot);
             if (stagedFiles.Count == 0)
             {
-                return "PASS: No staged files to validate.";
+                return VcaToolValidationReport.Pass("PASS: No staged files to validate.");
             }
 
             // Find AGENTS.md files
             var agentFiles = FindAgentFiles(gitRoot);
             if (agentFiles.Count == 0)
             {
-                return "PASS: No AGENTS.md files found. No VCA rules to check.";
+                return VcaToolValidationReport.Pass("PASS: No AGENTS.md files found. No VCA rules to check.");
             }
 
             // Parse rules from AGENTS.md files
@@ -52,24 +66,20 @@ public class RulesTool
             foreach (var agentFile in agentFiles)
             {
                 var content = await File.ReadAllTextAsync(agentFile);
-                var matches = RulePattern.Matches(content);
-                foreach (Match match in matches)
-                {
-                    var enforcement = match.Groups[1].Value.ToUpperInvariant();
-                    var ruleText = match.Groups[2].Value.Trim();
-                    allRules.Add((ruleText, enforcement, agentFile));
-                }
+                allRules.AddRange(ParseRules(content, agentFile));
             }
 
             if (allRules.Count == 0)
             {
-                return "PASS: No VCA rules defined in AGENTS.md files.";
+                return VcaToolValidationReport.Pass("PASS: No VCA rules defined in AGENTS.md files.");
             }
 
             // Validate against rules
             var violations = new List<string>();
             var warnings = new List<string>();
             var commitViolations = new List<(string RuleText, string SourceFile, string Slug)>();
+            var requiredAcknowledgments = new List<string>();
+            var hasStopViolation = false;
 
             foreach (var (ruleText, enforcement, sourceFile) in allRules)
             {
@@ -93,10 +103,13 @@ public class RulesTool
                     else if (enforcement == "COMMIT")
                     {
                         commitViolations.Add((ruleText, sourceFile, slug));
-                        violations.Add($"[COMMIT] {ruleText}: {message}\n  Acknowledgment needed: [VCA:{fileName}:{slug}] Reason: <your explanation>");
+                        var token = $"[VCA:{fileName}:{slug}]";
+                        requiredAcknowledgments.Add(token);
+                        violations.Add($"[COMMIT] {ruleText}: {message}\n  Acknowledgment needed: {token} Reason: <your explanation>");
                     }
                     else if (enforcement == "STOP")
                     {
+                        hasStopViolation = true;
                         violations.Add($"[STOP] {ruleText}: {message}\n  This violation CANNOT be overridden. Fix it before committing.");
                     }
                 }
@@ -110,7 +123,11 @@ public class RulesTool
             if (violations.Count == 0 && warnings.Count == 0)
             {
                 result.AppendLine("PASS: All VCA rules satisfied.");
-                return result.ToString();
+                return new VcaToolValidationReport(
+                    result.ToString(),
+                    HasError: false,
+                    HasStopViolation: false,
+                    RequiredAcknowledgments: []);
             }
 
             if (warnings.Count > 0)
@@ -125,8 +142,7 @@ public class RulesTool
 
             if (violations.Count > 0)
             {
-                var hasStop = violations.Any(v => v.StartsWith("[STOP]"));
-                if (hasStop)
+                if (hasStopViolation)
                 {
                     result.AppendLine("FAIL: STOP-level violations detected. Cannot commit.");
                 }
@@ -140,7 +156,7 @@ public class RulesTool
                     result.AppendLine($"  {violation}");
                 }
 
-                if (commitViolations.Count > 0 && !hasStop)
+                if (commitViolations.Count > 0 && !hasStopViolation)
                 {
                     result.AppendLine();
                     result.AppendLine("To commit, include acknowledgments like:");
@@ -152,12 +168,70 @@ public class RulesTool
                 }
             }
 
-            return result.ToString();
+            return new VcaToolValidationReport(
+                result.ToString(),
+                HasError: false,
+                HasStopViolation: hasStopViolation,
+                RequiredAcknowledgments: requiredAcknowledgments.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Failed to validate VCA rules for working directory {WorkDir}", workingDirectory ?? "current");
-            return $"ERROR: Failed to validate VCA rules: {ex.Message}";
+            return new VcaToolValidationReport(
+                $"ERROR: Failed to validate VCA rules: {ex.Message}",
+                HasError: true,
+                HasStopViolation: false,
+                RequiredAcknowledgments: []);
+        }
+    }
+
+    internal static List<(string RuleText, string Enforcement, string SourceFile)> ParseRules(
+        string content,
+        string sourceFile)
+    {
+        var rules = new List<(string RuleText, string Enforcement, string SourceFile)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rawLine in content.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r');
+            var bracketMatch = BracketRulePattern.Match(line);
+            if (bracketMatch.Success)
+            {
+                var enforcement = bracketMatch.Groups[1].Value.ToUpperInvariant();
+                var ruleText = bracketMatch.Groups[2].Value.Trim();
+                AddRuleIfNew(rules, seen, ruleText, enforcement, sourceFile);
+                continue;
+            }
+
+            var suffixMatch = SuffixRulePattern.Match(line);
+            if (suffixMatch.Success)
+            {
+                var ruleText = suffixMatch.Groups[1].Value.Trim();
+                var enforcement = suffixMatch.Groups[2].Value.ToUpperInvariant();
+                AddRuleIfNew(rules, seen, ruleText, enforcement, sourceFile);
+            }
+        }
+
+        return rules;
+    }
+
+    private static void AddRuleIfNew(
+        List<(string RuleText, string Enforcement, string SourceFile)> rules,
+        HashSet<string> seen,
+        string ruleText,
+        string enforcement,
+        string sourceFile)
+    {
+        if (string.IsNullOrWhiteSpace(ruleText))
+        {
+            return;
+        }
+
+        var key = $"{sourceFile}\n{enforcement}\n{ruleText}";
+        if (seen.Add(key))
+        {
+            rules.Add((ruleText, enforcement, sourceFile));
         }
     }
 
@@ -166,7 +240,11 @@ public class RulesTool
         var current = startPath;
         while (!string.IsNullOrEmpty(current))
         {
-            if (Directory.Exists(Path.Combine(current, ".git")))
+            // In a linked worktree or submodule, `.git` is a FILE (a gitdir pointer), not a
+            // directory — checking only Directory.Exists would walk past the real root and
+            // wrongly report "not a git repository", silently skipping all VCA validation.
+            var dotGit = Path.Combine(current, ".git");
+            if (Directory.Exists(dotGit) || File.Exists(dotGit))
             {
                 return current;
             }
@@ -180,38 +258,36 @@ public class RulesTool
     private static async Task<List<string>> GetStagedFilesAsync(string gitRoot)
     {
         var files = new List<string>();
-        try
+
+        // A git failure (git missing, index.lock, timeout, exit != 0) must NOT be
+        // indistinguishable from "no staged files" — that would fail open and let a commit
+        // through unvalidated. Throwing makes ValidateVca return "ERROR:", which blocks the hook.
+        var result = await GitProcessRunner.RunAsync(
+            "--no-pager diff --cached --name-only",
+            gitRoot,
+            GitCommandTimeout);
+
+        if (result.TimedOut)
         {
-            var process = new System.Diagnostics.Process
-            {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "git",
-                    Arguments = "diff --cached --name-only",
-                    WorkingDirectory = gitRoot,
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
+            throw new TimeoutException(
+                $"git diff --cached timed out after {(int)GitCommandTimeout.TotalSeconds} seconds in {gitRoot}.");
+        }
 
-            process.Start();
-            var output = await process.StandardOutput.ReadToEndAsync();
-            await process.WaitForExitAsync();
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"git diff --cached failed with exit code {result.ExitCode} in {gitRoot}: {result.StdErr}");
+        }
 
-            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var line in result.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmed = line.Trim();
+            if (!string.IsNullOrEmpty(trimmed))
             {
-                var trimmed = line.Trim();
-                if (!string.IsNullOrEmpty(trimmed))
-                {
-                    files.Add(Path.Combine(gitRoot, trimmed.Replace('/', Path.DirectorySeparatorChar)));
-                }
+                files.Add(Path.Combine(gitRoot, trimmed.Replace('/', Path.DirectorySeparatorChar)));
             }
         }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "Failed to get staged files from git in {GitRoot}", gitRoot);
-        }
+
         return files;
     }
 
@@ -500,4 +576,14 @@ public class RulesTool
 
         return slug;
     }
+}
+
+internal sealed record VcaToolValidationReport(
+    string Output,
+    bool HasError,
+    bool HasStopViolation,
+    IReadOnlyList<string> RequiredAcknowledgments)
+{
+    public static VcaToolValidationReport Pass(string output) =>
+        new(output, HasError: false, HasStopViolation: false, RequiredAcknowledgments: []);
 }
