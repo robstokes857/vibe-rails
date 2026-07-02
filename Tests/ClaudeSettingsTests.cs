@@ -75,7 +75,9 @@ public class ClaudeSettingsTests : IDisposable
     }
 
     [Theory]
-    [InlineData("max")]
+    [InlineData("low")]
+    [InlineData("medium")]
+    [InlineData("high")]
     [InlineData("xhigh")]
     public async Task GetSettings_AcceptsAllEffortLevels(string level)
     {
@@ -85,6 +87,34 @@ public class ClaudeSettingsTests : IDisposable
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
         Assert.Equal(level, settings.Effort);
+    }
+
+    [Fact]
+    public async Task GetSettings_IgnoresMaxEffort_SessionOnlyValue()
+    {
+        // Upstream `effortLevel` never holds "max" (session-only; rejected in settings files).
+        // A stale "max" from an older VibeRails build reads as empty; the edit modal recovers
+        // the real value from the --effort launch flag in CustomArgs.
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(@"{ ""effortLevel"": ""max"" }");
+
+        var settings = await _service.GetSettings("test-env", CancellationToken.None);
+
+        Assert.Equal("", settings.Effort);
+    }
+
+    [Fact]
+    public async Task SaveSettings_MaxEffort_RemovesEffortLevelKey()
+    {
+        // "max" is launch-flag-only; saving it must strip effortLevel from settings.json
+        // rather than persist a value Claude rejects there.
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(@"{ ""effortLevel"": ""max"" }");
+
+        await _service.SaveSettings("test-env", new ClaudeSettingsDto { Effort = "max" }, CancellationToken.None);
+
+        var writtenContent = _mockFileService.GetWrittenContent();
+        Assert.DoesNotContain("effortLevel", writtenContent);
     }
 
     [Fact]

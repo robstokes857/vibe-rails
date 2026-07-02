@@ -168,6 +168,20 @@ model = ""gpt-5.4""
     }
 
     [Fact]
+    public async Task SaveSettings_DoesNotRewriteRetiredCodexAliases()
+    {
+        // "gpt-5-codex" used to be rewritten to gpt-5.3-codex, which Codex has since retired.
+        // Per the compatibility policy the alias passes through unchanged (the env is already
+        // broken upstream; users delete/recreate rather than VibeRails carrying migration code).
+        _mockFileService.SetFileExists(false);
+
+        await _service.SaveSettings("test-env", new CodexSettingsDto { Model = "gpt-5-codex" }, CancellationToken.None);
+
+        var writtenContent = _mockFileService.GetWrittenContent();
+        Assert.Contains("model = \"gpt-5-codex\"", writtenContent);
+    }
+
+    [Fact]
     public async Task SaveSettings_InsertsRootKeysBeforeExistingTables()
     {
         var existingToml = """

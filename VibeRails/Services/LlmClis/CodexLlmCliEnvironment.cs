@@ -237,7 +237,6 @@ namespace VibeRails.Services.LlmClis
             return trimmed.ToLowerInvariant() switch
             {
                 "gpt-5" => "gpt-5.4",
-                "gpt-5-codex" => "gpt-5.3-codex",
                 "" => "",
                 _ => trimmed
             };
