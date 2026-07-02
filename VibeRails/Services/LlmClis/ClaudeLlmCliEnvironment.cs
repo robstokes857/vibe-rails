@@ -118,6 +118,9 @@ namespace VibeRails.Services.LlmClis
             catch { return false; }
         }
 
+        // Upstream `effortLevel` accepts only low/medium/high/xhigh — "max" is session-only
+        // and rejected in settings files, so it rides exclusively on the --effort launch flag
+        // in CustomArgs (the edit modal re-derives it from there).
         private static string NormalizeSettingsEffort(string? value)
         {
             return value?.Trim().ToLowerInvariant() switch
@@ -126,7 +129,6 @@ namespace VibeRails.Services.LlmClis
                 "medium" => "medium",
                 "high" => "high",
                 "xhigh" => "xhigh",
-                "max" => "max",
                 _ => ""
             };
         }

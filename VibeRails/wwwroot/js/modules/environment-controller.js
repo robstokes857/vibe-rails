@@ -765,7 +765,6 @@ export class EnvironmentController {
         const raw = (model || '').trim();
         const lower = raw.toLowerCase();
         if (lower === 'gpt-5') return 'gpt-5.4';
-        if (lower === 'gpt-5-codex') return 'gpt-5.3-codex';
         return raw;
     }
 
@@ -778,9 +777,7 @@ export class EnvironmentController {
             ['gpt-5.5', 'gpt-5.5'],
             ['gpt-5.4', 'gpt-5.4'],
             ['gpt-5.4-mini', 'gpt-5.4-mini'],
-            ['gpt-5.3-codex', 'gpt-5.3-codex'],
-            ['gpt-5.3-codex-spark', 'gpt-5.3-codex-spark'],
-            ['gpt-5.2', 'gpt-5.2']
+            ['gpt-5.3-codex-spark', 'gpt-5.3-codex-spark']
         ];
         const known = new Set(options.map(([value]) => value));
         const rendered = options.map(([value, label]) =>
@@ -804,8 +801,10 @@ export class EnvironmentController {
         // ("Model Lists") to add a newly released model or drop a retired one.
         const options = [
             ['', 'Default (Claude recommended)'],
+            ['claude-fable-5', 'claude-fable-5'],
             ['claude-opus-4-8', 'claude-opus-4-8'],
             ['claude-opus-4-7', 'claude-opus-4-7'],
+            ['claude-sonnet-5', 'claude-sonnet-5'],
             ['claude-sonnet-4-6', 'claude-sonnet-4-6'],
             ['claude-haiku-4-5', 'claude-haiku-4-5']
         ];
@@ -823,25 +822,35 @@ export class EnvironmentController {
 
     renderCopilotModelOptions(selectedModel) {
         const selected = (selectedModel || '').trim();
+        // Hand-maintained pinned list — see runbooks/custom_envs/CLI_OPTIONS.md ("Model
+        // Lists"). Availability varies by Copilot plan/policy, so these are suggestions;
+        // an unavailable model errors at launch ("is not available"), and unknown saved
+        // values survive via the `(custom)` fallback below.
         const options = [
             ['', 'Default (auto)'],
+            ['claude-fable-5', 'claude-fable-5'],
+            ['claude-sonnet-5', 'claude-sonnet-5'],
             ['claude-sonnet-4.6', 'claude-sonnet-4.6'],
             ['claude-sonnet-4.5', 'claude-sonnet-4.5'],
             ['claude-haiku-4.5', 'claude-haiku-4.5'],
+            ['claude-opus-4.8', 'claude-opus-4.8'],
+            ['claude-opus-4.8-fast', 'claude-opus-4.8-fast'],
             ['claude-opus-4.7', 'claude-opus-4.7'],
             ['claude-opus-4.6', 'claude-opus-4.6'],
-            ['claude-opus-4.6-fast', 'claude-opus-4.6-fast'],
             ['claude-opus-4.5', 'claude-opus-4.5'],
-            ['claude-sonnet-4', 'claude-sonnet-4'],
             ['gpt-5.5', 'gpt-5.5'],
             ['gpt-5.4', 'gpt-5.4'],
-            ['gpt-5.3-codex', 'gpt-5.3-codex'],
-            ['gpt-5.2-codex', 'gpt-5.2-codex'],
-            ['gpt-5.2', 'gpt-5.2'],
-            ['gpt-5.1', 'gpt-5.1'],
             ['gpt-5.4-mini', 'gpt-5.4-mini'],
+            ['gpt-5.4-nano', 'gpt-5.4-nano'],
+            ['gpt-5.3-codex', 'gpt-5.3-codex'],
             ['gpt-5-mini', 'gpt-5-mini'],
-            ['gpt-4.1', 'gpt-4.1'],
+            ['gemini-3.5-flash', 'gemini-3.5-flash'],
+            ['gemini-3.1-pro', 'gemini-3.1-pro'],
+            ['gemini-3-flash', 'gemini-3-flash'],
+            ['gemini-2.5-pro', 'gemini-2.5-pro'],
+            ['kimi-k2.7-code', 'kimi-k2.7-code'],
+            ['mai-code-1-flash', 'mai-code-1-flash'],
+            ['raptor-mini', 'raptor-mini'],
         ];
         const known = new Set(options.map(([value]) => value));
         const rendered = options.map(([value, label]) =>

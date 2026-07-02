@@ -19,9 +19,9 @@ and launch behavior before changing generated arguments:
 - Antigravity authoritative flags: run `agy --help` (and `agy models` for the live model catalog)
 - Copilot: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference
 
-Status checked against the upstream references above on June 13, 2026. agy flags
-were verified against `agy --help` (v1.0.8), since the third-party write-ups
-conflicted with each other.
+Status checked against the upstream references above on July 2, 2026. agy flags
+were re-verified against `agy --help` on this host (unchanged since v1.0.8); the
+third-party write-ups still conflict with each other, so trust `--help`.
 
 Important distinction: `CustomArgs` and `CustomPrompt` are VibeRails' launch
 contract. The DTO field lists below describe fields VibeRails currently
@@ -56,7 +56,7 @@ otherwise leave it alone (preserve it like any unknown field).
 
 ## Model Lists (hand-maintained — refresh these)
 
-The Claude, Codex, and Antigravity **Model** dropdowns are pinned, hand-curated lists. They do
+The Claude, Codex, Antigravity, and Copilot **Model** dropdowns are pinned, hand-curated lists. They do
 not auto-discover models, so this runbook is the place that owns them: when an
 upstream model ships or is retired, update the list here and in code. This is the
 main reason this section exists — a future change ("Claude shipped 4.9", "Haiku
@@ -68,24 +68,45 @@ Where they live in code
 - Claude: `renderClaudeModelOptions()`.
 - Codex: `renderCodexModelOptions()`.
 - Antigravity: `renderAntigravityModelOptions()`.
+- Copilot: `renderCopilotModelOptions()`.
 
-Current pinned values:
+Current pinned values (all refreshed 2026-07-02):
 
-- Claude (full model IDs): `claude-opus-4-8`, `claude-opus-4-7`,
-  `claude-sonnet-4-6`, `claude-haiku-4-5`, plus an empty "Default (Claude
-  recommended)" entry. (Fable — `claude-fable-5` — is still an active upstream
-  model but is intentionally NOT pinned here; it's a deliberate product choice,
-  not a retirement. Don't re-add it without a reason. Existing environments
-  pinned to it survive via the `… (custom)` fallback.)
-- Codex: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`,
-  `gpt-5.3-codex-spark`, `gpt-5.2`, plus an empty "Default (Codex recommended)"
-  entry.
+- Claude (full model IDs): `claude-fable-5`, `claude-opus-4-8`,
+  `claude-opus-4-7`, `claude-sonnet-5`, `claude-sonnet-4-6`,
+  `claude-haiku-4-5`, plus an empty "Default (Claude recommended)" entry.
+  (Fable — `claude-fable-5` — was previously left unpinned as a product choice;
+  Rob asked to add it on 2026-07-02. It needs Claude Code ≥ 2.1.170 and is not
+  the upstream default; safety-flagged requests auto-fall-back to Opus.)
+- Codex: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`, plus an
+  empty "Default (Codex recommended)" entry. (`gpt-5.3-codex` and `gpt-5.2`
+  were dropped 2026-07-02 — no longer in the `codex debug models` catalog. The
+  old `gpt-5-codex` → `gpt-5.3-codex` alias rewrite was removed with them, in
+  both `normalizeCodexModel()` and `CodexLlmCliEnvironment.NormalizeModel()`;
+  `gpt-5` → `gpt-5.4` stays because its target is still served.)
 - Antigravity (agy): `Gemini 3.5 Flash (Medium)`, `Gemini 3.5 Flash (High)`,
   `Gemini 3.5 Flash (Low)`, `Gemini 3.1 Pro (Low)`, `Gemini 3.1 Pro (High)`,
   `Claude Sonnet 4.6 (Thinking)`, `Claude Opus 4.6 (Thinking)`, `GPT-OSS 120B (Medium)`,
   plus an empty "Default (Antigravity recommended)" entry. NOTE: agy's `--model` value
   is the full display string verbatim — spaces and parens included — e.g.
-  `--model "Gemini 3.5 Flash (Low)"`, not a slug. (Verified on this host 2026-06-13.)
+  `--model "Gemini 3.5 Flash (Low)"`, not a slug. (Re-verified 2026-07-02 against
+  the codelabs reference + community write-ups — the catalog is unchanged since
+  v1.0.7; `agy models` prints nothing in a non-TTY, so it can't be scripted.)
+- Copilot: `claude-fable-5`, `claude-sonnet-5`, `claude-sonnet-4.6`,
+  `claude-sonnet-4.5`, `claude-haiku-4.5`, `claude-opus-4.8`,
+  `claude-opus-4.8-fast`, `claude-opus-4.7`, `claude-opus-4.6`,
+  `claude-opus-4.5`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`,
+  `gpt-5.3-codex`, `gpt-5-mini`, `gemini-3.5-flash`, `gemini-3.1-pro`,
+  `gemini-3-flash`, `gemini-2.5-pro`, `kimi-k2.7-code`, `mai-code-1-flash`,
+  `raptor-mini`, plus an empty "Default (auto)" entry (empty omits `--model`;
+  `--model auto` is Copilot's explicit auto-selection value). Dropped
+  2026-07-02: `claude-sonnet-4`, `claude-opus-4.6-fast` (deprecated in CLI
+  v1.0.66, replaced by `claude-opus-4.8-fast`), `gpt-5.2-codex`, `gpt-5.2`,
+  `gpt-5.1`, `gpt-4.1` — none are in the current supported-models table.
+  IMPORTANT: Copilot availability is plan/policy-gated, so "Model X is not
+  available" at launch does NOT mean the ID is wrong (on this host even
+  `claude-opus-4.7` is gated while `claude-sonnet-5` works). The pinned list
+  follows the docs' supported-in-CLI table, not one account's entitlements.
 
 The rule:
 
@@ -105,10 +126,18 @@ How to verify what's current:
   maps to which version).
 - Codex: run `codex debug models` to print Codex's live model catalog as JSON, and
   the Codex config reference at https://developers.openai.com/codex/config-reference.
+  Filter on `"visibility": "list"` — hidden entries (e.g. `codex-auto-review`)
+  are not user-selectable.
 - Antigravity: run `agy models` — it prints the catalog, but as an INTERACTIVE picker
-  with no `--json`/scriptable flag (it hangs in a non-TTY), so read the printed names
-  and update the list by hand. Hands-on reference:
+  with no `--json`/scriptable flag (it prints NOTHING in a non-TTY), so read the
+  printed names in a real terminal and update the list by hand. Hands-on reference:
   https://codelabs.developers.google.com/antigravity-cli-hands-on
+- Copilot: the supported-models table at
+  https://docs.github.com/en/copilot/reference/ai-models/supported-models (CLI
+  column) plus release notes at https://github.com/github/copilot-cli/releases.
+  You can positively confirm an ID with
+  `copilot -p "Reply with just: ok" --model <id>` (a reply proves the ID), but a
+  "not available" error is inconclusive — it also fires for plan-gated models.
 
 ## Current Managed Settings
 
@@ -124,11 +153,20 @@ UI-managed launch and prompt settings:
 - Model: `--model`; pinned full IDs from `renderClaudeModelOptions()` (see Model
   Lists). Also persisted as the `model` key in `settings.json`.
 - Effort: `--effort`; values `low`, `medium`, `high`, `xhigh`, `max`. Also
-  persisted as `effortLevel` in `settings.json`.
+  persisted as `effortLevel` in `settings.json` — EXCEPT `max`, which upstream
+  treats as session-only and rejects in settings files, so `max` rides on the
+  `--effort` flag alone (`ClaudeLlmCliEnvironment.NormalizeSettingsEffort`
+  strips it on read and write; the edit modal recovers it from `CustomArgs`).
+  Available levels vary by model (e.g. Opus 4.6 / Sonnet 4.6 have no `xhigh`);
+  the dropdown stays the full set and Claude ignores an unsupported level.
 - Fast Mode: settings-file only — `"fastMode": true` in `settings.json` (same as
   the in-session `/fast`). There is no `--fast` launch flag, so this round-trips
   purely through the settings API, never `CustomArgs`. Opus-only (Claude switches
-  to Opus when enabled); research preview, billed via usage credits.
+  to Opus when enabled); research preview, billed via usage credits. The
+  `"fastMode"` key was re-verified current in the fast-mode docs 2026-07-02
+  (it no longer appears in the settings-reference table, but the fast-mode page
+  documents it explicitly). Upstream supports fast mode on Opus 4.8 and 4.7
+  only; Opus 4.7 fast mode is deprecated and slated for removal 2026-07-24.
 - No Session Persistence: `--no-session-persistence`.
 - System Prompt: `--system-prompt`.
 - YOLO Mode: `--dangerously-skip-permissions`. This is the only permission control.
@@ -212,8 +250,11 @@ UI-managed launch and prompt settings:
 - Initial Message: stored in `CustomPrompt`; launched through
   `--interactive=<text>`.
 - Mode: `--mode`; values `interactive`, `plan`, `autopilot`.
-- Model: `--model`; current suggested values include Claude, GPT-5, GPT-4.1,
-  and Codex model names from `renderCopilotModelOptions()`.
+- Model: `--model`; pinned values from `renderCopilotModelOptions()` (see Model
+  Lists — Copilot is now a maintained pinned list like the others). Empty means
+  no `--model` flag; `auto` is Copilot's explicit auto-selection value.
+  Availability is plan/policy-gated per account, so the list is a superset of
+  what any one account can launch.
 - Permissions: `--allow-all-tools` for tool-only auto-approval, or `--yolo`
   for all permissions (`--allow-all` equivalent).
 - Don't Ask User: `--no-ask-user`.
