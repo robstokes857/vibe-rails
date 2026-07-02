@@ -56,13 +56,13 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `open_terminal` | `TerminalTools.OpenTerminal` | Opens a new VibeRails terminal tab, defaulting to a plain shell. |
 | `send_terminal_input` | `TerminalTools.SendTerminalInput` | Sends text input to a terminal tab without attaching/taking over the viewer WebSocket. |
 | `get_terminal_snapshot` | `TerminalTools.GetTerminalSnapshot` | Returns a structured terminal snapshot with plain text plus reserved xterm renderer payload fields. |
-| `run_shell_command` | `HostShellTools.RunShellCommand` | Runs a host shell command through a reusable backend shell worker pool. |
-| `get_shell_command_status` | `HostShellTools.GetShellCommandStatus` | Reads status/output for a queued or running shell command job. |
-| `cancel_shell_command` | `HostShellTools.CancelShellCommand` | Cancels a queued/running shell command job and recycles the worker. |
-| `web_search` | `WebResearchTools.WebSearch` | Searches the web and returns compact result summaries. |
-| `web_fetch` | `WebResearchTools.WebFetch` | Fetches any absolute HTTP/HTTPS URL as the local VibeRails process and returns cleaned text plus links. |
 
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
+
+> **Not currently exposed (security review 2026-07-02):** `run_shell_command` / `get_shell_command_status` /
+> `cancel_shell_command` (`HostShellTools`) and `web_search` / `web_fetch` (`WebResearchTools`) are kept in the
+> tree but no longer registered or listed via `WithTools<...>()` in either transport. The sections below
+> describe the retained implementations.
 
 ### Reserved Renderer Payload Fields
 
@@ -105,6 +105,8 @@ the viewer WebSocket, so tool-driven input does not disconnect or take over a hu
 
 ### Host shell command tools
 
+> **Not currently exposed** (security review 2026-07-02) — kept in-tree, not registered. Details retained below.
+
 `HostShellTools` is an **instance tool** backed by `IHostShellCommandService`. It is separate from
 the human terminal-tab tools: it runs host commands through a bounded reusable shell worker pool
 implemented with `Channel<T>`, `ConcurrentDictionary`, `CancellationTokenSource`, and async process
@@ -114,6 +116,8 @@ state may be dirty. Supported shells are PowerShell 7+ (`pwsh`) on Windows, `bas
 run on the host, not a sandbox.
 
 ### Web research tools
+
+> **Not currently exposed** (security review 2026-07-02) — kept in-tree, not registered. Details retained below.
 
 `WebResearchTools` is an **instance tool** backed by `IWebResearchService` and `IHttpClientFactory`.
 It provides no-key web search (DuckDuckGo HTML) and HTTP/HTTPS page fetch/cleaning. Fetches are

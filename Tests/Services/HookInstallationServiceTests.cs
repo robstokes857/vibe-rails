@@ -261,12 +261,32 @@ echo ""Another hook""
         }
 
         [Fact]
-        public async Task InstallHooksAsync_DoesNotRollbackPreCommit()
+        public async Task InstallHooksAsync_RollsBackPreCommit_WhenCommitMsgInstallFails()
         {
-            var result = await _service.InstallHooksAsync(_testRepoPath, CancellationToken.None);
+            // Arrange: pre-create a read-only commit-msg file so its write fails while the
+            // pre-commit write succeeds. A partial install must roll back so nothing is left
+            // reporting as installed while acknowledgment enforcement is actually missing.
+            var commitMsgPath = Path.Combine(_hooksDir, "commit-msg");
+            await File.WriteAllTextAsync(commitMsgPath, "existing content", TestContext.Current.CancellationToken);
+            File.SetAttributes(commitMsgPath, FileAttributes.ReadOnly);
 
-            Assert.True(result.Success);
-            Assert.True(File.Exists(Path.Combine(_hooksDir, "pre-commit")));
+            try
+            {
+                // Act
+                var result = await _service.InstallHooksAsync(_testRepoPath, CancellationToken.None);
+
+                // Assert
+                Assert.False(result.Success);
+                Assert.False(File.Exists(Path.Combine(_hooksDir, "pre-commit")));
+                Assert.False(_service.IsHookInstalled(_testRepoPath));
+            }
+            finally
+            {
+                if (File.Exists(commitMsgPath))
+                {
+                    File.SetAttributes(commitMsgPath, FileAttributes.Normal);
+                }
+            }
         }
 
         [Fact]

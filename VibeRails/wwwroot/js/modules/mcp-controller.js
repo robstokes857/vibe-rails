@@ -1,6 +1,8 @@
 import { getXtermPayload, renderXtermPayload } from './terminal-snapshot-renderer.js';
+import { escapeHtml } from './utils.js';
 
-const esc = v => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+// Alias the shared escaper (utils.js) so this module keeps no divergent copy of the logic.
+const esc = escapeHtml;
 
 // Starter arguments for the known local tools so a bare "Call" works without hand-writing JSON.
 const MCP_ARG_EXAMPLES = {
@@ -526,6 +528,17 @@ export class McpController {
         for (const dispose of this.resultDisposers.splice(0)) {
             try { dispose(); } catch { /* no-op */ }
         }
+    }
+
+    // Called by app.loadView() before switching views so the global 'message' listener and any
+    // rendered xterm.js instances don't outlive this view. Idempotent and safe to call before
+    // the view has ever been loaded.
+    unload() {
+        if (this._onRemoteMessage) {
+            window.removeEventListener('message', this._onRemoteMessage);
+            this._onRemoteMessage = null;
+        }
+        this.disposeRenderedResults();
     }
 
     formatJson(value) {

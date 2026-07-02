@@ -365,8 +365,6 @@ export class VibeControlApp {
         return {
             remoteAccess: false,
             apiKey: '',
-            enablePrerelease: false,
-            developerOptions: false,
             useVsCodeTheme: false,
             mcpEnabled: true,
             computerName: '',
@@ -388,16 +386,12 @@ export class VibeControlApp {
         }
     }
 
-    isDeveloperOptionsEnabled() {
-        return this.appSettings?.developerOptions === true;
-    }
-
     handleBrandLogoClick() {
         const now = Date.now();
         this.brandClickTimestamps.push(now);
         this.brandClickTimestamps = this.brandClickTimestamps.filter(timestamp => now - timestamp <= 900);
 
-        if (this.brandClickTimestamps.length < 3 || !this.isDeveloperOptionsEnabled()) {
+        if (this.brandClickTimestamps.length < 3) {
             return;
         }
 
@@ -674,6 +668,9 @@ export class VibeControlApp {
     loadView(view, data = {}) {
         this.updateActiveSubNav(view);
         this.terminalController?.resetLayoutStateForNavigation();
+        // Tear down the MCP Explorer's global listener / xterm instances when navigating away
+        // (and before re-entering, which rebuilds them). Idempotent.
+        this.mcpController?.unload?.();
         this.applyViewLayoutState(view);
         this.queueScrollPageToTop();
         const views = {

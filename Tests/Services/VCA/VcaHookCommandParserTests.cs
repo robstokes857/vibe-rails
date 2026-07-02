@@ -55,36 +55,23 @@ public class VcaHookCommandParserTests
 
 public class VcaHookValidationAnalyzerTests
 {
-    [Fact]
-    public void AnalyzeValidationOutput_ExtractsCommitAcknowledgments()
-    {
-        var analyzer = new VcaHookValidationAnalyzer();
-        const string output = """
-            COMMIT-LEVEL VIOLATIONS (require acknowledgment in commit message):
-              [COMMIT] Log all file changes: one file missing
-                Acknowledgment needed: [VCA:AGENTS.md:log-all-file-changes] Reason: <your explanation>
-
-            To commit, include acknowledgments like:
-              [VCA:AGENTS.md:log-all-file-changes] Reason: <explain why this is acceptable>
-            """;
-
-        var summary = analyzer.Analyze(output);
-
-        Assert.True(summary.HasCommitViolations);
-        Assert.False(summary.HasStopViolation);
-        Assert.False(analyzer.ShouldBlockPreCommit(summary));
-        Assert.Equal(new[] { "[VCA:AGENTS.md:log-all-file-changes]" }, summary.RequiredAcknowledgments);
-    }
+    private static VcaHookValidationSummary Summary(
+        bool hasError = false,
+        bool hasStopViolation = false,
+        bool hasCommitViolations = false,
+        params string[] requiredAcknowledgments) =>
+        new(hasError, hasStopViolation, hasCommitViolations, requiredAcknowledgments);
 
     [Fact]
-    public void AnalyzeValidationOutput_BlocksPreCommitForStopOrError()
+    public void ShouldBlockPreCommit_BlocksForStopOrError_ButNotForCommitViolations()
     {
         var analyzer = new VcaHookValidationAnalyzer();
-        var stopSummary = analyzer.Analyze("FAIL: STOP-level violations detected.\n[STOP] Package file changes");
-        var errorSummary = analyzer.Analyze("ERROR: Failed to validate VCA rules");
 
-        Assert.True(analyzer.ShouldBlockPreCommit(stopSummary));
-        Assert.True(analyzer.ShouldBlockPreCommit(errorSummary));
+        Assert.True(analyzer.ShouldBlockPreCommit(Summary(hasStopViolation: true)));
+        Assert.True(analyzer.ShouldBlockPreCommit(Summary(hasError: true)));
+        // COMMIT-level violations are acknowledged in the commit message, not blocked here.
+        Assert.False(analyzer.ShouldBlockPreCommit(
+            Summary(hasCommitViolations: true, requiredAcknowledgments: "[VCA:AGENTS.md:log-all-file-changes]")));
     }
 
     [Fact]

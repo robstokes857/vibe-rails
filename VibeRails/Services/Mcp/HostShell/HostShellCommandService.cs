@@ -548,15 +548,20 @@ public sealed class HostShellCommandService : IHostShellCommandService, IAsyncDi
 
         private static string BuildPosixCommand(ShellJob job, string marker)
         {
-            var wd = PosixSingleQuote(job.WorkingDirectory);
-            var markerValue = PosixSingleQuote(marker);
+            var wd = ShellArgSanitizer.QuotePosixSingleQuoted(job.WorkingDirectory);
+            var markerValue = ShellArgSanitizer.QuotePosixSingleQuoted(marker);
             return string.Join("\n", new[]
             {
                 $"__vbr_marker={markerValue}",
                 "(",
                 $"  cd {wd} || exit 125",
                 job.Command,
-                ")",
+                // Redirect the subshell's stdin from /dev/null. The worker feeds commands into a
+                // persistent shell over a single stdin pipe; without this a command that reads
+                // stdin (cat, read, ssh, an interactive prompt) would consume the wrapper's own
+                // trailing marker lines instead of hitting EOF, so the completion marker is never
+                // emitted and the job hangs until timeout (then the worker is force-recycled).
+                ") </dev/null",
                 "__vbr_exit=$?",
                 "printf '%s:%s\\n' \"$__vbr_marker\" \"$__vbr_exit\"",
                 "printf '%s:stderr\\n' \"$__vbr_marker\" >&2"
@@ -598,8 +603,6 @@ public sealed class HostShellCommandService : IHostShellCommandService, IAsyncDi
         }
 
         private static string PowerShellSingleQuote(string value) => value.Replace("'", "''");
-
-        private static string PosixSingleQuote(string value) => "'" + value.Replace("'", "'\\''") + "'";
 
         public async Task ResetAsync()
         {

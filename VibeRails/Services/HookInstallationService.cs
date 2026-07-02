@@ -69,9 +69,16 @@ namespace VibeRails.Services
             {
                 _logger.LogError("Commit-msg hook installation failed: {Error}", commitMsgResult.ErrorMessage);
 
+                // Roll back the pre-commit hook so a failed install never leaves a partial state.
+                // The pre-commit hook only WARNS on COMMIT-level violations; the acknowledgment
+                // enforcement lives in the commit-msg hook. Leaving pre-commit behind would make
+                // IsHookInstalled report "installed" while that enforcement is silently missing.
+                _logger.LogInformation("Rolling back pre-commit hook due to commit-msg installation failure");
+                await UninstallPreCommitHookAsync(repoPath, cancellationToken);
+
                 return HookInstallationResult.Fail(
                     HookInstallationError.PartialInstallationFailure,
-                    "Commit-msg hook installation failed; pre-commit hook remains installed",
+                    "Commit-msg hook installation failed, rolled back pre-commit hook",
                     commitMsgResult.ErrorMessage
                 );
             }

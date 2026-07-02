@@ -30,8 +30,6 @@ public static class AppSettingsRoutes
             // Empty apiKey means "unchanged" (masked value was not edited)
             if (!string.IsNullOrEmpty(settingsDto.ApiKey))
                 settings.ApiKey = settingsDto.ApiKey;
-            settings.EnablePrerelease = settingsDto.EnablePrerelease;
-            settings.DeveloperOptions = settingsDto.DeveloperOptions;
             settings.UseVsCodeTheme = settingsDto.UseVsCodeTheme;
             // MCP registration is always on. Keep the field true for old clients/settings files.
             settings.McpEnabled = true;
@@ -47,8 +45,6 @@ public static class AppSettingsRoutes
             ParserConfigs.SetRemoteAccess(remoteAccess);
             if (!string.IsNullOrEmpty(settingsDto.ApiKey))
                 ParserConfigs.SetApiKey(settingsDto.ApiKey);
-            ParserConfigs.SetEnablePrerelease(settingsDto.EnablePrerelease);
-            ParserConfigs.SetDeveloperOptions(settingsDto.DeveloperOptions);
             ParserConfigs.SetUseVsCodeTheme(settingsDto.UseVsCodeTheme);
             ParserConfigs.SetMcpEnabled(true);
 
@@ -79,8 +75,6 @@ public static class AppSettingsRoutes
         return new AppSettingsDto(
             settings.RemoteAccess,
             maskedKey,
-            settings.EnablePrerelease,
-            settings.DeveloperOptions,
             settings.UseVsCodeTheme,
             true,
             NormalizeComputerName(settings.ComputerName),

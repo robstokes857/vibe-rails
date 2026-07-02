@@ -114,11 +114,6 @@ namespace VibeRails
 
             // Shell service (cross-platform process runner)
             serviceCollection.AddScoped<IShellService, ShellService>();
-            serviceCollection.AddSingleton<IHostShellCommandService, HostShellCommandService>();
-            serviceCollection.AddHttpClient<IWebResearchService, WebResearchService>(client =>
-            {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("VibeRails-MCP-WebResearch/1.0");
-            });
 
             // LLM CLI Environment services
             serviceCollection.AddScoped<IClaudeLlmCliEnvironment, ClaudeLlmCliEnvironment>();
@@ -148,8 +143,10 @@ namespace VibeRails
                 // from the per-request scope.
                 serviceCollection.AddScoped<SessionSearchTool>();
                 serviceCollection.AddScoped<TerminalTools>();
-                serviceCollection.AddScoped<HostShellTools>();
-                serviceCollection.AddScoped<WebResearchTools>();
+                // run_shell_command (HostShellTools) and web_search/web_fetch (WebResearchTools) are
+                // intentionally not exposed for now (security review 2026-07-02). Classes kept in-tree;
+                // to restore, re-add AddScoped<...>() here, WithTools<...>() in the chain below, and the
+                // backing DI (AddSingleton<IHostShellCommandService,...>() / AddWebResearchClient()).
 
                 serviceCollection
                     .AddMcpServer(options =>
@@ -159,9 +156,7 @@ namespace VibeRails
                     .WithHttpTransport()
                     .WithTools<RulesTool>()
                     .WithTools<SessionSearchTool>()
-                    .WithTools<TerminalTools>()
-                    .WithTools<HostShellTools>()
-                    .WithTools<WebResearchTools>();
+                    .WithTools<TerminalTools>();
             }
 
             // Claude Agent Sync Service (syncs CLAUDE.md to AGENTS.md on session lifecycle)

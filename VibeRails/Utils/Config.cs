@@ -13,8 +13,6 @@ public class Settings
     public string InstallDirName { get; set; } = PathConstants.DEFAULT_INSTALL_DIR_NAME;
     public string ApiKey { get; set; } = string.Empty;
     public bool RemoteAccess { get; set; } = false;
-    public bool EnablePrerelease { get; set; } = false;
-    public bool DeveloperOptions { get; set; } = false;
     public bool UseVsCodeTheme { get; set; } = false;
     // Retained for settings.json/API compatibility. MCP registration is always on.
     public bool McpEnabled { get; set; } = true;
