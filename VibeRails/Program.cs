@@ -9,6 +9,7 @@ using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.VCA.Hooks;
 
 using VibeRails.Utils;
 
@@ -122,6 +123,14 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) =>
 if (McpStdioHost.IsRequested(args))
 {
     await McpStdioHost.RunAsync(args);
+    return;
+}
+
+// Git hook mode: runs without Kestrel/auth/browser startup. The host owns its
+// small DI container so this launch path stays isolated from web/server startup.
+if (VcaHookProcessHost.IsRequested(args))
+{
+    Environment.ExitCode = await VcaHookProcessHost.RunAsync(args);
     return;
 }
 

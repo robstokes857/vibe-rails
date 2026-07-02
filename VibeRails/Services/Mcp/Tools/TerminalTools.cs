@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
 using ModelContextProtocol.Server;
 using VibeRails.DTOs;
 using VibeRails.Services.AgentTools;
@@ -98,7 +99,7 @@ public sealed class TerminalTools
     }
 
     [McpServerTool]
-    [Description("Read the current plain-text screen snapshot from a VibeRails terminal tab.")]
+    [Description("Read the current terminal snapshot as JSON. The response includes screenText plus reserved xterm_ui_bytes/xterm_png_string fields for UI renderers.")]
     public async Task<string> GetTerminalSnapshot(
         [Description("Target terminal tab id. If omitted, uses the current tab when available.")] string? tabId = null)
     {
@@ -110,15 +111,9 @@ public sealed class TerminalTools
                 return "FAIL: No active terminal session was found for that tab.";
             }
 
-            var sb = new StringBuilder();
-            sb.AppendLine($"tab={snapshot.TabId ?? "?"} session={snapshot.SessionId} size={snapshot.Cols}x{snapshot.Rows} captured={snapshot.CapturedUtc:u}");
-            sb.AppendLine("screen:");
-            foreach (var line in snapshot.ScreenText)
-            {
-                sb.AppendLine(line.TrimEnd());
-            }
-
-            return sb.ToString().TrimEnd();
+            return JsonSerializer.Serialize(
+                snapshot,
+                AppJsonSerializerContext.Default.TerminalSnapshotResponse);
         }
         catch (Exception ex)
         {

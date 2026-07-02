@@ -4430,6 +4430,48 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     overflow-wrap: anywhere;
 }
 
+.vb-prompt-template-fields {
+    max-height: 24rem;
+    overflow: auto;
+    padding-right: 0.25rem;
+}
+
+.vb-prompt-template-preview {
+    min-height: 18rem;
+    max-height: 28rem;
+    margin: 0;
+    padding: 0.75rem 0.85rem;
+    overflow: auto;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: var(--color-text);
+    font-size: 0.82rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.vb-prompt-template-token {
+    display: inline;
+    padding: 0.08rem 0.22rem;
+    border: 1px solid rgba(154, 198, 197, 0.35);
+    border-radius: 4px;
+    background: rgba(154, 198, 197, 0.12);
+    color: var(--color-accent);
+    cursor: pointer;
+}
+
+.vb-prompt-template-token:focus {
+    outline: 2px solid rgba(154, 198, 197, 0.45);
+    outline-offset: 2px;
+}
+
+.vb-prompt-template-token-empty {
+    border-style: dashed;
+    color: var(--color-warning);
+}
+
 /* Danger Zones */
 .danger-card .card-body {
     background: rgba(229, 115, 115, 0.05);
@@ -7975,6 +8017,64 @@ input.form-control:disabled {
 .ch-item.ch-item-menu-active .ch-item-menu-btn {
     color: var(--ch-item-accent);
     background: color-mix(in srgb, var(--ch-item-accent) 18%, transparent);
+}
+
+/* MCP Explorer — reserved renderer payloads */
+.mcp-xterm-preview {
+    margin: 0 0 12px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 10%, transparent);
+    border-radius: 8px;
+    background: #1e1e1e;
+}
+
+.mcp-xterm-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 32px;
+    padding: 7px 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 9%, transparent);
+    color: color-mix(in srgb, var(--color-text, #f8fafc) 72%, transparent);
+    font-family: var(--vb-font-mono);
+    font-size: 0.68rem;
+    line-height: 1.25;
+}
+
+.mcp-xterm-toolbar span:last-child {
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 80%, transparent);
+    text-align: right;
+}
+
+.mcp-xterm-host {
+    min-height: 220px;
+    max-height: 62vh;
+    overflow: auto;
+    background: #1e1e1e;
+}
+
+.mcp-xterm-host .vb-terminal-element {
+    min-height: 220px;
+}
+
+.mcp-xterm-png {
+    border-top: 1px solid color-mix(in srgb, var(--color-text, #f8fafc) 9%, transparent);
+    background: color-mix(in srgb, #1e1e1e 92%, #000 8%);
+}
+
+.mcp-xterm-png img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    background: #1e1e1e;
+}
+
+.mcp-xterm-fallback {
+    padding: 14px;
+    color: color-mix(in srgb, var(--color-text-muted, #94a3b8) 90%, transparent);
+    font-family: var(--vb-font-mono);
+    font-size: 0.78rem;
 }
 
 /* Context menu — tighter, refined dividers, mono labels for IDs */

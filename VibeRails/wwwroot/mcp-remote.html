@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <title>MCP Remote (isolated)</title>
+    <!--
+      This page is loaded ONLY inside a sandboxed iframe (sandbox="allow-scripts", no
+      allow-same-origin) by the MCP Explorer. It therefore runs at an opaque/null origin
+      with no access to VibeRails cookies, localStorage, or the parent DOM. It renders
+      UNTRUSTED tool metadata/results from an arbitrary external MCP server. All backend
+      calls are brokered by the parent over postMessage — this page never fetches anything
+      itself, and it renders every value with HTML escaping. Do not add fetch()/img/script
+      injection of remote data here; keep it isolated.
+    -->
+    <style>
+        :root { color-scheme: dark; }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 12px;
+            background: #16181d;
+            color: #e6e9ef;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            font-size: 13px;
+        }
+        .warn {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+            padding: 8px 10px;
+            margin-bottom: 10px;
+            border: 1px solid #7f1d1d;
+            border-radius: 6px;
+            background: rgba(239, 68, 68, 0.12);
+            color: #fca5a5;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        .layout { display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); gap: 12px; }
+        .panel { border: 1px solid #2a2f3a; border-radius: 6px; background: #1b1e25; min-height: 320px; }
+        .panel-head { padding: 8px 10px; border-bottom: 1px solid #2a2f3a; display: flex; justify-content: space-between; align-items: center; }
+        .panel-head strong { font-size: 12px; }
+        .muted { color: #8b93a3; }
+        .body { padding: 8px; overflow: auto; max-height: 60vh; }
+        .empty { padding: 16px; text-align: center; color: #8b93a3; }
+        .tool { width: 100%; text-align: left; display: grid; gap: 3px; padding: 8px; margin-bottom: 6px; border: 1px solid #2a2f3a; border-radius: 5px; background: #20242d; color: inherit; cursor: pointer; }
+        .tool:hover, .tool.sel { border-color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
+        .tool-name { font-weight: 700; font-size: 12.5px; overflow-wrap: anywhere; }
+        .tool-desc { color: #8b93a3; font-size: 11.5px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .detail-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+        .detail-head h3 { margin: 0; font-size: 15px; color: #93c5fd; overflow-wrap: anywhere; }
+        .desc { color: #b8c0cf; font-size: 12.5px; line-height: 1.5; margin: 6px 0 10px; }
+        label { display: block; margin: 10px 0 4px; color: #8b93a3; font-size: 11px; font-weight: 700; }
+        .control { width: 100%; padding: 7px 8px; border: 1px solid #2a2f3a; border-radius: 4px; background: #12141a; color: #e6e9ef; font: inherit; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; }
+        textarea.control { min-height: 90px; resize: vertical; }
+        .pre { margin: 0; padding: 8px; border: 1px solid #2a2f3a; border-radius: 4px; background: #12141a; white-space: pre-wrap; word-break: break-word; overflow: auto; max-height: 220px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; line-height: 1.5; }
+        .btn { padding: 7px 12px; border: 1px solid #2a2f3a; border-radius: 4px; background: #262b35; color: #e6e9ef; font: inherit; font-weight: 700; font-size: 12px; cursor: pointer; }
+        .btn.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+        .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+        .banner { min-height: 16px; margin: 6px 0; font-size: 12px; color: #8b93a3; }
+        .banner.ok { color: #4ade80; }
+        .banner.error { color: #fca5a5; }
+    </style>
+</head>
+<body>
+    <div class="warn">
+        <span>&#9888;</span>
+        <span><strong>Isolated remote MCP view.</strong> This server is untrusted. Its responses are rendered here in a
+        sandboxed frame with no access to your VibeRails session. Do not paste secrets into tool arguments.</span>
+    </div>
+
+    <div class="layout">
+        <aside class="panel">
+            <div class="panel-head"><strong>Tools</strong><span class="muted" data-count>0</span></div>
+            <div class="body" data-list><div class="empty">Not connected.</div></div>
+        </aside>
+        <section class="panel">
+            <div class="panel-head"><strong>Inspector</strong><span class="muted" data-status></span></div>
+            <div class="body" data-detail><div class="empty">Connect to a remote MCP endpoint to inspect tools.</div></div>
+        </section>
+    </div>
+
+    <script>
+        (function () {
+            'use strict';
+            var esc = function (v) {
+                return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+                });
+            };
+            var fmt = function (v) {
+                try { return JSON.stringify(v == null ? {} : v, null, 2); } catch (e) { return String(v == null ? '' : v); }
+            };
+
+            var tools = [];
+            var selected = null;
+
+            var els = {
+                count: document.querySelector('[data-count]'),
+                list: document.querySelector('[data-list]'),
+                detail: document.querySelector('[data-detail]'),
+                status: document.querySelector('[data-status]')
+            };
+
+            function post(msg) {
+                // The parent validates event.source; an opaque-origin frame can only target '*'.
+                window.parent.postMessage(msg, '*');
+            }
+
+            function setStatus(text) { if (els.status) { els.status.textContent = text || ''; } }
+
+            function renderList() {
+                els.count.textContent = String(tools.length);
+                if (!tools.length) { els.list.innerHTML = '<div class="empty">No tools.</div>'; return; }
+                els.list.innerHTML = tools.map(function (t) {
+                    return '<button class="tool' + (selected === t.name ? ' sel' : '') + '" data-tool="' + esc(t.name) + '" type="button">' +
+                        '<span class="tool-name">' + esc(t.name) + '</span>' +
+                        '<span class="tool-desc">' + esc(t.title || t.description || 'No description') + '</span>' +
+                        '</button>';
+                }).join('');
+            }
+
+            function renderDetail() {
+                var tool = tools.find(function (t) { return t.name === selected; });
+                if (!tool) { els.detail.innerHTML = '<div class="empty">Select a tool.</div>'; return; }
+                els.detail.innerHTML =
+                    '<div class="detail-head"><h3>' + esc(tool.name) + '</h3>' +
+                    '<button class="btn primary" data-call type="button">Call</button></div>' +
+                    '<p class="desc">' + esc(tool.description || tool.title || 'No description') + '</p>' +
+                    '<label>Arguments JSON</label>' +
+                    '<textarea class="control" data-args spellcheck="false">{}</textarea>' +
+                    '<div class="banner" data-banner></div>' +
+                    '<label>Input Schema</label>' +
+                    '<pre class="pre">' + esc(fmt(tool.inputSchema || {})) + '</pre>' +
+                    '<label>Result</label>' +
+                    '<pre class="pre" data-result>&#8212;</pre>';
+                els.detail.querySelector('[data-call]').addEventListener('click', onCall);
+            }
+
+            function onCall() {
+                var tool = tools.find(function (t) { return t.name === selected; });
+                if (!tool) { return; }
+                var banner = els.detail.querySelector('[data-banner]');
+                var args = {};
+                try {
+                    var raw = els.detail.querySelector('[data-args]').value.trim();
+                    if (raw) { args = JSON.parse(raw); }
+                } catch (e) {
+                    banner.textContent = 'Invalid JSON: ' + (e.message || e);
+                    banner.className = 'banner error';
+                    return;
+                }
+                banner.textContent = 'Calling…';
+                banner.className = 'banner';
+                post({ type: 'mcp-remote-call', name: tool.name, args: args });
+            }
+
+            els.list.addEventListener('click', function (e) {
+                var item = e.target.closest('[data-tool]');
+                if (!item) { return; }
+                selected = item.getAttribute('data-tool');
+                renderList();
+                renderDetail();
+            });
+
+            window.addEventListener('message', function (event) {
+                if (event.source !== window.parent) { return; }
+                var data = event.data;
+                if (!data || typeof data !== 'object') { return; }
+                switch (data.type) {
+                    case 'mcp-remote-tools':
+                        tools = Array.isArray(data.tools) ? data.tools : [];
+                        selected = tools.length ? tools[0].name : null;
+                        setStatus(data.message || (tools.length + ' tool(s)'));
+                        renderList();
+                        renderDetail();
+                        break;
+                    case 'mcp-remote-status':
+                        setStatus(data.message || '');
+                        break;
+                    case 'mcp-remote-result':
+                        if (data.name !== selected) { break; }
+                        var banner = els.detail.querySelector('[data-banner]');
+                        var resultEl = els.detail.querySelector('[data-result]');
+                        if (banner) {
+                            banner.textContent = data.ok ? 'Call succeeded.' : 'Call failed.';
+                            banner.className = data.ok ? 'banner ok' : 'banner error';
+                        }
+                        if (resultEl) {
+                            resultEl.textContent = typeof data.output === 'string' ? data.output : fmt(data.output);
+                        }
+                        break;
+                    case 'mcp-remote-reset':
+                        tools = [];
+                        selected = null;
+                        setStatus('');
+                        renderList();
+                        renderDetail();
+                        break;
+                }
+            });
+
+            post({ type: 'mcp-remote-ready' });
+        })();
+    </script>
+</body>
+</html>

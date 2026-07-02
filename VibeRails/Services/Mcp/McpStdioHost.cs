@@ -5,7 +5,9 @@ using Serilog;
 using VibeRails.Services.BertBaseClasses;
 using VibeRails.Services.AgentTools;
 using VibeRails.Services.BertV2;
+using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
+using VibeRails.Services.Mcp.WebResearch;
 
 namespace VibeRails.Services.Mcp;
 
@@ -16,7 +18,8 @@ namespace VibeRails.Services.Mcp;
 /// to the spawning process and needs no token.
 ///
 /// Exposes the SAME tools as the in-process HTTP server (<see cref="RulesTool"/>,
-/// <see cref="SessionSearchTool"/>), so the two transports stay in lockstep.
+/// <see cref="SessionSearchTool"/>, terminal controls, host shell commands, and web research),
+/// so the two transports stay in lockstep.
 ///
 /// CRITICAL: nothing may be written to stdout except MCP protocol frames. Default host console
 /// logging is cleared; the static Serilog logger (configured in Program.cs) writes to file only,
@@ -81,6 +84,14 @@ public static class McpStdioHost
         services.AddScoped<SessionSearchTool>();
         services.AddSingleton<IAgentTerminalToolGateway, HttpAgentTerminalToolGateway>();
         services.AddScoped<TerminalTools>();
+        services.AddSingleton<IHostShellCommandService, HostShellCommandService>();
+        services.AddScoped<HostShellTools>();
+        services.AddHttpClient<IWebResearchService, WebResearchService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("VibeRails-MCP-WebResearch/1.0");
+        });
+        services.AddScoped<WebResearchTools>();
 
         services
             .AddMcpServer(options =>
@@ -90,6 +101,8 @@ public static class McpStdioHost
             .WithStdioServerTransport()
             .WithTools<RulesTool>()
             .WithTools<SessionSearchTool>()
-            .WithTools<TerminalTools>();
+            .WithTools<TerminalTools>()
+            .WithTools<HostShellTools>()
+            .WithTools<WebResearchTools>();
     }
 }

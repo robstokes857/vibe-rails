@@ -24,7 +24,7 @@ public static class HookRoutes
             return Results.Ok(new HookStatusResponse(true, isInstalled, null));
         }).WithName("GetHookStatus");
 
-        // POST /api/v1/hooks/install - Install the pre-commit hook
+        // POST /api/v1/hooks/install - Install the VCA git hooks
         app.MapPost("/api/v1/hooks/install", async (
             IHookInstallationService hookService,
             IGitService gitService,
@@ -36,14 +36,14 @@ public static class HookRoutes
                 return Results.BadRequest(new HookActionResponse(false, "Not in a git repository"));
             }
 
-            var result = await hookService.InstallPreCommitHookAsync(rootPath, cancellationToken);
+            var result = await hookService.InstallHooksAsync(rootPath, cancellationToken);
             var message = result.Success
-                ? "Pre-commit hook installed"
+                ? "VCA git hooks installed"
                 : $"{result.ErrorMessage} {(result.Details != null ? $"({result.Details})" : "")}";
             return Results.Ok(new HookActionResponse(result.Success, message));
         }).WithName("InstallHook");
 
-        // DELETE /api/v1/hooks - Uninstall the pre-commit hook
+        // DELETE /api/v1/hooks - Uninstall the VCA git hooks
         app.MapDelete("/api/v1/hooks", async (
             IHookInstallationService hookService,
             IGitService gitService,
@@ -55,9 +55,9 @@ public static class HookRoutes
                 return Results.BadRequest(new HookActionResponse(false, "Not in a git repository"));
             }
 
-            var result = await hookService.UninstallPreCommitHookAsync(rootPath, cancellationToken);
+            var result = await hookService.UninstallHooksAsync(rootPath, cancellationToken);
             var message = result.Success
-                ? "Pre-commit hook uninstalled"
+                ? "VCA git hooks uninstalled"
                 : $"{result.ErrorMessage} {(result.Details != null ? $"({result.Details})" : "")}";
             return Results.Ok(new HookActionResponse(result.Success, message));
         }).WithName("UninstallHook");

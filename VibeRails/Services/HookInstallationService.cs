@@ -39,11 +39,18 @@ namespace VibeRails.Services
 
         public bool IsHookInstalled(string repoPath)
         {
-            var hookPath = Path.Combine(repoPath, ".git", "hooks", "pre-commit");
+            var preCommitPath = Path.Combine(repoPath, ".git", "hooks", "pre-commit");
+            var commitMsgPath = Path.Combine(repoPath, ".git", "hooks", "commit-msg");
+            return IsHookFileInstalled(preCommitPath, PRE_COMMIT_MARKER)
+                || IsHookFileInstalled(commitMsgPath, COMMIT_MSG_MARKER);
+        }
+
+        private static bool IsHookFileInstalled(string hookPath, string marker)
+        {
             if (!File.Exists(hookPath)) return false;
 
             var content = File.ReadAllText(hookPath);
-            return content.Contains(HOOK_MARKER);
+            return content.Contains(marker);
         }
 
         public async Task<HookInstallationResult> InstallHooksAsync(string repoPath, CancellationToken cancellationToken)
@@ -62,13 +69,9 @@ namespace VibeRails.Services
             {
                 _logger.LogError("Commit-msg hook installation failed: {Error}", commitMsgResult.ErrorMessage);
 
-                // Rollback pre-commit hook
-                _logger.LogInformation("Rolling back pre-commit hook due to commit-msg installation failure");
-                await UninstallPreCommitHookAsync(repoPath, cancellationToken);
-
                 return HookInstallationResult.Fail(
                     HookInstallationError.PartialInstallationFailure,
-                    "Commit-msg hook installation failed, rolled back pre-commit hook",
+                    "Commit-msg hook installation failed; pre-commit hook remains installed",
                     commitMsgResult.ErrorMessage
                 );
             }

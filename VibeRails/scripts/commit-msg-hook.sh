@@ -1,6 +1,6 @@
 #!/bin/sh
 # Vibe Rails Commit-Msg Hook
-# Validates COMMIT-level acknowledgments in commit message
+# Validates VCA commit-message requirements
 # Installed by Vibe Rails - do not edit manually
 
 # Find vb executable
@@ -15,14 +15,14 @@ else
     exit 0
 fi
 
-# Run commit-msg validation
-$VB_CMD --commit-msg "$1"
+# Run VCA commit-message validation
+$VB_CMD --vca-hook commit-msg --commit-message "$1"
 exit_code=$?
 
 if [ $exit_code -ne 0 ]; then
     echo ""
-    echo "Commit message missing required VCA acknowledgments."
-    echo "Add acknowledgments for COMMIT-level violations."
+    echo "VCA commit validation failed."
+    echo "Add required acknowledgments or fix blocking violations."
     exit 1
 fi
 

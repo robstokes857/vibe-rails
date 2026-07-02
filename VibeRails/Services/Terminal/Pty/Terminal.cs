@@ -1,9 +1,16 @@
 using Pty.Net;
 using Serilog;
+using System.Text;
 using VibeRails.Services.Terminal.Consumers;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
+
+public sealed record TerminalSnapshotData(
+    int Cols,
+    int Rows,
+    string[] ScreenText,
+    byte[] XtermReplayBytes);
 
 /// <summary>
 /// Unified PTY abstraction. Owns the PTY process, runs a single read loop,
@@ -289,12 +296,77 @@ public sealed class Terminal : IAsyncDisposable
     }
 
     /// <summary>
+    /// Captures the CURRENT screen only (no scrollback) for out-of-band consumers
+    /// such as the MCP get_terminal_snapshot tool. Serializing the full scrollback
+    /// here can balloon a single tool response to megabytes of base64, and a caller
+    /// that just wants the visible screen never needs the history. Only
+    /// <see cref="_emulatorLock"/> is taken (a read-only grid copy), so snapshot
+    /// polling cannot stall the live read loop, which holds <see cref="_subscriberLock"/>
+    /// to dispatch output.
+    /// </summary>
+    public TerminalSnapshotData CaptureSnapshotData()
+    {
+        TerminalEmulator.TerminalCell[,] snap;
+        int rows, cols, cursorRow, cursorCol, cursorShape;
+        bool cursorVisible, isAlternateScreen, bracketedPaste;
+
+        lock (_emulatorLock)
+        {
+            snap = _emulator.GetSnapshot();
+            rows = _emulator.Rows;
+            cols = _emulator.Cols;
+            cursorRow = _emulator.CursorRow;
+            cursorCol = _emulator.CursorCol;
+            cursorVisible = _emulator.CursorVisible;
+            cursorShape = _emulator.CursorShape;
+            isAlternateScreen = _emulator.IsAlternateScreen;
+            bracketedPaste = _emulator.BracketedPasteActive;
+        }
+
+        // Empty scrollback → the serializer emits only the reset prologue plus the
+        // current screen grid, which is the least xterm.js needs to render the last screen.
+        var replayBytes = TerminalGridSerializer.Serialize(
+            Array.Empty<TerminalEmulator.TerminalCell[]>(), snap, rows, cols,
+            cursorRow, cursorCol, cursorVisible, cursorShape, isAlternateScreen, bracketedPaste);
+
+        return new TerminalSnapshotData(
+            cols,
+            rows,
+            GetScreenTextFromSnapshot(snap, rows, cols),
+            replayBytes);
+    }
+
+    /// <summary>
     /// Returns the current screen as plain text lines (no ANSI codes).
     /// </summary>
     public string[] GetScreenText()
     {
         lock (_emulatorLock)
             return _emulator.GetScreenText();
+    }
+
+    private static string[] GetScreenTextFromSnapshot(TerminalEmulator.TerminalCell[,] snap, int rows, int cols)
+    {
+        var lines = new string[rows];
+        for (int r = 0; r < rows; r++)
+        {
+            var sb = new StringBuilder(cols);
+            for (int c = 0; c < cols; c++)
+            {
+                var cell = snap[r, c];
+                if (cell.IsWideContinuation)
+                {
+                    sb.Append(' ');
+                    continue;
+                }
+
+                cell.AppendText(sb, replaceControlWithSpace: true);
+            }
+
+            lines[r] = sb.ToString().TrimEnd();
+        }
+
+        return lines;
     }
 
     /// <summary>

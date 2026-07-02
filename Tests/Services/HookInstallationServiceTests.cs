@@ -206,7 +206,20 @@ echo ""Another hook""
         }
 
         [Fact]
-        public async Task IsHookInstalled_ReturnsTrue_WhenHookInstalled()
+        public async Task IsHookInstalled_ReturnsTrue_WhenHooksInstalled()
+        {
+            // Arrange
+            await _service.InstallHooksAsync(_testRepoPath, CancellationToken.None);
+
+            // Act
+            var isInstalled = _service.IsHookInstalled(_testRepoPath);
+
+            // Assert
+            Assert.True(isInstalled);
+        }
+
+        [Fact]
+        public async Task IsHookInstalled_ReturnsTrue_WhenOnlyPreCommitHookInstalled()
         {
             // Arrange
             await _service.InstallPreCommitHookAsync(_testRepoPath, CancellationToken.None);
@@ -248,15 +261,12 @@ echo ""Another hook""
         }
 
         [Fact]
-        public async Task InstallHooksAsync_RollsBackPreCommit_WhenCommitMsgFails()
+        public async Task InstallHooksAsync_DoesNotRollbackPreCommit()
         {
-            // Arrange - make hooks directory read-only after pre-commit is installed
-            // This is hard to test without filesystem mocking, so we'll skip for now
-            // In a real scenario, you'd use a filesystem abstraction layer
-
-            // For now, just verify the happy path
             var result = await _service.InstallHooksAsync(_testRepoPath, CancellationToken.None);
+
             Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Combine(_hooksDir, "pre-commit")));
         }
 
         [Fact]

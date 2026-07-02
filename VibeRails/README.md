@@ -110,7 +110,7 @@ VibeRails consists of four main components:
 │  └──────────────┴──────────────┴──────────────────────┘ │
 │  ┌──────────────────────────────────────────────────────┐ │
 │  │  In-process MCP server  →  HTTP /mcp                  │ │
-│  │  validate_vca | search_history                       │ │
+│  │  validate_vca | search_history | terminal | shell | web │ │
 │  └──────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -204,6 +204,9 @@ Tools (snake_case wire names):
 |------|---------|
 | `validate_vca` | Validate staged git files against AGENTS.md enforcement rules |
 | `search_history` | Semantic + keyword search over captured agent history (real BGE/sqlite-vec/RRF — the same `IUnifiedSearchService` as the "Vibe AI" inspector) |
+| `list_terminals` / `open_terminal` / `send_terminal_input` / `get_terminal_snapshot` | Inspect and control VibeRails terminal tabs; snapshots include `screenText` plus reserved `xterm_ui_bytes` / `xterm_png_string` renderer fields |
+| `run_shell_command` / `get_shell_command_status` / `cancel_shell_command` | Run host shell commands through a reusable backend shell worker pool |
+| `web_search` / `web_fetch` | Search the web and fetch any absolute HTTP/HTTPS URL as the local VibeRails process |
 
 **Architecture:**
 - Streamable HTTP transport, served by the dashboard's Kestrel — no separate process
@@ -392,8 +395,9 @@ Launch from the Web Terminal or an environment action, then navigate to Sessions
 
 ### MCP Integration
 
-The MCP server runs in-process at `/mcp` (Streamable HTTP). Call its tools through the dashboard
-Explorer REST routes (which proxy to the in-process endpoint over loopback):
+The MCP server runs in-process at `/mcp` (Streamable HTTP). The dashboard Explorer defaults to that
+local endpoint, but its REST routes can also inspect/call another user-supplied Streamable HTTP MCP
+endpoint:
 
 ```bash
 # Via REST API (requires the auth session + tab tokens from /auth/bootstrap)

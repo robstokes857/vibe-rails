@@ -14,6 +14,7 @@ import { TerminalEditorModal } from './terminal-editor-modal.js';
 import { TerminalToast } from './terminal-toast.js';
 import { TerminalNotifications } from './terminal-notifications.js';
 import { showSendDebugLogModal } from './debug-bundle.js';
+import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 
 // Pending-close grace window: how long a closed tab is held in the undo
 // dropdown before the backend DELETE actually fires. Keep PENDING_CLOSE_MS
@@ -1149,6 +1150,22 @@ class TerminalManager {
 
     async startFromSelection(selection) {
         let tab = this.getActiveTab();
+        const selectionForMeta = selection || (!tab?.state?.hasActiveSession ? tab?.state?.selection : null);
+        const meta = this.getSelectionMeta(selectionForMeta);
+        if (!meta.cli) {
+            this.showSelectionRequiredFeedback(this.startBtn);
+            return;
+        }
+
+        const promptResolution = await resolvePromptTemplateForLaunch(this.app, {
+            cli: meta.cli,
+            environmentName: meta.environmentName,
+            title: meta.displayName
+        });
+        if (promptResolution.canceled) {
+            return;
+        }
+
         if (!tab) {
             tab = await this.createAndActivateTab({ selection: selection || null });
         } else if (tab.state.hasActiveSession) {
@@ -1161,12 +1178,6 @@ class TerminalManager {
             return;
         }
 
-        const meta = this.getSelectionMeta(tab.state.selection);
-        if (!meta.cli) {
-            this.showSelectionRequiredFeedback(this.startBtn);
-            return;
-        }
-
         const workingDirectory = this.getDefaultWorkingDirectory();
         const sessionTitle = meta.cli === 'shell' ? meta.displayName : `${meta.displayName} Terminal`;
         const body = {
@@ -1176,6 +1187,9 @@ class TerminalManager {
         };
         if (meta.environmentName) {
             body.environmentName = meta.environmentName;
+        }
+        if (promptResolution.initialPrompt != null) {
+            body.initialPrompt = promptResolution.initialPrompt;
         }
 
         const started = await tab.instance.startSession(body);
@@ -1274,6 +1288,24 @@ class TerminalManager {
             };
         }
 
+        // Resuming an existing session must not pop the "fill prompt values" modal or
+        // inject a freshly-resolved template — carry through only an explicit initialPrompt.
+        const promptResolution = options.resumeSessionId
+            ? { canceled: false, initialPrompt: typeof options.initialPrompt === 'string' ? options.initialPrompt : null }
+            : await resolvePromptTemplateForLaunch(this.app, {
+                cli: lower(options.cli),
+                environmentName: options.environmentName || null,
+                initialPrompt: typeof options.initialPrompt === 'string' ? options.initialPrompt : null,
+                title: requestedLabel || meta.displayName
+            });
+        if (promptResolution.canceled) {
+            return {
+                tabId: tab.state.id,
+                started: false,
+                reusedExisting
+            };
+        }
+
         const body = {
             cli: lower(options.cli),
             environmentName: options.environmentName || null,
@@ -1282,6 +1314,9 @@ class TerminalManager {
             resumeSessionId: options.resumeSessionId || null,
             resumeSummary: options.resumeSummary || null
         };
+        if (promptResolution.initialPrompt != null) {
+            body.initialPrompt = promptResolution.initialPrompt;
+        }
 
         const started = await tab.instance.startSession(body);
         if (!started) {

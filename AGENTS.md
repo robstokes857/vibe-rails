@@ -270,9 +270,10 @@ CLI runs with full session tracking (same as CLI path)
 vb.exe (Main App)
   ├─ AddMcpServer().WithHttpTransport().WithTools<...>()   # in-process MCP server
   ├─ app.MapMcp("/mcp")                                    # Streamable HTTP endpoint (root backend only)
-  └─ Tools: validate_vca · search_history (real BGE/sqlite-vec search)
+  └─ Tools: validate_vca · search_history · terminal controls · shell commands · web research
 
-McpClientService — thin client wrapper used by the dashboard MCP Explorer to call /mcp.
+McpClientService — thin client wrapper used by the dashboard MCP Explorer to inspect the local
+/mcp endpoint by default, or another user-supplied Streamable HTTP MCP endpoint.
 ```
 See [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md) for the full design.
 
@@ -396,7 +397,13 @@ separate process. Full design: [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Serv
 
 **Tools** (snake_case wire names): `validate_vca` (staged-file AGENTS.md rule validation),
 `search_history` (semantic + keyword search over captured agent history via the real
-`IUnifiedSearchService` — BGE/sqlite-vec/RRF).
+`IUnifiedSearchService` — BGE/sqlite-vec/RRF), terminal tab controls, reusable host shell command
+jobs (`run_shell_command`, `get_shell_command_status`, `cancel_shell_command`), and web research
+over arbitrary HTTP/HTTPS URLs as the local VibeRails process (`web_search`, `web_fetch`).
+
+`get_terminal_snapshot` returns structured JSON text. Generic consumers can use `screenText`;
+UI consumers can detect reserved `xterm_ui_bytes` and `xterm_png_string` fields to render the
+snapshot with xterm.js and attach a browser-generated PNG data URL.
 
 ### Data Layer
 
@@ -459,6 +466,7 @@ separate process. Full design: [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Serv
 **MCP Integration**:
 - `GET /api/v1/mcp/status` - MCP server status
 - `GET /api/v1/mcp/tools` - List MCP tools
+- `POST /api/v1/mcp/inspect` - Inspect tools on the local or a user-supplied Streamable HTTP MCP endpoint
 - `POST /api/v1/mcp/tools/{name}` - Call MCP tool
 
 **Utility**:

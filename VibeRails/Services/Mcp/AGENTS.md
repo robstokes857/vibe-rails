@@ -15,13 +15,13 @@ natural one:
 vb.exe — Native AOT, two MCP entry points sharing the same tool classes
 │
 ├── HTTP (dashboard's Kestrel, root backend only)
-│     MapRegisterServices: AddMcpServer().WithHttpTransport().WithTools<Rules/SessionSearch/TerminalTools>()
+│     MapRegisterServices: AddMcpServer().WithHttpTransport().WithTools<Rules/SessionSearch/Terminal/HostShell/WebResearch>()
 │     Program.cs:          app.MapMcp("/mcp")
 │     CookieAuthMiddleware in front of /mcp     ← viberails_session token required
 │
 └── stdio (`vb mcp`, McpStdioHost.cs)
       Program.cs branches BEFORE the web host:  if (McpStdioHost.IsRequested(args)) …
-      AddMcpServer().WithStdioServerTransport().WithTools<Rules/SessionSearch/TerminalTools>()
+      AddMcpServer().WithStdioServerTransport().WithTools<Rules/SessionSearch/Terminal/HostShell/WebResearch>()
       No MCP listener or MCP auth               ← terminal tools may call back to root API with injected credentials
 ```
 
@@ -55,9 +55,24 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 | `list_terminals` | `TerminalTools.ListTerminals` | Lists VibeRails terminal tabs available for tool-driven control. |
 | `open_terminal` | `TerminalTools.OpenTerminal` | Opens a new VibeRails terminal tab, defaulting to a plain shell. |
 | `send_terminal_input` | `TerminalTools.SendTerminalInput` | Sends text input to a terminal tab without attaching/taking over the viewer WebSocket. |
-| `get_terminal_snapshot` | `TerminalTools.GetTerminalSnapshot` | Reads the current plain-text screen snapshot from a terminal tab. |
+| `get_terminal_snapshot` | `TerminalTools.GetTerminalSnapshot` | Returns a structured terminal snapshot with plain text plus reserved xterm renderer payload fields. |
+| `run_shell_command` | `HostShellTools.RunShellCommand` | Runs a host shell command through a reusable backend shell worker pool. |
+| `get_shell_command_status` | `HostShellTools.GetShellCommandStatus` | Reads status/output for a queued or running shell command job. |
+| `cancel_shell_command` | `HostShellTools.CancelShellCommand` | Cancels a queued/running shell command job and recycles the worker. |
+| `web_search` | `WebResearchTools.WebSearch` | Searches the web and returns compact result summaries. |
+| `web_fetch` | `WebResearchTools.WebFetch` | Fetches any absolute HTTP/HTTPS URL as the local VibeRails process and returns cleaned text plus links. |
 
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
+
+### Reserved Renderer Payload Fields
+
+`get_terminal_snapshot` returns JSON text rather than a hand-formatted transcript. Generic callers can
+read `screenText` as plain text. UI-capable callers can detect these reserved fields:
+
+- `xterm_ui_bytes`: base64 ANSI replay bytes intended to be written into xterm.js. The object includes
+  `encoding`, `format`, `base64`, `byte_length`, `cols`, `rows`, `includes_scrollback`, and `renderer_hint`.
+- `xterm_png_string`: nullable browser-rendered PNG data URL. The backend leaves this `null`; the
+  dashboard MCP Explorer fills it after xterm.js renders the replay and captures the canvas.
 
 ### `search_history` — the real search
 
@@ -88,13 +103,33 @@ localhost with callback credentials injected into managed terminal environments:
 Terminal input intentionally goes through `/api/v1/terminal/input` in the child process instead of
 the viewer WebSocket, so tool-driven input does not disconnect or take over a human viewer.
 
+### Host shell command tools
+
+`HostShellTools` is an **instance tool** backed by `IHostShellCommandService`. It is separate from
+the human terminal-tab tools: it runs host commands through a bounded reusable shell worker pool
+implemented with `Channel<T>`, `ConcurrentDictionary`, `CancellationTokenSource`, and async process
+I/O. Workers execute one command at a time and are recycled after cancellation/timeout because shell
+state may be dirty. Supported shells are PowerShell 7+ (`pwsh`) on Windows, `bash` on Linux, and
+`zsh` on macOS. These tools execute as the current OS user; they are for managed agents that already
+run on the host, not a sandbox.
+
+### Web research tools
+
+`WebResearchTools` is an **instance tool** backed by `IWebResearchService` and `IHttpClientFactory`.
+It provides no-key web search (DuckDuckGo HTML) and HTTP/HTTPS page fetch/cleaning. Fetches are
+limited in size, but they are not network-target filtered: the request runs as the local VibeRails
+process and can target localhost or private-network URLs. This tool is intended for trusted local
+agents with host-level capabilities.
+
 ## MCP Explorer (dashboard)
 
 The `/api/v1/mcp/*` routes ([McpRoutes.cs](../../Routes/McpRoutes.cs)) are a thin Explorer layer
-for the dashboard. They connect to the in-process `/mcp` over **loopback HTTP** — exercising the
-exact Streamable-HTTP path an external CLI would use — forwarding the caller's `viberails_session`
-token so the loopback request clears auth. Kestrel serves the loopback request on a separate
-connection, so there is no self-deadlock.
+for the dashboard. They default to the in-process `/mcp` over **loopback HTTP** — exercising the
+exact Streamable-HTTP path an external CLI would use — and can also inspect/call another
+Streamable HTTP MCP endpoint supplied by the user. The `viberails_session` token is forwarded
+automatically only for the local loopback `/mcp` endpoint so the request clears auth; external
+targets receive only the headers explicitly supplied in the Explorer. Kestrel serves local
+loopback requests on a separate connection, so there is no self-deadlock.
 
 ## CLI auto-registration
 

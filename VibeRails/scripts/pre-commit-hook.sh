@@ -17,7 +17,7 @@ else
 fi
 
 # Run VCA validation
-$VB_CMD --validate-vca --pre-commit
+$VB_CMD --vca-hook pre-commit
 exit_code=$?
 
 if [ $exit_code -ne 0 ]; then
