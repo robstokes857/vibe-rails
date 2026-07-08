@@ -219,7 +219,7 @@ echo ""Another hook""
         }
 
         [Fact]
-        public async Task IsHookInstalled_ReturnsTrue_WhenOnlyPreCommitHookInstalled()
+        public async Task IsHookInstalled_ReturnsFalse_WhenOnlyPreCommitHookInstalled()
         {
             // Arrange
             await _service.InstallPreCommitHookAsync(_testRepoPath, CancellationToken.None);
@@ -228,7 +228,7 @@ echo ""Another hook""
             var isInstalled = _service.IsHookInstalled(_testRepoPath);
 
             // Assert
-            Assert.True(isInstalled);
+            Assert.False(isInstalled);
         }
 
         [Fact]

@@ -31,6 +31,7 @@
     <PackageReference Include="sqlite-vec" Version="0.1.7-alpha.2.1" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\MintLint\MintLint.csproj" />
     <ProjectReference Include="..\Pty.Net\Pty.Net.csproj" />
     <ProjectReference Include="..\TerminalEmulator\TerminalEmulator.csproj" />
   </ItemGroup>

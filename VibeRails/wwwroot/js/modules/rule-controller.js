@@ -14,9 +14,130 @@ export class RuleController {
         if (root) {
             this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
             this.app.bindAction(root, '[data-action="run-vca"]', () => this.runVCAValidation());
+            this.app.bindAction(root, '[data-action="install-hooks"]', () => this.installHooks());
+            this.app.bindAction(root, '[data-action="uninstall-hooks"]', () => this.uninstallHooks());
         }
 
         content.appendChild(fragment);
+        this.refreshHookStatus();
+    }
+
+    async refreshHookStatus() {
+        this.setHookStatusLoading(true);
+
+        try {
+            const status = await this.app.apiCall('/api/v1/hooks/status', 'GET', null, { showLoading: false });
+            this.renderHookStatus(status);
+        } catch (error) {
+            this.renderHookStatus({
+                inGitRepo: false,
+                isInstalled: false,
+                message: error?.message || 'Unable to check hook status'
+            }, true);
+        }
+    }
+
+    async installHooks() {
+        this.setHookActionButtonsDisabled(true);
+
+        try {
+            const response = await this.app.apiCall('/api/v1/hooks/install', 'POST');
+            this.app.showToast(
+                response.success ? 'Hooks Installed' : 'Hook Install Failed',
+                response.message,
+                response.success ? 'success' : 'error');
+            await this.refreshHookStatus();
+        } catch (error) {
+            this.app.showError(`Failed to install hooks: ${error.message}`);
+            await this.refreshHookStatus();
+        }
+    }
+
+    async uninstallHooks() {
+        this.setHookActionButtonsDisabled(true);
+
+        try {
+            const response = await this.app.apiCall('/api/v1/hooks', 'DELETE');
+            this.app.showToast(
+                response.success ? 'Hooks Removed' : 'Hook Removal Failed',
+                response.message,
+                response.success ? 'info' : 'error');
+            await this.refreshHookStatus();
+        } catch (error) {
+            this.app.showError(`Failed to remove hooks: ${error.message}`);
+            await this.refreshHookStatus();
+        }
+    }
+
+    renderHookStatus(status, isError = false) {
+        const badge = document.querySelector('[data-hook-status-badge]');
+        const title = document.querySelector('[data-hook-status-title]');
+        const message = document.querySelector('[data-hook-status-message]');
+        const installButton = document.querySelector('[data-action="install-hooks"]');
+        const uninstallButton = document.querySelector('[data-action="uninstall-hooks"]');
+
+        if (!badge || !title || !message) return;
+
+        badge.classList.remove('bg-secondary', 'bg-success', 'bg-warning', 'bg-danger');
+
+        if (isError) {
+            badge.classList.add('bg-danger');
+            badge.textContent = 'Error';
+            title.textContent = 'Hook status unavailable';
+            message.textContent = status.message || '';
+            if (installButton) installButton.disabled = true;
+            if (uninstallButton) uninstallButton.disabled = true;
+            return;
+        }
+
+        if (!status.inGitRepo) {
+            badge.classList.add('bg-warning');
+            badge.textContent = 'No Repo';
+            title.textContent = 'Git hooks unavailable';
+            message.textContent = status.message || 'Open a git repository to manage hooks.';
+            if (installButton) installButton.disabled = true;
+            if (uninstallButton) uninstallButton.disabled = true;
+            return;
+        }
+
+        if (status.isInstalled) {
+            badge.classList.add('bg-success');
+            badge.textContent = 'Installed';
+            title.textContent = 'VCA hooks are installed';
+            message.textContent = 'Pre-commit and commit-message checks will run during git commit.';
+            if (installButton) installButton.disabled = true;
+            if (uninstallButton) uninstallButton.disabled = false;
+            return;
+        }
+
+        badge.classList.add('bg-secondary');
+        badge.textContent = 'Not Installed';
+        title.textContent = 'VCA hooks are not installed';
+        message.textContent = 'Install hooks to show the VCA console when git commit runs.';
+        if (installButton) installButton.disabled = false;
+        if (uninstallButton) uninstallButton.disabled = true;
+    }
+
+    setHookStatusLoading(isLoading) {
+        const badge = document.querySelector('[data-hook-status-badge]');
+        const title = document.querySelector('[data-hook-status-title]');
+        const message = document.querySelector('[data-hook-status-message]');
+
+        if (!isLoading || !badge || !title || !message) return;
+
+        badge.classList.remove('bg-success', 'bg-warning', 'bg-danger');
+        badge.classList.add('bg-secondary');
+        badge.textContent = 'Checking';
+        title.textContent = 'Checking hook status';
+        message.textContent = '';
+        this.setHookActionButtonsDisabled(true);
+    }
+
+    setHookActionButtonsDisabled(disabled) {
+        document.querySelectorAll('[data-action="install-hooks"], [data-action="uninstall-hooks"]')
+            .forEach(button => {
+                button.disabled = disabled;
+            });
     }
 
     async runVCAValidation() {

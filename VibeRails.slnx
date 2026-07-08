@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="IntegrationTest/IntegrationTest.csproj" />
+  <Project Path="MintLint/MintLint.csproj" />
   <Project Path="Pty.Net/Pty.Net.csproj" />
   <Project Path="TerminalEmulator/TerminalEmulator.csproj" />
   <Project Path="TerminalEmulator.Tests/TerminalEmulator.Tests.csproj" />

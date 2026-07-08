@@ -103,6 +103,11 @@ public static class ProjectRoutes
             Utils.ParserConfigs.SetGitState(detected.projectRoot, isInGit: true);
             fileService.InitLocal(detected.projectRoot);
 
+            await global::VibeRails.Init.TryInstallGitHooksIfEnabledAsync(
+                app.Services,
+                detected.projectRoot,
+                cancellationToken);
+
             // Update ProjectCache with new git state
             await repository.SetProjectCacheValueAsync(launchDirectory, Services.ProjectCacheKeys.IsGitRepo, "True");
             await repository.SetProjectCacheValueAsync(launchDirectory, Services.ProjectCacheKeys.GitRootPath, detected.projectRoot);
