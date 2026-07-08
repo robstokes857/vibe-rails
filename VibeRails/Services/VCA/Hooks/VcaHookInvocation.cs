@@ -4,6 +4,7 @@ public enum VcaHookKind
 {
     PreCommit,
     CommitMessage,
+    AcknowledgeCommitMessage,
     Preview
 }
 
@@ -12,7 +13,8 @@ public sealed record VcaHookInvocation(
     string? CommitMessagePath,
     string? WorkingDirectory,
     bool DemoUi,
-    TimeSpan DemoDuration);
+    TimeSpan DemoDuration,
+    bool PromptForAcknowledgment);
 
 public sealed record VcaHookDisplayInfo(
     string Title,

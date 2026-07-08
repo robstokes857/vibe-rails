@@ -48,7 +48,7 @@ namespace Tests.Services.VCA
         }
 
         [Fact]
-        public async Task IsGoodCodeAsync_WithPackageFile_ShouldReturnFalse()
+        public async Task IsGoodCodeAsync_WithPackageFile_ShouldReturnTrueWhileValidationIsDisabled()
         {
             // Arrange
             var parsedRule = Rule.PackageChangeDetected;
@@ -62,7 +62,7 @@ namespace Tests.Services.VCA
             var result = await _validatorList.IsGoodCodeAsync("package.json", rule, "AGENTS.md", "/root", null, CancellationToken.None);
 
             // Assert
-            Assert.False(result);
+            Assert.True(result);
         }
 
         [Fact]

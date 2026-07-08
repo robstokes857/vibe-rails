@@ -14,11 +14,13 @@ public interface IVcaHookPresenter
     Task WriteWarningAsync(string message);
     Task WriteFailureAsync(string message);
     Task WriteErrorAsync(string message);
+    Task<string?> ReadLineAsync(string prompt);
 }
 
 public sealed record VcaHookConsoleOptions(
     TextWriter Output,
     TextWriter Error,
+    TextReader Input,
     bool EnableSpinner);
 
 public sealed class VcaConsoleHookPresenter : IVcaHookPresenter
@@ -84,11 +86,25 @@ public sealed class VcaConsoleHookPresenter : IVcaHookPresenter
 
     public Task WriteErrorAsync(string message) => WriteErrorLineAsync($"[error] {message}");
 
+    public async Task<string?> ReadLineAsync(string prompt)
+    {
+        await _writeLock.WaitAsync(CancellationToken.None);
+        try
+        {
+            await _options.Output.WriteAsync(prompt);
+            await _options.Output.FlushAsync();
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+
+        return await _options.Input.ReadLineAsync();
+    }
+
     private async Task WriteHeaderAsync(VcaHookDisplayInfo info)
     {
-        await WriteOutputLineAsync("");
-        await WriteOutputLineAsync("========================================");
-        await WriteOutputLineAsync($" VibeRails VCA - {info.Title}");
+        await WriteOutputLineAsync($"VibeRails VCA: {info.Title} check");
         await WriteOutputLineAsync("========================================");
         await WriteOutputLineAsync(info.Reason);
 

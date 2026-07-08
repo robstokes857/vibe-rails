@@ -15,11 +15,14 @@ public class VcaHookProcessHostTests
             ["--vca-hook", "preview", "--demo-duration-ms", "1"],
             output,
             error,
-            TestContext.Current.CancellationToken);
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var text = output.ToString();
+        var firstLine = text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).First();
+
         Assert.Equal(0, exitCode);
-        Assert.Contains("VibeRails VCA - Preview", text);
+        Assert.Equal("VibeRails VCA: Preview check", firstLine);
+        Assert.Contains("VibeRails VCA: Preview check", text);
         Assert.Contains("Reason: manual preview", text);
         Assert.Contains("PASS: VCA hook preview completed.", text);
     }

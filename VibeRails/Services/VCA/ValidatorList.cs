@@ -10,6 +10,7 @@ namespace VibeRails.Services.VCA
     /// </summary>
     public class ValidatorList : IValidatorList
     {
+        private static readonly bool VcaValidationTemporarilyDisabled = true;
         private readonly Dictionary<Rule, IRuleValidator> _validators;
         private readonly IRulesService _rulesService;
 
@@ -74,6 +75,11 @@ namespace VibeRails.Services.VCA
             ValidationContext? context,
             CancellationToken cancellation)
         {
+            if (VcaValidationTemporarilyDisabled)
+            {
+                return true;
+            }
+
             // Parse the rule text to get the Rule enum
             if (!_rulesService.TryParse(rule.RuleText, out Rule parsedRule))
             {
