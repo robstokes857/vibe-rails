@@ -42,7 +42,7 @@ namespace VibeRails.Services
             var preCommitPath = Path.Combine(repoPath, ".git", "hooks", "pre-commit");
             var commitMsgPath = Path.Combine(repoPath, ".git", "hooks", "commit-msg");
             return IsHookFileInstalled(preCommitPath, PRE_COMMIT_MARKER)
-                || IsHookFileInstalled(commitMsgPath, COMMIT_MSG_MARKER);
+                && IsHookFileInstalled(commitMsgPath, COMMIT_MSG_MARKER);
         }
 
         private static bool IsHookFileInstalled(string hookPath, string marker)

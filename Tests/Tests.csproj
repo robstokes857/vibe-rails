@@ -24,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\MintLint\MintLint.csproj" />
     <ProjectReference Include="..\VibeRails\VibeRails.csproj" />
   </ItemGroup>
 

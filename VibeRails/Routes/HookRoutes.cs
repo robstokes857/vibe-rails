@@ -8,7 +8,7 @@ public static class HookRoutes
 {
     public static void Map(WebApplication app)
     {
-        // GET /api/v1/hooks/status - Check if pre-commit hook is installed
+        // GET /api/v1/hooks/status - Check if VCA git hooks are installed
         app.MapGet("/api/v1/hooks/status", async (
             IHookInstallationService hookService,
             IGitService gitService,

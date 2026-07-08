@@ -69,6 +69,8 @@ namespace VibeRails
                             Log.Information("[Init] Fast path: loaded git info from ProjectCache for {Path}", projectPath);
 
                             // Background refresh to keep cache fresh
+                            await TryInstallGitHooksIfEnabledAsync(serviceProvider, cachedRoot);
+
                             _ = RefreshProjectCacheInBackgroundAsync(serviceProvider, projectPath);
 
                             return StartUpStatus.Success;
@@ -84,7 +86,7 @@ namespace VibeRails
                     }
 
                     // Slow path: no cache, run full git detection
-                    return await DetectAndCacheGitInfoAsync(fileService, repository, projectPath);
+                    return await DetectAndCacheGitInfoAsync(serviceProvider, fileService, repository, projectPath);
                 }
                 catch (Exception ex)
                 {
@@ -102,7 +104,7 @@ namespace VibeRails
         /// Runs full git detection, writes results to ProjectCache, and sets ParserConfigs.
         /// </summary>
         private static async Task<StartUpStatus> DetectAndCacheGitInfoAsync(
-            IFileService fileService, IRepository repository, string projectPath)
+            IServiceProvider serviceProvider, IFileService fileService, IRepository repository, string projectPath)
         {
             var isLocal = await fileService.TryGetProjectRootPathAsync(projectPath);
 
@@ -120,6 +122,8 @@ namespace VibeRails
             ParserConfigs.SetGitState(isLocal.projectRoot, isInGit: true);
             await repository.SetProjectCacheValueAsync(projectPath, ProjectCacheKeys.GitRootPath, isLocal.projectRoot);
             fileService.InitLocal(isLocal.projectRoot);
+
+            await TryInstallGitHooksIfEnabledAsync(serviceProvider, isLocal.projectRoot);
 
             // Fetch branch and remote URL while we're at it
             try
@@ -184,6 +188,8 @@ namespace VibeRails
                 // Update ParserConfigs with fresh values
                 ParserConfigs.SetGitState(isLocal.projectRoot, isInGit: true, gitBranch: branch, gitRemoteUrl: remoteUrl);
 
+                await TryInstallGitHooksIfEnabledAsync(serviceProvider, isLocal.projectRoot);
+
                 Log.Debug("[Init] Background refresh: updated ProjectCache for {Path}", projectPath);
             }
             catch (Exception ex)
@@ -207,6 +213,66 @@ namespace VibeRails
                 Config.Save(settings);
             }
             ParserConfigs.SetMcpEnabled(true);
+        }
+
+        public static async Task TryInstallGitHooksIfEnabledAsync(
+            IServiceProvider serviceProvider,
+            string? repoPath,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(repoPath))
+            {
+                return;
+            }
+
+            if (!Directory.Exists(Path.Combine(repoPath, ".git")))
+            {
+                return;
+            }
+
+            try
+            {
+                using var scope = serviceProvider.CreateScope();
+                var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+
+                if (!ShouldInstallGitHooksOnStartup(configuration))
+                {
+                    Log.Debug("[Hooks] Startup hook installation disabled for {RepoPath}", repoPath);
+                    return;
+                }
+
+                var hookService = scope.ServiceProvider.GetRequiredService<IHookInstallationService>();
+                if (hookService.IsHookInstalled(repoPath))
+                {
+                    Log.Debug("[Hooks] VCA git hooks already installed for {RepoPath}", repoPath);
+                    return;
+                }
+
+                var result = await hookService.InstallHooksAsync(repoPath, cancellationToken);
+                if (result.Success)
+                {
+                    Log.Information("[Hooks] VCA git hooks installed for {RepoPath}", repoPath);
+                    return;
+                }
+
+                Log.Warning(
+                    "[Hooks] Failed to install VCA git hooks for {RepoPath}: {Message} {Details}",
+                    repoPath,
+                    result.ErrorMessage,
+                    result.Details);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[Hooks] Startup hook installation failed for {RepoPath}", repoPath);
+            }
+        }
+
+        private static bool ShouldInstallGitHooksOnStartup(IConfiguration configuration)
+        {
+            var hooksSection = configuration.GetSection("VibeRails:Hooks");
+            var autoInstall = hooksSection.GetValue("AutoInstall", true);
+            var installOnStartup = hooksSection.GetValue("InstallOnStartup", true);
+            return autoInstall && installOnStartup;
         }
     }
 }
