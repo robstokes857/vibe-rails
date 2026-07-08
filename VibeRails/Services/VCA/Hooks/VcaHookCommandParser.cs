@@ -36,6 +36,7 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
         string? workingDirectory = null;
         var demoUi = false;
         var demoDuration = DefaultDemoDuration;
+        var promptForAcknowledgment = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -97,6 +98,16 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
                 continue;
             }
 
+            if (arg.Equals("--prompt-ack", StringComparison.OrdinalIgnoreCase) ||
+                arg.Equals("--prompt-acknowledgment", StringComparison.OrdinalIgnoreCase) ||
+                arg.Equals("--prompt-acknowledgement", StringComparison.OrdinalIgnoreCase) ||
+                arg.Equals("--prompt-acknowledgments", StringComparison.OrdinalIgnoreCase) ||
+                arg.Equals("--prompt-acknowledgements", StringComparison.OrdinalIgnoreCase))
+            {
+                promptForAcknowledgment = true;
+                continue;
+            }
+
             if (arg.Equals("--demo-duration-ms", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 if (int.TryParse(args[++i], out var ms) && ms > 0)
@@ -111,7 +122,7 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
             demoUi = true;
         }
 
-        return new VcaHookInvocation(kind, commitMessagePath, workingDirectory, demoUi, demoDuration);
+        return new VcaHookInvocation(kind, commitMessagePath, workingDirectory, demoUi, demoDuration, promptForAcknowledgment);
     }
 
     private static VcaHookKind ParseKind(string value)
@@ -122,6 +133,10 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
             "precommit" => VcaHookKind.PreCommit,
             "commit-msg" => VcaHookKind.CommitMessage,
             "commit-message" => VcaHookKind.CommitMessage,
+            "ack" => VcaHookKind.AcknowledgeCommitMessage,
+            "acknowledge" => VcaHookKind.AcknowledgeCommitMessage,
+            "acknowledge-commit-msg" => VcaHookKind.AcknowledgeCommitMessage,
+            "acknowledge-commit-message" => VcaHookKind.AcknowledgeCommitMessage,
             "preview" => VcaHookKind.Preview,
             "demo" => VcaHookKind.Preview,
             _ => VcaHookKind.PreCommit

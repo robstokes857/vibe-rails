@@ -34,9 +34,26 @@ public class VcaHookCommandParserTests
     {
         var parser = new VcaHookCommandParser();
 
-        var invocation = parser.Parse(["--vca-hook", "commit-msg", "--commit-message", ".git/COMMIT_EDITMSG"]);
+        var invocation = parser.Parse([
+            "--vca-hook",
+            "commit-msg",
+            "--commit-message",
+            ".git/COMMIT_EDITMSG",
+            "--prompt-acknowledgment"]);
 
         Assert.Equal(VcaHookKind.CommitMessage, invocation.Kind);
+        Assert.Equal(".git/COMMIT_EDITMSG", invocation.CommitMessagePath);
+        Assert.True(invocation.PromptForAcknowledgment);
+    }
+
+    [Fact]
+    public void Parse_AcknowledgeCommand_ReturnsAcknowledgeInvocation()
+    {
+        var parser = new VcaHookCommandParser();
+
+        var invocation = parser.Parse(["--vca-hook", "acknowledge-commit-msg", "--commit-message", ".git/COMMIT_EDITMSG"]);
+
+        Assert.Equal(VcaHookKind.AcknowledgeCommitMessage, invocation.Kind);
         Assert.Equal(".git/COMMIT_EDITMSG", invocation.CommitMessagePath);
     }
 

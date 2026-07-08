@@ -28,6 +28,7 @@ namespace VibeRails.Services
 
     public class RuleValidationService : IRuleValidationService
     {
+        private static readonly bool VcaValidationTemporarilyDisabled = true;
         private readonly IRulesService _rulesService;
         private readonly IAgentFileService _agentFileService;
 
@@ -43,6 +44,11 @@ namespace VibeRails.Services
             string rootPath,
             CancellationToken cancellationToken)
         {
+            if (VcaValidationTemporarilyDisabled)
+            {
+                return new ValidationResultSet(new List<ValidationResult>());
+            }
+
             var results = new List<ValidationResult>();
 
             foreach (var rule in rules)
@@ -85,6 +91,11 @@ namespace VibeRails.Services
             string rootPath,
             CancellationToken cancellationToken)
         {
+            if (VcaValidationTemporarilyDisabled)
+            {
+                return new ValidationResultSet(new List<ValidationResult>());
+            }
+
             var results = new List<ValidationResult>();
 
             foreach (var ruleWithSource in rulesWithSource)

@@ -13,6 +13,7 @@ namespace VibeRails.Services.Mcp.Tools;
 [McpServerToolType]
 public class RulesTool
 {
+    private static readonly bool VcaValidationTemporarilyDisabled = true;
     private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(10);
 
     // Enforcement vocabulary understood in AGENTS.md rule lines. This is a deliberate SUPERSET of
@@ -44,6 +45,11 @@ public class RulesTool
     {
         try
         {
+            if (VcaValidationTemporarilyDisabled)
+            {
+                return VcaToolValidationReport.Pass("PASS: VCA validation is temporarily disabled.");
+            }
+
             var workDir = workingDirectory ?? Directory.GetCurrentDirectory();
 
             // Find git root

@@ -14,13 +14,15 @@ public static class VcaHookProcessHost
         string[] args,
         TextWriter? output = null,
         TextWriter? error = null,
+        TextReader? input = null,
         CancellationToken cancellationToken = default)
     {
         output ??= Console.Out;
         error ??= Console.Error;
+        input ??= Console.In;
 
         var services = new ServiceCollection();
-        ConfigureServices(services, output, error, enableSpinner: !Console.IsOutputRedirected);
+        ConfigureServices(services, output, error, input, enableSpinner: !Console.IsOutputRedirected);
 
         await using var provider = services.BuildServiceProvider();
         var parser = provider.GetRequiredService<IVcaHookCommandParser>();
@@ -34,6 +36,7 @@ public static class VcaHookProcessHost
         IServiceCollection services,
         TextWriter output,
         TextWriter error,
+        TextReader input,
         bool enableSpinner)
     {
         services.AddSingleton<IVcaHookCommandParser, VcaHookCommandParser>();
@@ -42,6 +45,6 @@ public static class VcaHookProcessHost
         services.AddSingleton<IVcaHookValidationAnalyzer, VcaHookValidationAnalyzer>();
         services.AddSingleton<IVcaHookFileProvider, VcaHookFileProvider>();
         services.AddSingleton<IVcaHookPresenter>(_ =>
-            new VcaConsoleHookPresenter(new VcaHookConsoleOptions(output, error, enableSpinner)));
+            new VcaConsoleHookPresenter(new VcaHookConsoleOptions(output, error, input, enableSpinner)));
     }
 }
