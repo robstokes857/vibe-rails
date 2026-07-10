@@ -762,10 +762,7 @@ export class EnvironmentController {
     }
 
     normalizeCodexModel(model) {
-        const raw = (model || '').trim();
-        const lower = raw.toLowerCase();
-        if (lower === 'gpt-5') return 'gpt-5.4';
-        return raw;
+        return (model || '').trim();
     }
 
     renderCodexModelOptions(selectedModel) {
@@ -774,10 +771,10 @@ export class EnvironmentController {
         // ("Model Lists") to add a newly released model or drop a retired one.
         const options = [
             ['', 'Default (Codex recommended)'],
-            ['gpt-5.5', 'gpt-5.5'],
-            ['gpt-5.4', 'gpt-5.4'],
-            ['gpt-5.4-mini', 'gpt-5.4-mini'],
-            ['gpt-5.3-codex-spark', 'gpt-5.3-codex-spark']
+            ['gpt-5.6-sol', 'gpt-5.6-sol'],
+            ['gpt-5.6-terra', 'gpt-5.6-terra'],
+            ['gpt-5.6-luna', 'gpt-5.6-luna'],
+            ['gpt-5.5', 'gpt-5.5']
         ];
         const known = new Set(options.map(([value]) => value));
         const rendered = options.map(([value, label]) =>
@@ -1241,6 +1238,8 @@ export class EnvironmentController {
                         <option value="medium" ${codexEffort === 'medium' ? 'selected' : ''}>Medium</option>
                         <option value="high" ${codexEffort === 'high' ? 'selected' : ''}>High</option>
                         <option value="xhigh" ${codexEffort === 'xhigh' ? 'selected' : ''}>XHigh</option>
+                        <option value="max" ${codexEffort === 'max' ? 'selected' : ''}>Max</option>
+                        <option value="ultra" ${codexEffort === 'ultra' ? 'selected' : ''}>Ultra</option>
                     </select>
                     <small class="form-text text-muted">Passed as <code>-c model_reasoning_effort=&lt;level&gt;</code></small>
                 </div>

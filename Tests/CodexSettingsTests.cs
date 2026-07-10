@@ -49,7 +49,7 @@ public class CodexSettingsTests : IDisposable
     public async Task GetSettings_ReadsCurrentValues_FromToml()
     {
         var toml = @"
-model = ""gpt-5.4""
+model = ""gpt-5.6-sol""
 model_reasoning_effort = ""xhigh""
 service_tier = ""fast""
 
@@ -65,10 +65,28 @@ alternate_screen = ""never""
 
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
-        Assert.Equal("gpt-5.4", settings.Model);
+        Assert.Equal("gpt-5.6-sol", settings.Model);
         Assert.Equal("xhigh", settings.Effort);
         Assert.True(settings.FastMode);
         Assert.True(settings.NoAltScreen);
+    }
+
+    [Theory]
+    [InlineData("max")]
+    [InlineData("ultra")]
+    public async Task GetSettings_ReadsCurrentHighestReasoningEfforts_FromToml(string effort)
+    {
+        var toml = $@"
+model = ""gpt-5.6-sol""
+model_reasoning_effort = ""{effort}""
+";
+
+        _mockFileService.SetFileExists(true);
+        _mockFileService.SetFileContent(toml);
+
+        var settings = await _service.GetSettings("test-env", CancellationToken.None);
+
+        Assert.Equal(effort, settings.Effort);
     }
 
     [Fact]
@@ -80,7 +98,7 @@ alternate_screen = ""never""
 approval_policy = ""never""
 sandbox_mode = ""danger-full-access""
 model_provider = ""oss""
-model = ""gpt-5.4""
+model = ""gpt-5.6-terra""
 ";
 
         _mockFileService.SetFileExists(true);
@@ -89,7 +107,7 @@ model = ""gpt-5.4""
         var settings = await _service.GetSettings("test-env", CancellationToken.None);
 
         Assert.False(settings.Yolo);
-        Assert.Equal("gpt-5.4", settings.Model);
+        Assert.Equal("gpt-5.6-terra", settings.Model);
     }
 
     [Fact]
@@ -100,7 +118,7 @@ model = ""gpt-5.4""
         var settings = new CodexSettingsDto
         {
             NoAltScreen = true,
-            Model = "gpt-5.5",
+            Model = "gpt-5.6-luna",
             Effort = "xhigh",
             FastMode = true
         };
@@ -108,7 +126,7 @@ model = ""gpt-5.4""
         await _service.SaveSettings("test-env", settings, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("model = \"gpt-5.5\"", writtenContent);
+        Assert.Contains("model = \"gpt-5.6-luna\"", writtenContent);
         Assert.Contains("model_reasoning_effort = \"xhigh\"", writtenContent);
         Assert.Contains("service_tier = \"fast\"", writtenContent);
         Assert.Contains("[features]", writtenContent);
@@ -122,6 +140,23 @@ model = ""gpt-5.4""
         Assert.DoesNotContain("model_provider =", writtenContent);
     }
 
+    [Theory]
+    [InlineData("max")]
+    [InlineData("ultra")]
+    public async Task SaveSettings_WritesCurrentHighestReasoningEfforts_ToToml(string effort)
+    {
+        _mockFileService.SetFileExists(false);
+
+        await _service.SaveSettings("test-env", new CodexSettingsDto
+        {
+            Model = "gpt-5.6-sol",
+            Effort = effort
+        }, CancellationToken.None);
+
+        var writtenContent = _mockFileService.GetWrittenContent();
+        Assert.Contains($"model_reasoning_effort = \"{effort}\"", writtenContent);
+    }
+
     [Fact]
     public async Task SaveSettings_LeavesUserApprovalAndSandboxUntouched()
     {
@@ -132,7 +167,7 @@ model = ""gpt-5.4""
 approval_policy = ""never""
 sandbox_mode = ""read-only""
 model_provider = ""azure""
-model = ""gpt-5.4""
+model = ""gpt-5.6-sol""
 ";
 
         _mockFileService.SetFileExists(true);
@@ -141,19 +176,21 @@ model = ""gpt-5.4""
         await _service.SaveSettings("test-env", new CodexSettingsDto
         {
             Yolo = true,
-            Model = "gpt-5.5"
+            Model = "gpt-5.6-sol"
         }, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
         Assert.Contains("approval_policy = \"never\"", writtenContent);
         Assert.Contains("sandbox_mode = \"read-only\"", writtenContent);
         Assert.Contains("model_provider = \"azure\"", writtenContent);
-        Assert.Contains("model = \"gpt-5.5\"", writtenContent);
+        Assert.Contains("model = \"gpt-5.6-sol\"", writtenContent);
     }
 
     [Fact]
-    public async Task SaveSettings_MigratesStaleCodexModelNames()
+    public async Task SaveSettings_DoesNotRewriteBareGpt5Alias()
     {
+        // Bare gpt-5 used to select gpt-5.4. Once that pinned model was removed,
+        // the compatibility policy requires preserving the explicit value as-is.
         _mockFileService.SetFileExists(false);
 
         await _service.SaveSettings("test-env", new CodexSettingsDto
@@ -163,7 +200,7 @@ model = ""gpt-5.4""
         }, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Contains("model = \"gpt-5.4\"", writtenContent);
+        Assert.Contains("model = \"gpt-5\"", writtenContent);
         Assert.Contains("model_reasoning_effort = \"high\"", writtenContent);
     }
 
@@ -196,12 +233,12 @@ model = ""gpt-5.4""
 
         await _service.SaveSettings("test-env", new CodexSettingsDto
         {
-            Model = "gpt-5.4-mini",
+            Model = "gpt-5.6-luna",
             FastMode = true
         }, CancellationToken.None);
 
         var writtenContent = _mockFileService.GetWrittenContent();
-        Assert.Matches(@"(?s)model = ""gpt-5\.4-mini"".*\[features\]", writtenContent);
+        Assert.Matches(@"(?s)model = ""gpt-5\.6-luna"".*\[features\]", writtenContent);
         Assert.Matches(@"(?s)service_tier = ""fast"".*\[features\]", writtenContent);
         Assert.Contains("fast_mode = true", writtenContent);
     }
@@ -250,7 +287,7 @@ custom_field = ""preserved""
 approval_policy = ""on-request""
 sandbox_mode = ""workspace-write""
 model_provider = ""oss""
-model = ""gpt-5.4""
+model = ""gpt-5.6-sol""
 model_reasoning_effort = ""high""
 service_tier = ""fast""
 
@@ -336,14 +373,14 @@ model = ""gpt-5.3-codex""
         // Disabling must remove it (not only the [tui] section form), or it reappears on next read.
         var existingToml = @"
 tui.alternate_screen = ""never""
-model = ""gpt-5.4""
+model = ""gpt-5.6-sol""
 ";
         _mockFileService.SetFileExists(true);
         _mockFileService.SetFileContent(existingToml);
 
         await _service.SaveSettings(
             "test-env",
-            new CodexSettingsDto { NoAltScreen = false, Model = "gpt-5.4" },
+            new CodexSettingsDto { NoAltScreen = false, Model = "gpt-5.6-sol" },
             CancellationToken.None);
 
         var written = _mockFileService.GetWrittenContent();
@@ -359,14 +396,14 @@ model = ""gpt-5.4""
     {
         var existingToml = @"
 features.fast_mode = false
-model = ""gpt-5.4""
+model = ""gpt-5.6-terra""
 ";
         _mockFileService.SetFileExists(true);
         _mockFileService.SetFileContent(existingToml);
 
         await _service.SaveSettings(
             "test-env",
-            new CodexSettingsDto { FastMode = true, Model = "gpt-5.4" },
+            new CodexSettingsDto { FastMode = true, Model = "gpt-5.6-terra" },
             CancellationToken.None);
 
         var written = _mockFileService.GetWrittenContent();
