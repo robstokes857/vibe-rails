@@ -29,7 +29,7 @@ namespace VibeRails.Services.LlmClis
                     # Codex CLI Configuration
                     # This is an isolated environment managed by Vibe Rails
 
-                    # model = "gpt-5.5"
+                    # model = "gpt-5.6-sol"
                     # model_reasoning_effort = "medium"
                     # service_tier = "fast"
 
@@ -227,19 +227,15 @@ namespace VibeRails.Services.LlmClis
                 "medium" => "medium",
                 "high" => "high",
                 "xhigh" => "xhigh",
+                "max" => "max",
+                "ultra" => "ultra",
                 _ => ""
             };
         }
 
         private static string NormalizeModel(string? value)
         {
-            var trimmed = value?.Trim() ?? "";
-            return trimmed.ToLowerInvariant() switch
-            {
-                "gpt-5" => "gpt-5.4",
-                "" => "",
-                _ => trimmed
-            };
+            return value?.Trim() ?? "";
         }
 
         // TOML keys before the first [table] header belong to the root table. VibeRails only
