@@ -84,7 +84,10 @@ public class CommandService : ICommandService
             LLM.Antigravity => "agy",
             _ => llm.ToString().ToLower()
         };
-        var launchArgs = BuildLaunchArgs(llm, extraArgs);
+        // One fresh snapshot for the whole prepare so the enabled/mode fields can't tear across a
+        // concurrent settings save and the launch hits the disk once, not once per field.
+        var proxySettings = _llmProxySettings.GetSettings();
+        var launchArgs = BuildLaunchArgs(llm, extraArgs, proxySettings);
         var cliCommand = launchArgs.Length > 0
             ? $"{cli} {BuildSafeArgString(launchArgs)}"
             : cli;
@@ -144,9 +147,13 @@ public class CommandService : ICommandService
         // If Claude proxying is enabled separately, route Claude Code's Anthropic API traffic
         // through the local LLM proxy. Keep it independent from Codex's subscription/API setting:
         // Claude may use API tokens while Codex uses a ChatGPT subscription.
-        if (_llmProxySettings.ClaudeLlmProxyEnabled
+        // Skip if the selected environment already points Claude somewhere (base URL OR custom
+        // headers): respect the user's explicit Anthropic config instead of clobbering it — the
+        // proxy owns both variables together, so a partial overwrite would drop their headers.
+        if (proxySettings.ClaudeLlmProxyEnabled
             && llm == LLM.Claude
-            && !environment.ContainsKey(LlmProxyClaudeConfig.BaseUrlVariable))
+            && !environment.ContainsKey(LlmProxyClaudeConfig.BaseUrlVariable)
+            && !environment.ContainsKey(LlmProxyClaudeConfig.CustomHeadersVariable))
         {
             var claudeProxyEnv = LlmProxyClaudeConfig.BuildClaudeProxyEnvironment(
                 _toolApiContext.ApiBaseUrl,
@@ -165,14 +172,14 @@ public class CommandService : ICommandService
             environment));
     }
 
-    private string[] BuildLaunchArgs(LLM llm, string[]? extraArgs)
+    private string[] BuildLaunchArgs(LLM llm, string[]? extraArgs, LlmProxySettings proxySettings)
     {
-        if (!_llmProxySettings.CodexLlmProxyEnabled || llm != LLM.Codex || ShouldSkipCodexProxy(extraArgs))
+        if (!proxySettings.CodexLlmProxyEnabled || llm != LLM.Codex || ShouldSkipCodexProxy(extraArgs))
             return extraArgs ?? [];
 
         var proxyArgs = LlmProxyCodexConfig.BuildCodexProxyArgs(
             _toolApiContext.ApiBaseUrl,
-            _llmProxySettings.CodexLlmProxyMode);
+            proxySettings.CodexLlmProxyMode);
         if (extraArgs is not { Length: > 0 })
             return proxyArgs;
 
@@ -197,6 +204,17 @@ public class CommandService : ICommandService
                 return true;
             }
 
+            // A Codex profile can set its own model_provider, and profile config outranks a
+            // prepended -c, so never force the proxy when the user selected one. Covers spaced,
+            // =-form, and glued short options (--profile, --profile=x, -p, -p x, -px).
+            if (arg.Equals("--profile", StringComparison.Ordinal)
+                || arg.StartsWith("--profile=", StringComparison.Ordinal)
+                || arg.Equals("-p", StringComparison.Ordinal)
+                || (arg.StartsWith("-p", StringComparison.Ordinal) && arg.Length > 2))
+            {
+                return true;
+            }
+
             if ((arg.Equals("-c", StringComparison.Ordinal) || arg.Equals("--config", StringComparison.Ordinal))
                 && i + 1 < extraArgs.Length
                 && IsCodexProviderOverride(extraArgs[i + 1]))
@@ -206,6 +224,15 @@ public class CommandService : ICommandService
 
             if ((arg.StartsWith("-c=", StringComparison.Ordinal) || arg.StartsWith("--config=", StringComparison.Ordinal))
                 && IsCodexProviderOverride(arg[(arg.IndexOf('=') + 1)..]))
+            {
+                return true;
+            }
+
+            // Glued short form: -c<key>=<value> (e.g. -cmodel_provider="x").
+            if (arg.StartsWith("-c", StringComparison.Ordinal)
+                && arg.Length > 2
+                && arg[2] != '='
+                && IsCodexProviderOverride(arg[2..]))
             {
                 return true;
             }

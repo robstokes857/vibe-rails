@@ -55,8 +55,17 @@ public static class LlmAnthropicProxyRoutes
             IHttpClientFactory httpClientFactory,
             IAuthService authService,
             IAppEventBus appEventBus,
+            ILlmProxySettingsService proxySettings,
             CancellationToken cancellationToken) =>
         {
+            if (!proxySettings.GetSettings().ClaudeLlmProxyEnabled)
+            {
+                // Feature is off: behave as if the proxy endpoint doesn't exist rather than leaving
+                // an always-on relay to api.anthropic.com.
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
             var target = BuildAnthropicUri(context.Request);
             if (!IsProxyHeaderAuthenticated(context, authService))
             {
@@ -75,7 +84,7 @@ public static class LlmAnthropicProxyRoutes
             // Feed the shared activity light: a cheap, non-blocking ping (the WS handler just
             // TryWrites to a channel) that never carries the tool/session tokens — only where the
             // request went and its status. "Claude proxy" is the stable source the UI groups by.
-            appEventBus.PublishActivity(
+            appEventBus.PublishProxyActivity(
                 source: "Claude proxy",
                 label: context.Request.Method,
                 target: target.GetLeftPart(UriPartial.Path),
@@ -128,7 +137,7 @@ public static class LlmAnthropicProxyRoutes
     private static Uri BuildAnthropicUri(HttpRequest request)
     {
         var path = request.Path.ToUriComponent();
-        var rest = path.StartsWith(PathPrefix, StringComparison.Ordinal)
+        var rest = path.StartsWith(PathPrefix, StringComparison.OrdinalIgnoreCase)
             ? path.AsSpan(PathPrefix.Length)
             : ReadOnlySpan<char>.Empty;
 

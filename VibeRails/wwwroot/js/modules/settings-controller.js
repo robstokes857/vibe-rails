@@ -202,6 +202,13 @@ export class SettingsController {
                 return true;
             }
 
+            // window.confirm is suppressed (returns false) inside the sandboxed VS Code webview
+            // iframe, which would trap the user on a dirty form with no way to leave. Only block
+            // where confirm actually prompts; in the webview, allow navigation instead of trapping.
+            if (window.__viberails_VSCODE__) {
+                return true;
+            }
+
             return window.confirm('You have unsaved settings changes. Leave without saving?');
         }) || null;
 

@@ -8,54 +8,37 @@ public static class LlmProxyCodexConfig
     public const string OpenAiProviderName = "viberails_openai_proxy";
     public const string SessionHeaderName = "viberails_session";
     public const string TabHeaderName = "viberails_tab";
+    private const string OpenAiApiPath = "/v1";
+    private const string ChatGptCodexApiPath = "/backend-api/codex";
 
-    public static string BuildOpenAiBaseUrl(string apiBaseUrl)
-    {
-        var normalized = string.IsNullOrWhiteSpace(apiBaseUrl)
-            ? "http://127.0.0.1:0"
-            : apiBaseUrl.Trim();
+    public static string BuildOpenAiBaseUrl(string apiBaseUrl) =>
+        string.Concat(LocalToolApiContext.NormalizeBaseUrl(apiBaseUrl), OpenAiProxyPath, OpenAiApiPath);
 
-        while (normalized.EndsWith('/'))
-            normalized = normalized[..^1];
+    public static string BuildChatGptBaseUrl(string apiBaseUrl) =>
+        string.Concat(LocalToolApiContext.NormalizeBaseUrl(apiBaseUrl), OpenAiProxyPath, ChatGptCodexApiPath);
 
-        return string.Concat(normalized, OpenAiProxyPath, "/v1");
-    }
+    /// <summary>
+    /// True when <paramref name="path"/> targets the OpenAI proxy prefix or one of its children.
+    /// Shared with <c>CookieAuthMiddleware</c> so the middleware and route cannot drift apart.
+    /// </summary>
+    public static bool IsOpenAiProxyPath(string path) =>
+        IsPathOrChild(path, OpenAiProxyPath);
 
-    public static string BuildChatGptBaseUrl(string apiBaseUrl)
-    {
-        var normalized = string.IsNullOrWhiteSpace(apiBaseUrl)
-            ? "http://127.0.0.1:0"
-            : apiBaseUrl.Trim();
-
-        while (normalized.EndsWith('/'))
-            normalized = normalized[..^1];
-
-        return string.Concat(normalized, OpenAiProxyPath, "/");
-    }
+    private static bool IsPathOrChild(string path, string prefix) =>
+        path.Equals(prefix, StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase);
 
     public static string[] BuildCodexProxyArgs(string apiBaseUrl, string mode)
     {
         var normalizedMode = CodexLlmProxySettings.NormalizeMode(mode);
-        return normalizedMode == CodexLlmProxySettings.ModeApi
-            ? BuildOpenAiProviderArgs(apiBaseUrl)
-            : BuildChatGptProxyArgs(apiBaseUrl);
+        var baseUrl = normalizedMode == CodexLlmProxySettings.ModeApi
+            ? BuildOpenAiBaseUrl(apiBaseUrl)
+            : BuildChatGptBaseUrl(apiBaseUrl);
+        return BuildOpenAiProviderArgs(baseUrl);
     }
 
-    private static string[] BuildChatGptProxyArgs(string apiBaseUrl)
+    private static string[] BuildOpenAiProviderArgs(string baseUrl)
     {
-        var baseUrl = BuildChatGptBaseUrl(apiBaseUrl);
-
-        return
-        [
-            "--config",
-            $"chatgpt_base_url=\"{baseUrl}\""
-        ];
-    }
-
-    private static string[] BuildOpenAiProviderArgs(string apiBaseUrl)
-    {
-        var baseUrl = BuildOpenAiBaseUrl(apiBaseUrl);
-
         return
         [
             "--config",

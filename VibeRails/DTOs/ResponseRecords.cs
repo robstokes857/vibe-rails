@@ -413,9 +413,11 @@ namespace VibeRails.DTOs
         bool UseVsCodeTheme,
         bool McpEnabled,
         string? ComputerName,
-        bool CodexLlmProxyEnabled,
+        // Nullable so a stale client that omits these keys leaves the stored values untouched
+        // (see AppSettingsRoutes) instead of resetting an enabled proxy to false/subscription.
+        bool? CodexLlmProxyEnabled,
         string? CodexLlmProxyMode,
-        bool ClaudeLlmProxyEnabled,
+        bool? ClaudeLlmProxyEnabled,
         // Read-only: the live machine name, used by the client as the placeholder
         // and as the push-notification fallback when ComputerName is blank. Never
         // persisted (see AppSettingsRoutes), so renaming the machine reflects live.
@@ -427,14 +429,14 @@ namespace VibeRails.DTOs
     // the full settings object from a possibly-stale client cache.
     public record UpdateComputerNameDto(string? ComputerName);
 
-    // Generic "something just happened" ping for the shared activity light in the UI (see
-    // wwwroot activity-blinker.js). Any subsystem can publish one via IAppEventBus.PublishActivity;
-    // the browser aggregates them by Source. Deliberately display-only — never secrets or payloads.
-    //   Source: stable consumer name the UI groups by, e.g. "Claude proxy".
+    // Display-only ping for the proxy/token-saver light in the UI (see activity-blinker.js).
+    // Only the authenticated Claude/Codex proxy routes publish this event; ordinary terminal or
+    // app activity must not light it. Never include secrets, request bodies, or query strings.
+    //   Source: stable proxy name the UI groups by, e.g. "Claude proxy".
     //   Label:  short verb/context, e.g. an HTTP method.
     //   Target: where it went, e.g. an upstream URL (no query string).
     //   Status: outcome, e.g. an HTTP status code.
-    public record ActivityPingPayload(
+    public record ProxyActivityPingPayload(
         string Source,
         string? Label,
         string? Target,
@@ -817,7 +819,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(AppSettingsDto))]
     [JsonSerializable(typeof(UpdateComputerNameDto))]
-    [JsonSerializable(typeof(ActivityPingPayload))]
+    [JsonSerializable(typeof(ProxyActivityPingPayload))]
     // Remote PIN DTOs
     [JsonSerializable(typeof(SetPinRequest))]
     [JsonSerializable(typeof(PinStatusResponse))]

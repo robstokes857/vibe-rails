@@ -66,19 +66,25 @@ export class VibeControlApp {
         await this.fetchConfigs();
         this.applyDocumentTitle();
         await this.applyInitialSettings();
-        this.appEventClient.start();
         this.terminalController.bindSessionEvents(this.appEventClient);
 
-        // Shared "router light": one LED that blinks whenever any subsystem reports activity over
-        // the generic 'activity' app-event (the Claude proxy is the first consumer; server side is
-        // IAppEventBus.PublishActivity). Hovering it lists recent pings aggregated by source.
-        this.activityBlinker = new ActivityBlinker({ title: 'Proxy activity' });
-        this.appEventClient.on('activity', (p) => this.activityBlinker.report({
+        // Persistent proxy/token-saver light. It intentionally listens to the dedicated proxy
+        // event only, so terminal output, MCP calls, and other app activity cannot trigger it.
+        this.activityBlinker = new ActivityBlinker({
+            mount: document.getElementById('proxy-activity-slot'),
+            title: 'Proxy & token saver',
+            enabled: this.appSettings.codexLlmProxyEnabled === true
+                || this.appSettings.claudeLlmProxyEnabled === true
+        });
+        this.appEventClient.on('proxy_activity', (p) => this.activityBlinker.report({
             source: p?.source,
             label: p?.label,
             target: p?.target,
             status: p?.status
         }));
+        // Register every handler before opening the socket so the first fast proxy response cannot
+        // race the activity subscription during startup.
+        this.appEventClient.start();
 
         this.applyNavbarsCollapsedState(false);
         // Git is optional. When not in a git repo, show a small non-blocking helper bar
@@ -184,7 +190,14 @@ export class VibeControlApp {
                 await this.apiCall('/api/v1/git/init', 'POST');
                 await this.fetchConfigs();
                 if (this.data.isInGit) {
-                    // Repo created — drop the helper and re-render the current view in git mode.
+                    // Repo created — re-render the current view in git mode. Route the in-place
+                    // reload through the navigation guard so a dirty settings form isn't silently
+                    // discarded; if the user opts to keep their edits, leave the view as-is.
+                    if (!this.canNavigateTo(this.currentView)) {
+                        btn.disabled = false;
+                        btn.textContent = 'Initialize Git Here';
+                        return;
+                    }
                     document.getElementById('git-helper-bar')?.remove();
                     this.loadView(this.currentView);
                 } else {
@@ -396,6 +409,10 @@ export class VibeControlApp {
             ...settings
         });
         this.applyVsCodeThemePreference();
+        this.activityBlinker?.setEnabled(
+            this.appSettings.codexLlmProxyEnabled === true
+            || this.appSettings.claudeLlmProxyEnabled === true
+        );
     }
 
     _normalizeAppSettings(settings = {}) {

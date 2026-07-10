@@ -3,17 +3,15 @@ using VibeRails.DTOs;
 namespace VibeRails.Interfaces;
 
 /// <summary>
-/// One-liner for feeding the shared "activity light" in the UI. Any subsystem that wants to show
-/// it's doing something (an LLM proxy request, a background sync, a webhook, …) publishes a ping;
-/// the browser blinks a single shared LED and aggregates recent pings by <c>source</c> (see
-/// <c>wwwroot/js/modules/activity-blinker.js</c>). Keep <c>source</c> stable per subsystem so the
-/// UI groups its pings together. Never pass secrets or payloads — this is display-only.
+/// Feeds the proxy/token-saver light in the UI. This event is deliberately proxy-specific: only
+/// an authenticated, enabled LLM relay that actually reached its upstream should publish it.
+/// Keep <c>source</c> stable per provider and never pass secrets, request bodies, or query strings.
 /// </summary>
 public static class ActivityEventBusExtensions
 {
-    public const string ActivityEventType = "activity";
+    public const string ProxyActivityEventType = "proxy_activity";
 
-    public static void PublishActivity(
+    public static void PublishProxyActivity(
         this IAppEventBus bus,
         string source,
         string? label = null,
@@ -21,8 +19,8 @@ public static class ActivityEventBusExtensions
         string? status = null)
     {
         bus.Publish(
-            ActivityEventType,
-            new ActivityPingPayload(source, label, target, status),
-            AppJsonSerializerContext.Default.ActivityPingPayload);
+            ProxyActivityEventType,
+            new ProxyActivityPingPayload(source, label, target, status),
+            AppJsonSerializerContext.Default.ProxyActivityPingPayload);
     }
 }

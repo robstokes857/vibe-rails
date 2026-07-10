@@ -19,6 +19,9 @@ namespace Tests.Services.LlmProxy;
 ///    names the proxy auth-gate checks.
 /// See VibeRails/Routes/LlmAnthropicProxyRoutes.cs and token_saving_plan.md.
 /// </summary>
+// Shares the process-global VIBERAILS_TEST_FAKE_CLI env var with CommandServiceTests; the shared
+// collection serializes the two classes so their ctor/Dispose set+restore of the flag can't race.
+[Collection("ProcessEnvIsolation")]
 public class LlmProxyClaudeConfigTests : IDisposable
 {
     private readonly string? _originalFakeCliFlag;
@@ -166,9 +169,8 @@ public class LlmProxyClaudeConfigTests : IDisposable
         toolApiContext.Setup(x => x.SessionToken).Returns("test-session-token");
         toolApiContext.Setup(x => x.TabToken).Returns("test-tab-token");
         var proxySettings = new Mock<ILlmProxySettingsService>();
-        proxySettings.Setup(x => x.CodexLlmProxyEnabled).Returns(codexLlmProxyEnabled);
-        proxySettings.Setup(x => x.CodexLlmProxyMode).Returns(CodexLlmProxySettings.ModeSubscription);
-        proxySettings.Setup(x => x.ClaudeLlmProxyEnabled).Returns(claudeLlmProxyEnabled);
+        proxySettings.Setup(x => x.GetSettings())
+            .Returns(new LlmProxySettings(codexLlmProxyEnabled, CodexLlmProxySettings.ModeSubscription, claudeLlmProxyEnabled));
         return new CommandService(envService, toolApiContext.Object, proxySettings.Object);
     }
 }

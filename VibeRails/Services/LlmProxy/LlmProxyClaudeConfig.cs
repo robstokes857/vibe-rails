@@ -1,3 +1,5 @@
+using VibeRails.Services.AgentTools;
+
 namespace VibeRails.Services.LlmProxy;
 
 /// <summary>
@@ -27,17 +29,8 @@ public static class LlmProxyClaudeConfig
     /// Builds the <c>ANTHROPIC_BASE_URL</c> value. Claude POSTs to <c>{base}/v1/messages</c>, so we
     /// hand it <c>{apiBaseUrl}/llm/anthropic</c> and our route catches <c>/llm/anthropic/v1/messages</c>.
     /// </summary>
-    public static string BuildAnthropicBaseUrl(string apiBaseUrl)
-    {
-        var normalized = string.IsNullOrWhiteSpace(apiBaseUrl)
-            ? "http://127.0.0.1:0"
-            : apiBaseUrl.Trim();
-
-        while (normalized.EndsWith('/'))
-            normalized = normalized[..^1];
-
-        return string.Concat(normalized, AnthropicProxyPath);
-    }
+    public static string BuildAnthropicBaseUrl(string apiBaseUrl) =>
+        string.Concat(LocalToolApiContext.NormalizeBaseUrl(apiBaseUrl), AnthropicProxyPath);
 
     /// <summary>
     /// Builds the <c>ANTHROPIC_CUSTOM_HEADERS</c> value: newline-separated <c>Name: Value</c> pairs

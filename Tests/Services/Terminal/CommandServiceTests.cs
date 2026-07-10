@@ -22,6 +22,10 @@ namespace Tests.Services.Terminal;
 /// managed agent CLI launch. Remove-first repairs stale registrations and add
 /// restores the current server command.
 /// </summary>
+// Shares the process-global VIBERAILS_TEST_FAKE_CLI env var with LlmProxyClaudeConfigTests;
+// the shared collection serializes the two classes so one can't clear/restore the flag while the
+// other is mid-test (which would flake PrepareSession into the echo+sleep fake).
+[Collection("ProcessEnvIsolation")]
 public class CommandServiceTests : IDisposable
 {
     private readonly string? _originalFakeCliFlag;
@@ -81,7 +85,7 @@ public class CommandServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task PrepareSession_Codex_SubscriptionModeSetsChatGptBaseUrl()
+    public async Task PrepareSession_Codex_SubscriptionModeAddsVibeRailsChatGptProvider()
     {
         var service = CreateService(
             codexLlmProxyEnabled: true,
@@ -90,9 +94,12 @@ public class CommandServiceTests : IDisposable
         var prepared = await service.PrepareSessionAsync(LLM.Codex, envName: null, extraArgs: null);
 
         Assert.StartsWith("codex ", prepared.LaunchCommand);
-        Assert.Contains("chatgpt_base_url", prepared.LaunchCommand);
-        Assert.Contains("http://127.0.0.1:4321/llm/openai/", prepared.LaunchCommand);
-        Assert.DoesNotContain(LlmProxyCodexConfig.OpenAiProviderName, prepared.LaunchCommand);
+        Assert.Contains(LlmProxyCodexConfig.OpenAiProviderName, prepared.LaunchCommand);
+        Assert.Contains("http://127.0.0.1:4321/llm/openai/backend-api/codex", prepared.LaunchCommand);
+        Assert.Contains("requires_openai_auth=true", prepared.LaunchCommand);
+        Assert.Contains($"env_http_headers.{LlmProxyCodexConfig.SessionHeaderName}", prepared.LaunchCommand);
+        Assert.Contains($"env_http_headers.{LlmProxyCodexConfig.TabHeaderName}", prepared.LaunchCommand);
+        Assert.DoesNotContain("chatgpt_base_url", prepared.LaunchCommand);
         Assert.DoesNotContain("test-session-token", prepared.LaunchCommand);
         Assert.DoesNotContain("test-tab-token", prepared.LaunchCommand);
     }
@@ -222,9 +229,8 @@ public class CommandServiceTests : IDisposable
         toolApiContext.Setup(x => x.SessionToken).Returns("test-session-token");
         toolApiContext.Setup(x => x.TabToken).Returns("test-tab-token");
         var proxySettings = new Mock<ILlmProxySettingsService>();
-        proxySettings.Setup(x => x.CodexLlmProxyEnabled).Returns(codexLlmProxyEnabled);
-        proxySettings.Setup(x => x.CodexLlmProxyMode).Returns(codexLlmProxyMode);
-        proxySettings.Setup(x => x.ClaudeLlmProxyEnabled).Returns(claudeLlmProxyEnabled);
+        proxySettings.Setup(x => x.GetSettings())
+            .Returns(new LlmProxySettings(codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled));
         return new CommandService(envService, toolApiContext.Object, proxySettings.Object);
     }
 
