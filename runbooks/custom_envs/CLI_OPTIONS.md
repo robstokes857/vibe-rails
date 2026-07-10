@@ -1,3 +1,7 @@
+# Uses
+
+This describes the entire custom env option workflow but it has mainly been used for adding new models to the LLM/CLI provider
+
 # Custom Environment CLI Options
 
 This runbook explains how to change, add, or delete custom environment options
@@ -19,9 +23,11 @@ and launch behavior before changing generated arguments:
 - Antigravity authoritative flags: run `agy --help` (and `agy models` for the live model catalog)
 - Copilot: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference
 
-Status checked against the upstream references above on July 2, 2026. agy flags
-were re-verified against `agy --help` on this host (unchanged since v1.0.8); the
-third-party write-ups still conflict with each other, so trust `--help`.
+Status checked against the upstream references above on July 2, 2026. The Codex
+catalog and pinned-list preference were refreshed from the live model picker on
+this host on July 10, 2026. agy flags were re-verified against `agy --help` on
+this host (unchanged since v1.0.8); the third-party write-ups still conflict
+with each other, so trust `--help`.
 
 Important distinction: `CustomArgs` and `CustomPrompt` are VibeRails' launch
 contract. The DTO field lists below describe fields VibeRails currently
@@ -70,7 +76,7 @@ Where they live in code
 - Antigravity: `renderAntigravityModelOptions()`.
 - Copilot: `renderCopilotModelOptions()`.
 
-Current pinned values (all refreshed 2026-07-02):
+Current pinned values (Codex refreshed 2026-07-10; all others 2026-07-02):
 
 - Claude (full model IDs): `claude-fable-5`, `claude-opus-4-8`,
   `claude-opus-4-7`, `claude-sonnet-5`, `claude-sonnet-4-6`,
@@ -78,12 +84,15 @@ Current pinned values (all refreshed 2026-07-02):
   (Fable — `claude-fable-5` — was previously left unpinned as a product choice;
   Rob asked to add it on 2026-07-02. It needs Claude Code ≥ 2.1.170 and is not
   the upstream default; safety-flagged requests auto-fall-back to Opus.)
-- Codex: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`, plus an
-  empty "Default (Codex recommended)" entry. (`gpt-5.3-codex` and `gpt-5.2`
-  were dropped 2026-07-02 — no longer in the `codex debug models` catalog. The
-  old `gpt-5-codex` → `gpt-5.3-codex` alias rewrite was removed with them, in
-  both `normalizeCodexModel()` and `CodexLlmCliEnvironment.NormalizeModel()`;
-  `gpt-5` → `gpt-5.4` stays because its target is still served.)
+- Codex: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, plus an
+  empty "Default (Codex recommended)" entry. This is intentionally narrower
+  than the live catalog: at the app owner's request, all choices below 5.5 were
+  removed from the pinned dropdown on 2026-07-10, including `gpt-5.4`,
+  `gpt-5.4-mini`, and `gpt-5.3-codex-spark`. They remain usable as explicit
+  legacy/custom values. The old `gpt-5` → `gpt-5.4` alias rewrite was removed
+  from both `normalizeCodexModel()` and
+  `CodexLlmCliEnvironment.NormalizeModel()` so unpinned saved values pass
+  through unchanged and render as `… (custom)`.
 - Antigravity (agy): `Gemini 3.5 Flash (Medium)`, `Gemini 3.5 Flash (High)`,
   `Gemini 3.5 Flash (Low)`, `Gemini 3.1 Pro (Low)`, `Gemini 3.1 Pro (High)`,
   `Claude Sonnet 4.6 (Thinking)`, `Claude Opus 4.6 (Thinking)`, `GPT-OSS 120B (Medium)`,
@@ -194,7 +203,7 @@ UI-managed launch and prompt settings:
 - Model: `--model`; pinned values from `renderCodexModelOptions()` (see Model
   Lists for the maintained list and how to refresh it).
 - Effort: `-c model_reasoning_effort=<level>`; values `minimal`, `low`,
-  `medium`, `high`, `xhigh`.
+  `medium`, `high`, `xhigh`, `max`, `ultra`.
 - Fast Mode: `-c service_tier=fast --enable fast_mode`.
 - YOLO Mode: `--dangerously-bypass-approvals-and-sandbox`. This is the only
   permission control.
