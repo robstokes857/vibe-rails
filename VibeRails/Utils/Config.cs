@@ -17,6 +17,9 @@ public class Settings
     // Retained for settings.json/API compatibility. MCP registration is always on.
     public bool McpEnabled { get; set; } = true;
     public string ComputerName { get; set; } = string.Empty;
+    public bool CodexLlmProxyEnabled { get; set; } = false;
+    public string CodexLlmProxyMode { get; set; } = "subscription";
+    public bool ClaudeLlmProxyEnabled { get; set; } = false;
     public string PinHash { get; set; } = string.Empty;
     public string PinSalt { get; set; } = string.Empty;
     public HookSettings Hooks { get; set; } = new();

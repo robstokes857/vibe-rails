@@ -1,5 +1,7 @@
 using Serilog;
+using VibeRails.Services.AgentTools;
 using VibeRails.Services.LlmClis;
+using VibeRails.Services.LlmProxy;
 using static VibeRails.Utils.ShellArgSanitizer;
 
 namespace VibeRails.Services.Terminal;
@@ -13,6 +15,8 @@ public sealed record PreparedTerminalSession(
 public class CommandService : ICommandService
 {
     private readonly LlmCliEnvironmentService _envService;
+    private readonly ILocalToolApiContext _toolApiContext;
+    private readonly ILlmProxySettingsService _llmProxySettings;
     private const string VibeRailsMcpServerName = "viberails-mcp";
     private static int _fakeCliWarningEmitted;
 
@@ -24,9 +28,14 @@ public class CommandService : ICommandService
         LLM.Claude, LLM.Codex, LLM.Antigravity, LLM.Copilot
     };
 
-    public CommandService(LlmCliEnvironmentService envService)
+    public CommandService(
+        LlmCliEnvironmentService envService,
+        ILocalToolApiContext toolApiContext,
+        ILlmProxySettingsService llmProxySettings)
     {
         _envService = envService;
+        _toolApiContext = toolApiContext;
+        _llmProxySettings = llmProxySettings;
     }
 
     public Task<PreparedTerminalSession> PrepareSessionAsync(
@@ -75,8 +84,9 @@ public class CommandService : ICommandService
             LLM.Antigravity => "agy",
             _ => llm.ToString().ToLower()
         };
-        var cliCommand = extraArgs?.Length > 0
-            ? $"{cli} {BuildSafeArgString(extraArgs)}"
+        var launchArgs = BuildLaunchArgs(llm, extraArgs);
+        var cliCommand = launchArgs.Length > 0
+            ? $"{cli} {BuildSafeArgString(launchArgs)}"
             : cli;
 
         var prompt = !string.IsNullOrWhiteSpace(summary)
@@ -131,6 +141,21 @@ public class CommandService : ICommandService
                 environment[kvp.Key] = kvp.Value;
         }
 
+        // If Claude proxying is enabled separately, route Claude Code's Anthropic API traffic
+        // through the local LLM proxy. Keep it independent from Codex's subscription/API setting:
+        // Claude may use API tokens while Codex uses a ChatGPT subscription.
+        if (_llmProxySettings.ClaudeLlmProxyEnabled
+            && llm == LLM.Claude
+            && !environment.ContainsKey(LlmProxyClaudeConfig.BaseUrlVariable))
+        {
+            var claudeProxyEnv = LlmProxyClaudeConfig.BuildClaudeProxyEnvironment(
+                _toolApiContext.ApiBaseUrl,
+                _toolApiContext.SessionToken,
+                _toolApiContext.TabToken);
+            foreach (var kvp in claudeProxyEnv)
+                environment[kvp.Key] = kvp.Value;
+        }
+
         LogMcpSetup(llm, envName, setupCommands);
 
         return Task.FromResult(new PreparedTerminalSession(
@@ -138,6 +163,64 @@ public class CommandService : ICommandService
             cliCommand,
             setupCommands.AsReadOnly(),
             environment));
+    }
+
+    private string[] BuildLaunchArgs(LLM llm, string[]? extraArgs)
+    {
+        if (!_llmProxySettings.CodexLlmProxyEnabled || llm != LLM.Codex || ShouldSkipCodexProxy(extraArgs))
+            return extraArgs ?? [];
+
+        var proxyArgs = LlmProxyCodexConfig.BuildCodexProxyArgs(
+            _toolApiContext.ApiBaseUrl,
+            _llmProxySettings.CodexLlmProxyMode);
+        if (extraArgs is not { Length: > 0 })
+            return proxyArgs;
+
+        var merged = new string[proxyArgs.Length + extraArgs.Length];
+        proxyArgs.CopyTo(merged, 0);
+        extraArgs.CopyTo(merged, proxyArgs.Length);
+        return merged;
+    }
+
+    private static bool ShouldSkipCodexProxy(string[]? extraArgs)
+    {
+        if (extraArgs is not { Length: > 0 })
+            return false;
+
+        for (var i = 0; i < extraArgs.Length; i++)
+        {
+            var arg = extraArgs[i];
+            if (arg.Equals("--oss", StringComparison.Ordinal)
+                || arg.Equals("--local-provider", StringComparison.Ordinal)
+                || arg.StartsWith("--local-provider=", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if ((arg.Equals("-c", StringComparison.Ordinal) || arg.Equals("--config", StringComparison.Ordinal))
+                && i + 1 < extraArgs.Length
+                && IsCodexProviderOverride(extraArgs[i + 1]))
+            {
+                return true;
+            }
+
+            if ((arg.StartsWith("-c=", StringComparison.Ordinal) || arg.StartsWith("--config=", StringComparison.Ordinal))
+                && IsCodexProviderOverride(arg[(arg.IndexOf('=') + 1)..]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsCodexProviderOverride(string configArg)
+    {
+        var trimmed = configArg.AsSpan().TrimStart();
+        return trimmed.StartsWith("model_provider", StringComparison.Ordinal)
+            || trimmed.StartsWith("model_providers.", StringComparison.Ordinal)
+            || trimmed.StartsWith("openai_base_url", StringComparison.Ordinal)
+            || trimmed.StartsWith("chatgpt_base_url", StringComparison.Ordinal);
     }
 
     /// <summary>

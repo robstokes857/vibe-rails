@@ -11,6 +11,8 @@ public static class RouteExtensions
         SessionRoutes.Map(app);
         ChatHistoryRoutes.Map(app);
         DebugBundleRoutes.Map(app);
+        LlmProxyRoutes.Map(app);
+        LlmAnthropicProxyRoutes.Map(app);
         TerminalRoutes.Map(app, launchDirectory);
         TerminalTabsRoutes.Map(app);
         AgentToolRoutes.Map(app);

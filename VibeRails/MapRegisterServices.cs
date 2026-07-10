@@ -11,6 +11,7 @@ using VibeRails.Interfaces;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
 using VibeRails.Services.AgentTools;
+using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.Mcp.WebResearch;
@@ -73,6 +74,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<ILlmParser, LlmParser>();
             serviceCollection.AddSingleton<ILocalToolApiContext>(sp =>
                 new LocalToolApiContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>()));
+            serviceCollection.AddSingleton<ILlmProxySettingsService, LlmProxySettingsService>();
             serviceCollection.AddScoped<IAgentTerminalToolService, AgentTerminalToolService>();
             serviceCollection.AddScoped<IAgentTerminalToolGateway, LocalAgentTerminalToolGateway>();
             serviceCollection.AddScoped<IRepository>(sp =>

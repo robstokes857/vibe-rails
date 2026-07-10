@@ -1,5 +1,6 @@
 using VibeRails.Auth;
 using VibeRails.Services;
+using VibeRails.Services.LlmProxy;
 
 namespace VibeRails.Middleware;
 
@@ -19,9 +20,13 @@ public class CookieAuthMiddleware
         var path = context.Request.Path.Value ?? "";
         var isWebSocketRequest = IsWebSocketHandshake(context);
 
-        // Skip auth for bootstrap, health check, and CORS preflight requests
+        // Skip auth for bootstrap, health check, local LLM proxy, and CORS preflight requests.
+        // The proxy route performs its own loopback/token auth and must also receive Codex's
+        // OAuth discovery fallbacks under /.well-known/.../llm/openai/... instead of returning
+        // the dashboard auth HTML to the Codex TUI.
         if (path.StartsWith("/auth/bootstrap") ||
             path.Equals("/api/v1/context", StringComparison.OrdinalIgnoreCase) ||
+            IsOpenAiProxyPath(path) ||
             context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
@@ -122,6 +127,24 @@ public class CookieAuthMiddleware
         }
 
         return token.Replace("+", "-").Replace("/", "_").Replace("=", "");
+    }
+
+    private static bool IsPathOrChild(string path, string prefix)
+    {
+        return path.Equals(prefix, StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsOpenAiProxyPath(string path)
+    {
+        return IsPathOrChild(path, LlmProxyCodexConfig.OpenAiProxyPath)
+            || IsWellKnownOpenAiProxyPath(path);
+    }
+
+    private static bool IsWellKnownOpenAiProxyPath(string path)
+    {
+        return path.StartsWith("/.well-known/", StringComparison.OrdinalIgnoreCase)
+            && path.Contains(LlmProxyCodexConfig.OpenAiProxyPath, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsWebSocketHandshake(HttpContext context)

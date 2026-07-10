@@ -7102,6 +7102,63 @@ input.form-control:disabled {
     transition: opacity 0.15s;
 }
 
+/* ── Application Settings ────────────────────────────────────────────────── */
+.settings-view {
+    padding-bottom: 6.5rem;
+}
+
+.settings-save-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 1rem;
+    z-index: 1035;
+    width: min(calc(100vw - 2rem), 640px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 0.85rem;
+    background: color-mix(in srgb, var(--color-bg-surface) 92%, var(--color-bg-base) 8%);
+    border: 1px solid color-mix(in srgb, var(--color-border) 82%, var(--color-text) 18%);
+    border-radius: 8px;
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.38);
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    transform: translateX(-50%);
+}
+
+.settings-save-bar.is-dirty {
+    border-color: color-mix(in srgb, var(--color-warning) 46%, var(--color-border) 54%);
+}
+
+.settings-save-copy {
+    min-width: 0;
+}
+
+.settings-save-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    line-height: 1.1;
+    text-transform: uppercase;
+    color: var(--color-text);
+}
+
+.settings-save-state {
+    margin-top: 0.2rem;
+    font-size: 0.82rem;
+    line-height: 1.25;
+    color: var(--color-text-muted);
+}
+
+.settings-save-state.is-dirty {
+    color: var(--color-warning);
+}
+
+.settings-save-bar .btn {
+    flex-shrink: 0;
+}
+
 /* ── PIN Entry Modal ──────────────────────────────────────────────────────── */
 .pin-modal-dialog {
     max-width: 420px;
@@ -7357,6 +7414,23 @@ input.form-control:disabled {
 }
 
 @media (max-width: 576px) {
+    .settings-view {
+        padding-bottom: 8rem;
+    }
+
+    .settings-save-bar {
+        bottom: 0.65rem;
+        width: calc(100vw - 1rem);
+        align-items: stretch;
+        flex-direction: column;
+        gap: 0.65rem;
+    }
+
+    .settings-save-bar .btn {
+        justify-content: center;
+        width: 100%;
+    }
+
     .notAToasttoast-container.top-right {
         top: calc(var(--navbar-height) + 0.65rem) !important;
         right: 0.5rem !important;

@@ -1,5 +1,6 @@
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.LlmProxy;
 using VibeRails.Utils;
 
 namespace VibeRails.Routes;
@@ -37,6 +38,9 @@ public static class AppSettingsRoutes
             // at use (push notification) — never persisted — so a blank value keeps
             // tracking the live machine name and the field stays clearable.
             settings.ComputerName = NormalizeComputerName(settingsDto.ComputerName ?? settings.ComputerName);
+            settings.CodexLlmProxyEnabled = settingsDto.CodexLlmProxyEnabled;
+            settings.CodexLlmProxyMode = CodexLlmProxySettings.NormalizeMode(settingsDto.CodexLlmProxyMode);
+            settings.ClaudeLlmProxyEnabled = settingsDto.ClaudeLlmProxyEnabled;
 
             // Save back to settings.json
             Config.Save(settings);
@@ -78,6 +82,9 @@ public static class AppSettingsRoutes
             settings.UseVsCodeTheme,
             true,
             NormalizeComputerName(settings.ComputerName),
+            settings.CodexLlmProxyEnabled,
+            CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
+            settings.ClaudeLlmProxyEnabled,
             GetMachineName()
         );
     }

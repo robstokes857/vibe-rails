@@ -413,6 +413,9 @@ namespace VibeRails.DTOs
         bool UseVsCodeTheme,
         bool McpEnabled,
         string? ComputerName,
+        bool CodexLlmProxyEnabled,
+        string? CodexLlmProxyMode,
+        bool ClaudeLlmProxyEnabled,
         // Read-only: the live machine name, used by the client as the placeholder
         // and as the push-notification fallback when ComputerName is blank. Never
         // persisted (see AppSettingsRoutes), so renaming the machine reflects live.
@@ -423,6 +426,20 @@ namespace VibeRails.DTOs
     // settings panel change ComputerName without resending (and risking clobbering)
     // the full settings object from a possibly-stale client cache.
     public record UpdateComputerNameDto(string? ComputerName);
+
+    // Generic "something just happened" ping for the shared activity light in the UI (see
+    // wwwroot activity-blinker.js). Any subsystem can publish one via IAppEventBus.PublishActivity;
+    // the browser aggregates them by Source. Deliberately display-only — never secrets or payloads.
+    //   Source: stable consumer name the UI groups by, e.g. "Claude proxy".
+    //   Label:  short verb/context, e.g. an HTTP method.
+    //   Target: where it went, e.g. an upstream URL (no query string).
+    //   Status: outcome, e.g. an HTTP status code.
+    public record ActivityPingPayload(
+        string Source,
+        string? Label,
+        string? Target,
+        string? Status
+    );
 
     // Remote PIN DTOs
     public record SetPinRequest(string Pin);
@@ -800,6 +817,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(AppSettingsDto))]
     [JsonSerializable(typeof(UpdateComputerNameDto))]
+    [JsonSerializable(typeof(ActivityPingPayload))]
     // Remote PIN DTOs
     [JsonSerializable(typeof(SetPinRequest))]
     [JsonSerializable(typeof(PinStatusResponse))]

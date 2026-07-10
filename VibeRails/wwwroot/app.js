@@ -16,6 +16,7 @@ import { SettingsController } from './js/modules/settings-controller.js';
 import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
+import { ActivityBlinker } from './js/modules/activity-blinker.js';
 import { showAppToast } from './js/modules/toast-service.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
@@ -55,6 +56,7 @@ export class VibeControlApp {
         this.loadingOverlayPendingCount = 0;
         this.loadingOverlayTimer = null;
         this.loadingOverlayVisibleSince = 0;
+        this.navigationGuards = new Set();
 
         this.init();
     }
@@ -66,6 +68,18 @@ export class VibeControlApp {
         await this.applyInitialSettings();
         this.appEventClient.start();
         this.terminalController.bindSessionEvents(this.appEventClient);
+
+        // Shared "router light": one LED that blinks whenever any subsystem reports activity over
+        // the generic 'activity' app-event (the Claude proxy is the first consumer; server side is
+        // IAppEventBus.PublishActivity). Hovering it lists recent pings aggregated by source.
+        this.activityBlinker = new ActivityBlinker({ title: 'Proxy activity' });
+        this.appEventClient.on('activity', (p) => this.activityBlinker.report({
+            source: p?.source,
+            label: p?.label,
+            target: p?.target,
+            status: p?.status
+        }));
+
         this.applyNavbarsCollapsedState(false);
         // Git is optional. When not in a git repo, show a small non-blocking helper bar
         // but let the app load and run normally against the launch directory.
@@ -303,6 +317,29 @@ export class VibeControlApp {
         }
     }
 
+    registerNavigationGuard(guard) {
+        if (typeof guard !== 'function') {
+            return () => {};
+        }
+
+        this.navigationGuards.add(guard);
+        return () => this.navigationGuards.delete(guard);
+    }
+
+    canNavigateTo(view, data = {}) {
+        for (const guard of Array.from(this.navigationGuards)) {
+            try {
+                if (guard({ from: this.currentView, to: view, data }) === false) {
+                    return false;
+                }
+            } catch (error) {
+                console.error('Navigation guard failed:', error);
+            }
+        }
+
+        return true;
+    }
+
     bindGlobalActions() {
         document.addEventListener('click', (e) => {
             const brandLogo = e.target.closest('.navbar-brand-sm');
@@ -368,6 +405,9 @@ export class VibeControlApp {
             useVsCodeTheme: false,
             mcpEnabled: true,
             computerName: '',
+            codexLlmProxyEnabled: false,
+            codexLlmProxyMode: 'subscription',
+            claudeLlmProxyEnabled: false,
             machineName: '',
             ...settings
         };
@@ -607,6 +647,10 @@ export class VibeControlApp {
     // ============================================ 
 
     navigate(view, data = {}, { resetStack = false } = {}) {
+        if (!this.canNavigateTo(view, data)) {
+            return false;
+        }
+
         this.closeModal();
 
         if (resetStack) {
@@ -628,6 +672,7 @@ export class VibeControlApp {
 
         this.currentView = view;
         this.loadView(view, data);
+        return true;
     }
 
     updateActiveSubNav(view) {
@@ -644,11 +689,21 @@ export class VibeControlApp {
 
     goBack() {
         if (this.navigationStack.length > 1) {
+            const previous = this.navigationStack[this.navigationStack.length - 2];
+            const previousView = previous.view || previous;
+            const previousData = previous.data || {};
+
+            if (!this.canNavigateTo(previousView, previousData)) {
+                return false;
+            }
+
             this.navigationStack.pop();
-            const previous = this.navigationStack[this.navigationStack.length - 1];
             this.currentView = previous.view || previous;
             this.loadView(this.currentView, previous.data);
+            return true;
         }
+
+        return false;
     }
 
     scrollPageToTop() {
@@ -666,6 +721,7 @@ export class VibeControlApp {
     }
 
     loadView(view, data = {}) {
+        this.settingsController?.unload?.();
         this.updateActiveSubNav(view);
         this.terminalController?.resetLayoutStateForNavigation();
         // Tear down the MCP Explorer's global listener / xterm instances when navigating away
