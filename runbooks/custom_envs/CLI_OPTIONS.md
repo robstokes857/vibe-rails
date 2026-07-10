@@ -1,3 +1,7 @@
+# Uses
+
+This describes the entire custom env option workflow but it has mainly been used for adding new models to the LLM/CLI provider
+
 # Custom Environment CLI Options
 
 This runbook explains how to change, add, or delete custom environment options
