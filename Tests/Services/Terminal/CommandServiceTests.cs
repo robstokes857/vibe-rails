@@ -1,6 +1,8 @@
 using Moq;
 using VibeRails.Interfaces;
 using VibeRails.Services;
+using VibeRails.Services.AgentTools;
+using TokenSaver;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
 using Xunit;
@@ -20,6 +22,10 @@ namespace Tests.Services.Terminal;
 /// managed agent CLI launch. Remove-first repairs stale registrations and add
 /// restores the current server command.
 /// </summary>
+// Shares the process-global VIBERAILS_TEST_FAKE_CLI env var with LlmProxyClaudeConfigTests;
+// the shared collection serializes the two classes so one can't clear/restore the flag while the
+// other is mid-test (which would flake PrepareSession into the echo+sleep fake).
+[Collection("ProcessEnvIsolation")]
 public class CommandServiceTests : IDisposable
 {
     private readonly string? _originalFakeCliFlag;
@@ -64,22 +70,86 @@ public class CommandServiceTests : IDisposable
 
         var prepared = await service.PrepareSessionAsync(llm, envName: null, extraArgs: null);
 
-        Assert.Collection(
-            prepared.SetupCommands,
-            remove =>
-            {
-                Assert.StartsWith(expectedRemoveCommand, remove);
-                Assert.EndsWith(ExpectedQuietRedirect(), remove);
-            },
-            add =>
-            {
-                Assert.StartsWith(expectedAddPrefix, add);
-                Assert.Contains(" mcp", add);
-            });
+        Assert.True(prepared.SetupCommands.Count >= 2);
+        var remove = prepared.SetupCommands[0];
+        Assert.StartsWith(expectedRemoveCommand, remove);
+        Assert.EndsWith(ExpectedQuietRedirect(), remove);
+
+        var add = prepared.SetupCommands[1];
+        Assert.StartsWith(expectedAddPrefix, add);
+        Assert.Contains(" mcp", add);
 
         Assert.StartsWith(prepared.SetupCommands[0] + "; ", prepared.Command);
         Assert.Contains(expectedAddPrefix, prepared.Command);
         Assert.EndsWith(prepared.LaunchCommand, prepared.Command);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Codex_SubscriptionModeAddsVibeRailsChatGptProvider()
+    {
+        var service = CreateService(
+            codexLlmProxyEnabled: true,
+            codexLlmProxyMode: CodexLlmProxySettings.ModeSubscription);
+
+        var prepared = await service.PrepareSessionAsync(LLM.Codex, envName: null, extraArgs: null);
+
+        Assert.StartsWith("codex ", prepared.LaunchCommand);
+        Assert.Contains(LlmProxyCodexConfig.OpenAiProviderName, prepared.LaunchCommand);
+        Assert.Contains("http://127.0.0.1:4321/llm/openai/backend-api/codex", prepared.LaunchCommand);
+        Assert.Contains("requires_openai_auth=true", prepared.LaunchCommand);
+        Assert.Contains($"env_http_headers.{LlmProxyCodexConfig.SessionHeaderName}", prepared.LaunchCommand);
+        Assert.Contains($"env_http_headers.{LlmProxyCodexConfig.TabHeaderName}", prepared.LaunchCommand);
+        Assert.DoesNotContain("chatgpt_base_url", prepared.LaunchCommand);
+        Assert.DoesNotContain("test-session-token", prepared.LaunchCommand);
+        Assert.DoesNotContain("test-tab-token", prepared.LaunchCommand);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Codex_ApiModeAddsVibeRailsOpenAiProxyProvider()
+    {
+        var service = CreateService(
+            codexLlmProxyEnabled: true,
+            codexLlmProxyMode: CodexLlmProxySettings.ModeApi);
+
+        var prepared = await service.PrepareSessionAsync(LLM.Codex, envName: null, extraArgs: null);
+
+        Assert.StartsWith("codex ", prepared.LaunchCommand);
+        Assert.Contains(LlmProxyCodexConfig.OpenAiProviderName, prepared.LaunchCommand);
+        Assert.Contains("http://127.0.0.1:4321/llm/openai/v1", prepared.LaunchCommand);
+        Assert.Contains("requires_openai_auth=true", prepared.LaunchCommand);
+        Assert.Contains($"env_http_headers.{LlmProxyCodexConfig.SessionHeaderName}", prepared.LaunchCommand);
+        Assert.Contains(LocalToolApiContext.SessionTokenVariable, prepared.LaunchCommand);
+        Assert.Contains($"env_http_headers.{LlmProxyCodexConfig.TabHeaderName}", prepared.LaunchCommand);
+        Assert.Contains(LocalToolApiContext.TabTokenVariable, prepared.LaunchCommand);
+        Assert.DoesNotContain("test-session-token", prepared.LaunchCommand);
+        Assert.DoesNotContain("test-tab-token", prepared.LaunchCommand);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Codex_DoesNotAddProxyProviderWhenCodexLlmProxyDisabled()
+    {
+        var service = CreateService(codexLlmProxyEnabled: false);
+
+        var prepared = await service.PrepareSessionAsync(LLM.Codex, envName: null, extraArgs: null);
+
+        Assert.Equal("codex", prepared.LaunchCommand);
+        Assert.DoesNotContain(LlmProxyCodexConfig.OpenAiProviderName, prepared.Command);
+        Assert.DoesNotContain("llm/openai", prepared.Command);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Codex_SkipsProxyWhenProviderIsExplicit()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Codex,
+            envName: null,
+            extraArgs: ["--config", "model_provider=\"other\""]);
+
+        Assert.DoesNotContain(LlmProxyCodexConfig.OpenAiProviderName, prepared.LaunchCommand);
+        Assert.Contains("model_provider", prepared.LaunchCommand);
+        Assert.Contains("other", prepared.LaunchCommand);
     }
 
     [Theory]
@@ -142,7 +212,10 @@ public class CommandServiceTests : IDisposable
         Assert.False(prepared.Environment.ContainsKey("CLAUDE_CODE_FORCE_SYNC_OUTPUT"));
     }
 
-    private static CommandService CreateService()
+    private static CommandService CreateService(
+        bool codexLlmProxyEnabled = false,
+        bool claudeLlmProxyEnabled = false,
+        string codexLlmProxyMode = CodexLlmProxySettings.ModeSubscription)
     {
         var fileService = new Mock<IFileService>().Object;
         var envService = new LlmCliEnvironmentService(
@@ -151,7 +224,14 @@ public class CommandServiceTests : IDisposable
             new AntigravityLlmCliEnvironment(fileService),
             new CopilotLlmCliEnvironment(fileService),
             fileService);
-        return new CommandService(envService);
+        var toolApiContext = new Mock<ILocalToolApiContext>();
+        toolApiContext.Setup(x => x.ApiBaseUrl).Returns("http://127.0.0.1:4321");
+        toolApiContext.Setup(x => x.SessionToken).Returns("test-session-token");
+        toolApiContext.Setup(x => x.TabToken).Returns("test-tab-token");
+        var proxySettings = new Mock<ILlmProxySettingsService>();
+        proxySettings.Setup(x => x.GetSettings())
+            .Returns(new LlmProxySettings(codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled));
+        return new CommandService(envService, toolApiContext.Object, proxySettings.Object);
     }
 
     private static string ExpectedQuietRedirect() =>

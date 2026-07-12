@@ -5,5 +5,6 @@
   <Project Path="TerminalEmulator/TerminalEmulator.csproj" />
   <Project Path="TerminalEmulator.Tests/TerminalEmulator.Tests.csproj" />
   <Project Path="Tests/Tests.csproj" />
+  <Project Path="TokenSaver/TokenSaver.csproj" />
   <Project Path="VibeRails/VibeRails.csproj" />
 </Solution>

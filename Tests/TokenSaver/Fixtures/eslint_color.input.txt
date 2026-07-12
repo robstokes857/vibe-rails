@@ -1,0 +1,5 @@
+[1m[4msrc/app.js[24m[22m
+  [2m1:10[22m  [38;2;255;92;87merror[39m    'x' is assigned a value but never used  [2mno-unused-vars[22m
+  [2m3:5[22m   [38;2;243;249;157mwarning[39m  Unexpected console statement            [2mno-console[22m
+
+[1m[31m✖ 2 problems (1 error, 1 warning)[39m[22m

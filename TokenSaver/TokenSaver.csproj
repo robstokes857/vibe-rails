@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+  </PropertyGroup>
+  <!-- Supplies HttpContext/WebApplication/IHttpClientFactory/System.Text.Json without any
+       PackageReference, keeping this library dependency-free like TerminalEmulator/MintLint. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tests" />
+  </ItemGroup>
+</Project>

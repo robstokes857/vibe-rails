@@ -1,4 +1,6 @@
 using Serilog;
+using TokenSaver;
+using VibeRails.Services.AgentTools;
 using VibeRails.Services.LlmClis;
 using static VibeRails.Utils.ShellArgSanitizer;
 
@@ -13,6 +15,8 @@ public sealed record PreparedTerminalSession(
 public class CommandService : ICommandService
 {
     private readonly LlmCliEnvironmentService _envService;
+    private readonly ILocalToolApiContext _toolApiContext;
+    private readonly ILlmProxySettingsService _llmProxySettings;
     private const string VibeRailsMcpServerName = "viberails-mcp";
     private static int _fakeCliWarningEmitted;
 
@@ -24,9 +28,14 @@ public class CommandService : ICommandService
         LLM.Claude, LLM.Codex, LLM.Antigravity, LLM.Copilot
     };
 
-    public CommandService(LlmCliEnvironmentService envService)
+    public CommandService(
+        LlmCliEnvironmentService envService,
+        ILocalToolApiContext toolApiContext,
+        ILlmProxySettingsService llmProxySettings)
     {
         _envService = envService;
+        _toolApiContext = toolApiContext;
+        _llmProxySettings = llmProxySettings;
     }
 
     public Task<PreparedTerminalSession> PrepareSessionAsync(
@@ -75,8 +84,12 @@ public class CommandService : ICommandService
             LLM.Antigravity => "agy",
             _ => llm.ToString().ToLower()
         };
-        var cliCommand = extraArgs?.Length > 0
-            ? $"{cli} {BuildSafeArgString(extraArgs)}"
+        // One fresh snapshot for the whole prepare so the enabled/mode fields can't tear across a
+        // concurrent settings save and the launch hits the disk once, not once per field.
+        var proxySettings = _llmProxySettings.GetSettings();
+        var launchArgs = BuildLaunchArgs(llm, extraArgs, proxySettings);
+        var cliCommand = launchArgs.Length > 0
+            ? $"{cli} {BuildSafeArgString(launchArgs)}"
             : cli;
 
         var prompt = !string.IsNullOrWhiteSpace(summary)
@@ -131,6 +144,25 @@ public class CommandService : ICommandService
                 environment[kvp.Key] = kvp.Value;
         }
 
+        // If Claude proxying is enabled separately, route Claude Code's Anthropic API traffic
+        // through the local LLM proxy. Keep it independent from Codex's subscription/API setting:
+        // Claude may use API tokens while Codex uses a ChatGPT subscription.
+        // Skip if the selected environment already points Claude somewhere (base URL OR custom
+        // headers): respect the user's explicit Anthropic config instead of clobbering it — the
+        // proxy owns both variables together, so a partial overwrite would drop their headers.
+        if (proxySettings.ClaudeLlmProxyEnabled
+            && llm == LLM.Claude
+            && !environment.ContainsKey(LlmProxyClaudeConfig.BaseUrlVariable)
+            && !environment.ContainsKey(LlmProxyClaudeConfig.CustomHeadersVariable))
+        {
+            var claudeProxyEnv = LlmProxyClaudeConfig.BuildClaudeProxyEnvironment(
+                _toolApiContext.ApiBaseUrl,
+                _toolApiContext.SessionToken,
+                _toolApiContext.TabToken);
+            foreach (var kvp in claudeProxyEnv)
+                environment[kvp.Key] = kvp.Value;
+        }
+
         LogMcpSetup(llm, envName, setupCommands);
 
         return Task.FromResult(new PreparedTerminalSession(
@@ -138,6 +170,86 @@ public class CommandService : ICommandService
             cliCommand,
             setupCommands.AsReadOnly(),
             environment));
+    }
+
+    private string[] BuildLaunchArgs(LLM llm, string[]? extraArgs, LlmProxySettings proxySettings)
+    {
+        if (!proxySettings.CodexLlmProxyEnabled || llm != LLM.Codex || ShouldSkipCodexProxy(extraArgs))
+            return extraArgs ?? [];
+
+        var proxyArgs = LlmProxyCodexConfig.BuildCodexProxyArgs(
+            _toolApiContext.ApiBaseUrl,
+            proxySettings.CodexLlmProxyMode,
+            LocalToolApiContext.SessionTokenVariable,
+            LocalToolApiContext.TabTokenVariable);
+        if (extraArgs is not { Length: > 0 })
+            return proxyArgs;
+
+        var merged = new string[proxyArgs.Length + extraArgs.Length];
+        proxyArgs.CopyTo(merged, 0);
+        extraArgs.CopyTo(merged, proxyArgs.Length);
+        return merged;
+    }
+
+    private static bool ShouldSkipCodexProxy(string[]? extraArgs)
+    {
+        if (extraArgs is not { Length: > 0 })
+            return false;
+
+        for (var i = 0; i < extraArgs.Length; i++)
+        {
+            var arg = extraArgs[i];
+            if (arg.Equals("--oss", StringComparison.Ordinal)
+                || arg.Equals("--local-provider", StringComparison.Ordinal)
+                || arg.StartsWith("--local-provider=", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            // A Codex profile can set its own model_provider, and profile config outranks a
+            // prepended -c, so never force the proxy when the user selected one. Covers spaced,
+            // =-form, and glued short options (--profile, --profile=x, -p, -p x, -px).
+            if (arg.Equals("--profile", StringComparison.Ordinal)
+                || arg.StartsWith("--profile=", StringComparison.Ordinal)
+                || arg.Equals("-p", StringComparison.Ordinal)
+                || (arg.StartsWith("-p", StringComparison.Ordinal) && arg.Length > 2))
+            {
+                return true;
+            }
+
+            if ((arg.Equals("-c", StringComparison.Ordinal) || arg.Equals("--config", StringComparison.Ordinal))
+                && i + 1 < extraArgs.Length
+                && IsCodexProviderOverride(extraArgs[i + 1]))
+            {
+                return true;
+            }
+
+            if ((arg.StartsWith("-c=", StringComparison.Ordinal) || arg.StartsWith("--config=", StringComparison.Ordinal))
+                && IsCodexProviderOverride(arg[(arg.IndexOf('=') + 1)..]))
+            {
+                return true;
+            }
+
+            // Glued short form: -c<key>=<value> (e.g. -cmodel_provider="x").
+            if (arg.StartsWith("-c", StringComparison.Ordinal)
+                && arg.Length > 2
+                && arg[2] != '='
+                && IsCodexProviderOverride(arg[2..]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsCodexProviderOverride(string configArg)
+    {
+        var trimmed = configArg.AsSpan().TrimStart();
+        return trimmed.StartsWith("model_provider", StringComparison.Ordinal)
+            || trimmed.StartsWith("model_providers.", StringComparison.Ordinal)
+            || trimmed.StartsWith("openai_base_url", StringComparison.Ordinal)
+            || trimmed.StartsWith("chatgpt_base_url", StringComparison.Ordinal);
     }
 
     /// <summary>

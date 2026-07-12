@@ -1009,7 +1009,7 @@
     </template>
 
     <template id="settings-template">
-        <div class="view" data-view="settings">
+        <div class="view settings-view" data-view="settings">
             <div class="row justify-content-center text-center">
                 <div class="col-md-8 col-lg-6 mb-3">
                     <h4 class="text-uppercase fw-bold mb-0" style="letter-spacing: 0.05em;"><span class="text-gradient">Application Settings</span></h4>
@@ -1058,6 +1058,59 @@
                         </div>
                         <small class="form-text text-muted">Protect remote viewer access with a 4–6 digit PIN
                             challenge</small>
+                    </div>
+                </div>
+            </div>
+            <div class="row justify-content-center">
+                <div class="col-md-8 col-lg-6 mb-4">
+                    <div class="sandbox-item-card text-start">
+                        <div class="mb-3">
+                            <span class="sandbox-item-name">Codex Settings</span>
+                        </div>
+                        <div class="mb-4">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="setting-codex-llm-proxy-enabled">
+                                <label class="form-check-label" for="setting-codex-llm-proxy-enabled">Enable Codex proxy</label>
+                            </div>
+                            <small class="form-text text-muted">Route newly launched Codex sessions through the local VibeRails proxy. Token saving is Claude-only for now; Codex traffic passes through unchanged.</small>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-label mb-2">Codex auth type</div>
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="radio" name="setting-codex-llm-proxy-mode"
+                                    id="setting-codex-llm-proxy-mode-subscription" value="subscription">
+                                <label class="form-check-label" for="setting-codex-llm-proxy-mode-subscription">
+                                    Subscription plan
+                                </label>
+                                <small class="form-text text-muted d-block">Use this when Codex is signed in with a ChatGPT plan such as Plus, Pro, or Max.</small>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="setting-codex-llm-proxy-mode"
+                                    id="setting-codex-llm-proxy-mode-api" value="api">
+                                <label class="form-check-label" for="setting-codex-llm-proxy-mode-api">
+                                    API usage
+                                </label>
+                                <small class="form-text text-muted d-block">Use this when Codex is signed in with an OpenAI API key and billed through Platform usage.</small>
+                            </div>
+                        </div>
+                        <small class="form-text text-muted">Changes apply the next time a Codex terminal starts.</small>
+                    </div>
+                </div>
+            </div>
+            <div class="row justify-content-center">
+                <div class="col-md-8 col-lg-6 mb-4">
+                    <div class="sandbox-item-card text-start">
+                        <div class="mb-3">
+                            <span class="sandbox-item-name">Claude Settings</span>
+                        </div>
+                        <div class="mb-4">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="setting-claude-llm-proxy-enabled">
+                                <label class="form-check-label" for="setting-claude-llm-proxy-enabled">Enable Claude proxy and token saver</label>
+                            </div>
+                            <small class="form-text text-muted">Route newly launched Claude sessions through the local VibeRails proxy. Works with both subscription and API key sign-ins.</small>
+                        </div>
+                        <small class="form-text text-muted">Changes apply the next time a Claude terminal starts.</small>
                     </div>
                 </div>
             </div>
@@ -1114,18 +1167,25 @@
                                 </div>
                                 <small class="form-text text-muted">Use VS Code colors in the embedded dashboard</small>
                             </div>
-                            <button type="submit" class="btn btn-primary d-flex align-items-center gap-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
-                                    viewBox="0 0 16 16">
-                                    <path d="M11 2H9v3h2z" />
-                                    <path
-                                        d="M1.5 0h11.586a1.5 1.5 0 0 1 1.06.44l1.415 1.414A1.5 1.5 0 0 1 16 2.914V14.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 14.5v-13A1.5 1.5 0 0 1 1.5 0M1 1.5v13a.5.5 0 0 0 .5.5H2v-4.5A1.5 1.5 0 0 1 3.5 9h9a1.5 1.5 0 0 1 1.5 1.5V15h.5a.5.5 0 0 0 .5-.5V2.914a.5.5 0 0 0-.146-.353l-1.415-1.415A.5.5 0 0 0 13.086 1H13v4.5A1.5 1.5 0 0 1 11.5 7h-7A1.5 1.5 0 0 1 3 5.5V1H1.5a.5.5 0 0 0-.5.5m3 4a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V1H4zM3 15h10v-4.5a.5.5 0 0 0-.5-.5h-9a.5.5 0 0 0-.5.5z" />
-                                </svg>
-                                Save Settings
-                            </button>
                         </form>
                     </div>
                 </div>
+            </div>
+            <div class="settings-save-bar" data-settings-save-bar>
+                <div class="settings-save-copy">
+                    <div class="settings-save-title">Settings</div>
+                    <div class="settings-save-state" id="settings-save-state">All changes saved</div>
+                </div>
+                <button type="submit" form="app-settings-form" class="btn btn-primary d-flex align-items-center gap-2"
+                    id="settings-save-button" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        viewBox="0 0 16 16">
+                        <path d="M11 2H9v3h2z" />
+                        <path
+                            d="M1.5 0h11.586a1.5 1.5 0 0 1 1.06.44l1.415 1.414A1.5 1.5 0 0 1 16 2.914V14.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 14.5v-13A1.5 1.5 0 0 1 1.5 0M1 1.5v13a.5.5 0 0 0 .5.5H2v-4.5A1.5 1.5 0 0 1 3.5 9h9a1.5 1.5 0 0 1 1.5 1.5V15h.5a.5.5 0 0 0 .5-.5V2.914a.5.5 0 0 0-.146-.353l-1.415-1.415A.5.5 0 0 0 13.086 1H13v4.5A1.5 1.5 0 0 1 11.5 7h-7A1.5 1.5 0 0 1 3 5.5V1H1.5a.5.5 0 0 0-.5.5m3 4a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V1H4zM3 15h10v-4.5a.5.5 0 0 0-.5-.5h-9a.5.5 0 0 0-.5.5z" />
+                    </svg>
+                    Save Settings
+                </button>
             </div>
         </div>
     </template>

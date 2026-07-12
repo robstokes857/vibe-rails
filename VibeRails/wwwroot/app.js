@@ -16,6 +16,7 @@ import { SettingsController } from './js/modules/settings-controller.js';
 import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
+import { ActivityBlinker } from './js/modules/activity-blinker.js';
 import { showAppToast } from './js/modules/toast-service.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
@@ -55,6 +56,7 @@ export class VibeControlApp {
         this.loadingOverlayPendingCount = 0;
         this.loadingOverlayTimer = null;
         this.loadingOverlayVisibleSince = 0;
+        this.navigationGuards = new Set();
 
         this.init();
     }
@@ -64,8 +66,45 @@ export class VibeControlApp {
         await this.fetchConfigs();
         this.applyDocumentTitle();
         await this.applyInitialSettings();
-        this.appEventClient.start();
         this.terminalController.bindSessionEvents(this.appEventClient);
+
+        // Persistent proxy/token-compression indicator. It intentionally listens to the dedicated proxy
+        // event only, so terminal output, MCP calls, and other app activity cannot trigger it.
+        // The light lives in the terminal controls bar (see renderTerminalPanel); it's created
+        // detached and TerminalManager.initialize() re-parents it each time that bar renders.
+        this.activityBlinker = new ActivityBlinker({
+            title: 'Token compression',
+            enabled: this.appSettings.codexLlmProxyEnabled === true
+                || this.appSettings.claudeLlmProxyEnabled === true
+        });
+        // If the terminal view mounted before this ran, drop the light into its slot now.
+        this.activityBlinker.relocate(document.getElementById('terminal-proxy-activity-slot'));
+        this.appEventClient.on('proxy_activity', (p) => {
+            this.activityBlinker.report({
+                source: p?.source,
+                label: p?.label,
+                target: p?.target,
+                status: p?.status
+            });
+            // The running tally rides the ping (server-derived ~4 bytes/token estimate); older
+            // servers omit the field and the light keeps its em dash.
+            if (typeof p?.tokensSavedTotal === 'number') {
+                this.activityBlinker.setTokensSaved(p.tokensSavedTotal);
+            }
+        });
+        // Seed the tally from persisted history; pings keep it live from here on. Best-effort:
+        // a failed fetch just leaves the em dash until the first ping.
+        this.apiCall('/api/v1/token-savings', 'GET', null, { showLoading: false })
+            .then((savings) => {
+                if (typeof savings?.tokensSaved === 'number') {
+                    this.activityBlinker.setTokensSaved(savings.tokensSaved);
+                }
+            })
+            .catch(() => { });
+        // Register every handler before opening the socket so the first fast proxy response cannot
+        // race the activity subscription during startup.
+        this.appEventClient.start();
+
         this.applyNavbarsCollapsedState(false);
         // Git is optional. When not in a git repo, show a small non-blocking helper bar
         // but let the app load and run normally against the launch directory.
@@ -170,7 +209,14 @@ export class VibeControlApp {
                 await this.apiCall('/api/v1/git/init', 'POST');
                 await this.fetchConfigs();
                 if (this.data.isInGit) {
-                    // Repo created — drop the helper and re-render the current view in git mode.
+                    // Repo created — re-render the current view in git mode. Route the in-place
+                    // reload through the navigation guard so a dirty settings form isn't silently
+                    // discarded; if the user opts to keep their edits, leave the view as-is.
+                    if (!this.canNavigateTo(this.currentView)) {
+                        btn.disabled = false;
+                        btn.textContent = 'Initialize Git Here';
+                        return;
+                    }
                     document.getElementById('git-helper-bar')?.remove();
                     this.loadView(this.currentView);
                 } else {
@@ -303,6 +349,29 @@ export class VibeControlApp {
         }
     }
 
+    registerNavigationGuard(guard) {
+        if (typeof guard !== 'function') {
+            return () => {};
+        }
+
+        this.navigationGuards.add(guard);
+        return () => this.navigationGuards.delete(guard);
+    }
+
+    canNavigateTo(view, data = {}) {
+        for (const guard of Array.from(this.navigationGuards)) {
+            try {
+                if (guard({ from: this.currentView, to: view, data }) === false) {
+                    return false;
+                }
+            } catch (error) {
+                console.error('Navigation guard failed:', error);
+            }
+        }
+
+        return true;
+    }
+
     bindGlobalActions() {
         document.addEventListener('click', (e) => {
             const brandLogo = e.target.closest('.navbar-brand-sm');
@@ -359,6 +428,10 @@ export class VibeControlApp {
             ...settings
         });
         this.applyVsCodeThemePreference();
+        this.activityBlinker?.setEnabled(
+            this.appSettings.codexLlmProxyEnabled === true
+            || this.appSettings.claudeLlmProxyEnabled === true
+        );
     }
 
     _normalizeAppSettings(settings = {}) {
@@ -368,6 +441,9 @@ export class VibeControlApp {
             useVsCodeTheme: false,
             mcpEnabled: true,
             computerName: '',
+            codexLlmProxyEnabled: false,
+            codexLlmProxyMode: 'subscription',
+            claudeLlmProxyEnabled: false,
             machineName: '',
             ...settings
         };
@@ -607,6 +683,10 @@ export class VibeControlApp {
     // ============================================ 
 
     navigate(view, data = {}, { resetStack = false } = {}) {
+        if (!this.canNavigateTo(view, data)) {
+            return false;
+        }
+
         this.closeModal();
 
         if (resetStack) {
@@ -628,6 +708,7 @@ export class VibeControlApp {
 
         this.currentView = view;
         this.loadView(view, data);
+        return true;
     }
 
     updateActiveSubNav(view) {
@@ -644,11 +725,21 @@ export class VibeControlApp {
 
     goBack() {
         if (this.navigationStack.length > 1) {
+            const previous = this.navigationStack[this.navigationStack.length - 2];
+            const previousView = previous.view || previous;
+            const previousData = previous.data || {};
+
+            if (!this.canNavigateTo(previousView, previousData)) {
+                return false;
+            }
+
             this.navigationStack.pop();
-            const previous = this.navigationStack[this.navigationStack.length - 1];
             this.currentView = previous.view || previous;
             this.loadView(this.currentView, previous.data);
+            return true;
         }
+
+        return false;
     }
 
     scrollPageToTop() {
@@ -666,6 +757,7 @@ export class VibeControlApp {
     }
 
     loadView(view, data = {}) {
+        this.settingsController?.unload?.();
         this.updateActiveSubNav(view);
         this.terminalController?.resetLayoutStateForNavigation();
         // Tear down the MCP Explorer's global listener / xterm instances when navigating away

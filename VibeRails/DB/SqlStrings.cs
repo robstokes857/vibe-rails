@@ -237,6 +237,42 @@ namespace VibeRails.DB
             WHERE SessionId = $sessionId;
             """;
 
+        /// <summary>
+        /// LLM-proxy token-saver tally: one row per UTC day per provider, upsert-incremented per
+        /// request (see <see cref="UpsertTokenSavings"/>). Byte counts are the measured wire truth;
+        /// "tokens saved" is derived at display time so the heuristic never freezes into history.
+        /// Also created on demand by <c>TokenSavingsStore</c> (IF NOT EXISTS), since its writer can
+        /// run before the first <c>Repository</c> initializes the schema.
+        /// </summary>
+        public const string CreateTokenSavingsTable = """
+            CREATE TABLE IF NOT EXISTS TokenSavings (
+                Day               TEXT    NOT NULL,
+                Provider          TEXT    NOT NULL,
+                Requests          INTEGER NOT NULL DEFAULT 0,
+                RewrittenRequests INTEGER NOT NULL DEFAULT 0,
+                BytesBefore       INTEGER NOT NULL DEFAULT 0,
+                BytesAfter        INTEGER NOT NULL DEFAULT 0,
+                UpdatedUTC        TEXT    NOT NULL,
+                PRIMARY KEY (Day, Provider)
+            )
+            """;
+
+        public const string UpsertTokenSavings = """
+            INSERT INTO TokenSavings (Day, Provider, Requests, RewrittenRequests, BytesBefore, BytesAfter, UpdatedUTC)
+            VALUES ($day, $provider, 1, $rewritten, $bytesBefore, $bytesAfter, $updatedUTC)
+            ON CONFLICT(Day, Provider) DO UPDATE SET
+                Requests          = Requests + 1,
+                RewrittenRequests = RewrittenRequests + excluded.RewrittenRequests,
+                BytesBefore       = BytesBefore + excluded.BytesBefore,
+                BytesAfter        = BytesAfter + excluded.BytesAfter,
+                UpdatedUTC        = excluded.UpdatedUTC
+            """;
+
+        public const string SelectTokenSavingsTotals = """
+            SELECT COALESCE(SUM(BytesBefore), 0), COALESCE(SUM(BytesAfter), 0)
+            FROM TokenSavings
+            """;
+
         public static readonly string[] InitStatements =
         [
             CreateEnvironmentsTable,
@@ -261,7 +297,8 @@ namespace VibeRails.DB
             CreateTerminalSessionLogsTable,
             CreateTerminalSessionLogsIndex,
             CreateProjectCacheTable,
-            CreateGlobalCacheTable
+            CreateGlobalCacheTable,
+            CreateTokenSavingsTable
         ];
 
         public const string AddProcessedColumn = "ALTER TABLE Sessions ADD COLUMN Processed INTEGER NOT NULL DEFAULT 0";

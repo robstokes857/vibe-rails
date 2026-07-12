@@ -1,3 +1,4 @@
+using TokenSaver;
 using VibeRails.Auth;
 using VibeRails.Services;
 
@@ -19,9 +20,13 @@ public class CookieAuthMiddleware
         var path = context.Request.Path.Value ?? "";
         var isWebSocketRequest = IsWebSocketHandshake(context);
 
-        // Skip auth for bootstrap, health check, and CORS preflight requests
+        // Skip auth for bootstrap, the bare readiness probe, local LLM proxy, and CORS preflight
+        // requests. The proxy route validates the session and tab headers injected into the model
+        // provider. Everything else — including /api/v1/context, which leaks paths and the git
+        // remote URL — requires full auth.
         if (path.StartsWith("/auth/bootstrap") ||
-            path.Equals("/api/v1/context", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/health", StringComparison.OrdinalIgnoreCase) ||
+            LlmProxyCodexConfig.IsOpenAiProxyPath(path) ||
             context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
@@ -32,16 +37,14 @@ public class CookieAuthMiddleware
         var token = context.Request.Cookies["viberails_session"]
             ?? context.Request.Headers["viberails_session"].FirstOrDefault();
 
-        // Internal server-to-server ClientWebSocket connections (e.g. parent→child tab proxy)
-        // cannot use cookies and send the session token as a WebSocket subprotocol instead.
-        // Browser WebSocket connections always send the HttpOnly cookie automatically.
-        // VSCode webview WebSocket connections pass the token as a query parameter since
-        // the webview sandbox does not share cookies with the extension host.
+        // WebSocket connections that can't use cookies (internal server-to-server ClientWebSocket,
+        // the VSCode webview whose sandbox doesn't share cookies) send the session token as a
+        // WebSocket subprotocol — both tokens are URL-safe base64 for exactly this reason.
+        // Query-string tokens are deliberately NOT accepted: query strings end up in request logs.
         if (string.IsNullOrEmpty(token) && isWebSocketRequest)
         {
             token = context.WebSockets.WebSocketRequestedProtocols
-                .FirstOrDefault(x => _authService.ValidateToken(x))
-                ?? context.Request.Query["viberails_session"].FirstOrDefault();
+                .FirstOrDefault(x => _authService.ValidateToken(x));
         }
 
         if (!_authService.ValidateToken(token))
@@ -54,8 +57,8 @@ public class CookieAuthMiddleware
                 return;
             }
 
-            // API calls should not be redirected (fetch/XHR expects JSON/status codes).
-            if (path.StartsWith("/api/"))
+            // API and MCP calls should not be redirected (fetch/XHR/MCP clients expect status codes).
+            if (path.StartsWith("/api/") || IsMcpPath(path))
             {
                 context.Response.StatusCode = 401;
                 await context.Response.WriteAsync("Unauthorized");
@@ -69,10 +72,14 @@ public class CookieAuthMiddleware
             return;
         }
 
-        // Tab token required on API routes and WebSocket connections only.
+        // Tab token required on API routes, the MCP endpoint, and WebSocket connections.
         // Static files and page loads are exempt — the token lives in sessionStorage
         // which is populated after bootstrap, before any API calls are made.
-        if (isWebSocketRequest || path.Contains("/api/", StringComparison.OrdinalIgnoreCase))
+        // /mcp matters: its tools can open a host shell and send input, so a leaked session
+        // token alone must never be enough to reach them.
+        if (isWebSocketRequest
+            || path.Contains("/api/", StringComparison.OrdinalIgnoreCase)
+            || IsMcpPath(path))
         {
             if (isWebSocketRequest)
             {
@@ -94,7 +101,7 @@ public class CookieAuthMiddleware
                 var tabToken = context.Request.Headers["viberails_tab"].FirstOrDefault();
                 if (!_authService.ValidateTabToken(tabToken))
                 {
-                    if (path.StartsWith("/api/"))
+                    if (path.StartsWith("/api/") || IsMcpPath(path))
                     {
                         context.Response.StatusCode = 401;
                         await context.Response.WriteAsync("Unauthorized");
@@ -113,6 +120,10 @@ public class CookieAuthMiddleware
         // Authenticated - continue to next middleware
         await _next(context);
     }
+
+    private static bool IsMcpPath(string path) =>
+        path.Equals("/mcp", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith("/mcp/", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeTabToken(string? token)
     {

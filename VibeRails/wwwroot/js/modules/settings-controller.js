@@ -3,13 +3,30 @@ export class SettingsController {
         this.app = app;
         this._pinIsSet = false;
         this.performanceMode = window.VibeRailsPerformance;
+        this._settingsDirty = false;
+        this._settingsSaving = false;
+        this._settingsSnapshot = '';
+        this._removeNavigationGuard = null;
+        this._beforeUnloadHandler = null;
     }
 
     async loadSettings() {
+        this.unload();
+
         const content = document.getElementById('app-content');
         if (!content) return;
 
-        let settings = { remoteAccess: false, apiKey: '', useVsCodeTheme: false, mcpEnabled: true, computerName: '', machineName: '' };
+        let settings = {
+            remoteAccess: false,
+            apiKey: '',
+            useVsCodeTheme: false,
+            mcpEnabled: true,
+            computerName: '',
+            codexLlmProxyEnabled: false,
+            codexLlmProxyMode: 'subscription',
+            claudeLlmProxyEnabled: false,
+            machineName: ''
+        };
         try {
             settings = await this.app.apiCall('/api/v1/settings', 'GET');
             this.app.setAppSettings(settings);
@@ -31,6 +48,10 @@ export class SettingsController {
             const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
             const mcpEnabledToggle = root.querySelector('#setting-enable-mcp');
             const computerNameInput = root.querySelector('#setting-computer-name');
+            const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
+            const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
+            const codexLlmProxyModeApi = root.querySelector('#setting-codex-llm-proxy-mode-api');
+            const claudeLlmProxyEnabledToggle = root.querySelector('#setting-claude-llm-proxy-enabled');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
@@ -38,6 +59,7 @@ export class SettingsController {
                     if (remoteAccessToggle.checked && !this._pinIsSet) {
                         remoteAccessToggle.checked = false;
                         this.app.showToast('Remote Access', 'A PIN must be set before enabling remote access.', 'warning');
+                        this._updateDirtyState(root);
                     }
                 });
             }
@@ -69,49 +91,233 @@ export class SettingsController {
                 // surface it as the placeholder so the default is visible.
                 if (settings.machineName) computerNameInput.placeholder = settings.machineName;
             }
+            if (codexLlmProxyEnabledToggle) {
+                codexLlmProxyEnabledToggle.checked = settings.codexLlmProxyEnabled === true;
+            }
+            const codexLlmProxyMode = settings.codexLlmProxyMode === 'api' ? 'api' : 'subscription';
+            if (codexLlmProxyModeSubscription) codexLlmProxyModeSubscription.checked = codexLlmProxyMode === 'subscription';
+            if (codexLlmProxyModeApi) codexLlmProxyModeApi.checked = codexLlmProxyMode === 'api';
+            if (claudeLlmProxyEnabledToggle) {
+                claudeLlmProxyEnabledToggle.checked = settings.claudeLlmProxyEnabled === true;
+            }
 
             const form = root.querySelector('#app-settings-form');
             if (form) {
                 form.addEventListener('submit', async (e) => {
                     e.preventDefault();
+                    if (!this._settingsDirty || this._settingsSaving) {
+                        return;
+                    }
+
                     const wantsRemote = remoteAccessToggle?.checked || false;
                     if (wantsRemote && !this._pinIsSet) {
                         this.app.showToast('Remote Access', 'A PIN must be set before enabling remote access.', 'warning');
                         if (remoteAccessToggle) remoteAccessToggle.checked = false;
+                        this._updateDirtyState(root);
                         return;
                     }
                     const apiKeyValue = apiKeyInput?.value || '';
                     const apiKeyChanged = apiKeyValue !== (apiKeyInput?.dataset.originalValue || '');
-                    await this.saveSettings(
-                        wantsRemote,
-                        apiKeyChanged ? apiKeyValue : '',
-                        useVsCodeThemeToggle?.checked || false,
-                        true,
-                        computerNameInput?.value || ''
-                    );
+                    this._settingsSaving = true;
+                    this._updateSaveBar(root);
+                    try {
+                        const savedSettings = await this.saveSettings(
+                            wantsRemote,
+                            apiKeyChanged ? apiKeyValue : '',
+                            useVsCodeThemeToggle?.checked || false,
+                            true,
+                            computerNameInput?.value || '',
+                            codexLlmProxyEnabledToggle?.checked || false,
+                            this._getCodexLlmProxyMode(root),
+                            claudeLlmProxyEnabledToggle?.checked || false
+                        );
+                        if (savedSettings) {
+                            this._applySavedSettingsToControls(root, savedSettings);
+                            this._markSettingsClean(root);
+                        }
+                    } finally {
+                        this._settingsSaving = false;
+                        this._updateSaveBar(root);
+                    }
                 });
             }
 
+            this._initSettingsDirtyTracking(root);
             await this._initPinSection(root);
         }
 
         content.appendChild(fragment);
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
                 apiKey: apiKey,
                 useVsCodeTheme: useVsCodeTheme,
                 mcpEnabled: mcpEnabled,
-                computerName: computerName
+                computerName: computerName,
+                codexLlmProxyEnabled: codexLlmProxyEnabled,
+                codexLlmProxyMode: codexLlmProxyMode,
+                claudeLlmProxyEnabled: claudeLlmProxyEnabled
             });
             this.app.setAppSettings(savedSettings);
             this.app.showToast('Settings', 'Settings saved successfully', 'success');
+            return savedSettings;
         } catch (error) {
             this.app.showError('Failed to save settings: ' + error.message);
+            return null;
         }
+    }
+
+    unload() {
+        if (this._removeNavigationGuard) {
+            this._removeNavigationGuard();
+            this._removeNavigationGuard = null;
+        }
+
+        if (this._beforeUnloadHandler) {
+            window.removeEventListener('beforeunload', this._beforeUnloadHandler);
+            this._beforeUnloadHandler = null;
+        }
+
+        this._settingsDirty = false;
+        this._settingsSaving = false;
+        this._settingsSnapshot = '';
+    }
+
+    _initSettingsDirtyTracking(root) {
+        this._settingsSnapshot = this._captureSettingsSnapshot(root);
+        this._settingsDirty = false;
+        this._settingsSaving = false;
+        this._updateSaveBar(root);
+
+        root.querySelectorAll(this._trackedSettingsSelector()).forEach((input) => {
+            input.addEventListener('input', () => this._updateDirtyState(root));
+            input.addEventListener('change', () => this._updateDirtyState(root));
+        });
+
+        this._removeNavigationGuard = this.app.registerNavigationGuard?.(({ from }) => {
+            if (from !== 'settings' || !this._settingsDirty) {
+                return true;
+            }
+
+            // window.confirm is suppressed (returns false) inside the sandboxed VS Code webview
+            // iframe, which would trap the user on a dirty form with no way to leave. Only block
+            // where confirm actually prompts; in the webview, allow navigation instead of trapping.
+            if (window.__viberails_VSCODE__) {
+                return true;
+            }
+
+            return window.confirm('You have unsaved settings changes. Leave without saving?');
+        }) || null;
+
+        this._beforeUnloadHandler = (event) => {
+            if (!this._settingsDirty) {
+                return undefined;
+            }
+
+            event.preventDefault();
+            event.returnValue = '';
+            return '';
+        };
+        window.addEventListener('beforeunload', this._beforeUnloadHandler);
+    }
+
+    _trackedSettingsSelector() {
+        return [
+            '#setting-remote-access',
+            '#setting-api-key',
+            '#setting-use-vscode-theme',
+            '#setting-computer-name',
+            '#setting-codex-llm-proxy-enabled',
+            'input[name="setting-codex-llm-proxy-mode"]',
+            '#setting-claude-llm-proxy-enabled'
+        ].join(',');
+    }
+
+    _captureSettingsSnapshot(root) {
+        const isChecked = (selector) => root.querySelector(selector)?.checked === true;
+        const valueOf = (selector) => root.querySelector(selector)?.value || '';
+
+        return JSON.stringify({
+            remoteAccess: isChecked('#setting-remote-access'),
+            apiKey: valueOf('#setting-api-key'),
+            useVsCodeTheme: isChecked('#setting-use-vscode-theme'),
+            computerName: valueOf('#setting-computer-name'),
+            codexLlmProxyEnabled: isChecked('#setting-codex-llm-proxy-enabled'),
+            codexLlmProxyMode: this._getCodexLlmProxyMode(root),
+            claudeLlmProxyEnabled: isChecked('#setting-claude-llm-proxy-enabled')
+        });
+    }
+
+    _updateDirtyState(root) {
+        this._settingsDirty = this._captureSettingsSnapshot(root) !== this._settingsSnapshot;
+        this._updateSaveBar(root);
+    }
+
+    _markSettingsClean(root) {
+        this._settingsSnapshot = this._captureSettingsSnapshot(root);
+        this._settingsDirty = false;
+        this._updateSaveBar(root);
+    }
+
+    _updateSaveBar(root) {
+        const saveBar = root.querySelector('[data-settings-save-bar]');
+        const saveButton = root.querySelector('#settings-save-button');
+        const saveState = root.querySelector('#settings-save-state');
+
+        if (saveBar) {
+            saveBar.classList.toggle('is-dirty', this._settingsDirty);
+        }
+
+        if (saveState) {
+            saveState.classList.toggle('is-dirty', this._settingsDirty);
+            saveState.textContent = this._settingsSaving
+                ? 'Saving changes...'
+                : this._settingsDirty
+                    ? 'Unsaved changes'
+                    : 'All changes saved';
+        }
+
+        if (saveButton) {
+            saveButton.disabled = this._settingsSaving || !this._settingsDirty;
+        }
+    }
+
+    _applySavedSettingsToControls(root, settings) {
+        if (!settings) return;
+
+        const remoteAccessToggle = root.querySelector('#setting-remote-access');
+        const apiKeyInput = root.querySelector('#setting-api-key');
+        const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
+        const computerNameInput = root.querySelector('#setting-computer-name');
+        const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
+        const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
+        const codexLlmProxyModeApi = root.querySelector('#setting-codex-llm-proxy-mode-api');
+        const claudeLlmProxyEnabledToggle = root.querySelector('#setting-claude-llm-proxy-enabled');
+
+        if (remoteAccessToggle) remoteAccessToggle.checked = settings.remoteAccess === true;
+        if (apiKeyInput) {
+            apiKeyInput.value = settings.apiKey || '';
+            apiKeyInput.dataset.originalValue = settings.apiKey || '';
+        }
+        if (useVsCodeThemeToggle) useVsCodeThemeToggle.checked = settings.useVsCodeTheme === true;
+        if (computerNameInput) {
+            computerNameInput.value = settings.computerName || '';
+            if (settings.machineName) computerNameInput.placeholder = settings.machineName;
+        }
+        if (codexLlmProxyEnabledToggle) codexLlmProxyEnabledToggle.checked = settings.codexLlmProxyEnabled === true;
+
+        const codexLlmProxyMode = settings.codexLlmProxyMode === 'api' ? 'api' : 'subscription';
+        if (codexLlmProxyModeSubscription) codexLlmProxyModeSubscription.checked = codexLlmProxyMode === 'subscription';
+        if (codexLlmProxyModeApi) codexLlmProxyModeApi.checked = codexLlmProxyMode === 'api';
+        if (claudeLlmProxyEnabledToggle) claudeLlmProxyEnabledToggle.checked = settings.claudeLlmProxyEnabled === true;
+    }
+
+    _getCodexLlmProxyMode(root) {
+        const selected = root.querySelector('input[name="setting-codex-llm-proxy-mode"]:checked');
+        return selected?.value === 'api' ? 'api' : 'subscription';
     }
 
     // ── PIN section ────────────────────────────────────────────────────────
@@ -156,6 +362,7 @@ export class SettingsController {
                 const remoteToggle = root.querySelector('#setting-remote-access');
                 if (remoteToggle?.checked) {
                     remoteToggle.checked = false;
+                    this._updateDirtyState(root);
                     this.app.showToast('Remote Access', 'Remote access disabled because PIN was cleared.', 'warning');
                 }
             } catch (error) {
