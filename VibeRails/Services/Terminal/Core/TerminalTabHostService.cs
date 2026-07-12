@@ -676,7 +676,9 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         var http = _httpClientFactory.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(2);
 
-        var healthUrl = $"http://127.0.0.1:{port}/api/v1/context";
+        // The bare /health probe is the only unauthenticated endpoint: this poll runs BEFORE the
+        // child's bootstrap code is consumed, so no token exists yet to authenticate with.
+        var healthUrl = $"http://127.0.0.1:{port}/health";
         for (var attempt = 0; attempt < HealthAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();

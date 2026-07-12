@@ -1,0 +1,5 @@
+src/app.js
+  1:10  error    'x' is assigned a value but never used  no-unused-vars
+  3:5   warning  Unexpected console statement            no-console
+
+✖ 2 problems (1 error, 1 warning)

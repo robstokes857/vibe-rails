@@ -413,6 +413,11 @@ namespace VibeRails.DTOs
         bool UseVsCodeTheme,
         bool McpEnabled,
         string? ComputerName,
+        // Nullable so a stale client that omits these keys leaves the stored values untouched
+        // (see AppSettingsRoutes) instead of resetting an enabled proxy to false/subscription.
+        bool? CodexLlmProxyEnabled,
+        string? CodexLlmProxyMode,
+        bool? ClaudeLlmProxyEnabled,
         // Read-only: the live machine name, used by the client as the placeholder
         // and as the push-notification fallback when ComputerName is blank. Never
         // persisted (see AppSettingsRoutes), so renaming the machine reflects live.
@@ -423,6 +428,34 @@ namespace VibeRails.DTOs
     // settings panel change ComputerName without resending (and risking clobbering)
     // the full settings object from a possibly-stale client cache.
     public record UpdateComputerNameDto(string? ComputerName);
+
+    // Display-only ping for the proxy/token-saver light in the UI (see activity-blinker.js).
+    // Only the authenticated Claude/Codex proxy routes publish this event; ordinary terminal or
+    // app activity must not light it. Never include secrets, request bodies, or query strings.
+    //   Source: stable proxy name the UI groups by, e.g. "Claude proxy".
+    //   Label:  short verb/context, e.g. an HTTP method.
+    //   Target: where it went, e.g. an upstream URL (no query string).
+    //   Status: outcome, e.g. an HTTP status code.
+    //   BytesSaved: this request's minification win, when it was rewritten.
+    //   TokensSavedTotal: all-time running tally (~4 bytes/token estimate) for the light's label.
+    public record ProxyActivityPingPayload(
+        string Source,
+        string? Label,
+        string? Target,
+        string? Status,
+        long? BytesSaved = null,
+        long? TokensSavedTotal = null
+    );
+
+    // Served by GET /api/v1/token-savings for the UI's initial tally (live updates ride the
+    // proxy_activity pings). Bytes are the measured truth; TokensSaved is the ~4 bytes/token
+    // display estimate, derived server-side so the heuristic lives in one place.
+    public record TokenSavingsDto(
+        long BytesBefore,
+        long BytesAfter,
+        long BytesSaved,
+        long TokensSaved
+    );
 
     // Remote PIN DTOs
     public record SetPinRequest(string Pin);
@@ -800,6 +833,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(AppSettingsDto))]
     [JsonSerializable(typeof(UpdateComputerNameDto))]
+    [JsonSerializable(typeof(ProxyActivityPingPayload))]
+    [JsonSerializable(typeof(TokenSavingsDto))]
     // Remote PIN DTOs
     [JsonSerializable(typeof(SetPinRequest))]
     [JsonSerializable(typeof(PinStatusResponse))]

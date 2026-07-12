@@ -201,6 +201,11 @@ class TerminalManager {
         this.bindActions();
         this._mountDropdowns();
         this._initTabScrollArrows();
+
+        // Re-home the persistent proxy/token-saver light into this freshly-rendered controls bar.
+        // The bar is rebuilt via innerHTML on every terminal-view render, so the app-level singleton
+        // is re-parented here (state preserved) rather than recreated. No-op if the slot is absent.
+        this.app.activityBlinker?.relocate(this.container.querySelector('#terminal-proxy-activity-slot'));
         this.settings = new TerminalSettings(this.container, this);
         this.settings.init();
         const savedFontSize = this.settings.loadFontSize();
@@ -2947,6 +2952,10 @@ export class TerminalController {
                             <span>Reconnect</span>
                         </button>
                     </div>
+                    <!-- Far-right home for the persistent proxy/token-saver light (app.activityBlinker,
+                         re-parented here in TerminalManager.initialize()). ms-auto pushes it opposite
+                         the LLM picker + Start button. -->
+                    <div class="vb-terminal-proxy-activity-slot ms-auto" id="terminal-proxy-activity-slot"></div>
                 </div>
                 <div class="vb-terminal-window-shell">
                     <div class="vb-terminal-window-header">

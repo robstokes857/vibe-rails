@@ -1,0 +1,5 @@
+Collecting requests
+  Downloading requests-2.32.3-py3-none-any.whl (64 kB)
+     10%|███       | 6.5/64 kB     50%|█████     | 32.0/64 kB    100%|██████████| 64.0/64 kB
+Installing collected packages: requests
+Successfully installed requests-2.32.3

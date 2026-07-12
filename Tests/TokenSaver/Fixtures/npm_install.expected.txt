@@ -1,0 +1,4 @@
+npm warn deprecated foo@1.0.0: use bar instead
+✔ fetched 42 packages
+npm notice New minor version available
+added 42 packages in 3s
