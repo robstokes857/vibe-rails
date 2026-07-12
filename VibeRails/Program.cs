@@ -263,10 +263,22 @@ app.Use(async (context, next) =>
     var sw = Stopwatch.StartNew();
     var method = context.Request.Method;
     var path = context.Request.Path.Value ?? string.Empty;
-    var query = context.Request.QueryString.Value ?? string.Empty;
+    var query = RedactAuthTokens(context.Request.QueryString.Value ?? string.Empty);
     var isWs = context.WebSockets.IsWebSocketRequest;
     var tag = isWs ? "WS" : "HTTP";
     Log.Information("[{Tag} →] {Method} {Path}{Query}", tag, method, path, query);
+
+    // No client should ever put auth tokens in a query string (they belong in headers, cookies,
+    // or WS subprotocols — and the middleware no longer accepts query tokens), but a log file must
+    // never become the place we find out one did.
+    static string RedactAuthTokens(string query) =>
+        query.Contains("viberails_", StringComparison.OrdinalIgnoreCase)
+            ? System.Text.RegularExpressions.Regex.Replace(
+                query,
+                "(viberails_[a-z]*=)[^&]*",
+                "$1[redacted]",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            : query;
     try
     {
         await next();
@@ -301,9 +313,10 @@ app.MapApiEndpoints(launchDirectory);
 
 // In-process MCP server over HTTP. Root backend only (terminal-tab children skip both
 // the DI registration and this endpoint — see MapRegisterServices). Sits behind
-// CookieAuthMiddleware, so callers must present a valid viberails_session token: the
-// MCP Explorer forwards the caller's token to its own loopback /mcp, and external CLIs
-// would pass it as a request header. /mcp is not under /api, so no per-tab token applies.
+// CookieAuthMiddleware, which gates /mcp on BOTH the session AND the per-tab token —
+// the same bar as /api, because MCP tools can open a host shell, so a leaked session
+// token alone must not reach them. The MCP Explorer forwards both of the caller's tokens
+// to its own loopback /mcp; external CLIs pass them as request headers.
 if (!MapRegisterServices.IsTerminalTabChildProcess(args))
 {
     app.MapMcp("/mcp");

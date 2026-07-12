@@ -50,18 +50,12 @@ public sealed class LocalToolApiContext : ILocalToolApiContext
     }
 
     /// <summary>
-    /// Normalizes a local API base URL: blank/whitespace falls back to the sentinel
-    /// <c>http://127.0.0.1:0</c>, then it is trimmed and stripped of trailing slashes. Shared with
-    /// the LLM-proxy config builders so every base URL is normalized one way.
+    /// Normalizes a local API base URL. Delegates to the TokenSaver library's
+    /// <see cref="TokenSaver.LlmProxyBaseUrl.Normalize"/> — the single source of truth shared with
+    /// the LLM-proxy config builders — so every base URL is normalized one way.
     /// </summary>
-    public static string NormalizeBaseUrl(string value)
-    {
-        var trimmed = string.IsNullOrWhiteSpace(value)
-            ? "http://127.0.0.1:0"
-            : value.Trim();
-
-        return trimmed.TrimEnd('/');
-    }
+    public static string NormalizeBaseUrl(string value) =>
+        TokenSaver.LlmProxyBaseUrl.Normalize(value);
 
     private static string? EmptyToNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

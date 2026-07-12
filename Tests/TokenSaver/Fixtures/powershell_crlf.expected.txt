@@ -1,0 +1,6 @@
+    Directory: C:\src\demo
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+-a---           7/11/2026  3:14 PM           1024 build.ps1
+-a---           7/11/2026  3:14 PM           2048 app.cs

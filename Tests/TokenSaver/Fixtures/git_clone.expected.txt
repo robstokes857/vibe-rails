@@ -1,0 +1,5 @@
+Cloning into 'demo'...
+remote: Enumerating objects: 120, done.
+Counting objects: 100% (120/120), done.
+Receiving objects: 100% (120/120), 15.2 KiB | 1.5 MiB/s, done.
+Resolving deltas: 100% (30/30), done.

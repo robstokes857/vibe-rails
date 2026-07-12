@@ -1,7 +1,7 @@
 using Serilog;
+using TokenSaver;
 using VibeRails.Services.AgentTools;
 using VibeRails.Services.LlmClis;
-using VibeRails.Services.LlmProxy;
 using static VibeRails.Utils.ShellArgSanitizer;
 
 namespace VibeRails.Services.Terminal;
@@ -179,7 +179,9 @@ public class CommandService : ICommandService
 
         var proxyArgs = LlmProxyCodexConfig.BuildCodexProxyArgs(
             _toolApiContext.ApiBaseUrl,
-            proxySettings.CodexLlmProxyMode);
+            proxySettings.CodexLlmProxyMode,
+            LocalToolApiContext.SessionTokenVariable,
+            LocalToolApiContext.TabTokenVariable);
         if (extraArgs is not { Length: > 0 })
             return proxyArgs;
 

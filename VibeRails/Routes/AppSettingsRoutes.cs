@@ -1,6 +1,6 @@
+using TokenSaver;
 using VibeRails.DTOs;
 using VibeRails.Services;
-using VibeRails.Services.LlmProxy;
 using VibeRails.Utils;
 
 namespace VibeRails.Routes;
@@ -23,8 +23,11 @@ public static class AppSettingsRoutes
             // Remote access requires a PIN — if none is set, force it off
             var remoteAccess = settingsDto.RemoteAccess && RemoteConfig.IsPinConfigured;
 
-            // Load existing settings from settings.json
-            var settings = Config.Load();
+            // LoadFresh, not Load: this handler writes the WHOLE Settings object back, including
+            // fields the UI doesn't expose (e.g. the hand-editable token-saver flags). Merging over
+            // the process's cached copy would silently revert any settings.json edit made since
+            // the cache was filled — including flipping the token-saver kill switch back on.
+            var settings = Config.LoadFresh();
 
             // Empty apiKey means "unchanged" (masked value was not edited). Also reject the masked
             // placeholder itself (bullet chars, U+2022) so a client that echoes it back can't
@@ -72,7 +75,9 @@ public static class AppSettingsRoutes
         // stale client-side copy (remoteAccess, mcpEnabled, theme, …).
         app.MapPost("/api/v1/settings/computer-name", (UpdateComputerNameDto dto) =>
         {
-            var settings = Config.Load();
+            // LoadFresh for the same reason as the main settings POST: never write a stale cached
+            // snapshot back over hand-edited settings.json fields.
+            var settings = Config.LoadFresh();
             settings.ComputerName = NormalizeComputerName(dto.ComputerName ?? settings.ComputerName);
             Config.Save(settings);
             return Results.Ok(BuildAppSettingsDto(settings));

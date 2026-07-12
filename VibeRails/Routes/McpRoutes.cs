@@ -17,6 +17,7 @@ namespace VibeRails.Routes;
 public static class McpRoutes
 {
     private const string SessionCookieName = "viberails_session";
+    private const string TabHeaderName = "viberails_tab";
     private const int MaxCustomHeaders = 20;
 
     public static void Map(WebApplication app)
@@ -159,6 +160,10 @@ public static class McpRoutes
                 ?? ctx.Request.Headers[SessionCookieName].FirstOrDefault()
                 ?? string.Empty;
             headers[SessionCookieName] = sessionToken;
+            // /mcp requires the per-tab token too (its tools can reach a host shell, so a leaked
+            // session token alone must not clear the gate). These handlers sit behind full auth,
+            // so the caller always has one to forward.
+            headers[TabHeaderName] = ctx.Request.Headers[TabHeaderName].FirstOrDefault() ?? string.Empty;
         }
 
         return headers;

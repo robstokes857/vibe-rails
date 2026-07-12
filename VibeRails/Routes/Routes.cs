@@ -1,3 +1,5 @@
+using TokenSaver;
+
 namespace VibeRails.Routes;
 
 public static class RouteExtensions
@@ -13,6 +15,7 @@ public static class RouteExtensions
         DebugBundleRoutes.Map(app);
         LlmProxyRoutes.Map(app);
         LlmAnthropicProxyRoutes.Map(app);
+        TokenSavingsRoutes.Map(app);
         TerminalRoutes.Map(app, launchDirectory);
         TerminalTabsRoutes.Map(app);
         AgentToolRoutes.Map(app);

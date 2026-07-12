@@ -10,6 +10,27 @@ namespace VibeRails.Routes;
 
 public static class ProjectRoutes
 {
+    /// <summary>
+    /// Strips userinfo from a git remote URL before it leaves the server. A repo cloned with an
+    /// embedded credential stores it verbatim in .git/config (<c>https://user:TOKEN@host/…</c> —
+    /// or the GitHub-PAT-as-username form <c>https://TOKEN@host/…</c>), and
+    /// <c>git remote get-url</c> returns it unredacted. The UI only derives a display name from
+    /// this value; cloning paths (SandboxService) keep using the raw URL internally. scp-style
+    /// remotes (<c>git@host:path</c>) don't parse as absolute URIs and carry no password, so they
+    /// pass through unchanged.
+    /// </summary>
+    internal static string? StripUserInfo(string? remoteUrl)
+    {
+        if (string.IsNullOrEmpty(remoteUrl)
+            || !Uri.TryCreate(remoteUrl, UriKind.Absolute, out var uri)
+            || string.IsNullOrEmpty(uri.UserInfo))
+        {
+            return remoteUrl;
+        }
+
+        return new UriBuilder(uri) { UserName = string.Empty, Password = string.Empty }.Uri.ToString();
+    }
+
     // Dangerous directories that should never be git-initialized
     private static readonly string[] DangerousWindowsPaths =
     [
@@ -35,6 +56,12 @@ public static class ProjectRoutes
 
     public static void Map(WebApplication app, string launchDirectory)
     {
+        // Bare readiness probe: the ONLY deliberately unauthenticated endpoint (see
+        // CookieAuthMiddleware's skip list). The parent process polls it on a child terminal
+        // server BEFORE consuming the child's bootstrap code — i.e. before any token exists —
+        // so it must answer without auth and must reveal nothing.
+        app.MapGet("/health", () => Results.Ok()).WithName("Health");
+
         app.MapGet("/api/v1/context", (IGitService gitService) =>
         {
             // Return immediately with whatever git state is known.
@@ -51,7 +78,7 @@ public static class ProjectRoutes
                 LaunchDirectory: launchDirectory,
                 RootPath: rootPath,
                 GitBranch: Utils.ParserConfigs.GetGitBranch(),
-                GitRemoteUrl: Utils.ParserConfigs.GetGitRemoteUrl(),
+                GitRemoteUrl: StripUserInfo(Utils.ParserConfigs.GetGitRemoteUrl()),
                 IsSandbox: isSandbox
             ));
         }).WithName("GetContext");

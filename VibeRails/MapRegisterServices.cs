@@ -10,6 +10,7 @@ using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
+using TokenSaver;
 using VibeRails.Services.AgentTools;
 using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Mcp.HostShell;
@@ -75,6 +76,12 @@ namespace VibeRails
             serviceCollection.AddSingleton<ILocalToolApiContext>(sp =>
                 new LocalToolApiContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>()));
             serviceCollection.AddSingleton<ILlmProxySettingsService, LlmProxySettingsService>();
+            // Host adapters behind the TokenSaver library's seams: auth-gate → IAuthService,
+            // event sink → app event bus + Serilog + the state.db savings tally.
+            serviceCollection.AddSingleton<ILlmProxyAuthGate, LlmProxyAuthGateAdapter>();
+            serviceCollection.AddSingleton<ILlmProxyEventSink, LlmProxyEventSinkAdapter>();
+            serviceCollection.AddSingleton<ITokenSavingsStore>(_ => new TokenSavingsStore(
+                $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
             serviceCollection.AddScoped<IAgentTerminalToolService, AgentTerminalToolService>();
             serviceCollection.AddScoped<IAgentTerminalToolGateway, LocalAgentTerminalToolGateway>();
             serviceCollection.AddScoped<IRepository>(sp =>

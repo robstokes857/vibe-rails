@@ -164,10 +164,12 @@ async function sendTerminalInput(
     const port = info.port;
     const sessionToken = info.sessionToken;
     const tabToken = info.tabToken;
-    const url = `ws://127.0.0.1:${port}/api/v1/terminal/tabs/${encodeURIComponent(tabId)}/ws?cols=120&rows=30&viberails_session=${encodeURIComponent(sessionToken)}`;
+    // Both tokens ride WebSocket subprotocols — the server no longer accepts (and never logs)
+    // query-string tokens.
+    const url = `ws://127.0.0.1:${port}/api/v1/terminal/tabs/${encodeURIComponent(tabId)}/ws?cols=120&rows=30`;
 
     await new Promise<void>((resolve, reject) => {
-        const socket = new WebSocketCtor(url, [tabToken]);
+        const socket = new WebSocketCtor(url, [sessionToken, tabToken]);
         let sent = false;
         let settled = false;
         let sendTimer: NodeJS.Timeout | null = null;

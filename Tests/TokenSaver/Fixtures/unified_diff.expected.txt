@@ -1,0 +1,11 @@
+diff --git a/src/app.js b/src/app.js
+index 3f1a2b4..9c8d7e6 100644
+--- a/src/app.js
++++ b/src/app.js
+@@ -1,5 +1,5 @@
+ function main() {
+-  return 1;
++  return 2;
+ }
+
+ main();

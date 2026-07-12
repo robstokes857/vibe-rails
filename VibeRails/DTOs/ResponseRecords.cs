@@ -436,11 +436,25 @@ namespace VibeRails.DTOs
     //   Label:  short verb/context, e.g. an HTTP method.
     //   Target: where it went, e.g. an upstream URL (no query string).
     //   Status: outcome, e.g. an HTTP status code.
+    //   BytesSaved: this request's minification win, when it was rewritten.
+    //   TokensSavedTotal: all-time running tally (~4 bytes/token estimate) for the light's label.
     public record ProxyActivityPingPayload(
         string Source,
         string? Label,
         string? Target,
-        string? Status
+        string? Status,
+        long? BytesSaved = null,
+        long? TokensSavedTotal = null
+    );
+
+    // Served by GET /api/v1/token-savings for the UI's initial tally (live updates ride the
+    // proxy_activity pings). Bytes are the measured truth; TokensSaved is the ~4 bytes/token
+    // display estimate, derived server-side so the heuristic lives in one place.
+    public record TokenSavingsDto(
+        long BytesBefore,
+        long BytesAfter,
+        long BytesSaved,
+        long TokensSaved
     );
 
     // Remote PIN DTOs
@@ -820,6 +834,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(AppSettingsDto))]
     [JsonSerializable(typeof(UpdateComputerNameDto))]
     [JsonSerializable(typeof(ProxyActivityPingPayload))]
+    [JsonSerializable(typeof(TokenSavingsDto))]
     // Remote PIN DTOs
     [JsonSerializable(typeof(SetPinRequest))]
     [JsonSerializable(typeof(PinStatusResponse))]

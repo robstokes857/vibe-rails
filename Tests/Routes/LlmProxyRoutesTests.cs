@@ -7,10 +7,10 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
+using TokenSaver;
 using VibeRails.Auth;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
-using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Services.LlmProxy;
 using VibeRails.Utils;
@@ -22,6 +22,10 @@ public class LlmProxyRoutesTests
 {
     private const string SessionToken = "test-session-token";
     private const string TabToken = "test-tab-token";
+
+    // ONE client for every test in this class: a per-test HttpClient leaves its sockets in
+    // TIME_WAIT after dispose, and enough of those clogs the machine's ephemeral TCP ports.
+    private static readonly HttpClient SharedClient = new();
 
     [Fact]
     public void BuildOpenAiUri_SubscriptionModeMirrorsChatGptCodexPath()
@@ -100,6 +104,43 @@ public class LlmProxyRoutesTests
         Assert.Empty(result.Events);
     }
 
+    [Fact]
+    public async Task OpenAiProxy_UpstreamBodyFaultsBeforeFirstByte_Returns502NotFabricated200()
+    {
+        // The upstream returned 200 headers but its body died before the first relayed byte. The
+        // client is still connected, nothing was flushed — the CLI must see a retryable gateway
+        // error, never a cleanly-terminated empty "success" (adversarial-review finding,
+        // 2026-07-12). No unhandled 500 either. The activity ping precedes the body copy, so it
+        // still fires.
+        var result = await SendThroughProxyAsync(
+            enabled: true,
+            authenticated: true,
+            TestContext.Current.CancellationToken,
+            faultResponseBody: true);
+
+        Assert.Equal(HttpStatusCode.BadGateway, result.StatusCode);
+        Assert.Equal(1, result.UpstreamCallCount);
+        Assert.Single(result.Events);
+    }
+
+    [Fact]
+    public async Task OpenAiProxy_UpstreamDiesDuringSend_Returns502AndNoActivityPing()
+    {
+        // A post-connect transport failure (e.g. NAT/LB reset while uploading the body or awaiting
+        // headers) surfaces as HttpRequestException { InnerException: IOException } — the same
+        // shape as a client disconnect. With the client still connected, the relay must answer
+        // 502, not let Kestrel finalize a default empty 200.
+        var result = await SendThroughProxyAsync(
+            enabled: true,
+            authenticated: true,
+            TestContext.Current.CancellationToken,
+            failSendWithTransportError: true);
+
+        Assert.Equal(HttpStatusCode.BadGateway, result.StatusCode);
+        Assert.Equal(1, result.UpstreamCallCount);
+        Assert.Empty(result.Events); // the ping only fires for requests that reached the upstream
+    }
+
     private static HttpRequest CreateRequest(string path, string query)
     {
         var context = new DefaultHttpContext();
@@ -111,12 +152,15 @@ public class LlmProxyRoutesTests
     private static async Task<ProxyResult> SendThroughProxyAsync(
         bool enabled,
         bool authenticated,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool faultResponseBody = false,
+        bool failSendWithTransportError = false)
     {
-        var port = PortFinder.FindOpenPort();
+        // Port 0 = kernel-assigned: two Kestrel-hosted test classes running in parallel can race a
+        // find-then-rebind port picker, so bind ephemeral and read the real address after start.
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
 
         var authService = new Mock<IAuthService>(MockBehavior.Strict);
         authService.Setup(service => service.ValidateToken(SessionToken)).Returns(authenticated);
@@ -125,11 +169,15 @@ public class LlmProxyRoutesTests
         var eventBus = new AppEventBus();
         var events = new List<AppEvent>();
         using var subscription = eventBus.Subscribe(events.Add);
-        var upstreamHandler = new RecordingUpstreamHandler();
+        var upstreamHandler = new RecordingUpstreamHandler(faultResponseBody, failSendWithTransportError);
         using var clientFactory = new StubHttpClientFactory(upstreamHandler);
 
-        builder.Services.AddSingleton(authService.Object);
-        builder.Services.AddSingleton<IAppEventBus>(eventBus);
+        // The proxy resolves the library's seam interfaces; register the REAL host adapters over
+        // the mocked auth service and real event bus so the tests also cover the adapter path
+        // (including the payload sanitization asserted below).
+        builder.Services.AddSingleton<ILlmProxyAuthGate>(new LlmProxyAuthGateAdapter(authService.Object));
+        builder.Services.AddSingleton<ILlmProxyEventSink>(
+            new LlmProxyEventSinkAdapter(eventBus, new StubTokenSavingsStore()));
         builder.Services.AddSingleton<IHttpClientFactory>(clientFactory);
         builder.Services.AddSingleton<ILlmProxySettingsService>(
             new StubProxySettingsService(new LlmProxySettings(
@@ -143,10 +191,9 @@ public class LlmProxyRoutesTests
 
         try
         {
-            using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
             using var request = new HttpRequestMessage(
                 HttpMethod.Post,
-                "/llm/openai/v1/responses?api_key=query-secret");
+                new Uri(new Uri(app.Urls.First()), "/llm/openai/v1/responses?api_key=query-secret"));
             request.Headers.TryAddWithoutValidation(LlmProxyCodexConfig.SessionHeaderName, SessionToken);
             request.Headers.TryAddWithoutValidation(LlmProxyCodexConfig.TabHeaderName, TabToken);
             request.Headers.TryAddWithoutValidation("Cookie", "session=cookie-secret");
@@ -156,7 +203,7 @@ public class LlmProxyRoutesTests
                 Encoding.UTF8,
                 "application/json");
 
-            using var response = await client.SendAsync(request, cancellationToken);
+            using var response = await SharedClient.SendAsync(request, cancellationToken);
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
             return new ProxyResult(
@@ -185,6 +232,28 @@ public class LlmProxyRoutesTests
         public LlmProxySettings GetSettings() => settings;
     }
 
+    // Keeps the sink adapter off the real state.db: these tests assert relay/event behavior, not
+    // the tally. The recorded values are exposed for tests that do assert savings reporting.
+    private sealed class StubTokenSavingsStore : VibeRails.DB.ITokenSavingsStore
+    {
+        public readonly List<(string Provider, int BytesBefore, int BytesAfter)> Records = [];
+
+        public void Record(string provider, int bytesBefore, int bytesAfter) =>
+            Records.Add((provider, bytesBefore, bytesAfter));
+
+        public VibeRails.DB.TokenSavingsTotals GetTotals()
+        {
+            long before = 0, after = 0;
+            foreach (var (_, b, a) in Records)
+            {
+                before += b;
+                after += a;
+            }
+
+            return new VibeRails.DB.TokenSavingsTotals(before, after);
+        }
+    }
+
     private sealed class StubHttpClientFactory : IHttpClientFactory, IDisposable
     {
         private readonly HttpClient _client;
@@ -199,7 +268,9 @@ public class LlmProxyRoutesTests
         public void Dispose() => _client.Dispose();
     }
 
-    private sealed class RecordingUpstreamHandler : HttpMessageHandler
+    private sealed class RecordingUpstreamHandler(
+        bool faultResponseBody = false,
+        bool failSendWithTransportError = false) : HttpMessageHandler
     {
         public int CallCount { get; private set; }
         public Uri? RequestUri { get; private set; }
@@ -210,10 +281,34 @@ public class LlmProxyRoutesTests
         {
             CallCount += 1;
             RequestUri = request.RequestUri;
+
+            // The shape SocketsHttpHandler throws for a post-connect transport failure (reset
+            // while uploading the body / awaiting headers): HttpRequestException wrapping IO.
+            if (failSendWithTransportError)
+                throw new HttpRequestException(
+                    "simulated upstream reset", new IOException("connection reset by peer"));
+
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("relay-ok")
+                Content = faultResponseBody
+                    ? new ThrowingContent()
+                    : new StringContent("relay-ok")
             });
+        }
+    }
+
+    // Response body that faults as it is copied — the shape of a mid-stream transport teardown (the
+    // CLI closing its SSE connection), where the aborted socket read surfaces as an IOException out
+    // of CopyToAsync. Lets the test drive the proxy's disconnect-tolerant streaming path.
+    private sealed class ThrowingContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+            => throw new IOException("simulated mid-stream transport teardown");
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
         }
     }
 }

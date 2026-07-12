@@ -131,26 +131,18 @@ export class WebviewPanelManager {
         };
         const __vb_orig_ws__ = window.WebSocket;
         window.WebSocket = function(url, protocols) {
-            let nextUrl = url;
-            try {
-                if (typeof nextUrl === 'string') {
-                    const parsed = new URL(nextUrl, window.location.href);
-                    const path = parsed.pathname || '';
-                    if (path.startsWith('/api/')) {
-                        // All API WebSocket endpoints require the instance session token.
-                        // The tab token continues to flow through subprotocol negotiation.
-                        parsed.searchParams.set('viberails_session', __vb_token__);
-                        nextUrl = parsed.toString();
-                    }
-                }
-            } catch { /* use original URL */ }
-            // Merge the tab token into subprotocols so the server can validate it.
-            // Deduplicate via Set — base-websocket.js already includes the tab token
-            // in its protocols array, so avoid adding it twice (browsers reject duplicates).
-            const mergedProtocols = __vb_tab_token__
-                ? [...new Set([...(protocols ? (Array.isArray(protocols) ? protocols : [protocols]) : []), __vb_tab_token__])]
-                : protocols;
-            return mergedProtocols !== undefined ? new __vb_orig_ws__(nextUrl, mergedProtocols) : new __vb_orig_ws__(nextUrl);
+            // Merge BOTH tokens into subprotocols so the server can validate them. NEVER put the
+            // session token in the URL: query strings land verbatim in the server's request log.
+            // Both tokens are URL-safe base64 specifically so they are valid subprotocol values;
+            // the server acknowledges the tab token's subprotocol, the session entry just rides
+            // along unselected. Deduplicate via Set — base-websocket.js already includes the tab
+            // token in its protocols array (browsers reject duplicates).
+            const mergedProtocols = [...new Set([
+                ...(protocols ? (Array.isArray(protocols) ? protocols : [protocols]) : []),
+                __vb_token__,
+                ...(__vb_tab_token__ ? [__vb_tab_token__] : [])
+            ])];
+            return new __vb_orig_ws__(url, mergedProtocols);
         };
         window.WebSocket.prototype = __vb_orig_ws__.prototype;
         window.WebSocket.CONNECTING = __vb_orig_ws__.CONNECTING;

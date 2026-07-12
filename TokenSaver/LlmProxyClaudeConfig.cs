@@ -1,6 +1,4 @@
-using VibeRails.Services.AgentTools;
-
-namespace VibeRails.Services.LlmProxy;
+namespace TokenSaver;
 
 /// <summary>
 /// Anthropic/Claude Code side of the local LLM proxy. Mirrors <see cref="LlmProxyCodexConfig"/>
@@ -30,7 +28,7 @@ public static class LlmProxyClaudeConfig
     /// hand it <c>{apiBaseUrl}/llm/anthropic</c> and our route catches <c>/llm/anthropic/v1/messages</c>.
     /// </summary>
     public static string BuildAnthropicBaseUrl(string apiBaseUrl) =>
-        string.Concat(LocalToolApiContext.NormalizeBaseUrl(apiBaseUrl), AnthropicProxyPath);
+        string.Concat(LlmProxyBaseUrl.Normalize(apiBaseUrl), AnthropicProxyPath);
 
     /// <summary>
     /// Builds the <c>ANTHROPIC_CUSTOM_HEADERS</c> value: newline-separated <c>Name: Value</c> pairs

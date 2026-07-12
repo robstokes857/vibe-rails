@@ -2,8 +2,8 @@ using Moq;
 using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.AgentTools;
+using TokenSaver;
 using VibeRails.Services.LlmClis;
-using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Terminal;
 using Xunit;
 

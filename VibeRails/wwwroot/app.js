@@ -68,20 +68,39 @@ export class VibeControlApp {
         await this.applyInitialSettings();
         this.terminalController.bindSessionEvents(this.appEventClient);
 
-        // Persistent proxy/token-saver light. It intentionally listens to the dedicated proxy
+        // Persistent proxy/token-compression indicator. It intentionally listens to the dedicated proxy
         // event only, so terminal output, MCP calls, and other app activity cannot trigger it.
+        // The light lives in the terminal controls bar (see renderTerminalPanel); it's created
+        // detached and TerminalManager.initialize() re-parents it each time that bar renders.
         this.activityBlinker = new ActivityBlinker({
-            mount: document.getElementById('proxy-activity-slot'),
-            title: 'Proxy & token saver',
+            title: 'Token compression',
             enabled: this.appSettings.codexLlmProxyEnabled === true
                 || this.appSettings.claudeLlmProxyEnabled === true
         });
-        this.appEventClient.on('proxy_activity', (p) => this.activityBlinker.report({
-            source: p?.source,
-            label: p?.label,
-            target: p?.target,
-            status: p?.status
-        }));
+        // If the terminal view mounted before this ran, drop the light into its slot now.
+        this.activityBlinker.relocate(document.getElementById('terminal-proxy-activity-slot'));
+        this.appEventClient.on('proxy_activity', (p) => {
+            this.activityBlinker.report({
+                source: p?.source,
+                label: p?.label,
+                target: p?.target,
+                status: p?.status
+            });
+            // The running tally rides the ping (server-derived ~4 bytes/token estimate); older
+            // servers omit the field and the light keeps its em dash.
+            if (typeof p?.tokensSavedTotal === 'number') {
+                this.activityBlinker.setTokensSaved(p.tokensSavedTotal);
+            }
+        });
+        // Seed the tally from persisted history; pings keep it live from here on. Best-effort:
+        // a failed fetch just leaves the em dash until the first ping.
+        this.apiCall('/api/v1/token-savings', 'GET', null, { showLoading: false })
+            .then((savings) => {
+                if (typeof savings?.tokensSaved === 'number') {
+                    this.activityBlinker.setTokensSaved(savings.tokensSaved);
+                }
+            })
+            .catch(() => { });
         // Register every handler before opening the socket so the first fast proxy response cannot
         // race the activity subscription during startup.
         this.appEventClient.start();

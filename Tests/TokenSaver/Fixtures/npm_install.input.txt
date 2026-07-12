@@ -1,0 +1,5 @@
+npm warn deprecated foo@1.0.0: use bar instead
+⠋ fetching packages⠙ fetching packages⠹ fetching packages⠸ fetching packages✔ fetched 42 packages
+[33mnpm[39m [35mnotice[39m New minor version available   
+added 42 packages in 3s  
+

@@ -1,25 +1,47 @@
-// Persistent, app-wide status light for the local LLM proxy/token saver.
+// Persistent status light for the local LLM proxy/token saver.
 //
-// The control stays visible in an idle/disabled state so its absence cannot be confused with a
-// lack of traffic. Only `proxy_activity` app events are wired to report() (see app.js), and only
+// A single host element is created once and re-parented (see relocate()) into the terminal
+// controls bar, so it keeps its accumulated per-provider history across the view re-renders that
+// rebuild that bar. Only `proxy_activity` app events are wired to report() (see app.js), and only
 // the authenticated Claude/Codex proxy routes publish those events. Hover, focus, or click to see
 // recent query-free, payload-free request metadata grouped by provider.
+let nextActivityBlinkerId = 0;
+
 export class ActivityBlinker {
-    constructor({ mount = null, maxEntriesPerSource = 6, maxSources = 12, title = 'Proxy & token saver', enabled = false } = {}) {
+    constructor({
+        mount = null,
+        maxEntriesPerSource = 6,
+        maxSources = 12,
+        title = 'Token compression',
+        enabled = false,
+        tokensSaved = null
+    } = {}) {
         this.sources = new Map();
         this.totalCount = 0;
         this._maxEntriesPerSource = maxEntriesPerSource;
         this._maxSources = maxSources;
         this._title = title;
         this._enabled = Boolean(enabled);
+        this._tokensSaved = this._normalizeTokenCount(tokensSaved);
+        this._popoverId = `vb-activity-blinker-popover-${++nextActivityBlinkerId}`;
         this._pulseTimer = null;
         this._build(mount);
+        this._syncSavingsDisplay();
         this.setEnabled(this._enabled);
     }
 
     setEnabled(enabled) {
         this._enabled = Boolean(enabled);
         this._host.classList.toggle('is-enabled', this._enabled);
+        this._syncAccessibleStatus();
+        if (this._host.classList.contains('is-open')) this._renderPopover();
+    }
+
+    // Public seam for the real savings metric once proxy instrumentation starts publishing it.
+    // Until then null deliberately renders as an em dash rather than implying zero savings.
+    setTokensSaved(tokensSaved) {
+        this._tokensSaved = this._normalizeTokenCount(tokensSaved);
+        this._syncSavingsDisplay();
         this._syncAccessibleStatus();
         if (this._host.classList.contains('is-open')) this._renderPopover();
     }
@@ -78,36 +100,65 @@ export class ActivityBlinker {
         this._pulseTimer?.unref?.();
     }
 
+    // Re-parent the persistent host into `target` (e.g. the terminal controls bar) without dropping
+    // accumulated state — appendChild moves the same node. Called from TerminalManager.initialize()
+    // whenever that bar re-renders, and once from app.js on startup in case the bar mounted first.
+    // A no-op when the element is already there or the target is missing (the host just stays put /
+    // detached until the next render), so callers can pass a possibly-null slot safely.
+    relocate(target) {
+        if (!this._host || !target || typeof target.appendChild !== 'function') return;
+        if (this._host.parentElement === target) return;
+        target.appendChild(this._host);
+    }
+
     _build(mount) {
         const host = document.createElement('div');
         host.className = 'vb-activity-blinker';
-        if (!mount) host.classList.add('is-floating');
 
         const trigger = document.createElement('button');
         trigger.type = 'button';
         trigger.className = 'vb-activity-blinker-trigger';
-        trigger.setAttribute('aria-haspopup', 'true');
         trigger.setAttribute('aria-expanded', 'false');
+        trigger.setAttribute('aria-controls', this._popoverId);
 
-        const icon = document.createElement('i');
-        icon.className = 'fa-solid fa-traffic-light vb-activity-blinker-icon';
-        icon.setAttribute('aria-hidden', 'true');
-        trigger.appendChild(icon);
+        const zipper = document.createElement('span');
+        zipper.className = 'vb-activity-blinker-zip';
+        zipper.setAttribute('aria-hidden', 'true');
+
+        const zipperOutline = document.createElement('i');
+        zipperOutline.className = 'fa-regular fa-file-zipper vb-activity-blinker-zip-outline';
+        zipper.appendChild(zipperOutline);
+
+        const zipperSolid = document.createElement('i');
+        zipperSolid.className = 'fa-solid fa-file-zipper vb-activity-blinker-zip-solid';
+        zipper.appendChild(zipperSolid);
+        trigger.appendChild(zipper);
+
+        const label = document.createElement('span');
+        label.className = 'vb-activity-blinker-label';
+        label.textContent = 'Token compression';
+        trigger.appendChild(label);
+
+        const metric = document.createElement('span');
+        metric.className = 'vb-activity-blinker-metric';
+
+        const savingsValue = document.createElement('strong');
+        savingsValue.className = 'vb-activity-blinker-value';
+        metric.appendChild(savingsValue);
+        metric.appendChild(this._span('tokens saved', 'vb-activity-blinker-metric-label'));
+        trigger.appendChild(metric);
 
         const dot = document.createElement('span');
         dot.className = 'vb-activity-blinker-dot';
         dot.setAttribute('aria-hidden', 'true');
         trigger.appendChild(dot);
-
-        const label = document.createElement('span');
-        label.className = 'vb-activity-blinker-label';
-        label.textContent = 'Proxy';
-        trigger.appendChild(label);
         host.appendChild(trigger);
 
         const popover = document.createElement('div');
         popover.className = 'vb-activity-blinker-popover';
-        popover.setAttribute('role', 'tooltip');
+        popover.setAttribute('id', this._popoverId);
+        popover.setAttribute('role', 'region');
+        popover.setAttribute('aria-label', `${this._title} details`);
         host.appendChild(popover);
 
         host.addEventListener('mouseenter', () => this._openPopover());
@@ -131,8 +182,12 @@ export class ActivityBlinker {
         this._host = host;
         this._trigger = trigger;
         this._dot = dot;
+        this._savingsMetric = metric;
+        this._savingsValue = savingsValue;
         this._popover = popover;
-        (mount || document.body).appendChild(host);
+        // With no mount the host stays detached; app.js/TerminalManager place it via relocate().
+        // report() and setEnabled() work fine on a detached node, so state still accrues meanwhile.
+        if (mount) mount.appendChild(host);
     }
 
     _openPopover() {
@@ -158,8 +213,12 @@ export class ActivityBlinker {
             status = `${this._title}: ${this.totalCount} proxied request${this.totalCount === 1 ? '' : 's'}`;
         }
 
-        this._trigger.setAttribute('aria-label', status);
-        this._trigger.setAttribute('title', status);
+        const savingsStatus = this._tokensSaved == null
+            ? 'token savings not yet measured'
+            : `${this._formatExactTokenCount(this._tokensSaved)} tokens saved`;
+
+        this._trigger.setAttribute('aria-label', `${status}; ${savingsStatus}`);
+        this._trigger.setAttribute('title', `${status}; ${savingsStatus}`);
     }
 
     _renderPopover() {
@@ -169,8 +228,36 @@ export class ActivityBlinker {
         const header = document.createElement('div');
         header.className = 'vb-activity-popover-header';
         header.appendChild(this._span(this._title));
-        header.appendChild(this._span(`${this.totalCount} total`, 'vb-activity-popover-total'));
+        header.appendChild(this._span(
+            `${this.totalCount} request${this.totalCount === 1 ? '' : 's'}`,
+            'vb-activity-popover-total'
+        ));
         popover.appendChild(header);
+
+        const savings = document.createElement('div');
+        savings.className = 'vb-activity-popover-savings';
+
+        const savingsIcon = document.createElement('span');
+        savingsIcon.className = 'vb-activity-popover-savings-icon';
+        savingsIcon.setAttribute('aria-hidden', 'true');
+        const savingsFile = document.createElement('i');
+        savingsFile.className = 'fa-solid fa-file-zipper';
+        savingsIcon.appendChild(savingsFile);
+        savings.appendChild(savingsIcon);
+
+        const savingsCopy = document.createElement('span');
+        savingsCopy.className = 'vb-activity-popover-savings-copy';
+        savingsCopy.appendChild(this._span('Tokens saved', 'vb-activity-popover-savings-label'));
+        savingsCopy.appendChild(this._span(
+            this._tokensSaved == null ? 'Savings measurement not connected yet' : 'Across proxied traffic',
+            'vb-activity-popover-savings-hint'
+        ));
+        savings.appendChild(savingsCopy);
+        savings.appendChild(this._span(
+            this._tokensSaved == null ? '—' : this._formatCompactTokenCount(this._tokensSaved),
+            'vb-activity-popover-savings-value'
+        ));
+        popover.appendChild(savings);
 
         if (this.sources.size === 0) {
             popover.appendChild(this._span(
@@ -204,6 +291,33 @@ export class ActivityBlinker {
             }
             popover.appendChild(group);
         }
+    }
+
+    _normalizeTokenCount(value) {
+        if (value == null || value === '') return null;
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue) || numericValue < 0) return null;
+        return Math.floor(numericValue);
+    }
+
+    _formatCompactTokenCount(value) {
+        return new Intl.NumberFormat('en-US', {
+            notation: value >= 1000 ? 'compact' : 'standard',
+            maximumFractionDigits: 1
+        }).format(value);
+    }
+
+    _formatExactTokenCount(value) {
+        return new Intl.NumberFormat('en-US').format(value);
+    }
+
+    _syncSavingsDisplay() {
+        if (!this._savingsMetric || !this._savingsValue) return;
+        const isPlaceholder = this._tokensSaved == null;
+        this._savingsMetric.classList.toggle('is-placeholder', isPlaceholder);
+        this._savingsValue.textContent = isPlaceholder
+            ? '—'
+            : this._formatCompactTokenCount(this._tokensSaved);
     }
 
     _span(text, className = '') {

@@ -1,6 +1,4 @@
-using VibeRails.Services.AgentTools;
-
-namespace VibeRails.Services.LlmProxy;
+namespace TokenSaver;
 
 public static class LlmProxyCodexConfig
 {
@@ -12,10 +10,10 @@ public static class LlmProxyCodexConfig
     private const string ChatGptCodexApiPath = "/backend-api/codex";
 
     public static string BuildOpenAiBaseUrl(string apiBaseUrl) =>
-        string.Concat(LocalToolApiContext.NormalizeBaseUrl(apiBaseUrl), OpenAiProxyPath, OpenAiApiPath);
+        string.Concat(LlmProxyBaseUrl.Normalize(apiBaseUrl), OpenAiProxyPath, OpenAiApiPath);
 
     public static string BuildChatGptBaseUrl(string apiBaseUrl) =>
-        string.Concat(LocalToolApiContext.NormalizeBaseUrl(apiBaseUrl), OpenAiProxyPath, ChatGptCodexApiPath);
+        string.Concat(LlmProxyBaseUrl.Normalize(apiBaseUrl), OpenAiProxyPath, ChatGptCodexApiPath);
 
     /// <summary>
     /// True when <paramref name="path"/> targets the OpenAI proxy prefix or one of its children.
@@ -28,16 +26,24 @@ public static class LlmProxyCodexConfig
         path.Equals(prefix, StringComparison.OrdinalIgnoreCase)
         || path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase);
 
-    public static string[] BuildCodexProxyArgs(string apiBaseUrl, string mode)
+    /// <summary>
+    /// Builds the Codex <c>--config</c> args that point it at the proxy. The session/tab env-var
+    /// names are parameters because that contract is owned by the host app's tool-API environment
+    /// (<c>LocalToolApiContext</c>), not by this library — the caller passes the same names it
+    /// injects into the session environment, so the two can't drift apart.
+    /// </summary>
+    public static string[] BuildCodexProxyArgs(
+        string apiBaseUrl, string mode, string sessionTokenEnvVar, string tabTokenEnvVar)
     {
         var normalizedMode = CodexLlmProxySettings.NormalizeMode(mode);
         var baseUrl = normalizedMode == CodexLlmProxySettings.ModeApi
             ? BuildOpenAiBaseUrl(apiBaseUrl)
             : BuildChatGptBaseUrl(apiBaseUrl);
-        return BuildOpenAiProviderArgs(baseUrl);
+        return BuildOpenAiProviderArgs(baseUrl, sessionTokenEnvVar, tabTokenEnvVar);
     }
 
-    private static string[] BuildOpenAiProviderArgs(string baseUrl)
+    private static string[] BuildOpenAiProviderArgs(
+        string baseUrl, string sessionTokenEnvVar, string tabTokenEnvVar)
     {
         return
         [
@@ -52,9 +58,9 @@ public static class LlmProxyCodexConfig
             "--config",
             $"model_providers.{OpenAiProviderName}.requires_openai_auth=true",
             "--config",
-            $"model_providers.{OpenAiProviderName}.env_http_headers.{SessionHeaderName}=\"{LocalToolApiContext.SessionTokenVariable}\"",
+            $"model_providers.{OpenAiProviderName}.env_http_headers.{SessionHeaderName}=\"{sessionTokenEnvVar}\"",
             "--config",
-            $"model_providers.{OpenAiProviderName}.env_http_headers.{TabHeaderName}=\"{LocalToolApiContext.TabTokenVariable}\""
+            $"model_providers.{OpenAiProviderName}.env_http_headers.{TabHeaderName}=\"{tabTokenEnvVar}\""
         ];
     }
 }

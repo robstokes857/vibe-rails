@@ -1,5 +1,5 @@
+using TokenSaver;
 using VibeRails.Services.AgentTools;
-using VibeRails.Services.LlmProxy;
 using Xunit;
 
 namespace Tests.Services.LlmProxy;
@@ -29,7 +29,14 @@ public class LlmProxyCodexConfigTests
     [InlineData(CodexLlmProxySettings.ModeApi, "/v1")]
     public void BuildCodexProxyArgs_ConfiguresOnlyTheModelProvider(string mode, string expectedPath)
     {
-        var args = LlmProxyCodexConfig.BuildCodexProxyArgs("http://127.0.0.1:4321", mode);
+        // Pass the real tool-API env-var names (as CommandService does) so this test keeps pinning
+        // the header→env-var contract to LocalToolApiContext even though the builder lives in the
+        // TokenSaver library now.
+        var args = LlmProxyCodexConfig.BuildCodexProxyArgs(
+            "http://127.0.0.1:4321",
+            mode,
+            LocalToolApiContext.SessionTokenVariable,
+            LocalToolApiContext.TabTokenVariable);
         var joined = string.Join(' ', args);
 
         Assert.Contains($"model_provider=\"{LlmProxyCodexConfig.OpenAiProviderName}\"", joined);

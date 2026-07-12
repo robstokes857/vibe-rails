@@ -1,6 +1,6 @@
-using VibeRails.Utils;
+using TokenSaver.Minify;
 
-namespace VibeRails.Services.LlmProxy;
+namespace TokenSaver;
 
 public interface ILlmProxySettingsService
 {
@@ -13,23 +13,18 @@ public interface ILlmProxySettingsService
     LlmProxySettings GetSettings();
 }
 
-/// <summary>Immutable snapshot of the LLM-proxy settings, with the mode already normalized.</summary>
+/// <summary>
+/// Immutable snapshot of the LLM-proxy settings, with the mode already normalized. The token-saver
+/// fields default to "enabled but no-op flags" so callers that only care about relay routing (and
+/// the tests that fake them) don't have to spell out minify flags — a default snapshot behaves as
+/// a pure passthrough.
+/// </summary>
 public sealed record LlmProxySettings(
     bool CodexLlmProxyEnabled,
     string CodexLlmProxyMode,
-    bool ClaudeLlmProxyEnabled);
-
-public sealed class LlmProxySettingsService : ILlmProxySettingsService
-{
-    public LlmProxySettings GetSettings()
-    {
-        var settings = Config.LoadFresh();
-        return new LlmProxySettings(
-            settings.CodexLlmProxyEnabled,
-            CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
-            settings.ClaudeLlmProxyEnabled);
-    }
-}
+    bool ClaudeLlmProxyEnabled,
+    bool ClaudeTokenSaverEnabled = true,
+    MinifyFlags ClaudeTokenSaverFlags = default);
 
 public static class CodexLlmProxySettings
 {
