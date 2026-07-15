@@ -7,6 +7,7 @@ const modulePath = path.resolve('VibeRails/wwwroot/js/modules/git-guard-prefligh
 const {
     GitPreflightRunner,
     buildMintLintDetailModel,
+    buildMintLintReportViewModel,
     createAutorunOnce,
     createGitPreflightState,
     createSseParser,
@@ -165,6 +166,137 @@ class FakeElement {
         this.children = [...children];
     }
 }
+
+test('MintLint detail model prefers the full metric report over the legacy text summary', () => {
+    const report = JSON.stringify({
+        score: 78.4,
+        rating: 'AtRisk',
+        analyzedFileCount: 1,
+        skippedFileCount: 2,
+        files: [{
+            file: 'src/a.cs',
+            score: 100,
+            rating: 'AtRisk',
+            referencedByCount: 9,
+            priority: 200,
+            baselineScore: 100,
+            introducedScore: 0,
+            categories: [
+                {
+                    name: 'Complexity', score: 100, weight: 1, weightedScore: 100,
+                    metrics: [{ name: 'cyclomatic_complexity', value: 27, score: 100, warn: 10, critical: 20, higherIsBetter: false, source: 'Evaluate', line: 12 }]
+                },
+                {
+                    name: 'Size', score: 50, weight: 0.7, weightedScore: 35,
+                    metrics: [{ name: 'parameter_count', value: 4, score: 50, warn: 4, critical: 7, higherIsBetter: false }]
+                }
+            ]
+        }],
+        worstMetrics: [{
+            name: 'cyclomatic_complexity', file: 'src/a.cs', value: 27, score: 100,
+            warn: 10, critical: 20, higherIsBetter: false, source: 'Evaluate', line: 12,
+            snippet: 'public int Evaluate() {\n    if (a && b) { }\n}'
+        }]
+    });
+
+    const files = buildMintLintDetailModel({ report, worstFiles: 'ignored: 1.0 Clean · nothing' });
+
+    assert.equal(files.length, 1);
+    assert.equal(files[0].path, 'src/a.cs');
+    assert.equal(files[0].grade, '100.0 AtRisk');
+    assert.equal(files[0].detailed, true);
+    assert.equal(files[0].referencedBy, 9);
+    assert.equal(files[0].priority, 200);
+    assert.equal(files[0].baseline, 100);
+    assert.equal(files[0].introduced, 0);
+    assert.deepEqual(files[0].categories.map(category => category.name), ['Complexity', 'Size']);
+    const cyclomatic = files[0].categories[0].metrics[0];
+    assert.equal(cyclomatic.label, 'Cyclomatic complexity');
+    assert.equal(cyclomatic.value, 27);
+    assert.equal(cyclomatic.warn, 10);
+    assert.equal(cyclomatic.source, 'Evaluate');
+    assert.equal(cyclomatic.line, 12);
+    assert.equal(files[0].categories[1].weightedScore, 35);
+
+    const viewModel = buildMintLintReportViewModel({ report });
+    assert.equal(viewModel.detailed, true);
+    assert.equal(viewModel.worstMetrics.length, 1);
+    assert.equal(viewModel.worstMetrics[0].label, 'Cyclomatic complexity');
+    assert.equal(viewModel.worstMetrics[0].file, 'src/a.cs');
+    assert.match(viewModel.worstMetrics[0].snippet, /Evaluate/);
+});
+
+test('MintLint renderer leads with worst offenders and keeps the file list collapsed', () => {
+    const container = new FakeElement('div');
+    const documentRef = { createElement: tagName => new FakeElement(tagName) };
+    const report = {
+        files: [{
+            file: '<img src=x onerror=alert(1)>.cs',
+            score: 100,
+            rating: 'AtRisk',
+            referencedByCount: 3,
+            priority: 160.2,
+            baselineScore: 82.5,
+            introducedScore: 17.5,
+            categories: [{
+                name: '<script>Complexity',
+                score: 100,
+                weight: 1,
+                weightedScore: 100,
+                metrics: [{ name: 'cyclomatic_complexity', value: 27, score: 100, warn: 10, critical: 20, higherIsBetter: false, source: 'Evaluate', line: 12 }]
+            }]
+        }],
+        worstMetrics: [{
+            name: 'cyclomatic_complexity', file: '<img src=x onerror=alert(1)>.cs', value: 27, score: 100,
+            warn: 10, critical: 20, higherIsBetter: false, source: 'Evaluate', line: 12,
+            snippet: 'if (a && b) { alert("<script>") }'
+        }]
+    };
+
+    const rendered = renderMintLintDetails(container, { report }, documentRef);
+
+    assert.equal(rendered, 1);
+
+    // Worst-offender table first, snippet written as text.
+    const worstSection = container.children[0];
+    assert.equal(worstSection.className, 'mintlint-worst');
+    const worstRow = worstSection.children[1];
+    const worstSummary = worstRow.children[0];
+    assert.equal(worstSummary.children[0].textContent, 'Cyclomatic complexity');
+    assert.equal(worstSummary.children[1].textContent, '27');
+    assert.equal(worstSummary.children[2].textContent, '<img src=x onerror=alert(1)>.cs · Evaluate · line 12');
+    assert.equal(worstSummary.children[3].textContent, '100.0');
+    const worstDetail = worstRow.children[1];
+    assert.equal(worstDetail.children[0].textContent, 'warn ≥ 10 · critical ≥ 20');
+    assert.equal(worstDetail.children[1].tagName, 'pre');
+    assert.equal(worstDetail.children[1].textContent, 'if (a && b) { alert("<script>") }');
+
+    // Files live inside a collapsed disclosure, annotated with reach and priority.
+    const disclosure = container.children[1];
+    assert.equal(disclosure.className, 'mintlint-files');
+    assert.equal(disclosure.open, undefined);
+    const disclosureSummary = disclosure.children[0];
+    assert.equal(disclosureSummary.children[0].textContent, 'Per-file breakdown');
+    assert.equal(disclosureSummary.children[1].textContent, '1 file · ranked by concern × usage');
+    const fileDetails = disclosure.children[1].children[0];
+    const summary = fileDetails.children[0];
+    assert.equal(summary.children[0].textContent, '<img src=x onerror=alert(1)>.cs');
+    assert.equal(summary.children[1].textContent, 'used by 3 files · +17.5 added by this change (was 82.5) · priority 160.2');
+    assert.equal(summary.children[2].textContent, '100.0 AtRisk');
+    const categoryList = fileDetails.children[1];
+    const category = categoryList.children[0];
+    const head = category.children[0];
+    assert.equal(head.children[0].textContent, '<script>Complexity');
+    assert.equal(head.children[1].textContent, 'sets file score');
+    assert.equal(head.children[2].textContent, '100.0 × 1.0 = 100.0');
+    const metricRow = category.children[2].children[0];
+    assert.equal(metricRow.children[0].textContent, 'Cyclomatic complexity');
+    assert.equal(metricRow.children[0].children[0].textContent, ' · Evaluate L12');
+    assert.equal(metricRow.children[1].textContent, '27');
+    assert.equal(metricRow.children[2].textContent, 'warn ≥ 10 · critical ≥ 20');
+    assert.equal(metricRow.children[3].textContent, '100.0');
+    assert.equal(Object.hasOwn(summary.children[0], 'innerHTML'), false);
+});
 
 test('MintLint renderer writes untrusted filenames and categories through textContent', () => {
     const container = new FakeElement('div');

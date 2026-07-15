@@ -364,4 +364,3 @@ UserInputs                InputFileChanges
 - Reader mapping is **positional** (column index), not by column name
 
 ## Vibe Rails Rules
-- Log all file changes (STOP)

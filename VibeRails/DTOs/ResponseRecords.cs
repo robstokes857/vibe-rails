@@ -259,6 +259,28 @@ namespace VibeRails.DTOs
         string Message
     );
 
+    public record VcaRuleFindingResponse(
+        string Status,
+        string Enforcement,
+        string Rule,
+        string Reason,
+        string SourcePath,
+        string Guidance,
+        string? Acknowledgment
+    );
+
+    public record VcaValidationOverviewResponse(
+        string Outcome,
+        int StagedFileCount,
+        int ApplicableRuleCount,
+        int FindingCount,
+        int StopCount,
+        int CommitCount,
+        int WarningCount,
+        int DeferredCount,
+        List<VcaRuleFindingResponse> Findings
+    );
+
     public record HookPreviewResponse(
         bool Success,
         int ExitCode,
@@ -266,7 +288,74 @@ namespace VibeRails.DTOs
         string Title,
         string Output,
         DateTime StartedUtc,
-        long DurationMs
+        long DurationMs,
+        double? HealthScore = null,
+        string? Rating = null,
+        int? AnalyzedFileCount = null,
+        int? SkippedFileCount = null,
+        VcaValidationOverviewResponse? Validation = null,
+        MintLintReportResponse? Report = null
+    );
+
+    // MintLint code-analyzer report: every metric measured per file and how each score
+    // was assembled (metric → category worst-signal → weighted overall roll-up).
+    public record MintLintMetricResponse(
+        string Name,
+        double Value,
+        double Score,
+        double Warn,
+        double Critical,
+        bool HigherIsBetter,
+        string? Source = null,
+        int? Line = null
+    );
+
+    public record MintLintCategoryResponse(
+        string Name,
+        double Score,
+        double Weight,
+        double WeightedScore,
+        List<MintLintMetricResponse> Metrics
+    );
+
+    // ReferencedByCount = distinct other repo files referencing this file's declared
+    // classes/functions; Priority = concern attributable to this change scaled up by that
+    // reach, used to rank which bad code matters most. BaselineScore is the committed
+    // (pre-change) version's concern; IntroducedScore = Score - BaselineScore. Concern the
+    // file already had counts half toward priority.
+    public record MintLintFileReportResponse(
+        string File,
+        double Score,
+        string Rating,
+        List<MintLintCategoryResponse> Categories,
+        int ReferencedByCount = 0,
+        double Priority = 0,
+        double? BaselineScore = null,
+        double? IntroducedScore = null
+    );
+
+    // The single worst measurement of one metric across the whole scan, with the code
+    // that caused it.
+    public record MintLintWorstMetricResponse(
+        string Name,
+        string File,
+        double Value,
+        double Score,
+        double Warn,
+        double Critical,
+        bool HigherIsBetter,
+        string? Source = null,
+        int? Line = null,
+        string? Snippet = null
+    );
+
+    public record MintLintReportResponse(
+        double Score,
+        string Rating,
+        int AnalyzedFileCount,
+        int SkippedFileCount,
+        List<MintLintFileReportResponse> Files,
+        List<MintLintWorstMetricResponse>? WorstMetrics = null
     );
 
     public record GitPreflightEventResponse(
@@ -832,7 +921,19 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(HookFileStatusResponse))]
     [JsonSerializable(typeof(HookStatusResponse))]
     [JsonSerializable(typeof(HookActionResponse))]
+    [JsonSerializable(typeof(VcaRuleFindingResponse))]
+    [JsonSerializable(typeof(List<VcaRuleFindingResponse>))]
+    [JsonSerializable(typeof(VcaValidationOverviewResponse))]
     [JsonSerializable(typeof(HookPreviewResponse))]
+    [JsonSerializable(typeof(MintLintMetricResponse))]
+    [JsonSerializable(typeof(List<MintLintMetricResponse>))]
+    [JsonSerializable(typeof(MintLintCategoryResponse))]
+    [JsonSerializable(typeof(List<MintLintCategoryResponse>))]
+    [JsonSerializable(typeof(MintLintFileReportResponse))]
+    [JsonSerializable(typeof(List<MintLintFileReportResponse>))]
+    [JsonSerializable(typeof(MintLintWorstMetricResponse))]
+    [JsonSerializable(typeof(List<MintLintWorstMetricResponse>))]
+    [JsonSerializable(typeof(MintLintReportResponse))]
     [JsonSerializable(typeof(GitPreflightEventResponse))]
     [JsonSerializable(typeof(ValidationResultResponse))]
     [JsonSerializable(typeof(List<ValidationResultResponse>))]

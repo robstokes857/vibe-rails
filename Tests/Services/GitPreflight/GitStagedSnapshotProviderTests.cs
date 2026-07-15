@@ -64,6 +64,35 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
         Assert.Equal("class Staged { }\n", staged.Content);
         Assert.DoesNotContain("Unstaged", staged.Content);
         Assert.Equal(GitStagedChangeKind.Modified, staged.ChangeKind);
+        // The committed version rides along so scoring can tell new concern from old debt.
+        Assert.Equal("class Original { }\n", staged.PreviousContent);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_ListsTrackedFiles_AndGivesAddedFilesNoBaseline()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "untracked.cs"),
+            "class Untracked { }\n",
+            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "brand_new.cs"),
+            "class BrandNew { }\n",
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", "brand_new.cs");
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(snapshot.TrackedFiles);
+        Assert.Contains("tracked.cs", snapshot.TrackedFiles);
+        Assert.Contains("brand_new.cs", snapshot.TrackedFiles);
+        Assert.DoesNotContain("untracked.cs", snapshot.TrackedFiles);
+
+        var added = Assert.Single(snapshot.Files);
+        Assert.Equal(GitStagedChangeKind.Added, added.ChangeKind);
+        Assert.Null(added.PreviousContent);
     }
 
     [Fact]

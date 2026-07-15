@@ -64,7 +64,53 @@ public sealed class MintLintPreflightStep : IGitPreflightStep
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        var scan = MintLintAnalyzer.ScanSources(candidates);
+        var analyzed = MintLintAnalyzer.AnalyzeSources(candidates);
+        var scan = MintLintScorer.Score(analyzed);
+
+        // Reach across the repository: bad code that many files reference outranks bad
+        // code nothing uses. Tracked files only by default; a full-repo scan also walks
+        // untracked source. Failure here must never block the report itself.
+        IReadOnlyDictionary<string, int> referencedBy;
+        try
+        {
+            referencedBy = ImpactAnalyzer.CountReferencingFiles(
+                context.Snapshot.RepositoryPath,
+                analyzed,
+                context.Request.FullImpactScan ? null : context.Snapshot.TrackedFiles);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            referencedBy = new Dictionary<string, int>(StringComparer.Ordinal);
+        }
+
+        // Score the committed version of each modified file so priority can distinguish
+        // concern this change introduced from debt the file already carried.
+        var baselineInputs = context.Snapshot.Files
+            .Where(file => file.PreviousContent != null
+                && MintLintAnalyzer.SupportsFile(file.RelativePath))
+            .Select(file => new SourceInput(file.RelativePath, file.PreviousContent!))
+            .ToList();
+        var baselineByFile = new Dictionary<string, double>(StringComparer.Ordinal);
+        if (baselineInputs.Count > 0)
+        {
+            foreach (var baselineFile in MintLintAnalyzer.ScanSources(baselineInputs).Files)
+            {
+                baselineByFile[baselineFile.File] = baselineFile.Overall.Score;
+            }
+        }
+
+        var contentByFile = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var candidate in candidates)
+        {
+            var displayPath = candidate.Path.Replace('\\', '/');
+            while (displayPath.StartsWith("./", StringComparison.Ordinal))
+            {
+                displayPath = displayPath[2..];
+            }
+
+            contentByFile[displayPath] = candidate.Content;
+        }
+
         var output = new List<string>
         {
             $"Scanned {scan.Files.Count} supported staged source file(s); skipped {skippedCount}.",
@@ -92,13 +138,15 @@ public sealed class MintLintPreflightStep : IGitPreflightStep
 
         var warning = scan.Overall.Rating is "NeedsWork" or "AtRisk"
             || scan.Files.Any(file => file.Overall.Rating is "NeedsWork" or "AtRisk");
+        var report = MintLintReportFactory.Build(scan, skippedCount, contentByFile, referencedBy, baselineByFile);
         var details = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["supportedFileCount"] = scan.Files.Count.ToString(CultureInfo.InvariantCulture),
             ["skippedFileCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
             ["overallScore"] = scan.Overall.Score.ToString("0.0", CultureInfo.InvariantCulture),
             ["overallRating"] = scan.Overall.Rating,
-            ["worstFiles"] = string.Join("\n", output.Skip(2))
+            ["worstFiles"] = string.Join("\n", output.Skip(2)),
+            [MintLintReportFactory.DetailsKey] = MintLintReportFactory.ToJson(report)
         };
 
         return new GitPreflightStepResult(

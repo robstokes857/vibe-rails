@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace MintLint;
@@ -8,11 +9,46 @@ namespace MintLint;
 public sealed record OverallScore(double Score, string Rating);
 
 /// <summary>
-/// The score for one smell category (Complexity, Testability, Cohesion, …).
+/// How one raw metric was interpreted: the measured value, the thresholds it was judged
+/// against, and the normalized 0–100 concern score that resulted. This is the finest
+/// grain of "how the score was made" and is what UIs should show per metric.
+/// </summary>
+/// <param name="Name">snake_case metric name (e.g. <c>cyclomatic_complexity</c>).</param>
+/// <param name="Value">The raw measured value.</param>
+/// <param name="Score">Normalized concern score from 0 (clean) to 100 (severe).</param>
+/// <param name="Warn">Threshold where concern reaches 50.</param>
+/// <param name="Critical">Threshold where concern reaches 100.</param>
+/// <param name="HigherIsBetter">True when larger raw values are healthier (e.g. maintainability index).</param>
+/// <param name="Source">Name of the function or class the worst value came from; null for file-level metrics.</param>
+/// <param name="Line">1-based line of <paramref name="Source"/>; null when unattributed.</param>
+public sealed record MetricScore(
+    string Name,
+    double Value,
+    double Score,
+    double Warn,
+    double Critical,
+    bool HigherIsBetter,
+    string? Source = null,
+    int? Line = null);
+
+/// <summary>
+/// The score for one smell category (Complexity, Testability, Cohesion, …), including the
+/// per-metric breakdown it was combined from. The category score is its worst metric score;
+/// <see cref="Weight"/> is applied when categories roll up into the file's overall score.
 /// </summary>
 /// <param name="Name">Category name.</param>
 /// <param name="Score">Concern score from 0 (clean) to 100 (severe), combined from the category's metrics.</param>
-public sealed record CategoryScore(string Name, double Score);
+/// <param name="Weight">Relative weight of this category in the overall roll-up.</param>
+/// <param name="Metrics">The scored metrics that fed this category.</param>
+public sealed record CategoryScore(
+    string Name,
+    double Score,
+    double Weight,
+    IReadOnlyList<MetricScore> Metrics)
+{
+    /// <summary>The category's contribution to the overall roll-up (score × weight).</summary>
+    public double WeightedScore => Math.Round(Score * Weight, 1);
+}
 
 /// <summary>
 /// The score for a single file: the raw metric values, the interpreted category scores,

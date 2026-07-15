@@ -339,9 +339,144 @@ function normalizeCategory(category, fallbackName = '') {
     };
 }
 
+const MINTLINT_METRIC_LABELS = Object.freeze({
+    lines_of_code: 'Lines of code',
+    cyclomatic_complexity: 'Cyclomatic complexity',
+    cognitive_complexity: 'Cognitive complexity',
+    npath_complexity: 'NPath complexity',
+    nesting_depth: 'Nesting depth',
+    parameter_count: 'Parameter count',
+    halstead_difficulty: 'Halstead difficulty',
+    maintainability_index: 'Maintainability index',
+    lack_of_cohesion: 'Lack of cohesion (LCOM4)',
+    fan_out: 'Fan-out',
+    duplication: 'Duplicated code',
+    hard_coded_dependencies: 'Hard-coded dependencies',
+    ambient_dependencies: 'Ambient dependencies',
+    method_count: 'Methods per class',
+    field_count: 'Fields per class'
+});
+
+export function formatMintLintMetricLabel(name) {
+    const key = String(name ?? '').trim();
+    if (MINTLINT_METRIC_LABELS[key]) return MINTLINT_METRIC_LABELS[key];
+    const words = key.replace(/[_-]+/g, ' ').trim();
+    return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Metric';
+}
+
+function formatMintLintMetricNumber(name, value) {
+    if (!Number.isFinite(value)) return '—';
+    if (String(name) === 'duplication') return `${(value * 100).toFixed(1)}%`;
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+/** Tone for a 0 (clean) → 100 (severe) concern score, aligned with the rating bands. */
+export function mintLintConcernTone(score) {
+    const value = Number(score);
+    if (!Number.isFinite(value)) return 'neutral';
+    if (value >= 75) return 'danger';
+    if (value >= 55) return 'warning';
+    return value >= 30 ? 'okay' : 'success';
+}
+
+function normalizeMintLintMetric(rawMetric) {
+    const metric = asObject(rawMetric);
+    const name = String(metric.name ?? '');
+    const line = Number(metric.line);
+    return {
+        name,
+        label: formatMintLintMetricLabel(name),
+        value: Number(metric.value),
+        score: Number(metric.score),
+        warn: Number(metric.warn),
+        critical: Number(metric.critical),
+        higherIsBetter: metric.higherIsBetter === true,
+        source: metric.source ? String(metric.source) : '',
+        line: Number.isFinite(line) && line > 0 ? line : null
+    };
+}
+
+/**
+ * Parses the analyzer's full report (a JSON string when it travels through preflight
+ * event details, an object when it comes from /api/v1/code-analyzer) into the shared
+ * view model: worst offender per metric across the scan, plus per-file breakdowns
+ * ranked by priority (concern × how widely the file is referenced). Returns null when
+ * no usable report is present.
+ */
+function buildMintLintReportModel(rawReport) {
+    let report = rawReport;
+    if (typeof report === 'string') {
+        try {
+            report = JSON.parse(report);
+        } catch {
+            return null;
+        }
+    }
+    if (!isPlainRecord(report) || !Array.isArray(report.files)) return null;
+
+    const files = report.files.map((rawFile, index) => {
+        const file = asObject(rawFile);
+        const score = Number(file.score);
+        const rating = String(file.rating ?? '');
+        const referencedBy = Number(file.referencedByCount);
+        const priority = Number(file.priority);
+        const baseline = Number(file.baselineScore);
+        const introduced = Number(file.introducedScore);
+        const categories = (Array.isArray(file.categories) ? file.categories : []).map(rawCategory => {
+            const category = asObject(rawCategory);
+            return {
+                name: String(category.name ?? 'Category'),
+                score: Number(category.score),
+                weight: Number(category.weight),
+                weightedScore: Number(category.weightedScore),
+                metrics: (Array.isArray(category.metrics) ? category.metrics : []).map(normalizeMintLintMetric)
+            };
+        });
+        return {
+            path: String(file.file ?? `File ${index + 1}`),
+            grade: `${Number.isFinite(score) ? score.toFixed(1) : '—'} ${rating}`.trim(),
+            score: Number.isFinite(score) ? score : null,
+            rating,
+            referencedBy: Number.isFinite(referencedBy) && referencedBy > 0 ? referencedBy : 0,
+            priority: Number.isFinite(priority) ? priority : null,
+            baseline: Number.isFinite(baseline) ? baseline : null,
+            introduced: Number.isFinite(introduced) ? introduced : null,
+            detailed: true,
+            categories
+        };
+    });
+
+    const worstMetrics = (Array.isArray(report.worstMetrics) ? report.worstMetrics : []).map(rawMetric => {
+        const metric = normalizeMintLintMetric(rawMetric);
+        const item = asObject(rawMetric);
+        return {
+            ...metric,
+            file: String(item.file ?? ''),
+            snippet: item.snippet ? String(item.snippet) : ''
+        };
+    });
+
+    return { detailed: true, files, worstMetrics };
+}
+
+/**
+ * Full view model for a MintLint payload: `{ detailed, files, worstMetrics }`. Legacy
+ * payloads (files arrays or the flat worstFiles text) yield `detailed: false` with no
+ * worst-metric summary.
+ */
+export function buildMintLintReportViewModel(details) {
+    const payload = asObject(details);
+    const reportModel = buildMintLintReportModel(payload.report);
+    if (reportModel) return reportModel;
+    return { detailed: false, files: buildMintLintDetailModel(details), worstMetrics: [] };
+}
+
 /** Normalizes evolving MintLint detail payloads without ever producing markup. */
 export function buildMintLintDetailModel(details) {
     const payload = asObject(details);
+    const reportModel = buildMintLintReportModel(payload.report);
+    if (reportModel) return reportModel.files;
+
     const rawFiles = Array.isArray(payload.files)
         ? payload.files
         : Array.isArray(payload.results) ? payload.results : [];
@@ -392,37 +527,266 @@ export function setSafeText(element, value) {
     return element;
 }
 
+function setMeterWidth(element, score) {
+    const percent = Math.min(100, Math.max(0, Number(score) || 0));
+    // Test doubles have no CSSStyleDeclaration; the width is a number we computed, never markup.
+    if (element?.style) element.style.width = `${percent}%`;
+}
+
+function formatMintLintThresholds(metric) {
+    const comparator = metric.higherIsBetter ? '≤' : '≥';
+    return `warn ${comparator} ${formatMintLintMetricNumber(metric.name, metric.warn)} · critical ${comparator} ${formatMintLintMetricNumber(metric.name, metric.critical)}`;
+}
+
+function formatMintLintOrigin(metric) {
+    const parts = [];
+    if (metric.file) parts.push(metric.file);
+    if (metric.source) parts.push(metric.source);
+    if (metric.line) parts.push(`line ${metric.line}`);
+    return parts.join(' · ');
+}
+
+/** The top-of-report table: one row per metric, worst measurement across the whole scan. */
+function renderMintLintWorstSection(worstMetrics, documentRef) {
+    const section = documentRef.createElement('section');
+    section.className = 'mintlint-worst';
+
+    const heading = documentRef.createElement('div');
+    heading.className = 'mintlint-worst-heading';
+    setSafeText(heading, 'Worst offender per metric');
+    section.append(heading);
+
+    for (const metric of worstMetrics) {
+        const row = documentRef.createElement('details');
+        row.className = `mintlint-worst-row mintlint-tone-${mintLintConcernTone(metric.score)}`;
+
+        const summary = documentRef.createElement('summary');
+        const label = documentRef.createElement('span');
+        label.className = 'mintlint-worst-label';
+        setSafeText(label, metric.label);
+
+        const value = documentRef.createElement('span');
+        value.className = 'mintlint-worst-value';
+        setSafeText(value, formatMintLintMetricNumber(metric.name, metric.value));
+
+        const origin = documentRef.createElement('span');
+        origin.className = 'mintlint-worst-origin';
+        setSafeText(origin, formatMintLintOrigin(metric));
+
+        const score = documentRef.createElement('span');
+        score.className = 'mintlint-worst-score';
+        setSafeText(score, Number.isFinite(metric.score) ? metric.score.toFixed(1) : '—');
+
+        summary.append(label, value, origin, score);
+        row.append(summary);
+
+        const detail = documentRef.createElement('div');
+        detail.className = 'mintlint-worst-detail';
+        const range = documentRef.createElement('span');
+        range.className = 'mintlint-metric-range';
+        setSafeText(range, formatMintLintThresholds(metric));
+        detail.append(range);
+        if (metric.snippet) {
+            const snippet = documentRef.createElement('pre');
+            snippet.className = 'mintlint-snippet';
+            setSafeText(snippet, metric.snippet);
+            detail.append(snippet);
+        }
+        row.append(detail);
+        section.append(row);
+    }
+
+    return section;
+}
+
+function renderMintLintCategoryBreakdown(fileElement, file, documentRef) {
+    let worstWeighted = 0;
+    for (const category of file.categories) {
+        if (Number.isFinite(category.weightedScore)) {
+            worstWeighted = Math.max(worstWeighted, category.weightedScore);
+        }
+    }
+
+    const list = documentRef.createElement('div');
+    list.className = 'mintlint-category-list';
+
+    for (const category of file.categories) {
+        const tone = mintLintConcernTone(category.score);
+        const section = documentRef.createElement('section');
+        section.className = `mintlint-category mintlint-tone-${tone}`;
+
+        const head = documentRef.createElement('div');
+        head.className = 'mintlint-category-head';
+        const name = documentRef.createElement('span');
+        name.className = 'mintlint-category-name';
+        setSafeText(name, category.name);
+        head.append(name);
+
+        if (worstWeighted > 0 && category.weightedScore === worstWeighted) {
+            const driver = documentRef.createElement('span');
+            driver.className = 'mintlint-category-driver';
+            setSafeText(driver, 'sets file score');
+            head.append(driver);
+        }
+
+        const math = documentRef.createElement('span');
+        math.className = 'mintlint-category-math';
+        setSafeText(math, Number.isFinite(category.score)
+            ? `${category.score.toFixed(1)} × ${Number.isFinite(category.weight) ? category.weight.toFixed(1) : '1.0'} = ${Number.isFinite(category.weightedScore) ? category.weightedScore.toFixed(1) : '—'}`
+            : '—');
+        head.append(math);
+        section.append(head);
+
+        const meter = documentRef.createElement('div');
+        meter.className = 'mintlint-meter';
+        const fill = documentRef.createElement('span');
+        setMeterWidth(fill, category.score);
+        meter.append(fill);
+        section.append(meter);
+
+        if (category.metrics.length) {
+            const metricList = documentRef.createElement('div');
+            metricList.className = 'mintlint-metric-list';
+            for (const metric of category.metrics) {
+                const row = documentRef.createElement('div');
+                row.className = `mintlint-metric mintlint-tone-${mintLintConcernTone(metric.score)}`;
+
+                const label = documentRef.createElement('span');
+                label.className = 'mintlint-metric-name';
+                setSafeText(label, metric.label);
+                if (metric.source) {
+                    const source = documentRef.createElement('span');
+                    source.className = 'mintlint-metric-source';
+                    setSafeText(source, ` · ${metric.source}${metric.line ? ` L${metric.line}` : ''}`);
+                    label.append(source);
+                }
+
+                const value = documentRef.createElement('span');
+                value.className = 'mintlint-metric-value';
+                setSafeText(value, formatMintLintMetricNumber(metric.name, metric.value));
+
+                const range = documentRef.createElement('span');
+                range.className = 'mintlint-metric-range';
+                setSafeText(range, formatMintLintThresholds(metric));
+
+                const score = documentRef.createElement('span');
+                score.className = 'mintlint-metric-score';
+                setSafeText(score, Number.isFinite(metric.score) ? metric.score.toFixed(1) : '—');
+
+                row.append(label, value, range, score);
+                metricList.append(row);
+            }
+            section.append(metricList);
+        }
+
+        list.append(section);
+    }
+
+    fileElement.append(list);
+}
+
+function renderMintLintFileCard(file, documentRef) {
+    const fileElement = documentRef.createElement('details');
+    fileElement.className = file.detailed
+        ? 'git-preflight-mint-file mintlint-file'
+        : 'git-preflight-mint-file';
+    const summary = documentRef.createElement('summary');
+    const path = documentRef.createElement('span');
+    path.className = 'git-preflight-mint-path';
+    setSafeText(path, file.path);
+    summary.append(path);
+
+    if (file.detailed) {
+        const impact = documentRef.createElement('span');
+        impact.className = 'mintlint-file-impact';
+        const impactParts = [
+            file.referencedBy > 0
+                ? `used by ${file.referencedBy} file${file.referencedBy === 1 ? '' : 's'}`
+                : 'no other files reference it'
+        ];
+        if (file.baseline !== null && file.introduced !== null) {
+            if (file.introduced > 0) {
+                impactParts.push(`+${file.introduced.toFixed(1)} added by this change (was ${file.baseline.toFixed(1)})`);
+            } else if (file.introduced < 0) {
+                impactParts.push(`improved by ${Math.abs(file.introduced).toFixed(1)} (was ${file.baseline.toFixed(1)})`);
+            } else {
+                impactParts.push(`all pre-existing (was ${file.baseline.toFixed(1)})`);
+            }
+        } else if (file.baseline === null) {
+            impactParts.push('new file');
+        }
+        if (Number.isFinite(file.priority) && file.priority !== null) {
+            impactParts.push(`priority ${file.priority.toFixed(1)}`);
+        }
+        setSafeText(impact, impactParts.join(' · '));
+        summary.append(impact);
+    }
+
+    const grade = documentRef.createElement('span');
+    grade.className = file.detailed
+        ? `git-preflight-mint-grade mintlint-tone-${mintLintConcernTone(file.score)}`
+        : 'git-preflight-mint-grade';
+    setSafeText(grade, file.grade || 'Details');
+    summary.append(grade);
+    fileElement.append(summary);
+
+    if (file.detailed) {
+        renderMintLintCategoryBreakdown(fileElement, file, documentRef);
+        return fileElement;
+    }
+
+    const categoryList = documentRef.createElement('dl');
+    categoryList.className = 'git-preflight-mint-categories';
+    for (const category of file.categories) {
+        const term = documentRef.createElement('dt');
+        setSafeText(term, category.name);
+        const description = documentRef.createElement('dd');
+        setSafeText(description, [category.status, category.message].filter(Boolean).join(' · '));
+        categoryList.append(term, description);
+    }
+    if (file.categories.length) fileElement.append(categoryList);
+    return fileElement;
+}
+
 export function renderMintLintDetails(container, details, documentRef = globalThis.document) {
     if (!container || !documentRef?.createElement) return 0;
-    const files = buildMintLintDetailModel(details);
+    const model = buildMintLintReportViewModel(details);
     container.replaceChildren?.();
 
-    for (const file of files) {
-        const fileElement = documentRef.createElement('details');
-        fileElement.className = 'git-preflight-mint-file';
-        const summary = documentRef.createElement('summary');
-        const path = documentRef.createElement('span');
-        path.className = 'git-preflight-mint-path';
-        setSafeText(path, file.path);
-        const grade = documentRef.createElement('span');
-        grade.className = 'git-preflight-mint-grade';
-        setSafeText(grade, file.grade || 'Details');
-        summary.append(path, grade);
-        fileElement.append(summary);
-
-        const categoryList = documentRef.createElement('dl');
-        categoryList.className = 'git-preflight-mint-categories';
-        for (const category of file.categories) {
-            const term = documentRef.createElement('dt');
-            setSafeText(term, category.name);
-            const description = documentRef.createElement('dd');
-            setSafeText(description, [category.status, category.message].filter(Boolean).join(' · '));
-            categoryList.append(term, description);
-        }
-        if (file.categories.length) fileElement.append(categoryList);
-        container.append(fileElement);
+    if (model.detailed && model.worstMetrics.length) {
+        container.append(renderMintLintWorstSection(model.worstMetrics, documentRef));
     }
-    return files.length;
+
+    if (!model.files.length) return 0;
+
+    if (!model.detailed) {
+        for (const file of model.files) {
+            container.append(renderMintLintFileCard(file, documentRef));
+        }
+        return model.files.length;
+    }
+
+    // The per-file list stays collapsed; the worst-offender table above is the headline.
+    const disclosure = documentRef.createElement('details');
+    disclosure.className = 'mintlint-files';
+    const summary = documentRef.createElement('summary');
+    const title = documentRef.createElement('span');
+    title.className = 'mintlint-files-title';
+    setSafeText(title, 'Per-file breakdown');
+    const count = documentRef.createElement('span');
+    count.className = 'mintlint-files-count';
+    setSafeText(count, `${model.files.length} file${model.files.length === 1 ? '' : 's'} · ranked by concern × usage`);
+    summary.append(title, count);
+    disclosure.append(summary);
+
+    const list = documentRef.createElement('div');
+    list.className = 'mintlint-files-list';
+    for (const file of model.files) {
+        list.append(renderMintLintFileCard(file, documentRef));
+    }
+    disclosure.append(list);
+    container.append(disclosure);
+    return model.files.length;
 }
 
 export function formatPreflightEventForConsole(rawEvent) {

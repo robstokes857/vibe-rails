@@ -61,19 +61,14 @@
                 <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="me-1 icon-light">
                 <span>Terminals</span>
             </button>
-            <button class="app-subnav-link" data-action="navigate-home" title="Dashboard">
-                <i class="fa-solid fa-gauge-high me-1"></i>
-                <span>Dashboard</span>
+            <button class="app-subnav-link" data-action="navigate-home" title="Rules and project safeguards">
+                <i class="fa-solid fa-list-check me-1"></i>
+                <span>RULES</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="environments"
                 title="Manage Custom Environments & Sandboxes">
                 <img src="assets/img/icons/layer-group-solid-full.svg" alt="" class="me-1 icon-light">
                 <span>ENVS</span>
-            </button>
-            <button class="app-subnav-link" data-action="navigate" data-view="agents"
-                title="Manage Rules and Agent Files">
-                <i class="fa-solid fa-list-check me-1"></i>
-                <span>RULES</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="vibe-rails-ai"
                 title="Vibe Rails AI — query and inspect captures">
@@ -123,192 +118,9 @@
     <!-- Templates -->
     <template id="dashboard-template">
         <div class="dashboard" data-dashboard="unified">
-            <!-- Project Header -->
+            <!-- Rules workspace. DashboardController mounts the existing Rules view here. -->
             <div class="row mb-3">
-                <div class="col-12" data-context-heading-container></div>
-            </div>
-
-            <!-- New Quick Actions Header Row -->
-            <div class="row mb-3 animate-fade-up delay-200">
-                <div class="col-12">
-                    <div class="card border-secondary border-opacity-10 bg-dark bg-opacity-25" data-local-quick-actions
-                        style="display: none;">
-                        <div class="card-header border-0 bg-transparent py-1 d-flex align-items-center">
-                            <span class="x-small text-muted text-uppercase fw-bold">
-                                <i class="fa-solid fa-arrow-up-right-from-square me-2" style="font-size: 11px;"></i>
-                                Quick Launch
-                            </span>
-                        </div>
-                        <div class="card-body p-2">
-                            <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xxl-5 g-2">
-                                <div class="col">
-                                    <div class="quick-launch-card h-100">
-                                        <div class="ql-logo-container">
-                                            <img src="assets/img/vscode.svg" alt="VS Code" class="ql-logo">
-                                        </div>
-                                        <div class="ql-name">VS Code</div>
-                                        <div class="ql-actions">
-                                            <button class="btn btn-sm btn-outline-primary d-flex align-items-center justify-content-center gap-1"
-                                                type="button" data-action="launch-vscode" title="Open project in VS Code">
-                                                <i class="fa-solid fa-arrow-up-right-from-square"></i>
-                                                <span>Open</span>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col">
-                                    <div class="quick-launch-card h-100">
-                                        <div class="ql-logo-container">
-                                            <img src="assets/img/claude-color.svg" alt="Claude" class="ql-logo">
-                                        </div>
-                                        <div class="ql-name">Claude</div>
-                                        <div class="ql-actions ql-actions-dual">
-                                            <button
-                                                class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1"
-                                                type="button" data-action="launch-native-terminal" data-cli="claude"
-                                                title="Native Terminal">
-                                                <i class="fa-solid fa-terminal"></i>
-                                                <span>Native</span>
-                                            </button>
-                                            <button
-                                                class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1"
-                                                type="button" data-action="launch-web-terminal" data-cli="claude"
-                                                title="Web Terminal">
-                                                <i class="fa-solid fa-display"></i>
-                                                <span>Web</span>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col">
-                                    <div class="quick-launch-card h-100">
-                                        <div class="ql-logo-container">
-                                            <img src="assets/img/agy.png" alt="Antigravity" class="ql-logo">
-                                        </div>
-                                        <div class="ql-name">Antigravity</div>
-                                        <div class="ql-actions ql-actions-dual">
-                                            <button
-                                                class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1"
-                                                type="button" data-action="launch-native-terminal" data-cli="antigravity"
-                                                title="Native Terminal">
-                                                <i class="fa-solid fa-terminal"></i>
-                                                <span>Native</span>
-                                            </button>
-                                            <button
-                                                class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1"
-                                                type="button" data-action="launch-web-terminal" data-cli="antigravity"
-                                                title="Web Terminal">
-                                                <i class="fa-solid fa-display"></i>
-                                                <span>Web</span>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col">
-                                    <div class="quick-launch-card h-100">
-                                        <div class="ql-logo-container">
-                                            <img src="assets/img/openai.svg" alt="Codex" class="ql-logo icon-light">
-                                        </div>
-                                        <div class="ql-name">Codex</div>
-                                        <div class="ql-actions ql-actions-dual">
-                                            <button
-                                                class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1"
-                                                type="button" data-action="launch-native-terminal" data-cli="codex"
-                                                title="Native Terminal">
-                                                <i class="fa-solid fa-terminal"></i>
-                                                <span>Native</span>
-                                            </button>
-                                            <button
-                                                class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1"
-                                                type="button" data-action="launch-web-terminal" data-cli="codex"
-                                                title="Web Terminal">
-                                                <i class="fa-solid fa-display"></i>
-                                                <span>Web</span>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col">
-                                    <div class="quick-launch-card h-100">
-                                        <div class="ql-logo-container">
-                                            <img src="assets/img/copilot.svg" alt="Copilot" class="ql-logo">
-                                        </div>
-                                        <div class="ql-name">Copilot</div>
-                                        <div class="ql-actions ql-actions-dual">
-                                            <button
-                                                class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1"
-                                                type="button" data-action="launch-native-terminal" data-cli="copilot"
-                                                title="Native Terminal">
-                                                <i class="fa-solid fa-terminal"></i>
-                                                <span>Native</span>
-                                            </button>
-                                            <button
-                                                class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1"
-                                                type="button" data-action="launch-web-terminal" data-cli="copilot"
-                                                title="Web Terminal">
-                                                <i class="fa-solid fa-display"></i>
-                                                <span>Web</span>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Sandboxes & Environments Split -->
-            <div class="row g-3 mb-4 animate-fade-up delay-250">
-                <!-- Custom Sandboxes -->
-                <div class="col-lg-6">
-                    <div class="card border-secondary border-opacity-10 bg-dark bg-opacity-25 h-100"
-                        data-sandbox-section style="display: none;">
-                        <div
-                            class="card-header border-0 bg-transparent py-1 d-flex justify-content-between align-items-center">
-                            <span class="x-small text-muted text-uppercase fw-bold">
-                                <i class="fa-solid fa-boxes-stacked me-1" style="font-size: 11px;"></i>
-                                Sandboxes
-                            </span>
-                            <button class="btn btn-sm btn-outline-primary px-2 py-1" type="button"
-                                data-action="create-sandbox">
-                                <span>Add</span>
-                            </button>
-                        </div>
-                        <div class="card-body p-2 d-flex flex-column">
-                            <div class="d-flex flex-column gap-1 flex-grow-1" data-sandbox-list></div>
-                            <button
-                                class="btn btn-sm btn-link text-muted w-100 mt-1 text-decoration-none hover-accent py-1"
-                                data-action="navigate" data-view="environments" title="Manage Sandboxes">Show
-                                More</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Custom Environments -->
-                <div class="col-lg-6">
-                    <div class="card border-secondary border-opacity-10 bg-dark bg-opacity-25 h-100"
-                        data-local-history-section style="display: none;">
-                        <div
-                            class="card-header border-0 bg-transparent py-1 d-flex justify-content-between align-items-center">
-                            <span class="x-small text-muted text-uppercase fw-bold">
-                                <i class="fa-solid fa-layer-group me-1" style="font-size: 11px;"></i>
-                                Environments
-                            </span>
-                            <button class="btn btn-sm btn-outline-primary px-2 py-1" type="button"
-                                data-action="create-environment-quick">
-                                <span>Add</span>
-                            </button>
-                        </div>
-                        <div class="card-body p-2 d-flex flex-column">
-                            <div class="d-flex flex-column gap-1 flex-grow-1" data-local-project-history></div>
-                            <button
-                                class="btn btn-sm btn-link text-muted w-100 mt-1 text-decoration-none hover-accent py-1"
-                                data-action="navigate" data-view="environments" title="Manage Environments">Show
-                                More</button>
-                        </div>
-                    </div>
-                </div>
+                <div class="col-12 rules-dashboard-host" data-rules-overview-host></div>
             </div>
 
             <div class="row g-4 mb-3">
@@ -325,49 +137,7 @@
         </div>
     </template>
 
-    <template id="environment-history-item-template">
-        <div class="list-group-item project-item p-2 px-3 border-secondary border-opacity-10 bg-transparent mb-1 rounded"
-            data-env-item>
-            <div class="d-flex align-items-center gap-2">
-                <div class="project-logo-wrapper">
-                    <img class="project-logo icon-light" data-env-logo alt="" loading="lazy">
-                </div>
-                <div class="flex-grow-1 min-w-0">
-                    <div class="d-flex align-items-center gap-2 mb-0">
-                        <h6 class="mb-0 text-white text-truncate fw-bold" data-env-name></h6>
-                    </div>
-                    <div class="text-muted small opacity-50" style="font-size: 0.7rem;" data-env-time></div>
-                </div>
-            </div>
-            <div class="row g-2 mt-2">
-                <div class="col-12 col-sm-4 d-grid">
-                    <button
-                        class="btn btn-sm btn-outline-secondary d-flex align-items-center justify-content-center gap-1 w-100"
-                        type="button" data-env-launch title="Native Terminal">
-                        <i class="fa-solid fa-terminal"></i>
-                        <span data-env-launch-text>Native</span>
-                    </button>
-                </div>
-                <div class="col-12 col-sm-4 d-grid">
-                    <button
-                        class="btn btn-sm btn-outline-success d-flex align-items-center justify-content-center gap-1 w-100"
-                        type="button" data-env-launch-webui title="Web Terminal">
-                        <i class="fa-solid fa-display"></i>
-                        <span>Web</span>
-                    </button>
-                </div>
-                <div class="col-12 col-sm-4 d-grid">
-                    <button
-                        class="btn btn-sm btn-outline-danger d-flex align-items-center justify-content-center gap-1 w-100"
-                        type="button" data-env-delete title="Delete">
-                        <i class="fa-solid fa-trash"></i>
-                        <span>Delete</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </template>
-
+    <!-- Sandbox list item, rendered by SandboxController on the Sandboxes view. -->
     <template id="sandbox-item-template">
         <div class="sandbox-item-card" data-sandbox-item>
             <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2 mb-2">
@@ -454,71 +224,174 @@
 
     <template id="agents-template">
         <div class="view" data-view="agents">
-            <div class="row">
-                <div class="col-12 mb-3">
-                    <h4 class="text-uppercase fw-bold mb-0" style="letter-spacing: 0.05em;"><span class="text-gradient">Agent Files &amp; Rules</span></h4>
-                </div>
+            <div class="rules-git-setting-row">
+                <section class="rules-git-setting" data-hook-health data-tone="neutral" aria-busy="true"
+                    aria-label="Git Guard setting">
+                    <span class="rules-git-setting-icon" aria-hidden="true">
+                        <i class="fa-solid fa-code-commit"></i>
+                    </span>
+                    <span class="rules-git-setting-copy">
+                        <strong>Git Guard</strong>
+                        <small data-hook-status-message>Checking repository hooks…</small>
+                        <span class="visually-hidden" data-hook-status-title>Checking Git Guard</span>
+                    </span>
+                    <span class="hook-health-badge" data-hook-status-badge data-tone="neutral"
+                        aria-live="polite">Checking</span>
+                    <button class="rules-git-toggle" type="button" role="switch" aria-checked="false"
+                        data-action="toggle-hooks" data-idle-label="Turn Git Guard on" disabled>
+                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                            aria-hidden="true"></span>
+                        <span class="rules-git-toggle-track" data-button-icon aria-hidden="true">
+                            <span></span>
+                        </span>
+                        <span class="visually-hidden" data-button-label>Turn Git Guard on</span>
+                    </button>
+                </section>
             </div>
 
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <button class="card menu-card git-guard-menu-button h-100 w-100" type="button"
-                                data-action="navigate" data-view="check-violations">
-                                <span class="card-body d-flex align-items-center gap-3 p-3">
-                                    <span class="bg-success bg-opacity-10 text-success rounded-circle d-flex align-items-center justify-content-center"
-                                        style="width: 48px; height: 48px; flex-shrink: 0;">
-                                        <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
-                                    </span>
-                                    <span>
-                                        <span class="d-block mb-0 text-white fw-bold">VCA Git Guard</span>
-                                        <span class="d-block text-muted x-small mb-0 opacity-75">Manage hooks and run checks</span>
-                                    </span>
-                                </span>
+            <section class="card rules-vca-panel mb-4 vca-console-card" data-vca-console data-tone="neutral"
+                aria-busy="false" aria-labelledby="rules-vca-results-title">
+                <div class="card-header rules-vca-results-header">
+                    <div class="d-flex align-items-center gap-2 min-w-0">
+                        <i class="fa-solid fa-terminal text-accent" aria-hidden="true"></i>
+                        <h2 id="rules-vca-results-title">Validation results</h2>
+                        <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
+                            <span class="spinner-border spinner-border-sm"></span>
+                        </span>
+                        <span class="vca-console-state" data-vca-console-state>Ready</span>
+                    </div>
+                    <div class="vca-console-utility-actions" aria-label="Validation result actions">
+                        <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-action="copy-hook-output" aria-label="Copy validation results" title="Copy results">
+                            <i class="fa-regular fa-copy" aria-hidden="true"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-action="clear-hook-output" aria-label="Clear validation results" title="Clear results">
+                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body rules-vca-results">
+                    <section class="vca-explanation" data-vca-explanation hidden aria-live="polite">
+                        <div class="vca-explanation-verdict" data-vca-explanation-verdict data-tone="neutral">
+                            <span class="vca-explanation-icon" aria-hidden="true">
+                                <i class="fa-solid fa-circle-check"></i>
+                            </span>
+                            <div class="vca-explanation-copy">
+                                <span class="vca-explanation-eyebrow">What this means</span>
+                                <h3 data-vca-explanation-title>Validation ready</h3>
+                                <p data-vca-explanation-message>Run validation to review your staged changes.</p>
+                            </div>
+                            <div class="vca-explanation-stats" data-vca-explanation-stats></div>
+                        </div>
+                        <div class="vca-finding-list" data-vca-finding-list></div>
+                        <div class="vca-explanation-actions" data-vca-explanation-actions hidden>
+                            <button class="btn btn-sm btn-primary" type="button" data-action="open-fix-terminal">
+                                <i class="fa-solid fa-terminal me-1" aria-hidden="true"></i>
+                                Fix with an agent
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" data-action="copy-fix-brief">
+                                <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>
+                                Copy fix brief
                             </button>
                         </div>
-
-                        <div class="col-md-4">
-                            <div class="card menu-card h-100" data-action="navigate" data-view="active-rules">
-                                <div class="card-body d-flex align-items-center gap-3 p-3">
-                                    <div class="bg-info bg-opacity-10 text-info rounded-circle d-flex align-items-center justify-content-center"
-                                        style="width: 48px; height: 48px; flex-shrink: 0;">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
-                                            fill="currentColor" viewBox="0 0 16 16">
-                                            <path
-                                                d="M8.416.223a.5.5 0 0 0-.832 0l-3 4.5A.5.5 0 0 0 5 5.5h.098L3.076 8.735A.5.5 0 0 0 3.5 9.5h.191l-1.638 3.276a.5.5 0 0 0 .447.724H7V15h2v-1.5h4.5a.5.5 0 0 0 .447-.724L12.31 9.5h.191a.5.5 0 0 0 .424-.765L10.902 5.5H11a.5.5 0 0 0 .416-.777l-3-4.5z" />
-                                        </svg>
-                                    </div>
-                                    <div>
-                                        <h6 class="mb-0 text-white fw-bold">Active Rules</h6>
-                                        <p class="text-muted x-small mb-0 opacity-75">View rule hierarchy</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="col-md-4">
-                            <div class="card menu-card h-100" data-action="navigate" data-view="agent-create">
-                                <div class="card-body d-flex align-items-center gap-3 p-3">
-                                    <div class="bg-primary bg-opacity-10 text-primary rounded-circle d-flex align-items-center justify-content-center"
-                                        style="width: 48px; height: 48px; flex-shrink: 0;">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
-                                            fill="currentColor" viewBox="0 0 16 16">
-                                            <path
-                                                d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4" />
-                                        </svg>
-                                    </div>
-                                    <div>
-                                        <h6 class="mb-0 text-white fw-bold">Create New Agent</h6>
-                                        <p class="text-muted x-small mb-0 opacity-75">Create with wizard</p>
-                                    </div>
-                                </div>
-                            </div>
+                    </section>
+                    <div class="vca-console-shell">
+                        <pre class="vca-console-output" data-vca-console-output role="log" aria-live="polite"
+                            aria-atomic="false" tabindex="0"></pre>
+                        <div class="vca-console-footer">
+                            <span class="vca-console-pulse" aria-hidden="true"></span>
+                            <span data-vca-console-meta>Waiting for validation</span>
                         </div>
                     </div>
                 </div>
-            </div>
+                <div class="card-footer rules-vca-run-footer">
+                    <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center justify-content-center gap-2"
+                        type="button" data-action="run-hook-preview" data-idle-label="Run again" disabled>
+                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                            aria-hidden="true"></span>
+                        <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
+                        <span data-button-label>Run again</span>
+                    </button>
+                </div>
+            </section>
+
+            <section class="code-analyzer-panel mb-4 vca-console-card" data-code-analyzer-console
+                data-tone="neutral" aria-busy="false" aria-labelledby="code-analyzer-title">
+                <header class="code-analyzer-topbar">
+                    <div class="code-analyzer-brand-row">
+                        <span class="code-analyzer-brand-mark" aria-hidden="true">ML</span>
+                        <span class="code-analyzer-brand-copy">
+                            <strong id="code-analyzer-title">MintLint</strong>
+                            <small>Code health review</small>
+                        </span>
+                        <span class="code-analyzer-context-pill">
+                            <i class="fa-solid fa-code-commit" aria-hidden="true"></i>
+                            Staged changes
+                        </span>
+                        <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
+                            <span class="spinner-border spinner-border-sm"></span>
+                        </span>
+                        <span class="vca-console-state" data-vca-console-state>Ready</span>
+                    </div>
+                    <div class="code-analyzer-actions" aria-label="Code analyzer actions">
+                        <label class="mintlint-scan-toggle"
+                            title="Usage counts normally consider tracked files only. Check to scan every source file under the repository, including untracked ones.">
+                            <input type="checkbox" data-code-analyzer-full-scan>
+                            <span>Full repo scan</span>
+                        </label>
+                        <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-action="copy-code-analyzer-output" title="Copy scan transcript">
+                            <i class="fa-regular fa-copy" aria-hidden="true"></i>
+                            <span>Copy summary</span>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary code-analyzer-clear" type="button"
+                            data-action="clear-code-analyzer-output" aria-label="Clear code analyzer results"
+                            title="Clear results">
+                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                        </button>
+                        <button class="btn btn-sm btn-primary" type="button" data-action="run-code-analyzer"
+                            data-idle-label="Run again">
+                            <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                aria-hidden="true"></span>
+                            <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
+                            <span data-button-label>Run again</span>
+                        </button>
+                    </div>
+                </header>
+
+                <div class="code-analyzer-empty" data-code-analyzer-empty>
+                    <span class="code-analyzer-empty-icon" aria-hidden="true">
+                        <i class="fa-solid fa-chart-line"></i>
+                    </span>
+                    <div>
+                        <strong>Preparing the code-health review</strong>
+                        <p>MintLint will turn the staged-source scan into file, category, and metric-level findings.</p>
+                    </div>
+                </div>
+
+                <div class="code-analyzer-dashboard" data-code-analyzer-report hidden></div>
+
+                <details class="code-analyzer-transcript">
+                    <summary>
+                        <span>Scan transcript</span>
+                        <small data-vca-console-meta>Waiting for analysis</small>
+                    </summary>
+                    <div class="vca-console-shell">
+                        <pre class="vca-console-output" data-vca-console-output role="log" aria-live="polite"
+                            aria-atomic="false" tabindex="0"></pre>
+                    </div>
+                </details>
+
+                <footer class="code-analyzer-note">
+                    <span>Concern scores are normalized so higher always means more concern.</span>
+                    <span class="code-analyzer-legend">
+                        <span><i data-tone="success"></i>Healthy</span>
+                        <span><i data-tone="warning"></i>Review</span>
+                        <span><i data-tone="danger"></i>Change required</span>
+                    </span>
+                </footer>
+            </section>
 
             <div class="row mb-4">
                 <div class="col-12">
@@ -530,7 +403,7 @@
                                     stroke-linejoin="round" class="text-accent me-2"
                                     style="vertical-align: text-bottom;">
                                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                                </svg>Select Agent File To Edit
+                                </svg>Agent Rules
                             </span>
                             <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button"
                                 data-action="create-agent-file" title="Create a new AGENTS.md file">
@@ -798,7 +671,7 @@
                     <button class="btn btn-outline-secondary d-inline-flex align-items-center justify-content-center gap-2"
                         type="button" data-action="exit-git-guard">
                         <i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i>
-                        <span>Exit to Dashboard</span>
+                        <span>Exit to Rules</span>
                     </button>
                 </div>
             </div>
@@ -959,7 +832,7 @@
                         <p data-preflight-step-message>Grade staged files and surface maintainability findings.</p>
                         <pre data-preflight-step-output hidden></pre>
                         <details class="git-preflight-mint-disclosure" data-mintlint-disclosure hidden>
-                            <summary>View per-file and category details</summary>
+                            <summary>View the full per-file metric breakdown</summary>
                             <div data-mintlint-details></div>
                         </details>
                     </div>
@@ -1043,41 +916,6 @@
                     </div>
                 </div>
             </section>
-        </div>
-    </template>
-
-    <template id="active-rules-template">
-        <div class="view" data-view="active-rules">
-            <div class="row">
-                <div class="col-12">
-                    <button class="btn btn-outline-primary mb-4 d-flex align-items-center gap-2" type="button"
-                        data-action="go-back">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
-                            viewBox="0 0 16 16">
-                            <path fill-rule="evenodd"
-                                d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8" />
-                        </svg>
-                        Back
-                    </button>
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="col-12">
-                    <h2 class="mb-4">Active Rules Hierarchy</h2>
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header">Rules by Directory</div>
-                        <div class="card-body">
-                            <div data-active-rules></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
     </template>
 
@@ -1300,6 +1138,25 @@
                     </div>
                 </div>
             </div>
+            <div class="row justify-content-center" data-project-identity-card hidden>
+                <div class="col-md-8 col-lg-6 mb-4">
+                    <div class="sandbox-item-card project-identity-card text-start">
+                        <div class="project-identity-icon" aria-hidden="true">
+                            <i class="fa-solid fa-folder-tree"></i>
+                        </div>
+                        <div class="project-identity-copy">
+                            <span class="sandbox-item-name">Project identity</span>
+                            <strong data-project-display-name>Project</strong>
+                            <small data-project-root-path></small>
+                            <p>Choose the friendly name used in VibeRails tabs and project labels.</p>
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary" type="button" data-action="rename-project">
+                            <i class="fa-solid fa-pen-to-square me-1" aria-hidden="true"></i>
+                            Change name
+                        </button>
+                    </div>
+                </div>
+            </div>
             <div class="row justify-content-center">
                 <div class="col-md-8 col-lg-6 mb-4">
                     <div class="sandbox-item-card text-start">
@@ -1371,7 +1228,7 @@
                                     <label class="form-check-label" for="setting-use-vscode-theme">Follow VS Code
                                         Theme</label>
                                 </div>
-                                <small class="form-text text-muted">Use VS Code colors in the embedded dashboard</small>
+                                <small class="form-text text-muted">Use VS Code colors in the embedded terminal</small>
                             </div>
                         </form>
                     </div>

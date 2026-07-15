@@ -1062,15 +1062,7 @@ namespace VibeRails.Services
             {
                 var process = new System.Diagnostics.Process
                 {
-                    StartInfo = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "chmod",
-                        Arguments = $"+x \"{path}\"",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    }
+                    StartInfo = CreateChmodStartInfo(path)
                 };
 
                 process.Start();
@@ -1091,6 +1083,21 @@ namespace VibeRails.Services
                 _logger.LogError(ex, "Exception while executing chmod: {Path}", path);
                 return false;
             }
+        }
+
+        internal static System.Diagnostics.ProcessStartInfo CreateChmodStartInfo(string path)
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "chmod",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            startInfo.ArgumentList.Add("+x");
+            startInfo.ArgumentList.Add(path);
+            return startInfo;
         }
     }
 }

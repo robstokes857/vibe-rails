@@ -1,4 +1,5 @@
 import { ensureMonaco } from './monaco-loader.js';
+import { parseLlmSelection, populateLlmSelectionSelect } from './utils.js';
 
 // Sandbox Controller - Manages sandbox creation, listing, and actions
 export class SandboxController {
@@ -121,7 +122,158 @@ export class SandboxController {
         this.app.bindAction(root, '[data-action="create-sandbox"]', () => this.createSandbox());
 
         const list = root.querySelector('[data-sandbox-list]');
-        this.app.dashboardController.populateSandboxesList(list);
+        this.populateSandboxesList(list);
+    }
+
+    populateSandboxesList(container) {
+        if (!container) return;
+        container.innerHTML = '';
+
+        const sandboxes = this.app.data.sandboxes || [];
+
+        if (sandboxes.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center py-3">No sandboxes yet. Create one to work in an isolated copy of your project.</p>';
+            return;
+        }
+
+        const template = document.getElementById('sandbox-item-template');
+        if (!template) {
+            container.innerHTML = '<p class="text-muted text-center py-3">Template not found.</p>';
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        sandboxes.forEach((sb) => {
+            const node = template.content.cloneNode(true);
+
+            const name = node.querySelector('[data-sandbox-name]');
+            if (name) name.textContent = sb.name;
+
+            const branch = node.querySelector('[data-sandbox-branch]');
+            if (branch) branch.textContent = sb.branch;
+
+            const path = node.querySelector('[data-sandbox-path]');
+            if (path) path.textContent = sb.path;
+
+            const time = node.querySelector('[data-sandbox-time]');
+            if (time) time.textContent = sb.created;
+
+            // Diff button
+            const diffBtn = node.querySelector('[data-sandbox-diff]');
+            if (diffBtn) {
+                diffBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.showDiff(sb.id, sb.name);
+                });
+            }
+
+            // Merge local button
+            const mergeLocalBtn = node.querySelector('[data-sandbox-merge-local]');
+            if (mergeLocalBtn) {
+                mergeLocalBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.mergeLocally(sb.id, sb.name, sb.branch);
+                });
+            }
+
+            // Push to remote button
+            const pushRemoteBtn = node.querySelector('[data-sandbox-push-remote]');
+            if (pushRemoteBtn) {
+                pushRemoteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.pushToRemote(sb.id, sb.name);
+                });
+            }
+
+            // CLI select
+            const cliSelect = node.querySelector('[data-sandbox-cli-select]');
+            if (cliSelect) {
+                this.populateSandboxCliSelect(cliSelect);
+            }
+
+            // Helper to resolve CLI selection — returns null and shakes if nothing selected
+            const resolveCli = () => {
+                const result = this.parseSandboxCliSelection(cliSelect);
+                if (!result) {
+                    if (cliSelect) {
+                        const ts = cliSelect.tomselect;
+                        const shakeTarget = ts?.wrapper || cliSelect;
+                        shakeTarget.classList.remove('vb-terminal-selection-shake');
+                        void shakeTarget.offsetWidth;
+                        shakeTarget.classList.add('vb-terminal-selection-shake');
+                        if (ts) {
+                            try { ts.focus(); ts.open(); } catch {}
+                        } else {
+                            cliSelect.focus();
+                            if (typeof cliSelect.showPicker === 'function') {
+                                try { cliSelect.showPicker(); } catch {}
+                            }
+                        }
+                    }
+                    return null;
+                }
+                return result;
+            };
+
+            // CLI launch button
+            const cliBtn = node.querySelector('[data-sandbox-launch-cli]');
+            if (cliBtn) {
+                cliBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const result = resolveCli();
+                    if (!result) return;
+                    this.launchInExternalTerminal(sb.id, sb.name, result.cli, result.environmentName);
+                });
+            }
+
+            // Web Terminal launch button
+            const webUiBtn = node.querySelector('[data-sandbox-launch-webui]');
+            if (webUiBtn) {
+                webUiBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const result = resolveCli();
+                    if (!result) return;
+                    this.launchInWebUI(sb.id, sb.name, result.cli, result.environmentName);
+                });
+            }
+
+            // VS Code button
+            const vscodeBtn = node.querySelector('[data-sandbox-vscode]');
+            if (vscodeBtn) {
+                vscodeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.launchVSCode(sb.id, sb.name);
+                });
+            }
+
+            // Delete button
+            const deleteBtn = node.querySelector('[data-sandbox-delete]');
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.deleteSandbox(sb.id, sb.name);
+                });
+            }
+
+            fragment.appendChild(node);
+        });
+
+        container.appendChild(fragment);
+    }
+
+    populateSandboxCliSelect(selectEl) {
+        populateLlmSelectionSelect(selectEl, this.app.data.environments || [], {
+            placeholder: 'Select CLI...',
+            includeDefaultSuffix: false
+        });
+    }
+
+    parseSandboxCliSelection(selectEl) {
+        const parsed = parseLlmSelection(selectEl?.value, this.app.data.environments || []);
+        return parsed.cli
+            ? { cli: parsed.cli, environmentName: parsed.environmentName }
+            : null;
     }
 
     // Delete a sandbox with confirmation
@@ -185,7 +337,7 @@ export class SandboxController {
 
         const terminalContent = await this._waitForTerminalContent(2000);
         if (!terminalContent) {
-            this.app.showError('Could not find the terminal panel — open the dashboard and try again.');
+            this.app.showError('Could not find the terminal panel — open Rules and try again.');
             return;
         }
 

@@ -3,7 +3,7 @@ npm WARN deprecated old-lib@1.0.0: this package is no longer supported
 npm WARN deprecated old-lib@1.0.0: this package is no longer supported
 npm WARN deprecated old-lib@1.0.0: this package is no longer supported
 
-added 214 packages in 3s  
+added 214 packages in 3s
 [33m4 moderate severity vulnerabilities[0m
 
 

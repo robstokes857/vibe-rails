@@ -330,6 +330,44 @@ public sealed class MintLintGradingTests : IDisposable
         Assert.Equal(100.0, CategoryScoreOf(score, "Complexity"));
     }
 
+    [Fact]
+    public void Scorer_ExposesPerMetricBreakdown_WithThresholdsAndWeights()
+    {
+        string path = WriteFixture("messy_breakdown.cs", MessyCSharp);
+
+        FileScore score = MintLintScorer.Score(MintLintAnalyzer.AnalyzeFile(path));
+
+        // Complexity: cyclomatic 27 is past the 10/20 thresholds → 100, full 1.0 weight,
+        // and the score is pinned to the function that caused it.
+        CategoryScore complexity = CategoryOf(score, "Complexity");
+        Assert.Equal(1.0, complexity.Weight);
+        Assert.Equal(100.0, complexity.WeightedScore);
+        MetricScore cyclomatic = MetricOf(complexity, "cyclomatic_complexity");
+        Assert.Equal(27.0, cyclomatic.Value);
+        Assert.Equal(10.0, cyclomatic.Warn);
+        Assert.Equal(20.0, cyclomatic.Critical);
+        Assert.Equal(100.0, cyclomatic.Score);
+        Assert.False(cyclomatic.HigherIsBetter);
+        Assert.Equal("Evaluate", cyclomatic.Source);
+        Assert.True(cyclomatic.Line > 0);
+
+        // Size: parameter count 8 is past the 4/7 thresholds → 100, de-emphasized to 0.7.
+        CategoryScore size = CategoryOf(score, "Size");
+        Assert.Equal(0.7, size.Weight);
+        Assert.Equal(100.0, size.Score);
+        Assert.Equal(70.0, size.WeightedScore);
+        Assert.Equal(100.0, MetricOf(size, "parameter_count").Score);
+
+        // Maintainability index inverts the scale, and every category explains itself.
+        MetricScore maintainability = MetricOf(CategoryOf(score, "Maintainability"), "maintainability_index");
+        Assert.True(maintainability.HigherIsBetter);
+        Assert.All(score.Categories, category =>
+        {
+            Assert.NotEmpty(category.Metrics);
+            Assert.Equal(category.Metrics.Max(metric => metric.Score), category.Score, 1);
+        });
+    }
+
     // ----------------------------------------------------------- TypeScript
 
     [Fact]
@@ -634,9 +672,21 @@ public sealed class MintLintGradingTests : IDisposable
 
     private static double CategoryScoreOf(FileScore score, string category)
     {
+        return CategoryOf(score, category).Score;
+    }
+
+    private static CategoryScore CategoryOf(FileScore score, string category)
+    {
         List<CategoryScore> matches = [.. score.Categories.Where(c => c.Name == category)];
         Assert.Single(matches);
-        return matches[0].Score;
+        return matches[0];
+    }
+
+    private static MetricScore MetricOf(CategoryScore category, string metric)
+    {
+        List<MetricScore> matches = [.. category.Metrics.Where(m => m.Name == metric)];
+        Assert.Single(matches);
+        return matches[0];
     }
 
     private static void AssertGradedClean(FileScore score)

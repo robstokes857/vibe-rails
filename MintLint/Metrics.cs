@@ -11,6 +11,8 @@ namespace MintLint;
 /// <param name="NPath">NPath complexity (count of acyclic execution paths, capped to avoid overflow).</param>
 /// <param name="HalsteadVolume">Halstead volume of the function.</param>
 /// <param name="HalsteadDifficulty">Halstead difficulty of the function.</param>
+/// <param name="NestingDepth">Deepest level of nested control structures in the function.</param>
+/// <param name="ParameterCount">Number of declared parameters (0 for the synthetic global scope).</param>
 public sealed record FunctionMetrics(
     string Name,
     int Line,
@@ -19,7 +21,9 @@ public sealed record FunctionMetrics(
     int Cognitive,
     int NPath,
     double HalsteadVolume,
-    double HalsteadDifficulty);
+    double HalsteadDifficulty,
+    int NestingDepth = 0,
+    int ParameterCount = 0);
 
 /// <summary>Metrics for a single class-like type (class, struct, interface, or record).</summary>
 /// <param name="Name">Type name, or <c>"anonymous"</c> if it could not be resolved.</param>

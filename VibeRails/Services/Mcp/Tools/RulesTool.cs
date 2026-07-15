@@ -6,6 +6,7 @@ using Serilog;
 using VibeRails.Services;
 using VibeRails.Services.GitPreflight;
 using VibeRails.Services.VCA;
+using VibeRails.Services.VCA.Hooks;
 
 namespace VibeRails.Services.Mcp.Tools;
 
@@ -127,7 +128,9 @@ public class RulesTool
                     file.Content)).ToList();
             if (stagedFiles.Count == 0 && !validateCommitMessage)
             {
-                return VcaToolValidationReport.Pass("PASS: No staged files to validate.");
+                return VcaToolValidationReport.Pass(
+                    "PASS: No staged files to validate.",
+                    stagedFileCount: 0);
             }
 
             // Find AGENTS.md files
@@ -139,7 +142,9 @@ public class RulesTool
                     file.Content)).ToList();
             if (agentFiles.Count == 0)
             {
-                return VcaToolValidationReport.Pass("PASS: No AGENTS.md files found. No VCA rules to check.");
+                return VcaToolValidationReport.Pass(
+                    "PASS: No AGENTS.md files found. No VCA rules to check.",
+                    stagedFiles.Count);
             }
 
             // Parse rules from AGENTS.md files
@@ -152,7 +157,9 @@ public class RulesTool
 
             if (allRules.Count == 0)
             {
-                return VcaToolValidationReport.Pass("PASS: No VCA rules defined in AGENTS.md files.");
+                return VcaToolValidationReport.Pass(
+                    "PASS: No VCA rules defined in AGENTS.md files.",
+                    stagedFiles.Count);
             }
 
             // Validate against rules
@@ -161,6 +168,7 @@ public class RulesTool
             var deferredChecks = new List<string>();
             var commitViolations = new List<(string RuleText, string SourceFile, string Slug)>();
             var requiredAcknowledgments = new List<string>();
+            var findings = new List<VcaRuleFinding>();
             var hasStopViolation = false;
             var evaluatedRuleCount = 0;
 
@@ -197,6 +205,17 @@ public class RulesTool
                 if (validation.State == RuleValidationState.Deferred)
                 {
                     deferredChecks.Add($"[DEFERRED] {ruleText}: {validation.Message}");
+                    var sourcePath = GetRuleSourcePath(sourceFile, gitRoot);
+                    findings.Add(new VcaRuleFinding(
+                        VcaRuleFindingKind.Deferred,
+                        enforcement,
+                        ruleText,
+                        validation.Message,
+                        sourcePath,
+                        BuildFindingGuidance(
+                            VcaRuleFindingKind.Deferred,
+                            validation.Message,
+                            sourcePath)));
                     continue;
                 }
 
@@ -204,11 +223,22 @@ public class RulesTool
                 {
                     var message = validation.Message;
                     var sourceId = GetRuleSourceId(sourceFile, gitRoot);
+                    var sourcePath = GetRuleSourcePath(sourceFile, gitRoot);
                     var slug = GenerateRuleSlug(ruleText);
 
                     if (enforcement == "WARN")
                     {
                         warnings.Add($"[WARN] {ruleText}: {message}");
+                        findings.Add(new VcaRuleFinding(
+                            VcaRuleFindingKind.Warning,
+                            enforcement,
+                            ruleText,
+                            message,
+                            sourcePath,
+                            BuildFindingGuidance(
+                                VcaRuleFindingKind.Warning,
+                                message,
+                                sourcePath)));
                     }
                     else if (enforcement == "COMMIT")
                     {
@@ -216,11 +246,32 @@ public class RulesTool
                         var token = $"[VCA:{sourceId}:{slug}]";
                         requiredAcknowledgments.Add(token);
                         violations.Add($"[COMMIT] {ruleText}: {message}\n  Acknowledgment needed: {token} Reason: <your explanation>");
+                        findings.Add(new VcaRuleFinding(
+                            VcaRuleFindingKind.AcknowledgmentRequired,
+                            enforcement,
+                            ruleText,
+                            message,
+                            sourcePath,
+                            BuildFindingGuidance(
+                                VcaRuleFindingKind.AcknowledgmentRequired,
+                                message,
+                                sourcePath),
+                            token));
                     }
                     else if (enforcement == "STOP")
                     {
                         hasStopViolation = true;
                         violations.Add($"[STOP] {ruleText}: {message}\n  This violation CANNOT be overridden. Fix it before committing.");
+                        findings.Add(new VcaRuleFinding(
+                            VcaRuleFindingKind.Blocked,
+                            enforcement,
+                            ruleText,
+                            message,
+                            sourcePath,
+                            BuildFindingGuidance(
+                                VcaRuleFindingKind.Blocked,
+                                message,
+                                sourcePath)));
                     }
                 }
             }
@@ -237,7 +288,10 @@ public class RulesTool
                     result.ToString(),
                     HasError: false,
                     HasStopViolation: false,
-                    RequiredAcknowledgments: []);
+                    RequiredAcknowledgments: [],
+                    StagedFileCount: stagedFiles.Count,
+                    ApplicableRuleCount: evaluatedRuleCount,
+                    Findings: []);
             }
 
             if (warnings.Count > 0)
@@ -296,7 +350,10 @@ public class RulesTool
                 result.ToString(),
                 HasError: false,
                 HasStopViolation: hasStopViolation,
-                RequiredAcknowledgments: requiredAcknowledgments.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+                RequiredAcknowledgments: requiredAcknowledgments.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                StagedFileCount: stagedFiles.Count,
+                ApplicableRuleCount: evaluatedRuleCount,
+                Findings: findings);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -309,7 +366,10 @@ public class RulesTool
                 $"ERROR: Failed to validate VCA rules: {ex.Message}",
                 HasError: true,
                 HasStopViolation: false,
-                RequiredAcknowledgments: []);
+                RequiredAcknowledgments: [],
+                StagedFileCount: 0,
+                ApplicableRuleCount: 0,
+                Findings: []);
         }
     }
 
@@ -775,8 +835,34 @@ public class RulesTool
 
     private static string GetRuleSourceId(string sourceFile, string gitRoot)
     {
-        var relative = Path.GetRelativePath(gitRoot, sourceFile).Replace('\\', '/');
-        return relative.Replace('/', '-');
+        return GetRuleSourcePath(sourceFile, gitRoot).Replace('/', '-');
+    }
+
+    private static string GetRuleSourcePath(string sourceFile, string gitRoot) =>
+        NormalizeGitPath(Path.GetRelativePath(gitRoot, sourceFile).Replace('\\', '/'));
+
+    private static string BuildFindingGuidance(
+        VcaRuleFindingKind kind,
+        string reason,
+        string sourcePath)
+    {
+        if (reason.StartsWith("UNSUPPORTED:", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Git Guard cannot evaluate this rule as written. Update or disable it in {sourcePath}, or replace it with a supported rule before committing.";
+        }
+
+        return kind switch
+        {
+            VcaRuleFindingKind.Warning =>
+                "Review this finding before committing. WARN rules do not block the commit.",
+            VcaRuleFindingKind.Deferred =>
+                "No pre-commit action is required. This rule will run against the final commit message.",
+            VcaRuleFindingKind.AcknowledgmentRequired =>
+                "Fix the issue, or include the shown acknowledgment token and a meaningful reason in the final commit message.",
+            VcaRuleFindingKind.Blocked =>
+                "Fix the issue, stage the correction, and run validation again. STOP rules cannot be acknowledged or bypassed.",
+            _ => "Review this finding before committing."
+        };
     }
 
     private static async Task<GitCommandResult> RunGitAsync(
@@ -962,8 +1048,21 @@ internal sealed record VcaToolValidationReport(
     string Output,
     bool HasError,
     bool HasStopViolation,
-    IReadOnlyList<string> RequiredAcknowledgments)
+    IReadOnlyList<string> RequiredAcknowledgments,
+    int StagedFileCount,
+    int ApplicableRuleCount,
+    IReadOnlyList<VcaRuleFinding> Findings)
 {
-    public static VcaToolValidationReport Pass(string output) =>
-        new(output, HasError: false, HasStopViolation: false, RequiredAcknowledgments: []);
+    public static VcaToolValidationReport Pass(
+        string output,
+        int stagedFileCount = 0,
+        int applicableRuleCount = 0) =>
+        new(
+            output,
+            HasError: false,
+            HasStopViolation: false,
+            RequiredAcknowledgments: [],
+            StagedFileCount: stagedFileCount,
+            ApplicableRuleCount: applicableRuleCount,
+            Findings: []);
 }
