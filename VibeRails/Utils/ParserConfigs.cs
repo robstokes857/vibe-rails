@@ -18,6 +18,9 @@ namespace VibeRails.Utils
         public bool OpenBrowser { get; set; }
         public bool ShutdownOnBrowserClose { get; set; }
 
+        // Focused Git Guard preflight dashboard (vb --git-guard)
+        public bool IsGitGuardMode { get; set; }
+
         // Top-level
         public bool Help { get; set; }
         public bool Version { get; set; }

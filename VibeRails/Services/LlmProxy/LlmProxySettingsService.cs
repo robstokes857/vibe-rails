@@ -14,16 +14,33 @@ public sealed class LlmProxySettingsService : ILlmProxySettingsService
     public LlmProxySettings GetSettings()
     {
         var settings = Config.LoadFresh();
+        var level = TokenSaverPresets.Normalize(settings.TokenSaverLevel);
+
+        // The level preset resolves everything; "custom" is the escape hatch that honors the
+        // legacy per-transform bools (no lossy stage, default allowlist), and "off" keeps the
+        // relay up but disables the saver.
+        var (flags, condense, claudeAllowlist) = level == TokenSaverLevel.Custom
+            ? (new MinifyFlags(
+                    CollapseCrRedraws: settings.TokenSaverCollapseCrRedraws,
+                    StripAnsiStyling: settings.TokenSaverStripAnsi,
+                    StripTrailingWhitespace: settings.TokenSaverStripTrailingWhitespace,
+                    TrimBlankLineEdges: settings.TokenSaverTrimBlankLines,
+                    CollapseBlankLineRuns: settings.TokenSaverCollapseBlankRuns),
+                default,
+                TokenSaverPresets.ShellTools)
+            : TokenSaverPresets.For(level);
+
         return new LlmProxySettings(
-            settings.CodexLlmProxyEnabled,
-            CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
-            settings.ClaudeLlmProxyEnabled,
-            settings.ClaudeTokenSaverEnabled,
-            new MinifyFlags(
-                CollapseCrRedraws: settings.TokenSaverCollapseCrRedraws,
-                StripAnsiStyling: settings.TokenSaverStripAnsi,
-                StripTrailingWhitespace: settings.TokenSaverStripTrailingWhitespace,
-                TrimBlankLineEdges: settings.TokenSaverTrimBlankLines,
-                CollapseBlankLineRuns: settings.TokenSaverCollapseBlankRuns));
+            CodexLlmProxyEnabled: settings.CodexLlmProxyEnabled,
+            CodexLlmProxyMode: CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
+            ClaudeLlmProxyEnabled: settings.ClaudeLlmProxyEnabled,
+            ClaudeTokenSaverEnabled: settings.ClaudeTokenSaverEnabled && level != TokenSaverLevel.Off,
+            ClaudeTokenSaverFlags: flags,
+            ClaudeTokenSaverCondense: condense,
+            ClaudeTokenSaverAllowlist: claudeAllowlist,
+            CodexTokenSaverEnabled: settings.CodexLlmProxyEnabled && level != TokenSaverLevel.Off,
+            CodexTokenSaverFlags: flags,
+            CodexTokenSaverCondense: condense,
+            CodexTokenSaverAllowlist: CodexResponsesRewriter.DefaultToolAllowlist);
     }
 }

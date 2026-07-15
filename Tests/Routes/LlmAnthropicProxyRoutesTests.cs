@@ -72,7 +72,12 @@ public class LlmAnthropicProxyRoutesTests
         Assert.Equal(
             record.BytesBefore - record.BytesAfter,
             ping.Payload.GetProperty("bytesSaved").GetInt64());
-        Assert.True(ping.Payload.GetProperty("tokensSavedTotal").GetInt64() >= 0);
+        // The stub reports every window as the sum of its records, so all three tallies ride the
+        // ping with the same value: (before - after) / 4.
+        var expectedTokens = (record.BytesBefore - record.BytesAfter) / 4;
+        Assert.Equal(expectedTokens, ping.Payload.GetProperty("tokensSavedTotal").GetInt64());
+        Assert.Equal(expectedTokens, ping.Payload.GetProperty("tokensSavedSession").GetInt64());
+        Assert.Equal(expectedTokens, ping.Payload.GetProperty("tokensSavedMonth").GetInt64());
     }
 
     [Fact]
@@ -136,6 +141,33 @@ public class LlmAnthropicProxyRoutesTests
             || bytesSaved.ValueKind == System.Text.Json.JsonValueKind.Null);
     }
 
+    [Fact]
+    public async Task HighTier_CondensesRepeatedPowerShellOutput_EndToEnd()
+    {
+        // 40 identical lines from a PowerShell tab. Under the High preset the whole run must
+        // collapse to one marker-suffixed line on the wire — route gate → transform → rewriter →
+        // condenser, all through real Kestrel — and the savings record must land.
+        var spam = string.Join("\\n", Enumerable.Repeat("warning: retrying operation", 40));
+        var body = $$$"""
+            {"model":"claude-sonnet-5","messages":[
+              {"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"PowerShell","input":{"command":"./build.ps1"}}]},
+              {"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"{{{spam}}}"}]}
+            ]}
+            """;
+        var (flags, condense, allowlist) = TokenSaverPresets.For(TokenSaverLevel.High);
+
+        var result = await SendAsync(
+            "/llm/anthropic/v1/messages", body, tokenSaverEnabled: true,
+            TestContext.Current.CancellationToken, flags, condense, allowlist);
+
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        var upstreamBody = Encoding.UTF8.GetString(result.UpstreamBody);
+        Assert.Contains("warning: retrying operation [x40]", upstreamBody, StringComparison.Ordinal);
+
+        var record = Assert.Single(result.Savings.Records);
+        Assert.True(record.BytesBefore > record.BytesAfter);
+    }
+
     private sealed record ProxyResult(
         HttpStatusCode StatusCode,
         byte[] UpstreamBody,
@@ -144,7 +176,9 @@ public class LlmAnthropicProxyRoutesTests
         List<AppEvent> Events);
 
     private static async Task<ProxyResult> SendAsync(
-        string path, string body, bool tokenSaverEnabled, CancellationToken cancellationToken)
+        string path, string body, bool tokenSaverEnabled, CancellationToken cancellationToken,
+        MinifyFlags? flags = null, CondenseOptions condense = default,
+        IReadOnlyList<string>? allowlist = null)
     {
         // Port 0 = kernel-assigned: parallel Kestrel-hosted test classes can race a find-then-rebind
         // port picker, so bind ephemeral and read the real address after start.
@@ -172,7 +206,9 @@ public class LlmAnthropicProxyRoutesTests
                 CodexLlmProxyMode: CodexLlmProxySettings.ModeSubscription,
                 ClaudeLlmProxyEnabled: true,
                 ClaudeTokenSaverEnabled: tokenSaverEnabled,
-                ClaudeTokenSaverFlags: MinifyFlags.Default)));
+                ClaudeTokenSaverFlags: flags ?? MinifyFlags.Default,
+                ClaudeTokenSaverCondense: condense,
+                ClaudeTokenSaverAllowlist: allowlist)));
 
         await using var app = builder.Build();
         LlmAnthropicProxyRoutes.Map(app);
@@ -223,7 +259,8 @@ public class LlmAnthropicProxyRoutesTests
                 after += a;
             }
 
-            return new VibeRails.DB.TokenSavingsTotals(before, after);
+            // Every window reports the same sums so ping assertions can cover all three fields.
+            return new VibeRails.DB.TokenSavingsTotals(before, after, before, after, before, after);
         }
     }
 

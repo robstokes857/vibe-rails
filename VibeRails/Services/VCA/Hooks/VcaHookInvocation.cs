@@ -14,13 +14,15 @@ public sealed record VcaHookInvocation(
     string? WorkingDirectory,
     bool DemoUi,
     TimeSpan DemoDuration,
-    bool PromptForAcknowledgment);
+    bool PromptForAcknowledgment,
+    bool ShowConsoleWindow = false);
 
 public sealed record VcaHookDisplayInfo(
     string Title,
     string Subtitle,
     string Reason,
     IReadOnlyList<string> Files,
+    string? RepositoryPath = null,
     TimeSpan? Timeout = null);
 
 public sealed record VcaHookValidationSummary(

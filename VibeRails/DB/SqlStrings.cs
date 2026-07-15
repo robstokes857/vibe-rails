@@ -273,6 +273,13 @@ namespace VibeRails.DB
             FROM TokenSavings
             """;
 
+        // $month is a "yyyy-MM" prefix of the Day column ("yyyy-MM-dd").
+        public const string SelectTokenSavingsMonthTotals = """
+            SELECT COALESCE(SUM(BytesBefore), 0), COALESCE(SUM(BytesAfter), 0)
+            FROM TokenSavings
+            WHERE substr(Day, 1, 7) = $month
+            """;
+
         public static readonly string[] InitStatements =
         [
             CreateEnvironmentsTable,

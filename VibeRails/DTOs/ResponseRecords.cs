@@ -233,15 +233,57 @@ namespace VibeRails.DTOs
     );
 
     // Hook Management DTOs
+    public record HookFileStatusResponse(
+        string Name,
+        string State,
+        bool Installed,
+        bool Current,
+        string Message
+    );
+
     public record HookStatusResponse(
         bool InGitRepo,
         bool IsInstalled,
-        string? Message
+        bool NeedsRepair,
+        string State,
+        string? Message,
+        string? RepositoryPath,
+        string? HooksPath,
+        bool AutoInstallEnabled,
+        HookFileStatusResponse? PreCommit,
+        HookFileStatusResponse? CommitMessage
     );
 
     public record HookActionResponse(
         bool Success,
         string Message
+    );
+
+    public record HookPreviewResponse(
+        bool Success,
+        int ExitCode,
+        string Status,
+        string Title,
+        string Output,
+        DateTime StartedUtc,
+        long DurationMs
+    );
+
+    public record GitPreflightEventResponse(
+        string RunId,
+        long Sequence,
+        DateTimeOffset TimestampUtc,
+        string Type,
+        string? StepId,
+        string Status,
+        string Message,
+        string? Output,
+        Dictionary<string, string>? Details,
+        long? DurationMs,
+        bool Blocking,
+        bool? CommitAllowed,
+        int? StepNumber,
+        int? StepCount
     );
 
     // Validation DTOs
@@ -418,6 +460,9 @@ namespace VibeRails.DTOs
         bool? CodexLlmProxyEnabled,
         string? CodexLlmProxyMode,
         bool? ClaudeLlmProxyEnabled,
+        // off/safest/safe/medium/high (or "custom" when the settings.json escape hatch is in
+        // use) — see TokenSaverPresets. Nullable: same stale-client guard as the proxy fields.
+        string? TokenSaverLevel,
         // Read-only: the live machine name, used by the client as the placeholder
         // and as the push-notification fallback when ComputerName is blank. Never
         // persisted (see AppSettingsRoutes), so renaming the machine reflects live.
@@ -438,23 +483,30 @@ namespace VibeRails.DTOs
     //   Status: outcome, e.g. an HTTP status code.
     //   BytesSaved: this request's minification win, when it was rewritten.
     //   TokensSavedTotal: all-time running tally (~4 bytes/token estimate) for the light's label.
+    //   TokensSavedSession / TokensSavedMonth: the same estimate scoped to this server process
+    //   and to the current UTC month, for the light's popover breakdown.
     public record ProxyActivityPingPayload(
         string Source,
         string? Label,
         string? Target,
         string? Status,
         long? BytesSaved = null,
-        long? TokensSavedTotal = null
+        long? TokensSavedTotal = null,
+        long? TokensSavedSession = null,
+        long? TokensSavedMonth = null
     );
 
     // Served by GET /api/v1/token-savings for the UI's initial tally (live updates ride the
-    // proxy_activity pings). Bytes are the measured truth; TokensSaved is the ~4 bytes/token
-    // display estimate, derived server-side so the heuristic lives in one place.
+    // proxy_activity pings). Bytes are the measured truth; the token fields are the ~4 bytes/token
+    // display estimate — all-time, this server process, and the current UTC month — derived
+    // server-side so the heuristic lives in one place.
     public record TokenSavingsDto(
         long BytesBefore,
         long BytesAfter,
         long BytesSaved,
-        long TokensSaved
+        long TokensSaved,
+        long TokensSavedSession,
+        long TokensSavedMonth
     );
 
     // Remote PIN DTOs
@@ -777,8 +829,11 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateAgentNameRequest))]
     [JsonSerializable(typeof(UpdateAgentNameResponse))]
     // Hook Management DTOs
+    [JsonSerializable(typeof(HookFileStatusResponse))]
     [JsonSerializable(typeof(HookStatusResponse))]
     [JsonSerializable(typeof(HookActionResponse))]
+    [JsonSerializable(typeof(HookPreviewResponse))]
+    [JsonSerializable(typeof(GitPreflightEventResponse))]
     [JsonSerializable(typeof(ValidationResultResponse))]
     [JsonSerializable(typeof(List<ValidationResultResponse>))]
     [JsonSerializable(typeof(ValidationResponse))]

@@ -4,18 +4,6 @@ using System.Text.Json;
 
 namespace TokenSaver.Minify;
 
-/// <summary>One request body's rewrite outcome. Byte counts are wire bytes (the honest savings).</summary>
-public sealed record AnthropicRewriteResult(
-    bool Rewritten,
-    int BytesBefore,
-    int BytesAfter,
-    int ToolResultsMinified,
-    int ToolResultsSeen,
-    MinifyStats Transforms)
-{
-    public int BytesSaved => BytesBefore - BytesAfter;
-}
-
 /// <summary>
 /// Rewrites an Anthropic <c>/v1/messages</c> request body, minifying ONLY the tool_result strings
 /// that came from an allowlisted shell tool (token_saving_plan.md §2 "What we touch — and only
@@ -33,16 +21,19 @@ public sealed record AnthropicRewriteResult(
 /// system prompt, tool_use inputs — passes through untouched.
 ///
 /// Fail-open: any <see cref="JsonException"/> returns "not rewritten" and the caller forwards the
-/// original bytes. Determinism/idempotency ride on <see cref="OutputMinifier"/>'s guarantees: the
-/// CLI re-serializes its own history each turn (it never sees our rewrite), and this function is
-/// pure, so upstream sees byte-identical prefixes every turn — prompt caching stays intact.
+/// original bytes. Determinism/idempotency ride on <see cref="OutputMinifier"/>'s and
+/// <see cref="OutputCondenser"/>'s guarantees (each qualifying string runs
+/// <c>condense(minify(text))</c>): the CLI re-serializes its own history each turn (it never sees
+/// our rewrite), and this function is pure, so upstream sees byte-identical prefixes every turn —
+/// prompt caching stays intact.
 /// </summary>
 public static class AnthropicMessagesRewriter
 {
     /// <summary>
-    /// Claude Code's shell tool. Deliberately excludes <c>BashOutput</c> (background-shell reads)
-    /// in v1. A tool rename upstream makes savings drop to zero (visible in the seen-vs-minified
-    /// counters), never corrupts anything — unknown names pass through.
+    /// The original v1 allowlist, kept as the fallback when no tier resolves one (see
+    /// <see cref="TokenSaverPresets"/> for the per-level lists). A tool rename upstream makes
+    /// savings drop to zero (visible in the seen-vs-minified counters), never corrupts anything —
+    /// unknown names pass through.
     /// </summary>
     public static readonly IReadOnlyList<string> DefaultToolAllowlist = ["Bash"];
 
@@ -55,16 +46,20 @@ public static class AnthropicMessagesRewriter
         SkipValidation = true
     };
 
-    public static AnthropicRewriteResult Rewrite(
+    public static ToolOutputRewriteResult Rewrite(
         ReadOnlySpan<byte> utf8Body,
         MinifyFlags flags,
+        CondenseOptions condense,
         IReadOnlyCollection<string> toolAllowlist,
         IBufferWriter<byte> output)
     {
         var stats = new MinifyStats();
-        var unchanged = new AnthropicRewriteResult(
+        var condenseStats = new CondenseStats();
+        var unchanged = new ToolOutputRewriteResult(
             false, utf8Body.Length, utf8Body.Length, 0, 0, stats);
-        if (utf8Body.IsEmpty || flags.IsNoOp || toolAllowlist.Count == 0)
+        // Both stages no-op (or nothing allowlisted) means a guaranteed passthrough — checking
+        // only the minify flags here would leave a condense-only configuration silently dead.
+        if (utf8Body.IsEmpty || (flags.IsNoOp && condense.IsNoOp) || toolAllowlist.Count == 0)
             return unchanged;
 
         List<ToolResultEntry> toolResults;
@@ -102,9 +97,10 @@ public static class AnthropicMessagesRewriter
             return unchanged with { ToolResultsSeen = seen };
 
         // A JSON string token's UTF-16 char count never exceeds its UTF-8 byte count (escapes only
-        // shrink), so one rented pair sized to the largest token serves every splice.
+        // shrink), so one rented trio sized to the largest token serves every splice.
         var unescaped = ArrayPool<char>.Shared.Rent(maxTokenLength);
         var minified = ArrayPool<char>.Shared.Rent(maxTokenLength);
+        var condensed = ArrayPool<char>.Shared.Rent(maxTokenLength);
         // Changed strings are re-emitted into a scratch buffer first so the result can be size-
         // checked against the original token: the encoder escapes non-BMP chars as \uXXXX\uXXXX
         // pairs (a raw 4-byte emoji becomes 12 bytes), so a "minified" emoji-heavy string can come
@@ -133,25 +129,45 @@ public static class AnthropicMessagesRewriter
                     // Stats are merged only for accepted rewrites so the diagnostic counters can't
                     // drift when a candidate is discarded.
                     var candidateStats = stats;
+                    var candidateCondense = condenseStats;
                     try
                     {
                         var tokenReader = new Utf8JsonReader(token);
                         tokenReader.Read();
                         var charLength = tokenReader.CopyString(unescaped);
 
+                        // The two-stage pipeline: lossless minify, then (when enabled) the lossy
+                        // condense pass over whatever survived. Either stage alone marks the
+                        // string changed.
+                        var current = (ReadOnlySpan<char>)unescaped.AsSpan(0, charLength);
+                        var changed = false;
                         if (OutputMinifier.TryMinify(
-                                unescaped.AsSpan(0, charLength), flags, minified, out var written,
-                                ref candidateStats))
+                                current, flags, minified, out var written, ref candidateStats))
+                        {
+                            current = minified.AsSpan(0, written);
+                            changed = true;
+                        }
+
+                        if (!condense.IsNoOp && OutputCondenser.TryCondense(
+                                current, condense, condensed, out var condensedWritten,
+                                ref candidateCondense))
+                        {
+                            current = condensed.AsSpan(0, condensedWritten);
+                            changed = true;
+                        }
+
+                        if (changed)
                         {
                             scratch.Clear();
                             writer.Reset(scratch);
-                            writer.WriteStringValue(minified.AsSpan(0, written));
+                            writer.WriteStringValue(current);
                             writer.Flush();
                             if (scratch.WrittenCount < token.Length)
                             {
                                 output.Write(scratch.WrittenMemory.Span);
                                 bytesWritten += scratch.WrittenCount;
                                 stats = candidateStats;
+                                condenseStats = candidateCondense;
                                 accepted = true;
                                 entryChanged = true;
                                 anyChanged = true;
@@ -190,8 +206,8 @@ public static class AnthropicMessagesRewriter
             output.Write(tail);
             bytesWritten += tail.Length;
 
-            return new AnthropicRewriteResult(
-                true, utf8Body.Length, bytesWritten, minifiedResults, seen, stats);
+            return new ToolOutputRewriteResult(
+                true, utf8Body.Length, bytesWritten, minifiedResults, seen, stats, condenseStats);
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException)
         {
@@ -204,6 +220,7 @@ public static class AnthropicMessagesRewriter
         {
             ArrayPool<char>.Shared.Return(unescaped);
             ArrayPool<char>.Shared.Return(minified);
+            ArrayPool<char>.Shared.Return(condensed);
         }
     }
 

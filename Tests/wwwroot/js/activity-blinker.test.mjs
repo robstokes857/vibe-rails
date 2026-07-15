@@ -205,7 +205,7 @@ test('ActivityBlinker pulses and groups Claude and Codex proxy reports', () => {
     assert.match(text, /1 ·/);
 });
 
-test('ActivityBlinker exposes an honest savings placeholder and a future metric seam', () => {
+test('ActivityBlinker shows an honest savings placeholder and a session/month/all-time breakdown', () => {
     const mount = new FakeElement('div');
     const blinker = new ActivityBlinker({ mount, title: 'Token compression', enabled: true });
     const host = mount.querySelector('.vb-activity-blinker');
@@ -216,15 +216,32 @@ test('ActivityBlinker exposes an honest savings placeholder and a future metric 
     assert.equal(metric.classList.contains('is-placeholder'), true);
     assert.match(trigger.getAttribute('aria-label'), /token savings not yet measured/i);
 
-    blinker.setTokensSaved(12400);
+    blinker.setTokensSaved({ session: 12400, month: 90200, allTime: 1500000 });
+    // The compact trigger shows this session's tally; the popover carries the full breakdown.
     assert.match(renderedText(metric), /12\.4K tokens saved/);
     assert.equal(metric.classList.contains('is-placeholder'), false);
-    assert.match(trigger.getAttribute('aria-label'), /12,400 tokens saved/i);
+    assert.match(trigger.getAttribute('aria-label'), /12,400 this session/i);
+    assert.match(trigger.getAttribute('aria-label'), /90,200 this month/i);
+    assert.match(trigger.getAttribute('aria-label'), /1,500,000 all time/i);
 
     host.dispatchEvent({ type: 'mouseenter' });
     const popoverText = renderedText(host.querySelector('.vb-activity-blinker-popover'));
+    assert.match(popoverText, /This session/);
     assert.match(popoverText, /12\.4K/);
+    assert.match(popoverText, /This month/);
+    assert.match(popoverText, /90\.2K/);
+    assert.match(popoverText, /All time/);
+    assert.match(popoverText, /1\.5M/);
     assert.match(popoverText, /Across proxied traffic/);
+
+    // A bare number (legacy caller) is treated as all time and still fills the trigger.
+    blinker.setTokensSaved(800);
+    assert.match(renderedText(metric), /800 tokens saved/);
+    host.dispatchEvent({ type: 'mouseenter' });
+    assert.match(
+        renderedText(host.querySelector('.vb-activity-blinker-popover')),
+        /This session\s+—/
+    );
 
     blinker.setTokensSaved(null);
     assert.match(renderedText(metric), /— tokens saved/);

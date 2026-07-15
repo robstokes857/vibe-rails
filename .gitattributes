@@ -14,6 +14,12 @@ session_*.bin binary
 session_*.fixture.bin binary
 **/Fixtures/session_* binary
 
+# Token-saver minifier fixtures are byte-exact: inputs carry deliberate CRLF /
+# bare-CR terminal output and expected files pin the minifier's exact bytes.
+# text=auto corrupted both (CRLF stripped at commit, re-added at checkout),
+# which broke every golden test on a fresh Windows clone.
+Tests/TokenSaver/Fixtures/** -text
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

@@ -28,7 +28,6 @@ namespace VibeRails.Services
 
     public class RuleValidationService : IRuleValidationService
     {
-        private static readonly bool VcaValidationTemporarilyDisabled = true;
         private readonly IRulesService _rulesService;
         private readonly IAgentFileService _agentFileService;
 
@@ -44,11 +43,6 @@ namespace VibeRails.Services
             string rootPath,
             CancellationToken cancellationToken)
         {
-            if (VcaValidationTemporarilyDisabled)
-            {
-                return new ValidationResultSet(new List<ValidationResult>());
-            }
-
             var results = new List<ValidationResult>();
 
             foreach (var rule in rules)
@@ -91,11 +85,6 @@ namespace VibeRails.Services
             string rootPath,
             CancellationToken cancellationToken)
         {
-            if (VcaValidationTemporarilyDisabled)
-            {
-                return new ValidationResultSet(new List<ValidationResult>());
-            }
-
             var results = new List<ValidationResult>();
 
             foreach (var ruleWithSource in rulesWithSource)
@@ -398,11 +387,14 @@ namespace VibeRails.Services
                 }
             }
 
+            var passed = missingTests.Count == 0;
             return new ValidationResult(
                 rule.RuleText,
                 rule.Enforcement,
-                true,
-                $"Test coverage check: {codeFiles.Count} code files, {testFiles.Count} test files in commit",
+                passed,
+                passed
+                    ? $"Test coverage check: {codeFiles.Count} code files, {testFiles.Count} test files in commit"
+                    : $"Test coverage minimum {minimumPercent}% not satisfied: {missingTests.Count} code file(s) have no matching test in this commit",
                 missingTests.Count > 0 ? missingTests : null);
         }
 

@@ -37,6 +37,7 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
         var demoUi = false;
         var demoDuration = DefaultDemoDuration;
         var promptForAcknowledgment = false;
+        var showConsoleWindow = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -108,6 +109,13 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
                 continue;
             }
 
+            if (arg.Equals("--console-window", StringComparison.OrdinalIgnoreCase) ||
+                arg.Equals("--show-console", StringComparison.OrdinalIgnoreCase))
+            {
+                showConsoleWindow = true;
+                continue;
+            }
+
             if (arg.Equals("--demo-duration-ms", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 if (int.TryParse(args[++i], out var ms) && ms > 0)
@@ -122,7 +130,14 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
             demoUi = true;
         }
 
-        return new VcaHookInvocation(kind, commitMessagePath, workingDirectory, demoUi, demoDuration, promptForAcknowledgment);
+        return new VcaHookInvocation(
+            kind,
+            commitMessagePath,
+            workingDirectory,
+            demoUi,
+            demoDuration,
+            promptForAcknowledgment,
+            showConsoleWindow);
     }
 
     private static VcaHookKind ParseKind(string value)

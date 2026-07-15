@@ -19,7 +19,9 @@ public static class TokenSavingsRoutes
                 totals.BytesBefore,
                 totals.BytesAfter,
                 totals.BytesSaved,
-                totals.TokensSaved));
+                totals.TokensSaved,
+                totals.SessionTokensSaved,
+                totals.MonthTokensSaved));
         }).WithName("GetTokenSavings");
     }
 }

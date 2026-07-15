@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using VibeRails.Services.GitPreflight;
 
 namespace VibeRails.Services.VCA.Hooks;
 
@@ -17,19 +18,46 @@ public static class VcaHookProcessHost
         TextReader? input = null,
         CancellationToken cancellationToken = default)
     {
+        var usesDefaultOutput = output == null;
         output ??= Console.Out;
         error ??= Console.Error;
         input ??= Console.In;
 
+        var invocation = new VcaHookCommandParser().Parse(args);
+        using var consoleWindow = VcaHookConsoleWindow.TryOpen(invocation, output, error);
+        if (consoleWindow != null)
+        {
+            output = consoleWindow.Output;
+            error = consoleWindow.Error;
+            input = consoleWindow.Input;
+        }
+        else if (invocation.ShowConsoleWindow)
+        {
+            // The request came from a non-terminal Git launch, but opening a console
+            // was intentionally skipped (CI/service) or failed. Never wait on stdin.
+            invocation = invocation with { PromptForAcknowledgment = false };
+        }
+
         var services = new ServiceCollection();
-        ConfigureServices(services, output, error, input, enableSpinner: !Console.IsOutputRedirected);
+        ConfigureServices(
+            services,
+            output,
+            error,
+            input,
+            enableSpinner: consoleWindow != null || (usesDefaultOutput && !Console.IsOutputRedirected));
 
         await using var provider = services.BuildServiceProvider();
-        var parser = provider.GetRequiredService<IVcaHookCommandParser>();
         var runner = provider.GetRequiredService<IVcaHookRunner>();
 
-        var invocation = parser.Parse(args);
-        return await runner.RunAsync(invocation, cancellationToken);
+        var exitCode = await runner.RunAsync(invocation, cancellationToken);
+        if (consoleWindow != null)
+        {
+            await consoleWindow.CompleteAsync(
+                exitCode,
+                pauseOnFailure: invocation.Kind == VcaHookKind.PreCommit);
+        }
+
+        return exitCode;
     }
 
     internal static void ConfigureServices(
@@ -41,9 +69,8 @@ public static class VcaHookProcessHost
     {
         services.AddSingleton<IVcaHookCommandParser, VcaHookCommandParser>();
         services.AddSingleton<IVcaHookRunner, VcaHookRunner>();
-        services.AddSingleton<IVcaHookValidationService, VcaRulesHookValidationService>();
         services.AddSingleton<IVcaHookValidationAnalyzer, VcaHookValidationAnalyzer>();
-        services.AddSingleton<IVcaHookFileProvider, VcaHookFileProvider>();
+        services.AddGitPreflight();
         services.AddSingleton<IVcaHookPresenter>(_ =>
             new VcaConsoleHookPresenter(new VcaHookConsoleOptions(output, error, input, enableSpinner)));
     }

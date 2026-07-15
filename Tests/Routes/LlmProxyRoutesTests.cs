@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using TokenSaver;
+using TokenSaver.Minify;
 using VibeRails.Auth;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
@@ -141,6 +142,39 @@ public class LlmProxyRoutesTests
         Assert.Empty(result.Events); // the ping only fires for requests that reached the upstream
     }
 
+    [Fact]
+    public async Task OpenAiProxy_TokenSaverRewritesCodexShellOutputBeforeForwarding()
+    {
+        const string body = """
+            {"model":"gpt-5.5-codex","input":[
+              {"type":"function_call","name":"shell_command","call_id":"c1","arguments":"{}"},
+              {"type":"function_call_output","call_id":"c1","output":"\u001b[31mred\u001b[0m  \r\n"}
+            ]}
+            """;
+
+        var result = await SendThroughProxyAsync(
+            enabled: true,
+            authenticated: true,
+            TestContext.Current.CancellationToken,
+            requestBody: body,
+            tokenSaverEnabled: true,
+            tokenSaverFlags: MinifyFlags.Default);
+
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        using var upstream = System.Text.Json.JsonDocument.Parse(result.UpstreamBody);
+        Assert.Equal(
+            "red",
+            upstream.RootElement.GetProperty("input")[1].GetProperty("output").GetString());
+
+        var record = Assert.Single(result.SavingsRecords);
+        Assert.Equal("openai", record.Provider);
+        Assert.True(record.BytesBefore > record.BytesAfter);
+
+        var ping = Assert.Single(result.Events);
+        Assert.Equal(record.BytesBefore - record.BytesAfter,
+            ping.Payload.GetProperty("bytesSaved").GetInt64());
+    }
+
     private static HttpRequest CreateRequest(string path, string query)
     {
         var context = new DefaultHttpContext();
@@ -154,7 +188,11 @@ public class LlmProxyRoutesTests
         bool authenticated,
         CancellationToken cancellationToken,
         bool faultResponseBody = false,
-        bool failSendWithTransportError = false)
+        bool failSendWithTransportError = false,
+        string requestBody = "{\"input\":\"body-secret\"}",
+        bool tokenSaverEnabled = false,
+        MinifyFlags tokenSaverFlags = default,
+        CondenseOptions tokenSaverCondense = default)
     {
         // Port 0 = kernel-assigned: two Kestrel-hosted test classes running in parallel can race a
         // find-then-rebind port picker, so bind ephemeral and read the real address after start.
@@ -176,14 +214,19 @@ public class LlmProxyRoutesTests
         // the mocked auth service and real event bus so the tests also cover the adapter path
         // (including the payload sanitization asserted below).
         builder.Services.AddSingleton<ILlmProxyAuthGate>(new LlmProxyAuthGateAdapter(authService.Object));
+        var savingsStore = new StubTokenSavingsStore();
         builder.Services.AddSingleton<ILlmProxyEventSink>(
-            new LlmProxyEventSinkAdapter(eventBus, new StubTokenSavingsStore()));
+            new LlmProxyEventSinkAdapter(eventBus, savingsStore));
         builder.Services.AddSingleton<IHttpClientFactory>(clientFactory);
         builder.Services.AddSingleton<ILlmProxySettingsService>(
             new StubProxySettingsService(new LlmProxySettings(
                 CodexLlmProxyEnabled: enabled,
                 CodexLlmProxyMode: CodexLlmProxySettings.ModeApi,
-                ClaudeLlmProxyEnabled: false)));
+                ClaudeLlmProxyEnabled: false,
+                CodexTokenSaverEnabled: tokenSaverEnabled,
+                CodexTokenSaverFlags: tokenSaverFlags,
+                CodexTokenSaverCondense: tokenSaverCondense,
+                CodexTokenSaverAllowlist: CodexResponsesRewriter.DefaultToolAllowlist)));
 
         await using var app = builder.Build();
         LlmProxyRoutes.Map(app);
@@ -198,10 +241,7 @@ public class LlmProxyRoutesTests
             request.Headers.TryAddWithoutValidation(LlmProxyCodexConfig.TabHeaderName, TabToken);
             request.Headers.TryAddWithoutValidation("Cookie", "session=cookie-secret");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "upstream-auth-secret");
-            request.Content = new StringContent(
-                "{\"input\":\"body-secret\"}",
-                Encoding.UTF8,
-                "application/json");
+            request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
 
             using var response = await SharedClient.SendAsync(request, cancellationToken);
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -211,6 +251,8 @@ public class LlmProxyRoutesTests
                 responseBody,
                 upstreamHandler.CallCount,
                 upstreamHandler.RequestUri,
+                upstreamHandler.RequestBody,
+                [.. savingsStore.Records],
                 [.. events]);
         }
         finally
@@ -224,6 +266,8 @@ public class LlmProxyRoutesTests
         string ResponseBody,
         int UpstreamCallCount,
         Uri? UpstreamUri,
+        byte[] UpstreamBody,
+        List<(string Provider, int BytesBefore, int BytesAfter)> SavingsRecords,
         List<AppEvent> Events);
 
     private sealed class StubProxySettingsService(LlmProxySettings settings)
@@ -250,7 +294,8 @@ public class LlmProxyRoutesTests
                 after += a;
             }
 
-            return new VibeRails.DB.TokenSavingsTotals(before, after);
+            // Every window reports the same sums; these tests only assert the totals reach pings.
+            return new VibeRails.DB.TokenSavingsTotals(before, after, before, after, before, after);
         }
     }
 
@@ -274,13 +319,16 @@ public class LlmProxyRoutesTests
     {
         public int CallCount { get; private set; }
         public Uri? RequestUri { get; private set; }
+        public byte[] RequestBody { get; private set; } = [];
 
-        protected override Task<HttpResponseMessage> SendAsync(
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             CallCount += 1;
             RequestUri = request.RequestUri;
+            if (request.Content is not null)
+                RequestBody = await request.Content.ReadAsByteArrayAsync(cancellationToken);
 
             // The shape SocketsHttpHandler throws for a post-connect transport failure (reset
             // while uploading the body / awaiting headers): HttpRequestException wrapping IO.
@@ -288,12 +336,12 @@ public class LlmProxyRoutesTests
                 throw new HttpRequestException(
                     "simulated upstream reset", new IOException("connection reset by peer"));
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = faultResponseBody
                     ? new ThrowingContent()
                     : new StringContent("relay-ok")
-            });
+            };
         }
     }
 

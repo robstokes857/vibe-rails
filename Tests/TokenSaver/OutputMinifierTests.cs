@@ -407,7 +407,8 @@ public class OutputMinifierTests
     // determinism, and never-grows for every combo; plus a conservation check.
     // ---------------------------------------------------------------------
 
-    private static readonly string[] AdversarialInputs =
+    // Shared with PipelineGoldenFixtureTests' cross-stage idempotency property.
+    internal static readonly string[] AdversarialInputs =
     [
         "",
         "a",

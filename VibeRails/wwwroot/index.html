@@ -22,6 +22,10 @@
     <script>
         window.__viberails_cache_bust__ = Date.now().toString(36);
 
+        if (window.location.pathname.replace(/\/+$/, '') === '/git-guard') {
+            document.documentElement.classList.add('git-guard-focus-active');
+        }
+
         const _assetBase = (window.__viberails_VSCODE__ && window.__viberails_ASSETS_BASE__)
             ? window.__viberails_ASSETS_BASE__.replace(/\/$/, '') + '/'
             : document.baseURI;
@@ -460,22 +464,19 @@
                 <div class="col-12">
                     <div class="row g-3">
                         <div class="col-md-4">
-                            <div class="card menu-card h-100" data-action="navigate" data-view="check-violations">
-                                <div class="card-body d-flex align-items-center gap-3 p-3">
-                                    <div class="bg-success bg-opacity-10 text-success rounded-circle d-flex align-items-center justify-content-center"
+                            <button class="card menu-card git-guard-menu-button h-100 w-100" type="button"
+                                data-action="navigate" data-view="check-violations">
+                                <span class="card-body d-flex align-items-center gap-3 p-3">
+                                    <span class="bg-success bg-opacity-10 text-success rounded-circle d-flex align-items-center justify-content-center"
                                         style="width: 48px; height: 48px; flex-shrink: 0;">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
-                                            fill="currentColor" viewBox="0 0 16 16">
-                                            <path
-                                                d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.757.757 0 0 1 0-1.06.733.733 0 0 1 1.047 0l2.352 2.525 5.49-5.59z" />
-                                        </svg>
-                                    </div>
-                                    <div>
-                                        <h6 class="mb-0 text-white fw-bold">Check Violations</h6>
-                                        <p class="text-muted x-small mb-0 opacity-75">Run VCA validation</p>
-                                    </div>
-                                </div>
-                            </div>
+                                        <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+                                    </span>
+                                    <span>
+                                        <span class="d-block mb-0 text-white fw-bold">VCA Git Guard</span>
+                                        <span class="d-block text-muted x-small mb-0 opacity-75">Manage hooks and run checks</span>
+                                    </span>
+                                </span>
+                            </button>
                         </div>
 
                         <div class="col-md-4">
@@ -768,95 +769,280 @@
     </template>
 
     <template id="check-violations-template">
-        <div class="view" data-view="check-violations">
-            <div class="row">
-                <div class="col-12">
-                    <button class="btn btn-outline-primary mb-4 d-flex align-items-center gap-2" type="button"
-                        data-action="go-back">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
-                            viewBox="0 0 16 16">
-                            <path fill-rule="evenodd"
-                                d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8" />
-                        </svg>
-                        Back
+        <div class="view git-guard-view" data-view="check-violations">
+            <button class="btn btn-outline-primary mb-4 d-inline-flex align-items-center gap-2" type="button"
+                data-action="go-back" data-git-guard-dashboard-only>
+                <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+                <span>Back</span>
+            </button>
+
+            <div class="git-guard-focus-bar" data-git-guard-focused-only>
+                <div class="git-guard-focus-brand">
+                    <img src="assets/img/logo.png" alt="" width="38" height="38">
+                    <div>
+                        <span>VibeRails</span>
+                        <strong>Git Guard</strong>
+                    </div>
+                </div>
+                <div class="git-guard-focus-actions">
+                    <button class="btn btn-primary d-inline-flex align-items-center justify-content-center gap-2"
+                        type="button" data-action="run-git-preflight">
+                        <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                        <span data-button-label>Run Again</span>
+                    </button>
+                    <button class="btn btn-outline-warning d-inline-flex align-items-center justify-content-center gap-2"
+                        type="button" data-action="cancel-git-preflight" disabled>
+                        <i class="fa-solid fa-ban" aria-hidden="true"></i>
+                        <span>Cancel</span>
+                    </button>
+                    <button class="btn btn-outline-secondary d-inline-flex align-items-center justify-content-center gap-2"
+                        type="button" data-action="exit-git-guard">
+                        <i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i>
+                        <span>Exit to Dashboard</span>
                     </button>
                 </div>
             </div>
 
-            <div class="row">
-                <div class="col-12">
-                    <h2 class="mb-4">VCA Validation</h2>
-                </div>
-            </div>
+            <header class="git-guard-page-header mb-4">
+                <div class="git-guard-eyebrow">Repository safeguards</div>
+                <h2 class="mb-2">Git Guard</h2>
+                <p class="text-muted mb-0">
+                    Inspect the staged commit through VCA, MintLint, and repository workflows before Git writes it.
+                </p>
+            </header>
 
-            <!-- Git Hook Status -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-                            <span>Git Hooks</span>
-                            <span class="badge bg-secondary" data-hook-status-badge>Checking</span>
+            <section class="git-preflight-overview mb-4" data-git-guard-focused-only aria-live="polite">
+                <article class="card git-preflight-result" data-preflight-result data-tone="neutral" aria-busy="false">
+                    <div class="card-body">
+                        <div class="git-preflight-result-icon" aria-hidden="true">
+                            <i class="fa-solid fa-shield-halved"></i>
                         </div>
-                        <div class="card-body">
-                            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
-                                <div class="min-w-0">
-                                    <div class="fw-bold" data-hook-status-title>Checking hook status</div>
-                                    <div class="text-muted small" data-hook-status-message></div>
-                                </div>
-                                <div class="d-flex flex-wrap gap-2">
-                                    <button class="btn btn-outline-success d-flex align-items-center gap-2" type="button"
-                                        data-action="install-hooks">
-                                        <i class="fa-solid fa-plug-circle-check"></i>
-                                        <span>Install Hooks</span>
-                                    </button>
-                                    <button class="btn btn-outline-danger d-flex align-items-center gap-2" type="button"
-                                        data-action="uninstall-hooks">
-                                        <i class="fa-solid fa-plug-circle-xmark"></i>
-                                        <span>Remove Hooks</span>
-                                    </button>
-                                </div>
+                        <div class="min-w-0">
+                            <div class="git-guard-eyebrow">Commit decision</div>
+                            <h2 data-preflight-result-title>Commit decision pending</h2>
+                            <p data-preflight-result-message>Run the preflight to decide whether Git may create this commit.</p>
+                        </div>
+                        <span class="git-preflight-decision" data-preflight-decision data-tone="neutral">Not checked</span>
+                    </div>
+                </article>
+                <article class="card git-preflight-staged">
+                    <div class="card-body">
+                        <div class="git-preflight-staged-heading">
+                            <div>
+                                <div class="git-guard-eyebrow">Staged snapshot</div>
+                                <strong data-preflight-staged-count>Waiting for staged snapshot</strong>
+                            </div>
+                            <span class="hook-health-badge" data-preflight-run-state data-tone="neutral">Idle</span>
+                        </div>
+                        <p data-preflight-message>Waiting to inspect the staged commit.</p>
+                        <ul data-preflight-staged-files hidden></ul>
+                    </div>
+                </article>
+            </section>
+
+            <section class="card git-guard-health mb-4" data-hook-health data-tone="neutral" aria-busy="true"
+                aria-labelledby="git-guard-health-title">
+                <div class="card-header git-guard-card-header">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+                        <span class="card-header-label" id="git-guard-health-title">Protection status</span>
+                    </div>
+                    <span class="hook-health-badge" data-hook-status-badge data-tone="neutral"
+                        aria-live="polite">Checking</span>
+                </div>
+                <div class="card-body">
+                    <div class="git-guard-health-summary">
+                        <div class="git-guard-health-copy">
+                            <div class="git-guard-health-icon" aria-hidden="true">
+                                <i class="fa-solid fa-code-commit"></i>
+                            </div>
+                            <div class="min-w-0">
+                                <h3 class="git-guard-health-title" data-hook-status-title>Checking Git Guard</h3>
+                                <p class="git-guard-health-message" data-hook-status-message>
+                                    Inspecting the repository hook files…
+                                </p>
                             </div>
                         </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Manual Validation -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header">Manual Validation</div>
-                        <div class="card-body">
-                            <p class="text-muted mb-3">
-                                Run VCA validation manually against all changed files in your repository.
-                            </p>
-                            <button class="btn btn-primary btn-lg d-flex align-items-center gap-2" type="button"
-                                data-action="run-vca">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor"
-                                    viewBox="0 0 16 16">
-                                    <path
-                                        d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z" />
-                                </svg>
-                                Run VCA Validation
+                        <div class="git-guard-actions">
+                            <button class="btn btn-success d-inline-flex align-items-center justify-content-center gap-2"
+                                type="button" data-action="install-hooks" data-idle-label="Install Hooks" disabled>
+                                <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                    aria-hidden="true"></span>
+                                <i class="fa-solid fa-screwdriver-wrench" data-button-icon aria-hidden="true"></i>
+                                <span data-button-label>Install Hooks</span>
+                            </button>
+                            <button class="btn btn-outline-danger d-inline-flex align-items-center justify-content-center gap-2"
+                                type="button" data-action="uninstall-hooks" data-idle-label="Remove Hooks" disabled>
+                                <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                    aria-hidden="true"></span>
+                                <i class="fa-solid fa-trash-can" data-button-icon aria-hidden="true"></i>
+                                <span data-button-label>Remove Hooks</span>
                             </button>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <div class="row">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header">Validation Results</div>
-                        <div class="card-body">
-                            <div id="validation-results">
-                                <p class="text-muted text-center">Click "Run VCA Validation" to check for rule
-                                    violations</p>
+                    <div class="git-guard-hook-grid" role="list" aria-label="Managed Git hooks">
+                        <article class="git-guard-hook" data-hook-detail="pre-commit" role="listitem">
+                            <div class="git-guard-hook-mark" aria-hidden="true">
+                                <i class="fa-solid fa-file-shield"></i>
                             </div>
+                            <div class="git-guard-hook-copy">
+                                <div class="git-guard-hook-heading">
+                                    <code>pre-commit</code>
+                                    <span class="hook-detail-badge" data-hook-detail-badge data-tone="neutral">Checking</span>
+                                </div>
+                                <p data-hook-detail-message>Inspecting hook…</p>
+                            </div>
+                        </article>
+                        <article class="git-guard-hook" data-hook-detail="commit-message" role="listitem">
+                            <div class="git-guard-hook-mark" aria-hidden="true">
+                                <i class="fa-solid fa-message"></i>
+                            </div>
+                            <div class="git-guard-hook-copy">
+                                <div class="git-guard-hook-heading">
+                                    <code>commit-msg</code>
+                                    <span class="hook-detail-badge" data-hook-detail-badge data-tone="neutral">Checking</span>
+                                </div>
+                                <p data-hook-detail-message>Inspecting hook…</p>
+                            </div>
+                        </article>
+                    </div>
+
+                    <dl class="git-guard-meta">
+                        <div data-hook-repository-row hidden>
+                            <dt>Repository</dt>
+                            <dd data-hook-repository-path></dd>
+                        </div>
+                        <div data-hook-path-row hidden>
+                            <dt>Hooks directory</dt>
+                            <dd data-hook-path></dd>
+                        </div>
+                        <div data-hook-auto-install-row hidden>
+                            <dt>Setup policy</dt>
+                            <dd data-hook-auto-install></dd>
+                        </div>
+                    </dl>
+                </div>
+            </section>
+
+            <section class="git-preflight-steps mb-4" data-git-guard-focused-only
+                aria-label="Git preflight steps">
+                <article class="card git-preflight-step" data-preflight-step="vca" data-tone="neutral" data-status="pending">
+                    <div class="card-header git-preflight-step-header">
+                        <div class="git-preflight-step-title">
+                            <span class="git-preflight-step-number">1</span>
+                            <div><strong>VCA rules</strong><small>AGENTS.md policy validation</small></div>
+                        </div>
+                        <div class="git-preflight-step-meta">
+                            <span data-preflight-step-duration hidden></span>
+                            <span class="hook-detail-badge" data-preflight-step-status data-tone="neutral">Pending</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p data-preflight-step-message>Validate staged changes against repository AGENTS.md rules.</p>
+                        <pre data-preflight-step-output hidden></pre>
+                    </div>
+                </article>
+
+                <article class="card git-preflight-step" data-preflight-step="mintlint" data-tone="neutral" data-status="pending">
+                    <div class="card-header git-preflight-step-header">
+                        <div class="git-preflight-step-title">
+                            <span class="git-preflight-step-number">2</span>
+                            <div><strong>MintLint</strong><small>Staged code-health report</small></div>
+                        </div>
+                        <div class="git-preflight-step-meta">
+                            <span data-preflight-step-duration hidden></span>
+                            <span class="hook-detail-badge" data-preflight-step-status data-tone="neutral">Pending</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p data-preflight-step-message>Grade staged files and surface maintainability findings.</p>
+                        <pre data-preflight-step-output hidden></pre>
+                        <details class="git-preflight-mint-disclosure" data-mintlint-disclosure hidden>
+                            <summary>View per-file and category details</summary>
+                            <div data-mintlint-details></div>
+                        </details>
+                    </div>
+                </article>
+
+                <article class="card git-preflight-step" data-preflight-step="automated-workflows" data-tone="neutral" data-status="pending">
+                    <div class="card-header git-preflight-step-header">
+                        <div class="git-preflight-step-title">
+                            <span class="git-preflight-step-number">3</span>
+                            <div><strong>Automated workflows</strong><small>Repository commit safeguards</small></div>
+                        </div>
+                        <div class="git-preflight-step-meta">
+                            <span data-preflight-step-duration hidden></span>
+                            <span class="hook-detail-badge" data-preflight-step-status data-tone="neutral">Pending</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p data-preflight-step-message>Run repository-defined commit safeguards.</p>
+                        <pre data-preflight-step-output hidden></pre>
+                    </div>
+                </article>
+            </section>
+
+            <section class="card vca-console-card" data-vca-console data-tone="neutral" aria-busy="false"
+                aria-labelledby="vca-console-title">
+                <div class="card-header git-guard-card-header">
+                    <div class="d-flex align-items-center gap-2 min-w-0">
+                        <i class="fa-solid fa-terminal" aria-hidden="true"></i>
+                        <span class="card-header-label" id="vca-console-title">Hook console</span>
+                        <span class="vca-console-state" data-vca-console-state>Ready</span>
+                    </div>
+                    <div class="vca-console-utility-actions" aria-label="Console actions">
+                        <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-2"
+                            type="button" data-action="copy-hook-output" aria-label="Copy hook console output">
+                            <i class="fa-regular fa-copy" aria-hidden="true"></i>
+                            <span>Copy</span>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-2"
+                            type="button" data-action="clear-hook-output" aria-label="Clear hook console output">
+                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                            <span>Clear</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="vca-console-intro" data-git-guard-dashboard-only>
+                        <div>
+                            <h3>See the commit experience before you need it</h3>
+                            <p>
+                                This runs the Git preflight pipeline—VCA, MintLint, and automated workflows—and prints
+                                its plain-text output here. The real hook uses the same stages and console presentation.
+                            </p>
+                        </div>
+                        <button class="btn btn-primary d-inline-flex align-items-center justify-content-center gap-2"
+                            type="button" data-action="run-hook-preview" data-idle-label="Run Hook Check" disabled>
+                            <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                aria-hidden="true"></span>
+                            <i class="fa-solid fa-play" data-button-icon aria-hidden="true"></i>
+                            <span data-button-label>Run Hook Check</span>
+                        </button>
+                    </div>
+
+                    <div class="git-preflight-transcript-intro" data-git-guard-focused-only>
+                        <div>
+                            <h3>Live preflight transcript</h3>
+                            <p>Output is appended as each safeguard runs. Filenames and tool messages are always rendered as plain text.</p>
+                        </div>
+                    </div>
+
+                    <div class="vca-console-shell">
+                        <div class="vca-console-chrome" aria-hidden="true">
+                            <span></span><span></span><span></span>
+                            <div>viberails · git guard preflight</div>
+                        </div>
+                        <pre class="vca-console-output" data-vca-console-output role="log" aria-live="polite"
+                            aria-atomic="false" tabindex="0"></pre>
+                        <div class="vca-console-footer">
+                            <span class="vca-console-pulse" aria-hidden="true"></span>
+                            <span data-vca-console-meta>Waiting for a hook check</span>
                         </div>
                     </div>
                 </div>
-            </div>
+            </section>
         </div>
     </template>
 
@@ -1072,7 +1258,7 @@
                                 <input class="form-check-input" type="checkbox" id="setting-codex-llm-proxy-enabled">
                                 <label class="form-check-label" for="setting-codex-llm-proxy-enabled">Enable Codex proxy</label>
                             </div>
-                            <small class="form-text text-muted">Route newly launched Codex sessions through the local VibeRails proxy. Token saving is Claude-only for now; Codex traffic passes through unchanged.</small>
+                            <small class="form-text text-muted">Route newly launched Codex sessions through the local VibeRails proxy. When enabled, shell-tool output also uses the selected token-saving level.</small>
                         </div>
                         <div class="mb-3">
                             <div class="form-label mb-2">Codex auth type</div>
@@ -1106,11 +1292,31 @@
                         <div class="mb-4">
                             <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" id="setting-claude-llm-proxy-enabled">
-                                <label class="form-check-label" for="setting-claude-llm-proxy-enabled">Enable Claude proxy and token saver</label>
+                                <label class="form-check-label" for="setting-claude-llm-proxy-enabled">Enable Claude proxy</label>
                             </div>
                             <small class="form-text text-muted">Route newly launched Claude sessions through the local VibeRails proxy. Works with both subscription and API key sign-ins.</small>
                         </div>
                         <small class="form-text text-muted">Changes apply the next time a Claude terminal starts.</small>
+                    </div>
+                </div>
+            </div>
+            <div class="row justify-content-center">
+                <div class="col-md-8 col-lg-6 mb-4">
+                    <div class="sandbox-item-card text-start">
+                        <div class="mb-3">
+                            <span class="sandbox-item-name">Token Saver</span>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label mb-2" for="setting-token-saver-level">Token saving level</label>
+                            <select id="setting-token-saver-level" class="form-select">
+                                <option value="off">Off — proxy only, no token saving</option>
+                                <option value="safest">Safest — display-safe cleanup of shell output</option>
+                                <option value="safe">Safe — also collapse blank runs and background shells</option>
+                                <option value="medium">Medium — also collapse repeated output lines</option>
+                                <option value="high">High — also truncate very long outputs</option>
+                            </select>
+                            <small class="form-text text-muted">Applies to shell-tool output sent through either enabled Codex or Claude proxy. Higher levels compress harder before output reaches the model; changing level can invalidate a provider prompt cache once.</small>
+                        </div>
                     </div>
                 </div>
             </div>

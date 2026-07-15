@@ -4,9 +4,8 @@ using TokenSaver.Minify;
 namespace TokenSaver;
 
 /// <summary>
-/// Optional request-body rewrite hook for <see cref="LlmProxyRelay"/>. The Codex relay passes
-/// none (pure passthrough); the Anthropic relay passes <see cref="AnthropicBodyTransform"/> when
-/// the token saver is enabled.
+/// Optional request-body rewrite hook for <see cref="LlmProxyRelay"/>. Provider routes pass their
+/// structured JSON transform when the token saver is enabled.
 /// </summary>
 internal interface ILlmProxyBodyTransform
 {
@@ -32,5 +31,5 @@ internal interface ILlmProxyBodyTransform
 /// </summary>
 internal sealed record TransformedRequestBody(
     HttpContent Content,
-    AnthropicRewriteResult? Savings,
+    ToolOutputRewriteResult? Savings,
     IDisposable? BufferLease);

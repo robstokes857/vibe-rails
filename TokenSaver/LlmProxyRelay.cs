@@ -70,9 +70,9 @@ internal static class LlmProxyRelay
     /// <summary>
     /// Authenticates the proxy request (session + tab tokens) then relays it to <paramref name="target"/>.
     /// The caller has already confirmed the feature is enabled and built the provider-specific target.
-    /// <paramref name="bodyTransform"/> is the token-saver hook (token_saving_plan.md §3): null —
-    /// the Codex path — is a pure byte passthrough; the Anthropic path passes one when the saver is
-    /// enabled, and a request it declines to touch (or fails open on) is forwarded untouched.
+    /// <paramref name="bodyTransform"/> is the provider-specific token-saver hook. A route passes
+    /// null when saving is disabled; a request the transform declines or fails to rewrite is
+    /// forwarded untouched.
     /// </summary>
     internal static async Task HandleAsync(
         HttpContext context,
@@ -124,7 +124,8 @@ internal static class LlmProxyRelay
                     savings.BytesAfter,
                     savings.ToolResultsMinified,
                     savings.ToolResultsSeen,
-                    savings.Transforms));
+                    savings.Transforms,
+                    savings.Condensed));
             }
 
             // Display-only activity ping that lights the proxy indicator: never carries the query

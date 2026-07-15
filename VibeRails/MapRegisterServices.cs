@@ -23,6 +23,7 @@ using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Validators;
 using VibeRails.Utils;
 using VibeRails.Services.Integrations.VibeCodeRemote;
+using VibeRails.Services.GitPreflight;
 
 namespace VibeRails
 {
@@ -105,6 +106,7 @@ namespace VibeRails
             // VCA Validation services (for git hooks)
             serviceCollection.AddScoped<IRuleValidationService, RuleValidationService>();
             serviceCollection.AddScoped<IHookInstallationService, HookInstallationService>();
+            serviceCollection.AddGitPreflight();
 
             // NEW VCA Validation Architecture (modular)
             // Infrastructure services

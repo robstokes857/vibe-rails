@@ -39,7 +39,7 @@ public static class MintLintAnalyzer
 
         string baseDirectory = Directory.Exists(fullPath) ? fullPath : Path.GetDirectoryName(fullPath) ?? fullPath;
         List<string> files = EnumerateSourceFiles(fullPath, baseDirectory, options);
-        files.Sort(static (left, right) => string.Compare(left, right, StringComparison.OrdinalIgnoreCase));
+        files.Sort(static (left, right) => ComparePaths(left, right));
 
         List<ParsedSource> parsedSources = [];
         foreach (string file in files)
@@ -62,14 +62,7 @@ public static class MintLintAnalyzer
             parsedSources.Add(parser.Parse(file, RelativeDisplayPath(file, baseDirectory), text));
         }
 
-        double[] duplicationRatios = DuplicationAnalyzer.ComputeRatios(parsedSources);
-        List<FileMetrics> results = [];
-        for (int i = 0; i < parsedSources.Count; i++)
-        {
-            results.Add(MetricEngine.BuildFileMetrics(parsedSources[i], duplicationRatios[i], options));
-        }
-
-        return results;
+        return BuildMetrics(parsedSources, options);
     }
 
     /// <summary>
@@ -83,6 +76,69 @@ public static class MintLintAnalyzer
     public static ScanResult ScanPath(string path, MintLintOptions? options = null, ScoringProfile? profile = null)
     {
         return MintLintScorer.Score(AnalyzePath(path, options), profile);
+    }
+
+    /// <summary>
+    /// Returns whether MintLint can analyze a file based on its extension. The path does
+    /// not need to exist because only its logical extension is inspected.
+    /// </summary>
+    public static bool SupportsFile(string? path)
+    {
+        return !string.IsNullOrWhiteSpace(path) &&
+            LanguageRegistry.TryGetParser(Path.GetExtension(path), out _);
+    }
+
+    /// <summary>
+    /// Analyzes in-memory source files as one batch. Unsupported paths and paths matched
+    /// by <see cref="MintLintOptions.ExtraExcludes"/> are skipped, just as they are during
+    /// a directory scan. Supported results are ordered deterministically by their
+    /// normalized forward-slash paths. Cross-file duplication is measured across the
+    /// complete supported batch.
+    /// </summary>
+    /// <param name="sources">Logical source paths paired with their complete text content.</param>
+    /// <param name="options">Analysis options; <see cref="MintLintOptions.Default"/> is used when null.</param>
+    public static IReadOnlyList<FileMetrics> AnalyzeSources(
+        IReadOnlyList<SourceInput> sources,
+        MintLintOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(sources);
+        options ??= MintLintOptions.Default;
+
+        List<SourceInput> included = [];
+        for (int i = 0; i < sources.Count; i++)
+        {
+            SourceInput source = sources[i] ?? throw new ArgumentException(
+                "The source collection cannot contain null entries.", nameof(sources));
+            string displayPath = NormalizeDisplayPath(source.Path);
+            if (SupportsFile(displayPath) && !IsExcludedDisplayPath(displayPath, options))
+            {
+                included.Add(source);
+            }
+        }
+
+        included.Sort(static (left, right) => CompareSourceInputs(left, right));
+
+        List<ParsedSource> parsedSources = [];
+        foreach (SourceInput source in included)
+        {
+            string displayPath = NormalizeDisplayPath(source.Path);
+            parsedSources.Add(GetParser(displayPath).Parse(source.Path, displayPath, source.Content));
+        }
+
+        return BuildMetrics(parsedSources, options);
+    }
+
+    /// <summary>
+    /// Analyzes and scores in-memory source files in one call. Equivalent to
+    /// <see cref="AnalyzeSources"/> followed by
+    /// <see cref="MintLintScorer.Score(IReadOnlyList{FileMetrics}, ScoringProfile?)"/>.
+    /// </summary>
+    public static ScanResult ScanSources(
+        IReadOnlyList<SourceInput> sources,
+        MintLintOptions? options = null,
+        ScoringProfile? profile = null)
+    {
+        return MintLintScorer.Score(AnalyzeSources(sources, options), profile);
     }
 
     /// <summary>
@@ -212,7 +268,7 @@ public static class MintLintAnalyzer
 
     private static bool IsSupportedSource(string path)
     {
-        return LanguageRegistry.TryGetParser(Path.GetExtension(path), out _);
+        return SupportsFile(path);
     }
 
     private static ILanguageParser GetParser(string path)
@@ -228,16 +284,64 @@ public static class MintLintAnalyzer
     private static bool IsExcluded(string path, string baseDirectory, MintLintOptions options)
     {
         string relative = RelativeDisplayPath(path, baseDirectory);
+        return IsExcludedDisplayPath(relative, options);
+    }
+
+    private static bool IsExcludedDisplayPath(string displayPath, MintLintOptions options)
+    {
         foreach (string pattern in options.ExtraExcludes)
         {
             string normalizedPattern = pattern.Replace('\\', '/');
-            if (WildcardMatcher.IsMatch(relative, normalizedPattern))
+            if (WildcardMatcher.IsMatch(displayPath, normalizedPattern))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static IReadOnlyList<FileMetrics> BuildMetrics(
+        IReadOnlyList<ParsedSource> parsedSources,
+        MintLintOptions options)
+    {
+        double[] duplicationRatios = DuplicationAnalyzer.ComputeRatios(parsedSources);
+        List<FileMetrics> results = [];
+        for (int i = 0; i < parsedSources.Count; i++)
+        {
+            results.Add(MetricEngine.BuildFileMetrics(parsedSources[i], duplicationRatios[i], options));
+        }
+
+        return results;
+    }
+
+    private static int CompareSourceInputs(SourceInput left, SourceInput right)
+    {
+        string leftPath = NormalizeDisplayPath(left.Path);
+        string rightPath = NormalizeDisplayPath(right.Path);
+        int comparison = ComparePaths(leftPath, rightPath);
+        return comparison != 0
+            ? comparison
+            : string.Compare(left.Content, right.Content, StringComparison.Ordinal);
+    }
+
+    private static int ComparePaths(string left, string right)
+    {
+        int comparison = string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
+        return comparison != 0
+            ? comparison
+            : string.Compare(left, right, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeDisplayPath(string path)
+    {
+        string normalized = path.Replace('\\', '/');
+        while (normalized.StartsWith("./", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
+        }
+
+        return normalized;
     }
 
     private static string RelativeDisplayPath(string path, string baseDirectory)

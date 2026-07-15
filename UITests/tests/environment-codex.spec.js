@@ -50,4 +50,21 @@ test.describe('Codex environment form – Model field', () => {
             'ultra',
         ]);
     });
+
+    test('gpt-5.5 prevents Max effort and normalizes an existing Max selection', async ({ page }) => {
+        await openCodexEnvironmentForm(page);
+
+        const modelSelect = page.locator('#codex-model');
+        const effortSelect = page.locator('#codex-effort');
+        const maxOption = effortSelect.locator('option[value="max"]');
+
+        await effortSelect.selectOption('max');
+        await modelSelect.selectOption('gpt-5.5');
+
+        await expect(maxOption).toBeDisabled();
+        await expect(effortSelect).toHaveValue('xhigh');
+
+        await modelSelect.selectOption('gpt-5.6-sol');
+        await expect(maxOption).toBeEnabled();
+    });
 });

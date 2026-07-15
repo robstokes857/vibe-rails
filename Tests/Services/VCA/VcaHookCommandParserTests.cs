@@ -68,6 +68,16 @@ public class VcaHookCommandParserTests
         Assert.True(invocation.DemoUi);
         Assert.Equal(TimeSpan.FromMilliseconds(25), invocation.DemoDuration);
     }
+
+    [Fact]
+    public void Parse_ConsoleWindowFlag_RequestsDedicatedConsole()
+    {
+        var parser = new VcaHookCommandParser();
+
+        var invocation = parser.Parse(["--vca-hook", "pre-commit", "--console-window"]);
+
+        Assert.True(invocation.ShowConsoleWindow);
+    }
 }
 
 public class VcaHookValidationAnalyzerTests
@@ -102,9 +112,20 @@ public class VcaHookValidationAnalyzerTests
         };
 
         var missing = analyzer.GetMissingAcknowledgments(
-            "reason: [vca:agents.md:log-all-file-changes]",
+            "[vca:agents.md:log-all-file-changes] reason: reviewed and accepted",
             required);
 
         Assert.Equal(new[] { "[VCA:DB-AGENTS.md:package-file-changes]" }, missing);
+    }
+
+    [Fact]
+    public void GetMissingAcknowledgments_RejectsTokenWithoutReason()
+    {
+        var analyzer = new VcaHookValidationAnalyzer();
+        const string token = "[VCA:AGENTS.md:log-all-file-changes]";
+
+        var missing = analyzer.GetMissingAcknowledgments(token, [token]);
+
+        Assert.Equal([token], missing);
     }
 }

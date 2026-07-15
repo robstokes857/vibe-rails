@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using TokenSaver.Minify;
 
 namespace TokenSaver;
 
@@ -37,6 +38,14 @@ public static class LlmProxyRoutes
                 return;
             }
 
+            var transform = settings.CodexTokenSaverEnabled
+                    && !(settings.CodexTokenSaverFlags.IsNoOp && settings.CodexTokenSaverCondense.IsNoOp)
+                ? new CodexBodyTransform(
+                    settings.CodexTokenSaverFlags,
+                    settings.CodexTokenSaverCondense,
+                    settings.CodexTokenSaverAllowlist)
+                : null;
+
             var target = BuildOpenAiUri(context.Request, settings.CodexLlmProxyMode);
             await LlmProxyRelay.HandleAsync(
                 context,
@@ -45,7 +54,7 @@ public static class LlmProxyRoutes
                 context.RequestServices.GetRequiredService<ILlmProxyEventSink>(),
                 target,
                 "Codex proxy",
-                bodyTransform: null, // Codex is a pure passthrough; the token saver is Anthropic-only in v1
+                bodyTransform: transform,
                 context.RequestAborted);
         }).WithName("LlmOpenAiProxy");
     }

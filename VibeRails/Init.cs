@@ -225,7 +225,8 @@ namespace VibeRails
                 return;
             }
 
-            if (!Directory.Exists(Path.Combine(repoPath, ".git")))
+            var dotGitPath = Path.Combine(repoPath, ".git");
+            if (!Directory.Exists(dotGitPath) && !File.Exists(dotGitPath))
             {
                 return;
             }
@@ -242,10 +243,18 @@ namespace VibeRails
                 }
 
                 var hookService = scope.ServiceProvider.GetRequiredService<IHookInstallationService>();
-                if (hookService.IsHookInstalled(repoPath))
+                var status = await hookService.GetStatusAsync(repoPath, cancellationToken);
+                if (status.IsInstalled)
                 {
                     Log.Debug("[Hooks] VCA git hooks already installed for {RepoPath}", repoPath);
                     return;
+                }
+
+                if (status.NeedsRepair)
+                {
+                    Log.Information(
+                        "[Hooks] Repairing stale or partial VCA git hooks for {RepoPath}",
+                        repoPath);
                 }
 
                 var result = await hookService.InstallHooksAsync(repoPath, cancellationToken);
