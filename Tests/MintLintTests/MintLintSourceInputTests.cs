@@ -28,6 +28,10 @@ public sealed class MintLintSourceInputTests
         { "sample.c", "int add(int a, int b) { return a + b; }" },
         { "sample.java", "class Sample { int add(int a, int b) { return a + b; } }" },
         { "sample.cpp", "class Sample { public: int add(int a, int b) { return a + b; } };" },
+        { "sample.php", "<?php function add($a, $b) { return $a + $b; }" },
+        { "sample.rb", "def add(a, b)\n  a + b\nend\n" },
+        { "sample.sh", "add() { echo $(( $1 + $2 )); }" },
+        { "sample.ps1", "function Add-Numbers([int]$A, [int]$B) { return $A + $B }" },
     };
 
     [Theory]
@@ -53,6 +57,14 @@ public sealed class MintLintSourceInputTests
     [InlineData("source.c++")]
     [InlineData("source.hpp")]
     [InlineData("source.cppm")]
+    [InlineData("source.php")]
+    [InlineData("source.PHTML")]
+    [InlineData("source.rb")]
+    [InlineData("source.gemspec")]
+    [InlineData("source.SH")]
+    [InlineData("source.bash")]
+    [InlineData("source.ps1")]
+    [InlineData("source.PSM1")]
     public void SupportsFile_RecognizesSupportedExtensions(string path)
     {
         Assert.True(MintLintAnalyzer.SupportsFile(path));

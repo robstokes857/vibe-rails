@@ -13,24 +13,7 @@ internal static class MetricEngine
         "super", "this", "true", "undefined"
     };
 
-    private static readonly HashSet<string> OperatorKeywords = new(StringComparer.Ordinal)
-    {
-        "abstract", "and", "as", "assert", "async", "await", "break", "case", "catch",
-        "chan", "checked", "class", "const", "constexpr", "continue", "crate", "defer",
-        "def", "default", "delegate", "delete", "del", "do", "dyn", "elif", "else",
-        "enum", "event", "except", "explicit", "export", "extends", "extern",
-        "fallthrough", "finally", "fixed", "fn", "for", "foreach", "friend", "from",
-        "func", "function", "global", "go", "goto", "if", "impl", "implicit", "import",
-        "implements", "in", "include", "inline", "instanceof", "interface", "internal",
-        "is", "lambda", "let", "lock", "loop", "map", "match", "mod", "move", "mut",
-        "namespace", "new", "noexcept", "nonlocal", "not", "of", "operator", "or", "out",
-        "override", "package", "params", "pass", "private", "protected", "public", "pub",
-        "raise", "range", "readonly", "record", "ref", "required", "requires", "return",
-        "sealed", "select", "sizeof", "stackalloc", "static", "struct", "switch",
-        "synchronized", "template", "throw", "throws", "trait", "try", "type", "typedef",
-        "typename", "typeof", "unchecked", "union", "unsafe", "use", "using", "var",
-        "virtual", "void", "volatile", "where", "while", "with", "yield"
-    };
+    // Keyword vocabulary is per-language; see LanguageKeywords for why a shared set is wrong.
 
     public static FileMetrics BuildFileMetrics(ParsedSource parsed, double duplicationRatio, MintLintOptions options)
     {
@@ -168,6 +151,7 @@ internal static class MetricEngine
             return baseComplexity;
         }
 
+        KeywordProfile keywords = LanguageKeywords.For(parsed.Language);
         int total = baseComplexity;
         int i = Math.Max(0, start);
         end = Math.Min(end, parsed.Tokens.Count - 1);
@@ -181,26 +165,18 @@ internal static class MetricEngine
             }
 
             string text = parsed.Tokens[i].Text;
-            if (text is "if" or "elif" or "for" or "foreach" or "catch" or "except" or "case" or "match" or "loop")
+            if (keywords.Decisions.Contains(text))
             {
                 total++;
             }
-            else if (text == "select")
-            {
-                total++;
-            }
-            else if (text == "do")
-            {
-                total++;
-            }
-            else if (text == "while")
+            else if (keywords.Loops.Contains(text))
             {
                 if (!IsDoWhileCondition(parsed, i))
                 {
                     total++;
                 }
             }
-            else if (text is "&&" or "||" or "??" or "and" or "or")
+            else if (keywords.LogicalOperators.Contains(text))
             {
                 total++;
             }
@@ -222,6 +198,7 @@ internal static class MetricEngine
             return 0;
         }
 
+        KeywordProfile keywords = LanguageKeywords.For(parsed.Language);
         HashSet<int> controlBodyStarts = FindControlBodyStarts(parsed, start, end);
         HashSet<int> elseIfIndexes = FindElseIfIndexes(parsed, start, end);
         Stack<int> activeControlEnds = new();
@@ -255,19 +232,16 @@ internal static class MetricEngine
             {
                 total += elseIfIndexes.Contains(i) ? 1 : 1 + nesting;
             }
-            else if (text == "elif")
+            else if (keywords.ElseIfKeywords.Contains(text))
             {
+                // A chain link, not a fresh branch: a flat +1 with no nesting penalty.
                 total++;
             }
-            else if (text is "for" or "foreach" or "catch" or "except" or "switch" or "match" or "loop" or "select")
+            else if (keywords.NestingDecisions.Contains(text))
             {
                 total += 1 + nesting;
             }
-            else if (text == "do")
-            {
-                total += 1 + nesting;
-            }
-            else if (text == "while")
+            else if (keywords.Loops.Contains(text))
             {
                 if (!IsDoWhileCondition(parsed, i))
                 {
@@ -282,7 +256,7 @@ internal static class MetricEngine
                     total++;
                 }
             }
-            else if (text is "&&" or "||" or "??" or "and" or "or")
+            else if (keywords.LogicalOperators.Contains(text))
             {
                 total++;
             }
@@ -313,6 +287,7 @@ internal static class MetricEngine
             return 1;
         }
 
+        KeywordProfile keywords = LanguageKeywords.For(parsed.Language);
         long result = 1;
         int i = Math.Max(0, start);
         end = Math.Min(end, parsed.Tokens.Count - 1);
@@ -326,22 +301,12 @@ internal static class MetricEngine
             }
 
             string text = parsed.Tokens[i].Text;
-            if (text == "if")
+            if (keywords.Branches.Contains(text))
             {
                 int logical = CountConditionLogicalOps(parsed, i, currentFunctionIndex);
                 result = MultiplyCapped(result, 2 + logical);
             }
-            else if (text == "elif")
-            {
-                int logical = CountConditionLogicalOps(parsed, i, currentFunctionIndex);
-                result = MultiplyCapped(result, 2 + logical);
-            }
-            else if (text is "for" or "foreach" or "catch" or "except" or "loop")
-            {
-                int logical = CountConditionLogicalOps(parsed, i, currentFunctionIndex);
-                result = MultiplyCapped(result, 2 + logical);
-            }
-            else if (text == "while")
+            else if (keywords.Loops.Contains(text))
             {
                 if (!IsDoWhileCondition(parsed, i))
                 {
@@ -362,7 +327,7 @@ internal static class MetricEngine
                     int bodyEnd = parsed.BracePartner[bodyStart];
                     for (int j = bodyStart + 1; j < bodyEnd; j++)
                     {
-                        if (parsed.Tokens[j].Text is "case" or "default" ||
+                        if (keywords.CaseArms.Contains(parsed.Tokens[j].Text) ||
                             (text == "match" && parsed.Tokens[j].Text == "=>"))
                         {
                             caseCount++;
@@ -454,10 +419,31 @@ internal static class MetricEngine
 
         if (open < 0)
         {
+            if (parsed.Language == SourceLanguage.Ruby)
+            {
+                return CountRubyParameters(tokens, span);
+            }
+
+            if (parsed.Language == SourceLanguage.PowerShell)
+            {
+                int param = FindPowerShellParamBlock(parsed, span);
+                if (param < span.EndIndex && tokens[param].Text == "param" &&
+                    param + 1 < span.EndIndex && tokens[param + 1].Text == "(")
+                {
+                    return CountParameterList(parsed, param + 1);
+                }
+            }
+
             // A single-identifier arrow parameter, e.g. `x => x + 1`.
             return span.StartIndex < tokens.Count && ParserUtilities.IsNameToken(tokens[span.StartIndex]) ? 1 : 0;
         }
 
+        return CountParameterList(parsed, open);
+    }
+
+    private static int CountParameterList(ParsedSource parsed, int open)
+    {
+        List<Token> tokens = parsed.Tokens;
         int close = parsed.ParenPartner[open];
         if (close <= open + 1)
         {
@@ -467,6 +453,85 @@ internal static class MetricEngine
         int count = 1;
         int depth = 0;
         for (int i = open + 1; i < close; i++)
+        {
+            string text = tokens[i].Text;
+            if (text is "(" or "[" or "{")
+            {
+                depth++;
+            }
+            else if (text is ")" or "]" or "}")
+            {
+                depth--;
+            }
+            else if (text == "," && depth == 0)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static int FindPowerShellParamBlock(ParsedSource parsed, FunctionSpan span)
+    {
+        int cursor = span.BodyStartIndex + 1;
+        while (cursor < span.EndIndex && parsed.Tokens[cursor].Text == "[")
+        {
+            int close = parsed.BracketPartner[cursor];
+            if (close <= cursor)
+            {
+                break;
+            }
+
+            cursor = close + 1;
+        }
+
+        return cursor;
+    }
+
+    /// <summary>
+    /// Counts the parameters of a parenless Ruby definition (`def render title, layout: nil`).
+    /// Parenthesised and endless definitions are handled by the caller's paren scan.
+    /// </summary>
+    private static int CountRubyParameters(List<Token> tokens, FunctionSpan span)
+    {
+        int cursor = ParserUtilities.NextSignificant(tokens, span.StartIndex + 1);
+        if (cursor < 0 || cursor >= span.BodyStartIndex)
+        {
+            return 0;
+        }
+
+        if (tokens[cursor].Text == "self")
+        {
+            int separator = ParserUtilities.NextSignificant(tokens, cursor + 1);
+            if (separator >= 0 && tokens[separator].Text is "." or "::")
+            {
+                cursor = ParserUtilities.NextSignificant(tokens, separator + 1);
+            }
+        }
+
+        if (cursor < 0 || cursor >= span.BodyStartIndex)
+        {
+            return 0;
+        }
+
+        cursor = ParserUtilities.NextSignificant(tokens, cursor + 1); // past the method name
+        if (cursor < 0 || cursor >= span.BodyStartIndex)
+        {
+            return 0;
+        }
+
+        // `def name = expression` is an endless method: the `=` binds the body, not a default.
+        if (tokens[cursor].Text == "=")
+        {
+            return 0;
+        }
+
+        // Commas nested inside a default value (`def at key, fallback = [1, 2]`) separate
+        // elements, not parameters, so only depth-zero commas count.
+        int count = 1;
+        int depth = 0;
+        for (int i = cursor; i < span.BodyStartIndex; i++)
         {
             string text = tokens[i].Text;
             if (text is "(" or "[" or "{")
@@ -573,6 +638,13 @@ internal static class MetricEngine
                     continue;
                 }
 
+                if (parsed.Language == SourceLanguage.Ruby &&
+                    parsed.Tokens[i].Text.StartsWith('@') &&
+                    fields.Contains(parsed.Tokens[i].Text))
+                {
+                    fieldAccess[methodOrdinal].Add(parsed.Tokens[i].Text);
+                }
+
                 i++;
             }
         }
@@ -621,14 +693,15 @@ internal static class MetricEngine
         start = Math.Max(0, start);
         end = Math.Min(end, parsed.Tokens.Count - 1);
 
+        KeywordProfile keywords = LanguageKeywords.For(parsed.Language);
         for (int i = start; i <= end; i++)
         {
             Token token = parsed.Tokens[i];
-            if (IsOperand(token))
+            if (IsOperand(token, keywords))
             {
                 AddCount(operands, token.Text);
             }
-            else if (IsOperator(token))
+            else if (IsOperator(token, keywords))
             {
                 AddCount(operators, token.Text);
             }
@@ -664,13 +737,17 @@ internal static class MetricEngine
 
     private static HashSet<int> FindControlBodyStarts(ParsedSource parsed, int start, int end)
     {
+        KeywordProfile keywords = LanguageKeywords.For(parsed.Language);
         HashSet<int> starts = [];
         for (int i = Math.Max(0, start); i <= end && i < parsed.Tokens.Count; i++)
         {
             string text = parsed.Tokens[i].Text;
-            if (text is "if" or "elif" or "for" or "foreach" or "while" or "switch" or "match" or "select" or "catch" or "except" or "else" or "do" or "loop")
+            if (text is "if" or "else"
+                || keywords.ElseIfKeywords.Contains(text)
+                || keywords.NestingDecisions.Contains(text)
+                || keywords.Loops.Contains(text))
             {
-                if (text == "while" && IsDoWhileCondition(parsed, i))
+                if (keywords.Loops.Contains(text) && IsDoWhileCondition(parsed, i))
                 {
                     continue;
                 }
@@ -775,6 +852,7 @@ internal static class MetricEngine
 
     private static int CountLogicalOps(ParsedSource parsed, int start, int end, int currentFunctionIndex)
     {
+        KeywordProfile keywords = LanguageKeywords.For(parsed.Language);
         int total = 0;
         for (int i = Math.Max(0, start); i <= end && i < parsed.Tokens.Count; i++)
         {
@@ -784,7 +862,7 @@ internal static class MetricEngine
                 continue;
             }
 
-            if (parsed.Tokens[i].Text is "&&" or "||" or "??" or "and" or "or")
+            if (keywords.LogicalOperators.Contains(parsed.Tokens[i].Text))
             {
                 total++;
             }
@@ -968,7 +1046,7 @@ internal static class MetricEngine
         return value > NPathCap ? NPathCap : value;
     }
 
-    private static bool IsOperand(Token token)
+    private static bool IsOperand(Token token, KeywordProfile keywords)
     {
         if (token.Kind is TokenKind.Number or TokenKind.String)
         {
@@ -980,17 +1058,19 @@ internal static class MetricEngine
             return false;
         }
 
-        return !OperatorKeywords.Contains(token.Text) || OperandKeywords.Contains(token.Text);
+        return !keywords.OperatorKeywords.Contains(token.Text) || OperandKeywords.Contains(token.Text);
     }
 
-    private static bool IsOperator(Token token)
+    private static bool IsOperator(Token token, KeywordProfile keywords)
     {
         if (token.Kind is TokenKind.Operator or TokenKind.Punctuation)
         {
             return true;
         }
 
-        return token.Kind == TokenKind.Identifier && OperatorKeywords.Contains(token.Text) && !OperandKeywords.Contains(token.Text);
+        return token.Kind == TokenKind.Identifier
+            && keywords.OperatorKeywords.Contains(token.Text)
+            && !OperandKeywords.Contains(token.Text);
     }
 
     private static void AddCount(Dictionary<string, int> counts, string key)

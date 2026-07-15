@@ -2,6 +2,50 @@ import {
     buildMintLintReportViewModel,
     mintLintConcernTone
 } from './git-guard-preflight.js';
+import { ensureMonaco } from './monaco-loader.js';
+
+const CODE_ANALYZER_SESSIONS = new WeakMap();
+
+const MONACO_LANGUAGE_BY_EXTENSION = Object.freeze({
+    '.bash': 'shell',
+    '.c': 'cpp',
+    '.cc': 'cpp',
+    '.cpp': 'cpp',
+    '.cs': 'csharp',
+    '.cshtml': 'razor',
+    '.css': 'css',
+    '.fs': 'fsharp',
+    '.go': 'go',
+    '.h': 'cpp',
+    '.hpp': 'cpp',
+    '.html': 'html',
+    '.ini': 'ini',
+    '.java': 'java',
+    '.js': 'javascript',
+    '.json': 'json',
+    '.jsx': 'javascript',
+    '.kt': 'kotlin',
+    '.kts': 'kotlin',
+    '.less': 'less',
+    '.md': 'markdown',
+    '.mjs': 'javascript',
+    '.php': 'php',
+    '.ps1': 'powershell',
+    '.py': 'python',
+    '.razor': 'razor',
+    '.rb': 'ruby',
+    '.rs': 'rust',
+    '.scss': 'scss',
+    '.sh': 'shell',
+    '.sql': 'sql',
+    '.swift': 'swift',
+    '.ts': 'typescript',
+    '.tsx': 'typescript',
+    '.vb': 'vb',
+    '.xml': 'xml',
+    '.yaml': 'yaml',
+    '.yml': 'yaml'
+});
 
 const METRIC_GUIDANCE = Object.freeze({
     lines_of_code: {
@@ -160,6 +204,15 @@ function worstMetric(metrics) {
     return [...metrics].sort((left, right) => (Number(right.score) || 0) - (Number(left.score) || 0))[0] || null;
 }
 
+export function getMonacoLanguageForPath(path) {
+    const normalized = String(path || '').trim().toLowerCase();
+    const fileName = normalized.split(/[\\/]/).pop() || '';
+    if (fileName === 'dockerfile' || fileName.endsWith('.dockerfile')) return 'dockerfile';
+    const extensionIndex = fileName.lastIndexOf('.');
+    const extension = extensionIndex >= 0 ? fileName.slice(extensionIndex) : '';
+    return MONACO_LANGUAGE_BY_EXTENSION[extension] || 'plaintext';
+}
+
 /** Builds the scan-oriented view model used by the Rules-page MintLint dashboard. */
 export function buildCodeAnalyzerDashboardModel(response = {}) {
     const report = buildMintLintReportViewModel({ report: response?.report });
@@ -176,7 +229,7 @@ export function buildCodeAnalyzerDashboardModel(response = {}) {
                     ...metric,
                     category: category.name,
                     file: file.path,
-                    snippet: worst?.snippet || ''
+                    snippet: metric.snippet || worst?.snippet || ''
                 };
             })
         }));
@@ -287,7 +340,7 @@ function renderScanBanner(documentRef, model) {
     copy.append(
         element(documentRef, 'span', 'code-analyzer-eyebrow', 'Change quality'),
         element(documentRef, 'h3', '', model.healthLabel),
-        element(documentRef, 'p', '', `${model.analyzedFileCount} staged source file${model.analyzedFileCount === 1 ? '' : 's'} analyzed. Focus the review on the highest-concern hotspots.`));
+        element(documentRef, 'p', '', `${model.analyzedFileCount} changed source file${model.analyzedFileCount === 1 ? '' : 's'} analyzed. Focus the review on the highest-concern hotspots.`));
     const gradeLine = element(documentRef, 'div', 'code-analyzer-grade-line');
     const grade = element(documentRef, 'span', 'code-analyzer-rating-badge', model.qualityGrade);
     setTone(grade, model.tone);
@@ -461,6 +514,140 @@ function renderInspector(documentRef, file, metric) {
     return inspector;
 }
 
+function disposeEvidenceEditor(session) {
+    if (!session) return;
+    session.generation += 1;
+    // editor.dispose() also disposes the model it created, so the model is never disposed
+    // here — doing so would be a double-dispose that only the try/catch was hiding.
+    try { session.decorations?.clear?.(); } catch (_) { /* no-op */ }
+    try { session.editor?.dispose?.(); } catch (_) { /* no-op */ }
+    session.decorations = null;
+    session.editor = null;
+    session.model = null;
+}
+
+export function disposeCodeAnalyzerDashboard(container) {
+    const session = container ? CODE_ANALYZER_SESSIONS.get(container) : null;
+    if (!session) return false;
+    session.disposed = true;
+    disposeEvidenceEditor(session);
+    CODE_ANALYZER_SESSIONS.delete(container);
+    return true;
+}
+
+function showEvidenceFallback(view) {
+    if (view.loading) view.loading.hidden = true;
+    if (view.host) view.host.hidden = true;
+    if (view.fallback) view.fallback.hidden = false;
+}
+
+function evidenceDecorationOptions(monaco, tone) {
+    const suffix = ['danger', 'warning', 'success'].includes(tone) ? tone : 'okay';
+    const colors = {
+        danger: '#ff6d80',
+        warning: '#f4be63',
+        success: '#68aaff',
+        okay: '#8b7cff'
+    };
+    return {
+        isWholeLine: true,
+        className: `mintlint-monaco-line mintlint-monaco-line-${suffix}`,
+        glyphMarginClassName: `mintlint-monaco-glyph mintlint-monaco-glyph-${suffix}`,
+        overviewRuler: {
+            color: colors[suffix],
+            position: monaco.editor.OverviewRulerLane?.Full ?? 7
+        },
+        minimap: {
+            color: colors[suffix],
+            position: monaco.editor.MinimapPosition?.Inline ?? 1
+        }
+    };
+}
+
+export function createCodeEvidenceEditor(monaco, host, file, metric) {
+    const source = metric.snippet || `${file.path}\n\nNo code excerpt was returned for ${metric.label}.`;
+    const language = getMonacoLanguageForPath(file.path);
+    const firstSourceLine = Number.isFinite(metric.line) && metric.line > 0 ? metric.line : 1;
+    const editor = monaco.editor.create(host, {
+        value: source,
+        language,
+        theme: 'viberails-dark',
+        ariaLabel: `Read-only MintLint code evidence for ${metric.label}`,
+        readOnly: true,
+        domReadOnly: true,
+        automaticLayout: true,
+        glyphMargin: true,
+        folding: false,
+        lineNumbers: lineNumber => String(firstSourceLine + lineNumber - 1),
+        lineNumbersMinChars: String(firstSourceLine + source.split('\n').length).length + 1,
+        minimap: { enabled: source.split('\n').length > 18, showSlider: 'mouseover' },
+        overviewRulerBorder: false,
+        renderLineHighlight: 'all',
+        renderWhitespace: 'selection',
+        scrollBeyondLastLine: false,
+        smoothScrolling: true,
+        wordWrap: 'off',
+        fontSize: 13,
+        lineHeight: 21,
+        fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
+        padding: { top: 12, bottom: 12 },
+        contextmenu: true,
+        links: false,
+        occurrencesHighlight: 'off',
+        selectionHighlight: false,
+        stickyScroll: { enabled: false }
+    });
+    const tone = mintLintConcernTone(metric.score);
+    const range = new monaco.Range(1, 1, 1, 1);
+    const decorations = editor.createDecorationsCollection?.([{
+        range,
+        options: evidenceDecorationOptions(monaco, tone)
+    }]) || null;
+    editor.setSelection?.(range);
+    editor.revealLineNearTop?.(1);
+    return { editor, model: editor.getModel?.() || null, decorations };
+}
+
+async function mountCodeEvidenceEditor(view, file, metric, session) {
+    const generation = ++session.generation;
+    let monaco;
+    try {
+        monaco = await ensureMonaco();
+    } catch (error) {
+        console.error('MintLint Monaco viewer failed to load:', error);
+        monaco = null;
+    }
+    if (session.disposed || generation !== session.generation) return;
+    if (!monaco) {
+        showEvidenceFallback(view);
+        return;
+    }
+
+    let mounted;
+    try {
+        mounted = createCodeEvidenceEditor(monaco, view.host, file, metric);
+    } catch (error) {
+        console.error('MintLint Monaco viewer could not create the editor:', error);
+        showEvidenceFallback(view);
+        return;
+    }
+    if (session.disposed || generation !== session.generation) {
+        // Superseded while Monaco was loading; editor.dispose() takes its model with it.
+        mounted.editor?.dispose?.();
+        return;
+    }
+
+    session.editor = mounted.editor;
+    session.model = mounted.model;
+    session.decorations = mounted.decorations;
+    if (view.loading) view.loading.hidden = true;
+    if (view.host) view.host.hidden = false;
+
+    globalThis.requestAnimationFrame?.(() => {
+        if (!session.disposed && generation === session.generation) mounted.editor.layout?.();
+    });
+}
+
 function renderCodeEvidence(documentRef, file, metric) {
     const panel = element(documentRef, 'article', 'code-analyzer-panel-surface code-analyzer-code-panel');
     const header = element(documentRef, 'header', 'code-analyzer-code-head');
@@ -468,16 +655,39 @@ function renderCodeEvidence(documentRef, file, metric) {
     copy.append(
         element(documentRef, 'h3', '', 'Code evidence'),
         element(documentRef, 'p', '', metric.snippet
-            ? 'The analyzer returned this source excerpt for the selected worst-offender metric.'
+            ? 'The selected metric source excerpt is shown in a read-only Monaco editor.'
             : 'The selected metric includes a location, but this scan did not return a source excerpt for it.'));
     const location = element(documentRef, 'span', 'code-analyzer-evidence-location');
     location.textContent = [metric.source || file.name, metric.line ? `L${metric.line}` : ''].filter(Boolean).join(' · ');
     header.append(copy, location);
     panel.append(header);
-    const code = element(documentRef, 'pre', 'code-analyzer-code-evidence');
-    code.textContent = metric.snippet || `${file.path}\n\nNo code snippet was returned for ${metric.label}.`;
-    panel.append(code);
-    return panel;
+
+    const editorShell = element(documentRef, 'div', 'code-analyzer-monaco-shell');
+    setTone(editorShell, mintLintConcernTone(metric.score));
+    const host = element(documentRef, 'div', 'code-analyzer-monaco-host');
+    host.setAttribute('data-code-analyzer-monaco-host', '');
+    const loading = element(documentRef, 'div', 'code-analyzer-monaco-loading');
+    const spinner = element(documentRef, 'span', 'spinner-border spinner-border-sm');
+    spinner.setAttribute('aria-hidden', 'true');
+    loading.append(spinner, element(documentRef, 'span', '', 'Loading code editor…'));
+    const fallback = element(documentRef, 'pre', 'code-analyzer-code-evidence');
+    fallback.textContent = metric.snippet || `${file.path}\n\nNo code snippet was returned for ${metric.label}.`;
+    fallback.hidden = true;
+    editorShell.append(host, loading, fallback);
+
+    const status = element(documentRef, 'footer', 'code-analyzer-editor-status');
+    const statusLeft = element(documentRef, 'span');
+    statusLeft.append(
+        element(documentRef, 'span', 'code-analyzer-editor-readonly', 'Read only'),
+        element(documentRef, 'span', '', metric.line ? `Starts at line ${metric.line}` : 'Source excerpt'));
+    const language = getMonacoLanguageForPath(file.path);
+    const statusRight = element(documentRef, 'span');
+    statusRight.append(
+        element(documentRef, 'span', '', 'UTF-8'),
+        element(documentRef, 'span', '', language));
+    status.append(statusLeft, statusRight);
+    panel.append(editorShell, status);
+    return { panel, host, loading, fallback };
 }
 
 function renderMetricsPanel(documentRef, file, selectedMetric, onSelect) {
@@ -624,9 +834,21 @@ function renderFileRail(documentRef, model, selectedFile, onSelect) {
 /** Renders the interactive MintLint dashboard and returns the number of files shown. */
 export function renderCodeAnalyzerDashboard(container, response, documentRef = globalThis.document) {
     if (!container || !documentRef?.createElement) return 0;
+    disposeCodeAnalyzerDashboard(container);
     const model = buildCodeAnalyzerDashboardModel(response);
     container.replaceChildren?.();
     if (!model.files.length) return 0;
+
+    const session = {
+        container,
+        editor: null,
+        model: null,
+        decorations: null,
+        generation: 0,
+        disposed: false
+    };
+    CODE_ANALYZER_SESSIONS.set(container, session);
+    const canMountMonaco = documentRef === globalThis.document && typeof globalThis.window !== 'undefined';
 
     container.append(renderScanBanner(documentRef, model));
     const workspace = element(documentRef, 'div', 'code-analyzer-workspace');
@@ -636,6 +858,7 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
     let rail;
 
     const paintReview = () => {
+        disposeEvidenceEditor(session);
         review.replaceChildren();
         review.append(renderFileOverview(documentRef, selectedFile));
         if (!selectedMetric) {
@@ -650,7 +873,13 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
         detail.append(
             renderMetricsPanel(documentRef, selectedFile, selectedMetric, selectMetric),
             renderInspector(documentRef, selectedFile, selectedMetric));
-        review.append(detail, renderCodeEvidence(documentRef, selectedFile, selectedMetric));
+        const evidence = renderCodeEvidence(documentRef, selectedFile, selectedMetric);
+        review.append(detail, evidence.panel);
+        if (canMountMonaco) {
+            void mountCodeEvidenceEditor(evidence, selectedFile, selectedMetric, session);
+        } else {
+            showEvidenceFallback(evidence);
+        }
     };
 
     const selectFile = file => {

@@ -392,7 +392,8 @@ function normalizeMintLintMetric(rawMetric) {
         critical: Number(metric.critical),
         higherIsBetter: metric.higherIsBetter === true,
         source: metric.source ? String(metric.source) : '',
-        line: Number.isFinite(line) && line > 0 ? line : null
+        line: Number.isFinite(line) && line > 0 ? line : null,
+        snippet: metric.snippet ? String(metric.snippet) : ''
     };
 }
 

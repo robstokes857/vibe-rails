@@ -110,6 +110,10 @@ public sealed class MintLintReportFactoryTests
         Assert.Equal("Evaluate", cyclomatic.Source);
         Assert.NotNull(cyclomatic.Line);
         Assert.Contains("Evaluate", cyclomatic.Snippet);
+        var fileCyclomatic = Assert.Single(
+            report.Files[0].Categories.SelectMany(category => category.Metrics),
+            metric => metric.Name == "cyclomatic_complexity");
+        Assert.Contains("Evaluate", fileCyclomatic.Snippet);
         // Worst offenders are sorted most concerning first.
         for (int i = 1; i < report.WorstMetrics.Count; i++)
         {

@@ -68,7 +68,8 @@ public sealed record GitStagedSnapshot(
 public sealed record GitPreflightRequest(
     string WorkingDirectory,
     VcaHookInvocation Invocation,
-    bool FullImpactScan = false);
+    bool FullImpactScan = false,
+    bool WorkingTreeChanges = false);
 
 public sealed record GitPreflightEvent(
     string RunId,
@@ -112,6 +113,13 @@ public sealed record GitPreflightRunResult(
 public interface IGitStagedSnapshotProvider
 {
     Task<GitStagedSnapshot> CaptureAsync(string workingDirectory, CancellationToken cancellationToken);
+}
+
+public interface IGitWorkingTreeSnapshotProvider
+{
+    Task<GitStagedSnapshot> CaptureWorkingTreeAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken);
 }
 
 public interface IGitPreflightStep

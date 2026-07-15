@@ -7,6 +7,22 @@ namespace VibeRails.Services
     {
         Task<List<string>> GetChangedFileAsync(CancellationToken cancellationToken);
         Task<List<string>> GetStagedFilesAsync(CancellationToken cancellationToken);
+        Task StageFileAsync(string path, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// True when staging <paramref name="path"/> would stage only the caller's own edit.
+        ///
+        /// <c>git add</c> stages a whole file, so it is only safe when the index and the
+        /// working tree already agree. Otherwise it would replace a partially staged version
+        /// of the file, or sweep unrelated unstaged edits into the index alongside the
+        /// caller's change.
+        ///
+        /// Must be called <em>before</em> the edit: afterwards the caller's own change is
+        /// itself an unstaged difference and this would always be false. Returns false for
+        /// anything that makes staging impossible — no repository, a path outside it, or Git
+        /// being unavailable — so callers can treat it as a single "safe to stage" signal.
+        /// </summary>
+        Task<bool> IsStagingSafeAsync(string path, CancellationToken cancellationToken = default);
         Task<string> GetRootPathAsync(CancellationToken cancellationToken = default);
         Task<string?> GetCurrentCommitHashAsync(CancellationToken cancellationToken = default);
         Task<string?> GetCurrentBranchAsync(CancellationToken cancellationToken = default);
@@ -91,6 +107,84 @@ namespace VibeRails.Services
                 .Select(NormalizePath)
                 .Where(f => !string.IsNullOrWhiteSpace(f))
                 .ToList();
+        }
+
+        public async Task StageFileAsync(string path, CancellationToken cancellationToken = default)
+        {
+            var (rootPath, relativePath) = await ResolveRepositoryFileAsync(path, cancellationToken);
+
+            var result = await GitProcessRunner.RunAsync(
+                ["add", "--", relativePath],
+                rootPath,
+                StatusCommandTimeout,
+                cancellationToken);
+
+            if (result.TimedOut)
+            {
+                throw new TimeoutException($"Git timed out while staging '{relativePath}'.");
+            }
+
+            if (result.ExitCode != 0)
+            {
+                var details = string.IsNullOrWhiteSpace(result.StdErr)
+                    ? "Git returned a non-zero exit code."
+                    : result.StdErr;
+                throw new InvalidOperationException($"Git could not stage '{relativePath}': {details}");
+            }
+        }
+
+        public async Task<bool> IsStagingSafeAsync(string path, CancellationToken cancellationToken = default)
+        {
+            string rootPath;
+            string relativePath;
+            try
+            {
+                (rootPath, relativePath) = await ResolveRepositoryFileAsync(path, cancellationToken);
+            }
+            catch (InvalidOperationException)
+            {
+                // No repository, or the file lives outside it. Both are ordinary setups, and
+                // both simply mean there is nothing to stage into.
+                return false;
+            }
+
+            var result = await GitProcessRunner.RunAsync(
+                ["diff", "--quiet", "--", relativePath],
+                rootPath,
+                StatusCommandTimeout,
+                cancellationToken);
+
+            // `git diff --quiet` exits 0 when the working tree matches the index and 1 when it
+            // does not. Any other code is an error, and staging through it would be a guess.
+            return !result.TimedOut && result.ExitCode == 0;
+        }
+
+        /// <summary>
+        /// Resolves <paramref name="path"/> to (repository root, repository-relative path),
+        /// rejecting anything that escapes the repository.
+        /// </summary>
+        private async Task<(string RootPath, string RelativePath)> ResolveRepositoryFileAsync(
+            string path,
+            CancellationToken cancellationToken)
+        {
+            var rootPath = await GetRootPathAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(rootPath))
+            {
+                throw new InvalidOperationException("Git could not locate the repository root.");
+            }
+
+            rootPath = Path.GetFullPath(rootPath);
+            var fullPath = Path.GetFullPath(path, rootPath);
+            var relativePath = Path.GetRelativePath(rootPath, fullPath);
+            if (Path.IsPathRooted(relativePath)
+                || relativePath.Equals("..", StringComparison.Ordinal)
+                || relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                || relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Cannot stage a file outside the repository.");
+            }
+
+            return (rootPath, relativePath);
         }
 
         public async Task<string?> GetCurrentCommitHashAsync(CancellationToken cancellationToken = default)

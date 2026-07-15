@@ -1,5 +1,8 @@
 import { VcaConsole, copyVcaConsoleText } from './vca-console.js';
-import { renderCodeAnalyzerDashboard } from './code-analyzer-dashboard.js';
+import {
+    disposeCodeAnalyzerDashboard,
+    renderCodeAnalyzerDashboard
+} from './code-analyzer-dashboard.js';
 import {
     GIT_PREFLIGHT_STEPS,
     GitPreflightRunner,
@@ -375,8 +378,8 @@ export class RuleController {
         this.app.bindAction(root, '[data-action="copy-fix-brief"]', () => this.copyVcaFixBrief());
         this.vcaConsole = new VcaConsole(root.querySelector('[data-vca-console]'));
         this.codeAnalyzerConsole = new VcaConsole(root.querySelector('[data-code-analyzer-console]'), {
-            defaultMessage: 'Code analyzer ready.\nStage source files, then run the analyzer.',
-            runningMessage: 'Analyzing staged source files…',
+            defaultMessage: 'Code analyzer ready.\nChange a supported source file, then run the analyzer.',
+            runningMessage: 'Analyzing working-tree source changes…',
             failureMessage: 'The code analysis could not be completed.',
             failureMeta: 'Code analysis failed'
         });
@@ -419,6 +422,7 @@ export class RuleController {
     unload() {
         this.preflightRunner?.cancel();
         this.preflightRunner = null;
+        disposeCodeAnalyzerDashboard(this.viewRoot?.querySelector?.('[data-code-analyzer-report]'));
         this.viewRoot = null;
         this.vcaConsole = null;
         this.codeAnalyzerConsole = null;
@@ -689,6 +693,7 @@ export class RuleController {
         const empty = this.query('[data-code-analyzer-empty]');
         const reportContainer = this.query('[data-code-analyzer-report]');
         if (!response) {
+            disposeCodeAnalyzerDashboard(reportContainer);
             if (reportContainer) reportContainer.hidden = true;
             if (empty) empty.hidden = false;
             return;
@@ -701,11 +706,11 @@ export class RuleController {
                 empty.hidden = fileCount > 0;
                 const title = empty.querySelector('strong');
                 const message = empty.querySelector('p');
-                if (title) title.textContent = fileCount > 0 ? '' : 'No staged source files to analyze';
+                if (title) title.textContent = fileCount > 0 ? '' : 'No changed source files to analyze';
                 if (message) {
                     message.textContent = fileCount > 0
                         ? ''
-                        : 'Stage a supported source file, then run MintLint again.';
+                        : 'Change a supported source file, then run MintLint again.';
                 }
             }
         }
@@ -1062,6 +1067,7 @@ export class RuleController {
     clearCodeAnalyzerOutput() {
         if (this.codeAnalyzerConsole?.clear()) {
             const report = this.query('[data-code-analyzer-report]');
+            disposeCodeAnalyzerDashboard(report);
             if (report) report.hidden = true;
             const empty = this.query('[data-code-analyzer-empty]');
             if (empty) empty.hidden = false;

@@ -8,7 +8,11 @@ public static class GitPreflightServiceCollectionExtensions
     public static IServiceCollection AddGitPreflight(this IServiceCollection services)
     {
         services.AddSingleton<IVcaHookValidationService, VcaRulesHookValidationService>();
-        services.AddSingleton<IGitStagedSnapshotProvider, GitStagedSnapshotProvider>();
+        services.AddSingleton<GitStagedSnapshotProvider>();
+        services.AddSingleton<IGitStagedSnapshotProvider>(provider =>
+            provider.GetRequiredService<GitStagedSnapshotProvider>());
+        services.AddSingleton<IGitWorkingTreeSnapshotProvider>(provider =>
+            provider.GetRequiredService<GitStagedSnapshotProvider>());
         services.AddSingleton<IGitPreflightStep, VcaPreflightStep>();
         services.AddSingleton<IGitPreflightStep, MintLintPreflightStep>();
         services.AddSingleton<IGitPreflightStep, AutomatedWorkflowsPreflightStep>();

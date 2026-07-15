@@ -10,5 +10,9 @@ internal enum SourceLanguage
     Rust,
     C,
     Java,
-    Cpp
+    Cpp,
+    Php,
+    Ruby,
+    Bash,
+    PowerShell
 }

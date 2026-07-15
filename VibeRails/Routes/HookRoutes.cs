@@ -260,11 +260,12 @@ public static class HookRoutes
                 Validation: BuildVcaValidationOverview(validationSummary)));
         }).WithName("PreviewVcaHook");
 
-        // POST /api/v1/code-analyzer - Run the existing staged-source analyzer by itself.
+        // POST /api/v1/code-analyzer - Analyze all current working-tree changes by itself.
+        // Git Guard continues to use IGitStagedSnapshotProvider and the exact staged index.
         // ?fullScan=true widens the impact scan from tracked files to the whole directory.
         app.MapPost("/api/v1/code-analyzer", async (
             bool? fullScan,
-            IGitStagedSnapshotProvider snapshotProvider,
+            IGitWorkingTreeSnapshotProvider snapshotProvider,
             IEnumerable<IGitPreflightStep> preflightSteps,
             IGitService gitService,
             CancellationToken cancellationToken) =>
@@ -289,11 +290,15 @@ public static class HookRoutes
             }
 
             var startedUtc = DateTime.UtcNow;
-            var snapshot = await snapshotProvider.CaptureAsync(rootPath, cancellationToken);
+            var snapshot = await snapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken);
             var result = await analyzer.ExecuteAsync(
                 new GitPreflightStepContext(
                     Guid.NewGuid().ToString("N"),
-                    CreatePreCommitRequest(rootPath) with { FullImpactScan = fullScan == true },
+                    CreatePreCommitRequest(rootPath) with
+                    {
+                        FullImpactScan = fullScan == true,
+                        WorkingTreeChanges = true
+                    },
                     snapshot,
                     (_, _, _) => ValueTask.CompletedTask),
                 cancellationToken);

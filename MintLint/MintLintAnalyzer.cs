@@ -6,8 +6,8 @@ namespace MintLint;
 
 /// <summary>
 /// Entry point for computing source-code metrics. Supports C#, JavaScript/TypeScript,
-/// Python, Go, Rust, C, Java, and C++; the target language is selected from each file's
-/// extension.
+/// Python, Go, Rust, C, Java, C++, PHP, Ruby, Bash, and PowerShell; the target language
+/// is selected from each file's extension.
 /// </summary>
 public static class MintLintAnalyzer
 {

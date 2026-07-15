@@ -140,6 +140,217 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
         Assert.Equal("# Staged instructions\n", agent.Content);
     }
 
+    [Fact]
+    public async Task CaptureWorkingTreeAsync_IncludesUnstagedAndUntrackedFiles()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            "class UnstagedOnly { }\n",
+            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "untracked.cs"),
+            "class Untracked { }\n",
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureWorkingTreeAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, snapshot.Files.Count);
+        var modified = Assert.Single(snapshot.Files, file => file.RelativePath == "tracked.cs");
+        Assert.Equal(GitStagedChangeKind.Modified, modified.ChangeKind);
+        Assert.Equal("class UnstagedOnly { }\n", modified.Content);
+        Assert.Equal("class Original { }\n", modified.PreviousContent);
+
+        var untracked = Assert.Single(snapshot.Files, file => file.RelativePath == "untracked.cs");
+        Assert.Equal(GitStagedChangeKind.Added, untracked.ChangeKind);
+        Assert.True(untracked.ExistsInIndex);
+        Assert.Equal("class Untracked { }\n", untracked.Content);
+        Assert.Null(untracked.PreviousContent);
+        Assert.DoesNotContain("untracked.cs", snapshot.TrackedFiles!);
+    }
+
+    [Fact]
+    public async Task CaptureWorkingTreeAsync_UsesLatestContentWhenIndexAlsoHasChanges()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            "class Staged { }\n",
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", "tracked.cs");
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            "class LatestWorkingTree { }\n",
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureWorkingTreeAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        var changed = Assert.Single(snapshot.Files);
+        Assert.Equal("class LatestWorkingTree { }\n", changed.Content);
+        Assert.Equal("class Original { }\n", changed.PreviousContent);
+    }
+
+    [Fact]
+    public async Task CaptureWorkingTreeAsync_AnalyzesAFileRecreatedAfterAStagedDeletion()
+    {
+        await GitAsync("rm", "tracked.cs");
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            "class Recreated { }\n",
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureWorkingTreeAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        var changed = Assert.Single(snapshot.Files);
+        Assert.Equal(GitStagedChangeKind.Modified, changed.ChangeKind);
+        Assert.True(changed.ExistsInIndex);
+        Assert.Equal("class Recreated { }\n", changed.Content);
+        Assert.Equal("class Original { }\n", changed.PreviousContent);
+    }
+
+    [Fact]
+    public async Task CaptureWorkingTreeAsync_DoesNotFollowASymlinkOutOfTheRepository()
+    {
+        // The staged snapshot reads blobs from the object store, where a symlink is stored as
+        // its link text. The working-tree snapshot reads the filesystem, where an unguarded
+        // read would follow the link and hand the target's contents back to the client.
+        var secretDirectory = Path.Combine(Path.GetTempPath(), $"git_preflight_secret_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(secretDirectory);
+        var secret = Path.Combine(secretDirectory, "id_rsa");
+        await File.WriteAllTextAsync(
+            secret,
+            "class TotallyPrivateKeyMaterial { }\n",
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            var link = Path.Combine(_repository, "leak.cs");
+            try
+            {
+                File.CreateSymbolicLink(link, secret);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Windows needs Developer Mode or elevation to create symlinks.
+                Assert.Skip("This platform does not permit creating symbolic links.");
+                return;
+            }
+
+            var snapshot = await new GitStagedSnapshotProvider().CaptureWorkingTreeAsync(
+                _repository,
+                TestContext.Current.CancellationToken);
+
+            var leaked = snapshot.Files.SingleOrDefault(file => file.RelativePath == "leak.cs");
+            if (leaked is not null)
+            {
+                Assert.Null(leaked.Content);
+                Assert.False(leaked.ExistsInIndex);
+            }
+
+            Assert.DoesNotContain(
+                snapshot.Files,
+                file => file.Content?.Contains("TotallyPrivateKeyMaterial", StringComparison.Ordinal) == true);
+        }
+        finally
+        {
+            Directory.Delete(secretDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CaptureWorkingTreeAsync_DoesNotReadThroughAJunctionedDirectory()
+    {
+        // Git lists `linkdir/leak.cs` even though `linkdir` is a junction out of the
+        // repository, and that file is not itself a reparse point — so guarding only the leaf
+        // would still read it. Junctions also need no elevation, unlike symlinks.
+        var secretDirectory = Path.Combine(Path.GetTempPath(), $"git_preflight_secret_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(secretDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(secretDirectory, "leak.cs"),
+            "class TotallyPrivateKeyMaterial { }\n",
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            if (!TryCreateJunction(Path.Combine(_repository, "linkdir"), secretDirectory))
+            {
+                Assert.Skip("This platform does not support directory junctions.");
+                return;
+            }
+
+            var snapshot = await new GitStagedSnapshotProvider().CaptureWorkingTreeAsync(
+                _repository,
+                TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain(
+                snapshot.Files,
+                file => file.Content?.Contains("TotallyPrivateKeyMaterial", StringComparison.Ordinal) == true);
+        }
+        finally
+        {
+            var link = Path.Combine(_repository, "linkdir");
+            if (Directory.Exists(link))
+            {
+                Directory.Delete(link);
+            }
+
+            Directory.Delete(secretDirectory, recursive: true);
+        }
+    }
+
+    private static bool TryCreateJunction(string linkPath, string targetPath)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath },
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        });
+
+        process!.WaitForExit();
+        return process.ExitCode == 0 && Directory.Exists(linkPath);
+    }
+
+    [Fact]
+    public async Task CaptureWorkingTreeAsync_ReadsUnstagedAndUntrackedChanges()
+    {
+        // The whole point of the working-tree snapshot: unlike CaptureAsync, it sees edits the
+        // user has not staged, plus files Git does not track at all.
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            "class Unstaged { }\n",
+            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "untracked.cs"),
+            "class Untracked { }\n",
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureWorkingTreeAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        var unstaged = Assert.Single(snapshot.Files, file => file.RelativePath == "tracked.cs");
+        Assert.Equal("class Unstaged { }\n", unstaged.Content);
+        Assert.Equal("class Original { }\n", unstaged.PreviousContent);
+
+        var untracked = Assert.Single(snapshot.Files, file => file.RelativePath == "untracked.cs");
+        Assert.Equal("class Untracked { }\n", untracked.Content);
+        Assert.Equal(GitStagedChangeKind.Added, untracked.ChangeKind);
+        Assert.Null(untracked.PreviousContent);
+    }
+
     private async Task GitAsync(params string[] arguments)
     {
         using var process = new Process

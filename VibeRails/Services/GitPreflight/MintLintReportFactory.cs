@@ -46,7 +46,8 @@ public static class MintLintReportFactory
                         metric.Critical,
                         metric.HigherIsBetter,
                         metric.Source,
-                        metric.Line));
+                        metric.Line,
+                        ExtractSnippet(contentByFile, file.File, metric.Line)));
 
                     // Track the single worst measurement of each metric across the scan.
                     if (!worst.TryGetValue(metric.Name, out var current)

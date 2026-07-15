@@ -39,10 +39,11 @@ public sealed class MintLintPreflightStep : IGitPreflightStep
             .Select(file => new SourceInput(file.RelativePath, file.Content!))
             .ToList();
         var skippedCount = context.Snapshot.Files.Count - candidates.Count;
+        var sourceScope = context.Request.WorkingTreeChanges ? "changed" : "staged";
 
         if (candidates.Count == 0)
         {
-            var skipped = $"No supported staged source files to scan ({skippedCount} skipped).";
+            var skipped = $"No supported {sourceScope} source files to scan ({skippedCount} skipped).";
             await context.WriteOutputAsync(skipped, new Dictionary<string, string>
             {
                 ["supportedFileCount"] = "0",
@@ -113,7 +114,7 @@ public sealed class MintLintPreflightStep : IGitPreflightStep
 
         var output = new List<string>
         {
-            $"Scanned {scan.Files.Count} supported staged source file(s); skipped {skippedCount}.",
+            $"Scanned {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}.",
             $"Overall concern: {scan.Overall.Score:0.0}/100 · {scan.Overall.Rating}"
         };
 

@@ -1,12 +1,23 @@
 using System.Diagnostics;
 using System.Text;
+using Serilog;
 
 namespace VibeRails.Services.GitPreflight;
 
-public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider
+public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGitWorkingTreeSnapshotProvider
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(15);
     private const int MaximumTextFileBytes = 5 * 1024 * 1024;
+
+    /// <summary>
+    /// Ceiling on the file content one working-tree snapshot will hold in memory at once.
+    ///
+    /// The staged snapshot is implicitly bounded by what the user chose to stage. The
+    /// working-tree snapshot has no such limit — it reads every changed and untracked file —
+    /// so without a budget a repository carrying a few hundred large unignored files would
+    /// allocate all of them simultaneously.
+    /// </summary>
+    private const long MaximumSnapshotBytes = 64L * 1024 * 1024;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
         : StringComparer.Ordinal;
@@ -81,6 +92,299 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider
         return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles);
     }
 
+    /// <summary>
+    /// Captures the current working tree relative to HEAD for the interactive code analyzer.
+    /// This deliberately does not replace <see cref="CaptureAsync"/>: commit preflight must
+    /// continue to validate the exact staged index snapshot.
+    /// </summary>
+    public async Task<GitStagedSnapshot> CaptureWorkingTreeAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        var rootResult = await RunTextGitAsync(
+            workingDirectory,
+            ["rev-parse", "--show-toplevel"],
+            cancellationToken);
+        EnsureSucceeded(rootResult, "locate the Git repository", workingDirectory);
+        var repositoryPath = Path.GetFullPath(rootResult.StdOut.Trim());
+
+        var trackedFiles = await ReadTrackedFilesAsync(repositoryPath, cancellationToken);
+        var hasHead = await HasHeadAsync(repositoryPath, cancellationToken);
+        var changedEntries = hasHead
+            ? await ReadWorkingTreeStatusAsync(repositoryPath, cancellationToken)
+            : trackedFiles.Select(path => new StagedStatusEntry(
+                path,
+                GitStagedChangeKind.Added,
+                PreviousRelativePath: null)).ToList();
+        var changedLines = hasHead
+            ? await ReadWorkingTreeChangedLineCountsAsync(repositoryPath, cancellationToken)
+            : new Dictionary<string, int?>(PathComparer);
+
+        var untrackedResult = await RunTextGitAsync(
+            repositoryPath,
+            ["ls-files", "--others", "--exclude-standard", "-z"],
+            cancellationToken);
+        EnsureSucceeded(untrackedResult, "read untracked files", repositoryPath);
+
+        var entryIndexByPath = new Dictionary<string, int>(PathComparer);
+        for (var i = 0; i < changedEntries.Count; i++)
+        {
+            entryIndexByPath[changedEntries[i].RelativePath] = i;
+        }
+
+        foreach (var path in SplitNull(untrackedResult.StdOut)
+            .Select(NormalizePath)
+            .Where(path => path.Length > 0))
+        {
+            var existing = entryIndexByPath.TryGetValue(path, out var existingIndex);
+            var entry = new StagedStatusEntry(
+                path,
+                existing && changedEntries[existingIndex].Kind == GitStagedChangeKind.Deleted
+                    ? GitStagedChangeKind.Modified
+                    : GitStagedChangeKind.Added,
+                PreviousRelativePath: null);
+            if (existing)
+            {
+                // A path can be staged for deletion and then recreated as an untracked
+                // working-tree file. Prefer the file that actually exists and analyze it.
+                changedEntries[existingIndex] = entry;
+            }
+            else
+            {
+                entryIndexByPath[path] = changedEntries.Count;
+                changedEntries.Add(entry);
+            }
+        }
+
+        var files = new List<GitStagedFileSnapshot>(changedEntries.Count);
+        var pathGuard = new WorkingTreePathGuard(repositoryPath);
+        var contentBytesRead = 0L;
+        var skippedForBudget = 0;
+        foreach (var entry in changedEntries
+            .GroupBy(item => item.RelativePath, PathComparer)
+            .Select(group => group.First())
+            .OrderBy(item => item.RelativePath, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var fullPath = ToFullPath(repositoryPath, entry.RelativePath);
+            var existsInWorkingTree = entry.Kind != GitStagedChangeKind.Deleted
+                && pathGuard.IsReadableRegularFile(fullPath);
+            string? content = null;
+            var isBinary = false;
+            if (existsInWorkingTree)
+            {
+                var length = new FileInfo(fullPath).Length;
+                if (contentBytesRead + length > MaximumSnapshotBytes)
+                {
+                    // Out of budget: mark it unanalyzable, the same way an oversized file is
+                    // reported, rather than reading it and blowing the ceiling.
+                    skippedForBudget++;
+                    isBinary = true;
+                }
+                else
+                {
+                    (content, isBinary) = await ReadWorkingTreeContentAsync(fullPath, cancellationToken);
+                    contentBytesRead += length;
+                }
+            }
+
+            string? previousContent = null;
+            if (!isBinary
+                && hasHead
+                && entry.Kind is GitStagedChangeKind.Modified or GitStagedChangeKind.Renamed)
+            {
+                var previousPath = entry.PreviousRelativePath ?? entry.RelativePath;
+                var headBlob = await TryReadHeadBlobAsync(repositoryPath, previousPath, cancellationToken);
+                if (headBlob != null)
+                {
+                    previousContent = DecodeText(headBlob, out var previousBinary);
+                    if (previousBinary)
+                    {
+                        previousContent = null;
+                    }
+                }
+            }
+
+            // Untracked files have no diff against HEAD, so every line in them is new.
+            if (!changedLines.TryGetValue(entry.RelativePath, out var lineCount) && content != null)
+            {
+                lineCount = CountLines(content);
+            }
+
+            // ExistsInIndex is the legacy snapshot field consumed by preflight steps. For
+            // this working-tree snapshot it means a current, analyzable file exists; this
+            // is intentionally true for untracked files and false for deleted paths.
+            files.Add(new GitStagedFileSnapshot(
+                entry.RelativePath,
+                fullPath,
+                entry.Kind,
+                existsInWorkingTree,
+                isBinary,
+                lineCount,
+                content,
+                entry.PreviousRelativePath,
+                previousContent));
+        }
+
+        if (skippedForBudget > 0)
+        {
+            // Never let a bounded scan read as a complete one.
+            Log.Warning(
+                "[GitPreflight] Working-tree snapshot reached its {BudgetBytes} byte content budget; "
+                + "{SkippedCount} file(s) were left unanalyzed.",
+                MaximumSnapshotBytes,
+                skippedForBudget);
+        }
+
+        var agentFiles = await ReadAgentFilesAsync(repositoryPath, trackedFiles, cancellationToken);
+        return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles);
+    }
+
+    private static async Task<bool> HasHeadAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunTextGitAsync(
+            repositoryPath,
+            ["rev-parse", "--verify", "HEAD"],
+            cancellationToken);
+        return result.ExitCode == 0 && !result.TimedOut;
+    }
+
+    private static async Task<List<StagedStatusEntry>> ReadWorkingTreeStatusAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunTextGitAsync(
+            repositoryPath,
+            ["--no-pager", "diff", "HEAD", "--name-status", "-z", "--find-renames"],
+            cancellationToken);
+        EnsureSucceeded(result, "read working tree file status", repositoryPath);
+        return ParseNameStatus(result.StdOut);
+    }
+
+    private static async Task<Dictionary<string, int?>> ReadWorkingTreeChangedLineCountsAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunTextGitAsync(
+            repositoryPath,
+            ["--no-pager", "diff", "HEAD", "--numstat", "-z"],
+            cancellationToken);
+        EnsureSucceeded(result, "count working tree changed lines", repositoryPath);
+        return ParseChangedLineCounts(result.StdOut);
+    }
+
+    /// <summary>
+    /// Decides which working-tree paths are safe to read.
+    ///
+    /// The staged snapshot reads blobs out of the object store, where a symlink is stored as
+    /// its link text and can never leak its target. This snapshot reads the filesystem
+    /// instead, and <see cref="File.ReadAllBytesAsync(string, CancellationToken)"/> follows
+    /// links — so an untracked <c>leak.cs</c> pointing at <c>~/.ssh/id_rsa</c> would be read
+    /// and handed back to the client as a source excerpt.
+    ///
+    /// Checking the file alone is not enough: Git happily lists <c>linkdir/leak.cs</c> where
+    /// <c>linkdir</c> is a junction out of the repository, and that file is not itself a
+    /// reparse point. So every directory between the file and the repository root is checked
+    /// too, and the walk stops at the root — a repository that legitimately sits under a
+    /// junction stays readable.
+    /// </summary>
+    private sealed class WorkingTreePathGuard(string repositoryPath)
+    {
+        private readonly string _repositoryPath = Normalize(repositoryPath);
+        private readonly Dictionary<string, bool> _directoryIsContained = new(PathComparer);
+
+        public bool IsReadableRegularFile(string fullPath)
+        {
+            FileInfo info;
+            try
+            {
+                info = new FileInfo(fullPath);
+                if (!info.Exists
+                    || info.LinkTarget is not null
+                    || info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return false;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+
+            return IsContained(Path.GetDirectoryName(fullPath));
+        }
+
+        private bool IsContained(string? directory)
+        {
+            if (string.IsNullOrEmpty(directory))
+            {
+                // Walked past the drive root without reaching the repository.
+                return false;
+            }
+
+            var normalized = Normalize(directory);
+            if (_directoryIsContained.TryGetValue(normalized, out var cached))
+            {
+                return cached;
+            }
+
+            bool contained;
+            if (PathComparer.Equals(normalized, _repositoryPath))
+            {
+                contained = true;
+            }
+            else
+            {
+                try
+                {
+                    var info = new DirectoryInfo(normalized);
+                    contained = info.Exists
+                        && info.LinkTarget is null
+                        && !info.Attributes.HasFlag(FileAttributes.ReparsePoint)
+                        && IsContained(Path.GetDirectoryName(normalized));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    contained = false;
+                }
+            }
+
+            _directoryIsContained[normalized] = contained;
+            return contained;
+        }
+
+        private static string Normalize(string path) =>
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+    }
+
+    private static async Task<(string? Content, bool IsBinary)> ReadWorkingTreeContentAsync(
+        string fullPath,
+        CancellationToken cancellationToken)
+    {
+        var info = new FileInfo(fullPath);
+        if (info.Length > MaximumTextFileBytes)
+        {
+            return (null, true);
+        }
+
+        var bytes = await File.ReadAllBytesAsync(fullPath, cancellationToken);
+        var content = DecodeText(bytes, out var isBinary);
+        return (content, isBinary);
+    }
+
+    private static int CountLines(string content)
+    {
+        if (content.Length == 0)
+        {
+            return 0;
+        }
+
+        var count = content.Count(character => character == '\n');
+        return content[^1] == '\n' ? count : checked(count + 1);
+    }
+
     private static async Task<IReadOnlyList<string>> ReadTrackedFilesAsync(
         string repositoryPath,
         CancellationToken cancellationToken)
@@ -131,8 +435,13 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider
             cancellationToken);
         EnsureSucceeded(result, "count staged changed lines", repositoryPath);
 
+        return ParseChangedLineCounts(result.StdOut);
+    }
+
+    private static Dictionary<string, int?> ParseChangedLineCounts(string output)
+    {
         var counts = new Dictionary<string, int?>(PathComparer);
-        var records = SplitNull(result.StdOut).ToList();
+        var records = SplitNull(output).ToList();
         for (var i = 0; i < records.Count; i++)
         {
             var record = records[i];
