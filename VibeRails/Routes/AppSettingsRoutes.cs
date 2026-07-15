@@ -1,4 +1,5 @@
 using TokenSaver;
+using TokenSaver.Minify;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Utils;
@@ -55,6 +56,12 @@ public static class AppSettingsRoutes
                 settings.CodexLlmProxyMode = CodexLlmProxySettings.NormalizeMode(settingsDto.CodexLlmProxyMode);
             if (settingsDto.ClaudeLlmProxyEnabled.HasValue)
                 settings.ClaudeLlmProxyEnabled = settingsDto.ClaudeLlmProxyEnabled.Value;
+            // Normalize on write so settings.json only ever carries canonical level strings.
+            // "custom" round-trips (it's what Normalize maps unknowns to), preserving the
+            // hand-edited escape hatch; the UI never fabricates it.
+            if (settingsDto.TokenSaverLevel is not null)
+                settings.TokenSaverLevel = TokenSaverPresets.ToSettingsString(
+                    TokenSaverPresets.Normalize(settingsDto.TokenSaverLevel));
 
             // Save back to settings.json
             Config.Save(settings);
@@ -101,6 +108,7 @@ public static class AppSettingsRoutes
             settings.CodexLlmProxyEnabled,
             CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
             settings.ClaudeLlmProxyEnabled,
+            TokenSaverPresets.ToSettingsString(TokenSaverPresets.Normalize(settings.TokenSaverLevel)),
             GetMachineName()
         );
     }

@@ -518,13 +518,14 @@ export class EnvironmentController {
         const s = settings || {};
         const args = [];
         const model = this.normalizeCodexModel(s.model);
+        const effort = this.normalizeCodexEffort(model, s.effort);
 
         if (model) {
             args.push('--model', model);
         }
 
-        if (s.effort) {
-            args.push('-c', `model_reasoning_effort=${s.effort}`);
+        if (effort) {
+            args.push('-c', `model_reasoning_effort=${effort}`);
         }
 
         // YOLO Mode for Codex: bypass approvals and sandboxing entirely.
@@ -641,8 +642,25 @@ export class EnvironmentController {
     }
 
     bindCliSettingsInteractions(cli) {
-        // Permission posture is a single YOLO toggle per CLI, so no cross-control wiring
-        // remains. Kept as a hook in case future settings need interactions.
+        if ((cli || '').toLowerCase() !== 'codex') return;
+
+        const modelSelect = document.getElementById('codex-model');
+        const effortSelect = document.getElementById('codex-effort');
+        const maxOption = effortSelect?.querySelector('option[value="max"]');
+        if (!modelSelect || !effortSelect || !maxOption) return;
+
+        const syncEffortForModel = () => {
+            const model = this.normalizeCodexModel(modelSelect.value);
+            const supportsMax = this.codexModelSupportsMaxEffort(model);
+            maxOption.disabled = !supportsMax;
+
+            if (!supportsMax && effortSelect.value === 'max') {
+                effortSelect.value = this.normalizeCodexEffort(model, effortSelect.value);
+            }
+        };
+
+        modelSelect.addEventListener('change', syncEffortForModel);
+        syncEffortForModel();
     }
 
     mergeCodexSettingsFromCustomArgs(settings, customArgs) {
@@ -763,6 +781,18 @@ export class EnvironmentController {
 
     normalizeCodexModel(model) {
         return (model || '').trim();
+    }
+
+    codexModelSupportsMaxEffort(model) {
+        return this.normalizeCodexModel(model).toLowerCase() !== 'gpt-5.5';
+    }
+
+    normalizeCodexEffort(model, effort) {
+        const normalizedEffort = (effort || '').trim();
+        if (!this.codexModelSupportsMaxEffort(model) && normalizedEffort.toLowerCase() === 'max') {
+            return 'xhigh';
+        }
+        return normalizedEffort;
     }
 
     renderCodexModelOptions(selectedModel) {
@@ -1129,12 +1159,13 @@ export class EnvironmentController {
             };
         }
         if (cliLower === 'codex') {
+            const model = this.normalizeCodexModel(document.getElementById('codex-model').value);
             return {
                 yolo: document.getElementById('codex-yolo').checked,
                 noAltScreen: document.getElementById('codex-no-alt-screen').checked,
                 prompt: document.getElementById('codex-prompt').value,
-                model: this.normalizeCodexModel(document.getElementById('codex-model').value),
-                effort: document.getElementById('codex-effort').value,
+                model,
+                effort: this.normalizeCodexEffort(model, document.getElementById('codex-effort').value),
                 fastMode: document.getElementById('codex-fast-mode').checked
             };
         }
@@ -1213,7 +1244,8 @@ export class EnvironmentController {
         if (cliLower === 'codex') {
             const promptValue = this.app.escapeHtml(s.prompt || '');
             const codexModel = this.normalizeCodexModel(s.model);
-            const codexEffort = s.effort || '';
+            const codexEffort = this.normalizeCodexEffort(codexModel, s.effort);
+            const codexMaxEffortDisabled = !this.codexModelSupportsMaxEffort(codexModel);
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Codex CLI Settings</h6>
@@ -1238,7 +1270,7 @@ export class EnvironmentController {
                         <option value="medium" ${codexEffort === 'medium' ? 'selected' : ''}>Medium</option>
                         <option value="high" ${codexEffort === 'high' ? 'selected' : ''}>High</option>
                         <option value="xhigh" ${codexEffort === 'xhigh' ? 'selected' : ''}>XHigh</option>
-                        <option value="max" ${codexEffort === 'max' ? 'selected' : ''}>Max</option>
+                        <option value="max" ${codexEffort === 'max' ? 'selected' : ''} ${codexMaxEffortDisabled ? 'disabled' : ''}>Max</option>
                         <option value="ultra" ${codexEffort === 'ultra' ? 'selected' : ''}>Ultra</option>
                     </select>
                     <small class="form-text text-muted">Passed as <code>-c model_reasoning_effort=&lt;level&gt;</code></small>

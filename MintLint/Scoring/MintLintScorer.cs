@@ -58,7 +58,19 @@ public static class MintLintScorer
             sum += score.Overall.Score;
         }
 
-        scored.Sort(static (left, right) => right.Overall.Score.CompareTo(left.Overall.Score));
+        scored.Sort(static (left, right) =>
+        {
+            int comparison = right.Overall.Score.CompareTo(left.Overall.Score);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+
+            comparison = string.Compare(left.File, right.File, StringComparison.OrdinalIgnoreCase);
+            return comparison != 0
+                ? comparison
+                : string.Compare(left.File, right.File, StringComparison.Ordinal);
+        });
 
         double mean = scored.Count == 0 ? 0 : Math.Round(sum / scored.Count, 1);
         return new ScanResult(scored, new OverallScore(mean, RatingFor(mean)));

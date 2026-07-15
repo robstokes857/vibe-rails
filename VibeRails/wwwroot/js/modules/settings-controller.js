@@ -25,6 +25,7 @@ export class SettingsController {
             codexLlmProxyEnabled: false,
             codexLlmProxyMode: 'subscription',
             claudeLlmProxyEnabled: false,
+            tokenSaverLevel: 'safest',
             machineName: ''
         };
         try {
@@ -52,6 +53,7 @@ export class SettingsController {
             const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
             const codexLlmProxyModeApi = root.querySelector('#setting-codex-llm-proxy-mode-api');
             const claudeLlmProxyEnabledToggle = root.querySelector('#setting-claude-llm-proxy-enabled');
+            const tokenSaverLevelSelect = root.querySelector('#setting-token-saver-level');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
@@ -100,6 +102,10 @@ export class SettingsController {
             if (claudeLlmProxyEnabledToggle) {
                 claudeLlmProxyEnabledToggle.checked = settings.claudeLlmProxyEnabled === true;
             }
+            if (tokenSaverLevelSelect) {
+                this._setTokenSaverLevel(tokenSaverLevelSelect, settings.tokenSaverLevel);
+                this._initTokenSaverLevelSelect(tokenSaverLevelSelect);
+            }
 
             const form = root.querySelector('#app-settings-form');
             if (form) {
@@ -129,7 +135,8 @@ export class SettingsController {
                             computerNameInput?.value || '',
                             codexLlmProxyEnabledToggle?.checked || false,
                             this._getCodexLlmProxyMode(root),
-                            claudeLlmProxyEnabledToggle?.checked || false
+                            claudeLlmProxyEnabledToggle?.checked || false,
+                            tokenSaverLevelSelect?.value || 'safest'
                         );
                         if (savedSettings) {
                             this._applySavedSettingsToControls(root, savedSettings);
@@ -149,7 +156,7 @@ export class SettingsController {
         content.appendChild(fragment);
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, tokenSaverLevel) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -159,7 +166,8 @@ export class SettingsController {
                 computerName: computerName,
                 codexLlmProxyEnabled: codexLlmProxyEnabled,
                 codexLlmProxyMode: codexLlmProxyMode,
-                claudeLlmProxyEnabled: claudeLlmProxyEnabled
+                claudeLlmProxyEnabled: claudeLlmProxyEnabled,
+                tokenSaverLevel: tokenSaverLevel
             });
             this.app.setAppSettings(savedSettings);
             this.app.showToast('Settings', 'Settings saved successfully', 'success');
@@ -232,7 +240,8 @@ export class SettingsController {
             '#setting-computer-name',
             '#setting-codex-llm-proxy-enabled',
             'input[name="setting-codex-llm-proxy-mode"]',
-            '#setting-claude-llm-proxy-enabled'
+            '#setting-claude-llm-proxy-enabled',
+            '#setting-token-saver-level'
         ].join(',');
     }
 
@@ -247,7 +256,8 @@ export class SettingsController {
             computerName: valueOf('#setting-computer-name'),
             codexLlmProxyEnabled: isChecked('#setting-codex-llm-proxy-enabled'),
             codexLlmProxyMode: this._getCodexLlmProxyMode(root),
-            claudeLlmProxyEnabled: isChecked('#setting-claude-llm-proxy-enabled')
+            claudeLlmProxyEnabled: isChecked('#setting-claude-llm-proxy-enabled'),
+            tokenSaverLevel: valueOf('#setting-token-saver-level')
         });
     }
 
@@ -313,6 +323,40 @@ export class SettingsController {
         if (codexLlmProxyModeSubscription) codexLlmProxyModeSubscription.checked = codexLlmProxyMode === 'subscription';
         if (codexLlmProxyModeApi) codexLlmProxyModeApi.checked = codexLlmProxyMode === 'api';
         if (claudeLlmProxyEnabledToggle) claudeLlmProxyEnabledToggle.checked = settings.claudeLlmProxyEnabled === true;
+
+        const tokenSaverLevelSelect = root.querySelector('#setting-token-saver-level');
+        if (tokenSaverLevelSelect) this._setTokenSaverLevel(tokenSaverLevelSelect, settings.tokenSaverLevel);
+    }
+
+    // "custom" is the hand-edited settings.json escape hatch — the UI never offers it, but when
+    // it is the stored value it must be shown (and remain selectable) rather than silently
+    // misreporting the level as one of the presets.
+    _setTokenSaverLevel(selectEl, level) {
+        const value = level || 'safest';
+        if (value === 'custom' && !selectEl.querySelector('option[value="custom"]')) {
+            const custom = document.createElement('option');
+            custom.value = 'custom';
+            custom.textContent = 'Custom — per-transform flags from settings.json';
+            selectEl.prepend(custom);
+            selectEl.tomselect?.addOption({ value: 'custom', text: custom.textContent });
+        }
+        if (selectEl.tomselect) {
+            selectEl.tomselect.setValue(value, true); // silent: applying saved state is not a dirty edit
+        } else {
+            selectEl.value = value;
+        }
+    }
+
+    _initTokenSaverLevelSelect(selectEl) {
+        // Same graceful degradation as the undo picker: without Tom Select the native
+        // <select> works fine, it just doesn't match the styled dropdowns.
+        if (typeof window.TomSelect !== 'function') return;
+        if (selectEl.tomselect) selectEl.tomselect.destroy();
+        new window.TomSelect(selectEl, {
+            controlInput: null, // fixed option list — no search box
+            maxOptions: null,
+            dropdownParent: 'body'
+        });
     }
 
     _getCodexLlmProxyMode(root) {

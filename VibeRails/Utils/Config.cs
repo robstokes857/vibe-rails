@@ -20,10 +20,15 @@ public class Settings
     public bool CodexLlmProxyEnabled { get; set; } = false;
     public string CodexLlmProxyMode { get; set; } = "subscription";
     public bool ClaudeLlmProxyEnabled { get; set; } = false;
-    // Token saver (token_saving_plan.md §3/§5): master kill switch + one flag per transform, all
-    // settings.json-only (no UI) — they exist to bisect misbehavior without disabling the proxy.
-    // The saver only runs when ClaudeLlmProxyEnabled is also on. Flipping any of these mid-session
-    // busts the Anthropic prompt cache once (the transform must be deterministic across turns).
+    // Token saver (token_saving_plan.md §3/§5). TokenSaverLevel is the UI-facing knob
+    // (off/safest/safe/medium/high — see TokenSaverPresets); it fully determines the transforms
+    // and tool allowlist, SUPERSEDING the per-transform bools below. Set it to "custom" to have
+    // the bools honored instead — they remain the settings.json-only escape hatch for bisecting a
+    // misbehaving transform without disabling the proxy. The saver only runs when
+    // ClaudeLlmProxyEnabled is also on, and ClaudeTokenSaverEnabled=false force-disables it at
+    // any level. Changing the level (or flipping a flag under "custom") mid-session busts the
+    // provider prompt cache once (the transforms must be deterministic across turns).
+    public string TokenSaverLevel { get; set; } = "safest";
     public bool ClaudeTokenSaverEnabled { get; set; } = true;
     public bool TokenSaverCollapseCrRedraws { get; set; } = true;
     public bool TokenSaverStripAnsi { get; set; } = true;
@@ -32,12 +37,6 @@ public class Settings
     public bool TokenSaverCollapseBlankRuns { get; set; } = false;
     public string PinHash { get; set; } = string.Empty;
     public string PinSalt { get; set; } = string.Empty;
-    public HookSettings Hooks { get; set; } = new();
-}
-
-public class HookSettings
-{
-    public bool InstallOnStartup { get; set; } = false;
 }
 
 public static class Config

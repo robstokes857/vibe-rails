@@ -108,6 +108,7 @@ public static class CliLoop
         Console.WriteLine("Usage:");
         Console.WriteLine("  vb                       Launch the web dashboard (browser opens, server stops on close).");
         Console.WriteLine("  vb --web                 Same as `vb`.");
+        Console.WriteLine("  vb --git-guard           Launch the focused staged-change preflight dashboard.");
         Console.WriteLine("  vb --version, -v         Print version and exit.");
         Console.WriteLine("  vb --help,    -h         Print this help and exit.");
         Console.WriteLine();

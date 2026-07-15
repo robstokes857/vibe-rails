@@ -162,6 +162,16 @@ vb --env antigravity --workdir /project # Explicit working directory
 - Web UI "Stop" button disabled for CLI-owned sessions
 - Web server shuts down when CLI terminal exits
 
+#### 4. Git Guard Mode
+```bash
+vb --git-guard
+```
+- Opens the authenticated `/git-guard` focused web surface
+- Captures the exact staged Git index snapshot (including partially staged files)
+- Streams VCA, report-only MintLint, and automated-workflow stage events live to the browser
+- VCA is the only preflight stage that can block a commit; automated workflows are currently a placeholder
+- The native pre-commit hook uses the same shared pipeline and console event presentation
+
 The old CLI management commands (`vb env`, `vb validate`, `vb hooks`, etc.) are no longer part of the supported surface. Use the Web UI, VS Code extension, or REST APIs for those workflows.
 
 ### Component Interaction Flow
@@ -474,6 +484,7 @@ snapshot with xterm.js and attach a browser-generated PNG data URL.
 
 **Utility**:
 - `GET /api/v1/IsLocal` - Check if in git repo
+- `POST /api/v1/git/preflight/stream` - Stream staged-index Git Guard events as SSE
 
 ### Frontend Layer
 
@@ -895,7 +906,7 @@ vb --web  # Explicit web-dashboard launch
 ## Future Enhancements
 
 ### Planned Features
-- [ ] Rule enforcement automation (pre-commit hooks)
+- [x] Rule enforcement automation (pre-commit and commit-msg hooks)
 - [ ] Multi-project workspace support
 - [ ] Remote session sharing
 - [ ] Advanced MCP tool development (RAG, code analysis)
@@ -957,19 +968,22 @@ VibeRails includes a sophisticated git hook installation system that automatical
 
 **Hook Scripts**:
 1. **pre-commit-hook.sh** - Validates VCA rules before commit
-   - Legacy script kept with the hook installer; do not document it as a direct user workflow until the non-interactive validation runner is restored
-   - Blocks commits if validation fails
+   - Runs the standalone `vb --vca-hook pre-commit` host against the Git index snapshot (not unstaged working-tree edits)
+   - Shows a dedicated console when a Windows Git GUI captures hook output
+   - Blocks STOP violations and validation errors; COMMIT violations continue to commit-msg
    - Allows bypass with `git commit --no-verify`
 
 2. **commit-msg-hook.sh** - Validates COMMIT-level acknowledgments
-   - Legacy script kept with the hook installer; the old `vb --commit-msg` entry point has been removed
-   - Ensures required acknowledgments in commit message
+   - Runs `vb --vca-hook commit-msg` through the same validation engine
+   - Ensures required acknowledgment tokens include a non-empty reason
    - Enforces COMMIT-level rule compliance
 
 **Installation Behavior**:
 - **Auto-install on startup** - Hooks installed automatically when VibeRails starts (configurable)
-- **Preserves existing hooks** - Appends to existing hook files, doesn't overwrite
-- **Marker-based management** - Uses markers to track VibeRails sections
+- **Preserves existing hooks** - Inserts VCA ahead of existing shell-hook exits and chains non-shell/binary/symlink hooks through a preserved sidecar
+- **Versioned health checks** - V3 detects missing, disabled, stale, partial, missing-launcher, or mismatched-launcher hooks and repairs them
+- **Git-aware path resolution** - Honors linked worktrees and `core.hooksPath`
+- **Safe hook chaining** - Runs before existing shell hooks and preserves non-shell hooks as executable sidecars
 - **Safe uninstallation** - Removes only VibeRails sections, keeps other hooks intact
 
 **Key Methods**:
@@ -985,8 +999,8 @@ Task<HookInstallationResult> UninstallHooksAsync(string repoPath, CancellationTo
 Task<HookInstallationResult> InstallPreCommitHookAsync(string repoPath, CancellationToken ct);
 Task<HookInstallationResult> UninstallPreCommitHookAsync(string repoPath, CancellationToken ct);
 
-// Check installation status
-bool IsHookInstalled(string repoPath);
+// Resolve Git's effective hook path and inspect both hooks
+Task<GitHooksStatus> GetStatusAsync(string repoPath, CancellationToken ct);
 ```
 
 **Error Handling**:
@@ -1012,9 +1026,11 @@ public enum HookInstallationError
 
 ```json
 {
-  "hooks": {
-    "autoInstall": true,
-    "installOnStartup": true
+  "VibeRails": {
+    "Hooks": {
+      "AutoInstall": true,
+      "InstallOnStartup": true
+    }
   }
 }
 ```
@@ -1034,7 +1050,7 @@ if (!result.Success)
 }
 
 // Check if installed
-if (hookService.IsHookInstalled(repoPath))
+if ((await hookService.GetStatusAsync(repoPath, cancellationToken)).IsInstalled)
 {
     Console.WriteLine("Hooks are installed");
 }
@@ -1049,6 +1065,7 @@ var uninstallResult = await hookService.UninstallHooksAsync(repoPath, cancellati
 GET  /api/v1/hooks/status        # Check if hooks are installed
 POST /api/v1/hooks/install       # Install hooks via API
 DELETE /api/v1/hooks             # Uninstall hooks via API
+POST /api/v1/hooks/preview       # Run the real pre-commit pipeline and capture its console
 ```
 
 **Testing**:

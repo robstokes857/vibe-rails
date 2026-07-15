@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Serilog;
+using VibeRails.Services.GitPreflight;
 
 namespace VibeRails.Services.VCA.Hooks;
 
@@ -10,20 +11,17 @@ public interface IVcaHookRunner
 
 public sealed class VcaHookRunner : IVcaHookRunner
 {
-    private readonly IVcaHookValidationService _validationService;
+    private readonly IGitPreflightPipeline _preflightPipeline;
     private readonly IVcaHookValidationAnalyzer _analyzer;
-    private readonly IVcaHookFileProvider _fileProvider;
     private readonly IVcaHookPresenter _presenter;
 
     public VcaHookRunner(
-        IVcaHookValidationService validationService,
+        IGitPreflightPipeline preflightPipeline,
         IVcaHookValidationAnalyzer analyzer,
-        IVcaHookFileProvider fileProvider,
         IVcaHookPresenter presenter)
     {
-        _validationService = validationService;
+        _preflightPipeline = preflightPipeline;
         _analyzer = analyzer;
-        _fileProvider = fileProvider;
         _presenter = presenter;
     }
 
@@ -33,31 +31,48 @@ public sealed class VcaHookRunner : IVcaHookRunner
 
         try
         {
-            var stagedFiles = invocation.Kind == VcaHookKind.Preview
-                ? GetPreviewFiles()
-                : await _fileProvider.GetStagedFilesAsync(workingDirectory, cancellationToken);
-
-            var displayInfo = BuildDisplayInfo(invocation, stagedFiles);
-            var validationResult = await _presenter.RunWithProgressAsync(
-                displayInfo,
-                ct => GetValidationResultAsync(invocation, workingDirectory, ct),
+            var preflightResult = await _preflightPipeline.RunAsync(
+                new GitPreflightRequest(workingDirectory, invocation),
+                async (preflightEvent, ct) =>
+                    await _presenter.WritePreflightEventAsync(preflightEvent, ct),
                 cancellationToken);
+            var summary = preflightResult.VcaSummary;
+            if (summary == null)
+            {
+                if (preflightResult.Status == GitPreflightStepStatus.Cancelled)
+                {
+                    return 1;
+                }
+
+                await _presenter.WriteErrorAsync("VCA did not produce a validation result. Commit blocked.");
+                return 1;
+            }
+
+            var validationOutput = string.Join(
+                Environment.NewLine,
+                preflightResult.Steps
+                    .First(step => step.StepId == VcaPreflightStep.Id)
+                    .Output);
 
             return invocation.Kind switch
             {
                 VcaHookKind.AcknowledgeCommitMessage => await RunAcknowledgmentPromptValidationAsync(
                     invocation,
-                    validationResult.Output,
-                    validationResult.Summary),
+                    validationOutput,
+                    summary),
                 VcaHookKind.CommitMessage => await RunCommitMessageValidationAsync(
                     invocation,
-                    validationResult.Output,
-                    validationResult.Summary,
+                    validationOutput,
+                    summary,
                     workingDirectory,
                     cancellationToken),
-                VcaHookKind.Preview => await RunPreviewAsync(validationResult.Output),
-                _ => await RunPreCommitValidationAsync(validationResult.Output, validationResult.Summary)
+                VcaHookKind.Preview => 0,
+                _ => RunPreCommitValidation(summary)
             };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -67,32 +82,18 @@ public sealed class VcaHookRunner : IVcaHookRunner
         }
     }
 
-    private async Task<int> RunPreCommitValidationAsync(
-        string validationOutput,
-        VcaHookValidationSummary summary)
+    private int RunPreCommitValidation(VcaHookValidationSummary summary)
     {
-        await _presenter.WriteValidationOutputAsync(validationOutput);
-
         if (_analyzer.ShouldBlockPreCommit(summary))
         {
-            await _presenter.WriteFailureAsync("VCA pre-commit checks failed. Commit blocked.");
             return 1;
         }
 
         if (summary.HasCommitViolations)
         {
-            await _presenter.WriteWarningAsync("COMMIT-level VCA violations detected. The commit message must include the listed acknowledgments.");
             return 0;
         }
 
-        await _presenter.WriteSuccessAsync("VCA pre-commit checks passed. Git commit can continue.");
-        return 0;
-    }
-
-    private async Task<int> RunPreviewAsync(string validationOutput)
-    {
-        await _presenter.WriteValidationOutputAsync(validationOutput);
-        await _presenter.WriteSuccessAsync("VCA hook preview completed.");
         return 0;
     }
 
@@ -105,7 +106,6 @@ public sealed class VcaHookRunner : IVcaHookRunner
     {
         if (summary.HasError || summary.HasStopViolation)
         {
-            await _presenter.WriteValidationOutputAsync(validationOutput);
             await _presenter.WriteFailureAsync("VCA commit-message checks failed because blocking validation still fails.");
             return 1;
         }
@@ -127,7 +127,10 @@ public sealed class VcaHookRunner : IVcaHookRunner
         // Match against the message git will actually record: drop comment lines. An
         // acknowledgment token pasted into the commented template region would otherwise
         // pass here but be stripped from the final commit, defeating the audit trail.
-        var commitMessage = StripCommitComments(rawCommitMessage);
+        var commitMessage = await VcaCommitMessageCleaner.StripCommentsAsync(
+            rawCommitMessage,
+            workingDirectory,
+            cancellationToken);
         var missingAcknowledgments = _analyzer.GetMissingAcknowledgments(
             commitMessage,
             summary.RequiredAcknowledgments);
@@ -139,13 +142,17 @@ public sealed class VcaHookRunner : IVcaHookRunner
         }
 
         if (invocation.PromptForAcknowledgment &&
-            await TryPromptForAcknowledgmentsAsync(invocation, workingDirectory, cancellationToken))
+            await TryPromptForAcknowledgmentsAsync(
+                invocation,
+                workingDirectory,
+                validationOutput,
+                summary,
+                cancellationToken))
         {
             await _presenter.WriteSuccessAsync("VCA commit acknowledgments added. Git commit can continue.");
             return 0;
         }
 
-        await _presenter.WriteValidationOutputAsync(validationOutput);
         await _presenter.WriteFailureAsync("Commit message missing required VCA acknowledgment token(s):");
         foreach (var token in missingAcknowledgments)
         {
@@ -163,7 +170,6 @@ public sealed class VcaHookRunner : IVcaHookRunner
     {
         if (summary.HasError || summary.HasStopViolation)
         {
-            await _presenter.WriteValidationOutputAsync(validationOutput);
             await _presenter.WriteFailureAsync("Blocking VCA validation still fails. Fix STOP-level violations before committing.");
             await PauseIfInteractiveAsync();
             return 1;
@@ -185,7 +191,10 @@ public sealed class VcaHookRunner : IVcaHookRunner
         }
 
         var rawCommitMessage = await File.ReadAllTextAsync(invocation.CommitMessagePath);
-        var commitMessage = StripCommitComments(rawCommitMessage);
+        var commitMessage = await VcaCommitMessageCleaner.StripCommentsAsync(
+            rawCommitMessage,
+            invocation.WorkingDirectory ?? Directory.GetCurrentDirectory(),
+            CancellationToken.None);
         var missingAcknowledgments = _analyzer.GetMissingAcknowledgments(
             commitMessage,
             summary.RequiredAcknowledgments);
@@ -209,11 +218,16 @@ public sealed class VcaHookRunner : IVcaHookRunner
     private async Task<bool> TryPromptForAcknowledgmentsAsync(
         VcaHookInvocation invocation,
         string workingDirectory,
+        string validationOutput,
+        VcaHookValidationSummary summary,
         CancellationToken cancellationToken)
     {
         if (CanPromptInCurrentConsole())
         {
-            return await RunAcknowledgmentPromptInCurrentProcessAsync(invocation);
+            return await RunAcknowledgmentPromptValidationAsync(
+                invocation with { Kind = VcaHookKind.AcknowledgeCommitMessage },
+                validationOutput,
+                summary) == 0;
         }
 
         if (!OperatingSystem.IsWindows())
@@ -257,25 +271,11 @@ public sealed class VcaHookRunner : IVcaHookRunner
         }
     }
 
-    private async Task<bool> RunAcknowledgmentPromptInCurrentProcessAsync(VcaHookInvocation invocation)
-    {
-        var validationResult = await GetValidationResultAsync(
-            invocation with { Kind = VcaHookKind.AcknowledgeCommitMessage },
-            invocation.WorkingDirectory ?? Directory.GetCurrentDirectory(),
-            CancellationToken.None);
-
-        return await RunAcknowledgmentPromptValidationAsync(
-            invocation,
-            validationResult.Output,
-            validationResult.Summary) == 0;
-    }
-
     private async Task<bool> PromptAndAppendAcknowledgmentsAsync(
         string commitMessagePath,
         string validationOutput,
         IReadOnlyList<string> missingAcknowledgments)
     {
-        await _presenter.WriteValidationOutputAsync(validationOutput);
         await _presenter.WriteWarningAsync("This commit requires a VCA acknowledgment reason.");
         await _presenter.WriteWarningAsync("Required token(s):");
 
@@ -309,82 +309,6 @@ public sealed class VcaHookRunner : IVcaHookRunner
         return true;
     }
 
-    private async Task<VcaHookValidationResult> GetValidationResultAsync(
-        VcaHookInvocation invocation,
-        string workingDirectory,
-        CancellationToken cancellationToken)
-    {
-        if (invocation.DemoUi)
-        {
-            await Task.Delay(invocation.DemoDuration, cancellationToken);
-            return new VcaHookValidationResult(
-                "PASS: VCA hook preview completed.",
-                new VcaHookValidationSummary(
-                    HasError: false,
-                    HasStopViolation: false,
-                    HasCommitViolations: false,
-                    RequiredAcknowledgments: []));
-        }
-
-        return await _validationService.ValidateAsync(workingDirectory, cancellationToken);
-    }
-
-    private static VcaHookDisplayInfo BuildDisplayInfo(
-        VcaHookInvocation invocation,
-        IReadOnlyList<string> stagedFiles)
-    {
-        var title = invocation.Kind switch
-        {
-            VcaHookKind.AcknowledgeCommitMessage => "Commit Acknowledgment",
-            VcaHookKind.CommitMessage => "Commit Message",
-            VcaHookKind.Preview => "Preview",
-            _ => "Pre-Commit"
-        };
-
-        var subtitle = invocation.Kind switch
-        {
-            VcaHookKind.AcknowledgeCommitMessage => "Collecting VCA commit acknowledgment",
-            VcaHookKind.CommitMessage => "Checking VCA commit-message requirements",
-            VcaHookKind.Preview => "Previewing the VCA hook experience",
-            _ => "Validating staged files against VCA rules"
-        };
-
-        var reason = invocation.Kind switch
-        {
-            VcaHookKind.AcknowledgeCommitMessage => "Reason: VCA needs an acknowledgment before Git records this commit.",
-            VcaHookKind.CommitMessage => "Reason: git commit-msg hook is checking required VCA acknowledgments.",
-            VcaHookKind.Preview => "Reason: manual preview of the VCA hook progress UI.",
-            _ => "Reason: git pre-commit hook is running VCA validation before Git creates the commit."
-        };
-
-        return new VcaHookDisplayInfo(title, subtitle, reason, stagedFiles);
-    }
-
-    private static IReadOnlyList<string> GetPreviewFiles() =>
-    [
-        "src/security/AuthPolicy.cs",
-        "src/payments/CardVault.cs",
-        "package.json"
-    ];
-
-    // Mirrors git's default commit-message cleanup: lines whose first character is the
-    // comment char ('#') are removed from the recorded message.
-    private static string StripCommitComments(string commitMessage)
-    {
-        var kept = new List<string>();
-        foreach (var line in commitMessage.Split('\n'))
-        {
-            if (line.StartsWith('#'))
-            {
-                continue;
-            }
-
-            kept.Add(line);
-        }
-
-        return string.Join('\n', kept);
-    }
-
     private static bool CanPromptInCurrentConsole() =>
         Environment.UserInteractive &&
         !Console.IsInputRedirected &&
@@ -414,7 +338,7 @@ public sealed class VcaHookRunner : IVcaHookRunner
         var commandLineArgs = Environment.GetCommandLineArgs();
         var args = hookArgs.Select(QuoteArgument).ToList();
 
-        if (Path.GetFileName(processPath).Equals("dotnet.exe", StringComparison.OrdinalIgnoreCase) &&
+        if (IsDotnetHost(processPath) &&
             commandLineArgs.Length > 0 &&
             commandLineArgs[0].EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
         {
@@ -422,6 +346,13 @@ public sealed class VcaHookRunner : IVcaHookRunner
         }
 
         return (processPath, string.Join(" ", args));
+    }
+
+    private static bool IsDotnetHost(string processPath)
+    {
+        var fileName = Path.GetFileName(processPath);
+        return fileName.Equals("dotnet", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Equals("dotnet.exe", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string QuoteArgument(string value)

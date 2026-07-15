@@ -45,7 +45,8 @@ public sealed record LlmProxySavingsReport(
     int BytesAfter,
     int ToolResultsMinified,
     int ToolResultsSeen,
-    MinifyStats Transforms)
+    MinifyStats Transforms,
+    CondenseStats Condensed = default)
 {
     public int BytesSaved => BytesBefore - BytesAfter;
 }

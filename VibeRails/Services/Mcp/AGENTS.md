@@ -50,7 +50,7 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 
 | Wire name (snake_case) | Method | Description |
 |------------------------|--------|-------------|
-| `validate_vca` | `RulesTool.ValidateVca` | Validates staged git files against `- [ENFORCEMENT] …` rules in AGENTS.md files. |
+| `validate_vca` | `RulesTool.ValidateVca` | Validates the staged Git index snapshot against `- [ENFORCEMENT] …` rules from the indexed AGENTS.md files. |
 | `search_history` | `SessionSearchTool.SearchHistory` | Semantic + keyword search over the developer's captured agent history. |
 | `list_terminals` | `TerminalTools.ListTerminals` | Lists VibeRails terminal tabs available for tool-driven control. |
 | `open_terminal` | `TerminalTools.OpenTerminal` | Opens a new VibeRails terminal tab, defaulting to a plain shell. |

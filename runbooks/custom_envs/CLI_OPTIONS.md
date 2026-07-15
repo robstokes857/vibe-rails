@@ -203,7 +203,9 @@ UI-managed launch and prompt settings:
 - Model: `--model`; pinned values from `renderCodexModelOptions()` (see Model
   Lists for the maintained list and how to refresh it).
 - Effort: `-c model_reasoning_effort=<level>`; values `minimal`, `low`,
-  `medium`, `high`, `xhigh`, `max`, `ultra`.
+  `medium`, `high`, `xhigh`, `max`, `ultra`. Codex rejects `max` for
+  `gpt-5.5`, so the form disables that combination and normalizes an existing
+  `gpt-5.5` + `max` selection to `xhigh`.
 - Fast Mode: `-c service_tier=fast --enable fast_mode`.
 - YOLO Mode: `--dangerously-bypass-approvals-and-sandbox`. This is the only
   permission control.

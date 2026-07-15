@@ -307,6 +307,13 @@ if (Directory.Exists(webRootPath))
         DefaultFileNames = new List<string> { "index.html" }
     });
     app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
+
+    // A dedicated entry path keeps Git Guard launchable without creating a second
+    // frontend runtime. The authenticated SPA detects this path and renders its
+    // focused, navigation-free preflight surface.
+    app.MapGet("/git-guard", () => Results.File(
+        Path.Combine(webRootPath, "index.html"),
+        contentType: "text/html"));
 }
 
 app.MapApiEndpoints(launchDirectory);
@@ -331,10 +338,11 @@ if (exit)
 }
 
 Log.Information(
-    "[Startup] Parsed mode. processId={ProcessId} isVsCodeMode={IsVsCodeMode} isLMBootstrap={IsLMBootstrap} env={Env}",
+    "[Startup] Parsed mode. processId={ProcessId} isVsCodeMode={IsVsCodeMode} isLMBootstrap={IsLMBootstrap} isGitGuardMode={IsGitGuardMode} env={Env}",
     Environment.ProcessId,
     parsedArgs.IsVsCodeMode,
     parsedArgs.IsLMBootstrap,
+    parsedArgs.IsGitGuardMode,
     parsedArgs.LMBootstrapCli ?? "n/a");
 
 // Start server in background (non-blocking)
@@ -399,7 +407,6 @@ if (parsedArgs.IsLMBootstrap)
 IAuthBootstrapService authBootstrapService = app.Services.GetRequiredService<IAuthBootstrapService>();
 string bootstrapCode = authBootstrapService.GenerateBootstrapCode();
 string bootstrapUrl = $"{serverUrl}/auth/bootstrap?code={bootstrapCode}";
-string vsCodeV1Url = $"vs-code-v1={bootstrapUrl}";
 
 // Encode user-supplied args (strip internal flags) for pass-through to new instances.
 // `--parent-pid` may be passed as two tokens; strip both the flag and its value so
@@ -410,6 +417,11 @@ if (redirectArgs.Length > 0)
 {
     var encodedArgs = Uri.EscapeDataString(string.Join(" ", redirectArgs));
     bootstrapUrl = $"{bootstrapUrl}&redirectArgs={encodedArgs}";
+}
+
+if (parsedArgs.IsGitGuardMode)
+{
+    bootstrapUrl = $"{bootstrapUrl}&redirect={Uri.EscapeDataString("/git-guard")}";
 }
 
 // VS Code mode: emit bootstrap URL immediately, then flush so the extension picks it up.
@@ -475,7 +487,8 @@ static string[] GetRedirectArgs(string[] args)
 
         if (arg.StartsWith("--parent-pid=", StringComparison.OrdinalIgnoreCase)
             || arg.Equals("--vs-code-v1", StringComparison.OrdinalIgnoreCase)
-            || arg.Equals("--web", StringComparison.OrdinalIgnoreCase))
+            || arg.Equals("--web", StringComparison.OrdinalIgnoreCase)
+            || arg.Equals("--git-guard", StringComparison.OrdinalIgnoreCase))
         {
             continue;
         }

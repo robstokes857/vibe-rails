@@ -103,10 +103,13 @@ Library contents: `LlmProxyRelay` (shared streaming relay), `LlmProxyRoutes` /
 Request Delegate Generator doesn't run in class libraries, so parameter-injected
 lambdas there would silently fall back to reflection and break AOT),
 `LlmProxyClaudeConfig` / `LlmProxyCodexConfig` (env/arg builders), and
-`Minify\` — `OutputMinifier`, `AnthropicMessagesRewriter`,
-`AnthropicBodyTransform`, pooled buffer plumbing.
+`Minify\` — `OutputMinifier`, provider-specific `AnthropicMessagesRewriter` and
+`CodexResponsesRewriter`, their body transforms, and pooled buffer plumbing.
 
 ### What we touch — and only this
+
+Claude:
+
 - Only `messages[].content[]` blocks of `type: "tool_result"` in a
   `POST …/v1/messages` JSON body ≤ 10 MB.
 - Only results whose `tool_use_id` correlates to an earlier `tool_use` named
@@ -123,6 +126,19 @@ lambdas there would silently fall back to reflection and break AOT),
   blobs, and unknown future fields are byte-identical by construction. Unchanged
   strings keep their original token bytes — the no-op path is byte-stable.
 
+Codex:
+
+- Only tool-output items inside a `POST …/responses` body's `input[]`: correlated
+  `function_call_output` / `custom_tool_call_output` strings for allowlisted shell
+  calls (`shell_command`, `exec_command`, `write_stdin`), plus provider-native
+  `local_shell_call_output` / `shell_call_output` text fields.
+- Correlation is exact on `call_id`; unknown calls and missing IDs pass through.
+  Array-form output touches only `input_text.text`, while images/files and all
+  non-output items remain byte-identical.
+- The same raw-byte splice, fail-open, never-grow, deterministic, and idempotent
+  guarantees apply. Prompts, messages, tool arguments, patch output, web results,
+  and model responses are never candidates.
+
 ---
 
 ## 3. v1 Allowlist — what shipped
@@ -138,10 +154,12 @@ counters. All are **deletion-only** (output never grows → one pooled buffer of
 | 3 | **Trailing whitespace strip** — spaces/tabs at end of each line. | Never load-bearing in command output. | `TokenSaverStripTrailingWhitespace` (on) |
 | 4 | **Blank-line trim** — leading/trailing blank lines of the whole payload; sub-flag collapses runs of ≥3 interior blanks → 2. | Edge trim is fully safe; run-collapse is the only opinionated bit, hence its own flag, default off. | `TokenSaverTrimBlankLines` (on) / `TokenSaverCollapseBlankRuns` (**off**) |
 
-Master kill switch: `ClaudeTokenSaverEnabled` (on; only active when
-`ClaudeLlmProxyEnabled` is also on). No UI beyond the existing "Enable Claude
-proxy and token saver" checkbox — per-transform flags are a bisection tool, not a
-user decision.
+The legacy Claude-specific kill switch is `ClaudeTokenSaverEnabled` (on; only active when
+`ClaudeLlmProxyEnabled` is also on). Codex saving is active whenever its proxy is enabled and the
+selected level is not `off`. Since 2026-07-13 the user-facing knob is the
+**`TokenSaverLevel`** dropdown (§3.5); the per-transform flags above are honored
+only at `TokenSaverLevel: "custom"` — they remain a bisection tool, not a user
+decision.
 
 **The three idempotency abort rules** (load-bearing — do not "improve" them):
 1. A malformed/truncated escape sequence aborts the WHOLE string (returned
@@ -168,15 +186,73 @@ Note for archaeology: the original plan said "reuse `TerminalTextSanitizer`
 (tested)". It turned out to have **no tests**, an allocation-heavy part model, and
 the wrong keep-set semantics — so the library ships its own ~250-line span scanner
 instead, pinned by a golden corpus with real ESC/CR bytes
-(`Tests\TokenSaver\Fixtures\`).
+(`Tests\TokenSaver\Fixtures\`). Those fixtures are `-text` in `.gitattributes`
+(added 2026-07-13): `text=auto` was CRLF-mangling them at commit/checkout, which
+silently broke every golden test on a fresh Windows clone.
 
 ---
 
-## 4. Explicit Non-Goals for v1 (name them so we don't backslide)
+## 3.5 Aggressiveness tiers & the lossy second stage (2026-07-13)
 
-These are tempting and all fail the litmus test today:
+v1's transforms are display-invariant by design, which caps savings in the tens of
+bytes per request. RTK-scale wins need transforms that are **lossy on formatting
+or content** — so those ship in a separate stage, gated behind an explicit
+user-chosen level. `TokenSaverLevel` (settings.json + the Settings-UI Tom Select
+dropdown, `off/safest/safe/medium/high`) maps to a preset in
+`TokenSaver\Minify\TokenSaverLevel.cs`:
 
-- ❌ **Summarizing / truncating** long output ("+400 lines") — drops information.
+| Level | MinifyFlags | Condense (lossy stage) | tool allowlist |
+|---|---|---|---|
+| off | — (no transform built) | — | — |
+| custom | the 6 legacy flags | — | Bash, PowerShell |
+| safest (default) | `Default` | — | Bash, PowerShell |
+| safe | + blank-run collapse | — | + BashOutput |
+| medium | same | dedup | same |
+| high | same | dedup + truncation | same |
+
+The lossy stage is `OutputCondenser`, run per string AFTER `OutputMinifier`
+(`condense(minify(text))` inside the rewriter's splice loop):
+
+- **D — consecutive-duplicate collapse** (medium+): a run of ≥3 identical lines →
+  one instance + `" [xN]"` suffix. Idempotency keystone: marker-shaped lines are
+  ineligible to start/join runs, so collapse output is a fixed point. Collapse
+  only when strictly profitable (never grows).
+- **T — head/tail truncation** (high): keep first 150 + last 50 lines, elide the
+  middle as one `[... N lines elided ...]` line — only when the middle is ≥10
+  lines AND ≥4096 chars (joint condition: a huge single-line JSON blob is never
+  cut). Runs after D so lossless collapse gets first shot. Idempotent by
+  arithmetic: output has exactly 201 lines → a re-pass sees a 1-line middle.
+- **Whole-string abort**: any ESC/BEL/CR in the input → untouched
+  (`AbortedControlChars`). Composes with the minifier's abort rules and keeps
+  line edits away from anything the minifier kept verbatim.
+- **NOT MinifyFlags members**: markers mean condenser output is not a subsequence
+  of its input, which would void the minifier's 32-combo deletion-only proof. The
+  condenser has its own options (`CondenseOptions`), its own stats
+  (`CondenseStats`, net-chars conservation law), its own 4-combo property tests,
+  and a cross-stage `P(P(x)) == P(x)` property + per-tier golden fixtures
+  (`Tests\TokenSaver\Fixtures\Pipeline\`).
+
+Litmus-test honesty: medium/high deliberately relax §1's
+"lossless-for-the-model" plank — repetition counts and elided middles ARE
+information loss. That is the entire reason they are opt-in tiers and not
+defaults; every other plank (deterministic, idempotent, fail-open, never grows,
+measurable) still holds and is property-tested. Switching level can bust a
+provider prompt cache once, same as flipping a flag.
+
+Allowlist notes: `PowerShell` is Claude Code's shell tool name on Windows
+sessions — same content class as `Bash`, covered at every level. `Read`/`Grep`
+stay excluded at every level: the model builds `Edit.old_string` from their
+output, so touching them risks failed edits, not just lost savings.
+Codex uses its own shell allowlist (`shell_command`, plus the earlier
+`exec_command`/`write_stdin` pair); non-shell function/custom-tool outputs stay
+excluded even though they use the same Responses API item envelope.
+
+---
+
+## 4. Explicit Non-Goals (name them so we don't backslide)
+
+Still absolute at every level:
+
 - ❌ **Stripping git hint lines** (`(use "git add <file>…")`) — the model sometimes
   acts on them; it's semantic.
 - ❌ **Touching diffs / patches** — the model applies these; a byte off = broken edit.
@@ -185,9 +261,13 @@ These are tempting and all fail the litmus test today:
   the kill switch if dogfooding ever shows it matters.)
 - ❌ **Touching file-read contents** — see the Markdown `<br>` footgun above.
 - ❌ **Reformatting / re-indenting JSON or tables** — changes structure the model parses.
-- ❌ **Deduping "repeated" lines** — repetition can be meaningful (counts, logs).
 - ❌ **Per-command bespoke parsers** — the 20k-to-get-right trap. If a win needs one,
   it waits for an eval harness that proves it's neutral (see §7 Phase 2).
+- ❌ **LLM-based summarization** of output — non-deterministic, thrashes the cache.
+
+Graduated from this list into opt-in tiers (§3.5, 2026-07-13): deduping repeated
+lines (medium) and truncating long output (high) — they still fail the *default*
+bar on purpose and live behind the level dropdown.
 
 ---
 
@@ -218,7 +298,8 @@ These are tempting and all fail the litmus test today:
   derived server-side at display time only, so history reprices for free if a real
   tokenizer ever lands.
 - **One log line per measured request** (counts only, never content):
-  `Token saver: anthropic minified 2/3 tool results, 48231→31877 bytes (…)`.
+  `Token saver: anthropic minified 2/3 tool results, 48231→31877 bytes (…
+  dedup=N elide=N)` — the last two are the condenser's run/truncation counts.
 
 ## 6. Safety-critical proxy details (unchanged, all implemented)
 
@@ -267,11 +348,20 @@ integration tests, tally tests. **Next: dogfood on this repo for a week; any wei
 agent behavior → bisect by flag.** Watch the `Requests` vs `RewrittenRequests` gap
 and the bytes-saved tally.
 
-**Phase 2 — Only if data justifies it.** Anything beyond §3 requires an **eval
-gate**: run a fixed task set with the transform on vs off and show *identical*
-task outcomes before it's allowed near a user. No eval, no expansion. Obvious
-first candidates once earned: `BashOutput` in the allowlist; Codex/Antigravity
-envelopes (same minifier core, per-vendor "where's the tool output" adapters).
+**Phase 1.5 — Aggressiveness tiers. ✅ CODE COMPLETE (2026-07-13).** §3.5: the
+`TokenSaverLevel` dropdown, `OutputCondenser` (dedup medium+, truncation high),
+PowerShell/BashOutput allowlist coverage. Default stays `safest` (= Phase 1
+behavior); lossy transforms are user-opted. **Next: dogfood at high on this
+repo** — watch for the model re-running commands because an elided middle
+mattered, and for dedup markers confusing it.
+
+**Phase 2 — Only if data justifies it.** Anything beyond §3/§3.5 requires an
+**eval gate**: run a fixed task set with the transform on vs off and show
+*identical* task outcomes before it's allowed near a user. No eval, no expansion.
+Obvious first candidates once earned: Codex/Antigravity envelopes (same minifier
+core, per-vendor "where's the tool output" adapters); char-level truncation of
+huge single-line outputs; per-line (rather than whole-string) control-char
+exclusion in the condenser.
 
 ---
 
@@ -289,6 +379,7 @@ envelopes (same minifier core, per-vendor "where's the tool output" adapters).
 
 ### One-line summary
 Sit on the CLI→model HTTPS call (now its own `TokenSaver` project), splice-rewrite
-only Bash `tool_result` strings, and only remove bytes a terminal would have thrown
-away anyway. Four boring, provable transforms shipped behind flags; everything
-clever refused.
+only shell `tool_result` strings. By default remove only bytes a terminal would
+have thrown away anyway; at user-opted higher levels, deterministically collapse
+repeated lines and elide the middles of huge outputs. Everything clever still
+refused.

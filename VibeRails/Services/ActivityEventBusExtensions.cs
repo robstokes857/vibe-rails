@@ -18,11 +18,15 @@ public static class ActivityEventBusExtensions
         string? target = null,
         string? status = null,
         long? bytesSaved = null,
-        long? tokensSavedTotal = null)
+        long? tokensSavedTotal = null,
+        long? tokensSavedSession = null,
+        long? tokensSavedMonth = null)
     {
         bus.Publish(
             ProxyActivityEventType,
-            new ProxyActivityPingPayload(source, label, target, status, bytesSaved, tokensSavedTotal),
+            new ProxyActivityPingPayload(
+                source, label, target, status, bytesSaved,
+                tokensSavedTotal, tokensSavedSession, tokensSavedMonth),
             AppJsonSerializerContext.Default.ProxyActivityPingPayload);
     }
 }

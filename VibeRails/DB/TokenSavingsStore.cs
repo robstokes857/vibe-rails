@@ -3,8 +3,17 @@ using Serilog;
 
 namespace VibeRails.DB;
 
-/// <summary>Running totals across all days/providers. Bytes are measured; tokens are a display heuristic.</summary>
-public sealed record TokenSavingsTotals(long BytesBefore, long BytesAfter)
+/// <summary>
+/// Running totals over three windows: all time (all days/providers), the current UTC month, and
+/// this server process ("session"). Bytes are measured; tokens are a display heuristic.
+/// </summary>
+public sealed record TokenSavingsTotals(
+    long BytesBefore,
+    long BytesAfter,
+    long SessionBytesBefore = 0,
+    long SessionBytesAfter = 0,
+    long MonthBytesBefore = 0,
+    long MonthBytesAfter = 0)
 {
     public long BytesSaved => BytesBefore - BytesAfter;
 
@@ -13,6 +22,10 @@ public sealed record TokenSavingsTotals(long BytesBefore, long BytesAfter)
     /// for free if a real tokenizer ever replaces the estimate.
     /// </summary>
     public long TokensSaved => BytesSaved / 4;
+
+    public long SessionTokensSaved => (SessionBytesBefore - SessionBytesAfter) / 4;
+
+    public long MonthTokensSaved => (MonthBytesBefore - MonthBytesAfter) / 4;
 }
 
 /// <summary>
@@ -28,7 +41,10 @@ public interface ITokenSavingsStore
     /// </summary>
     void Record(string provider, int bytesBefore, int bytesAfter);
 
-    /// <summary>Current running totals (persisted history + this session's records).</summary>
+    /// <summary>
+    /// Current running totals (persisted history + this session's records), broken out into
+    /// all-time, current-UTC-month, and this-process windows.
+    /// </summary>
     TokenSavingsTotals GetTotals();
 }
 
@@ -43,15 +59,30 @@ public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsSt
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private long _bytesBefore;
     private long _bytesAfter;
+    private long _sessionBytesBefore;
+    private long _sessionBytesAfter;
     private volatile bool _loaded;
+
+    // Current-UTC-month tally. Guarded by its own lock (not Interlocked) because a month rollover
+    // must swap the key and zero both counters as one unit.
+    private readonly object _monthLock = new();
+    private string _monthKey = "";
+    private long _monthBytesBefore;
+    private long _monthBytesAfter;
 
     /// <summary>Last fire-and-forget persist, observable so tests can await the write settling.</summary>
     internal Task LastPersist { get; private set; } = Task.CompletedTask;
+
+    /// <summary>Testable clock; month-rollover behavior is unreachable under the real one.</summary>
+    internal Func<DateTime> UtcNow { get; set; } = () => DateTime.UtcNow;
 
     public void Record(string provider, int bytesBefore, int bytesAfter)
     {
         Interlocked.Add(ref _bytesBefore, bytesBefore);
         Interlocked.Add(ref _bytesAfter, bytesAfter);
+        Interlocked.Add(ref _sessionBytesBefore, bytesBefore);
+        Interlocked.Add(ref _sessionBytesAfter, bytesAfter);
+        AddToMonth(CurrentMonthKey(), bytesBefore, bytesAfter);
         LastPersist = PersistAsync(provider, bytesBefore, bytesAfter);
     }
 
@@ -60,9 +91,47 @@ public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsSt
         if (!_loaded)
             _ = PersistAsync(null, 0, 0); // kick the lazy history load; this call returns what's in memory
 
+        var (monthBefore, monthAfter) = ReadMonth(CurrentMonthKey());
         return new TokenSavingsTotals(
             Interlocked.Read(ref _bytesBefore),
-            Interlocked.Read(ref _bytesAfter));
+            Interlocked.Read(ref _bytesAfter),
+            Interlocked.Read(ref _sessionBytesBefore),
+            Interlocked.Read(ref _sessionBytesAfter),
+            monthBefore,
+            monthAfter);
+    }
+
+    private string CurrentMonthKey() => UtcNow().ToString("yyyy-MM");
+
+    private void AddToMonth(string monthKey, long bytesBefore, long bytesAfter)
+    {
+        lock (_monthLock)
+        {
+            // Keys sort chronologically ("yyyy-MM"), so an older key is a stale late add (e.g. the
+            // lazy history load landing just after a rollover) and must not resurrect last month.
+            if (string.CompareOrdinal(monthKey, _monthKey) < 0)
+                return;
+
+            if (_monthKey != monthKey)
+            {
+                _monthKey = monthKey;
+                _monthBytesBefore = 0;
+                _monthBytesAfter = 0;
+            }
+
+            _monthBytesBefore += bytesBefore;
+            _monthBytesAfter += bytesAfter;
+        }
+    }
+
+    private (long Before, long After) ReadMonth(string monthKey)
+    {
+        lock (_monthLock)
+        {
+            // A stale key means nothing was recorded since the month rolled over: report zero
+            // rather than last month's counters.
+            return _monthKey == monthKey ? (_monthBytesBefore, _monthBytesAfter) : (0L, 0L);
+        }
     }
 
     private async Task PersistAsync(string? provider, int bytesBefore, int bytesAfter)
@@ -96,13 +165,28 @@ public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsSt
 
             if (!_loaded)
             {
-                using var totals = connection.CreateCommand();
-                totals.CommandText = SqlStrings.SelectTokenSavingsTotals;
-                using var reader = totals.ExecuteReader();
-                if (reader.Read())
+                using (var totals = connection.CreateCommand())
                 {
-                    Interlocked.Add(ref _bytesBefore, reader.GetInt64(0));
-                    Interlocked.Add(ref _bytesAfter, reader.GetInt64(1));
+                    totals.CommandText = SqlStrings.SelectTokenSavingsTotals;
+                    using var reader = totals.ExecuteReader();
+                    if (reader.Read())
+                    {
+                        Interlocked.Add(ref _bytesBefore, reader.GetInt64(0));
+                        Interlocked.Add(ref _bytesAfter, reader.GetInt64(1));
+                    }
+                }
+
+                // Session rows recorded before this load already counted into the month tally at
+                // Record() time and are still queued behind this semaphore, so the history sum
+                // cannot double-count them (same ordering argument as the all-time load above).
+                var monthKey = CurrentMonthKey();
+                using (var month = connection.CreateCommand())
+                {
+                    month.CommandText = SqlStrings.SelectTokenSavingsMonthTotals;
+                    month.Parameters.AddWithValue("$month", monthKey);
+                    using var reader = month.ExecuteReader();
+                    if (reader.Read())
+                        AddToMonth(monthKey, reader.GetInt64(0), reader.GetInt64(1));
                 }
 
                 _loaded = true;
@@ -113,14 +197,14 @@ public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsSt
 
             using var upsert = connection.CreateCommand();
             upsert.CommandText = SqlStrings.UpsertTokenSavings;
-            upsert.Parameters.AddWithValue("$day", DateTime.UtcNow.ToString("yyyy-MM-dd"));
+            upsert.Parameters.AddWithValue("$day", UtcNow().ToString("yyyy-MM-dd"));
             upsert.Parameters.AddWithValue("$provider", provider);
             // Requests counts every measured request; RewrittenRequests only those that shrank —
             // the gap is the canary for an upstream tool rename (savings flatline, traffic doesn't).
             upsert.Parameters.AddWithValue("$rewritten", bytesBefore != bytesAfter ? 1 : 0);
             upsert.Parameters.AddWithValue("$bytesBefore", bytesBefore);
             upsert.Parameters.AddWithValue("$bytesAfter", bytesAfter);
-            upsert.Parameters.AddWithValue("$updatedUTC", DateTime.UtcNow.ToString("o"));
+            upsert.Parameters.AddWithValue("$updatedUTC", UtcNow().ToString("o"));
             upsert.ExecuteNonQuery();
         }
         catch (Exception ex)

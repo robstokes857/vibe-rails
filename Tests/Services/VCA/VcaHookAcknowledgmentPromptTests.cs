@@ -1,4 +1,5 @@
 using VibeRails.Services.VCA.Hooks;
+using VibeRails.Services.GitPreflight;
 using Xunit;
 
 namespace Tests.Services.VCA;
@@ -17,10 +18,16 @@ public class VcaHookAcknowledgmentPromptTests
         {
             var token = "[VCA:AGENTS.md:log-all-file-changes]";
             var presenter = new TestPresenter("Documented in issue 123");
+            var validationService = new TestValidationService(token);
             var runner = new VcaHookRunner(
-                new TestValidationService(token),
+                new GitPreflightPipeline(
+                    new TestSnapshotProvider(tempDir),
+                    [
+                        new VcaPreflightStep(validationService),
+                        new MintLintPreflightStep(),
+                        new AutomatedWorkflowsPreflightStep()
+                    ]),
                 new VcaHookValidationAnalyzer(),
-                new TestFileProvider(),
                 presenter);
 
             var exitCode = await runner.RunAsync(
@@ -56,7 +63,10 @@ public class VcaHookAcknowledgmentPromptTests
             _token = token;
         }
 
-        public Task<VcaHookValidationResult> ValidateAsync(string workingDirectory, CancellationToken cancellationToken) =>
+        public Task<VcaHookValidationResult> ValidateAsync(
+            VcaHookInvocation invocation,
+            string workingDirectory,
+            CancellationToken cancellationToken) =>
             Task.FromResult(new VcaHookValidationResult(
                 "Validated 1 file(s) against 1 rule(s).\n\nCOMMIT-LEVEL VIOLATIONS (require acknowledgment in commit message):",
                 new VcaHookValidationSummary(
@@ -66,10 +76,27 @@ public class VcaHookAcknowledgmentPromptTests
                     RequiredAcknowledgments: [_token])));
     }
 
-    private sealed class TestFileProvider : IVcaHookFileProvider
+    private sealed class TestSnapshotProvider : IGitStagedSnapshotProvider
     {
-        public Task<IReadOnlyList<string>> GetStagedFilesAsync(string workingDirectory, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<string>>(["src/demo.cs"]);
+        private readonly string _repositoryPath;
+
+        public TestSnapshotProvider(string repositoryPath)
+        {
+            _repositoryPath = repositoryPath;
+        }
+
+        public Task<GitStagedSnapshot> CaptureAsync(string workingDirectory, CancellationToken cancellationToken) =>
+            Task.FromResult(new GitStagedSnapshot(
+                _repositoryPath,
+                [new GitStagedFileSnapshot(
+                    "src/demo.cs",
+                    Path.Combine(_repositoryPath, "src", "demo.cs"),
+                    GitStagedChangeKind.Modified,
+                    ExistsInIndex: true,
+                    IsBinary: false,
+                    ChangedLineCount: 1,
+                    Content: "class Demo { }")],
+                []));
     }
 
     private sealed class TestPresenter : IVcaHookPresenter

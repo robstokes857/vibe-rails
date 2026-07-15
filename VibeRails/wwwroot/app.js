@@ -86,10 +86,14 @@ export class VibeControlApp {
                 target: p?.target,
                 status: p?.status
             });
-            // The running tally rides the ping (server-derived ~4 bytes/token estimate); older
-            // servers omit the field and the light keeps its em dash.
+            // The running tallies ride the ping (server-derived ~4 bytes/token estimate); older
+            // servers omit the fields and the light keeps its em dashes.
             if (typeof p?.tokensSavedTotal === 'number') {
-                this.activityBlinker.setTokensSaved(p.tokensSavedTotal);
+                this.activityBlinker.setTokensSaved({
+                    session: p.tokensSavedSession,
+                    month: p.tokensSavedMonth,
+                    allTime: p.tokensSavedTotal
+                });
             }
         });
         // Seed the tally from persisted history; pings keep it live from here on. Best-effort:
@@ -97,7 +101,11 @@ export class VibeControlApp {
         this.apiCall('/api/v1/token-savings', 'GET', null, { showLoading: false })
             .then((savings) => {
                 if (typeof savings?.tokensSaved === 'number') {
-                    this.activityBlinker.setTokensSaved(savings.tokensSaved);
+                    this.activityBlinker.setTokensSaved({
+                        session: savings.tokensSavedSession,
+                        month: savings.tokensSavedMonth,
+                        allTime: savings.tokensSaved
+                    });
                 }
             })
             .catch(() => { });
@@ -521,6 +529,9 @@ export class VibeControlApp {
 
     consumeRequestedInitialView() {
         const url = new URL(window.location.href);
+        if (url.pathname.replace(/\/+$/, '') === '/git-guard') {
+            return 'git-guard';
+        }
         const requestedView = (url.searchParams.get('view') || '').trim();
         const initialView = this.getDuplicateTabViewName(requestedView);
 
@@ -545,6 +556,7 @@ export class VibeControlApp {
             'launch-cli',
             'agents',
             'check-violations',
+            'git-guard',
             'active-rules',
             'environments',
             'config',
@@ -758,6 +770,7 @@ export class VibeControlApp {
 
     loadView(view, data = {}) {
         this.settingsController?.unload?.();
+        this.ruleController?.unload?.();
         this.updateActiveSubNav(view);
         this.terminalController?.resetLayoutStateForNavigation();
         // Tear down the MCP Explorer's global listener / xterm instances when navigating away
@@ -772,6 +785,7 @@ export class VibeControlApp {
             'agent-edit': () => this.agentController.loadAgentEdit(data),
             'agent-create': () => this.agentController.loadAgentCreate(),
             'check-violations': () => this.ruleController.loadCheckViolations(),
+            'git-guard': () => this.ruleController.loadFocusedGitGuard(),
             'active-rules': () => this.ruleController.loadActiveRules(),
             'environments': () => this.environmentController.loadEnvironments(),
             'config': () => this.configController.loadConfiguration(),
@@ -796,11 +810,13 @@ export class VibeControlApp {
 
     applyViewLayoutState(view) {
         const isTerminalFocus = view === 'terminal-focus';
+        const isGitGuardFocus = view === 'git-guard';
         const layoutRoots = [document.documentElement, document.body];
 
         layoutRoots.forEach((element) => {
             element.classList.toggle('terminal-focus-active', isTerminalFocus);
             element.classList.toggle('vb-terminal-focus-active', isTerminalFocus);
+            element.classList.toggle('git-guard-focus-active', isGitGuardFocus);
         });
 
         // Removed automatic collapsing of navbars in terminal focus mode

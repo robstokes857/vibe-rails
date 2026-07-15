@@ -21,9 +21,11 @@ public class VcaHookProcessHostTests
         var firstLine = text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).First();
 
         Assert.Equal(0, exitCode);
-        Assert.Equal("VibeRails VCA: Preview check", firstLine);
-        Assert.Contains("VibeRails VCA: Preview check", text);
-        Assert.Contains("Reason: manual preview", text);
+        Assert.Equal("VibeRails · Git Guard — Preview", firstLine);
+        Assert.Contains("[1/3]", text);
         Assert.Contains("PASS: VCA hook preview completed.", text);
+        Assert.Contains("MintLint code health", text);
+        Assert.Contains("Placeholder for automated workflows", text);
+        Assert.Contains("[pass] Commit allowed", text);
     }
 }

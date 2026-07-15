@@ -812,12 +812,35 @@ code {
     white-space: nowrap;
 }
 
-.vb-activity-popover-savings-value {
+.vb-activity-popover-savings-breakdown {
+    display: grid;
+    gap: 0.2rem;
+    justify-items: stretch;
+}
+
+.vb-activity-popover-savings-row {
+    display: inline-flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.55rem;
+}
+
+.vb-activity-popover-savings-row-label {
+    color: var(--color-text-muted);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.vb-activity-popover-savings-row-value {
     color: color-mix(in srgb, var(--color-accent) 82%, #fff 18%);
-    font-size: 1.15rem;
+    font-size: 0.82rem;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.04em;
+    text-align: right;
 }
 
 .vb-activity-popover-empty {
@@ -9113,4 +9136,916 @@ kbd:not(.ch-search-kbd) {
 }
 @media (max-width: 720px) {
     .vibe-rails-ai-view .insp-col.full .insp-col-body-grid { grid-template-columns: 1fr; }
+}
+
+/* ─── VCA Git Guard ──────────────────────────────────────────────────────── */
+.git-guard-view {
+    --git-guard-tone: var(--color-text-muted);
+    width: min(100%, 1120px);
+    margin-inline: auto;
+}
+
+.git-guard-view [hidden] {
+    display: none !important;
+}
+
+button.git-guard-menu-button {
+    padding: 0;
+    appearance: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+}
+
+button.git-guard-menu-button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 85%, white 15%);
+    outline-offset: 3px;
+}
+
+.git-guard-page-header {
+    max-width: 780px;
+}
+
+.git-guard-page-header h2 {
+    font-size: clamp(1.75rem, 3vw, 2.35rem);
+    letter-spacing: -0.035em;
+}
+
+.git-guard-eyebrow {
+    margin-bottom: 0.45rem;
+    color: var(--color-accent);
+    font-family: var(--vb-font-mono, ui-monospace, monospace);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.git-guard-health,
+.vca-console-card {
+    overflow: hidden;
+    border-color: color-mix(in srgb, var(--color-border) 78%, transparent);
+}
+
+.git-guard-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-height: 52px;
+}
+
+.git-guard-card-header > div:first-child > i {
+    color: var(--color-accent);
+}
+
+.git-guard-health[data-tone="success"] {
+    --git-guard-tone: var(--color-success);
+}
+
+.git-guard-health[data-tone="warning"] {
+    --git-guard-tone: var(--color-warning);
+}
+
+.git-guard-health[data-tone="danger"] {
+    --git-guard-tone: var(--color-danger);
+}
+
+.git-guard-health::before {
+    content: "";
+    display: block;
+    height: 3px;
+    background: var(--git-guard-tone);
+    opacity: 0.9;
+}
+
+.hook-health-badge,
+.hook-detail-badge,
+.vca-console-state {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    border: 1px solid color-mix(in srgb, var(--badge-tone, var(--color-text-muted)) 40%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--badge-tone, var(--color-text-muted)) 12%, transparent);
+    color: var(--badge-tone, var(--color-text-muted));
+    font-family: var(--vb-font-mono, ui-monospace, monospace);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.hook-health-badge {
+    padding: 0.42rem 0.65rem;
+}
+
+.hook-detail-badge,
+.vca-console-state {
+    padding: 0.3rem 0.5rem;
+}
+
+.hook-health-badge[data-tone="success"],
+.hook-detail-badge[data-tone="success"] {
+    --badge-tone: var(--color-success);
+}
+
+.hook-health-badge[data-tone="warning"],
+.hook-detail-badge[data-tone="warning"] {
+    --badge-tone: var(--color-warning);
+}
+
+.hook-health-badge[data-tone="danger"],
+.hook-detail-badge[data-tone="danger"] {
+    --badge-tone: var(--color-danger);
+}
+
+.git-guard-health-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    padding-bottom: 1.4rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+}
+
+.git-guard-health-copy {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 1rem;
+}
+
+.git-guard-health-icon {
+    display: grid;
+    flex: 0 0 54px;
+    width: 54px;
+    height: 54px;
+    place-items: center;
+    border: 1px solid color-mix(in srgb, var(--git-guard-tone) 45%, transparent);
+    border-radius: 13px;
+    background: color-mix(in srgb, var(--git-guard-tone) 12%, transparent);
+    color: var(--git-guard-tone);
+    font-size: 1.25rem;
+}
+
+.git-guard-health-title {
+    margin: 0 0 0.3rem;
+    color: var(--color-text);
+    font-size: 1.08rem;
+    font-weight: 700;
+}
+
+.git-guard-health-message {
+    max-width: 680px;
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 0.84rem;
+    line-height: 1.55;
+}
+
+.git-guard-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+}
+
+.git-guard-actions .btn {
+    min-width: 132px;
+}
+
+.git-guard-hook-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    padding-top: 1.2rem;
+}
+
+.git-guard-hook {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.8rem;
+    min-width: 0;
+    padding: 0.95rem;
+    border: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-bg-base) 45%, transparent);
+}
+
+.git-guard-hook-mark {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: var(--color-accent);
+    font-size: 0.85rem;
+}
+
+.git-guard-hook-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.git-guard-hook-heading code {
+    padding: 0;
+    background: transparent;
+    color: var(--color-text);
+    font-family: var(--vb-font-mono, ui-monospace, monospace);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.git-guard-hook-copy p {
+    margin: 0.42rem 0 0;
+    color: var(--color-text-muted);
+    font-size: 0.75rem;
+    line-height: 1.45;
+}
+
+.git-guard-meta {
+    display: grid;
+    gap: 0.45rem;
+    margin: 1rem 0 0;
+    padding: 0;
+}
+
+.git-guard-meta > div {
+    display: grid;
+    grid-template-columns: 112px minmax(0, 1fr);
+    gap: 0.75rem;
+    font-family: var(--vb-font-mono, ui-monospace, monospace);
+    font-size: 0.67rem;
+    line-height: 1.45;
+}
+
+.git-guard-meta dt {
+    color: var(--color-text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.git-guard-meta dd {
+    min-width: 0;
+    margin: 0;
+    color: color-mix(in srgb, var(--color-text) 82%, transparent);
+    overflow-wrap: anywhere;
+}
+
+.vca-console-card {
+    --console-tone: var(--color-accent);
+}
+
+.vca-console-card[data-tone="success"] {
+    --console-tone: var(--color-success);
+}
+
+.vca-console-card[data-tone="warning"] {
+    --console-tone: var(--color-warning);
+}
+
+.vca-console-card[data-tone="danger"] {
+    --console-tone: var(--color-danger);
+}
+
+.vca-console-state {
+    --badge-tone: var(--console-tone);
+    margin-left: 0.25rem;
+}
+
+.vca-console-utility-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.vca-console-intro {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.vca-console-intro h3 {
+    margin: 0 0 0.32rem;
+    color: var(--color-text);
+    font-size: 1rem;
+}
+
+.vca-console-intro p {
+    max-width: 720px;
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
+    line-height: 1.5;
+}
+
+.vca-console-intro .btn {
+    flex: 0 0 auto;
+    min-width: 164px;
+}
+
+.vca-console-shell {
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--console-tone) 35%, #243045 65%);
+    border-radius: 8px;
+    background: #090d14;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
+    transition: border-color 160ms ease;
+}
+
+.vca-console-chrome {
+    display: flex;
+    align-items: center;
+    gap: 0.38rem;
+    min-height: 38px;
+    padding: 0 0.85rem;
+    border-bottom: 1px solid #202a3a;
+    background: #111722;
+}
+
+.vca-console-chrome > span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4b5565;
+}
+
+.vca-console-chrome > span:first-child {
+    background: #ef6a63;
+}
+
+.vca-console-chrome > span:nth-child(2) {
+    background: #e5b95c;
+}
+
+.vca-console-chrome > span:nth-child(3) {
+    background: #58b77b;
+}
+
+.vca-console-chrome > div {
+    min-width: 0;
+    margin-left: 0.45rem;
+    overflow: hidden;
+    color: #8390a5;
+    font: 0.63rem/1 var(--vb-font-mono, ui-monospace, monospace);
+    letter-spacing: 0.04em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vca-console-output {
+    min-height: 250px;
+    max-height: min(52vh, 520px);
+    margin: 0;
+    padding: 1.15rem 1.25rem;
+    overflow: auto;
+    background: transparent;
+    color: #dce6f4;
+    font: 0.78rem/1.62 var(--vb-font-mono, "Cascadia Code", monospace);
+    overflow-wrap: anywhere;
+    tab-size: 4;
+    white-space: pre-wrap;
+}
+
+.vca-console-output:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 85%, white 15%);
+    outline-offset: -3px;
+}
+
+.vca-console-output::selection {
+    background: color-mix(in srgb, var(--color-primary) 45%, transparent);
+}
+
+.vca-console-output::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.vca-console-output::-webkit-scrollbar-thumb {
+    border-radius: 8px;
+    background: #334155;
+}
+
+.vca-console-footer {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 34px;
+    padding: 0 0.9rem;
+    border-top: 1px solid #202a3a;
+    background: #0e141e;
+    color: #8390a5;
+    font: 0.62rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
+}
+
+.vca-console-pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--console-tone);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--console-tone) 12%, transparent);
+}
+
+.vca-console-card.is-running .vca-console-pulse {
+    animation: vca-console-pulse 1.15s ease-in-out infinite;
+}
+
+@keyframes vca-console-pulse {
+    50% {
+        box-shadow: 0 0 0 7px color-mix(in srgb, var(--console-tone) 0%, transparent);
+        opacity: 0.65;
+    }
+}
+
+@media (max-width: 760px) {
+    .git-guard-health-summary,
+    .vca-console-intro {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .git-guard-actions,
+    .git-guard-actions .btn,
+    .vca-console-intro .btn {
+        width: 100%;
+    }
+
+    .git-guard-hook-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .vca-console-output {
+        min-height: 220px;
+        padding: 1rem;
+        font-size: 0.72rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .git-guard-card-header,
+    .vca-console-utility-actions {
+        align-items: stretch;
+    }
+
+    .vca-console-utility-actions {
+        width: 100%;
+    }
+
+    .vca-console-utility-actions .btn {
+        flex: 1 1 0;
+        justify-content: center;
+    }
+
+    .git-guard-health-copy {
+        align-items: flex-start;
+    }
+
+    .git-guard-health-icon {
+        flex-basis: 44px;
+        width: 44px;
+        height: 44px;
+    }
+
+    .git-guard-meta > div {
+        grid-template-columns: 1fr;
+        gap: 0.15rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vca-console-card.is-running .vca-console-pulse {
+        animation: none;
+    }
+}
+
+/* ─── Dedicated Git Guard preflight ─────────────────────────────────────── */
+.git-guard-view [data-git-guard-focused-only] {
+    display: none;
+}
+
+.git-guard-view[data-mode="focused"] [data-git-guard-dashboard-only] {
+    display: none !important;
+}
+
+.git-guard-view[data-mode="focused"] [data-git-guard-focused-only] {
+    display: block;
+}
+
+.git-guard-view[data-mode="focused"] .git-guard-focus-bar,
+.git-guard-view[data-mode="focused"] .git-preflight-overview,
+.git-guard-view[data-mode="focused"] .git-preflight-steps {
+    display: flex;
+}
+
+html.git-guard-focus-active,
+body.git-guard-focus-active {
+    min-height: 100%;
+    background: #080d15;
+}
+
+html.git-guard-focus-active body .app-subnav,
+body.git-guard-focus-active .app-subnav,
+html.git-guard-focus-active body .app-footer,
+body.git-guard-focus-active .app-footer {
+    display: none !important;
+}
+
+html.git-guard-focus-active body .main-container,
+body.git-guard-focus-active .main-container {
+    width: 100%;
+    max-width: none;
+    min-height: 100vh;
+    padding: 0 1.5rem 2.5rem;
+}
+
+body.git-guard-focus-active #app-content {
+    min-height: 100vh;
+}
+
+.git-guard-view[data-mode="focused"] {
+    width: min(100%, 1440px);
+}
+
+.git-guard-focus-bar {
+    position: sticky;
+    z-index: 20;
+    top: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 0 -1.5rem 2rem;
+    padding: 0.85rem 1.5rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+    background: color-mix(in srgb, #080d15 94%, transparent);
+    box-shadow: 0 12px 30px rgb(0 0 0 / 22%);
+    backdrop-filter: blur(16px);
+}
+
+.git-guard-focus-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.git-guard-focus-brand img {
+    border-radius: 9px;
+    box-shadow: 0 0 20px color-mix(in srgb, var(--color-primary) 25%, transparent);
+}
+
+.git-guard-focus-brand div {
+    display: grid;
+    line-height: 1.08;
+}
+
+.git-guard-focus-brand span {
+    color: var(--color-text-muted);
+    font: 0.63rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.git-guard-focus-brand strong {
+    color: var(--color-text);
+    font-size: 0.95rem;
+}
+
+.git-guard-focus-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.55rem;
+}
+
+.git-preflight-overview {
+    align-items: stretch;
+    gap: 1rem;
+}
+
+.git-preflight-result {
+    flex: 1.35 1 0;
+    overflow: hidden;
+    --preflight-tone: var(--color-text-muted);
+}
+
+.git-preflight-result[data-tone="success"] { --preflight-tone: var(--color-success); }
+.git-preflight-result[data-tone="warning"] { --preflight-tone: var(--color-warning); }
+.git-preflight-result[data-tone="danger"] { --preflight-tone: var(--color-danger); }
+
+.git-preflight-result::before,
+.git-preflight-step::before {
+    content: "";
+    display: block;
+    height: 3px;
+    background: var(--preflight-tone, var(--color-text-muted));
+}
+
+.git-preflight-result .card-body {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 1rem;
+}
+
+.git-preflight-result-icon {
+    display: grid;
+    width: 56px;
+    height: 56px;
+    place-items: center;
+    border: 1px solid color-mix(in srgb, var(--preflight-tone) 45%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--preflight-tone) 13%, transparent);
+    color: var(--preflight-tone);
+    font-size: 1.25rem;
+}
+
+.git-preflight-result h2 {
+    margin: 0 0 0.25rem;
+    color: var(--color-text);
+    font-size: clamp(1.2rem, 2.4vw, 1.65rem);
+}
+
+.git-preflight-result p,
+.git-preflight-staged p {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.git-preflight-decision {
+    align-self: center;
+    padding: 0.45rem 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--decision-tone, var(--color-text-muted)) 45%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--decision-tone, var(--color-text-muted)) 12%, transparent);
+    color: var(--decision-tone, var(--color-text-muted));
+    font: 700 0.67rem/1 var(--vb-font-mono, ui-monospace, monospace);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
+.git-preflight-decision[data-tone="success"] { --decision-tone: var(--color-success); }
+.git-preflight-decision[data-tone="warning"] { --decision-tone: var(--color-warning); }
+.git-preflight-decision[data-tone="danger"] { --decision-tone: var(--color-danger); }
+
+.git-preflight-staged {
+    flex: 0.65 1 0;
+    min-width: 310px;
+}
+
+.git-preflight-staged-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.55rem;
+}
+
+.git-preflight-staged-heading strong {
+    color: var(--color-text);
+    font-size: 0.9rem;
+}
+
+.git-preflight-staged ul {
+    max-height: 116px;
+    margin: 0.8rem 0 0;
+    padding: 0.65rem 0.8rem 0.65rem 1.75rem;
+    overflow: auto;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--color-bg-base) 65%, transparent);
+    color: color-mix(in srgb, var(--color-text) 82%, transparent);
+    font: 0.68rem/1.55 var(--vb-font-mono, ui-monospace, monospace);
+}
+
+.git-preflight-steps {
+    align-items: stretch;
+    gap: 0.85rem;
+}
+
+.git-preflight-step {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    --preflight-tone: var(--color-text-muted);
+}
+
+.git-preflight-step[data-tone="success"] { --preflight-tone: var(--color-success); }
+.git-preflight-step[data-tone="warning"] { --preflight-tone: var(--color-warning); }
+.git-preflight-step[data-tone="danger"] { --preflight-tone: var(--color-danger); }
+.git-preflight-step[data-status="running"] { --preflight-tone: var(--color-primary); }
+
+.git-preflight-step-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.git-preflight-step-title,
+.git-preflight-step-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.git-preflight-step-title > div {
+    display: grid;
+    min-width: 0;
+}
+
+.git-preflight-step-title strong {
+    color: var(--color-text);
+    font-size: 0.82rem;
+}
+
+.git-preflight-step-title small,
+.git-preflight-step-meta > span:first-child {
+    color: var(--color-text-muted);
+    font: 0.61rem/1.35 var(--vb-font-mono, ui-monospace, monospace);
+}
+
+.git-preflight-step-number {
+    display: grid;
+    flex: 0 0 30px;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--preflight-tone) 14%, transparent);
+    color: var(--preflight-tone);
+    font: 700 0.72rem/1 var(--vb-font-mono, ui-monospace, monospace);
+}
+
+.git-preflight-step .card-body > p {
+    min-height: 2.4em;
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 0.74rem;
+    line-height: 1.5;
+}
+
+.git-preflight-step pre {
+    max-height: 180px;
+    margin: 0.8rem 0 0;
+    padding: 0.7rem;
+    overflow: auto;
+    border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+    border-radius: 7px;
+    background: #090d14;
+    color: #cbd7e8;
+    font: 0.66rem/1.5 var(--vb-font-mono, ui-monospace, monospace);
+    white-space: pre-wrap;
+}
+
+.git-preflight-mint-disclosure {
+    margin-top: 0.8rem;
+    color: var(--color-text-muted);
+    font-size: 0.7rem;
+}
+
+.git-preflight-mint-disclosure > summary {
+    cursor: pointer;
+    color: var(--color-accent);
+    font-weight: 700;
+}
+
+.git-preflight-mint-file {
+    margin-top: 0.55rem;
+    padding: 0.6rem;
+    border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--color-bg-base) 50%, transparent);
+}
+
+.git-preflight-mint-file > summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.7rem;
+    cursor: pointer;
+}
+
+.git-preflight-mint-path {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--color-text);
+    font-family: var(--vb-font-mono, ui-monospace, monospace);
+}
+
+.git-preflight-mint-grade {
+    flex: 0 0 auto;
+    color: var(--color-warning);
+    font-weight: 700;
+}
+
+.git-preflight-mint-categories {
+    display: grid;
+    grid-template-columns: minmax(90px, 0.35fr) minmax(0, 1fr);
+    gap: 0.3rem 0.6rem;
+    margin: 0.65rem 0 0;
+    padding-top: 0.55rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+
+.git-preflight-mint-categories dt,
+.git-preflight-mint-categories dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.git-preflight-mint-categories dt { color: var(--color-text); }
+
+.git-preflight-transcript-intro {
+    margin-bottom: 1rem;
+}
+
+.git-preflight-transcript-intro h3 {
+    margin: 0 0 0.3rem;
+    color: var(--color-text);
+    font-size: 1rem;
+}
+
+.git-preflight-transcript-intro p {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 0.78rem;
+}
+
+.git-guard-view[data-mode="focused"] .vca-console-output {
+    min-height: 300px;
+    max-height: min(46vh, 620px);
+}
+
+@media (max-width: 960px) {
+    .git-preflight-overview,
+    .git-preflight-steps {
+        flex-direction: column;
+    }
+
+    .git-preflight-staged {
+        min-width: 0;
+    }
+}
+
+@media (max-width: 720px) {
+    html.git-guard-focus-active body .main-container,
+    body.git-guard-focus-active .main-container {
+        padding-inline: 0.75rem;
+    }
+
+    .git-guard-focus-bar {
+        position: static;
+        align-items: stretch;
+        flex-direction: column;
+        margin-inline: -0.75rem;
+        padding-inline: 0.75rem;
+    }
+
+    .git-guard-focus-actions,
+    .git-guard-focus-actions .btn {
+        width: 100%;
+    }
+
+    .git-guard-focus-actions .btn {
+        flex: 1 1 0;
+    }
+
+    .git-preflight-result .card-body {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .git-preflight-decision {
+        grid-column: 1 / -1;
+        justify-self: stretch;
+        text-align: center;
+    }
+}
+
+@media (max-width: 520px) {
+    .git-guard-focus-actions {
+        flex-direction: column;
+    }
+
+    .git-preflight-result .card-body {
+        grid-template-columns: 1fr;
+    }
+
+    .git-preflight-result-icon {
+        width: 46px;
+        height: 46px;
+    }
+
+    .git-preflight-step-header,
+    .git-preflight-staged-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
 }

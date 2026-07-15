@@ -5,6 +5,7 @@ namespace VibeRails.Utils
     /// Surviving shapes:
     ///   vb                                           → web dashboard, browser opens, server stops on browser close
     ///   vb --web                                     → same as bare invocation
+    ///   vb --git-guard                               → focused staged-change preflight dashboard
     ///   vb --version | -v                            → print version and exit
     ///   vb --help | -h                               → print help and exit
     ///   vb --vs-code-v1 [--parent-pid &lt;pid&gt;]         → VS Code extension / new-tab child mode
@@ -20,7 +21,8 @@ namespace VibeRails.Utils
             // any arg containing "web", which incorrectly fired on `--workdir C:\my-website`
             // or `--env webapp`.
             if (args.Length == 0
-                || args.Any(a => a.Equals("--web", System.StringComparison.OrdinalIgnoreCase)))
+                || args.Any(a => a.Equals("--web", System.StringComparison.OrdinalIgnoreCase))
+                || args.Any(a => a.Equals("--git-guard", System.StringComparison.OrdinalIgnoreCase)))
             {
                 parsed.OpenBrowser = true;
                 parsed.ShutdownOnBrowserClose = true;
@@ -49,6 +51,10 @@ namespace VibeRails.Utils
 
                     case "--web":
                         // OpenBrowser/ShutdownOnBrowserClose already set above; nothing extra to do.
+                        break;
+
+                    case "--git-guard":
+                        parsed.IsGitGuardMode = true;
                         break;
 
                     case "--vs-code-v1":

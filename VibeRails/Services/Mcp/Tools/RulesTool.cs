@@ -1,8 +1,11 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 using Serilog;
 using VibeRails.Services;
+using VibeRails.Services.GitPreflight;
+using VibeRails.Services.VCA;
 
 namespace VibeRails.Services.Mcp.Tools;
 
@@ -13,8 +16,56 @@ namespace VibeRails.Services.Mcp.Tools;
 [McpServerToolType]
 public class RulesTool
 {
-    private static readonly bool VcaValidationTemporarilyDisabled = true;
     private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(10);
+    private static readonly IFileClassifier FileClassifier = new FileClassifier();
+    private static readonly StringComparer GitPathComparer = OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
+    private static readonly StringComparison GitPathComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
+    private sealed record StagedFileSnapshot(
+        string RelativePath,
+        string FullPath,
+        int? ChangedLineCount,
+        bool ExistsInIndex,
+        string? Content = null);
+
+    private sealed record AgentFileSnapshot(
+        string RelativePath,
+        string FullPath,
+        string Content);
+
+    private sealed record VcaRuleSnapshot(
+        string RuleText,
+        string Enforcement,
+        AgentFileSnapshot Source);
+
+    private enum RuleValidationState
+    {
+        Passed,
+        Violated,
+        Deferred
+    }
+
+    private sealed record RuleValidationResult(RuleValidationState State, string Message)
+    {
+        public static RuleValidationResult Pass(string message) =>
+            new(RuleValidationState.Passed, message);
+
+        public static RuleValidationResult Violation(string message) =>
+            new(RuleValidationState.Violated, message);
+
+        public static RuleValidationResult Deferred(string message) =>
+            new(RuleValidationState.Deferred, message);
+    }
+
+    private sealed record GitCommandResult(
+        int ExitCode,
+        string StdOut,
+        string StdErr,
+        bool TimedOut);
 
     // Enforcement vocabulary understood in AGENTS.md rule lines. This is a deliberate SUPERSET of
     // Services.EnforcementParser (WARN/COMMIT/STOP): the MCP tool additionally honors the bracket
@@ -41,44 +92,62 @@ public class RulesTool
         return report.Output;
     }
 
-    internal static async Task<VcaToolValidationReport> ValidateVcaReportAsync(string? workingDirectory = null)
+    internal static async Task<VcaToolValidationReport> ValidateVcaReportAsync(
+        string? workingDirectory = null,
+        string? commitMessage = null,
+        bool validateCommitMessage = false,
+        CancellationToken cancellationToken = default,
+        GitStagedSnapshot? stagedSnapshot = null)
     {
         try
         {
-            if (VcaValidationTemporarilyDisabled)
-            {
-                return VcaToolValidationReport.Pass("PASS: VCA validation is temporarily disabled.");
-            }
-
-            var workDir = workingDirectory ?? Directory.GetCurrentDirectory();
+            cancellationToken.ThrowIfCancellationRequested();
+            var workDir = stagedSnapshot?.RepositoryPath
+                ?? workingDirectory
+                ?? Directory.GetCurrentDirectory();
 
             // Find git root
-            var gitRoot = FindGitRoot(workDir);
+            var gitRoot = stagedSnapshot?.RepositoryPath ?? FindGitRoot(workDir);
             if (gitRoot == null)
             {
                 return VcaToolValidationReport.Pass("SKIP: Not in a git repository.");
             }
 
             // Get staged files
-            var stagedFiles = await GetStagedFilesAsync(gitRoot);
-            if (stagedFiles.Count == 0)
+            var indexPaths = stagedSnapshot == null
+                ? await GetIndexPathsAsync(gitRoot, cancellationToken)
+                : stagedSnapshot.AgentFiles.Select(file => file.RelativePath).ToHashSet(GitPathComparer);
+            var stagedFiles = stagedSnapshot == null
+                ? await GetStagedFilesAsync(gitRoot, indexPaths, cancellationToken)
+                : stagedSnapshot.Files.Select(file => new StagedFileSnapshot(
+                    file.RelativePath,
+                    file.FullPath,
+                    file.ChangedLineCount,
+                    file.ExistsInIndex,
+                    file.Content)).ToList();
+            if (stagedFiles.Count == 0 && !validateCommitMessage)
             {
                 return VcaToolValidationReport.Pass("PASS: No staged files to validate.");
             }
 
             // Find AGENTS.md files
-            var agentFiles = FindAgentFiles(gitRoot);
+            var agentFiles = stagedSnapshot == null
+                ? await GetAgentFilesFromIndexAsync(gitRoot, indexPaths, cancellationToken)
+                : stagedSnapshot.AgentFiles.Select(file => new AgentFileSnapshot(
+                    file.RelativePath,
+                    ToFullPath(gitRoot, file.RelativePath),
+                    file.Content)).ToList();
             if (agentFiles.Count == 0)
             {
                 return VcaToolValidationReport.Pass("PASS: No AGENTS.md files found. No VCA rules to check.");
             }
 
             // Parse rules from AGENTS.md files
-            var allRules = new List<(string RuleText, string Enforcement, string SourceFile)>();
+            var allRules = new List<VcaRuleSnapshot>();
             foreach (var agentFile in agentFiles)
             {
-                var content = await File.ReadAllTextAsync(agentFile);
-                allRules.AddRange(ParseRules(content, agentFile));
+                allRules.AddRange(ParseRules(agentFile.Content, agentFile.FullPath)
+                    .Select(rule => new VcaRuleSnapshot(rule.RuleText, rule.Enforcement, agentFile)));
             }
 
             if (allRules.Count == 0)
@@ -89,23 +158,52 @@ public class RulesTool
             // Validate against rules
             var violations = new List<string>();
             var warnings = new List<string>();
+            var deferredChecks = new List<string>();
             var commitViolations = new List<(string RuleText, string SourceFile, string Slug)>();
             var requiredAcknowledgments = new List<string>();
             var hasStopViolation = false;
+            var evaluatedRuleCount = 0;
 
-            foreach (var (ruleText, enforcement, sourceFile) in allRules)
+            foreach (var rule in allRules)
             {
+                var ruleText = rule.RuleText;
+                var enforcement = rule.Enforcement;
+                var sourceFile = rule.Source.FullPath;
+
                 if (enforcement == "SKIP" || enforcement == "DISABLED")
                 {
                     continue;
                 }
 
-                // Pass sourceFile for rules that need to check against Files section
-                var (passed, message) = await ValidateRuleAsync(ruleText, stagedFiles, gitRoot, sourceFile);
-
-                if (!passed)
+                var scopedFiles = GetScopedFiles(stagedFiles, sourceFile, gitRoot);
+                var isCommitMessageRule = IsCommitMessageRule(ruleText);
+                if (scopedFiles.Count == 0
+                    && !(validateCommitMessage && stagedFiles.Count == 0 && isCommitMessageRule))
                 {
-                    var fileName = Path.GetFileName(sourceFile);
+                    continue;
+                }
+
+                evaluatedRuleCount++;
+                // Pass sourceFile for rules that need to check against Files section
+                var validation = await ValidateRuleAsync(
+                    ruleText,
+                    scopedFiles,
+                    gitRoot,
+                    rule.Source,
+                    commitMessage,
+                    validateCommitMessage,
+                    cancellationToken);
+
+                if (validation.State == RuleValidationState.Deferred)
+                {
+                    deferredChecks.Add($"[DEFERRED] {ruleText}: {validation.Message}");
+                    continue;
+                }
+
+                if (validation.State == RuleValidationState.Violated)
+                {
+                    var message = validation.Message;
+                    var sourceId = GetRuleSourceId(sourceFile, gitRoot);
                     var slug = GenerateRuleSlug(ruleText);
 
                     if (enforcement == "WARN")
@@ -115,7 +213,7 @@ public class RulesTool
                     else if (enforcement == "COMMIT")
                     {
                         commitViolations.Add((ruleText, sourceFile, slug));
-                        var token = $"[VCA:{fileName}:{slug}]";
+                        var token = $"[VCA:{sourceId}:{slug}]";
                         requiredAcknowledgments.Add(token);
                         violations.Add($"[COMMIT] {ruleText}: {message}\n  Acknowledgment needed: {token} Reason: <your explanation>");
                     }
@@ -129,10 +227,10 @@ public class RulesTool
 
             // Build response
             var result = new System.Text.StringBuilder();
-            result.AppendLine($"Validated {stagedFiles.Count} file(s) against {allRules.Count} rule(s).");
+            result.AppendLine($"Validated {stagedFiles.Count} staged file(s) against {evaluatedRuleCount} applicable rule(s).");
             result.AppendLine();
 
-            if (violations.Count == 0 && warnings.Count == 0)
+            if (violations.Count == 0 && warnings.Count == 0 && deferredChecks.Count == 0)
             {
                 result.AppendLine("PASS: All VCA rules satisfied.");
                 return new VcaToolValidationReport(
@@ -148,6 +246,16 @@ public class RulesTool
                 foreach (var warning in warnings)
                 {
                     result.AppendLine($"  {warning}");
+                }
+                result.AppendLine();
+            }
+
+            if (deferredChecks.Count > 0)
+            {
+                result.AppendLine("DEFERRED CHECKS (evaluated by a later Git hook):");
+                foreach (var deferredCheck in deferredChecks)
+                {
+                    result.AppendLine($"  {deferredCheck}");
                 }
                 result.AppendLine();
             }
@@ -174,10 +282,14 @@ public class RulesTool
                     result.AppendLine("To commit, include acknowledgments like:");
                     foreach (var (ruleText, sourceFile, slug) in commitViolations.Take(3))
                     {
-                        var fileName = Path.GetFileName(sourceFile);
-                        result.AppendLine($"  [VCA:{fileName}:{slug}] Reason: <explain why this is acceptable>");
+                        var sourceId = GetRuleSourceId(sourceFile, gitRoot);
+                        result.AppendLine($"  [VCA:{sourceId}:{slug}] Reason: <explain why this is acceptable>");
                     }
                 }
+            }
+            else
+            {
+                result.AppendLine("PASS: No blocking VCA violations detected.");
             }
 
             return new VcaToolValidationReport(
@@ -185,6 +297,10 @@ public class RulesTool
                 HasError: false,
                 HasStopViolation: hasStopViolation,
                 RequiredAcknowledgments: requiredAcknowledgments.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -267,282 +383,534 @@ public class RulesTool
         return null;
     }
 
-    private static async Task<List<string>> GetStagedFilesAsync(string gitRoot)
+    private static async Task<HashSet<string>> GetIndexPathsAsync(
+        string gitRoot,
+        CancellationToken cancellationToken)
     {
-        var files = new List<string>();
-
-        // A git failure (git missing, index.lock, timeout, exit != 0) must NOT be
-        // indistinguishable from "no staged files" — that would fail open and let a commit
-        // through unvalidated. Throwing makes ValidateVca return "ERROR:", which blocks the hook.
-        var result = await GitProcessRunner.RunAsync(
-            "--no-pager diff --cached --name-only",
+        var result = await RunGitAsync(
             gitRoot,
-            GitCommandTimeout);
+            ["--no-pager", "ls-files", "--cached", "-z"],
+            cancellationToken);
+        EnsureGitSucceeded(result, "git ls-files --cached", gitRoot);
 
-        if (result.TimedOut)
-        {
-            throw new TimeoutException(
-                $"git diff --cached timed out after {(int)GitCommandTimeout.TotalSeconds} seconds in {gitRoot}.");
-        }
-
-        if (result.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"git diff --cached failed with exit code {result.ExitCode} in {gitRoot}: {result.StdErr}");
-        }
-
-        foreach (var line in result.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var trimmed = line.Trim();
-            if (!string.IsNullOrEmpty(trimmed))
-            {
-                files.Add(Path.Combine(gitRoot, trimmed.Replace('/', Path.DirectorySeparatorChar)));
-            }
-        }
-
-        return files;
+        return SplitNullDelimited(result.StdOut)
+            .Select(NormalizeGitPath)
+            .ToHashSet(GitPathComparer);
     }
 
-    private static List<string> FindAgentFiles(string gitRoot)
+    private static async Task<List<StagedFileSnapshot>> GetStagedFilesAsync(
+        string gitRoot,
+        IReadOnlySet<string> indexPaths,
+        CancellationToken cancellationToken)
     {
-        var agentFiles = new List<string>();
-        try
-        {
-            // Check common locations for AGENTS.md
-            var commonPaths = new[]
-            {
-                Path.Combine(gitRoot, "AGENTS.md"),
-                Path.Combine(gitRoot, ".github", "AGENTS.md"),
-                Path.Combine(gitRoot, ".cursor", "AGENTS.md"),
-                Path.Combine(gitRoot, ".claude", "AGENTS.md"),
-            };
+        // `-z` is essential: newline, tab, quote, and backslash are all legal in Git paths.
+        // `--no-renames` also keeps numstat records to one unambiguous path apiece.
+        var namesResult = await RunGitAsync(
+            gitRoot,
+            ["--no-pager", "diff", "--cached", "--name-only", "--no-renames", "-z"],
+            cancellationToken);
+        EnsureGitSucceeded(namesResult, "git diff --cached --name-only", gitRoot);
 
-            foreach (var path in commonPaths)
-            {
-                if (File.Exists(path))
-                {
-                    agentFiles.Add(path);
-                }
-            }
-
-            // Also search for any AGENTS.md in subdirectories (up to 3 levels)
-            try
-            {
-                var files = Directory.GetFiles(gitRoot, "AGENTS.md", SearchOption.AllDirectories)
-                    .Where(f => f.Split(Path.DirectorySeparatorChar).Length - gitRoot.Split(Path.DirectorySeparatorChar).Length <= 4)
-                    .Where(f => !f.Contains("node_modules") && !f.Contains(".git"));
-                agentFiles.AddRange(files);
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "Failed to search for AGENTS.md files in {GitRoot}", gitRoot);
-            }
-
-            return agentFiles.Distinct().ToList();
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "Failed to find AGENTS.md files in {GitRoot}", gitRoot);
-            return agentFiles;
-        }
+        var lineCounts = await GetStagedChangedLineCountsAsync(gitRoot, cancellationToken);
+        return SplitNullDelimited(namesResult.StdOut)
+            .Select(NormalizeGitPath)
+            .Where(path => path.Length > 0)
+            .Distinct(GitPathComparer)
+            .Select(path => new StagedFileSnapshot(
+                path,
+                ToFullPath(gitRoot, path),
+                lineCounts.GetValueOrDefault(path),
+                indexPaths.Contains(path)))
+            .ToList();
     }
 
-    private static async Task<(bool Passed, string Message)> ValidateRuleAsync(
-        string ruleText, List<string> stagedFiles, string gitRoot, string sourceFile)
+    private static async Task<Dictionary<string, int?>> GetStagedChangedLineCountsAsync(
+        string gitRoot,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunGitAsync(
+            gitRoot,
+            ["--no-pager", "diff", "--cached", "--numstat", "--no-renames", "-z"],
+            cancellationToken);
+        EnsureGitSucceeded(result, "git diff --cached --numstat", gitRoot);
+
+        var counts = new Dictionary<string, int?>(GitPathComparer);
+        foreach (var record in SplitNullDelimited(result.StdOut))
+        {
+            var firstTab = record.IndexOf('\t');
+            var secondTab = firstTab < 0 ? -1 : record.IndexOf('\t', firstTab + 1);
+            if (firstTab < 0 || secondTab < 0)
+            {
+                throw new InvalidOperationException("git diff --cached --numstat returned a malformed record.");
+            }
+
+            var addedText = record[..firstTab];
+            var deletedText = record[(firstTab + 1)..secondTab];
+            var path = NormalizeGitPath(record[(secondTab + 1)..]);
+            if (path.Length == 0)
+            {
+                continue;
+            }
+
+            counts[path] = int.TryParse(addedText, out var added)
+                && int.TryParse(deletedText, out var deleted)
+                    ? checked(added + deleted)
+                    : null;
+        }
+
+        return counts;
+    }
+
+    private static async Task<List<AgentFileSnapshot>> GetAgentFilesFromIndexAsync(
+        string gitRoot,
+        IEnumerable<string> indexPaths,
+        CancellationToken cancellationToken)
+    {
+        var snapshots = new List<AgentFileSnapshot>();
+        foreach (var relativePath in indexPaths.Where(IsAgentFilePath).OrderBy(path => path, StringComparer.Ordinal))
+        {
+            var content = await ReadIndexFileAsync(gitRoot, relativePath, cancellationToken);
+            snapshots.Add(new AgentFileSnapshot(
+                relativePath,
+                ToFullPath(gitRoot, relativePath),
+                content));
+        }
+
+        return snapshots;
+    }
+
+    private static bool IsAgentFilePath(string relativePath)
+    {
+        var name = Path.GetFileName(relativePath);
+        return name.Equals("AGENTS.md", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("AGENT.md", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<string> ReadIndexFileAsync(
+        string gitRoot,
+        string relativePath,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunGitAsync(
+            gitRoot,
+            ["--no-pager", "show", "--no-textconv", $":./{relativePath}"],
+            cancellationToken);
+        EnsureGitSucceeded(result, $"git show index file '{relativePath}'", gitRoot);
+        return result.StdOut;
+    }
+
+    private static async Task<RuleValidationResult> ValidateRuleAsync(
+        string ruleText,
+        List<StagedFileSnapshot> stagedFiles,
+        string gitRoot,
+        AgentFileSnapshot sourceAgent,
+        string? commitMessage,
+        bool validateCommitMessage,
+        CancellationToken cancellationToken)
     {
         var ruleLower = ruleText.ToLowerInvariant();
 
-        // Log all file changes - check if staged files are documented in Files section
-        if (ruleLower.Contains("log all file changes"))
+        if (ruleLower.Contains("log all file changes", StringComparison.Ordinal))
         {
-            var documentedFiles = await GetDocumentedFilesAsync(sourceFile, gitRoot);
-            var undocumentedFiles = new List<string>();
-
-            foreach (var stagedFile in stagedFiles)
-            {
-                var relativePath = GetRelativePath(gitRoot, stagedFile);
-                if (!IsFileDocumented(relativePath, documentedFiles))
-                {
-                    undocumentedFiles.Add(relativePath);
-                }
-            }
+            var documentedFiles = ParseDocumentedFiles(sourceAgent, gitRoot);
+            var undocumentedFiles = stagedFiles
+                .Select(file => file.RelativePath)
+                .Where(path => !documentedFiles.Contains(path))
+                .ToList();
 
             if (undocumentedFiles.Count > 0)
             {
                 var fileList = string.Join(", ", undocumentedFiles.Take(3));
-                var suffix = undocumentedFiles.Count > 3 ? $" and {undocumentedFiles.Count - 3} more" : "";
-                return (false, $"{undocumentedFiles.Count} file(s) not documented in AGENTS.md Files section: {fileList}{suffix}");
+                var suffix = undocumentedFiles.Count > 3
+                    ? $" and {undocumentedFiles.Count - 3} more"
+                    : string.Empty;
+                return RuleValidationResult.Violation(
+                    $"{undocumentedFiles.Count} file(s) not documented in AGENTS.md Files section: {fileList}{suffix}");
             }
 
-            return (true, $"All {stagedFiles.Count} changed file(s) are documented");
+            return RuleValidationResult.Pass($"All {stagedFiles.Count} changed file(s) are documented");
         }
 
-        // File changes > N lines - check large files are documented
-        if (ruleLower.Contains("file changes") && ruleLower.Contains("lines"))
+        if (ruleLower.Contains("file changes", StringComparison.Ordinal)
+            && ruleLower.Contains("lines", StringComparison.Ordinal))
         {
             var match = Regex.Match(ruleLower, @">\s*(\d+)");
-            if (match.Success && int.TryParse(match.Groups[1].Value, out int threshold))
+            if (!match.Success || !int.TryParse(match.Groups[1].Value, out var threshold))
             {
-                var documentedFiles = await GetDocumentedFilesAsync(sourceFile, gitRoot);
-                var violations = new List<string>();
-
-                foreach (var file in stagedFiles)
-                {
-                    if (File.Exists(file))
-                    {
-                        var lineCount = File.ReadAllLines(file).Length;
-                        if (lineCount > threshold)
-                        {
-                            var relativePath = GetRelativePath(gitRoot, file);
-                            if (!IsFileDocumented(relativePath, documentedFiles))
-                            {
-                                violations.Add($"{relativePath} ({lineCount} lines)");
-                            }
-                        }
-                    }
-                }
-
-                if (violations.Count > 0)
-                {
-                    return (false, $"{violations.Count} large file(s) not documented: {string.Join(", ", violations.Take(3))}");
-                }
+                return RuleValidationResult.Violation(
+                    "UNSUPPORTED: changed-lines rule is missing a numeric '> N lines' threshold.");
             }
-            return (true, "All large files are documented");
+
+            var uncountableFiles = stagedFiles
+                .Where(file => file.ChangedLineCount is null)
+                .Select(file => file.RelativePath)
+                .ToList();
+            if (uncountableFiles.Count > 0)
+            {
+                return RuleValidationResult.Violation(
+                    $"UNSUPPORTED: Git could not count changed lines for {string.Join(", ", uncountableFiles.Take(3))} (usually binary content).");
+            }
+
+            var documentedFiles = ParseDocumentedFiles(sourceAgent, gitRoot);
+            var violations = stagedFiles
+                .Where(file => file.ChangedLineCount > threshold)
+                .Where(file => !documentedFiles.Contains(file.RelativePath))
+                .Select(file => $"{file.RelativePath} ({file.ChangedLineCount} staged lines changed)")
+                .ToList();
+
+            return violations.Count == 0
+                ? RuleValidationResult.Pass("All staged deltas within threshold or documented")
+                : RuleValidationResult.Violation(
+                    $"{violations.Count} staged file delta(s) over {threshold} lines not documented: {string.Join(", ", violations.Take(3))}");
         }
 
-        // Cyclomatic complexity < N
-        if (ruleLower.Contains("cyclomatic complexity") || ruleLower.Contains("complexity <"))
+        if (ruleLower.Contains("cyclomatic complexity disabled", StringComparison.Ordinal))
+        {
+            return RuleValidationResult.Pass("Cyclomatic complexity validation is disabled by rule");
+        }
+
+        if (ruleLower.Contains("cyclomatic complexity", StringComparison.Ordinal)
+            || ruleLower.Contains("complexity <", StringComparison.Ordinal))
         {
             var match = Regex.Match(ruleLower, @"<\s*(\d+)");
-            if (match.Success && int.TryParse(match.Groups[1].Value, out int maxComplexity))
+            if (!match.Success || !int.TryParse(match.Groups[1].Value, out var maxComplexity))
             {
-                foreach (var file in stagedFiles)
+                return RuleValidationResult.Violation(
+                    "UNSUPPORTED: complexity rule is missing a numeric '< N' threshold.");
+            }
+
+            foreach (var file in stagedFiles.Where(file => file.ExistsInIndex && IsCodeFile(file.RelativePath)))
+            {
+                var content = file.Content
+                    ?? await ReadIndexFileAsync(gitRoot, file.RelativePath, cancellationToken);
+                var complexity = EstimateCyclomaticComplexity(content);
+                if (complexity > maxComplexity)
                 {
-                    if (File.Exists(file) && IsCodeFile(file))
-                    {
-                        var content = await File.ReadAllTextAsync(file);
-                        var complexity = EstimateCyclomaticComplexity(content);
-                        if (complexity > maxComplexity)
-                        {
-                            return (false, $"File '{Path.GetFileName(file)}' estimated complexity {complexity} exceeds {maxComplexity}");
-                        }
-                    }
+                    return RuleValidationResult.Violation(
+                        $"Staged file '{file.RelativePath}' estimated complexity {complexity} exceeds {maxComplexity}");
                 }
             }
-            return (true, "All files within complexity threshold");
+
+            return RuleValidationResult.Pass("All staged files within complexity threshold");
         }
 
-        // Test coverage minimum N%
-        if (ruleLower.Contains("test coverage") || ruleLower.Contains("coverage minimum"))
+        if (ruleLower.Contains("skip test coverage", StringComparison.Ordinal))
         {
-            var match = Regex.Match(ruleLower, @"(\d+)\s*%");
-            if (match.Success)
-            {
-                // Simple check: ensure test files exist for code files
-                var codeFiles = stagedFiles.Where(f => IsCodeFile(f) && !IsTestFile(f)).ToList();
-                var testFiles = stagedFiles.Where(IsTestFile).ToList();
-
-                if (codeFiles.Count > 0 && testFiles.Count == 0)
-                {
-                    return (false, "Code changes detected but no test files staged. Consider adding tests.");
-                }
-            }
-            return (true, "Test coverage check passed");
+            return RuleValidationResult.Pass("Test coverage validation is disabled by rule");
         }
 
-        // Default: pass unknown rules
-        return (true, "Rule check passed");
+        if (ruleLower.Contains("test coverage", StringComparison.Ordinal)
+            || ruleLower.Contains("coverage minimum", StringComparison.Ordinal))
+        {
+            var hasChangedProductionCode = stagedFiles.Any(file =>
+                file.ExistsInIndex
+                && IsCodeFile(file.RelativePath)
+                && !IsTestFile(file.RelativePath));
+            if (!hasChangedProductionCode)
+            {
+                return RuleValidationResult.Pass(
+                    "No non-test code file is staged; coverage rule is not applicable");
+            }
+
+            return RuleValidationResult.Violation(
+                "UNSUPPORTED: the Git hook has no coverage report for the staged snapshot, so it cannot verify a coverage percentage.");
+        }
+
+        if (ruleLower.Contains("package file changes", StringComparison.Ordinal))
+        {
+            var packageFiles = stagedFiles
+                .Where(file => FileClassifier.IsPackageFile(file.RelativePath))
+                .Select(file => file.RelativePath)
+                .ToList();
+
+            return packageFiles.Count == 0
+                ? RuleValidationResult.Pass("No package files changed")
+                : RuleValidationResult.Violation(
+                    $"{packageFiles.Count} package file(s) changed: {string.Join(", ", packageFiles.Take(3))}");
+        }
+
+        if (ruleLower.Contains("check commit message for", StringComparison.Ordinal))
+        {
+            var wordsMatch = Regex.Match(ruleText, @":\s*(.+)$");
+            var forbiddenWords = wordsMatch.Success
+                ? wordsMatch.Groups[1].Value
+                    .Split(',')
+                    .Select(word => word.Trim())
+                    .Where(word => word.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList()
+                : [];
+
+            if (forbiddenWords.Count == 0)
+            {
+                return RuleValidationResult.Violation(
+                    "UNSUPPORTED: commit-message rule has no comma-separated forbidden words after ':'.");
+            }
+
+            if (!validateCommitMessage)
+            {
+                return RuleValidationResult.Deferred("will be checked against the final commit message by commit-msg");
+            }
+
+            var foundWords = forbiddenWords
+                .Where(word => Regex.IsMatch(
+                    commitMessage ?? string.Empty,
+                    $@"\b{Regex.Escape(word)}\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                .ToList();
+
+            return foundWords.Count == 0
+                ? RuleValidationResult.Pass("Commit message contains no forbidden words")
+                : RuleValidationResult.Violation(
+                    $"Commit message contains forbidden words: {string.Join(", ", foundWords)}");
+        }
+
+        return RuleValidationResult.Violation(
+            "UNSUPPORTED: this VCA rule has no validator and was not silently accepted.");
     }
 
-    private static async Task<HashSet<string>> GetDocumentedFilesAsync(string agentFilePath, string gitRoot)
+    private static bool IsCommitMessageRule(string ruleText) =>
+        ruleText.Contains("check commit message for", StringComparison.OrdinalIgnoreCase);
+
+    private static HashSet<string> ParseDocumentedFiles(
+        AgentFileSnapshot agentFile,
+        string gitRoot)
     {
-        var documentedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var documentedFiles = new HashSet<string>(GitPathComparer);
+        var sourceDirectory = Path.GetDirectoryName(agentFile.FullPath) ?? gitRoot;
+        var root = Path.GetFullPath(gitRoot);
 
-        try
+        foreach (var line in GetFilesSectionEntries(agentFile.Content))
         {
-            var content = await File.ReadAllTextAsync(agentFilePath);
-            var lines = content.Split('\n');
-
-            // Find the ## Files section
-            var inFilesSection = false;
-            foreach (var line in lines)
+            try
             {
-                var trimmed = line.Trim();
-
-                if (trimmed.StartsWith("## Files", StringComparison.OrdinalIgnoreCase))
+                // AGENTS.md paths are relative to the directory containing that AGENTS.md.
+                var fullPath = Path.GetFullPath(Path.Combine(
+                    sourceDirectory,
+                    line.Replace('/', Path.DirectorySeparatorChar)));
+                var relativePath = Path.GetRelativePath(root, fullPath).Replace('\\', '/');
+                if (!relativePath.Equals("..", StringComparison.Ordinal)
+                    && !relativePath.StartsWith("../", StringComparison.Ordinal))
                 {
-                    inFilesSection = true;
-                    continue;
-                }
-
-                if (inFilesSection && trimmed.StartsWith("##"))
-                {
-                    break; // Next section
-                }
-
-                if (!inFilesSection || string.IsNullOrWhiteSpace(trimmed))
-                    continue;
-
-                // Extract file path from list item (- path/to/file.cs) or plain text
-                var lineContent = trimmed.TrimStart('-', '*', ' ').Trim();
-
-                // Handle markdown links like [filename](path/to/file.cs)
-                if (lineContent.Contains("]("))
-                {
-                    var linkMatch = Regex.Match(lineContent, @"\]\(([^)]+)\)");
-                    if (linkMatch.Success)
-                    {
-                        lineContent = linkMatch.Groups[1].Value;
-                    }
-                }
-
-                // Handle inline code like `path/to/file.cs`
-                lineContent = lineContent.Trim('`');
-
-                // Handle "path/to/file.cs: Description" format
-                if (lineContent.Contains(':'))
-                {
-                    lineContent = lineContent.Split(':')[0].Trim();
-                }
-
-                if (!string.IsNullOrEmpty(lineContent))
-                {
-                    // Normalize the path
-                    var normalized = lineContent.Replace('\\', '/').TrimStart('.', '/');
-                    documentedFiles.Add(normalized);
+                    documentedFiles.Add(NormalizeGitPath(relativePath));
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "Failed to read documented files from {AgentFile}", agentFilePath);
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                Log.Warning(ex, "Ignoring invalid Files entry {Entry} from {AgentFile}", line, agentFile.RelativePath);
+            }
         }
 
         return documentedFiles;
     }
 
-    private static bool IsFileDocumented(string relativePath, HashSet<string> documentedFiles)
+    private static IEnumerable<string> GetFilesSectionEntries(string content)
     {
-        var normalized = relativePath.Replace('\\', '/').TrimStart('.', '/');
-        return documentedFiles.Contains(normalized);
+        var inFilesSection = false;
+        foreach (var line in content.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("## Files", StringComparison.OrdinalIgnoreCase))
+            {
+                inFilesSection = true;
+                continue;
+            }
+
+            if (inFilesSection && trimmed.StartsWith("##", StringComparison.Ordinal))
+            {
+                yield break;
+            }
+
+            if (!inFilesSection || trimmed.Length == 0)
+            {
+                continue;
+            }
+
+            var entry = trimmed.TrimStart('-', '*', ' ').Trim();
+            var linkMatch = Regex.Match(entry, @"\]\(([^)]+)\)");
+            if (linkMatch.Success)
+            {
+                entry = linkMatch.Groups[1].Value;
+            }
+
+            entry = entry.Trim('`');
+            var descriptionSeparator = entry.IndexOf(": ", StringComparison.Ordinal);
+            if (descriptionSeparator >= 0)
+            {
+                entry = entry[..descriptionSeparator].Trim();
+            }
+
+            if (entry.Length > 0)
+            {
+                yield return entry;
+            }
+        }
     }
 
-    private static string GetRelativePath(string gitRoot, string fullPath)
+    private static List<StagedFileSnapshot> GetScopedFiles(
+        IReadOnlyList<StagedFileSnapshot> stagedFiles,
+        string sourceFile,
+        string gitRoot)
+    {
+        var root = Path.GetFullPath(gitRoot);
+        var sourceDirectory = Path.GetDirectoryName(Path.GetFullPath(sourceFile)) ?? root;
+        var relativeDirectory = Path.GetRelativePath(root, sourceDirectory).Replace('\\', '/');
+
+        if (relativeDirectory == ".")
+        {
+            return stagedFiles.ToList();
+        }
+
+        if (relativeDirectory.Equals("..", StringComparison.Ordinal)
+            || relativeDirectory.StartsWith("../", StringComparison.Ordinal))
+        {
+            return [];
+        }
+
+        var prefix = relativeDirectory.TrimEnd('/') + "/";
+        return stagedFiles
+            .Where(file => file.RelativePath.StartsWith(prefix, GitPathComparison))
+            .ToList();
+    }
+
+    private static string GetRuleSourceId(string sourceFile, string gitRoot)
+    {
+        var relative = Path.GetRelativePath(gitRoot, sourceFile).Replace('\\', '/');
+        return relative.Replace('/', '-');
+    }
+
+    private static async Task<GitCommandResult> RunGitAsync(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "git",
+                WorkingDirectory = workingDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        foreach (var argument in arguments)
+        {
+            process.StartInfo.ArgumentList.Add(argument);
+        }
+
+        try
+        {
+            process.Start();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new GitCommandResult(-1, string.Empty, ex.Message, TimedOut: false);
+        }
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(GitCommandTimeout);
+
+        var timedOut = false;
+        try
+        {
+            await process.WaitForExitAsync(timeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            timedOut = true;
+            TryKillGitProcess(process);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKillGitProcess(process);
+            throw;
+        }
+
+        if (!process.HasExited)
+        {
+            await Task.WhenAny(process.WaitForExitAsync(), Task.Delay(TimeSpan.FromSeconds(2)));
+        }
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+        return new GitCommandResult(
+            process.HasExited ? process.ExitCode : -1,
+            stdout,
+            stderr,
+            timedOut);
+    }
+
+    private static void EnsureGitSucceeded(
+        GitCommandResult result,
+        string operation,
+        string gitRoot)
+    {
+        if (result.TimedOut)
+        {
+            throw new TimeoutException(
+                $"{operation} timed out after {(int)GitCommandTimeout.TotalSeconds} seconds in {gitRoot}.");
+        }
+
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"{operation} failed with exit code {result.ExitCode} in {gitRoot}: {result.StdErr.Trim()}");
+        }
+    }
+
+    private static void TryKillGitProcess(Process process)
     {
         try
         {
-            return Path.GetRelativePath(gitRoot, fullPath).Replace('\\', '/');
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
         }
         catch
         {
-            return fullPath.Replace('\\', '/');
+            // Best effort while preserving the original timeout or cancellation.
         }
     }
+
+    private static IEnumerable<string> SplitNullDelimited(string output) =>
+        output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+
+    private static string NormalizeGitPath(string path)
+    {
+        var normalized = path.Replace('\\', '/');
+        while (normalized.StartsWith("./", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
+        }
+
+        return normalized;
+    }
+
+    private static string ToFullPath(string gitRoot, string relativePath) =>
+        Path.GetFullPath(Path.Combine(
+            gitRoot,
+            relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
     private static bool IsCodeFile(string path)
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();
-        return ext is ".cs" or ".js" or ".ts" or ".py" or ".java" or ".go" or ".rb" or ".rs" or ".cpp" or ".c" or ".h";
+        return ext is ".cs" or ".fs" or ".vb"
+            or ".js" or ".jsx" or ".ts" or ".tsx"
+            or ".py" or ".java" or ".kt" or ".kts"
+            or ".go" or ".rb" or ".rs"
+            or ".cpp" or ".cc" or ".cxx" or ".c" or ".h" or ".hpp"
+            or ".php" or ".swift" or ".scala";
     }
 
     private static bool IsTestFile(string path)

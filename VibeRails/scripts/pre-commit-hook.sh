@@ -1,51 +1,70 @@
 #!/bin/sh
 # Vibe Rails Pre-Commit Hook
-# Validates VCA rules before commits
-# Installed by Vibe Rails - do not edit manually
+# VibeRails Hook Version: 3
+# Validates staged changes before Git creates a commit.
+# Installed by VibeRails - use the dashboard to repair or remove this section.
 
-echo "VibeRails VCA validation is temporarily disabled."
-exit 0
+VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
+VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
+VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
 
-# Find vb executable
-if command -v vb >/dev/null 2>&1; then
-    VB_CMD="vb"
-elif [ -f "./vb" ]; then
-    VB_CMD="./vb"
-elif [ -f "./vb.exe" ]; then
-    VB_CMD="./vb.exe"
-else
-    # Vibe Rails not found - allow commit with warning
-    echo "Warning: vb not found in PATH. Skipping VCA validation."
-    exit 0
-fi
-
-# Run VCA validation. When Git is invoked by VS Code or another GUI client,
-# stdout is captured and the client often shows only the first line. Buffer the
-# detailed output in that case so failures start with a useful summary instead
-# of the progress banner.
-if [ -t 1 ]; then
-    $VB_CMD --vca-hook pre-commit
-    exit_code=$?
-else
-    vca_output="$($VB_CMD --vca-hook pre-commit 2>&1)"
-    exit_code=$?
-
-    if [ $exit_code -ne 0 ]; then
-        echo "VibeRails VCA blocked this commit. Show Command Output for details."
-        echo ""
+viberails_run() {
+    if [ -n "$VIBERAILS_EXECUTABLE" ] && [ -f "$VIBERAILS_EXECUTABLE" ] &&
+       { [ -z "$VIBERAILS_EXECUTABLE_ARGUMENT" ] || [ -f "$VIBERAILS_EXECUTABLE_ARGUMENT" ]; }; then
+        if [ -n "$VIBERAILS_EXECUTABLE_ARGUMENT" ]; then
+            "$VIBERAILS_EXECUTABLE" "$VIBERAILS_EXECUTABLE_ARGUMENT" "$@"
+        else
+            "$VIBERAILS_EXECUTABLE" "$@"
+        fi
+        return $?
     fi
 
-    if [ -n "$vca_output" ]; then
-        printf '%s\n' "$vca_output"
+    if command -v vb >/dev/null 2>&1; then
+        vb "$@"
+        return $?
     fi
-fi
 
-if [ $exit_code -ne 0 ]; then
+    echo "VibeRails VCA could not run because the vb executable was not found." >&2
+    echo "Repair the hooks from VibeRails, or use git commit --no-verify for an intentional bypass." >&2
+    return 127
+}
+
+viberails_repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+viberails_console_arg=
+
+# Git GUI clients usually capture hook output. On Git for Windows, ask the hook
+# host to mirror its transcript into a dedicated visible console as well.
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+        # A GUI launch has neither a terminal input nor terminal output. A command
+        # such as `git commit >hook.log` still has terminal input and should keep
+        # writing to the redirected stream. CI must never open or wait on a window.
+        if [ ! -t 0 ] && [ ! -t 1 ] &&
+           [ -z "${CI:-}${TF_BUILD:-}${GITHUB_ACTIONS:-}${GITLAB_CI:-}${JENKINS_URL:-}${TEAMCITY_VERSION:-}${BUILDKITE:-}${APPVEYOR:-}" ]; then
+            viberails_console_arg=--console-window
+        fi
+        ;;
+esac
+
+if [ -n "$viberails_console_arg" ]; then
+    viberails_run --vca-hook pre-commit --workdir "$viberails_repo_root" "$viberails_console_arg"
+else
+    viberails_run --vca-hook pre-commit --workdir "$viberails_repo_root"
+fi
+viberails_exit_code=$?
+
+if [ "$viberails_exit_code" -ne 0 ]; then
     echo ""
-    echo "VibeRails VCA validation failed. Commit blocked."
-    echo "Fix the issues above or use 'git commit --no-verify' to bypass."
-    exit 1
+    echo "VibeRails VCA blocked this commit. Fix the reported issue or use --no-verify to bypass intentionally." >&2
+    exit "$viberails_exit_code"
 fi
 
-exit 0
+if [ -n "$VIBERAILS_CHAINED_HOOK" ] && [ -f "$VIBERAILS_CHAINED_HOOK" ]; then
+    "$VIBERAILS_CHAINED_HOOK" "$@"
+    viberails_exit_code=$?
+    if [ "$viberails_exit_code" -ne 0 ]; then
+        exit "$viberails_exit_code"
+    fi
+fi
+
 # End Vibe Rails Hook

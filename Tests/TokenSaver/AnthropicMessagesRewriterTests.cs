@@ -54,7 +54,7 @@ public class AnthropicMessagesRewriterTests
 
     [Theory]
     [InlineData("Read")]      // never touch file reads — trailing whitespace can be significant
-    [InlineData("BashOutput")] // deliberately outside the v1 allowlist
+    [InlineData("BashOutput")] // outside the DEFAULT allowlist (the Safe+ tier presets add it)
     public void Rewrite_NonAllowlistedTool_PassesThrough(string toolName)
     {
         var body = MessagesBody(toolName, $"\"{DirtyToolOutput}\"");
@@ -154,7 +154,7 @@ public class AnthropicMessagesRewriterTests
 
         var writer = new ArrayBufferWriter<byte>();
         var result = AnthropicMessagesRewriter.Rewrite(
-            bytes, MinifyFlags.Default, AnthropicMessagesRewriter.DefaultToolAllowlist, writer);
+            bytes, MinifyFlags.Default, default, AnthropicMessagesRewriter.DefaultToolAllowlist, writer);
 
         Assert.False(result.Rewritten); // caller forwards the original buffer untouched
         Assert.Equal(1, result.ToolResultsSeen);
@@ -260,6 +260,52 @@ public class AnthropicMessagesRewriterTests
         Assert.False(again.Rewritten);
     }
 
+    [Theory]
+    [InlineData("PowerShell")] // the Windows Claude Code shell tool
+    [InlineData("BashOutput")] // background-shell reads, allowlisted from Safe up
+    public void Rewrite_TierAllowlist_CoversWindowsAndBackgroundShells(string toolName)
+    {
+        var body = MessagesBody(toolName, $"\"{DirtyToolOutput}\"");
+        var (flags, condense, allowlist) = TokenSaverPresets.For(TokenSaverLevel.Safe);
+
+        var (result, output) = Rewrite(body, flags, condense, allowlist);
+
+        Assert.True(result.Rewritten);
+        Assert.Equal(body.Replace(DirtyToolOutput, MinifiedToolOutput), output);
+    }
+
+    [Fact]
+    public void Rewrite_CondenseOnlyConfiguration_StillRewrites()
+    {
+        // All minify flags off, condensing on: the no-op gates must consider BOTH stages, or a
+        // condense-only bisection state is silently dead.
+        var body = MessagesBody("Bash", "\"spam\\nspam\\nspam\\nspam\\ndone\"");
+        var condense = new CondenseOptions(DedupeConsecutiveLines: true, TruncateLongOutput: false);
+
+        var (result, output) = Rewrite(body, flags: default(MinifyFlags), condense: condense);
+
+        Assert.True(result.Rewritten);
+        Assert.Equal(1, result.Condensed.DedupRunsCollapsed);
+        Assert.True(result.Condensed.Changed);
+        Assert.Contains("spam [x4]\\ndone", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Rewrite_MediumTier_CondensedBodyIsStableAcrossTurns()
+    {
+        // Same history property as the minify-only test, but through the full Medium pipeline:
+        // a body containing an already-condensed tool_result must come back byte-identical.
+        var body = MessagesBody("Bash", "\"spam\\nspam\\nspam\\nspam\\ndone\"");
+        var (flags, condense, allowlist) = TokenSaverPresets.For(TokenSaverLevel.Medium);
+
+        var (first, firstOutput) = Rewrite(body, flags, condense, allowlist);
+        Assert.True(first.Rewritten);
+        Assert.Contains("spam [x4]", firstOutput, StringComparison.Ordinal);
+
+        var (again, _) = Rewrite(firstOutput, flags, condense, allowlist);
+        Assert.False(again.Rewritten);
+    }
+
     [Fact]
     public void Rewrite_EmptyAllowlist_DoesNothing()
     {
@@ -267,7 +313,7 @@ public class AnthropicMessagesRewriterTests
         var writer = new ArrayBufferWriter<byte>();
 
         var result = AnthropicMessagesRewriter.Rewrite(
-            Encoding.UTF8.GetBytes(body), MinifyFlags.Default, [], writer);
+            Encoding.UTF8.GetBytes(body), MinifyFlags.Default, default, [], writer);
 
         Assert.False(result.Rewritten);
         Assert.Equal(0, writer.WrittenCount);
@@ -292,12 +338,20 @@ public class AnthropicMessagesRewriterTests
         ],"metadata":{"user_id":"abc"}}
         """;
 
-    private static (AnthropicRewriteResult Result, string Output) Rewrite(string body)
+    private static (ToolOutputRewriteResult Result, string Output) Rewrite(
+        string body,
+        MinifyFlags? flags = null,
+        CondenseOptions condense = default,
+        IReadOnlyCollection<string>? allowlist = null)
     {
         var bytes = Encoding.UTF8.GetBytes(body);
         var writer = new ArrayBufferWriter<byte>();
         var result = AnthropicMessagesRewriter.Rewrite(
-            bytes, MinifyFlags.Default, AnthropicMessagesRewriter.DefaultToolAllowlist, writer);
+            bytes,
+            flags ?? MinifyFlags.Default,
+            condense,
+            allowlist ?? AnthropicMessagesRewriter.DefaultToolAllowlist,
+            writer);
         var output = result.Rewritten
             ? Encoding.UTF8.GetString(writer.WrittenSpan)
             : body;

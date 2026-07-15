@@ -22,7 +22,7 @@ export class ActivityBlinker {
         this._maxSources = maxSources;
         this._title = title;
         this._enabled = Boolean(enabled);
-        this._tokensSaved = this._normalizeTokenCount(tokensSaved);
+        this._savings = this._normalizeSavings(tokensSaved);
         this._popoverId = `vb-activity-blinker-popover-${++nextActivityBlinkerId}`;
         this._pulseTimer = null;
         this._build(mount);
@@ -37,10 +37,11 @@ export class ActivityBlinker {
         if (this._host.classList.contains('is-open')) this._renderPopover();
     }
 
-    // Public seam for the real savings metric once proxy instrumentation starts publishing it.
-    // Until then null deliberately renders as an em dash rather than implying zero savings.
+    // Accepts a { session, month, allTime } breakdown (or a bare number, treated as all time).
+    // Unmeasured windows stay null and deliberately render as an em dash rather than implying
+    // zero savings.
     setTokensSaved(tokensSaved) {
-        this._tokensSaved = this._normalizeTokenCount(tokensSaved);
+        this._savings = this._normalizeSavings(tokensSaved);
         this._syncSavingsDisplay();
         this._syncAccessibleStatus();
         if (this._host.classList.contains('is-open')) this._renderPopover();
@@ -213,12 +214,8 @@ export class ActivityBlinker {
             status = `${this._title}: ${this.totalCount} proxied request${this.totalCount === 1 ? '' : 's'}`;
         }
 
-        const savingsStatus = this._tokensSaved == null
-            ? 'token savings not yet measured'
-            : `${this._formatExactTokenCount(this._tokensSaved)} tokens saved`;
-
-        this._trigger.setAttribute('aria-label', `${status}; ${savingsStatus}`);
-        this._trigger.setAttribute('title', `${status}; ${savingsStatus}`);
+        this._trigger.setAttribute('aria-label', `${status}; ${this._formatSavingsStatus()}`);
+        this._trigger.setAttribute('title', `${status}; ${this._formatSavingsStatus()}`);
     }
 
     _renderPopover() {
@@ -249,14 +246,28 @@ export class ActivityBlinker {
         savingsCopy.className = 'vb-activity-popover-savings-copy';
         savingsCopy.appendChild(this._span('Tokens saved', 'vb-activity-popover-savings-label'));
         savingsCopy.appendChild(this._span(
-            this._tokensSaved == null ? 'Savings measurement not connected yet' : 'Across proxied traffic',
+            this._hasSavingsMeasurement() ? 'Across proxied traffic' : 'Savings measurement not connected yet',
             'vb-activity-popover-savings-hint'
         ));
         savings.appendChild(savingsCopy);
-        savings.appendChild(this._span(
-            this._tokensSaved == null ? '—' : this._formatCompactTokenCount(this._tokensSaved),
-            'vb-activity-popover-savings-value'
-        ));
+
+        const breakdown = document.createElement('span');
+        breakdown.className = 'vb-activity-popover-savings-breakdown';
+        for (const [windowLabel, value] of [
+            ['This session', this._savings.session],
+            ['This month', this._savings.month],
+            ['All time', this._savings.allTime]
+        ]) {
+            const row = document.createElement('span');
+            row.className = 'vb-activity-popover-savings-row';
+            row.appendChild(this._span(windowLabel, 'vb-activity-popover-savings-row-label'));
+            row.appendChild(this._span(
+                value == null ? '—' : this._formatCompactTokenCount(value),
+                'vb-activity-popover-savings-row-value'
+            ));
+            breakdown.appendChild(row);
+        }
+        savings.appendChild(breakdown);
         popover.appendChild(savings);
 
         if (this.sources.size === 0) {
@@ -300,6 +311,31 @@ export class ActivityBlinker {
         return Math.floor(numericValue);
     }
 
+    _normalizeSavings(value) {
+        if (value != null && typeof value === 'object') {
+            return {
+                session: this._normalizeTokenCount(value.session),
+                month: this._normalizeTokenCount(value.month),
+                allTime: this._normalizeTokenCount(value.allTime)
+            };
+        }
+        return { session: null, month: null, allTime: this._normalizeTokenCount(value) };
+    }
+
+    _hasSavingsMeasurement() {
+        const { session, month, allTime } = this._savings;
+        return session != null || month != null || allTime != null;
+    }
+
+    _formatSavingsStatus() {
+        if (!this._hasSavingsMeasurement()) return 'token savings not yet measured';
+        const part = (value, windowLabel) =>
+            `${value == null ? 'unmeasured' : this._formatExactTokenCount(value)} ${windowLabel}`;
+        const { session, month, allTime } = this._savings;
+        return 'tokens saved: '
+            + `${part(session, 'this session')}, ${part(month, 'this month')}, ${part(allTime, 'all time')}`;
+    }
+
     _formatCompactTokenCount(value) {
         return new Intl.NumberFormat('en-US', {
             notation: value >= 1000 ? 'compact' : 'standard',
@@ -313,11 +349,15 @@ export class ActivityBlinker {
 
     _syncSavingsDisplay() {
         if (!this._savingsMetric || !this._savingsValue) return;
-        const isPlaceholder = this._tokensSaved == null;
+        // The trigger has room for one number: this session's savings, the tally that visibly
+        // ticks with the pulse (all time as a fallback for a bare-number legacy update). The
+        // popover carries the full session/month/all-time breakdown.
+        const shown = this._savings.session ?? this._savings.allTime;
+        const isPlaceholder = shown == null;
         this._savingsMetric.classList.toggle('is-placeholder', isPlaceholder);
         this._savingsValue.textContent = isPlaceholder
             ? '—'
-            : this._formatCompactTokenCount(this._tokensSaved);
+            : this._formatCompactTokenCount(shown);
     }
 
     _span(text, className = '') {
