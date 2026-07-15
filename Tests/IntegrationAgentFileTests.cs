@@ -122,6 +122,10 @@ public class IntegrationAgentFileTests
 
         public Task<List<string>> GetStagedFilesAsync(CancellationToken cancellationToken) => Task.FromResult(new List<string>());
 
+        public Task StageFileAsync(string path, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<bool> IsStagingSafeAsync(string path, CancellationToken cancellationToken = default) => Task.FromResult(true);
+
         public Task<string?> GetCurrentCommitHashAsync(CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
 
         public Task<string?> GetCurrentBranchAsync(CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);

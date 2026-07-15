@@ -6,6 +6,9 @@ import { pathToFileURL } from 'node:url';
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/code-analyzer-dashboard.js');
 const {
     buildCodeAnalyzerDashboardModel,
+    createCodeEvidenceEditor,
+    disposeCodeAnalyzerDashboard,
+    getMonacoLanguageForPath,
     renderCodeAnalyzerDashboard
 } = await import(pathToFileURL(modulePath).href);
 
@@ -40,7 +43,8 @@ function sampleResponse() {
                         critical: 25,
                         higherIsBetter: false,
                         source: 'ProcessAsync',
-                        line: 42
+                        line: 42,
+                        snippet: 'if (payment.IsPending) { }'
                     }]
                 }]
             }],
@@ -100,6 +104,68 @@ test('code analyzer dashboard handles an empty report without inventing files', 
     assert.equal(model.skippedFileCount, 3);
 });
 
+test('code analyzer dashboard selects Monaco languages from source paths', () => {
+    assert.equal(getMonacoLanguageForPath('src/Worker.cs'), 'csharp');
+    assert.equal(getMonacoLanguageForPath('web/widget.tsx'), 'typescript');
+    assert.equal(getMonacoLanguageForPath('Dockerfile'), 'dockerfile');
+    assert.equal(getMonacoLanguageForPath('unknown.extension'), 'plaintext');
+});
+
+test('code evidence creates a read-only Monaco editor with source line numbers and highlighting', () => {
+    let editorOptions;
+    let decorationEntries;
+    let selectedRange;
+    const model = { dispose() { } };
+    const editor = {
+        getModel: () => model,
+        createDecorationsCollection(entries) {
+            decorationEntries = entries;
+            return { dispose() { } };
+        },
+        setSelection(range) { selectedRange = range; },
+        revealLineNearTop() { }
+    };
+    class Range {
+        constructor(startLineNumber, startColumn, endLineNumber, endColumn) {
+            Object.assign(this, { startLineNumber, startColumn, endLineNumber, endColumn });
+        }
+    }
+    const monaco = {
+        Range,
+        editor: {
+            OverviewRulerLane: { Full: 7 },
+            MinimapPosition: { Inline: 1 },
+            create(_host, options) {
+                editorOptions = options;
+                return editor;
+            }
+        }
+    };
+    const metric = {
+        label: 'Cognitive complexity',
+        snippet: 'if (payment.IsPending) { }',
+        line: 42,
+        score: 82
+    };
+
+    const mounted = createCodeEvidenceEditor(
+        monaco,
+        {},
+        { path: 'src/Payments/PaymentProcessor.cs' },
+        metric);
+
+    assert.equal(mounted.editor, editor);
+    assert.equal(mounted.model, model);
+    assert.equal(editorOptions.value, metric.snippet);
+    assert.equal(editorOptions.language, 'csharp');
+    assert.equal(editorOptions.readOnly, true);
+    assert.equal(editorOptions.domReadOnly, true);
+    assert.equal(editorOptions.lineNumbers(1), '42');
+    assert.equal(editorOptions.lineNumbers(3), '44');
+    assert.equal(decorationEntries[0].options.className, 'mintlint-monaco-line mintlint-monaco-line-danger');
+    assert.equal(selectedRange.startLineNumber, 1);
+});
+
 class FakeClassList {
     add() { }
     toggle() { }
@@ -141,5 +207,10 @@ test('code analyzer dashboard renders the full scan workspace with plain DOM API
     assert.equal(container.children[0].className, 'code-analyzer-scan-banner');
     assert.equal(container.children[1].className, 'code-analyzer-workspace');
     assert.equal(container.children[1].children[0].className, 'code-analyzer-panel-surface code-analyzer-file-rail');
-    assert.equal(container.children[1].children[1].className, 'code-analyzer-review-column');
+    const review = container.children[1].children[1];
+    assert.equal(review.className, 'code-analyzer-review-column');
+    assert.equal(review.children[2].className, 'code-analyzer-panel-surface code-analyzer-code-panel');
+    assert.equal(review.children[2].children[1].className, 'code-analyzer-monaco-shell');
+    assert.equal(disposeCodeAnalyzerDashboard(container), true);
+    assert.equal(disposeCodeAnalyzerDashboard(container), false);
 });

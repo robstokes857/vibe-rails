@@ -151,6 +151,25 @@ public sealed class MintLintPreflightStepTests
         Assert.Contains("already ran", result.Summary);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_WorkingTreeRequest_DescribesChangedSourceFiles()
+    {
+        var snapshot = new GitStagedSnapshot(
+            Directory.GetCurrentDirectory(),
+            [File("src/demo.cs", "public class Demo { }")],
+            []);
+
+        var result = await new MintLintPreflightStep().ExecuteAsync(
+            new GitPreflightStepContext(
+                "run",
+                Request() with { WorkingTreeChanges = true },
+                snapshot,
+                (_, _, _) => ValueTask.CompletedTask),
+            TestContext.Current.CancellationToken);
+
+        Assert.StartsWith("Scanned 1 supported changed source file(s)", result.Output[0]);
+    }
+
     private static GitStagedFileSnapshot File(string path, string content) => new(
         path,
         path,

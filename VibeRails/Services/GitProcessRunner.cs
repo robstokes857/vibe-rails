@@ -13,18 +13,45 @@ internal static class GitProcessRunner
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {
+        var startInfo = CreateStartInfo(workingDirectory);
+        startInfo.Arguments = arguments;
+        return await RunAsync(startInfo, arguments, timeout, cancellationToken);
+    }
+
+    public static async Task<Result> RunAsync(
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        var startInfo = CreateStartInfo(workingDirectory);
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        return await RunAsync(startInfo, string.Join(' ', arguments), timeout, cancellationToken);
+    }
+
+    private static ProcessStartInfo CreateStartInfo(string workingDirectory) => new()
+    {
+        FileName = "git",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        WorkingDirectory = workingDirectory
+    };
+
+    private static async Task<Result> RunAsync(
+        ProcessStartInfo startInfo,
+        string displayArguments,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
         using var process = new Process
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "git",
-                Arguments = arguments,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WorkingDirectory = workingDirectory
-            }
+            StartInfo = startInfo
         };
 
         try
@@ -33,7 +60,11 @@ internal static class GitProcessRunner
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "[Git] Failed to start git {Arguments} in {WorkingDirectory}", arguments, workingDirectory);
+            Log.Warning(
+                ex,
+                "[Git] Failed to start git {Arguments} in {WorkingDirectory}",
+                displayArguments,
+                startInfo.WorkingDirectory);
             return new Result(-1, string.Empty, ex.Message, false);
         }
 

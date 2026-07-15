@@ -307,7 +307,8 @@ namespace VibeRails.DTOs
         double Critical,
         bool HigherIsBetter,
         string? Source = null,
-        int? Line = null
+        int? Line = null,
+        string? Snippet = null
     );
 
     public record MintLintCategoryResponse(

@@ -14,7 +14,11 @@ internal static class LanguageRegistry
         new RustLanguageParser(),
         new CLanguageParser(),
         new JavaLanguageParser(),
-        new CppLanguageParser()
+        new CppLanguageParser(),
+        new PhpLanguageParser(),
+        new RubyLanguageParser(),
+        new BashLanguageParser(),
+        new PowerShellLanguageParser()
     ];
 
     public static bool TryGetParser(string extension, out ILanguageParser parser)

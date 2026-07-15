@@ -11659,9 +11659,45 @@ button.git-guard-menu-button:focus-visible {
     font: 0.5rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
 }
 
+.code-analyzer-monaco-shell {
+    position: relative;
+    height: clamp(280px, 38vh, 480px);
+    min-height: 280px;
+    overflow: hidden;
+    background: #1a1a22;
+}
+
+.code-analyzer-monaco-host,
+.code-analyzer-monaco-loading,
 .code-analyzer-code-evidence {
-    min-height: 170px;
-    max-height: 360px;
+    position: absolute;
+    inset: 0;
+}
+
+.code-analyzer-monaco-host {
+    min-width: 0;
+    min-height: 0;
+}
+
+.code-analyzer-monaco-loading {
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    background: #1a1a22;
+    color: var(--analyzer-muted);
+    font-size: 0.65rem;
+}
+
+.code-analyzer-monaco-loading .spinner-border {
+    width: 0.85rem;
+    height: 0.85rem;
+    border-width: 0.12em;
+    color: var(--analyzer-tone);
+}
+
+.code-analyzer-code-evidence {
     margin: 0;
     padding: 0.9rem 1rem;
     overflow: auto;
@@ -11670,6 +11706,85 @@ button.git-guard-menu-button:focus-visible {
     font: 0.66rem/1.65 var(--vb-font-mono, "Cascadia Code", monospace);
     tab-size: 4;
     white-space: pre;
+}
+
+.code-analyzer-editor-status {
+    display: flex;
+    min-height: 30px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.35rem 0.75rem;
+    border-top: 1px solid #2b2b36;
+    background: #15151d;
+    color: var(--analyzer-muted);
+    font: 0.5rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
+    text-transform: capitalize;
+}
+
+.code-analyzer-editor-status > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.code-analyzer-editor-readonly {
+    padding: 0.16rem 0.35rem;
+    border: 1px solid rgb(139 124 255 / 30%);
+    border-radius: 5px;
+    background: rgb(139 124 255 / 10%);
+    color: #b7afff;
+    font-weight: 750;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-line-danger {
+    background: rgb(255 109 128 / 9%);
+    box-shadow: inset 3px 0 #ff6d80;
+}
+
+.code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-line-warning {
+    background: rgb(244 190 99 / 7%);
+    box-shadow: inset 3px 0 #f4be63;
+}
+
+.code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-line-success {
+    background: rgb(104 170 255 / 7%);
+    box-shadow: inset 3px 0 #68aaff;
+}
+
+.code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-line-okay {
+    background: rgb(139 124 255 / 8%);
+    box-shadow: inset 3px 0 #8b7cff;
+}
+
+.code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph {
+    width: 7px !important;
+    height: 7px !important;
+    margin-top: 7px;
+    margin-left: 5px;
+    border-radius: 50%;
+}
+
+.code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph-danger {
+    background: #ff6d80;
+    box-shadow: 0 0 9px rgb(255 109 128 / 75%);
+}
+
+.code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph-warning {
+    background: #f4be63;
+    box-shadow: 0 0 9px rgb(244 190 99 / 70%);
+}
+
+.code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph-success {
+    background: #68aaff;
+    box-shadow: 0 0 9px rgb(104 170 255 / 70%);
+}
+
+.code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph-okay {
+    background: #8b7cff;
+    box-shadow: 0 0 9px rgb(139 124 255 / 72%);
 }
 
 .code-analyzer-no-metrics {
@@ -11878,6 +11993,17 @@ button.git-guard-menu-button:focus-visible {
 
     .code-analyzer-legend {
         flex-wrap: wrap;
+    }
+
+    .code-analyzer-monaco-shell {
+        height: 300px;
+        min-height: 300px;
+    }
+
+    .code-analyzer-editor-status {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.35rem;
     }
 }
 

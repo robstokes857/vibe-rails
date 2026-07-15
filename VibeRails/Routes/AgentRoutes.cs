@@ -1,3 +1,4 @@
+using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
@@ -7,6 +8,40 @@ namespace VibeRails.Routes;
 
 public static class AgentRoutes
 {
+    /// <summary>
+    /// Stages an agent file after a rule edit, best-effort.
+    ///
+    /// The edit is already durable on disk by the time this runs, so a staging problem must
+    /// never fail the request: a non-Git project, or an agent file outside the repository, is
+    /// an ordinary setup rather than a client error, and reporting one as a failure would
+    /// leave the caller showing a rule it had in fact already removed.
+    ///
+    /// Staging is skipped when <paramref name="stagingIsSafe"/> is false — see
+    /// <see cref="IGitService.IsStagingSafeAsync"/> for why staging a whole file is only
+    /// correct when the index and the working tree already agree.
+    /// </summary>
+    private static async Task TryStageAgentFileAsync(
+        IGitService gitService,
+        string path,
+        bool stagingIsSafe,
+        CancellationToken cancellationToken)
+    {
+        if (!stagingIsSafe)
+        {
+            Log.Debug("[Agents] Left {Path} unstaged: staging it would have swept in other changes.", path);
+            return;
+        }
+
+        try
+        {
+            await gitService.StageFileAsync(path, cancellationToken);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException)
+        {
+            Log.Warning(ex, "[Agents] Could not stage {Path} after editing its rules.", path);
+        }
+    }
+
     public static void Map(WebApplication app)
     {
         // PUT /api/v1/agents/name - Update agent custom name
@@ -130,6 +165,7 @@ public static class AgentRoutes
         // POST /api/v1/agents/rules - Add rule with enforcement to agent file
         app.MapPost("/api/v1/agents/rules", async (
             IAgentFileService agentService,
+            IGitService gitService,
             IRepository repository,
             AddRuleWithEnforcementRequest request,
             CancellationToken cancellationToken) =>
@@ -142,7 +178,11 @@ public static class AgentRoutes
             try
             {
                 var enforcement = EnforcementParser.Parse(request.Enforcement);
+
+                // Decided before the edit: afterwards our own change is an unstaged difference.
+                var stagingIsSafe = await gitService.IsStagingSafeAsync(request.Path, cancellationToken);
                 await agentService.AddRuleWithEnforcementAsync(request.Path, request.RuleText, enforcement, cancellationToken);
+                await TryStageAgentFileAsync(gitService, request.Path, stagingIsSafe, cancellationToken);
 
                 var updatedRules = await agentService.GetRulesWithEnforcementAsync(request.Path, cancellationToken);
                 var ruleResponses = updatedRules.Select(r => new RuleWithEnforcementResponse(r.RuleText, r.Enforcement.ToString())).ToList();
@@ -164,6 +204,7 @@ public static class AgentRoutes
         // DELETE /api/v1/agents/rules - Delete rules from agent file
         app.MapDelete("/api/v1/agents/rules", async (
             IAgentFileService agentService,
+            IGitService gitService,
             IRepository repository,
             AgentRulesRequest request,
             CancellationToken cancellationToken) =>
@@ -173,7 +214,10 @@ public static class AgentRoutes
                 return Results.NotFound(new ErrorResponse($"Agent file not found: {request.Path}"));
             }
 
+            // Decided before the edit: afterwards our own change is an unstaged difference.
+            var stagingIsSafe = await gitService.IsStagingSafeAsync(request.Path, cancellationToken);
             await agentService.DeleteRulesAsync(request.Path, cancellationToken, request.Rules);
+            await TryStageAgentFileAsync(gitService, request.Path, stagingIsSafe, cancellationToken);
 
             var updatedRules = await agentService.GetRulesWithEnforcementAsync(request.Path, cancellationToken);
             var ruleResponses = updatedRules.Select(r => new RuleWithEnforcementResponse(r.RuleText, r.Enforcement.ToString())).ToList();

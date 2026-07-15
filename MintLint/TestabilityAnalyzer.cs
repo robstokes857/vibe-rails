@@ -55,16 +55,38 @@ internal static class TestabilityAnalyzer
                 continue;
             }
 
+            // A variable that is itself the dependency, with no accessor to key off
+            // (e.g. PowerShell's `$env:HOME`).
+            if (IsAmbientVariable(catalog, text))
+            {
+                ambient++;
+                continue;
+            }
+
             // A member access on an ambient root (e.g. `DateTime.Now`, `os.getenv`,
-            // `std::chrono`, or `this->dependency`).
+            // `std::chrono`, `this->dependency`). Indexers count too: PHP superglobals and
+            // Ruby's ENV are read as `$_ENV["HOME"]` / `ENV["HOME"]`, never as members.
             if (catalog.AmbientRoots.Contains(text) && i + 1 < tokens.Count &&
-                tokens[i + 1].Text is "." or "::" or "->")
+                tokens[i + 1].Text is "." or "::" or "->" or "[")
             {
                 ambient++;
             }
         }
 
         return (hardCoded, ambient);
+    }
+
+    private static bool IsAmbientVariable(LanguageCatalog catalog, string text)
+    {
+        foreach (string prefix in catalog.AmbientVariablePrefixes ?? [])
+        {
+            if (text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsConcreteConstruction(List<Token> tokens, int newIndex)
@@ -165,6 +187,38 @@ internal static class TestabilityAnalyzer
                 AmbientGlobals: ["printf", "fprintf", "scanf", "fopen", "getenv", "system", "time", "rand"],
                 HasNewOperator: true),
 
+            SourceLanguage.Php => new LanguageCatalog(
+                AmbientRoots: ["$_ENV", "$_SERVER", "$_SESSION", "$_COOKIE", "$_FILES"],
+                AmbientGlobals:
+                [
+                    "curl_exec", "exec", "file_get_contents", "file_put_contents", "fopen",
+                    "getenv", "header", "mail", "mt_rand", "passthru", "rand", "shell_exec",
+                    "sleep", "system", "time"
+                ],
+                HasNewOperator: true),
+
+            SourceLanguage.Ruby => new LanguageCatalog(
+                AmbientRoots:
+                [
+                    "ENV", "File", "Dir", "IO", "Kernel", "Net", "Open3", "Process",
+                    "Random", "Socket", "Time"
+                ],
+                AmbientGlobals: ["gets", "open", "print", "printf", "puts", "rand", "sleep", "system"],
+                HasNewOperator: false),
+
+            SourceLanguage.Bash => new LanguageCatalog(
+                AmbientRoots: [],
+                AmbientGlobals: [],
+                HasNewOperator: false),
+
+            SourceLanguage.PowerShell => new LanguageCatalog(
+                AmbientRoots: ["Environment", "File", "Directory", "Path", "DateTime", "Random"],
+                AmbientGlobals: [],
+                HasNewOperator: false,
+                // `$env:HOME` is a single token, so it is matched by prefix rather than as a
+                // root with an accessor.
+                AmbientVariablePrefixes: ["$env:"]),
+
             _ => new LanguageCatalog([], [], HasNewOperator: false)
         };
     }
@@ -176,14 +230,15 @@ internal static class TestabilityAnalyzer
         "ArrayList", "Span", "ReadOnlySpan", "Memory", "Object", "String", "Guid"
     };
 
+    /// <param name="AmbientRoots">Reached through an accessor, e.g. <c>DateTime.Now</c>.</param>
+    /// <param name="AmbientGlobals">Called directly, e.g. <c>getenv(...)</c>.</param>
+    /// <param name="AmbientVariablePrefixes">
+    /// Variables that are ambient on their own, with no accessor to key off: PowerShell's
+    /// <c>$env:HOME</c> is one token naming one environment variable.
+    /// </param>
     private readonly record struct LanguageCatalog(
         HashSet<string> AmbientRoots,
         HashSet<string> AmbientGlobals,
-        bool HasNewOperator)
-    {
-        public LanguageCatalog(string[] ambientRoots, string[] ambientGlobals, bool hasNewOperator)
-            : this(new HashSet<string>(ambientRoots, StringComparer.Ordinal), new HashSet<string>(ambientGlobals, StringComparer.Ordinal), hasNewOperator)
-        {
-        }
-    }
+        bool HasNewOperator,
+        string[]? AmbientVariablePrefixes = null);
 }
