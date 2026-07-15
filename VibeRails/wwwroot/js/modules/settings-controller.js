@@ -42,6 +42,21 @@ export class SettingsController {
         if (root) {
             this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
 
+            const projectIdentityCard = root.querySelector('[data-project-identity-card]');
+            if (projectIdentityCard && this.app.data.isInGit) {
+                projectIdentityCard.hidden = false;
+                const projectName = projectIdentityCard.querySelector('[data-project-display-name]');
+                const projectPath = projectIdentityCard.querySelector('[data-project-root-path]');
+                const renderProjectName = (name) => {
+                    if (projectName) projectName.textContent = name || this.app.getCurrentProjectDisplayName();
+                };
+                renderProjectName(this.app.getCurrentProjectDisplayName());
+                if (projectPath) projectPath.textContent = this.app.data.configs?.rootPath || '';
+                this.app.bindAction(projectIdentityCard, '[data-action="rename-project"]', () => {
+                    this.app.showCustomNameModal({ onSaved: renderProjectName });
+                });
+            }
+
             const remoteAccessToggle = root.querySelector('#setting-remote-access');
             const apiKeyInput = root.querySelector('#setting-api-key');
             const performanceModeToggle = root.querySelector('#setting-performance-mode');

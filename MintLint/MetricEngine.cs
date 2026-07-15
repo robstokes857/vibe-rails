@@ -40,6 +40,7 @@ internal static class MetricEngine
         int globalCyclomatic = CountDecisionPoints(parsed, 0, parsed.Tokens.Count - 1, currentFunctionIndex: -1, baseComplexity: 0);
         int globalCognitive = ComputeCognitive(parsed, 0, parsed.Tokens.Count - 1, currentFunctionIndex: -1);
         int globalNPath = ComputeNPath(parsed, 0, parsed.Tokens.Count - 1, currentFunctionIndex: -1);
+        int globalNesting = ComputeMaxNestingDepth(parsed, 0, parsed.Tokens.Count - 1, currentFunctionIndex: -1);
         functions.Add(new FunctionMetrics(
             "global",
             0,
@@ -48,9 +49,11 @@ internal static class MetricEngine
             globalCognitive,
             globalNPath,
             0.0,
-            0.0));
+            0.0,
+            globalNesting,
+            0));
 
-        int maxNestingDepth = ComputeMaxNestingDepth(parsed, 0, parsed.Tokens.Count - 1, currentFunctionIndex: -1);
+        int maxNestingDepth = globalNesting;
         int maxParameterCount = 0;
 
         for (int i = 0; i < parsed.Functions.Count; i++)
@@ -62,9 +65,11 @@ internal static class MetricEngine
             (double hVolume, double hDifficulty) = ComputeHalstead(parsed, span.StartIndex, span.EndIndex);
             int startLine = parsed.Tokens[span.StartIndex].Line;
             int endLine = parsed.Tokens[span.EndIndex].Line;
+            int nestingDepth = ComputeMaxNestingDepth(parsed, span.BodyStartIndex, span.EndIndex, i);
+            int parameterCount = ComputeParameterCount(parsed, span);
 
-            maxNestingDepth = Math.Max(maxNestingDepth, ComputeMaxNestingDepth(parsed, span.BodyStartIndex, span.EndIndex, i));
-            maxParameterCount = Math.Max(maxParameterCount, ComputeParameterCount(parsed, span));
+            maxNestingDepth = Math.Max(maxNestingDepth, nestingDepth);
+            maxParameterCount = Math.Max(maxParameterCount, parameterCount);
 
             functions.Add(new FunctionMetrics(
                 span.Name,
@@ -74,7 +79,9 @@ internal static class MetricEngine
                 cognitive,
                 npath,
                 hVolume,
-                hDifficulty));
+                hDifficulty,
+                nestingDepth,
+                parameterCount));
         }
 
         functions.Sort(static (left, right) =>

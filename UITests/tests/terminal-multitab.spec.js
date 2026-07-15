@@ -5,7 +5,7 @@
 // `echo VIBERAILS_FAKE_CLI_READY:<llm>; sleep 600` running under the real PTY+WS+xterm path.
 //
 // What we cover here:
-//   1. Tab creation via dashboard launch button → tab item + xterm output appear
+//   1. Tab creation via the preserved Rules-page terminal → tab item + xterm output appear
 //   2. Tab creation via the in-strip add button → second tab appears, two coexist
 //   3. Multi-tab isolation → output from tab A doesn't leak into tab B
 //   4. Tab close → enters pending-close state; kill-X in undo dropdown commits the DELETE
@@ -15,27 +15,51 @@ const { test, expect, selectors } = require('./fixtures');
 
 const FAKE_MARKER = /VIBERAILS_FAKE_CLI_READY/;
 
-async function navigateToDashboard(page) {
+async function navigateToRules(page) {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Dashboard' }).click();
-    await expect(page.locator(selectors.launchWebTerminalButton('codex')).first())
-        .toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'RULES' }).click();
+    await expect(page.locator('#terminal-header-select')).toBeAttached({ timeout: 15_000 });
+    await expect(page.locator('#terminal-start-btn')).toBeVisible({ timeout: 15_000 });
+    // The controls render before the manager finishes restoring/creating its
+    // initial blank tab. Wait for that lifecycle boundary so updateUi() cannot
+    // overwrite the selection made by the test.
+    await expect(page.locator(selectors.tabItems)).toHaveCount(1, { timeout: 15_000 });
 }
 
 async function launchWebTerminal(page, cli) {
-    await page.locator(selectors.launchWebTerminalButton(cli)).first().click();
-    // The dashboard switches to the terminal view as a side effect of startTerminal.
+    const selector = page.locator('#terminal-header-select');
+    await selector.selectOption(`base:${cli}`);
+    await expect(selector).toHaveValue(`base:${cli}`);
+    await page.locator('#terminal-start-btn').click();
     await expect(page.locator(selectors.tabItems)).toHaveCount(1, { timeout: 10_000 });
 }
 
 async function waitForFakeCliReady(page, tabId) {
-    const panel = page.locator(selectors.tabPanel(tabId));
-    await expect(panel.locator('.xterm-rows')).toContainText(FAKE_MARKER, { timeout: 30_000 });
+    await expect.poll(() => readTerminalText(page, tabId), { timeout: 30_000 })
+        .toMatch(FAKE_MARKER);
+}
+
+async function readTerminalText(page, tabId) {
+    return page.evaluate((id) => {
+        const tab = window.app?.terminalController?.manager?.tabs?.get(id);
+        return tab?.instance?.vibeTerminal?.getPlainText?.() || '';
+    }, tabId);
 }
 
 test.describe('terminal-multitab', () => {
-    test('clicking a launch-web-terminal button creates a tab and runs the fake CLI', async ({ page }) => {
-        await navigateToDashboard(page);
+    test.beforeEach(async ({ context }) => {
+        const response = await context.request.get('/api/v1/terminal/tabs');
+        if (!response.ok()) return;
+        const data = await response.json();
+        for (const tab of (data.tabs || [])) {
+            if (tab?.tabId) {
+                await context.request.delete(`/api/v1/terminal/tabs/${encodeURIComponent(tab.tabId)}`);
+            }
+        }
+    });
+
+    test('the Rules terminal creates a tab and runs the fake CLI', async ({ page }) => {
+        await navigateToRules(page);
         await launchWebTerminal(page, 'codex');
 
         const tabId = await page.locator(selectors.tabItems)
@@ -46,7 +70,7 @@ test.describe('terminal-multitab', () => {
     });
 
     test('the in-strip + button opens a second tab independent of the first', async ({ page }) => {
-        await navigateToDashboard(page);
+        await navigateToRules(page);
         await launchWebTerminal(page, 'codex');
 
         const firstTabId = await page.locator(selectors.tabItems)
@@ -57,8 +81,8 @@ test.describe('terminal-multitab', () => {
         await expect(page.locator(selectors.tabItems)).toHaveCount(2, { timeout: 10_000 });
     });
 
-    test('empty tabs cannot be minimized or closed before a session is started', async ({ page }) => {
-        await navigateToDashboard(page);
+    test('empty tabs cannot be minimized but remain dismissible', async ({ page }) => {
+        await navigateToRules(page);
         await launchWebTerminal(page, 'codex');
 
         const firstTabId = await page.locator(selectors.tabItems)
@@ -75,11 +99,11 @@ test.describe('terminal-multitab', () => {
 
         await page.locator(selectors.tabItem(/** @type {string} */(emptyTabId))).hover();
         await expect(page.locator(selectors.tabMinimize(/** @type {string} */(emptyTabId)))).toBeHidden();
-        await expect(page.locator(selectors.tabClose(/** @type {string} */(emptyTabId)))).toBeHidden();
+        await expect(page.locator(selectors.tabClose(/** @type {string} */(emptyTabId)))).toBeVisible();
     });
 
     test('closing a tab enters pending-close; kill-X in undo dropdown commits the DELETE', async ({ page }) => {
-        await navigateToDashboard(page);
+        await navigateToRules(page);
         await launchWebTerminal(page, 'codex');
 
         const tabId = /** @type {string} */ (
@@ -117,7 +141,7 @@ test.describe('terminal-multitab', () => {
     });
 
     test('output from one tab does not leak into another tab', async ({ page }) => {
-        await navigateToDashboard(page);
+        await navigateToRules(page);
 
         await launchWebTerminal(page, 'codex');
         const firstTabId = await page.locator(selectors.tabItems)
@@ -137,18 +161,16 @@ test.describe('terminal-multitab', () => {
         // can make: the first tab's panel still contains its own marker after a
         // sibling tab is created. Real cross-tab leak would show the marker in the
         // second tab's panel, which we assert against below.
-        const firstPanelText = await page.locator(selectors.tabPanel(/** @type {string} */(firstTabId)))
-            .locator('.xterm-rows').innerText();
+        const firstPanelText = await readTerminalText(page, /** @type {string} */(firstTabId));
         expect(firstPanelText).toMatch(FAKE_MARKER);
 
-        const secondPanelText = await page.locator(selectors.tabPanel(/** @type {string} */(secondTabId)))
-            .locator('.xterm-rows').innerText().catch(() => '');
+        const secondPanelText = await readTerminalText(page, /** @type {string} */(secondTabId));
         expect(secondPanelText, 'second tab panel must not contain first tab fake-CLI marker')
             .not.toMatch(FAKE_MARKER);
     });
 
     test('reload preserves the active tab id', async ({ page }) => {
-        await navigateToDashboard(page);
+        await navigateToRules(page);
         await launchWebTerminal(page, 'codex');
 
         const firstTabId = await page.locator(selectors.tabItems)

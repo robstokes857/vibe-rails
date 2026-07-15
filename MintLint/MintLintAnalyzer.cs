@@ -199,7 +199,7 @@ public static class MintLintAnalyzer
         return classified;
     }
 
-    private static List<string> EnumerateSourceFiles(string root, string baseDirectory, MintLintOptions options)
+    internal static List<string> EnumerateSourceFiles(string root, string baseDirectory, MintLintOptions options)
     {
         List<string> results = [];
         if (File.Exists(root))

@@ -45,18 +45,26 @@ public sealed class VcaPreflightStep : IGitPreflightStep
             await context.WriteOutputAsync(line, null, cancellationToken);
         }
 
+        var findings = validation.Summary.Findings ?? [];
+        var hasWarnings = findings.Any(finding => finding.Kind == VcaRuleFindingKind.Warning);
+        var hasDeferredChecks = findings.Any(finding => finding.Kind == VcaRuleFindingKind.Deferred);
         var status = validation.Summary.HasError
             ? GitPreflightStepStatus.Error
             : validation.Summary.HasStopViolation
                 ? GitPreflightStepStatus.Blocked
-                : validation.Summary.HasCommitViolations
+                : validation.Summary.HasCommitViolations || hasWarnings
                     ? GitPreflightStepStatus.Warning
                     : GitPreflightStepStatus.Passed;
         var summary = status switch
         {
             GitPreflightStepStatus.Error => "VCA could not validate the staged snapshot.",
             GitPreflightStepStatus.Blocked => "VCA found STOP-level violations.",
-            GitPreflightStepStatus.Warning => "VCA requires commit-message acknowledgment.",
+            GitPreflightStepStatus.Warning when validation.Summary.HasCommitViolations =>
+                hasWarnings
+                    ? "VCA requires commit-message acknowledgment and has additional warnings."
+                    : "VCA requires commit-message acknowledgment.",
+            GitPreflightStepStatus.Warning => "VCA found non-blocking warnings.",
+            _ when hasDeferredChecks => "VCA rules passed; commit-message checks were deferred.",
             _ => "VCA rules passed."
         };
 
@@ -73,7 +81,11 @@ public sealed class VcaPreflightStep : IGitPreflightStep
                 ["hasError"] = validation.Summary.HasError.ToString(),
                 ["hasStopViolation"] = validation.Summary.HasStopViolation.ToString(),
                 ["hasCommitViolations"] = validation.Summary.HasCommitViolations.ToString(),
-                ["requiredAcknowledgments"] = string.Join("\n", validation.Summary.RequiredAcknowledgments)
+                ["requiredAcknowledgments"] = string.Join("\n", validation.Summary.RequiredAcknowledgments),
+                ["stagedFileCount"] = validation.Summary.StagedFileCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["applicableRuleCount"] = validation.Summary.ApplicableRuleCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["warningCount"] = findings.Count(finding => finding.Kind == VcaRuleFindingKind.Warning).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["deferredCount"] = findings.Count(finding => finding.Kind == VcaRuleFindingKind.Deferred).ToString(System.Globalization.CultureInfo.InvariantCulture)
             },
             validation.Summary);
     }

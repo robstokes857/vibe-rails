@@ -1564,7 +1564,7 @@ export class EnvironmentController {
         // wait for that here.
         const terminalContent = await this._waitForTerminalContent(2000);
         if (!terminalContent) {
-            this.app.showError('Could not find the terminal panel — open the dashboard and try again.');
+            this.app.showError('Could not find the terminal panel — open Rules and try again.');
             return;
         }
 

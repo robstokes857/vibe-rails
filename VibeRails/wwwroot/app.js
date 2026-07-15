@@ -31,7 +31,8 @@ export class VibeControlApp {
             sandboxes: [],
             availableRulesWithDescriptions: [],
             isInGit: false,
-            configs: null
+            configs: null,
+            projectDisplayName: null
         };
         this.hostUnreachableToastShown = false;
         this.brandClickTimestamps = [];
@@ -300,6 +301,8 @@ export class VibeControlApp {
             const configs = await this.apiCall('/api/v1/context', 'GET');
             this.data.configs = configs;
             this.data.isInGit = configs.isInGit;
+            const projectPath = configs.rootPath || configs.launchDirectory;
+            this.data.projectDisplayName = projectPath ? this.getProjectNameFromPath(projectPath) : null;
         } catch (error) {
             console.error('Failed to fetch configs:', error);
             this.data.isInGit = false;
@@ -329,6 +332,7 @@ export class VibeControlApp {
         // name. The "— Vibe Rails" suffix was intentionally dropped (bare name now).
         // Terminal tab labels are separate and unaffected (they use the CLI name).
         const title = customName || folderName || 'Vibe Rails';
+        this.data.projectDisplayName = title;
         document.title = title;
         // Browser tab title only; in VS Code, the panel tab is owned by the
         // extension, so notify it via postMessage.
@@ -548,8 +552,8 @@ export class VibeControlApp {
     }
 
     getDuplicateTabViewName(view) {
-        const normalizedView = view === 'agent-edit' || view === 'agent-create'
-            ? 'agents'
+        const normalizedView = ['agents', 'agent-edit', 'agent-create'].includes(view)
+            ? 'dashboard'
             : view;
         const duplicateableViews = new Set([
             'dashboard',
@@ -557,7 +561,6 @@ export class VibeControlApp {
             'agents',
             'check-violations',
             'git-guard',
-            'active-rules',
             'environments',
             'config',
             'sessions',
@@ -781,12 +784,11 @@ export class VibeControlApp {
         const views = {
             'dashboard': () => this.dashboardController.loadDashboard(data),
             'launch-cli': () => this.cliLauncher.loadLaunchCLI(),
-            'agents': () => this.agentController.loadAgents(),
+            'agents': () => this.dashboardController.loadDashboard(data),
             'agent-edit': () => this.agentController.loadAgentEdit(data),
             'agent-create': () => this.agentController.loadAgentCreate(),
             'check-violations': () => this.ruleController.loadCheckViolations(),
             'git-guard': () => this.ruleController.loadFocusedGitGuard(),
-            'active-rules': () => this.ruleController.loadActiveRules(),
             'environments': () => this.environmentController.loadEnvironments(),
             'config': () => this.configController.loadConfiguration(),
             'sessions': () => this.sessionController.loadSessions(),
@@ -826,9 +828,64 @@ export class VibeControlApp {
     // Shared Logic (Used by multiple controllers)
     // ============================================ 
 
+    getCurrentProjectDisplayName() {
+        const projectPath = this.data.configs?.rootPath || this.data.configs?.launchDirectory;
+        return this.dashboardController?._customProjectName ||
+            this.data.projectDisplayName ||
+            (projectPath ? this.getProjectNameFromPath(projectPath) : null) ||
+            'Project';
+    }
+
+    getAgentFileViewModel(agent, index) {
+        const normalizePath = value => String(value || '').replace(/\\/g, '/').replace(/\/+$/, '');
+        const rootPath = normalizePath(this.data.configs?.rootPath || this.data.configs?.launchDirectory);
+        const agentPath = normalizePath(agent.path);
+        const rootPrefix = rootPath ? `${rootPath}/` : '';
+        const relativePath = rootPrefix && agentPath.toLowerCase().startsWith(rootPrefix.toLowerCase())
+            ? agentPath.slice(rootPrefix.length)
+            : agentPath.split('/').pop();
+        const pathParts = String(relativePath || '').split('/').filter(Boolean);
+        const fileName = pathParts.pop() || agent.name || 'AGENTS.md';
+        const projectName = this.getCurrentProjectDisplayName();
+        const scopeLeaf = agent.customName || 'Agent';
+        const scopeName = [projectName, ...pathParts, scopeLeaf].filter(Boolean).join('/');
+        const ruleCount = Number(agent.ruleCount) || agent.rules?.length || 0;
+
+        return {
+            agent,
+            index,
+            displayName: scopeName,
+            relativePath: [...pathParts, fileName].join('/'),
+            ruleCount,
+            hasRules: ruleCount > 0
+        };
+    }
+
+    renderAgentFileItem(item, { empty = false } = {}) {
+        const ruleLabel = `${item.ruleCount} ${item.ruleCount === 1 ? 'rule' : 'rules'}`;
+        return `
+            <div class="agent-file-tree-item${empty ? ' agent-file-tree-item--empty' : ''}">
+                <button type="button" class="agent-file-tree-open" data-agent-tree-index="${item.index}"
+                    aria-label="Open ${this.escapeHtml(item.displayName)}">
+                    <span class="agent-file-tree-icon" aria-hidden="true">
+                        <i class="fa-regular fa-file-lines"></i>
+                    </span>
+                    <span class="agent-file-tree-info">
+                        <span class="agent-file-tree-name text-truncate">${this.escapeHtml(item.displayName)}</span>
+                        <span class="agent-file-tree-path">${this.escapeHtml(item.relativePath)}</span>
+                    </span>
+                </button>
+                <button type="button" class="btn btn-sm btn-link text-muted p-1 agent-file-tree-rename"
+                    data-agent-rename="${item.index}" title="Set a custom name">
+                    <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                    <span class="visually-hidden">Rename ${this.escapeHtml(item.displayName)}</span>
+                </button>
+                <span class="agent-file-tree-badge${item.hasRules ? ' agent-file-tree-badge--active' : ''}">${ruleLabel}</span>
+            </div>`;
+    }
+
     // Pure renderer for the agent-file list. Returns HTML only; callers are
-    // responsible for binding handlers (see AgentController.bindAgentListItems),
-    // which keeps the render/bind split explicit instead of relying on setTimeout.
+    // responsible for binding handlers (see AgentController.bindAgentListItems).
     renderLocalFileTree() {
         if (this.data.agents.length === 0) {
             return `
@@ -843,38 +900,44 @@ export class VibeControlApp {
             `;
         }
 
-        return `
-            <div class="agent-files-tree d-flex flex-column gap-2">
-                ${this.data.agents.map((agent, idx) => {
-                    const parts = agent.path.split(/[\\/]/);
-                    const fileName = parts.pop();
-                    const dirPath = parts.length > 0 ? parts.join('/') + '/' : '';
-                    const displayName = this.escapeHtml(agent.customName || fileName);
-                    const fullPath = this.escapeHtml(dirPath + fileName);
+        const files = this.data.agents.map((agent, index) => this.getAgentFileViewModel(agent, index));
+        const configured = files.filter(file => file.hasRules);
+        const empty = files.filter(file => !file.hasRules);
 
-                    return `
-                    <div class="agent-file-tree-item p-2 px-3 d-flex align-items-center gap-3 border border-secondary border-opacity-10 rounded bg-dark bg-opacity-25" data-agent-tree-index="${idx}" style="cursor:pointer;">
-                        <div class="agent-file-tree-icon bg-primary bg-opacity-10 text-primary rounded d-flex align-items-center justify-content-center" style="width: 32px; height: 32px;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M12 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM4 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
-                                <path d="M4 4.5V5h8v-.5zm0 2V7h8v-.5zm0 2V9h8v-.5zm0 2v.5h5v-.5z"/>
-                            </svg>
+        return `
+            <div class="agent-files-tree">
+                <section class="agent-files-group agent-files-configured" aria-labelledby="configured-agent-files-title">
+                    <div class="agent-files-group-heading">
+                        <div>
+                            <h3 id="configured-agent-files-title">Configured</h3>
+                            <p>Agent files currently enforcing one or more rules.</p>
                         </div>
-                        <div class="agent-file-tree-info flex-grow-1 min-w-0">
-                            <div class="fw-bold text-white text-truncate" style="font-size: 0.9rem;">${displayName}</div>
-                            <div class="text-muted small opacity-50 font-monospace text-truncate" style="font-size: 0.7rem;">${fullPath}</div>
-                        </div>
-                        <button type="button" class="btn btn-sm btn-link text-muted p-1 agent-file-tree-rename" data-agent-rename="${idx}" title="Rename this agent file">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/>
-                            </svg>
-                            <span class="visually-hidden">Rename</span>
-                        </button>
-                        <span class="badge bg-dark border border-secondary border-opacity-25 text-muted x-small fw-normal">${agent.ruleCount || 0} rules</span>
+                        <span>${configured.length}</span>
                     </div>
-                `}).join('')}
-            </div>
-        `;
+                    <div class="agent-files-list">
+                        ${configured.length > 0
+                            ? configured.map(item => this.renderAgentFileItem(item)).join('')
+                            : '<p class="agent-files-group-empty">No agent files have rules yet.</p>'}
+                    </div>
+                </section>
+
+                ${empty.length > 0 ? `
+                    <details class="agent-files-group agent-files-unconfigured" data-agent-empty-group>
+                        <summary>
+                            <span class="agent-files-disclosure-icon" aria-hidden="true">
+                                <i class="fa-solid fa-chevron-right"></i>
+                            </span>
+                            <span class="agent-files-disclosure-copy">
+                                <strong>Without rules</strong>
+                                <small>Available agent files that are not currently enforcing anything.</small>
+                            </span>
+                            <span class="agent-files-disclosure-count">${empty.length}</span>
+                        </summary>
+                        <div class="agent-files-list">
+                            ${empty.map(item => this.renderAgentFileItem(item, { empty: true })).join('')}
+                        </div>
+                    </details>` : ''}
+            </div>`;
     }
 
     async launchCliForProject(projectPath, cliName) {
@@ -902,9 +965,9 @@ export class VibeControlApp {
     // Helper Methods & Data
     // ============================================
 
-    showCustomNameModal() {
+    showCustomNameModal({ onSaved = null } = {}) {
         const path = this.data.configs?.rootPath || '';
-        const currentName = this.dashboardController?._customProjectName || this.getProjectNameFromPath(path);
+        const currentName = this.data.projectDisplayName || this.getProjectNameFromPath(path);
 
         this.showModal('Set Custom Project Name', `
             <form id="custom-name-form">
@@ -922,7 +985,7 @@ export class VibeControlApp {
 
         document.getElementById('custom-name-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const newName = document.getElementById('project-custom-name').value;
+            const newName = document.getElementById('project-custom-name').value.trim();
             const path = this.data.configs?.rootPath;
 
             if (!path) {
@@ -937,8 +1000,14 @@ export class VibeControlApp {
                 });
 
                 this.showToast('Success', `Project name updated to "${newName}"`, 'success');
+                this.data.projectDisplayName = newName;
+                this.dashboardController._customProjectName = newName;
+                document.title = newName;
+                if (typeof window.__viberails_setTitle__ === 'function') {
+                    try { window.__viberails_setTitle__(newName); } catch { /* ignore */ }
+                }
                 this.closeModal();
-                await this.dashboardController.loadDashboard();
+                if (typeof onSaved === 'function') onSaved(newName);
             } catch (error) {
                 this.showError('Failed to update project name: ' + error.message);
             }

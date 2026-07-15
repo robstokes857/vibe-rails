@@ -73,6 +73,9 @@ public sealed class VcaRulesHookValidationService : IVcaHookValidationService
                 report.HasError,
                 report.HasStopViolation,
                 report.RequiredAcknowledgments.Count > 0,
-                report.RequiredAcknowledgments));
+                report.RequiredAcknowledgments,
+                report.StagedFileCount,
+                report.ApplicableRuleCount,
+                report.Findings));
     }
 }

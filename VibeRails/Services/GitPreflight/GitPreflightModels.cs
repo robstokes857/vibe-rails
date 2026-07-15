@@ -43,12 +43,14 @@ public sealed record GitStagedFileSnapshot(
     bool IsBinary,
     int? ChangedLineCount,
     string? Content,
-    string? PreviousRelativePath = null);
+    string? PreviousRelativePath = null,
+    string? PreviousContent = null);
 
 public sealed record GitStagedSnapshot(
     string RepositoryPath,
     IReadOnlyList<GitStagedFileSnapshot> Files,
-    IReadOnlyList<GitIndexTextFile> AgentFiles)
+    IReadOnlyList<GitIndexTextFile> AgentFiles,
+    IReadOnlyList<string>? TrackedFiles = null)
 {
     public static GitStagedSnapshot Preview(string repositoryPath) => new(
         Path.GetFullPath(repositoryPath),
@@ -65,7 +67,8 @@ public sealed record GitStagedSnapshot(
 
 public sealed record GitPreflightRequest(
     string WorkingDirectory,
-    VcaHookInvocation Invocation);
+    VcaHookInvocation Invocation,
+    bool FullImpactScan = false);
 
 public sealed record GitPreflightEvent(
     string RunId,

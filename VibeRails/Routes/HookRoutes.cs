@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
@@ -196,9 +197,11 @@ public static class HookRoutes
             }
         }).WithName("StreamGitPreflight");
 
-        // POST /api/v1/hooks/preview - Run the exact pre-commit pipeline and capture its console.
+        // POST /api/v1/hooks/preview - Run staged VCA validation by itself for the Rules page.
+        // The full Git Guard pipeline remains available through /api/v1/git/preflight/stream.
         app.MapPost("/api/v1/hooks/preview", async (
-            IGitPreflightPipeline pipeline,
+            IGitStagedSnapshotProvider snapshotProvider,
+            IEnumerable<IGitPreflightStep> preflightSteps,
             IGitService gitService,
             CancellationToken cancellationToken) =>
         {
@@ -212,28 +215,121 @@ public static class HookRoutes
                     Title: "Pre-commit hook check",
                     Output: "[error] Not in a git repository.",
                     StartedUtc: DateTime.UtcNow,
-                    DurationMs: 0));
+                    DurationMs: 0,
+                    Validation: BuildVcaValidationOverview(new VcaHookValidationSummary(
+                        HasError: true,
+                        HasStopViolation: false,
+                        HasCommitViolations: false,
+                        RequiredAcknowledgments: []))));
+            }
+
+            var validator = preflightSteps.FirstOrDefault(step => step.StepId == VcaPreflightStep.Id);
+            if (validator is null)
+            {
+                return Results.Problem("VCA validation is unavailable.");
             }
 
             var startedUtc = DateTime.UtcNow;
-            var result = await pipeline.RunAsync(
-                CreatePreCommitRequest(rootPath),
-                cancellationToken: cancellationToken);
-            var output = string.Join(
-                Environment.NewLine,
-                result.Steps.SelectMany(step =>
-                    new[] { $"[{ToWireStatus(step.Status)}] {step.DisplayName} ({step.DurationMs} ms)" }
-                        .Concat(step.Output.Select(line => $"  {line}"))));
+            var snapshot = await snapshotProvider.CaptureAsync(rootPath, cancellationToken);
+            var result = await validator.ExecuteAsync(
+                new GitPreflightStepContext(
+                    Guid.NewGuid().ToString("N"),
+                    CreatePreCommitRequest(rootPath),
+                    snapshot,
+                    (_, _, _) => ValueTask.CompletedTask),
+                cancellationToken);
+            var succeeded = result.Status is not GitPreflightStepStatus.Blocked
+                and not GitPreflightStepStatus.Error
+                and not GitPreflightStepStatus.Cancelled;
+            var output = string.Join(Environment.NewLine, result.Output);
+            var validationSummary = result.VcaSummary ?? new VcaHookValidationSummary(
+                HasError: result.Status is GitPreflightStepStatus.Error or GitPreflightStepStatus.Cancelled,
+                HasStopViolation: result.Status == GitPreflightStepStatus.Blocked,
+                HasCommitViolations: result.Status == GitPreflightStepStatus.Warning,
+                RequiredAcknowledgments: [],
+                StagedFileCount: snapshot.Files.Count);
 
             return Results.Ok(new HookPreviewResponse(
-                Success: result.CommitAllowed,
-                ExitCode: result.CommitAllowed ? 0 : 1,
+                Success: succeeded,
+                ExitCode: succeeded ? 0 : 1,
                 Status: ToWireStatus(result.Status),
-                Title: "Git preflight check",
+                Title: "VCA validation",
                 Output: output,
                 StartedUtc: startedUtc,
-                DurationMs: result.DurationMs));
+                DurationMs: (long)(DateTime.UtcNow - startedUtc).TotalMilliseconds,
+                Validation: BuildVcaValidationOverview(validationSummary)));
         }).WithName("PreviewVcaHook");
+
+        // POST /api/v1/code-analyzer - Run the existing staged-source analyzer by itself.
+        // ?fullScan=true widens the impact scan from tracked files to the whole directory.
+        app.MapPost("/api/v1/code-analyzer", async (
+            bool? fullScan,
+            IGitStagedSnapshotProvider snapshotProvider,
+            IEnumerable<IGitPreflightStep> preflightSteps,
+            IGitService gitService,
+            CancellationToken cancellationToken) =>
+        {
+            var rootPath = await gitService.GetRootPathAsync(cancellationToken);
+            if (string.IsNullOrEmpty(rootPath))
+            {
+                return Results.BadRequest(new HookPreviewResponse(
+                    Success: false,
+                    ExitCode: 1,
+                    Status: "error",
+                    Title: "Code analyzer",
+                    Output: "[error] Not in a git repository.",
+                    StartedUtc: DateTime.UtcNow,
+                    DurationMs: 0));
+            }
+
+            var analyzer = preflightSteps.FirstOrDefault(step => step.StepId == MintLintPreflightStep.Id);
+            if (analyzer is null)
+            {
+                return Results.Problem("The code analyzer is unavailable.");
+            }
+
+            var startedUtc = DateTime.UtcNow;
+            var snapshot = await snapshotProvider.CaptureAsync(rootPath, cancellationToken);
+            var result = await analyzer.ExecuteAsync(
+                new GitPreflightStepContext(
+                    Guid.NewGuid().ToString("N"),
+                    CreatePreCommitRequest(rootPath) with { FullImpactScan = fullScan == true },
+                    snapshot,
+                    (_, _, _) => ValueTask.CompletedTask),
+                cancellationToken);
+            var succeeded = result.Status is not GitPreflightStepStatus.Error
+                and not GitPreflightStepStatus.Cancelled;
+            var output = string.Join(Environment.NewLine, result.Output);
+            var details = result.Details;
+            double? healthScore = details?.TryGetValue("overallScore", out var concernText) == true
+                && double.TryParse(concernText, NumberStyles.Float, CultureInfo.InvariantCulture, out var concernScore)
+                    ? Math.Round(Math.Clamp(100 - concernScore, 0, 100), 1)
+                    : null;
+            int? analyzedFileCount = details?.TryGetValue("supportedFileCount", out var analyzedText) == true
+                && int.TryParse(analyzedText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var analyzedCount)
+                    ? analyzedCount
+                    : null;
+            int? skippedFileCount = details?.TryGetValue("skippedFileCount", out var skippedText) == true
+                && int.TryParse(skippedText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var skippedCount)
+                    ? skippedCount
+                    : null;
+            var rating = details?.GetValueOrDefault("overallRating");
+            var report = MintLintReportFactory.FromJson(details?.GetValueOrDefault(MintLintReportFactory.DetailsKey));
+
+            return Results.Ok(new HookPreviewResponse(
+                Success: succeeded,
+                ExitCode: succeeded ? 0 : 1,
+                Status: ToWireStatus(result.Status),
+                Title: "Code analyzer",
+                Output: output,
+                StartedUtc: startedUtc,
+                DurationMs: (long)(DateTime.UtcNow - startedUtc).TotalMilliseconds,
+                HealthScore: healthScore,
+                Rating: rating,
+                AnalyzedFileCount: analyzedFileCount,
+                SkippedFileCount: skippedFileCount,
+                Report: report));
+        }).WithName("RunCodeAnalyzer");
 
         // POST /api/v1/hooks/validate - Run VCA validation manually
         app.MapPost("/api/v1/hooks/validate", async (
@@ -309,6 +405,54 @@ public static class HookRoutes
             preflightEvent.CommitAllowed,
             preflightEvent.StepNumber,
             preflightEvent.StepCount);
+
+    internal static VcaValidationOverviewResponse BuildVcaValidationOverview(
+        VcaHookValidationSummary summary)
+    {
+        var findings = (summary.Findings ?? [])
+            .Select(finding => new VcaRuleFindingResponse(
+                ToWireFindingKind(finding.Kind),
+                finding.Enforcement,
+                finding.Rule,
+                finding.Reason,
+                finding.SourcePath,
+                finding.Guidance,
+                finding.Acknowledgment))
+            .ToList();
+        var stopCount = findings.Count(finding => finding.Status == "blocked");
+        var commitCount = findings.Count(finding => finding.Status == "acknowledgment_required");
+        var warningCount = findings.Count(finding => finding.Status == "warning");
+        var deferredCount = findings.Count(finding => finding.Status == "deferred");
+        var outcome = summary.HasError
+            ? "error"
+            : summary.HasStopViolation || stopCount > 0
+                ? "blocked"
+                : summary.HasCommitViolations || commitCount > 0 || warningCount > 0
+                    ? "attention"
+                    : summary.StagedFileCount == 0
+                        ? "empty"
+                        : "passed";
+
+        return new VcaValidationOverviewResponse(
+            outcome,
+            summary.StagedFileCount,
+            summary.ApplicableRuleCount,
+            findings.Count,
+            stopCount,
+            commitCount,
+            warningCount,
+            deferredCount,
+            findings);
+    }
+
+    private static string ToWireFindingKind(VcaRuleFindingKind kind) => kind switch
+    {
+        VcaRuleFindingKind.Warning => "warning",
+        VcaRuleFindingKind.Deferred => "deferred",
+        VcaRuleFindingKind.AcknowledgmentRequired => "acknowledgment_required",
+        VcaRuleFindingKind.Blocked => "blocked",
+        _ => "warning"
+    };
 
     private static string ToWireType(GitPreflightEventType type) => type switch
     {

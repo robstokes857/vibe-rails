@@ -24,10 +24,12 @@ public class Settings
     // (off/safest/safe/medium/high — see TokenSaverPresets); it fully determines the transforms
     // and tool allowlist, SUPERSEDING the per-transform bools below. Set it to "custom" to have
     // the bools honored instead — they remain the settings.json-only escape hatch for bisecting a
-    // misbehaving transform without disabling the proxy. The saver only runs when
-    // ClaudeLlmProxyEnabled is also on, and ClaudeTokenSaverEnabled=false force-disables it at
-    // any level. Changing the level (or flipping a flag under "custom") mid-session busts the
-    // provider prompt cache once (the transforms must be deterministic across turns).
+    // misbehaving transform without disabling the proxy. Despite its legacy provider-specific
+    // name, ClaudeTokenSaverEnabled is the master saver kill switch for both Claude and Codex;
+    // false force-disables all rewriting at any level. A provider's saver only runs when that
+    // provider's proxy is also enabled. Changing the level (or flipping a flag under "custom")
+    // mid-session busts the provider prompt cache once (the transforms must be deterministic
+    // across turns).
     public string TokenSaverLevel { get; set; } = "safest";
     public bool ClaudeTokenSaverEnabled { get; set; } = true;
     public bool TokenSaverCollapseCrRedraws { get; set; } = true;

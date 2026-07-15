@@ -55,6 +55,19 @@ vb --vca-hook commit-msg --commit-message ""$1""
             File.WriteAllText(Path.Combine(_scriptsDir, "commit-msg-hook.sh"), commitMsgScript);
         }
 
+        [Fact]
+        public void CreateChmodStartInfo_PreservesQuotedPathAsSingleArgument()
+        {
+            const string path = "/tmp/repo's hooks/pre-commit";
+
+            var startInfo = HookInstallationService.CreateChmodStartInfo(path);
+
+            Assert.Equal("chmod", startInfo.FileName);
+            Assert.Empty(startInfo.Arguments);
+            Assert.Equal(new[] { "+x", path }, startInfo.ArgumentList);
+            Assert.False(startInfo.UseShellExecute);
+        }
+
         public void Dispose()
         {
             // Clean up test directory

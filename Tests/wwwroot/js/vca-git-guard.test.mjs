@@ -13,7 +13,12 @@ const {
     formatVcaDuration,
     normalizeVcaConsoleText
 } = await import(pathToFileURL(consoleModule).href);
-const { RuleController, normalizeHookStatus } = await import(pathToFileURL(controllerModule).href);
+const {
+    RuleController,
+    buildCodeAnalyzerSummary,
+    buildVcaExplanationViewModel,
+    normalizeHookStatus
+} = await import(pathToFileURL(controllerModule).href);
 
 test('detailed current hook status produces a protected health model', () => {
     const model = normalizeHookStatus({
@@ -100,6 +105,182 @@ test('no-repository state disables all hook mutations', () => {
     assert.equal(model.preCommit.label, 'Unavailable');
 });
 
+test('Rules overview automatically starts validation and analysis together', async () => {
+    const controller = new RuleController({});
+    const root = {};
+    const calls = [];
+    controller.viewRoot = root;
+    controller.refreshHookStatus = async () => {
+        controller.hookStatus = { inGitRepo: true };
+    };
+    controller.runHookPreview = async () => calls.push('validation');
+    controller.runCodeAnalyzer = async () => calls.push('analysis');
+
+    assert.equal(await controller.runRulesOverviewChecks(root), true);
+    assert.deepEqual(calls.sort(), ['analysis', 'validation']);
+});
+
+test('focused Git Guard autoruns again when the view is reopened', async () => {
+    const root = { dataset: {} };
+    const fragment = { querySelector: () => root };
+    const content = {
+        innerHTML: '',
+        appendChild() { }
+    };
+    const originalDocument = globalThis.document;
+    globalThis.document = { getElementById: () => content };
+
+    try {
+        const controller = new RuleController({
+            bindAction() { },
+            cloneTemplate: () => fragment
+        });
+        let runs = 0;
+        controller.bindHookControls = () => { };
+        controller.renderPreflightState = () => { };
+        controller.refreshHookStatus = () => { };
+        controller.runGitPreflight = () => { runs += 1; };
+
+        controller.loadFocusedGitGuard();
+        await Promise.resolve();
+        controller.loadCheckViolations();
+        controller.loadFocusedGitGuard();
+        await Promise.resolve();
+
+        assert.equal(runs, 2);
+    } finally {
+        globalThis.document = originalDocument;
+    }
+});
+
+test('turning off an installed Git Guard requires confirmation', async () => {
+    const controller = new RuleController({});
+    let confirmationCount = 0;
+    let uninstallCount = 0;
+    controller.hookStatus = { inGitRepo: true, isInstalled: true, needsRepair: false };
+    controller.confirmUninstallHooks = () => { confirmationCount += 1; };
+    controller.uninstallHooks = async () => { uninstallCount += 1; };
+
+    await controller.toggleHooks();
+    assert.equal(confirmationCount, 1);
+    assert.equal(uninstallCount, 0);
+});
+
+test('code analyzer converts concern output into a bounded health summary', () => {
+    assert.deepEqual(buildCodeAnalyzerSummary({
+        healthScore: 82.5,
+        rating: 'NeedsWork',
+        analyzedFileCount: 4,
+        skippedFileCount: 2
+    }), {
+        score: 82.5,
+        scoreLabel: '82.5',
+        rating: 'Needs Work',
+        analyzedFileCount: 4,
+        skippedFileCount: 2,
+        tone: 'success'
+    });
+
+    const empty = buildCodeAnalyzerSummary({ analyzedFileCount: 0, skippedFileCount: 3 });
+    assert.equal(empty.score, null);
+    assert.equal(empty.scoreLabel, '—');
+    assert.equal(empty.rating, 'No staged code');
+    assert.equal(empty.tone, 'neutral');
+});
+
+test('VCA STOP findings explain why the commit is blocked and how to fix it', () => {
+    const model = buildVcaExplanationViewModel({
+        success: false,
+        validation: {
+            outcome: 'blocked',
+            stagedFileCount: 2,
+            applicableRuleCount: 3,
+            stopCount: 1,
+            findings: [{
+                status: 'blocked',
+                enforcement: 'STOP',
+                rule: 'Tests must accompany behavior changes',
+                reason: 'src/widget.cs changed without a matching test file.',
+                sourcePath: 'AGENTS.md',
+                guidance: 'Add or update the relevant test, then stage it.'
+            }]
+        }
+    });
+
+    assert.equal(model.tone, 'danger');
+    assert.match(model.title, /commit blocked/i);
+    assert.match(model.message, /cannot be bypassed/i);
+    assert.equal(model.findings[0].label, 'STOP');
+    assert.match(model.findings[0].reason, /without a matching test/i);
+    assert.match(model.fixBrief, /what to do next: add or update/i);
+    assert.deepEqual(model.stats.map(stat => stat.value), [2, 3, 1]);
+});
+
+test('VCA COMMIT and WARN findings clearly distinguish acknowledgement from advice', () => {
+    const model = buildVcaExplanationViewModel({
+        success: true,
+        validation: {
+            outcome: 'attention',
+            commitCount: 1,
+            warningCount: 1,
+            findings: [{
+                status: 'acknowledgment_required',
+                rule: 'Document public API changes',
+                reason: 'The public contract changed without documentation.',
+                guidance: 'Update the API documentation or acknowledge the exception.',
+                acknowledgment: '[VCA-ACK:docs]'
+            }, {
+                status: 'warning',
+                rule: 'Keep methods focused',
+                reason: 'One method is longer than the preferred limit.',
+                guidance: 'Consider extracting a helper.'
+            }]
+        }
+    });
+
+    assert.equal(model.tone, 'warning');
+    assert.match(model.title, /acknowledgment required/i);
+    assert.match(model.message, /will not block/i);
+    assert.equal(model.findings[0].label, 'COMMIT');
+    assert.equal(model.findings[1].label, 'WARN');
+    assert.match(model.fixBrief, /\[VCA-ACK:docs\] Reason:/);
+});
+
+test('VCA pass and empty states are calm, explicit results', () => {
+    const passed = buildVcaExplanationViewModel({
+        success: true,
+        validation: { outcome: 'passed', stagedFileCount: 4, applicableRuleCount: 7, findings: [] }
+    });
+    const empty = buildVcaExplanationViewModel({
+        success: true,
+        validation: { outcome: 'empty', stagedFileCount: 0, findings: [] }
+    });
+
+    assert.equal(passed.tone, 'success');
+    assert.match(passed.title, /satisfy your VCA rules/i);
+    assert.equal(passed.actionable, false);
+    assert.equal(empty.tone, 'info');
+    assert.match(empty.title, /nothing staged/i);
+    assert.equal(empty.actionable, false);
+});
+
+test('VCA explanatory data remains plain text even when a rule contains markup', () => {
+    const model = buildVcaExplanationViewModel({
+        validation: {
+            outcome: 'blocked',
+            findings: [{
+                status: 'blocked',
+                rule: '<img src=x onerror=alert(1)>',
+                reason: '<script>unsafe()</script>',
+                guidance: 'Use textContent only.'
+            }]
+        }
+    });
+
+    assert.equal(model.findings[0].rule, '<img src=x onerror=alert(1)>');
+    assert.match(model.fixBrief, /<script>unsafe\(\)<\/script>/);
+});
+
 test('console helpers normalize output and summarize preview completion', () => {
     assert.equal(normalizeVcaConsoleText('one\r\ntwo\rthree\0'), 'one\ntwo\nthree');
     assert.equal(formatVcaDuration(42.4), '42 ms');
@@ -169,16 +350,19 @@ test('VcaConsole writes untrusted hook output as text and exposes busy state', (
     const output = fakeElement('');
     const state = fakeElement('');
     const meta = fakeElement('');
+    const spinner = { hidden: true };
     const root = fakeElement('');
     root.querySelector = (selector) => ({
         '[data-vca-console-output]': output,
         '[data-vca-console-state]': state,
-        '[data-vca-console-meta]': meta
+        '[data-vca-console-meta]': meta,
+        '[data-vca-console-spinner]': spinner
     })[selector] || null;
 
     const hookConsole = new VcaConsole(root);
     hookConsole.begin();
     assert.equal(root.attributes.get('aria-busy'), 'true');
+    assert.equal(spinner.hidden, false);
     assert.match(output.textContent, /Starting VCA hook check/);
     assert.equal(hookConsole.clear(), false, 'clear must not contradict an active busy state');
     assert.match(output.textContent, /Starting VCA hook check/);
@@ -192,6 +376,7 @@ test('VcaConsole writes untrusted hook output as text and exposes busy state', (
 
     assert.equal(output.textContent, '<img src=x onerror=alert(1)>');
     assert.equal(root.attributes.get('aria-busy'), 'false');
+    assert.equal(spinner.hidden, true);
     assert.equal(root.dataset.tone, 'success');
     assert.equal(state.textContent, 'Passed');
 

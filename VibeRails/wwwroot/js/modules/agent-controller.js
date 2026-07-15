@@ -26,7 +26,13 @@ export class AgentController {
             return;
         }
 
-        content.innerHTML = '';
+        this.mountAgentsOverview(content);
+    }
+
+    mountAgentsOverview(container) {
+        if (!container) return null;
+
+        container.innerHTML = '';
         const fragment = this.app.cloneTemplate('agents-template');
         const root = fragment.querySelector('[data-view="agents"]');
 
@@ -45,7 +51,9 @@ export class AgentController {
                 // Ensure we have data to render
                 if (this.app.data.agents && this.app.data.agents.length > 0) {
                     fileTree.innerHTML = this.app.renderLocalFileTree();
-                    this.bindAgentListItems(fileTree);
+                    this.bindAgentListItems(fileTree, {
+                        onSaved: () => this.mountAgentsOverview(container)
+                    });
                 } else if (this.app.data.isInGit) {
                     fileTree.innerHTML = '<p class="text-muted text-center">No agent files found in this project.</p>';
                 } else {
@@ -54,13 +62,17 @@ export class AgentController {
             }
         }
 
-        content.appendChild(fragment);
+        container.appendChild(fragment);
+        if (root) {
+            this.app.ruleController.attachRulesOverview(root);
+        }
+        return root;
     }
 
     // Wire up the agent-file list rendered by app.renderLocalFileTree():
     // clicking a row opens the editor; clicking the inline rename button opens
     // the custom-name modal without leaving the list.
-    bindAgentListItems(container) {
+    bindAgentListItems(container, { onSaved = null } = {}) {
         container.querySelectorAll('[data-agent-tree-index]').forEach(el => {
             const idx = parseInt(el.dataset.agentTreeIndex);
             const agent = this.app.data.agents[idx];
@@ -76,7 +88,7 @@ export class AgentController {
                 el.addEventListener('click', (e) => {
                     // Don't let the click bubble to the row (which would navigate in).
                     e.stopPropagation();
-                    this.showAgentCustomNameModal(agent, { onSaved: () => this.loadAgents() });
+                    this.showAgentCustomNameModal(agent, { onSaved: onSaved || (() => this.loadAgents()) });
                 });
             }
         });
@@ -122,7 +134,8 @@ export class AgentController {
         if (root) {
             const displayName = root.querySelector('[data-agent-display-name]');
             if (displayName) {
-                displayName.textContent = agent.customName || agent.name;
+                const agentIndex = this.app.data.agents.findIndex(candidate => candidate.path === agent.path);
+                displayName.textContent = this.app.getAgentFileViewModel(agent, Math.max(agentIndex, 0)).displayName;
             }
 
             const path = root.querySelector('[data-agent-path]');
@@ -1033,7 +1046,7 @@ export class AgentController {
             if (newAgent) {
                 this.app.navigate('agent-edit', newAgent);
             } else {
-                this.app.navigate('agents');
+                this.app.navigate('dashboard', {}, { resetStack: true });
             }
         } catch (error) {
             console.error('Failed to create agent:', error);

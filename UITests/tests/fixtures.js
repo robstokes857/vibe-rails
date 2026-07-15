@@ -28,7 +28,15 @@ function readRuntime() {
 const test = base.test.extend({
     context: async ({ browser }, use) => {
         const { storageState, baseURL, sessionStorage: sessionData } = readRuntime();
-        const ctx = await browser.newContext({ storageState, baseURL });
+        const tabToken = sessionData?.viberails_tab || '';
+        const ctx = await browser.newContext({
+            storageState,
+            baseURL,
+            // Keep Playwright's context.request client authenticated too. Page
+            // requests still read the same value from sessionStorage, while
+            // test setup can now clean backend terminal tabs before navigation.
+            extraHTTPHeaders: tabToken ? { viberails_tab: tabToken } : {}
+        });
         // Playwright's storageState persists cookies + localStorage but NOT
         // sessionStorage. The bootstrap flow stashes the tab token there
         // (`viberails_tab`), and API calls 401 without it, sending the page

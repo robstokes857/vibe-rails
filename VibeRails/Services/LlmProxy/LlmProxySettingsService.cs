@@ -13,7 +13,12 @@ public sealed class LlmProxySettingsService : ILlmProxySettingsService
 {
     public LlmProxySettings GetSettings()
     {
-        var settings = Config.LoadFresh();
+        return Resolve(Config.LoadFresh());
+    }
+
+    internal static LlmProxySettings Resolve(Settings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
         var level = TokenSaverPresets.Normalize(settings.TokenSaverLevel);
 
         // The level preset resolves everything; "custom" is the escape hatch that honors the
@@ -29,16 +34,17 @@ public sealed class LlmProxySettingsService : ILlmProxySettingsService
                 default,
                 TokenSaverPresets.ShellTools)
             : TokenSaverPresets.For(level);
+        var tokenSaverEnabled = settings.ClaudeTokenSaverEnabled && level != TokenSaverLevel.Off;
 
         return new LlmProxySettings(
             CodexLlmProxyEnabled: settings.CodexLlmProxyEnabled,
             CodexLlmProxyMode: CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
             ClaudeLlmProxyEnabled: settings.ClaudeLlmProxyEnabled,
-            ClaudeTokenSaverEnabled: settings.ClaudeTokenSaverEnabled && level != TokenSaverLevel.Off,
+            ClaudeTokenSaverEnabled: settings.ClaudeLlmProxyEnabled && tokenSaverEnabled,
             ClaudeTokenSaverFlags: flags,
             ClaudeTokenSaverCondense: condense,
             ClaudeTokenSaverAllowlist: claudeAllowlist,
-            CodexTokenSaverEnabled: settings.CodexLlmProxyEnabled && level != TokenSaverLevel.Off,
+            CodexTokenSaverEnabled: settings.CodexLlmProxyEnabled && tokenSaverEnabled,
             CodexTokenSaverFlags: flags,
             CodexTokenSaverCondense: condense,
             CodexTokenSaverAllowlist: CodexResponsesRewriter.DefaultToolAllowlist);

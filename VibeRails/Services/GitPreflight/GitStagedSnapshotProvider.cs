@@ -45,6 +45,24 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider
                 content = DecodeText(blob, out isBinary);
             }
 
+            // The committed version of the file, so consumers can tell newly introduced
+            // problems apart from ones the file already had. Modified/renamed files only;
+            // added and copied paths had no code at this location before.
+            string? previousContent = null;
+            if (!isBinary && entry.Kind is GitStagedChangeKind.Modified or GitStagedChangeKind.Renamed)
+            {
+                var previousPath = entry.PreviousRelativePath ?? entry.RelativePath;
+                var headBlob = await TryReadHeadBlobAsync(repositoryPath, previousPath, cancellationToken);
+                if (headBlob != null)
+                {
+                    previousContent = DecodeText(headBlob, out var previousBinary);
+                    if (previousBinary)
+                    {
+                        previousContent = null;
+                    }
+                }
+            }
+
             changedLines.TryGetValue(entry.RelativePath, out var lineCount);
             files.Add(new GitStagedFileSnapshot(
                 entry.RelativePath,
@@ -54,14 +72,16 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider
                 isBinary,
                 lineCount,
                 content,
-                entry.PreviousRelativePath));
+                entry.PreviousRelativePath,
+                previousContent));
         }
 
-        var agentFiles = await ReadAgentFilesAsync(repositoryPath, cancellationToken);
-        return new GitStagedSnapshot(repositoryPath, files, agentFiles);
+        var trackedFiles = await ReadTrackedFilesAsync(repositoryPath, cancellationToken);
+        var agentFiles = await ReadAgentFilesAsync(repositoryPath, trackedFiles, cancellationToken);
+        return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles);
     }
 
-    private static async Task<IReadOnlyList<GitIndexTextFile>> ReadAgentFilesAsync(
+    private static async Task<IReadOnlyList<string>> ReadTrackedFilesAsync(
         string repositoryPath,
         CancellationToken cancellationToken)
     {
@@ -71,11 +91,20 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider
             cancellationToken);
         EnsureSucceeded(indexResult, "read the Git index", repositoryPath);
 
-        var paths = SplitNull(indexResult.StdOut)
+        return SplitNull(indexResult.StdOut)
             .Select(NormalizePath)
-            .Where(IsAgentFile)
             .Distinct(PathComparer)
             .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static async Task<IReadOnlyList<GitIndexTextFile>> ReadAgentFilesAsync(
+        string repositoryPath,
+        IReadOnlyList<string> trackedFiles,
+        CancellationToken cancellationToken)
+    {
+        var paths = trackedFiles
+            .Where(IsAgentFile)
             .ToList();
         var results = new List<GitIndexTextFile>(paths.Count);
 
@@ -197,6 +226,22 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider
         }
 
         return result.Bytes;
+    }
+
+    /// <summary>
+    /// Reads the committed (HEAD) version of a path. Returns null instead of throwing:
+    /// an unborn branch or a path new to this commit simply has no baseline.
+    /// </summary>
+    private static async Task<byte[]?> TryReadHeadBlobAsync(
+        string repositoryPath,
+        string relativePath,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunBinaryGitAsync(
+            repositoryPath,
+            ["--no-pager", "show", "--no-textconv", $"HEAD:./{relativePath}"],
+            cancellationToken);
+        return result.ExitCode == 0 && !result.TimedOut ? result.Bytes : null;
     }
 
     private static string? DecodeText(byte[] bytes, out bool isBinary)

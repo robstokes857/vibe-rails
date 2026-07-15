@@ -25,11 +25,31 @@ public sealed record VcaHookDisplayInfo(
     string? RepositoryPath = null,
     TimeSpan? Timeout = null);
 
+public enum VcaRuleFindingKind
+{
+    Warning,
+    Deferred,
+    AcknowledgmentRequired,
+    Blocked
+}
+
+public sealed record VcaRuleFinding(
+    VcaRuleFindingKind Kind,
+    string Enforcement,
+    string Rule,
+    string Reason,
+    string SourcePath,
+    string Guidance,
+    string? Acknowledgment = null);
+
 public sealed record VcaHookValidationSummary(
     bool HasError,
     bool HasStopViolation,
     bool HasCommitViolations,
-    IReadOnlyList<string> RequiredAcknowledgments);
+    IReadOnlyList<string> RequiredAcknowledgments,
+    int StagedFileCount = 0,
+    int ApplicableRuleCount = 0,
+    IReadOnlyList<VcaRuleFinding>? Findings = null);
 
 public sealed record VcaHookValidationResult(
     string Output,

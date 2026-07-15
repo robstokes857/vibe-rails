@@ -104,11 +104,16 @@ export class VcaConsole {
         this.output = this.root?.querySelector('[data-vca-console-output]') || null;
         this.state = this.root?.querySelector('[data-vca-console-state]') || null;
         this.meta = this.root?.querySelector('[data-vca-console-meta]') || null;
+        this.spinner = this.root?.querySelector('[data-vca-console-spinner]') || null;
         this.clipboard = options.clipboard;
         this.documentRef = options.documentRef;
+        this.defaultMessage = normalizeVcaConsoleText(options.defaultMessage || DEFAULT_CONSOLE_MESSAGE);
+        this.runningMessage = String(options.runningMessage || 'Starting VCA hook check…');
+        this.failureMessage = String(options.failureMessage || 'The hook check could not be completed.');
+        this.failureMeta = String(options.failureMeta || 'Hook check failed');
 
         if (this.output && !this.output.textContent.trim()) {
-            this.output.textContent = DEFAULT_CONSOLE_MESSAGE;
+            this.output.textContent = this.defaultMessage;
         }
     }
 
@@ -118,12 +123,13 @@ export class VcaConsole {
             this.root.classList.toggle('is-running', Boolean(isBusy));
         }
         if (this.state) this.state.textContent = isBusy ? 'Running' : 'Ready';
+        if (this.spinner) this.spinner.hidden = !isBusy;
         if (isBusy && this.meta) this.meta.textContent = message;
     }
 
     begin(command = 'vb --vca-hook pre-commit') {
         this.setTone('neutral');
-        this.write(`$ ${command}\n\nStarting VCA hook check…`);
+        this.write(`$ ${command}\n\n${this.runningMessage}`);
         this.setBusy(true);
     }
 
@@ -138,12 +144,12 @@ export class VcaConsole {
     }
 
     fail(error) {
-        const message = normalizeVcaConsoleText(error?.message || error || 'The hook check could not be completed.');
+        const message = normalizeVcaConsoleText(error?.message || error || this.failureMessage);
         this.write(`[error] ${message}`);
         this.setBusy(false);
         this.setTone('danger');
         if (this.state) this.state.textContent = 'Error';
-        if (this.meta) this.meta.textContent = 'Hook check failed';
+        if (this.meta) this.meta.textContent = this.failureMeta;
     }
 
     finishStream({ tone = 'neutral', state = 'Complete', meta = 'Preflight finished' } = {}) {
@@ -178,7 +184,7 @@ export class VcaConsole {
 
     clear() {
         if (this.root?.getAttribute?.('aria-busy') === 'true') return false;
-        this.write(DEFAULT_CONSOLE_MESSAGE);
+        this.write(this.defaultMessage);
         this.setTone('neutral');
         if (this.state) this.state.textContent = 'Ready';
         if (this.meta) this.meta.textContent = 'Console cleared';
