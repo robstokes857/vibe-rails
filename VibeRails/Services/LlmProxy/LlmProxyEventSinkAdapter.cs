@@ -32,7 +32,8 @@ public sealed class LlmProxyEventSinkAdapter(IAppEventBus eventBus, ITokenSaving
     {
         savingsStore.Record(report.Provider, report.BytesBefore, report.BytesAfter);
 
-        // The one log line the plan allows (token_saving_plan.md §6): counts only, never content.
+        // The only log line the saver is allowed to emit: counts only, never content. Tool output
+        // is the user's file and command data — it goes to captures (opt-in, local) or nowhere.
         Log.Information(
             "Token saver: {Provider} minified {Minified}/{Seen} tool results, {BytesBefore}→{BytesAfter} bytes "
             + "(saved {BytesSaved}; cr={CrChars} ansi={AnsiChars} ws={WsChars} blank={BlankChars} "

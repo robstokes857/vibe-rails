@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using TokenSaver;
 using TokenSaver.Minify;
+using TokenSaver.Pipeline;
 using VibeRails.Auth;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
@@ -224,9 +225,10 @@ public class LlmProxyRoutesTests
                 CodexLlmProxyMode: CodexLlmProxySettings.ModeApi,
                 ClaudeLlmProxyEnabled: false,
                 CodexTokenSaverEnabled: tokenSaverEnabled,
-                CodexTokenSaverFlags: tokenSaverFlags,
-                CodexTokenSaverCondense: tokenSaverCondense,
-                CodexTokenSaverAllowlist: CodexResponsesRewriter.DefaultToolAllowlist)));
+                TokenSaverPlan: CompressionPlan.FromLegacy(
+                    tokenSaverFlags,
+                    tokenSaverCondense,
+                    codexAllowlist: CodexResponsesRewriter.DefaultToolAllowlist))));
 
         await using var app = builder.Build();
         LlmProxyRoutes.Map(app);

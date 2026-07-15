@@ -34,6 +34,17 @@ public class EmbedderBenchmarkTests
     [Fact]
     public async Task Compare_Bge_vs_MiniLm_OverRealCorpus()
     {
+        // Opt-in only. This is a report, not a test: it asserts nothing about product behaviour,
+        // it prints a comparison table for a human to read. But it is CPU-bound ONNX inference
+        // (4 model configs × corpus × 3 passes) and it is the single longest thing in the suite —
+        // it alone sets the suite's wall clock, and because ONNX's intra-op pool spin-waits, its
+        // cost explodes under load (measured: 14s idle, 63s with the cores busy) and drags the
+        // whole run with it. Running it by default charges every unrelated `dotnet test` a
+        // variable multi-minute toll for numbers nobody is reading. Set VIBERAILS_RUN_BENCHMARKS=1
+        // to run it deliberately.
+        if (Environment.GetEnvironmentVariable("VIBERAILS_RUN_BENCHMARKS") != "1")
+            Assert.Skip("Benchmark is opt-in: set VIBERAILS_RUN_BENCHMARKS=1 to run it.");
+
         // Corpus is gitignored — it's a local dump of real CleanedUserInput.
         // Skip when absent so the benchmark stays a manual/local exercise and
         // doesn't fail CI or contributor runs that don't have the fixture.

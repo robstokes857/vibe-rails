@@ -38,12 +38,13 @@ public static class LlmProxyRoutes
                 return;
             }
 
-            var transform = settings.CodexTokenSaverEnabled
-                    && !(settings.CodexTokenSaverFlags.IsNoOp && settings.CodexTokenSaverCondense.IsNoOp)
-                ? new CodexBodyTransform(
-                    settings.CodexTokenSaverFlags,
-                    settings.CodexTokenSaverCondense,
-                    settings.CodexTokenSaverAllowlist)
+            var plan = settings.ResolvedPlan;
+            var saverHasWork = !plan.IsNoOp && plan.CodexAllowlist.Count > 0;
+            var captureSink = settings.TokenSaverCaptureEnabled
+                ? context.RequestServices.GetService<ICompressionCaptureSink>()
+                : null;
+            var transform = settings.CodexTokenSaverEnabled && saverHasWork
+                ? new CodexBodyTransform(plan, captureSink)
                 : null;
 
             var target = BuildOpenAiUri(context.Request, settings.CodexLlmProxyMode);

@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using TokenSaver.Pipeline;
+using TokenSaver.Shape;
 
 namespace TokenSaver.Minify;
 
@@ -30,18 +32,32 @@ public static class CodexResponsesRewriter
         SkipValidation = true
     };
 
+    /// <summary>Compatibility adapter for callers that predate <see cref="CompressionPlan"/>.</summary>
     public static ToolOutputRewriteResult Rewrite(
         ReadOnlySpan<byte> utf8Body,
         MinifyFlags flags,
         CondenseOptions condense,
         IReadOnlyCollection<string> toolAllowlist,
-        IBufferWriter<byte> output)
+        IBufferWriter<byte> output) =>
+        Rewrite(
+            utf8Body,
+            CompressionPlan.FromLegacy(flags, condense, codexAllowlist: [.. toolAllowlist]),
+            output);
+
+    /// <summary>Rewrites with one immutable request plan, the sole runtime configuration value.</summary>
+    public static ToolOutputRewriteResult Rewrite(
+        ReadOnlySpan<byte> utf8Body,
+        CompressionPlan plan,
+        IBufferWriter<byte> output,
+        ICompressionCaptureSink? captures = null)
     {
+        ArgumentNullException.ThrowIfNull(plan);
         var stats = new MinifyStats();
         var condenseStats = new CondenseStats();
         var unchanged = new ToolOutputRewriteResult(
             false, utf8Body.Length, utf8Body.Length, 0, 0, stats);
-        if (utf8Body.IsEmpty || (flags.IsNoOp && condense.IsNoOp))
+        var toolAllowlist = plan.CodexAllowlist;
+        if (utf8Body.IsEmpty || plan.IsNoOp || toolAllowlist.Count == 0)
             return unchanged;
 
         List<ResponseItem> items;
@@ -54,11 +70,11 @@ public static class CodexResponsesRewriter
             return unchanged;
         }
 
-        var toolNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        var toolUses = new Dictionary<string, ToolUseInfo>(StringComparer.Ordinal);
         foreach (var item in items)
         {
             if (item.CallId is not null && item.Name is not null && item.IsToolCall)
-                toolNames[item.CallId] = item.Name;
+                toolUses[item.CallId] = new ToolUseInfo(item.Name, item.Command);
         }
 
         var seen = 0;
@@ -70,13 +86,25 @@ public static class CodexResponsesRewriter
                 continue;
 
             seen++;
+            var use = default(ToolUseInfo);
             var allowed = item.IsIntrinsicShellOutput
-                || (item.CallId is not null
-                    && toolNames.TryGetValue(item.CallId, out var name)
-                    && IsAllowed(toolAllowlist, name));
+                ? IsAllowed(toolAllowlist, "shell_command")
+                : item.CallId is not null
+                    && toolUses.TryGetValue(item.CallId, out use)
+                    && IsAllowed(toolAllowlist, use.Name);
             if (!allowed || item.Ranges.Count == 0)
                 continue;
 
+            if (item.IsIntrinsicShellOutput)
+            {
+                item.Name = "shell_command";
+                item.Command = null;
+            }
+            else
+            {
+                item.Name = use.Name;
+                item.Command = use.Command;
+            }
             qualifying.Add(item);
             foreach (var (start, end) in item.Ranges)
                 maxTokenLength = Math.Max(maxTokenLength, end - start);
@@ -86,8 +114,7 @@ public static class CodexResponsesRewriter
             return unchanged with { ToolResultsSeen = seen };
 
         var unescaped = ArrayPool<char>.Shared.Rent(maxTokenLength);
-        var minified = ArrayPool<char>.Shared.Rent(maxTokenLength);
-        var condensed = ArrayPool<char>.Shared.Rent(maxTokenLength);
+        using var buffers = new PipelineScratch(maxTokenLength);
         using var scratch = new PooledBufferWriter(maxTokenLength);
         using var writer = new Utf8JsonWriter(scratch, StringWriterOptions);
         try
@@ -116,22 +143,17 @@ public static class CodexResponsesRewriter
                         tokenReader.Read();
                         var charLength = tokenReader.CopyString(unescaped);
 
-                        var current = (ReadOnlySpan<char>)unescaped.AsSpan(0, charLength);
-                        var changed = false;
-                        if (OutputMinifier.TryMinify(
-                                current, flags, minified, out var written, ref candidateStats))
-                        {
-                            current = minified.AsSpan(0, written);
-                            changed = true;
-                        }
-
-                        if (!condense.IsNoOp && OutputCondenser.TryCondense(
-                                current, condense, condensed, out var condensedWritten,
-                                ref candidateCondense))
-                        {
-                            current = condensed.AsSpan(0, condensedWritten);
-                            changed = true;
-                        }
+                        var raw = (ReadOnlySpan<char>)unescaped.AsSpan(0, charLength);
+                        var trace = captures is not null ? new List<StageTrace>() : null;
+                        var current = CompressionPipeline.Run(
+                            raw,
+                            plan,
+                            CommandShapes.Classify(item.Command),
+                            buffers,
+                            out var changed,
+                            ref candidateStats,
+                            ref candidateCondense,
+                            trace);
 
                         if (changed)
                         {
@@ -149,6 +171,20 @@ public static class CodexResponsesRewriter
                                 itemChanged = true;
                                 anyChanged = true;
                             }
+                        }
+
+                        if (trace is not null)
+                        {
+                            captures!.Capture(new CompressionCapture(
+                                Guid.NewGuid(),
+                                "openai",
+                                item.Name ?? "shell_command",
+                                item.Command,
+                                raw.ToString(),
+                                current.ToString(),
+                                trace,
+                                [.. plan.EnabledIds],
+                                RewriteAccepted: accepted));
                         }
                     }
                     catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException)
@@ -186,10 +222,10 @@ public static class CodexResponsesRewriter
         finally
         {
             ArrayPool<char>.Shared.Return(unescaped);
-            ArrayPool<char>.Shared.Return(minified);
-            ArrayPool<char>.Shared.Return(condensed);
         }
     }
+
+    private readonly record struct ToolUseInfo(string Name, string? Command);
 
     private static bool IsAllowed(IReadOnlyCollection<string> allowlist, string name)
     {
@@ -207,6 +243,7 @@ public static class CodexResponsesRewriter
         public string? Type;
         public string? Name;
         public string? CallId;
+        public string? Command;
         public readonly List<(int Start, int End)> Ranges = [];
 
         public bool IsToolCall => Type is "function_call" or "custom_tool_call";
@@ -294,6 +331,22 @@ public static class CodexResponsesRewriter
                 else
                     reader.Skip();
             }
+            else if (reader.ValueTextEquals("arguments"u8))
+            {
+                reader.Read();
+                if (reader.TokenType == JsonTokenType.String)
+                    item.Command = ExtractCommand(reader.GetString());
+                else
+                    reader.Skip();
+            }
+            else if (reader.ValueTextEquals("input"u8))
+            {
+                reader.Read();
+                if (reader.TokenType == JsonTokenType.String)
+                    item.Command = reader.GetString();
+                else
+                    reader.Skip();
+            }
             else if (reader.ValueTextEquals("output"u8))
             {
                 reader.Read();
@@ -328,6 +381,26 @@ public static class CodexResponsesRewriter
 
         item.Ranges.Sort(static (left, right) => left.Start.CompareTo(right.Start));
         return item;
+    }
+
+    private static string? ExtractCommand(string? arguments)
+    {
+        if (string.IsNullOrWhiteSpace(arguments))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(arguments);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("command", out var command)
+                && command.ValueKind == JsonValueKind.String
+                    ? command.GetString()
+                    : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static void ScanOutputArray(

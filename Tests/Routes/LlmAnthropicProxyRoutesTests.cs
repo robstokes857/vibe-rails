@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using TokenSaver;
 using TokenSaver.Minify;
+using TokenSaver.Pipeline;
 using VibeRails.Auth;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
@@ -21,9 +22,10 @@ namespace Tests.Routes;
 /// Drives the Claude/Anthropic relay end-to-end through real Kestrel and asserts the token saver's
 /// wire behavior: qualifying <c>/v1/messages</c> bodies reach the upstream minified with a correct
 /// Content-Length, while every other path — saver off, invalid JSON, non-messages endpoints —
-/// forwards byte-identical (fail-open, token_saving_plan.md §6). Also pins the metrics contract:
-/// measured requests hit the savings store, and the activity ping carries savings only for a
-/// request that actually shrank.
+/// forwards byte-identical. That last part is the fail-open rule: the proxy must never be able to
+/// break a request, so anything it cannot handle forwards the original bytes. Also pins the metrics
+/// contract: measured requests hit the savings store, and the activity ping carries savings only
+/// for a request that actually shrank.
 /// </summary>
 public class LlmAnthropicProxyRoutesTests
 {
@@ -142,9 +144,9 @@ public class LlmAnthropicProxyRoutesTests
     }
 
     [Fact]
-    public async Task HighTier_CondensesRepeatedPowerShellOutput_EndToEnd()
+    public async Task DedupeStage_CondensesRepeatedPowerShellOutput_EndToEnd()
     {
-        // 40 identical lines from a PowerShell tab. Under the High preset the whole run must
+        // 40 identical lines from a PowerShell tab. With the lossy stages on, the whole run must
         // collapse to one marker-suffixed line on the wire — route gate → transform → rewriter →
         // condenser, all through real Kestrel — and the savings record must land.
         var spam = string.Join("\\n", Enumerable.Repeat("warning: retrying operation", 40));
@@ -154,11 +156,17 @@ public class LlmAnthropicProxyRoutesTests
               {"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"{{{spam}}}"}]}
             ]}
             """;
-        var (flags, condense, allowlist) = TokenSaverPresets.For(TokenSaverLevel.High);
+        var plan = CompressionCatalog.Resolve([
+            CompressionCatalog.CrCollapse, CompressionCatalog.AnsiStrip,
+            CompressionCatalog.TrailingWhitespace, CompressionCatalog.BlankEdges,
+            CompressionCatalog.BlankRuns, CompressionCatalog.DedupeLines,
+            CompressionCatalog.TruncateLong,
+            CompressionCatalog.ScopeShell, CompressionCatalog.ScopeShellBackground]);
 
         var result = await SendAsync(
             "/llm/anthropic/v1/messages", body, tokenSaverEnabled: true,
-            TestContext.Current.CancellationToken, flags, condense, allowlist);
+            TestContext.Current.CancellationToken,
+            plan.Flags, plan.Condense, plan.AnthropicAllowlist);
 
         Assert.Equal(HttpStatusCode.OK, result.StatusCode);
         var upstreamBody = Encoding.UTF8.GetString(result.UpstreamBody);
@@ -206,9 +214,10 @@ public class LlmAnthropicProxyRoutesTests
                 CodexLlmProxyMode: CodexLlmProxySettings.ModeSubscription,
                 ClaudeLlmProxyEnabled: true,
                 ClaudeTokenSaverEnabled: tokenSaverEnabled,
-                ClaudeTokenSaverFlags: flags ?? MinifyFlags.Default,
-                ClaudeTokenSaverCondense: condense,
-                ClaudeTokenSaverAllowlist: allowlist)));
+                TokenSaverPlan: CompressionPlan.FromLegacy(
+                    flags ?? MinifyFlags.Default,
+                    condense,
+                    anthropicAllowlist: allowlist ?? AnthropicMessagesRewriter.DefaultToolAllowlist))));
 
         await using var app = builder.Build();
         LlmAnthropicProxyRoutes.Map(app);

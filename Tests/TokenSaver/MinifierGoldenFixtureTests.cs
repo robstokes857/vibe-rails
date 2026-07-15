@@ -5,10 +5,11 @@ using Xunit;
 namespace Tests.TokenSaver;
 
 /// <summary>
-/// Golden-corpus tests (token_saving_plan.md §7 Phase 1): realistic captured-style tool outputs
-/// under <c>Fixtures\</c>, each a <c>&lt;name&gt;.input.txt</c> / <c>&lt;name&gt;.expected.txt</c>
-/// pair. Expected files were derived BY HAND from the §3 transform rules, not by running the
-/// minifier — they pin behavior, they don't echo it.
+/// Golden-corpus tests: realistic captured-style tool outputs under <c>Fixtures\</c>, each a
+/// <c>&lt;name&gt;.input.txt</c> / <c>&lt;name&gt;.expected.txt</c> pair. Expected files were
+/// derived BY HAND from <see cref="OutputMinifier"/>'s transform rules, not by running the
+/// minifier — they pin behavior, they don't echo it. Regenerating one from actual output defeats
+/// the entire point of the file.
 ///
 /// Fixtures contain REAL control bytes (0x1B, 0x0D, 0x07) and deliberate \r / \r\n framing, so
 /// they are read raw via <see cref="File.ReadAllText(string)"/> (UTF-8, no BOM, and .NET performs

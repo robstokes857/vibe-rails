@@ -2412,6 +2412,120 @@ code {
     font-weight: 500;
 }
 
+/* ── Token Saver settings: catalog-driven stage/scope toggles ─────────────
+   Rendered by settings-controller.js from GET /api/v1/compression/catalog, so
+   these classes must survive a stage being added without any change here. */
+.ts-defaults-btn {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.ts-loading {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    padding: 0.35rem 0;
+}
+
+.ts-toggle {
+    padding: 0.5rem 0.6rem;
+    border: 1px solid transparent;
+    border-radius: var(--border-radius);
+    transition: background var(--transition-speed);
+}
+
+.ts-toggle + .ts-toggle {
+    margin-top: 0.15rem;
+}
+
+.ts-toggle:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.ts-toggle-head {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.ts-toggle .form-check {
+    margin-bottom: 0;
+}
+
+.ts-toggle .form-text {
+    margin-top: 0.2rem;
+    margin-left: 2.5rem;
+    font-size: 0.72rem;
+    line-height: 1.45;
+}
+
+/* Kind badge. Lossy is deliberately the loud one: it is the only kind that
+   destroys information, so it must not read as just another colour. */
+.ts-kind {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-radius: 3px;
+    padding: 0.05rem 0.35rem;
+    border: 1px solid transparent;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.ts-kind-lossless {
+    color: var(--color-success);
+    background: rgba(16, 185, 129, 0.1);
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.ts-kind-reshaping {
+    color: var(--color-accent);
+    background: rgba(6, 182, 212, 0.1);
+    border-color: rgba(6, 182, 212, 0.3);
+}
+
+.ts-kind-lossy {
+    color: var(--color-warning);
+    background: rgba(245, 158, 11, 0.14);
+    border-color: rgba(245, 158, 11, 0.45);
+}
+
+/* A scope carrying a catalog warning (scope-read, scope-grep). These fail as
+   BROKEN EDITS, not as lost savings, so the row must not look like an ordinary
+   toggle sitting next to the safe ones. */
+.ts-toggle.is-risky {
+    border-color: rgba(245, 158, 11, 0.35);
+    border-left: 3px solid var(--color-warning);
+    background: rgba(245, 158, 11, 0.05);
+}
+
+.ts-toggle.is-risky:hover {
+    background: rgba(245, 158, 11, 0.08);
+}
+
+.ts-toggle.is-risky .form-check-label {
+    color: var(--color-warning);
+    font-weight: 600;
+}
+
+.ts-warning {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.35rem;
+    margin-left: 2.5rem;
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: var(--color-warning);
+}
+
+.ts-warning i {
+    margin-top: 0.15rem;
+    flex-shrink: 0;
+}
+
 .sandbox-item-time {
     font-size: 0.65rem;
     color: var(--color-text-muted);

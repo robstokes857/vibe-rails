@@ -1,4 +1,5 @@
 import { showTranscriptModal, showReplayModal } from './session-viewer.js';
+import { CompressionCapturesController } from './compression-captures-controller.js';
 
 const esc = v => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 const shortId = v => !v ? 'n/a' : (v.length <= 14 ? v : v.slice(0, 8) + '…' + v.slice(-4));
@@ -192,6 +193,12 @@ export class VibeRailsAiController {
         this._syncDisclosures();
         this._renderEmptyColumns('Run a search to see how each strategy ranks your query.');
         this.refreshAll({ silent: true });
+
+        // The compression capture browser owns the panel above the search UI. It is independent
+        // of the BERT corpus — different store, different API — so it loads on its own and a
+        // failure there must not take the search view down with it.
+        this.captures = new CompressionCapturesController(this.app, this.root);
+        this.captures.init().catch(err => console.error('Capture panel failed to load:', err));
     }
 
     _bindEvents() {

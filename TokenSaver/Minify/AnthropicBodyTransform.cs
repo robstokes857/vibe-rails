@@ -11,9 +11,8 @@ namespace TokenSaver.Minify;
 /// failure is a request that saves nothing.
 /// </summary>
 internal sealed class AnthropicBodyTransform(
-    MinifyFlags flags,
-    CondenseOptions condense = default,
-    IReadOnlyList<string>? toolAllowlist = null) : ILlmProxyBodyTransform
+    Pipeline.CompressionPlan plan,
+    ICompressionCaptureSink? captures = null) : ILlmProxyBodyTransform
 {
     /// <summary>
     /// Bodies over this are forwarded without a rewrite attempt. Message histories with base64
@@ -56,15 +55,15 @@ internal sealed class AnthropicBodyTransform(
                 lease.Output = new PooledBufferWriter(length);
                 result = AnthropicMessagesRewriter.Rewrite(
                     lease.Buffered(length).Span,
-                    flags,
-                    condense,
-                    toolAllowlist ?? AnthropicMessagesRewriter.DefaultToolAllowlist,
-                    lease.Output);
+                    plan,
+                    lease.Output,
+                    captures);
             }
             catch (Exception ex)
             {
-                // The rewriter fails open on JsonException itself; this is the catch-all mandated
-                // by token_saving_plan.md §6 — the proxy must never be able to break a request.
+                // The rewriter fails open on JsonException itself; this is the catch-all: the proxy
+                // must never be able to break a request. Any rewrite failure falls back to the
+                // buffered original bytes.
                 events.Diagnostic(
                     "Claude proxy", "token-saver rewrite failed; forwarding original body.", ex);
                 result = new ToolOutputRewriteResult(false, length, length, 0, 0, default);

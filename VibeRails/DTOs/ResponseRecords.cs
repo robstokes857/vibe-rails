@@ -550,9 +550,13 @@ namespace VibeRails.DTOs
         bool? CodexLlmProxyEnabled,
         string? CodexLlmProxyMode,
         bool? ClaudeLlmProxyEnabled,
-        // off/safest/safe/medium/high (or "custom" when the settings.json escape hatch is in
-        // use) — see TokenSaverPresets. Nullable: same stale-client guard as the proxy fields.
-        string? TokenSaverLevel,
+        // The enabled stage and scope ids, drawn from TokenSaver's CompressionCatalog (e.g.
+        // "ansi-strip", "scope-shell"). Nullable for the same stale-client guard as the proxy
+        // fields — but null and empty are NOT the same answer: null means the client didn't send
+        // the key (leave the stored selection alone), while [] is a real "everything off" choice
+        // that must round-trip. See CompressionCatalog.Resolve, which draws the same line.
+        List<string>? TokenSaverStages,
+        bool? TokenSaverCaptureEnabled,
         // Read-only: the live machine name, used by the client as the placeholder
         // and as the push-notification fallback when ComputerName is blank. Never
         // persisted (see AppSettingsRoutes), so renaming the machine reflects live.
@@ -597,6 +601,89 @@ namespace VibeRails.DTOs
         long TokensSaved,
         long TokensSavedSession,
         long TokensSavedMonth
+    );
+
+    // Compression capture DTOs — served by /api/v1/compression/*.
+    //
+    // Outcome and Kind cross the wire as strings, not enum ordinals: the capture view and the
+    // settings UI render these directly, and an ordinal would silently change meaning if a value is
+    // ever inserted into StageOutcome/StageKind. Same wire-format discipline CompressionCatalog
+    // applies to stage ids.
+    public record CompressionStageTraceResponse(
+        string StageId,
+        string Outcome,
+        int CharsRemoved
+    );
+
+    // The list projection. No RawText: the capture table is uncapped and one row can hold
+    // megabytes, so the big strings only ever ship from the by-id endpoint.
+    public record CompressionCaptureSummaryResponse(
+        Guid Id,
+        DateTime CreatedUtc,
+        string Provider,
+        string ToolName,
+        string? Command,
+        int CharsBefore,
+        int CharsAfter,
+        bool Changed,
+        bool RewriteAccepted
+    );
+
+    public record CompressionCaptureDetailResponse(
+        Guid Id,
+        DateTime CreatedUtc,
+        string Provider,
+        string ToolName,
+        string? Command,
+        string RawText,
+        string CompressedText,
+        int CharsBefore,
+        int CharsAfter,
+        bool Changed,
+        bool RewriteAccepted,
+        List<CompressionStageTraceResponse> Trace,
+        List<string> EnabledIds
+    );
+
+    public record CompressionClearResponse(int Deleted);
+
+    public record CompressionStageResponse(
+        string Id,
+        string Name,
+        string Summary,
+        string Kind,
+        bool OnByDefault,
+        int Order
+    );
+
+    public record CompressionScopeResponse(
+        string Id,
+        string Name,
+        string Summary,
+        bool OnByDefault,
+        string? Warning
+    );
+
+    // Projected live from CompressionCatalog on every request. The catalog is the single source of
+    // truth for what the token saver can do; a hand-copied list here would be a fourth place to
+    // forget when a stage is added, which is the exact failure the catalog exists to prevent.
+    public record CompressionCatalogResponse(
+        List<CompressionStageResponse> Stages,
+        List<CompressionScopeResponse> Scopes,
+        List<string> DefaultSelection
+    );
+
+    // EnabledIds is nullable because null and empty are different answers: null means "not
+    // specified" and resolves to the catalog defaults, empty means "every stage off". See
+    // CompressionCatalog.Resolve, which draws that line.
+    public record CompressionPreviewRequest(Guid CaptureId, string[]? EnabledIds);
+
+    public record CompressionPreviewResponse(
+        string Output,
+        List<CompressionStageTraceResponse> Trace,
+        int CharsBefore,
+        int CharsAfter,
+        bool ScopeAllowed
     );
 
     // Remote PIN DTOs
@@ -992,6 +1079,20 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateComputerNameDto))]
     [JsonSerializable(typeof(ProxyActivityPingPayload))]
     [JsonSerializable(typeof(TokenSavingsDto))]
+    // Compression capture DTOs
+    [JsonSerializable(typeof(CompressionStageTraceResponse))]
+    [JsonSerializable(typeof(List<CompressionStageTraceResponse>))]
+    [JsonSerializable(typeof(CompressionCaptureSummaryResponse))]
+    [JsonSerializable(typeof(List<CompressionCaptureSummaryResponse>))]
+    [JsonSerializable(typeof(CompressionCaptureDetailResponse))]
+    [JsonSerializable(typeof(CompressionClearResponse))]
+    [JsonSerializable(typeof(CompressionStageResponse))]
+    [JsonSerializable(typeof(List<CompressionStageResponse>))]
+    [JsonSerializable(typeof(CompressionScopeResponse))]
+    [JsonSerializable(typeof(List<CompressionScopeResponse>))]
+    [JsonSerializable(typeof(CompressionCatalogResponse))]
+    [JsonSerializable(typeof(CompressionPreviewRequest))]
+    [JsonSerializable(typeof(CompressionPreviewResponse))]
     // Remote PIN DTOs
     [JsonSerializable(typeof(SetPinRequest))]
     [JsonSerializable(typeof(PinStatusResponse))]

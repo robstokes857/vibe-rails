@@ -1096,7 +1096,7 @@
                                 <input class="form-check-input" type="checkbox" id="setting-codex-llm-proxy-enabled">
                                 <label class="form-check-label" for="setting-codex-llm-proxy-enabled">Enable Codex proxy</label>
                             </div>
-                            <small class="form-text text-muted">Route newly launched Codex sessions through the local VibeRails proxy. When enabled, shell-tool output also uses the selected token-saving level.</small>
+                            <small class="form-text text-muted">Route newly launched Codex sessions through the local VibeRails proxy. When enabled, tool output is also compressed using the stages selected under Token Saver.</small>
                         </div>
                         <div class="mb-3">
                             <div class="form-label mb-2">Codex auth type</div>
@@ -1160,19 +1160,43 @@
             <div class="row justify-content-center">
                 <div class="col-md-8 col-lg-6 mb-4">
                     <div class="sandbox-item-card text-start">
-                        <div class="mb-3">
+                        <div class="mb-3 d-flex align-items-center justify-content-between gap-2">
                             <span class="sandbox-item-name">Token Saver</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary ts-defaults-btn"
+                                data-action="token-saver-defaults"
+                                title="Set every toggle back to the catalog's recommended selection. Does not save — press Save Settings to apply.">
+                                <i class="fa-solid fa-rotate-left me-1" aria-hidden="true"></i>
+                                Reset to recommended
+                            </button>
                         </div>
+                        <small class="form-text text-muted d-block mb-3">Applies to tool output sent through either
+                            enabled Codex or Claude proxy. Changing the selection can invalidate a provider prompt
+                            cache once.</small>
+
+                        <div class="mb-4">
+                            <div class="form-label mb-2">Compression stages</div>
+                            <!-- Rendered from GET /api/v1/compression/catalog — never a hardcoded list. -->
+                            <div data-token-saver-stages>
+                                <div class="ts-loading">Loading stages…</div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <div class="form-label mb-2">What we compress</div>
+                            <div data-token-saver-scopes>
+                                <div class="ts-loading">Loading scopes…</div>
+                            </div>
+                        </div>
+
                         <div class="mb-2">
-                            <label class="form-label mb-2" for="setting-token-saver-level">Token saving level</label>
-                            <select id="setting-token-saver-level" class="form-select">
-                                <option value="off">Off — proxy only, no token saving</option>
-                                <option value="safest">Safest — display-safe cleanup of shell output</option>
-                                <option value="safe">Safe — also collapse blank runs and background shells</option>
-                                <option value="medium">Medium — also collapse repeated output lines</option>
-                                <option value="high">High — also truncate very long outputs</option>
-                            </select>
-                            <small class="form-text text-muted">Applies to shell-tool output sent through either enabled Codex or Claude proxy. Higher levels compress harder before output reaches the model; changing level can invalidate a provider prompt cache once.</small>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="setting-token-saver-capture">
+                                <label class="form-check-label" for="setting-token-saver-capture">Capture
+                                    requests</label>
+                            </div>
+                            <small class="form-text text-muted">Record every tool output the pipeline considers —
+                                before, after, and the stage trace — so Vibe AI can show what compression actually
+                                did. Uncapped: captures hold verbatim command output and grow without bound.</small>
                         </div>
                     </div>
                 </div>
@@ -1371,7 +1395,9 @@
                     display: grid;
                     gap: 1rem;
                     min-height: calc(100vh - 200px);
-                    grid-template-rows: auto auto auto auto 1fr auto;
+                    /* One row per child, in order: captures, masthead, diagnostics, cols, query,
+                       disclosures, lens. The disclosures row takes the slack. */
+                    grid-template-rows: auto auto auto auto auto 1fr auto;
                     color: var(--color-text);
                 }
 
@@ -2424,9 +2450,393 @@
                     overflow: hidden;
                     word-break: break-word;
                 }
+
+                /* ─── Compression captures: what the token saver actually did ─── */
+                .vibe-rails-ai-view .insp-cap {
+                    border: 1px solid var(--insp-hairline-strong);
+                    border-radius: 4px;
+                    background: var(--color-bg-surface);
+                }
+                .vibe-rails-ai-view .insp-cap-head {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    gap: 1rem;
+                    flex-wrap: wrap;
+                    padding: 0.9rem 1.1rem;
+                }
+                .vibe-rails-ai-view .insp-cap-h2 {
+                    font-size: 1rem;
+                    font-weight: 600;
+                    margin: 0;
+                    color: var(--color-text);
+                }
+                .vibe-rails-ai-view .insp-cap-sub {
+                    font-size: 0.75rem;
+                    color: var(--color-text-muted);
+                    margin: 0.2rem 0 0;
+                    line-height: 1.5;
+                    max-width: 70ch;
+                }
+                .vibe-rails-ai-view .insp-cap-tools {
+                    display: flex;
+                    gap: 0.5rem;
+                    align-items: center;
+                    flex-wrap: wrap;
+                }
+                .vibe-rails-ai-view .insp-cap-body {
+                    display: none;
+                    padding: 0 1.1rem 1.1rem;
+                    gap: 0.75rem;
+                }
+                .vibe-rails-ai-view .insp-cap-body.open { display: grid; }
+
+                /* List */
+                .vibe-rails-ai-view .insp-cap-list {
+                    display: grid;
+                    gap: 0.35rem;
+                    max-height: 320px;
+                    overflow-y: auto;
+                }
+                .vibe-rails-ai-view .insp-cap-list::-webkit-scrollbar { width: 6px; }
+                .vibe-rails-ai-view .insp-cap-list::-webkit-scrollbar-thumb { background: var(--insp-hairline-strong); border-radius: 3px; }
+                .vibe-rails-ai-view .insp-cap-row {
+                    width: 100%;
+                    text-align: left;
+                    display: grid;
+                    /* id+copy | tool & command (takes the slack) | delta | changed | when */
+                    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+                    gap: 0.6rem;
+                    align-items: center;
+                    padding: 0.5rem 0.7rem;
+                    background: color-mix(in srgb, var(--color-bg-base) 60%, transparent);
+                    border: 1px solid var(--insp-hairline);
+                    border-radius: 2px;
+                    color: inherit;
+                    cursor: pointer;
+                    font-family: inherit;
+                    font-size: 0.75rem;
+                    transition: border-color 0.15s, background 0.15s;
+                }
+                .vibe-rails-ai-view .insp-cap-row:hover {
+                    border-color: var(--insp-accent);
+                    background: color-mix(in srgb, var(--insp-accent) 6%, var(--color-bg-base));
+                }
+                .vibe-rails-ai-view .insp-cap-row.sel {
+                    border-color: var(--insp-accent);
+                    background: color-mix(in srgb, var(--insp-accent) 12%, var(--color-bg-base));
+                }
+                .vibe-rails-ai-view .insp-cap-id {
+                    font-family: var(--insp-mono);
+                    font-size: 0.68rem;
+                    color: var(--insp-accent);
+                    white-space: nowrap;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.35rem;
+                }
+                .vibe-rails-ai-view .insp-cap-id .insp-cap-copy {
+                    margin-left: 0;
+                    padding: 0.1rem 0.3rem;
+                    font-size: 0.52rem;
+                }
+                .vibe-rails-ai-view .insp-cap-cmd {
+                    font-family: var(--insp-mono);
+                    font-size: 0.7rem;
+                    color: var(--color-text);
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    min-width: 0;
+                }
+                .vibe-rails-ai-view .insp-cap-cmd .tool {
+                    color: var(--color-text-muted);
+                    margin-right: 0.4rem;
+                }
+                .vibe-rails-ai-view .insp-cap-delta {
+                    font-family: var(--insp-mono);
+                    font-size: 0.68rem;
+                    color: var(--color-text-muted);
+                    white-space: nowrap;
+                }
+                .vibe-rails-ai-view .insp-cap-delta b { color: var(--color-success); font-weight: 700; }
+                .vibe-rails-ai-view .insp-cap-when {
+                    font-family: var(--insp-mono);
+                    font-size: 0.6rem;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                    white-space: nowrap;
+                }
+                .vibe-rails-ai-view .insp-cap-flag {
+                    font-family: var(--insp-mono);
+                    font-size: 0.55rem;
+                    letter-spacing: 0.1em;
+                    text-transform: uppercase;
+                    font-weight: 700;
+                    border: 1px solid transparent;
+                    border-radius: 2px;
+                    padding: 0.1rem 0.3rem;
+                    white-space: nowrap;
+                }
+                .vibe-rails-ai-view .insp-cap-flag.yes { color: var(--color-success); border-color: color-mix(in srgb, var(--color-success) 40%, transparent); }
+                .vibe-rails-ai-view .insp-cap-flag.warn { color: var(--color-warning); border-color: color-mix(in srgb, var(--color-warning) 45%, transparent); }
+                .vibe-rails-ai-view .insp-cap-flag.no { color: var(--color-text-muted); border-color: var(--insp-hairline-strong); }
+
+                /* Detail lens */
+                .vibe-rails-ai-view .insp-cap-lens {
+                    display: grid;
+                    gap: 0.85rem;
+                    padding-top: 0.85rem;
+                    border-top: 1px solid var(--insp-hairline-strong);
+                }
+                .vibe-rails-ai-view .insp-cap-guid {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.6rem;
+                    flex-wrap: wrap;
+                    padding: 0.6rem 0.75rem;
+                    border: 1px solid color-mix(in srgb, var(--insp-accent) 35%, var(--insp-hairline));
+                    border-left: 3px solid var(--insp-accent);
+                    border-radius: 0 3px 3px 0;
+                    background: color-mix(in srgb, var(--insp-accent) 5%, transparent);
+                }
+                .vibe-rails-ai-view .insp-cap-guid .lbl {
+                    font-family: var(--insp-mono);
+                    font-size: 0.55rem;
+                    letter-spacing: 0.2em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-cap-guid .val {
+                    font-family: var(--insp-mono);
+                    font-size: 0.9rem;
+                    font-weight: 700;
+                    color: var(--insp-accent);
+                    word-break: break-all;
+                    user-select: all;
+                }
+                .vibe-rails-ai-view .insp-cap-copy {
+                    background: transparent;
+                    border: 1px solid var(--insp-hairline-strong);
+                    color: var(--color-text-muted);
+                    font-family: var(--insp-mono);
+                    font-size: 0.6rem;
+                    letter-spacing: 0.14em;
+                    text-transform: uppercase;
+                    padding: 0.3rem 0.6rem;
+                    border-radius: 2px;
+                    cursor: pointer;
+                    margin-left: auto;
+                    transition: color 0.2s, border-color 0.2s;
+                }
+                .vibe-rails-ai-view .insp-cap-copy:hover { color: var(--insp-accent); border-color: var(--insp-accent); }
+                .vibe-rails-ai-view .insp-cap-copy.done { color: var(--color-success); border-color: var(--color-success); }
+                .vibe-rails-ai-view .insp-cap-meta {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+                    gap: 0.5rem;
+                }
+                .vibe-rails-ai-view .insp-cap-meta-cell {
+                    padding: 0.45rem 0.6rem;
+                    border: 1px solid var(--insp-hairline);
+                    border-radius: 2px;
+                    background: color-mix(in srgb, var(--color-bg-base) 60%, transparent);
+                    display: grid;
+                    gap: 0.15rem;
+                    min-width: 0;
+                }
+                .vibe-rails-ai-view .insp-cap-meta-cell .k {
+                    font-family: var(--insp-mono);
+                    font-size: 0.55rem;
+                    letter-spacing: 0.14em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-cap-meta-cell .v {
+                    font-family: var(--insp-mono);
+                    font-size: 0.75rem;
+                    color: var(--color-text);
+                    word-break: break-all;
+                }
+                .vibe-rails-ai-view .insp-cap-sec { display: grid; gap: 0.4rem; min-width: 0; }
+                .vibe-rails-ai-view .insp-cap-sec-head {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: baseline;
+                    gap: 0.5rem;
+                    font-family: var(--insp-mono);
+                    font-size: 0.6rem;
+                    letter-spacing: 0.16em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-cap-sec-head b { color: var(--color-text); font-weight: 700; }
+                .vibe-rails-ai-view .insp-cap-text {
+                    margin: 0;
+                    padding: 0.7rem 0.8rem;
+                    border: 1px solid var(--insp-hairline);
+                    border-radius: 2px;
+                    background: var(--color-bg-base);
+                    color: var(--color-text);
+                    font-family: var(--insp-mono);
+                    font-size: 0.72rem;
+                    line-height: 1.5;
+                    white-space: pre;
+                    overflow: auto;
+                    max-height: 260px;
+                    min-height: 60px;
+                }
+                .vibe-rails-ai-view .insp-cap-text::-webkit-scrollbar { width: 6px; height: 6px; }
+                .vibe-rails-ai-view .insp-cap-text::-webkit-scrollbar-thumb { background: var(--insp-hairline-strong); border-radius: 3px; }
+
+                /* Trace table */
+                .vibe-rails-ai-view .insp-cap-trace {
+                    border: 1px solid var(--insp-hairline);
+                    border-radius: 2px;
+                    overflow: auto;
+                    background: var(--color-bg-base);
+                }
+                .vibe-rails-ai-view .insp-cap-trace table { width: 100%; border-collapse: collapse; }
+                .vibe-rails-ai-view .insp-cap-trace th,
+                .vibe-rails-ai-view .insp-cap-trace td {
+                    padding: 0.35rem 0.6rem;
+                    text-align: left;
+                    border-bottom: 1px solid var(--insp-hairline);
+                    font-size: 0.7rem;
+                    white-space: nowrap;
+                }
+                .vibe-rails-ai-view .insp-cap-trace th {
+                    font-family: var(--insp-mono);
+                    font-size: 0.55rem;
+                    letter-spacing: 0.14em;
+                    text-transform: uppercase;
+                    color: var(--color-text-muted);
+                }
+                .vibe-rails-ai-view .insp-cap-trace td.num { text-align: right; font-family: var(--insp-mono); }
+                .vibe-rails-ai-view .insp-cap-trace tr.off { opacity: 0.5; }
+                .vibe-rails-ai-view .insp-cap-out {
+                    font-family: var(--insp-mono);
+                    font-size: 0.58rem;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                    font-weight: 700;
+                    border: 1px solid transparent;
+                    border-radius: 2px;
+                    padding: 0.05rem 0.3rem;
+                }
+                .vibe-rails-ai-view .insp-cap-out.applied { color: var(--color-success); border-color: color-mix(in srgb, var(--color-success) 40%, transparent); }
+                .vibe-rails-ai-view .insp-cap-out.nochange { color: var(--color-text-muted); border-color: var(--insp-hairline-strong); }
+                .vibe-rails-ai-view .insp-cap-out.disabled { color: var(--color-text-muted); border-color: var(--insp-hairline); opacity: 0.8; }
+                .vibe-rails-ai-view .insp-cap-out.notapplicable { color: var(--color-text-muted); border-color: var(--insp-hairline); }
+                .vibe-rails-ai-view .insp-cap-out.aborted { color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 45%, transparent); }
+
+                /* What-if controls */
+                .vibe-rails-ai-view .insp-cap-whatif {
+                    display: grid;
+                    gap: 0.5rem;
+                    padding: 0.7rem 0.8rem;
+                    border: 1px solid var(--insp-hairline-strong);
+                    border-radius: 3px;
+                    background: color-mix(in srgb, var(--color-bg-base) 50%, transparent);
+                }
+                .vibe-rails-ai-view .insp-cap-checks {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+                    gap: 0.2rem 0.75rem;
+                }
+                .vibe-rails-ai-view .insp-cap-check {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                    font-size: 0.72rem;
+                    color: var(--color-text);
+                    cursor: pointer;
+                    padding: 0.15rem 0;
+                    min-width: 0;
+                }
+                .vibe-rails-ai-view .insp-cap-check input { cursor: pointer; flex-shrink: 0; accent-color: var(--insp-accent); }
+                .vibe-rails-ai-view .insp-cap-check span {
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                .vibe-rails-ai-view .insp-cap-check.risky span { color: var(--color-warning); }
+                .vibe-rails-ai-view .insp-cap-check.lossy span { color: var(--color-warning); }
+                .vibe-rails-ai-view .insp-cap-whatif-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+
+                /* Side-by-side comparison */
+                .vibe-rails-ai-view .insp-cap-compare {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 0.85rem;
+                    min-width: 0;
+                }
+                @media (max-width: 980px) { .vibe-rails-ai-view .insp-cap-compare { grid-template-columns: 1fr; } }
+                .vibe-rails-ai-view .insp-cap-pane { display: grid; gap: 0.4rem; align-content: start; min-width: 0; }
+                .vibe-rails-ai-view .insp-cap-pane-title {
+                    font-family: var(--insp-mono);
+                    font-size: 0.62rem;
+                    letter-spacing: 0.16em;
+                    text-transform: uppercase;
+                    font-weight: 700;
+                    padding-bottom: 0.3rem;
+                    border-bottom: 2px solid var(--insp-hairline-strong);
+                }
+                .vibe-rails-ai-view .insp-cap-pane.actual .insp-cap-pane-title { color: var(--color-text); border-bottom-color: var(--color-text-muted); }
+                .vibe-rails-ai-view .insp-cap-pane.whatif .insp-cap-pane-title { color: var(--insp-accent); border-bottom-color: var(--insp-accent); }
+                .vibe-rails-ai-view .insp-cap-placeholder {
+                    display: grid;
+                    place-items: center;
+                    min-height: 100px;
+                    padding: 1rem;
+                    text-align: center;
+                    border: 1px dashed var(--insp-hairline-strong);
+                    border-radius: 2px;
+                    color: var(--color-text-muted);
+                    font-size: 0.75rem;
+                    line-height: 1.5;
+                }
+                .vibe-rails-ai-view .insp-cap-empty {
+                    display: grid;
+                    place-items: center;
+                    min-height: 90px;
+                    padding: 1rem;
+                    text-align: center;
+                    border: 1px dashed var(--insp-hairline-strong);
+                    border-radius: 2px;
+                    color: var(--color-text-muted);
+                    font-size: 0.78rem;
+                    line-height: 1.6;
+                }
             </style>
 
             <div class="insp" data-view="vibe-rails-ai">
+
+                <!-- Compression captures — rendered by compression-captures-controller.js -->
+                <section class="insp-cap">
+                    <header class="insp-cap-head">
+                        <div>
+                            <h2 class="insp-cap-h2">Compression Captures</h2>
+                            <p class="insp-cap-sub">Every tool result the token saver considered — the raw bytes, what
+                                came off, and what a different stage selection would have done to the same input.</p>
+                        </div>
+                        <div class="insp-cap-tools">
+                            <span class="insp-query-count"><b data-cap-count>0</b> <span data-cap-count-label>captures</span></span>
+                            <button class="insp-refresh" type="button" data-cap-refresh title="Reload the capture list">↻ Refresh</button>
+                            <button class="insp-refresh" type="button" data-cap-clear title="Permanently delete all compression captures">Clear</button>
+                            <button class="insp-toggle" type="button" data-cap-toggle aria-expanded="true" aria-controls="insp-cap-body"><span class="chev">▸</span>Captures</button>
+                        </div>
+                    </header>
+                    <div class="insp-cap-body open" id="insp-cap-body" data-cap-body>
+                        <div class="insp-banner" data-cap-banner></div>
+                        <div class="insp-cap-list" data-cap-list></div>
+                        <div data-cap-more-row hidden>
+                            <button class="insp-refresh" type="button" data-cap-more>Load more</button>
+                        </div>
+                        <div class="insp-cap-lens" data-cap-lens hidden></div>
+                    </div>
+                </section>
 
                 <!-- Masthead -->
                 <header class="insp-masthead">
