@@ -37,16 +37,15 @@ public static class LlmAnthropicProxyRoutes
                 return;
             }
 
-            // The saver's kill switch (and per-transform flags) sit apart from the proxy toggle so
-            // transforms can be bisected or disabled without tearing down the relay itself. Both
-            // stages must be no-op to skip the transform — minify flags alone would leave a
-            // condense-only configuration silently dead.
-            var transform = settings.ClaudeTokenSaverEnabled
-                    && !(settings.ClaudeTokenSaverFlags.IsNoOp && settings.ClaudeTokenSaverCondense.IsNoOp)
-                ? new AnthropicBodyTransform(
-                    settings.ClaudeTokenSaverFlags,
-                    settings.ClaudeTokenSaverCondense,
-                    settings.ClaudeTokenSaverAllowlist)
+            // The saver's kill switch sits apart from the proxy toggle so stages can be bisected or
+            // disabled without tearing down the relay itself.
+            var plan = settings.ResolvedPlan;
+            var saverHasWork = !plan.IsNoOp && plan.AnthropicAllowlist.Count > 0;
+            var captureSink = settings.TokenSaverCaptureEnabled
+                ? context.RequestServices.GetService<ICompressionCaptureSink>()
+                : null;
+            var transform = settings.ClaudeTokenSaverEnabled && saverHasWork
+                ? new AnthropicBodyTransform(plan, captureSink)
                 : null;
 
             var target = LlmProxyRelay.BuildTarget(context.Request, UpstreamHost, PathPrefix);

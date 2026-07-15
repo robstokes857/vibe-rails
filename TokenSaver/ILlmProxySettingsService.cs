@@ -1,4 +1,4 @@
-using TokenSaver.Minify;
+using TokenSaver.Pipeline;
 
 namespace TokenSaver;
 
@@ -14,25 +14,33 @@ public interface ILlmProxySettingsService
 }
 
 /// <summary>
-/// Immutable snapshot of the LLM-proxy settings, with the mode already normalized and the
-/// token-saver level already resolved into flags/options/allowlist (the host's settings service
-/// owns that mapping — see <see cref="Minify.TokenSaverPresets"/>). The token-saver fields default
-/// to "enabled but no-op" so callers that only care about relay routing (and the tests that fake
-/// them) don't have to spell them out — a default snapshot behaves as a pure passthrough. Null
-/// provider allowlists fall back to their rewriter defaults.
+/// Immutable snapshot of the LLM-proxy settings, with the mode already normalized and the enabled
+/// stage ids already resolved into flags/options/allowlist (the host's settings service owns that
+/// mapping — it resolves them through <see cref="Pipeline.CompressionCatalog.Resolve"/>). The
+/// token-saver fields default to "enabled but no-op" so callers that only care about relay routing
+/// (and the tests that fake them) don't have to spell them out — a default snapshot behaves as a
+/// pure passthrough.
 /// </summary>
 public sealed record LlmProxySettings(
     bool CodexLlmProxyEnabled,
     string CodexLlmProxyMode,
     bool ClaudeLlmProxyEnabled,
     bool ClaudeTokenSaverEnabled = true,
-    MinifyFlags ClaudeTokenSaverFlags = default,
-    CondenseOptions ClaudeTokenSaverCondense = default,
-    IReadOnlyList<string>? ClaudeTokenSaverAllowlist = null,
     bool CodexTokenSaverEnabled = false,
-    MinifyFlags CodexTokenSaverFlags = default,
-    CondenseOptions CodexTokenSaverCondense = default,
-    IReadOnlyList<string>? CodexTokenSaverAllowlist = null);
+    CompressionPlan? TokenSaverPlan = null,
+    bool TokenSaverCaptureEnabled = false)
+{
+    /// <summary>
+    /// The resolved stage selection (see <see cref="Pipeline.CompressionCatalog"/>), or a no-op
+    /// plan when this snapshot predates the stage rework.
+    ///
+    /// The plan is the only runtime representation of the compression decision. Provider routes
+    /// select their allowlist from it; no parallel flag/allowlist projection exists to drift.
+    /// </summary>
+    public CompressionPlan ResolvedPlan => TokenSaverPlan ?? NoOpPlan;
+
+    private static readonly CompressionPlan NoOpPlan = CompressionPlan.FromLegacy(default, default);
+}
 
 public static class CodexLlmProxySettings
 {

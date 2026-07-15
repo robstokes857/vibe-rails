@@ -4,8 +4,8 @@ namespace TokenSaver.Minify;
 
 /// <summary>
 /// The token saver's core lint pass: removes only bytes a real terminal would have discarded from
-/// a shell tool's output (token_saving_plan.md §3). Four transforms, fused into one forward
-/// line-oriented scan:
+/// a shell tool's output, so its result is always a subsequence of its input — worst case is lost
+/// savings, never lost meaning. Four transforms, fused into one forward line-oriented scan:
 ///
 ///   1. CR-redraw collapse — within each line, keep only the final progress-bar frame, and only
 ///      when it provably covers every earlier frame (a \r returns the cursor to column 0, it does

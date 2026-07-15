@@ -1,21 +1,27 @@
 using System.Runtime.CompilerServices;
 using TokenSaver.Minify;
+using TokenSaver.Pipeline;
 using Xunit;
 
 namespace Tests.TokenSaver;
 
 /// <summary>
-/// Golden tests for the full two-stage pipeline <c>P = Condense ∘ Minify</c> under the Medium and
-/// High tier presets, plus the cross-stage idempotency property the condenser's class doc argues
-/// (<c>P(P(x)) == P(x)</c>) — asserted here over both stages' adversarial corpora and every golden
-/// fixture, not just argued.
+/// Golden tests for the full two-stage pipeline <c>P = Condense ∘ Minify</c> under two stage
+/// selections — every lossless stage plus dedupe, and the same plus truncation — chosen because
+/// they are the two that make the condenser do something. Plus the cross-stage idempotency property
+/// the condenser's class doc argues (<c>P(P(x)) == P(x)</c>), asserted here over both stages'
+/// adversarial corpora and every golden fixture, not just argued.
 ///
 /// Fixtures live in <c>Fixtures\Pipeline\</c> (a subdirectory so the minifier corpus's
 /// every-input-has-an-expected discovery invariant stays untouched) as
-/// <c>&lt;name&gt;.input.txt</c> + <c>&lt;name&gt;.&lt;tier&gt;.expected.txt</c>. Expected files
+/// <c>&lt;name&gt;.input.txt</c> + <c>&lt;name&gt;.&lt;variant&gt;.expected.txt</c>. Expected files
 /// were derived from the transform RULES (head/tail arithmetic, marker syntax), not by running the
 /// condenser — they pin behavior. Same raw-byte discipline as the minifier fixtures: real control
 /// bytes, LF framing, <c>-text</c> in .gitattributes, no newline translation anywhere.
+///
+/// The <c>medium</c>/<c>high</c> variant names are the fixture FILENAME suffixes and are a wire
+/// format on disk: renaming one orphans its expected file. They are historical (these were the old
+/// Medium/High tier presets); the id sets below are what actually defines each variant now.
 /// </summary>
 public class PipelineGoldenFixtureTests
 {
@@ -25,19 +31,31 @@ public class PipelineGoldenFixtureTests
     private static string GetFixtureDir([CallerFilePath] string? callerPath = null)
         => Path.Combine(Path.GetDirectoryName(callerPath)!, "Fixtures");
 
-    private static readonly (string Suffix, TokenSaverLevel Level)[] Tiers =
+    // Every lossless stage + dedupe. No shape ids: shape filters key off a command the pipeline
+    // never sees here, and enabling one would change these goldens.
+    internal static readonly string[] MediumIds =
     [
-        ("medium", TokenSaverLevel.Medium),
-        ("high", TokenSaverLevel.High),
+        CompressionCatalog.CrCollapse, CompressionCatalog.AnsiStrip,
+        CompressionCatalog.TrailingWhitespace, CompressionCatalog.BlankEdges,
+        CompressionCatalog.BlankRuns, CompressionCatalog.DedupeLines,
     ];
 
-    private static string RunPipeline(string input, TokenSaverLevel level)
+    /// <summary>Medium plus the one lossy stage it withholds.</summary>
+    internal static readonly string[] HighIds = [.. MediumIds, CompressionCatalog.TruncateLong];
+
+    private static readonly (string Suffix, string[] Ids)[] Variants =
+    [
+        ("medium", MediumIds),
+        ("high", HighIds),
+    ];
+
+    private static string RunPipeline(string input, string[] ids)
     {
-        var (flags, condense, _) = TokenSaverPresets.For(level);
-        return OutputCondenser.Condense(OutputMinifier.Minify(input, flags), condense);
+        var plan = CompressionCatalog.Resolve(ids);
+        return OutputCondenser.Condense(OutputMinifier.Minify(input, plan.Flags), plan.Condense);
     }
 
-    public static TheoryData<string, string> TierCases()
+    public static TheoryData<string, string> VariantCases()
     {
         const string suffix = ".input.txt";
         var data = new TheoryData<string, string>();
@@ -45,17 +63,17 @@ public class PipelineGoldenFixtureTests
                      .OrderBy(p => p, StringComparer.Ordinal))
         {
             var name = Path.GetFileName(path)[..^suffix.Length];
-            foreach (var (tier, _) in Tiers)
+            foreach (var (variant, _) in Variants)
             {
-                if (File.Exists(Path.Combine(PipelineFixtureDir, $"{name}.{tier}.expected.txt")))
-                    data.Add(name, tier);
+                if (File.Exists(Path.Combine(PipelineFixtureDir, $"{name}.{variant}.expected.txt")))
+                    data.Add(name, variant);
             }
         }
         return data;
     }
 
     [Fact]
-    public void Corpus_IsPresent_AndEveryInputHasATierExpected()
+    public void Corpus_IsPresent_AndEveryInputHasAVariantExpected()
     {
         Assert.True(Directory.Exists(PipelineFixtureDir), $"Missing fixture dir: {PipelineFixtureDir}");
 
@@ -66,28 +84,29 @@ public class PipelineGoldenFixtureTests
         {
             var name = Path.GetFileName(input)[..^".input.txt".Length];
             Assert.True(
-                Tiers.Any(t => File.Exists(
-                    Path.Combine(PipelineFixtureDir, $"{name}.{t.Suffix}.expected.txt"))),
-                $"No tier expected file for {name}");
+                Variants.Any(v => File.Exists(
+                    Path.Combine(PipelineFixtureDir, $"{name}.{v.Suffix}.expected.txt"))),
+                $"No variant expected file for {name}");
         }
     }
 
     [Theory]
-    [MemberData(nameof(TierCases))]
-    public void Fixture_CondensesToExpected(string name, string tier)
+    [MemberData(nameof(VariantCases))]
+    public void Fixture_CondensesToExpected(string name, string variant)
     {
         var input = File.ReadAllText(Path.Combine(PipelineFixtureDir, $"{name}.input.txt"));
-        var expected = File.ReadAllText(Path.Combine(PipelineFixtureDir, $"{name}.{tier}.expected.txt"));
-        var level = Tiers.Single(t => t.Suffix == tier).Level;
+        var expected = File.ReadAllText(Path.Combine(PipelineFixtureDir, $"{name}.{variant}.expected.txt"));
+        var ids = Variants.Single(v => v.Suffix == variant).Ids;
 
-        Assert.Equal(expected, RunPipeline(input, level));
+        Assert.Equal(expected, RunPipeline(input, ids));
     }
 
     [Theory]
-    [InlineData(TokenSaverLevel.Medium)]
-    [InlineData(TokenSaverLevel.High)]
-    public void Properties_PipelineIsIdempotentOverCorporaAndFixtures(TokenSaverLevel level)
+    [InlineData("medium")]
+    [InlineData("high")]
+    public void Properties_PipelineIsIdempotentOverCorporaAndFixtures(string variant)
     {
+        var ids = Variants.Single(v => v.Suffix == variant).Ids;
         var inputs = OutputMinifierTests.AdversarialInputs
             .Concat(OutputCondenserTests.AdversarialInputs())
             .Concat(Directory.GetFiles(GetFixtureDir(), "*.input.txt").Select(File.ReadAllText))
@@ -95,14 +114,14 @@ public class PipelineGoldenFixtureTests
 
         foreach (var input in inputs)
         {
-            var once = RunPipeline(input, level);
+            var once = RunPipeline(input, ids);
 
-            Assert.True(once == RunPipeline(once, level),
-                $"Pipeline not idempotent at {level} for input of length {input.Length}");
-            Assert.True(once == RunPipeline(input, level),
-                $"Pipeline not deterministic at {level} for input of length {input.Length}");
+            Assert.True(once == RunPipeline(once, ids),
+                $"Pipeline not idempotent at {variant} for input of length {input.Length}");
+            Assert.True(once == RunPipeline(input, ids),
+                $"Pipeline not deterministic at {variant} for input of length {input.Length}");
             Assert.True(once.Length <= input.Length,
-                $"Pipeline grew output at {level}: {input.Length} → {once.Length}");
+                $"Pipeline grew output at {variant}: {input.Length} → {once.Length}");
         }
     }
 }

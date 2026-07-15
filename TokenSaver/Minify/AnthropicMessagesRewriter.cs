@@ -1,13 +1,15 @@
 using System.Buffers;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using TokenSaver.Pipeline;
+using TokenSaver.Shape;
 
 namespace TokenSaver.Minify;
 
 /// <summary>
 /// Rewrites an Anthropic <c>/v1/messages</c> request body, minifying ONLY the tool_result strings
-/// that came from an allowlisted shell tool (token_saving_plan.md §2 "What we touch — and only
-/// this"). Strategy: a two-pass <see cref="Utf8JsonReader"/> scan + raw-byte splice — every byte
+/// that came from an allowlisted shell tool — never the system prompt, the user's messages, or the
+/// model's replies. Strategy: a two-pass <see cref="Utf8JsonReader"/> scan + raw-byte splice — every byte
 /// outside the rewritten string tokens is copied verbatim, so the client's own escaping, property
 /// order, number formatting, <c>cache_control</c> blobs, and unknown future fields are untouched
 /// by construction. No DOM, no reflection (AOT-safe).
@@ -30,10 +32,10 @@ namespace TokenSaver.Minify;
 public static class AnthropicMessagesRewriter
 {
     /// <summary>
-    /// The original v1 allowlist, kept as the fallback when no tier resolves one (see
-    /// <see cref="TokenSaverPresets"/> for the per-level lists). A tool rename upstream makes
-    /// savings drop to zero (visible in the seen-vs-minified counters), never corrupts anything —
-    /// unknown names pass through.
+    /// The original v1 allowlist, kept as the fallback for a caller that passes none. The real
+    /// allowlist comes from the enabled scope ids — see <see cref="CompressionCatalog.Scopes"/>. A
+    /// tool rename upstream makes savings drop to zero (visible in the seen-vs-minified counters),
+    /// never corrupts anything — unknown names pass through.
     /// </summary>
     public static readonly IReadOnlyList<string> DefaultToolAllowlist = ["Bash"];
 
@@ -46,27 +48,50 @@ public static class AnthropicMessagesRewriter
         SkipValidation = true
     };
 
+    /// <summary>Compatibility adapter for callers that predate <see cref="CompressionPlan"/>.</summary>
     public static ToolOutputRewriteResult Rewrite(
         ReadOnlySpan<byte> utf8Body,
         MinifyFlags flags,
         CondenseOptions condense,
         IReadOnlyCollection<string> toolAllowlist,
-        IBufferWriter<byte> output)
+        IBufferWriter<byte> output) =>
+        Rewrite(
+            utf8Body,
+            CompressionPlan.FromLegacy(
+                flags, condense, anthropicAllowlist: [.. toolAllowlist]),
+            output);
+
+    /// <summary>
+    /// Rewrites with one immutable request plan. Keeping flags, shapes, scopes, and diagnostic ids
+    /// in this single value makes contradictory runtime configuration unrepresentable.
+    /// </summary>
+    /// <param name="captures">
+    /// Optional before/after recorder. Null skips materializing raw strings entirely, which is why
+    /// the check is inside the loop rather than at the call site.
+    /// </param>
+    public static ToolOutputRewriteResult Rewrite(
+        ReadOnlySpan<byte> utf8Body,
+        CompressionPlan plan,
+        IBufferWriter<byte> output,
+        ICompressionCaptureSink? captures = null)
     {
+        ArgumentNullException.ThrowIfNull(plan);
         var stats = new MinifyStats();
         var condenseStats = new CondenseStats();
         var unchanged = new ToolOutputRewriteResult(
             false, utf8Body.Length, utf8Body.Length, 0, 0, stats);
-        // Both stages no-op (or nothing allowlisted) means a guaranteed passthrough — checking
-        // only the minify flags here would leave a condense-only configuration silently dead.
-        if (utf8Body.IsEmpty || (flags.IsNoOp && condense.IsNoOp) || toolAllowlist.Count == 0)
+        var toolAllowlist = plan.AnthropicAllowlist;
+
+        // Every stage no-op (or nothing allowlisted) means a guaranteed passthrough — checking only
+        // the minify flags here would leave a condense-only or shape-only config silently dead.
+        if (utf8Body.IsEmpty || plan.IsNoOp || toolAllowlist.Count == 0)
             return unchanged;
 
         List<ToolResultEntry> toolResults;
-        Dictionary<string, string> toolNames;
+        Dictionary<string, ToolUseInfo> toolUses;
         try
         {
-            (toolNames, toolResults) = LocateToolResults(utf8Body);
+            (toolUses, toolResults) = LocateToolResults(utf8Body);
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException)
         {
@@ -82,12 +107,14 @@ public static class AnthropicMessagesRewriter
         {
             if (entry.ToolUseId is null
                 || entry.Ranges.Count == 0
-                || !toolNames.TryGetValue(entry.ToolUseId, out var name)
-                || !IsAllowed(toolAllowlist, name))
+                || !toolUses.TryGetValue(entry.ToolUseId, out var use)
+                || !IsAllowed(toolAllowlist, use.Name))
             {
                 continue;
             }
 
+            entry.ToolName = use.Name;
+            entry.Command = use.Command;
             qualifying.Add(entry);
             foreach (var (start, end) in entry.Ranges)
                 maxTokenLength = Math.Max(maxTokenLength, end - start);
@@ -99,8 +126,7 @@ public static class AnthropicMessagesRewriter
         // A JSON string token's UTF-16 char count never exceeds its UTF-8 byte count (escapes only
         // shrink), so one rented trio sized to the largest token serves every splice.
         var unescaped = ArrayPool<char>.Shared.Rent(maxTokenLength);
-        var minified = ArrayPool<char>.Shared.Rent(maxTokenLength);
-        var condensed = ArrayPool<char>.Shared.Rent(maxTokenLength);
+        using var buffers = new PipelineScratch(maxTokenLength);
         // Changed strings are re-emitted into a scratch buffer first so the result can be size-
         // checked against the original token: the encoder escapes non-BMP chars as \uXXXX\uXXXX
         // pairs (a raw 4-byte emoji becomes 12 bytes), so a "minified" emoji-heavy string can come
@@ -136,25 +162,21 @@ public static class AnthropicMessagesRewriter
                         tokenReader.Read();
                         var charLength = tokenReader.CopyString(unescaped);
 
-                        // The two-stage pipeline: lossless minify, then (when enabled) the lossy
-                        // condense pass over whatever survived. Either stage alone marks the
-                        // string changed.
-                        var current = (ReadOnlySpan<char>)unescaped.AsSpan(0, charLength);
-                        var changed = false;
-                        if (OutputMinifier.TryMinify(
-                                current, flags, minified, out var written, ref candidateStats))
-                        {
-                            current = minified.AsSpan(0, written);
-                            changed = true;
-                        }
+                        var raw = (ReadOnlySpan<char>)unescaped.AsSpan(0, charLength);
 
-                        if (!condense.IsNoOp && OutputCondenser.TryCondense(
-                                current, condense, condensed, out var condensedWritten,
-                                ref candidateCondense))
-                        {
-                            current = condensed.AsSpan(0, condensedWritten);
-                            changed = true;
-                        }
+                        // Everything the compression does to this string happens in here. See
+                        // CompressionPipeline.Run — it is the only path, and the trace it fills is
+                        // what the capture view and the compress runbook read.
+                        var trace = captures is not null ? new List<StageTrace>() : null;
+                        var current = CompressionPipeline.Run(
+                            raw,
+                            plan,
+                            CommandShapes.Classify(entry.Command),
+                            buffers,
+                            out var changed,
+                            ref candidateStats,
+                            ref candidateCondense,
+                            trace);
 
                         if (changed)
                         {
@@ -172,6 +194,24 @@ public static class AnthropicMessagesRewriter
                                 entryChanged = true;
                                 anyChanged = true;
                             }
+                        }
+
+                        if (trace is not null)
+                        {
+                            // Keep rejected candidates because they explain missed savings, but
+                            // record their disposition explicitly. Without RewriteAccepted the
+                            // audit UI would report a candidate that grew on the wire as output we
+                            // actually sent upstream.
+                            captures!.Capture(new CompressionCapture(
+                                Guid.NewGuid(),
+                                "anthropic",
+                                entry.ToolName,
+                                entry.Command,
+                                raw.ToString(),
+                                current.ToString(),
+                                trace,
+                                [.. plan.EnabledIds],
+                                RewriteAccepted: accepted));
                         }
                     }
                     catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException)
@@ -211,16 +251,14 @@ public static class AnthropicMessagesRewriter
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException)
         {
-            // Outer fail-open (mirrors token_saving_plan.md §6): anything unparseable at the body
-            // level forwards the original bytes. Callers must ignore `output`'s partial contents
-            // when Rewritten is false.
+            // Outer fail-open: anything unparseable at the body level forwards the original bytes,
+            // because the worst outcome of a bug here must be a request that saves nothing. Callers
+            // must ignore `output`'s partial contents when Rewritten is false.
             return unchanged with { ToolResultsSeen = seen };
         }
         finally
         {
             ArrayPool<char>.Shared.Return(unescaped);
-            ArrayPool<char>.Shared.Return(minified);
-            ArrayPool<char>.Shared.Return(condensed);
         }
     }
 
@@ -238,23 +276,33 @@ public static class AnthropicMessagesRewriter
     private sealed class ToolResultEntry
     {
         public string? ToolUseId;
+
+        /// <summary>Resolved from the matching tool_use during the qualifying pass, not during the
+        /// scan: a tool_result can legally appear before the tool_use it answers.</summary>
+        public string ToolName = string.Empty;
+        public string? Command;
         public readonly List<(int Start, int End)> Ranges = [];
     }
+
+    /// <summary>What a tool_use block tells us about the output that will come back: the tool's
+    /// name (which decides whether we may touch it at all) and, for shell tools, the command
+    /// (which decides which shape filter, if any, understands it).</summary>
+    private readonly record struct ToolUseInfo(string Name, string? Command);
 
     /// <summary>
     /// Pass 1: scan <c>messages[].content[]</c>, returning the tool_use id→name map and every
     /// tool_result block with the byte ranges of its candidate string tokens (quotes included).
     /// Throws <see cref="JsonException"/> on malformed input — the caller fails open.
     /// </summary>
-    private static (Dictionary<string, string> ToolNames, List<ToolResultEntry> ToolResults)
+    private static (Dictionary<string, ToolUseInfo> ToolUses, List<ToolResultEntry> ToolResults)
         LocateToolResults(ReadOnlySpan<byte> utf8Body)
     {
-        var toolNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        var toolUses = new Dictionary<string, ToolUseInfo>(StringComparer.Ordinal);
         var toolResults = new List<ToolResultEntry>();
 
         var reader = new Utf8JsonReader(utf8Body);
         if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
-            return (toolNames, toolResults);
+            return (toolUses, toolResults);
 
         while (reader.Read())
         {
@@ -265,7 +313,7 @@ public static class AnthropicMessagesRewriter
             {
                 reader.Read();
                 if (reader.TokenType == JsonTokenType.StartArray)
-                    ScanMessages(ref reader, toolNames, toolResults);
+                    ScanMessages(ref reader, toolUses, toolResults);
                 else
                     reader.Skip();
             }
@@ -275,18 +323,18 @@ public static class AnthropicMessagesRewriter
             }
         }
 
-        return (toolNames, toolResults);
+        return (toolUses, toolResults);
     }
 
     private static void ScanMessages(
         ref Utf8JsonReader reader,
-        Dictionary<string, string> toolNames,
+        Dictionary<string, ToolUseInfo> toolUses,
         List<ToolResultEntry> toolResults)
     {
         while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
         {
             if (reader.TokenType == JsonTokenType.StartObject)
-                ScanMessage(ref reader, toolNames, toolResults);
+                ScanMessage(ref reader, toolUses, toolResults);
             else
                 reader.Skip();
         }
@@ -294,7 +342,7 @@ public static class AnthropicMessagesRewriter
 
     private static void ScanMessage(
         ref Utf8JsonReader reader,
-        Dictionary<string, string> toolNames,
+        Dictionary<string, ToolUseInfo> toolUses,
         List<ToolResultEntry> toolResults)
     {
         while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
@@ -311,7 +359,7 @@ public static class AnthropicMessagesRewriter
                     while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
                     {
                         if (reader.TokenType == JsonTokenType.StartObject)
-                            ScanContentBlock(ref reader, toolNames, toolResults);
+                            ScanContentBlock(ref reader, toolUses, toolResults);
                         else
                             reader.Skip();
                     }
@@ -336,13 +384,14 @@ public static class AnthropicMessagesRewriter
     /// </summary>
     private static void ScanContentBlock(
         ref Utf8JsonReader reader,
-        Dictionary<string, string> toolNames,
+        Dictionary<string, ToolUseInfo> toolUses,
         List<ToolResultEntry> toolResults)
     {
         var isToolUse = false;
         var isToolResult = false;
         string? id = null;
         string? name = null;
+        string? command = null;
         var entry = new ToolResultEntry();
 
         while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
@@ -397,6 +446,18 @@ public static class AnthropicMessagesRewriter
                 else if (reader.TokenType == JsonTokenType.StartObject)
                     reader.Skip();
             }
+            else if (reader.ValueTextEquals("input"u8))
+            {
+                // tool_use "input" was previously skipped whole. It is now read one level deep for
+                // the shell command, because shape filters key off the COMMAND, never off sniffing
+                // the output (CompressionCatalog stages 6-8). The one-level rule below is what
+                // preserves the original reason for skipping it.
+                reader.Read();
+                if (reader.TokenType == JsonTokenType.StartObject)
+                    command = ReadCommandFromInput(ref reader);
+                else
+                    reader.Skip();
+            }
             else
             {
                 reader.Skip();
@@ -404,9 +465,47 @@ public static class AnthropicMessagesRewriter
         }
 
         if (isToolUse && id is not null && name is not null)
-            toolNames[id] = name; // indexer, not Add: a duplicated id must not throw the rewrite away
+            // indexer, not Add: a duplicated id must not throw the rewrite away
+            toolUses[id] = new ToolUseInfo(name, command);
         else if (isToolResult)
             toolResults.Add(entry);
+    }
+
+    /// <summary>
+    /// Pulls <c>input.command</c> out of a tool_use block, reading ONLY input's immediate children.
+    /// Nested objects and arrays are skipped whole, so a "command" key buried inside some other
+    /// tool's payload can never be mistaken for the shell command that produced this output — the
+    /// same reasoning that had this whole subtree skipped before, narrowed rather than abandoned.
+    /// A wrong command here means a shape filter fires on output it does not understand, which is
+    /// the worst bug this feature can have; null (the normal case for every non-shell tool) merely
+    /// means no shape filter applies.
+    /// </summary>
+    private static string? ReadCommandFromInput(ref Utf8JsonReader reader)
+    {
+        string? command = null;
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        {
+            if (reader.TokenType != JsonTokenType.PropertyName)
+                continue;
+
+            // First "command" wins; a duplicate key is malformed enough that trusting the later one
+            // is no safer than trusting the first, and bailing entirely would cost savings for no
+            // gain in correctness.
+            if (command is null && reader.ValueTextEquals("command"u8))
+            {
+                reader.Read();
+                if (reader.TokenType == JsonTokenType.String)
+                    command = reader.GetString();
+                else
+                    reader.Skip();
+            }
+            else
+            {
+                reader.Skip();
+            }
+        }
+
+        return command;
     }
 
     private static void ScanToolResultContent(ref Utf8JsonReader reader, ToolResultEntry entry)

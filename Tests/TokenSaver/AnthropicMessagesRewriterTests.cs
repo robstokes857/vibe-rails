@@ -1,17 +1,20 @@
 using System.Buffers;
 using System.Text;
 using System.Text.Json;
+using TokenSaver;
 using TokenSaver.Minify;
+using TokenSaver.Pipeline;
 using Xunit;
 
 namespace Tests.TokenSaver;
 
 /// <summary>
-/// Pins the tool_result rewriter's contract (token_saving_plan.md §2): ONLY allowlisted shell
-/// tool_result strings are touched, every other byte of the request passes through verbatim, and
-/// every failure path forwards the original. Byte-identity assertions are deliberate — the
-/// transform must be deterministic and idempotent across turns or it thrashes Anthropic prompt
-/// caching (§6).
+/// Pins the tool_result rewriter's contract: ONLY allowlisted shell tool_result strings are
+/// touched, every other byte of the request passes through verbatim, and every failure path
+/// forwards the original. Byte-identity assertions are deliberate — the transform must be
+/// deterministic and idempotent across turns or it thrashes Anthropic prompt caching, which costs
+/// more than saving nothing. See TokenSaver/README.md and the class doc on
+/// <see cref="AnthropicMessagesRewriter"/>.
 /// </summary>
 public class AnthropicMessagesRewriterTests
 {
@@ -231,6 +234,25 @@ public class AnthropicMessagesRewriterTests
     }
 
     [Fact]
+    public void Rewrite_RejectedWireGrowthCapture_IsMarkedNotAccepted()
+    {
+        var body = MessagesBody("Bash", "\"a😀b  \\nraw😀  \"");
+        var plan = CompressionCatalog.Resolve([
+            CompressionCatalog.TrailingWhitespace,
+            CompressionCatalog.ScopeShell]);
+        var captures = new RecordingCaptureSink();
+        var writer = new ArrayBufferWriter<byte>();
+
+        var result = AnthropicMessagesRewriter.Rewrite(
+            Encoding.UTF8.GetBytes(body), plan, writer, captures);
+
+        Assert.False(result.Rewritten);
+        var capture = Assert.Single(captures.Captures);
+        Assert.True(capture.Changed); // the pipeline produced a useful diagnostic candidate
+        Assert.False(capture.RewriteAccepted); // but the original wire token was forwarded
+    }
+
+    [Fact]
     public void Rewrite_MixedEmojiGrowthAndShrinkableStrings_OnlyForwardsTheShrink()
     {
         var body = TwoResultBody("\"a😀b  \\nraw😀  \"", $"\"{DirtyToolOutput}\"");
@@ -261,14 +283,19 @@ public class AnthropicMessagesRewriterTests
     }
 
     [Theory]
-    [InlineData("PowerShell")] // the Windows Claude Code shell tool
-    [InlineData("BashOutput")] // background-shell reads, allowlisted from Safe up
-    public void Rewrite_TierAllowlist_CoversWindowsAndBackgroundShells(string toolName)
+    [InlineData("PowerShell")] // the Windows Claude Code shell tool, from scope-shell
+    [InlineData("BashOutput")] // background-shell reads, from scope-shell-background
+    public void Rewrite_ShellScopes_CoverWindowsAndBackgroundShells(string toolName)
     {
         var body = MessagesBody(toolName, $"\"{DirtyToolOutput}\"");
-        var (flags, condense, allowlist) = TokenSaverPresets.For(TokenSaverLevel.Safe);
+        // Both shell scopes on, so the allowlist spans Bash/PowerShell/BashOutput.
+        var plan = CompressionCatalog.Resolve([
+            CompressionCatalog.CrCollapse, CompressionCatalog.AnsiStrip,
+            CompressionCatalog.TrailingWhitespace, CompressionCatalog.BlankEdges,
+            CompressionCatalog.BlankRuns,
+            CompressionCatalog.ScopeShell, CompressionCatalog.ScopeShellBackground]);
 
-        var (result, output) = Rewrite(body, flags, condense, allowlist);
+        var (result, output) = Rewrite(body, plan.Flags, plan.Condense, plan.AnthropicAllowlist);
 
         Assert.True(result.Rewritten);
         Assert.Equal(body.Replace(DirtyToolOutput, MinifiedToolOutput), output);
@@ -291,18 +318,22 @@ public class AnthropicMessagesRewriterTests
     }
 
     [Fact]
-    public void Rewrite_MediumTier_CondensedBodyIsStableAcrossTurns()
+    public void Rewrite_DedupedBodyIsStableAcrossTurns()
     {
-        // Same history property as the minify-only test, but through the full Medium pipeline:
+        // Same history property as the minify-only test, but with the lossy dedupe stage on too:
         // a body containing an already-condensed tool_result must come back byte-identical.
         var body = MessagesBody("Bash", "\"spam\\nspam\\nspam\\nspam\\ndone\"");
-        var (flags, condense, allowlist) = TokenSaverPresets.For(TokenSaverLevel.Medium);
+        var plan = CompressionCatalog.Resolve([
+            CompressionCatalog.CrCollapse, CompressionCatalog.AnsiStrip,
+            CompressionCatalog.TrailingWhitespace, CompressionCatalog.BlankEdges,
+            CompressionCatalog.BlankRuns, CompressionCatalog.DedupeLines,
+            CompressionCatalog.ScopeShell, CompressionCatalog.ScopeShellBackground]);
 
-        var (first, firstOutput) = Rewrite(body, flags, condense, allowlist);
+        var (first, firstOutput) = Rewrite(body, plan.Flags, plan.Condense, plan.AnthropicAllowlist);
         Assert.True(first.Rewritten);
         Assert.Contains("spam [x4]", firstOutput, StringComparison.Ordinal);
 
-        var (again, _) = Rewrite(firstOutput, flags, condense, allowlist);
+        var (again, _) = Rewrite(firstOutput, plan.Flags, plan.Condense, plan.AnthropicAllowlist);
         Assert.False(again.Rewritten);
     }
 
@@ -379,5 +410,11 @@ public class AnthropicMessagesRewriterTests
         }
 
         return hits;
+    }
+
+    private sealed class RecordingCaptureSink : ICompressionCaptureSink
+    {
+        public List<CompressionCapture> Captures { get; } = [];
+        public void Capture(CompressionCapture capture) => Captures.Add(capture);
     }
 }

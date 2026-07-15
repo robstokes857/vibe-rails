@@ -1,5 +1,5 @@
 using TokenSaver;
-using TokenSaver.Minify;
+using TokenSaver.Pipeline;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.LlmProxy;
@@ -19,34 +19,25 @@ public sealed class LlmProxySettingsService : ILlmProxySettingsService
     internal static LlmProxySettings Resolve(Settings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        var level = TokenSaverPresets.Normalize(settings.TokenSaverLevel);
 
-        // The level preset resolves everything; "custom" is the escape hatch that honors the
-        // legacy per-transform bools (no lossy stage, default allowlist), and "off" keeps the
-        // relay up but disables the saver.
-        var (flags, condense, claudeAllowlist) = level == TokenSaverLevel.Custom
-            ? (new MinifyFlags(
-                    CollapseCrRedraws: settings.TokenSaverCollapseCrRedraws,
-                    StripAnsiStyling: settings.TokenSaverStripAnsi,
-                    StripTrailingWhitespace: settings.TokenSaverStripTrailingWhitespace,
-                    TrimBlankLineEdges: settings.TokenSaverTrimBlankLines,
-                    CollapseBlankLineRuns: settings.TokenSaverCollapseBlankRuns),
-                default,
-                TokenSaverPresets.ShellTools)
-            : TokenSaverPresets.For(level);
-        var tokenSaverEnabled = settings.ClaudeTokenSaverEnabled && level != TokenSaverLevel.Off;
+        // TokenSaverStages is the whole decision. Null means never-configured and resolves to the
+        // catalog defaults; an empty list is a real "everything off" choice and is honored — hence
+        // the nullable round-trip rather than a `?? []`.
+        //
+        // Config.LoadCore migrates legacy tier/per-transform settings before they reach this seam,
+        // so runtime resolution has exactly one source of truth.
+        var plan = CompressionCatalog.Resolve(settings.TokenSaverStages);
+
+        // The saver's master kill switch. Named for Claude for legacy reasons; it governs both.
+        var tokenSaverEnabled = settings.ClaudeTokenSaverEnabled;
 
         return new LlmProxySettings(
             CodexLlmProxyEnabled: settings.CodexLlmProxyEnabled,
             CodexLlmProxyMode: CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
             ClaudeLlmProxyEnabled: settings.ClaudeLlmProxyEnabled,
             ClaudeTokenSaverEnabled: settings.ClaudeLlmProxyEnabled && tokenSaverEnabled,
-            ClaudeTokenSaverFlags: flags,
-            ClaudeTokenSaverCondense: condense,
-            ClaudeTokenSaverAllowlist: claudeAllowlist,
             CodexTokenSaverEnabled: settings.CodexLlmProxyEnabled && tokenSaverEnabled,
-            CodexTokenSaverFlags: flags,
-            CodexTokenSaverCondense: condense,
-            CodexTokenSaverAllowlist: CodexResponsesRewriter.DefaultToolAllowlist);
+            TokenSaverPlan: plan,
+            TokenSaverCaptureEnabled: settings.TokenSaverCaptureEnabled);
     }
 }

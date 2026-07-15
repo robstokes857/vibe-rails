@@ -1,3 +1,14 @@
+const esc = v => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+
+// Catalog kind → badge class. Lossy is the loud one on purpose: it is the only kind that
+// destroys information. An unrecognised kind from a newer server falls back to neutral rather
+// than disappearing.
+const STAGE_KIND_CLASS = {
+    lossless: 'ts-kind-lossless',
+    reshaping: 'ts-kind-reshaping',
+    lossy: 'ts-kind-lossy',
+};
+
 export class SettingsController {
     constructor(app) {
         this.app = app;
@@ -8,6 +19,10 @@ export class SettingsController {
         this._settingsSnapshot = '';
         this._removeNavigationGuard = null;
         this._beforeUnloadHandler = null;
+        // Only true once the stage toggles are actually on screen. Until then the save path
+        // sends null for the selection rather than the empty array the DOM would report — see
+        // _collectTokenSaverStages.
+        this._tokenSaverReady = false;
     }
 
     async loadSettings() {
@@ -25,7 +40,10 @@ export class SettingsController {
             codexLlmProxyEnabled: false,
             codexLlmProxyMode: 'subscription',
             claudeLlmProxyEnabled: false,
-            tokenSaverLevel: 'safest',
+            // null = never configured. Distinct from [] ("everything off"); the catalog's
+            // defaultSelection stands in for null, exactly as CompressionCatalog.Resolve does.
+            tokenSaverStages: null,
+            tokenSaverCaptureEnabled: false,
             machineName: ''
         };
         try {
@@ -33,6 +51,15 @@ export class SettingsController {
             this.app.setAppSettings(settings);
         } catch (error) {
             console.error('Failed to fetch settings:', error);
+        }
+
+        // The stage/scope toggles are rendered from this, never from a hardcoded list — the
+        // catalog is the single source of truth for what the saver can do.
+        let catalog = null;
+        try {
+            catalog = await this.app.apiCall('/api/v1/compression/catalog', 'GET');
+        } catch (error) {
+            console.error('Failed to fetch compression catalog:', error);
         }
 
         content.innerHTML = '';
@@ -68,7 +95,7 @@ export class SettingsController {
             const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
             const codexLlmProxyModeApi = root.querySelector('#setting-codex-llm-proxy-mode-api');
             const claudeLlmProxyEnabledToggle = root.querySelector('#setting-claude-llm-proxy-enabled');
-            const tokenSaverLevelSelect = root.querySelector('#setting-token-saver-level');
+            const tokenSaverCaptureToggle = root.querySelector('#setting-token-saver-capture');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
@@ -117,10 +144,13 @@ export class SettingsController {
             if (claudeLlmProxyEnabledToggle) {
                 claudeLlmProxyEnabledToggle.checked = settings.claudeLlmProxyEnabled === true;
             }
-            if (tokenSaverLevelSelect) {
-                this._setTokenSaverLevel(tokenSaverLevelSelect, settings.tokenSaverLevel);
-                this._initTokenSaverLevelSelect(tokenSaverLevelSelect);
+            if (tokenSaverCaptureToggle) {
+                tokenSaverCaptureToggle.checked = settings.tokenSaverCaptureEnabled === true;
             }
+            // Must happen before _initSettingsDirtyTracking below: it renders the toggles that
+            // the tracked-input selector goes looking for, and listeners can only be attached to
+            // inputs that already exist.
+            this._renderTokenSaver(root, catalog, settings);
 
             const form = root.querySelector('#app-settings-form');
             if (form) {
@@ -151,7 +181,8 @@ export class SettingsController {
                             codexLlmProxyEnabledToggle?.checked || false,
                             this._getCodexLlmProxyMode(root),
                             claudeLlmProxyEnabledToggle?.checked || false,
-                            tokenSaverLevelSelect?.value || 'safest'
+                            this._collectTokenSaverStages(root),
+                            tokenSaverCaptureToggle?.checked ?? false
                         );
                         if (savedSettings) {
                             this._applySavedSettingsToControls(root, savedSettings);
@@ -171,7 +202,7 @@ export class SettingsController {
         content.appendChild(fragment);
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, tokenSaverLevel) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, tokenSaverStages, tokenSaverCaptureEnabled) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -182,7 +213,12 @@ export class SettingsController {
                 codexLlmProxyEnabled: codexLlmProxyEnabled,
                 codexLlmProxyMode: codexLlmProxyMode,
                 claudeLlmProxyEnabled: claudeLlmProxyEnabled,
-                tokenSaverLevel: tokenSaverLevel
+                // An empty array is a real "everything off" choice and must reach the server as
+                // [], not as null/absent — the route treats null as "stale client, leave the
+                // stored selection alone". null only ever comes from the catalog having failed
+                // to load, which is exactly when we want that guard.
+                tokenSaverStages: tokenSaverStages,
+                tokenSaverCaptureEnabled: tokenSaverCaptureEnabled
             });
             this.app.setAppSettings(savedSettings);
             this.app.showToast('Settings', 'Settings saved successfully', 'success');
@@ -207,6 +243,9 @@ export class SettingsController {
         this._settingsDirty = false;
         this._settingsSaving = false;
         this._settingsSnapshot = '';
+        // The toggles go away with the view; leaving this true would let a save from a
+        // re-rendered form collect an empty selection off a DOM that has none.
+        this._tokenSaverReady = false;
     }
 
     _initSettingsDirtyTracking(root) {
@@ -256,7 +295,10 @@ export class SettingsController {
             '#setting-codex-llm-proxy-enabled',
             'input[name="setting-codex-llm-proxy-mode"]',
             '#setting-claude-llm-proxy-enabled',
-            '#setting-token-saver-level'
+            '#setting-token-saver-capture',
+            // Rendered from the catalog, so they must already be in the DOM when dirty tracking
+            // initialises — see the render call in loadSettings.
+            '[data-token-saver-id]'
         ].join(',');
     }
 
@@ -272,7 +314,9 @@ export class SettingsController {
             codexLlmProxyEnabled: isChecked('#setting-codex-llm-proxy-enabled'),
             codexLlmProxyMode: this._getCodexLlmProxyMode(root),
             claudeLlmProxyEnabled: isChecked('#setting-claude-llm-proxy-enabled'),
-            tokenSaverLevel: valueOf('#setting-token-saver-level')
+            // DOM order is catalog order, so this is stable across snapshots.
+            tokenSaverStages: this._collectTokenSaverStages(root),
+            tokenSaverCaptureEnabled: isChecked('#setting-token-saver-capture')
         });
     }
 
@@ -339,38 +383,104 @@ export class SettingsController {
         if (codexLlmProxyModeApi) codexLlmProxyModeApi.checked = codexLlmProxyMode === 'api';
         if (claudeLlmProxyEnabledToggle) claudeLlmProxyEnabledToggle.checked = settings.claudeLlmProxyEnabled === true;
 
-        const tokenSaverLevelSelect = root.querySelector('#setting-token-saver-level');
-        if (tokenSaverLevelSelect) this._setTokenSaverLevel(tokenSaverLevelSelect, settings.tokenSaverLevel);
-    }
-
-    // "custom" is the hand-edited settings.json escape hatch — the UI never offers it, but when
-    // it is the stored value it must be shown (and remain selectable) rather than silently
-    // misreporting the level as one of the presets.
-    _setTokenSaverLevel(selectEl, level) {
-        const value = level || 'safest';
-        if (value === 'custom' && !selectEl.querySelector('option[value="custom"]')) {
-            const custom = document.createElement('option');
-            custom.value = 'custom';
-            custom.textContent = 'Custom — per-transform flags from settings.json';
-            selectEl.prepend(custom);
-            selectEl.tomselect?.addOption({ value: 'custom', text: custom.textContent });
-        }
-        if (selectEl.tomselect) {
-            selectEl.tomselect.setValue(value, true); // silent: applying saved state is not a dirty edit
-        } else {
-            selectEl.value = value;
+        const tokenSaverCaptureToggle = root.querySelector('#setting-token-saver-capture');
+        if (tokenSaverCaptureToggle) tokenSaverCaptureToggle.checked = settings.tokenSaverCaptureEnabled === true;
+        // Re-check against what the server actually stored, so an id it dropped (or kept) shows
+        // up here rather than leaving the UI asserting a selection that was never saved.
+        if (this._tokenSaverReady) {
+            this._applyTokenSaverSelection(root, settings.tokenSaverStages ?? this._catalog?.defaultSelection);
         }
     }
 
-    _initTokenSaverLevelSelect(selectEl) {
-        // Same graceful degradation as the undo picker: without Tom Select the native
-        // <select> works fine, it just doesn't match the styled dropdowns.
-        if (typeof window.TomSelect !== 'function') return;
-        if (selectEl.tomselect) selectEl.tomselect.destroy();
-        new window.TomSelect(selectEl, {
-            controlInput: null, // fixed option list — no search box
-            maxOptions: null,
-            dropdownParent: 'body'
+    // ── Token Saver ────────────────────────────────────────────────────────
+
+    // Renders one switch per catalog stage and scope. Nothing here knows a stage id: the list,
+    // the order, the copy and the defaults all come from GET /api/v1/compression/catalog, so a
+    // stage added server-side shows up without a change to this file.
+    _renderTokenSaver(root, catalog, settings) {
+        const stagesHost = root.querySelector('[data-token-saver-stages]');
+        const scopesHost = root.querySelector('[data-token-saver-scopes]');
+        if (!stagesHost || !scopesHost) return;
+
+        this._catalog = catalog;
+        this._tokenSaverReady = false;
+
+        if (!catalog?.stages?.length || !catalog?.scopes?.length) {
+            // Without the catalog we don't know which ids exist. Rendering nothing would make
+            // the DOM report an empty selection, and saving that would wipe the stored one — so
+            // stay out of the way entirely and let the save path send null instead.
+            const unavailable = '<div class="ts-loading">Unavailable — the compression catalog failed to load. Your saved selection is left untouched.</div>';
+            stagesHost.innerHTML = unavailable;
+            scopesHost.innerHTML = unavailable;
+            return;
+        }
+
+        // Order is the pipeline's, not ours: the stages don't commute, so showing them out of
+        // execution order would misrepresent what actually runs.
+        const stages = [...catalog.stages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        stagesHost.innerHTML = stages.map(stage => {
+            const kindClass = STAGE_KIND_CLASS[String(stage.kind || '').toLowerCase()] || '';
+            return `
+                <div class="ts-toggle">
+                    <div class="ts-toggle-head">
+                        ${this._tokenSaverSwitch(stage)}
+                        <span class="ts-kind ${kindClass}">${esc(stage.kind)}</span>
+                    </div>
+                    <small class="form-text text-muted d-block">${esc(stage.summary)}</small>
+                </div>`;
+        }).join('');
+
+        scopesHost.innerHTML = catalog.scopes.map(scope => {
+            // A scope with a warning fails as a broken edit, not as a lost saving. It gets a
+            // riskier treatment than an ordinary toggle on purpose.
+            const risky = !!scope.warning;
+            return `
+                <div class="ts-toggle ${risky ? 'is-risky' : ''}">
+                    <div class="ts-toggle-head">
+                        ${this._tokenSaverSwitch(scope)}
+                        ${risky ? '<span class="ts-kind ts-kind-lossy">Risky</span>' : ''}
+                    </div>
+                    <small class="form-text text-muted d-block">${esc(scope.summary)}</small>
+                    ${risky ? `<div class="ts-warning"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span>${esc(scope.warning)}</span></div>` : ''}
+                </div>`;
+        }).join('');
+
+        this._tokenSaverReady = true;
+        // null (never configured) resolves to the catalog defaults, matching what the pipeline
+        // would actually run. An empty array stays empty — it is a real "everything off" choice.
+        this._applyTokenSaverSelection(root, settings.tokenSaverStages ?? catalog.defaultSelection);
+
+        this.app.bindAction(root, '[data-action="token-saver-defaults"]', () => {
+            this._applyTokenSaverSelection(root, catalog.defaultSelection);
+            // Setting .checked in script fires no change event, so the tracked-input listeners
+            // never run and Save would stay disabled. Recompute by hand.
+            this._updateDirtyState(root);
+        });
+    }
+
+    _tokenSaverSwitch(item) {
+        const inputId = `setting-ts-${item.id}`;
+        return `
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="${esc(inputId)}" data-token-saver-id="${esc(item.id)}">
+                <label class="form-check-label" for="${esc(inputId)}">${esc(item.name)}</label>
+            </div>`;
+    }
+
+    // The persisted value: checked stage ids and scope ids in one flat array. Returns null —
+    // never [] — when the toggles aren't on screen, because [] means "everything off" to the
+    // route and would silently overwrite a real selection with nothing.
+    _collectTokenSaverStages(root) {
+        if (!this._tokenSaverReady) return null;
+        return Array.from(root.querySelectorAll('[data-token-saver-id]'))
+            .filter(input => input.checked)
+            .map(input => input.dataset.tokenSaverId);
+    }
+
+    _applyTokenSaverSelection(root, ids) {
+        const enabled = new Set(ids || []);
+        root.querySelectorAll('[data-token-saver-id]').forEach(input => {
+            input.checked = enabled.has(input.dataset.tokenSaverId);
         });
     }
 

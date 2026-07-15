@@ -10,9 +10,8 @@ namespace TokenSaver.Minify;
 /// fails open to the original buffered request.
 /// </summary>
 internal sealed class CodexBodyTransform(
-    MinifyFlags flags,
-    CondenseOptions condense = default,
-    IReadOnlyList<string>? toolAllowlist = null) : ILlmProxyBodyTransform
+    Pipeline.CompressionPlan plan,
+    ICompressionCaptureSink? captures = null) : ILlmProxyBodyTransform
 {
     internal const int MaxBufferedBodyBytes = 10 * 1024 * 1024;
 
@@ -44,10 +43,9 @@ internal sealed class CodexBodyTransform(
                 lease.Output = new PooledBufferWriter(length);
                 result = CodexResponsesRewriter.Rewrite(
                     lease.Buffered(length).Span,
-                    flags,
-                    condense,
-                    toolAllowlist ?? CodexResponsesRewriter.DefaultToolAllowlist,
-                    lease.Output);
+                    plan,
+                    lease.Output,
+                    captures);
             }
             catch (Exception ex)
             {

@@ -5,9 +5,10 @@ using Xunit;
 namespace Tests.TokenSaver;
 
 /// <summary>
-/// Unit tests for <see cref="OutputMinifier"/> — the four transforms of token_saving_plan.md §3,
-/// plus the litmus properties of §1 (lossless / deterministic / idempotent / fail-open) that the
-/// class doc promises. ESC is written as "\u001b" via the Esc const throughout (never \x1b — a following hex digit
+/// Unit tests for <see cref="OutputMinifier"/> — its four fused transforms, plus the litmus
+/// properties its class doc promises: lossless (output is a subsequence of the input),
+/// deterministic, idempotent, and fail-open. The last three are what prompt caching rides on; see
+/// TokenSaver/README.md. ESC is written as "\u001b" via the Esc const throughout (never \x1b — a following hex digit
 /// would silently extend the escape in C# source).
 /// </summary>
 public class OutputMinifierTests

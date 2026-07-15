@@ -81,7 +81,12 @@ namespace VibeRails
             // event sink → app event bus + Serilog + the state.db savings tally.
             serviceCollection.AddSingleton<ILlmProxyAuthGate, LlmProxyAuthGateAdapter>();
             serviceCollection.AddSingleton<ILlmProxyEventSink, LlmProxyEventSinkAdapter>();
+            serviceCollection.AddSingleton<ICompressionCaptureSink, CompressionCaptureSinkAdapter>();
             serviceCollection.AddSingleton<ITokenSavingsStore>(_ => new TokenSavingsStore(
+                $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
+            // Singleton for the same reason as the savings tally: one ordered writer, so concurrent
+            // relays serialize capture inserts, re-sight counts, and clears before reaching SQLite.
+            serviceCollection.AddSingleton<ICompressionCaptureStore>(_ => new CompressionCaptureStore(
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
             serviceCollection.AddScoped<IAgentTerminalToolService, AgentTerminalToolService>();
             serviceCollection.AddScoped<IAgentTerminalToolGateway, LocalAgentTerminalToolGateway>();

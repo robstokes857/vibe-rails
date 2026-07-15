@@ -280,6 +280,121 @@ namespace VibeRails.DB
             WHERE substr(Day, 1, 7) = $month
             """;
 
+        /// <summary>
+        /// Raw before/after compression captures: one row per tool_result the pipeline considered
+        /// rewriting (see <c>TokenSaver.ICompressionCaptureSink</c>). RawText/CompressedText are
+        /// verbatim tool output from the user's machine, so this table is exactly as sensitive as
+        /// SessionLogs and inherits the same handling rules.
+        ///
+        /// UNCAPPED by explicit product decision (2026-07-15) — no retention, no row limit, no
+        /// truncation. The whole value of a capture is that it is the unedited input, and any cap
+        /// would preferentially destroy the pathological rows that are the reason to look.
+        /// <see cref="DeleteAllCompressionCaptures"/> is the only eviction.
+        ///
+        /// EnabledIds and Trace are JSON arrays of catalog stage ids, which
+        /// <c>CompressionCatalog</c> documents as a wire format — renaming a stage id silently
+        /// re-reads every historical row as "stage disabled".
+        ///
+        /// Also created on demand by <c>CompressionCaptureStore</c> (IF NOT EXISTS), since its
+        /// writer can run before the first <c>Repository</c> initializes the schema.
+        /// </summary>
+        public const string CreateCompressionCapturesTable = """
+            CREATE TABLE IF NOT EXISTS CompressionCaptures (
+                Id             TEXT    PRIMARY KEY,
+                CreatedUTC     TEXT    NOT NULL,
+                Provider       TEXT    NOT NULL,
+                ToolName       TEXT    NOT NULL,
+                Command        TEXT,
+                RawText        TEXT    NOT NULL,
+                CompressedText TEXT    NOT NULL,
+                CharsBefore    INTEGER NOT NULL,
+                CharsAfter     INTEGER NOT NULL,
+                Changed        INTEGER NOT NULL,
+                RewriteAccepted INTEGER NOT NULL DEFAULT 0,
+                EnabledIds     TEXT    NOT NULL,
+                Trace          TEXT    NOT NULL,
+                ContentHash    TEXT    NOT NULL DEFAULT '',
+                SeenCount      INTEGER NOT NULL DEFAULT 1
+            )
+            """;
+        public const string CreateCompressionCapturesCreatedIndex = "CREATE INDEX IF NOT EXISTS idx_compression_captures_created ON CompressionCaptures(CreatedUTC DESC)";
+
+        /// <summary>
+        /// The dedupe key. The Messages API is stateless, so the CLI re-sends its whole history every
+        /// turn and the proxy re-compresses — and would re-capture — every tool_result in it. Row
+        /// count would be triangular in turn count, ~96% of it byte-identical duplicates. This index
+        /// makes <see cref="UpsertCompressionCapture"/> collapse them to one row plus a counter.
+        ///
+        /// PARTIAL, on purpose: rows written before ContentHash existed carry the '' default, and a
+        /// plain unique index would see them as duplicates of each other and fail to build — which
+        /// the migration loop swallows as a warning, silently leaving dedupe off. Excluding '' means
+        /// legacy rows keep their place and every new row is deduped.
+        /// </summary>
+        public const string CreateCompressionCapturesHashIndex =
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_compression_captures_hash ON CompressionCaptures(ContentHash) WHERE ContentHash != ''";
+
+        public const string AddCompressionCaptureContentHashColumn =
+            "ALTER TABLE CompressionCaptures ADD COLUMN ContentHash TEXT NOT NULL DEFAULT ''";
+
+        public const string AddCompressionCaptureSeenCountColumn =
+            "ALTER TABLE CompressionCaptures ADD COLUMN SeenCount INTEGER NOT NULL DEFAULT 1";
+
+        public const string AddCompressionCaptureRewriteAcceptedColumn =
+            "ALTER TABLE CompressionCaptures ADD COLUMN RewriteAccepted INTEGER NOT NULL DEFAULT 0";
+
+        /// <summary>
+        /// Insert-or-count. On a ContentHash collision the payload is NOT rewritten — the original
+        /// row's Id stays stable (it is the handle the compress runbook cites) and CreatedUTC keeps
+        /// pointing at first sight. Only SeenCount moves.
+        ///
+        /// SeenCount is the measurement that pays for this table: a 20KB tool_result re-sent 30 times
+        /// costs 600KB of context, and until now nothing counted that. It is what tells you which
+        /// outputs are actually expensive, rather than which are merely large.
+        /// </summary>
+        public const string UpsertCompressionCapture = """
+            INSERT INTO CompressionCaptures
+                (Id, CreatedUTC, Provider, ToolName, Command, RawText, CompressedText,
+                 CharsBefore, CharsAfter, Changed, RewriteAccepted, EnabledIds, Trace,
+                 ContentHash, SeenCount)
+            VALUES
+                ($id, $createdUTC, $provider, $toolName, $command, $rawText, $compressedText,
+                 $charsBefore, $charsAfter, $changed, $rewriteAccepted, $enabledIds, $trace,
+                 $contentHash, 1)
+            ON CONFLICT(ContentHash) WHERE ContentHash != ''
+            DO UPDATE SET SeenCount = SeenCount + 1;
+            """;
+
+        /// <summary>Flushes a batch of in-memory re-sight counts (see CompressionCaptureStore). No-op
+        /// for a hash we have never written, which is the correct outcome for a count whose insert
+        /// was dropped.</summary>
+        public const string TouchCompressionCapture =
+            "UPDATE CompressionCaptures SET SeenCount = SeenCount + $delta WHERE ContentHash = $contentHash;";
+
+        // The list view's projection. RawText/CompressedText are deliberately absent: this table is
+        // uncapped and a row can hold megabytes, so the two big strings only ever leave via
+        // SelectCompressionCaptureById.
+        //
+        // rowid breaks CreatedUTC ties. DateTime.UtcNow's resolution on Windows (~15ms) is coarser
+        // than the write path is fast, so same-timestamp rows are routine rather than exotic, and
+        // without a tiebreak they would shuffle between pages of the same scan.
+        public const string SelectCompressionCaptureSummaries = """
+            SELECT Id, CreatedUTC, Provider, ToolName, Command, CharsBefore, CharsAfter, Changed,
+                   RewriteAccepted
+            FROM CompressionCaptures
+            ORDER BY CreatedUTC DESC, rowid DESC
+            LIMIT $take OFFSET $skip;
+            """;
+
+        public const string SelectCompressionCaptureById = """
+            SELECT Id, CreatedUTC, Provider, ToolName, Command, RawText, CompressedText,
+                   CharsBefore, CharsAfter, Changed, RewriteAccepted, EnabledIds, Trace
+            FROM CompressionCaptures
+            WHERE Id = $id
+            LIMIT 1;
+            """;
+
+        public const string DeleteAllCompressionCaptures = "DELETE FROM CompressionCaptures;";
+
         public static readonly string[] InitStatements =
         [
             CreateEnvironmentsTable,
@@ -305,7 +420,9 @@ namespace VibeRails.DB
             CreateTerminalSessionLogsIndex,
             CreateProjectCacheTable,
             CreateGlobalCacheTable,
-            CreateTokenSavingsTable
+            CreateTokenSavingsTable,
+            CreateCompressionCapturesTable,
+            CreateCompressionCapturesCreatedIndex
         ];
 
         public const string AddProcessedColumn = "ALTER TABLE Sessions ADD COLUMN Processed INTEGER NOT NULL DEFAULT 0";
@@ -323,6 +440,14 @@ namespace VibeRails.DB
             "ALTER TABLE Sessions ADD COLUMN OwnershipTracked INTEGER",
             // Drop orphaned table from a previous build.
             "DROP TABLE IF EXISTS TUI_Event",
+            // CompressionCaptures shipped for a few days without dedupe. On a fresh DB the CREATE
+            // above already has these columns and these fail benignly ("duplicate column"); on an
+            // early one they add them. The hash index is partial (see its remarks), so it builds
+            // either way.
+            AddCompressionCaptureContentHashColumn,
+            AddCompressionCaptureSeenCountColumn,
+            AddCompressionCaptureRewriteAcceptedColumn,
+            CreateCompressionCapturesHashIndex,
             MigrateUserInputsAddBertEmbeddedUTC,
             CreateUserInputsUnembeddedIndex,
             MigrateUserInputsAddBertEmbedFailureCount,

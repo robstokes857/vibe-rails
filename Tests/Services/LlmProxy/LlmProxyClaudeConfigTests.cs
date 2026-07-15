@@ -17,7 +17,7 @@ namespace Tests.Services.LlmProxy;
 ///    ending in "/v1" would double it to "/v1/v1/messages";
 ///  - the custom-headers value is newline-separated "Name: Value" pairs with the exact header
 ///    names the proxy auth-gate checks.
-/// See VibeRails/Routes/LlmAnthropicProxyRoutes.cs and token_saving_plan.md.
+/// See VibeRails/Routes/LlmAnthropicProxyRoutes.cs and TokenSaver/README.md.
 /// </summary>
 // Shares the process-global VIBERAILS_TEST_FAKE_CLI env var with CommandServiceTests; the shared
 // collection serializes the two classes so their ctor/Dispose set+restore of the flag can't race.

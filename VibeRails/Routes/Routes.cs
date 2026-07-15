@@ -16,6 +16,7 @@ public static class RouteExtensions
         LlmProxyRoutes.Map(app);
         LlmAnthropicProxyRoutes.Map(app);
         TokenSavingsRoutes.Map(app);
+        CompressionCaptureRoutes.Map(app);
         TerminalRoutes.Map(app, launchDirectory);
         TerminalTabsRoutes.Map(app);
         AgentToolRoutes.Map(app);

@@ -1,5 +1,4 @@
 using TokenSaver;
-using TokenSaver.Minify;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Utils;
@@ -56,12 +55,17 @@ public static class AppSettingsRoutes
                 settings.CodexLlmProxyMode = CodexLlmProxySettings.NormalizeMode(settingsDto.CodexLlmProxyMode);
             if (settingsDto.ClaudeLlmProxyEnabled.HasValue)
                 settings.ClaudeLlmProxyEnabled = settingsDto.ClaudeLlmProxyEnabled.Value;
-            // Normalize on write so settings.json only ever carries canonical level strings.
-            // "custom" round-trips (it's what Normalize maps unknowns to), preserving the
-            // hand-edited escape hatch; the UI never fabricates it.
-            if (settingsDto.TokenSaverLevel is not null)
-                settings.TokenSaverLevel = TokenSaverPresets.ToSettingsString(
-                    TokenSaverPresets.Normalize(settingsDto.TokenSaverLevel));
+            // Same stale-client guard, with one extra wrinkle: null here means "key absent, leave
+            // the stored selection alone", but an EMPTY list is a real choice (every stage off)
+            // and must be written through untouched. Collapsing the two would make "turn
+            // everything off" silently save as "never configured" — which resolves back to the
+            // catalog defaults on the next request. Ids are persisted as sent rather than
+            // filtered against the catalog: unknown ids are already ignored at Resolve time, so
+            // dropping them here would only destroy a newer build's selection.
+            if (settingsDto.TokenSaverStages is not null)
+                settings.TokenSaverStages = [.. settingsDto.TokenSaverStages];
+            if (settingsDto.TokenSaverCaptureEnabled.HasValue)
+                settings.TokenSaverCaptureEnabled = settingsDto.TokenSaverCaptureEnabled.Value;
 
             // Save back to settings.json
             Config.Save(settings);
@@ -108,7 +112,12 @@ public static class AppSettingsRoutes
             settings.CodexLlmProxyEnabled,
             CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
             settings.ClaudeLlmProxyEnabled,
-            TokenSaverPresets.ToSettingsString(TokenSaverPresets.Normalize(settings.TokenSaverLevel)),
+            // Passed through as-is, null included: null means "never configured", which the client
+            // resolves to the catalog's defaultSelection exactly as CompressionCatalog.Resolve
+            // does server-side. Substituting the defaults here would make the two states
+            // indistinguishable to the UI.
+            settings.TokenSaverStages,
+            settings.TokenSaverCaptureEnabled,
             GetMachineName()
         );
     }
