@@ -106,6 +106,48 @@ public static class TerminalTabsRoutes
             }
         }).WithName("StopTerminalTabSession");
 
+        app.MapGet("/api/v1/terminal/tabs/{tabId}/token-saver", async (
+            string tabId,
+            ITerminalTabHostService tabHost,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                return Results.Ok(await tabHost.GetTokenSaverStateAsync(tabId, cancellationToken));
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound(new ErrorResponse($"Terminal tab not found: {tabId}"));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
+        }).WithName("GetTerminalTabTokenSaverState");
+
+        app.MapPut("/api/v1/terminal/tabs/{tabId}/token-saver", async (
+            string tabId,
+            TabTokenSaverStateRequest request,
+            ITerminalTabHostService tabHost,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                return Results.Ok(await tabHost.SetTokenSaverStateAsync(
+                    tabId,
+                    request.Enabled,
+                    cancellationToken));
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound(new ErrorResponse($"Terminal tab not found: {tabId}"));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
+        }).WithName("SetTerminalTabTokenSaverState");
+
         app.Map("/api/v1/terminal/tabs/{tabId}/ws", async (
             HttpContext context,
             string tabId,

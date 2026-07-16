@@ -120,16 +120,16 @@ globalThis.document = {
     createElement: (tagName) => new FakeElement(tagName)
 };
 
-const sourceModule = path.resolve('VibeRails/wwwroot/js/modules/activity-blinker.js');
-const { ActivityBlinker } = await import(pathToFileURL(sourceModule).href);
+const sourceModule = path.resolve('VibeRails/wwwroot/js/modules/terminal-token-compression.js');
+const { TerminalTokenCompressionMeter } = await import(pathToFileURL(sourceModule).href);
 
 function renderedText(element) {
     return [element.textContent, ...element.children.map(renderedText)].join(' ');
 }
 
-test('ActivityBlinker stays visibly mounted while idle and exposes enabled state', () => {
+test('TerminalTokenCompressionMeter stays visibly mounted while idle and exposes enabled state', () => {
     const mount = new FakeElement('div');
-    const blinker = new ActivityBlinker({ mount, title: 'Proxy activity' });
+    const blinker = new TerminalTokenCompressionMeter({ mount, title: 'Proxy activity' });
     const host = mount.querySelector('.vb-activity-blinker');
 
     assert.ok(host, 'the proxy activity indicator should mount immediately');
@@ -138,6 +138,7 @@ test('ActivityBlinker stays visibly mounted while idle and exposes enabled state
     assert.ok(host.querySelector('.vb-activity-blinker-popover'));
     assert.ok(host.querySelector('.vb-activity-blinker-zip-outline'));
     assert.ok(host.querySelector('.vb-activity-blinker-zip-solid'));
+    assert.match(renderedText(host.querySelector('.vb-activity-blinker-trigger')), /Token saver/);
     assert.match(renderedText(host.querySelector('.vb-activity-blinker-metric')), /— tokens saved/);
     assert.equal(
         host.querySelector('.vb-activity-blinker-trigger').getAttribute('aria-controls'),
@@ -154,9 +155,9 @@ test('ActivityBlinker stays visibly mounted while idle and exposes enabled state
     assert.equal(host.classList.contains('is-active'), false);
 });
 
-test('ActivityBlinker pulses and groups Claude and Codex proxy reports', () => {
+test('TerminalTokenCompressionMeter pulses and groups Claude and Codex proxy reports', () => {
     const mount = new FakeElement('div');
-    const blinker = new ActivityBlinker({ mount, title: 'Proxy activity' });
+    const blinker = new TerminalTokenCompressionMeter({ mount, title: 'Proxy activity' });
     const host = mount.querySelector('.vb-activity-blinker');
     blinker.setEnabled(true);
 
@@ -205,9 +206,9 @@ test('ActivityBlinker pulses and groups Claude and Codex proxy reports', () => {
     assert.match(text, /1 ·/);
 });
 
-test('ActivityBlinker shows an honest savings placeholder and a session/month/all-time breakdown', () => {
+test('TerminalTokenCompressionMeter shows an honest savings placeholder and a session/month/all-time breakdown', () => {
     const mount = new FakeElement('div');
-    const blinker = new ActivityBlinker({ mount, title: 'Token compression', enabled: true });
+    const blinker = new TerminalTokenCompressionMeter({ mount, title: 'Token compression', enabled: true });
     const host = mount.querySelector('.vb-activity-blinker');
     const trigger = host.querySelector('.vb-activity-blinker-trigger');
     const metric = host.querySelector('.vb-activity-blinker-metric');
@@ -248,10 +249,48 @@ test('ActivityBlinker shows an honest savings placeholder and a session/month/al
     assert.equal(metric.classList.contains('is-placeholder'), true);
 });
 
-test('ActivityBlinker constructs detached and relocate() re-homes it without losing state', () => {
+test('TerminalTokenCompressionMeter owns app event wiring and the initial savings seed', async () => {
+    const mount = new FakeElement('div');
+    const calls = [];
+    let proxyActivityHandler;
+    const meter = new TerminalTokenCompressionMeter({ mount }).connect({
+        appEventClient: {
+            on: (eventName, handler) => {
+                assert.equal(eventName, 'proxy_activity');
+                proxyActivityHandler = handler;
+            }
+        },
+        apiCall: async (...args) => {
+            calls.push(args);
+            return { tokensSavedSession: 900, tokensSavedMonth: 2400, tokensSaved: 8100 };
+        }
+    });
+
+    await meter.initialSavingsReady;
+    assert.deepEqual(calls, [[
+        '/api/v1/token-savings',
+        'GET',
+        null,
+        { showLoading: false }
+    ]]);
+    assert.match(renderedText(mount.querySelector('.vb-activity-blinker-metric')), /900 tokens saved/);
+
+    proxyActivityHandler({
+        source: 'Codex proxy',
+        label: 'POST',
+        status: 200,
+        tokensSavedSession: 1100,
+        tokensSavedMonth: 2600,
+        tokensSavedTotal: 8400
+    });
+    assert.equal(meter.totalCount, 1);
+    assert.match(renderedText(mount.querySelector('.vb-activity-blinker-metric')), /1\.1K tokens saved/);
+});
+
+test('TerminalTokenCompressionMeter constructs detached and relocate() re-homes it without losing state', () => {
     // No mount → the host starts detached so app.js / TerminalManager.initialize() can drop it into
     // the terminal controls bar once that bar renders.
-    const blinker = new ActivityBlinker({ title: 'Proxy activity' });
+    const blinker = new TerminalTokenCompressionMeter({ title: 'Proxy activity' });
     assert.equal(blinker._host.parentElement, null, 'a mountless blinker stays detached until relocated');
 
     blinker.report({
@@ -275,9 +314,9 @@ test('ActivityBlinker constructs detached and relocate() re-homes it without los
     assert.equal(blinker.sources.get('Codex proxy').count, 1, 'per-source history survives the move');
 });
 
-test('ActivityBlinker.relocate() is a safe no-op for missing or unchanged targets', () => {
+test('TerminalTokenCompressionMeter.relocate() is a safe no-op for missing or unchanged targets', () => {
     const mount = new FakeElement('div');
-    const blinker = new ActivityBlinker({ mount, title: 'Proxy activity' });
+    const blinker = new TerminalTokenCompressionMeter({ mount, title: 'Proxy activity' });
 
     // A possibly-null slot (e.g. no terminal view mounted yet) must not throw or detach the host.
     blinker.relocate(null);

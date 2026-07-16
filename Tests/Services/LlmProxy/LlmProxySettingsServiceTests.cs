@@ -47,6 +47,18 @@ public sealed class LlmProxySettingsServiceTests
     }
 
     [Fact]
+    public void Resolve_TabGateDisablesBothProviderSaversWithoutChangingTheirPlan()
+    {
+        var resolved = LlmProxySettingsService.Resolve(
+            ProxyOn(null),
+            tabTokenSaverEnabled: false);
+
+        Assert.False(resolved.ClaudeTokenSaverEnabled);
+        Assert.False(resolved.CodexTokenSaverEnabled);
+        Assert.True(resolved.ResolvedPlan.EnabledIds.SetEquals(CompressionCatalog.DefaultSelection));
+    }
+
+    [Fact]
     public void Resolve_NullStages_MeansNeverConfigured_AndTakesTheCatalogDefaults()
     {
         var plan = LlmProxySettingsService.Resolve(ProxyOn(null)).ResolvedPlan;
