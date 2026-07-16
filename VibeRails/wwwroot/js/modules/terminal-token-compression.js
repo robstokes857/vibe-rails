@@ -1,13 +1,16 @@
-// Persistent status light for the local LLM proxy/token saver.
+// Terminal token-compression UI.
 //
-// A single host element is created once and re-parented (see relocate()) into the terminal
+// This module owns both compression surfaces in the terminal: the persistent savings meter and
+// the per-tab compression toggle. TerminalManager and app.js only provide lifecycle integration.
+//
+// The meter creates one host element and re-parents it (see relocate()) into the terminal
 // controls bar, so it keeps its accumulated per-provider history across the view re-renders that
 // rebuild that bar. Only `proxy_activity` app events are wired to report() (see app.js), and only
 // the authenticated Claude/Codex proxy routes publish those events. Hover, focus, or click to see
 // recent query-free, payload-free request metadata grouped by provider.
-let nextActivityBlinkerId = 0;
+let nextCompressionMeterId = 0;
 
-export class ActivityBlinker {
+export class TerminalTokenCompressionMeter {
     constructor({
         mount = null,
         maxEntriesPerSource = 6,
@@ -23,11 +26,58 @@ export class ActivityBlinker {
         this._title = title;
         this._enabled = Boolean(enabled);
         this._savings = this._normalizeSavings(tokensSaved);
-        this._popoverId = `vb-activity-blinker-popover-${++nextActivityBlinkerId}`;
+        this._popoverId = `vb-activity-blinker-popover-${++nextCompressionMeterId}`;
         this._pulseTimer = null;
         this._build(mount);
         this._syncSavingsDisplay();
         this.setEnabled(this._enabled);
+    }
+
+    // Attach the meter to the app's dedicated proxy event stream and seed its counters from the
+    // persisted savings endpoint. Keeping this wiring here prevents app.js from accumulating
+    // compression-specific payload mapping and fallback behavior.
+    connect(app) {
+        if (!app || this._connectedApp === app) return this;
+        this._connectedApp = app;
+
+        app.appEventClient?.on('proxy_activity', payload => {
+            this.report({
+                source: payload?.source,
+                label: payload?.label,
+                target: payload?.target,
+                status: payload?.status
+            });
+
+            // Older servers omit the tallies; retain the current values in that case.
+            if (typeof payload?.tokensSavedTotal === 'number') {
+                this.setTokensSaved({
+                    session: payload.tokensSavedSession,
+                    month: payload.tokensSavedMonth,
+                    allTime: payload.tokensSavedTotal
+                });
+            }
+        });
+
+        this.initialSavingsReady = (async () => {
+            try {
+                const savings = await app.apiCall(
+                    '/api/v1/token-savings',
+                    'GET',
+                    null,
+                    { showLoading: false });
+                if (typeof savings?.tokensSaved === 'number') {
+                    this.setTokensSaved({
+                        session: savings.tokensSavedSession,
+                        month: savings.tokensSavedMonth,
+                        allTime: savings.tokensSaved
+                    });
+                }
+            } catch {
+                // Best-effort seed: the next live proxy event can still supply the counters.
+            }
+        })();
+
+        return this;
     }
 
     setEnabled(enabled) {
@@ -137,7 +187,7 @@ export class ActivityBlinker {
 
         const label = document.createElement('span');
         label.className = 'vb-activity-blinker-label';
-        label.textContent = 'Token compression';
+        label.textContent = 'Token saver';
         trigger.appendChild(label);
 
         const metric = document.createElement('span');
@@ -224,7 +274,18 @@ export class ActivityBlinker {
 
         const header = document.createElement('div');
         header.className = 'vb-activity-popover-header';
-        header.appendChild(this._span(this._title));
+
+        const heading = document.createElement('span');
+        heading.className = 'vb-activity-popover-heading';
+        const headingIcon = document.createElement('span');
+        headingIcon.className = 'vb-activity-popover-heading-icon';
+        headingIcon.setAttribute('aria-hidden', 'true');
+        const compressIcon = document.createElement('i');
+        compressIcon.className = 'fa-solid fa-compress';
+        headingIcon.appendChild(compressIcon);
+        heading.appendChild(headingIcon);
+        heading.appendChild(this._span(this._title));
+        header.appendChild(heading);
         header.appendChild(this._span(
             `${this.totalCount} request${this.totalCount === 1 ? '' : 's'}`,
             'vb-activity-popover-total'
@@ -238,7 +299,7 @@ export class ActivityBlinker {
         savingsIcon.className = 'vb-activity-popover-savings-icon';
         savingsIcon.setAttribute('aria-hidden', 'true');
         const savingsFile = document.createElement('i');
-        savingsFile.className = 'fa-solid fa-file-zipper';
+        savingsFile.className = 'fa-solid fa-arrow-trend-down';
         savingsIcon.appendChild(savingsFile);
         savings.appendChild(savingsIcon);
 
@@ -365,5 +426,136 @@ export class ActivityBlinker {
         element.textContent = text;
         if (className) element.className = className;
         return element;
+    }
+}
+
+// Per-tab gate over the global Token Saver stage selection. Each Web UI tab owns a child
+// VibeRails process (and therefore its own Claude/Codex proxy), so this controller always talks to
+// the addressed tab endpoint. The child process is authoritative; session metadata is only used
+// for an immediate paint while the quiet refresh is in flight.
+export class TerminalTabTokenCompression {
+    constructor(manager) {
+        this.manager = manager;
+    }
+
+    createState(source = {}) {
+        return {
+            tokenSaverEnabled: source?.tokenSaverEnabled !== false,
+            tokenSaverPending: false,
+            tokenSaverRevision: 0
+        };
+    }
+
+    readMetadata(metadata = {}) {
+        return { tokenSaverEnabled: metadata?.tokenSaverEnabled !== false };
+    }
+
+    writeMetadata(state = {}) {
+        return { tokenSaverEnabled: state?.tokenSaverEnabled !== false };
+    }
+
+    createButton(tabId) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'vb-terminal-tab-token-compression';
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            void this.toggle(tabId);
+        });
+        return button;
+    }
+
+    async refresh(tabId) {
+        const startingTab = this.manager.tabs.get(tabId);
+        if (!startingTab) return;
+        const revision = startingTab.state.tokenSaverRevision;
+
+        try {
+            const response = await this.manager.app.apiCall(this._endpoint(tabId), 'GET');
+            const tab = this.manager.tabs.get(tabId);
+            if (!tab
+                || tab.state.tokenSaverRevision !== revision
+                || typeof response?.enabled !== 'boolean') return;
+
+            tab.state.tokenSaverEnabled = response.enabled;
+            this._persist(tab);
+            this.render(tab);
+        } catch {
+            // Initial synchronization is best-effort. A deliberate click surfaces failures.
+        }
+    }
+
+    async toggle(tabId) {
+        const tab = this.manager.tabs.get(tabId);
+        if (!tab || tab.state.tokenSaverPending === true) return;
+
+        const desired = tab.state.tokenSaverEnabled !== true;
+        tab.state.tokenSaverRevision += 1;
+        tab.state.tokenSaverPending = true;
+        this.render(tab);
+
+        try {
+            const response = await this.manager.app.apiCall(
+                this._endpoint(tabId),
+                'PUT',
+                { enabled: desired });
+            if (typeof response?.enabled !== 'boolean') {
+                throw new Error('The terminal returned an invalid compression state.');
+            }
+
+            tab.state.tokenSaverEnabled = response.enabled;
+            this._persist(tab);
+        } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            this.manager.app.showToast(
+                'Token compression',
+                `Could not update this tab: ${reason}`,
+                'danger');
+        } finally {
+            tab.state.tokenSaverPending = false;
+            this.render(tab);
+        }
+    }
+
+    render(tab) {
+        const item = tab?.state?.ui?.item;
+        const button = tab?.state?.ui?.tokenCompression;
+        if (!item) return;
+
+        const enabled = tab.state.tokenSaverEnabled === true;
+        const pending = tab.state.tokenSaverPending === true;
+        item.classList.toggle('is-token-compression-on', enabled);
+        item.dataset.tokenCompression = enabled ? 'on' : 'off';
+
+        if (!button) return;
+
+        button.hidden = false;
+        button.disabled = pending;
+        button.classList.toggle('is-on', enabled);
+        button.dataset.state = pending ? 'pending' : enabled ? 'on' : 'off';
+        button.innerHTML = pending
+            ? '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>'
+            : '<i class="fa-solid fa-compress" aria-hidden="true"></i><span class="vb-terminal-tab-token-compression-dot" aria-hidden="true"></span>';
+
+        const label = pending
+            ? 'Updating token compression for this tab…'
+            : enabled
+                ? 'Token compression is on for this tab — click to turn it off'
+                : 'Token compression is off for this tab — click to turn it on';
+        button.title = label;
+        button.setAttribute('aria-label', label);
+        button.setAttribute('aria-pressed', String(enabled));
+        button.setAttribute('aria-busy', String(pending));
+        button.setAttribute('aria-hidden', 'false');
+    }
+
+    _persist(tab) {
+        this.manager.saveTabMeta(
+            tab.state.id,
+            this.manager._tabMetaPayload(tab.state));
+    }
+
+    _endpoint(tabId) {
+        return `/api/v1/terminal/tabs/${encodeURIComponent(tabId)}/token-saver`;
     }
 }

@@ -10,6 +10,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 |------|---------|
 | [app.js](app.js) | Central controller, routing, API layer |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
+| [js/modules/terminal-token-compression.js](js/modules/terminal-token-compression.js) | Persistent token-savings meter and per-tab compression control, including API synchronization and persisted state |
 | [js/modules/terminal-snapshot-renderer.js](js/modules/terminal-snapshot-renderer.js) | Renders reserved `xterm_ui_bytes` payloads into xterm.js and captures PNG data URLs for MCP Explorer previews |
 | [js/modules/environment-controller.js](js/modules/environment-controller.js) | Environment CRUD + "Web UI" launch button |
 | [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
@@ -17,6 +18,13 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Interactive MintLint scan dashboard with Monaco code evidence for the Rules page |
 
 ## Terminal Environment Integration
+
+The tab hover actions include a green compression toggle. Its UI, API synchronization, and
+persisted state are owned by `terminal-token-compression.js`; `terminal-multitab.js` only calls the
+controller at tab lifecycle boundaries. The control changes a process-local gate in that tab's
+child VibeRails process, takes effect on the next Claude/Codex proxy request, and does not alter the
+global compression stages or any sibling tab. The same module owns the persistent token-savings
+meter at the far right of the terminal controls bar.
 
 The terminal dropdown shows two groups:
 - **Base CLIs**: Claude (default), Codex (default), Antigravity (default) — resolved to its executable server-side (Antigravity → `agy`)

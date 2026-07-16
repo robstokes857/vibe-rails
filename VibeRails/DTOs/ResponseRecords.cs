@@ -413,6 +413,10 @@ namespace VibeRails.DTOs
         int MaxTabs
     );
 
+    public record TabTokenSaverStateRequest(bool Enabled);
+
+    public record TabTokenSaverStateResponse(bool Enabled);
+
     public record StartTerminalRequest(
         string? WorkingDirectory = null,
         string? Cli = null,
@@ -568,7 +572,7 @@ namespace VibeRails.DTOs
     // the full settings object from a possibly-stale client cache.
     public record UpdateComputerNameDto(string? ComputerName);
 
-    // Display-only ping for the proxy/token-saver light in the UI (see activity-blinker.js).
+    // Display-only ping for the proxy/token-saver meter (see terminal-token-compression.js).
     // Only the authenticated Claude/Codex proxy routes publish this event; ordinary terminal or
     // app activity must not light it. Never include secrets, request bodies, or query strings.
     //   Source: stable proxy name the UI groups by, e.g. "Claude proxy".
@@ -1050,6 +1054,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(TerminalTabStatusResponse))]
     [JsonSerializable(typeof(List<TerminalTabStatusResponse>))]
     [JsonSerializable(typeof(TerminalTabListResponse))]
+    [JsonSerializable(typeof(TabTokenSaverStateRequest))]
+    [JsonSerializable(typeof(TabTokenSaverStateResponse))]
     [JsonSerializable(typeof(StartTerminalRequest))]
     [JsonSerializable(typeof(TerminalInputRequest))]
     [JsonSerializable(typeof(TerminalInputResponse))]

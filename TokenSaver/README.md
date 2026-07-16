@@ -293,6 +293,9 @@ One knob: `TokenSaverStages` in `settings.json` — a list of enabled stage/scop
   stage is off here" rather than failing a request.
 - `ClaudeTokenSaverEnabled` is the master kill switch for **both** providers, despite
   the name. A provider's saver only runs if that provider's proxy is also on.
+- Every Web UI terminal tab also has a process-local zip toggle. It is on by default and acts as
+  an additional gate over the global switch: turning it off bypasses compression for that tab's
+  Claude and Codex proxy requests without changing sibling tabs or restarting the CLI.
 - `TokenSaverCaptureEnabled` independently opts into raw diagnostic captures; it defaults off.
 
 This replaced the old `TokenSaverLevel` tier string (`off`/`safest`/…/`high`) and its

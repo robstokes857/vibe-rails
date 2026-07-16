@@ -16,7 +16,7 @@ import { SettingsController } from './js/modules/settings-controller.js';
 import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
-import { ActivityBlinker } from './js/modules/activity-blinker.js';
+import { TerminalTokenCompressionMeter } from './js/modules/terminal-token-compression.js';
 import { showAppToast } from './js/modules/toast-service.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
@@ -73,43 +73,13 @@ export class VibeControlApp {
         // event only, so terminal output, MCP calls, and other app activity cannot trigger it.
         // The light lives in the terminal controls bar (see renderTerminalPanel); it's created
         // detached and TerminalManager.initialize() re-parents it each time that bar renders.
-        this.activityBlinker = new ActivityBlinker({
+        this.terminalTokenCompression = new TerminalTokenCompressionMeter({
             title: 'Token compression',
             enabled: this.appSettings.codexLlmProxyEnabled === true
                 || this.appSettings.claudeLlmProxyEnabled === true
-        });
-        // If the terminal view mounted before this ran, drop the light into its slot now.
-        this.activityBlinker.relocate(document.getElementById('terminal-proxy-activity-slot'));
-        this.appEventClient.on('proxy_activity', (p) => {
-            this.activityBlinker.report({
-                source: p?.source,
-                label: p?.label,
-                target: p?.target,
-                status: p?.status
-            });
-            // The running tallies ride the ping (server-derived ~4 bytes/token estimate); older
-            // servers omit the fields and the light keeps its em dashes.
-            if (typeof p?.tokensSavedTotal === 'number') {
-                this.activityBlinker.setTokensSaved({
-                    session: p.tokensSavedSession,
-                    month: p.tokensSavedMonth,
-                    allTime: p.tokensSavedTotal
-                });
-            }
-        });
-        // Seed the tally from persisted history; pings keep it live from here on. Best-effort:
-        // a failed fetch just leaves the em dash until the first ping.
-        this.apiCall('/api/v1/token-savings', 'GET', null, { showLoading: false })
-            .then((savings) => {
-                if (typeof savings?.tokensSaved === 'number') {
-                    this.activityBlinker.setTokensSaved({
-                        session: savings.tokensSavedSession,
-                        month: savings.tokensSavedMonth,
-                        allTime: savings.tokensSaved
-                    });
-                }
-            })
-            .catch(() => { });
+        }).connect(this);
+        // If the terminal view mounted before this ran, drop the meter into its slot now.
+        this.terminalTokenCompression.relocate(document.getElementById('terminal-proxy-activity-slot'));
         // Register every handler before opening the socket so the first fast proxy response cannot
         // race the activity subscription during startup.
         this.appEventClient.start();
@@ -440,7 +410,7 @@ export class VibeControlApp {
             ...settings
         });
         this.applyVsCodeThemePreference();
-        this.activityBlinker?.setEnabled(
+        this.terminalTokenCompression?.setEnabled(
             this.appSettings.codexLlmProxyEnabled === true
             || this.appSettings.claudeLlmProxyEnabled === true
         );

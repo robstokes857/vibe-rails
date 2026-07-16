@@ -13,6 +13,7 @@ import { TerminalMultiRun } from './terminal-multirun.js';
 import { TerminalEditorModal } from './terminal-editor-modal.js';
 import { TerminalToast } from './terminal-toast.js';
 import { TerminalNotifications } from './terminal-notifications.js';
+import { TerminalTabTokenCompression } from './terminal-token-compression.js';
 import { showSendDebugLogModal } from './debug-bundle.js';
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 
@@ -65,6 +66,7 @@ class TerminalManager {
         this.app = app;
         this.container = container;
         this.options = options;
+        this.tabTokenCompression = new TerminalTabTokenCompression(this);
         this._destroyed = false;
 
         this.maxTabs = 8;
@@ -202,10 +204,10 @@ class TerminalManager {
         this._mountDropdowns();
         this._initTabScrollArrows();
 
-        // Re-home the persistent proxy/token-saver light into this freshly-rendered controls bar.
+        // Re-home the persistent token-compression meter into this freshly-rendered controls bar.
         // The bar is rebuilt via innerHTML on every terminal-view render, so the app-level singleton
         // is re-parented here (state preserved) rather than recreated. No-op if the slot is absent.
-        this.app.activityBlinker?.relocate(this.container.querySelector('#terminal-proxy-activity-slot'));
+        this.app.terminalTokenCompression?.relocate(this.container.querySelector('#terminal-proxy-activity-slot'));
         this.settings = new TerminalSettings(this.container, this);
         this.settings.init();
         const savedFontSize = this.settings.loadFontSize();
@@ -515,6 +517,7 @@ class TerminalManager {
                 minimized: metadata?.minimized === true,
                 pinned: metadata?.pinned === true,
                 notifyEnabled: metadata?.notifyEnabled === true,
+                ...this.tabTokenCompression.readMetadata(metadata),
                 workingDirectory
             });
         });
@@ -545,6 +548,7 @@ class TerminalManager {
             minimized: options.minimized === true,
             pinned: options.pinned === true,
             notifyEnabled: options.notifyEnabled === true,
+            ...this.tabTokenCompression.createState(options),
             workingDirectory,
             renaming: false,
             hasActiveSession: tabInfo.hasActiveSession === true,
@@ -620,6 +624,8 @@ class TerminalManager {
             this.toggleTabPinned(state.id);
         });
 
+        const tokenCompression = this.tabTokenCompression.createButton(state.id);
+
         const notify = document.createElement('button');
         notify.type = 'button';
         notify.className = 'vb-terminal-tab-notify';
@@ -647,6 +653,7 @@ class TerminalManager {
         actions.className = 'vb-terminal-tab-actions';
         actions.appendChild(edit);
         actions.appendChild(pin);
+        actions.appendChild(tokenCompression);
         actions.appendChild(notify);
         actions.appendChild(min);
         actions.appendChild(close);
@@ -699,7 +706,7 @@ class TerminalManager {
         }
         this.tabPanels?.appendChild(panel);
 
-        state.ui = { item, button, edit, pin, notify, min, close, actions, watchBadge, panel, terminalElement, toastLayer };
+        state.ui = { item, button, edit, pin, tokenCompression, notify, min, close, actions, watchBadge, panel, terminalElement, toastLayer };
 
         const instance = new TerminalTab(this, state);
         instance.statusController = new TabStatusController(state, state.ui, {
@@ -735,8 +742,13 @@ class TerminalManager {
         this.renderTabButton(tab);
         this.applyTabAccent(tab);
         this.applyTabPinned(tab);
+        this.tabTokenCompression.render(tab);
         this.applyTabMinimized(tab);
         this.applyTabNotify(tab);
+
+        // The child process is authoritative. Session storage gives an immediate paint across a
+        // reload; this quiet refresh corrects it if another viewer changed the tab meanwhile.
+        void this.tabTokenCompression.refresh(state.id);
 
         this.updateAddButtonState();
         return tab;
@@ -1510,6 +1522,9 @@ class TerminalManager {
             button.disabled = !enabled;
             button.setAttribute('aria-hidden', enabled ? 'false' : 'true');
         });
+
+        // The compression controller keeps its pending spinner visible while disabling clicks.
+        this.tabTokenCompression.render(tab);
     }
 
     renderTabButton(tab) {
@@ -2549,6 +2564,7 @@ class TerminalManager {
             minimized: state.minimized === true,
             pinned: state.pinned === true,
             notifyEnabled: state.notifyEnabled === true,
+            ...this.tabTokenCompression.writeMetadata(state),
             workingDirectory: state.workingDirectory,
             ...overrides
         };
@@ -2565,6 +2581,7 @@ class TerminalManager {
                 minimized: metadata.minimized === true,
                 pinned: metadata.pinned === true,
                 notifyEnabled: metadata.notifyEnabled === true,
+                ...this.tabTokenCompression.readMetadata(metadata),
                 workingDirectory: cleanString(metadata.workingDirectory) || null
             };
             window.sessionStorage.setItem(`${TAB_META_PREFIX}${tabId}`, JSON.stringify(payload));
@@ -2585,6 +2602,7 @@ class TerminalManager {
                 minimized: parsed?.minimized === true,
                 pinned: parsed?.pinned === true,
                 notifyEnabled: parsed?.notifyEnabled === true,
+                ...this.tabTokenCompression.readMetadata(parsed),
                 workingDirectory: cleanString(parsed?.workingDirectory) || null
             };
         } catch {
@@ -2952,7 +2970,7 @@ export class TerminalController {
                             <span>Reconnect</span>
                         </button>
                     </div>
-                    <!-- Far-right home for the persistent proxy/token-saver light (app.activityBlinker,
+                    <!-- Far-right home for the persistent token-compression meter (app.terminalTokenCompression,
                          re-parented here in TerminalManager.initialize()). ms-auto pushes it opposite
                          the LLM picker + Start button. -->
                     <div class="vb-terminal-proxy-activity-slot ms-auto" id="terminal-proxy-activity-slot"></div>

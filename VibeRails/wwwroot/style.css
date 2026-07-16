@@ -524,7 +524,7 @@ code {
         color-mix(in srgb, var(--color-bg-base) 92%, #fff 8%),
         color-mix(in srgb, var(--color-bg-base) 72%, transparent));
     border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
-    border-radius: 8px;
+    border-radius: 999px;
     font-family: var(--vb-font-mono, 'JetBrains Mono', monospace);
     font-weight: 700;
     cursor: pointer;
@@ -569,7 +569,7 @@ code {
     content: '';
     background: color-mix(in srgb, currentColor 8%, transparent);
     border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-    border-radius: 6px;
+    border-radius: 50%;
     transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
@@ -613,7 +613,7 @@ code {
     color: color-mix(in srgb, var(--color-text) 76%, var(--color-text-muted));
     background: color-mix(in srgb, var(--color-accent) 7%, transparent);
     border: 1px solid color-mix(in srgb, var(--color-accent) 18%, transparent);
-    border-radius: 6px;
+    border-radius: 999px;
     line-height: 1;
     white-space: nowrap;
     transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease;
@@ -756,9 +756,28 @@ code {
 }
 
 .vb-activity-popover-header {
-    padding-bottom: 0.45rem;
+    align-items: center;
+    padding-bottom: 0.55rem;
     font-weight: 700;
     border-bottom: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent);
+}
+
+.vb-activity-popover-heading {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.vb-activity-popover-heading-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    color: color-mix(in srgb, var(--color-accent) 84%, #fff 16%);
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 26%, transparent);
+    border-radius: 7px;
+    font-size: 0.72rem;
 }
 
 .vb-activity-popover-total,
@@ -766,6 +785,16 @@ code {
 .vb-activity-popover-empty,
 .vb-activity-popover-savings-hint {
     color: var(--color-text-muted);
+}
+
+.vb-activity-popover-total {
+    padding: 0.12rem 0.42rem;
+    background: color-mix(in srgb, var(--color-text-muted) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
 .vb-activity-popover-savings {
@@ -790,7 +819,7 @@ code {
     color: color-mix(in srgb, var(--color-accent) 84%, #fff 16%);
     background: color-mix(in srgb, var(--color-accent) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
-    border-radius: 7px;
+    border-radius: 9px;
     font-size: 0.92rem;
 }
 
@@ -907,7 +936,7 @@ code {
     color: color-mix(in srgb, #cdd6f4 56%, transparent);
     background: linear-gradient(135deg, #11111b, rgba(49, 50, 68, 0.72));
     border-color: var(--terminal-border);
-    border-radius: 6px;
+    border-radius: 999px;
 }
 
 #vb-terminal-panel .vb-terminal-controls-bar .vb-activity-blinker-trigger:hover,
@@ -3506,6 +3535,7 @@ code {
 
 #vb-terminal-panel .vb-terminal-tab-edit,
 #vb-terminal-panel .vb-terminal-tab-pin,
+#vb-terminal-panel .vb-terminal-tab-token-compression,
 #vb-terminal-panel .vb-terminal-tab-notify,
 #vb-terminal-panel .vb-terminal-tab-min {
     font-size: 0.72rem;
@@ -3517,6 +3547,54 @@ code {
 
 #vb-terminal-panel .vb-terminal-tab-item.is-pinned .vb-terminal-tab-pin:hover {
     color: #ff8a8a;
+}
+
+/* Per-tab compression is a compact two-state capsule. The compression arrows communicate the
+   action more clearly than a generic archive file, while the dot and soft green fill keep the
+   current state legible in the crowded hover action strip. */
+#vb-terminal-panel .vb-terminal-tab-token-compression {
+    position: relative;
+    width: 27px;
+    color: #7f849c;
+    box-shadow: inset 0 0 0 1px transparent;
+}
+
+#vb-terminal-panel .vb-terminal-tab-token-compression:hover {
+    color: #bac2de;
+    background: rgba(205, 214, 244, 0.09);
+}
+
+#vb-terminal-panel .vb-terminal-tab-token-compression-dot {
+    position: absolute;
+    right: 4px;
+    bottom: 3px;
+    width: 4px;
+    height: 4px;
+    background: currentColor;
+    border-radius: 50%;
+    opacity: 0.48;
+    transition: opacity 0.16s ease, box-shadow 0.16s ease;
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-token-compression-on .vb-terminal-tab-token-compression {
+    color: #a6e3a1;
+    background: linear-gradient(135deg, rgba(166, 227, 161, 0.16), rgba(74, 222, 128, 0.06));
+    box-shadow: inset 0 0 0 1px rgba(166, 227, 161, 0.26), 0 0 8px rgba(74, 222, 128, 0.08);
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-token-compression-on .vb-terminal-tab-token-compression:hover {
+    color: #d2f6ce;
+    background: linear-gradient(135deg, rgba(166, 227, 161, 0.23), rgba(74, 222, 128, 0.1));
+}
+
+#vb-terminal-panel .vb-terminal-tab-item.is-token-compression-on .vb-terminal-tab-token-compression-dot {
+    opacity: 1;
+    box-shadow: 0 0 5px rgba(166, 227, 161, 0.85);
+}
+
+#vb-terminal-panel .vb-terminal-tab-token-compression:disabled {
+    cursor: wait;
+    opacity: 0.82;
 }
 
 /* An armed tab's eye toggle glows sky so it's clear (on hover) which tabs are
