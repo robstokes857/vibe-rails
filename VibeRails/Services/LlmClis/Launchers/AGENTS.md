@@ -30,7 +30,8 @@ IBaseLlmCliLauncher (Interface)
     │       ├── ClaudeLlmCliLauncher   → CLAUDE_CONFIG_DIR
     │       ├── CodexLlmCliLauncher    → CODEX_HOME
     │       ├── AntigravityLlmCliLauncher → (none — launch-flag-only)
-    │       └── CopilotLlmCliLauncher  → (none — launch-flag-only)
+    │       ├── CopilotLlmCliLauncher  → (none — launch-flag-only)
+    │       └── OpencodeLlmCliLauncher → XDG_CONFIG_HOME
     │
     └── LaunchLLMService (Orchestrator - selects launcher by LLM type)
 ```
@@ -52,6 +53,16 @@ IBaseLlmCliLauncher (Interface)
 - **Config Env Var**: none — agy is launch-flag-only. There is no verified per-environment
   config-dir env var (the Node-era Gemini CLI used XDG; the Go-based agy exposes no documented
   equivalent), so `GetEnvironmentVariables` returns an empty dictionary, like Copilot.
+
+### OpencodeLlmCliLauncher
+- **Executable**: `opencode` (== enum name lowercased; no remap needed, unlike `agy`)
+- **Config Env Var**: `XDG_CONFIG_HOME`, set to `{envBasePath}/{envName}`. OpenCode resolves its
+  standard config/agents/commands/plugins directory beneath that root at `opencode/`.
+  `OPENCODE_CONFIG_DIR` is intentionally not used because it is an additive overlay and still
+  merges the user's global config. `XDG_DATA_HOME` is left unchanged, so credentials remain
+  global. Launch-flag-only — no settings file is written (see
+  runbooks/custom_envs/CLI_OPTIONS.md "### OpenCode"). YOLO is `--auto`; initial prompt is
+  `--prompt=<text>` (positional = project path); no MCP auto-reg.
 
 ## Antigravity (agy) — no settings feature
 

@@ -148,7 +148,6 @@ export class TerminalTokenCompressionMeter {
             this._pulseTimer = null;
             this._syncAccessibleStatus();
         }, 900);
-        this._pulseTimer?.unref?.();
     }
 
     // Re-parent the persistent host into `target` (e.g. the terminal controls bar) without dropping
@@ -471,7 +470,8 @@ export class TerminalTabTokenCompression {
         const revision = startingTab.state.tokenSaverRevision;
 
         try {
-            const response = await this.manager.app.apiCall(this._endpoint(tabId), 'GET');
+            const response = await this.manager.app.apiCall(
+                this._endpoint(tabId), 'GET', null, { showLoading: false });
             const tab = this.manager.tabs.get(tabId);
             if (!tab
                 || tab.state.tokenSaverRevision !== revision
@@ -498,7 +498,8 @@ export class TerminalTabTokenCompression {
             const response = await this.manager.app.apiCall(
                 this._endpoint(tabId),
                 'PUT',
-                { enabled: desired });
+                { enabled: desired },
+                { showLoading: false });
             if (typeof response?.enabled !== 'boolean') {
                 throw new Error('The terminal returned an invalid compression state.');
             }
@@ -510,7 +511,7 @@ export class TerminalTabTokenCompression {
             this.manager.app.showToast(
                 'Token compression',
                 `Could not update this tab: ${reason}`,
-                'danger');
+                'error');
         } finally {
             tab.state.tokenSaverPending = false;
             this.render(tab);

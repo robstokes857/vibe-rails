@@ -329,6 +329,12 @@ export class EnvironmentController {
             }
             this.mergeCopilotSettingsFromCustomArgs(cliSettings, env.customArgs || '');
         }
+        if (cliLower === 'opencode') {
+            if (env.customPrompt) {
+                cliSettings.initialMessage = env.customPrompt;
+            }
+            this.mergeOpencodeSettingsFromCustomArgs(cliSettings, env.customArgs || '');
+        }
 
         this.showEnvironmentForm({ mode: 'edit', env, cliSettings });
     }
@@ -341,7 +347,7 @@ export class EnvironmentController {
             return div.innerHTML;
         };
 
-        const cliOptions = ['codex', 'claude', 'antigravity', 'copilot'];
+        const cliOptions = ['codex', 'claude', 'antigravity', 'copilot', 'opencode'];
         const initialCli = isEdit ? env.cli : cliOptions[0];
         const title = isEdit ? `Edit Environment: ${env.name}` : 'Create New Environment';
         const submitLabel = isEdit ? 'Save Changes' : 'Create Environment';
@@ -453,7 +459,7 @@ export class EnvironmentController {
 
     usesManagedCustomArgs(cli) {
         const cliLower = (cli || '').toLowerCase();
-        return cliLower === 'codex' || cliLower === 'claude' || cliLower === 'antigravity' || cliLower === 'copilot';
+        return cliLower === 'codex' || cliLower === 'claude' || cliLower === 'antigravity' || cliLower === 'copilot' || cliLower === 'opencode';
     }
 
     async loadCliSettings(cli, envName) {
@@ -506,6 +512,14 @@ export class EnvironmentController {
             return {
                 customArgs: this.buildCopilotCustomArgs(copilotSettings),
                 customPrompt: copilotSettings?.initialMessage ?? ''
+            };
+        }
+
+        if (cliLower === 'opencode') {
+            const opencodeSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            return {
+                customArgs: this.buildOpencodeCustomArgs(opencodeSettings),
+                customPrompt: opencodeSettings?.initialMessage ?? ''
             };
         }
 
@@ -1008,6 +1022,111 @@ export class EnvironmentController {
         return '';
     }
 
+    renderOpencodeModelOptions(selectedModel) {
+        const selected = (selectedModel || '').trim();
+        // Hand-maintained pinned list — see runbooks/custom_envs/CLI_OPTIONS.md ("Model Lists").
+        // OpenCode model IDs are `provider/model` (e.g. anthropic/claude-sonnet-4-5). Verify the
+        // current catalog with `opencode models` and refresh when providers ship/retire models;
+        // unknown saved values survive via the `(custom)` fallback below.
+        const options = [
+            ['', 'Default (OpenCode recommended)'],
+            ['anthropic/claude-opus-4-5', 'anthropic/claude-opus-4-5'],
+            ['anthropic/claude-sonnet-4-5', 'anthropic/claude-sonnet-4-5'],
+            ['openai/gpt-5.2', 'openai/gpt-5.2'],
+            ['openai/gpt-5.1-codex', 'openai/gpt-5.1-codex'],
+            ['google/gemini-3-pro', 'google/gemini-3-pro'],
+            ['opencode/gpt-5.1-codex', 'opencode/gpt-5.1-codex (Zen)'],
+        ];
+        const known = new Set(options.map(([value]) => value));
+        const rendered = options.map(([value, label]) =>
+            `<option value="${this.app.escapeHtml(value)}" ${selected === value ? 'selected' : ''}>${this.app.escapeHtml(label)}</option>`
+        );
+
+        if (selected && !known.has(selected)) {
+            rendered.push(`<option value="${this.app.escapeHtml(selected)}" selected>${this.app.escapeHtml(selected)} (custom)</option>`);
+        }
+
+        return rendered.join('');
+    }
+
+    buildOpencodeCustomArgs(settings) {
+        const s = settings || {};
+        const args = [];
+
+        this.pushStringArg(args, '--model', s.model);
+        this.pushStringArg(args, '--agent', s.agent);
+
+        // YOLO Mode for OpenCode: auto-approve permissions not explicitly denied (--auto).
+        if (s.yoloMode) {
+            args.push('--auto');
+        }
+
+        args.push(...this.parseArgString(s.additionalArgs || ''));
+
+        return args.map(arg => this.quoteCustomArg(arg)).join(' ');
+    }
+
+    mergeOpencodeSettingsFromCustomArgs(settings, customArgs) {
+        const args = this.parseArgString(customArgs);
+        if (args.length === 0) return settings;
+
+        const additionalArgs = [];
+
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+            const next = args[i + 1];
+
+            // YOLO Mode for OpenCode.
+            if (arg === '--auto') {
+                settings.yoloMode = true;
+                continue;
+            }
+
+            if (arg.startsWith('--model=')) {
+                settings.model = arg.slice('--model='.length).trim();
+                continue;
+            }
+
+            if (arg === '--model' && next) {
+                settings.model = next.trim();
+                i++;
+                continue;
+            }
+
+            if (arg.startsWith('--agent=')) {
+                settings.agent = arg.slice('--agent='.length).trim();
+                continue;
+            }
+
+            if (arg === '--agent' && next) {
+                settings.agent = next.trim();
+                i++;
+                continue;
+            }
+
+            // Initial message rides on --prompt at launch (see LlmPromptArgvBuilder); preserve
+            // it if a user hand-wrote --prompt into the saved args.
+            if (arg.startsWith('--prompt=')) {
+                settings.initialMessage ||= arg.slice('--prompt='.length);
+                continue;
+            }
+
+            if (arg === '--prompt' && next) {
+                settings.initialMessage ||= next;
+                i++;
+                continue;
+            }
+
+            additionalArgs.push(arg);
+        }
+
+        if (additionalArgs.length > 0) {
+            settings.additionalArgs = additionalArgs.map(arg => this.quoteCustomArg(arg)).join(' ');
+        }
+
+        return settings;
+    }
+
     mergeClaudeSettingsFromCustomArgs(settings, customArgs) {
         const args = this.parseArgString(customArgs);
         if (args.length === 0) return settings;
@@ -1192,6 +1311,15 @@ export class EnvironmentController {
                 additionalArgs: document.getElementById('copilot-additional-args').value
             };
         }
+        if (cliLower === 'opencode') {
+            return {
+                initialMessage: document.getElementById('opencode-initial-message').value,
+                model: document.getElementById('opencode-model').value.trim(),
+                agent: document.getElementById('opencode-agent').value.trim(),
+                yoloMode: document.getElementById('opencode-yolo').checked,
+                additionalArgs: document.getElementById('opencode-additional-args').value
+            };
+        }
         return null;
     }
 
@@ -1350,6 +1478,47 @@ export class EnvironmentController {
                 <div class="mb-3">
                     <label class="form-label">Additional Arguments</label>
                     <input type="text" class="form-control" id="copilot-additional-args" value="${additionalArgs}" placeholder="Optional extra Copilot flags">
+                    <small class="form-text text-muted">Preserves advanced flags not covered above</small>
+                </div>
+            `;
+        }
+
+        if (cliLower === 'opencode') {
+            const initialMessage = this.app.escapeHtml(s.initialMessage || '');
+            const model = s.model || '';
+            const agent = this.app.escapeHtml(s.agent || '');
+            const additionalArgs = this.app.escapeHtml(s.additionalArgs || '');
+
+            return `
+                <hr class="my-4">
+                <h6 class="text-muted mb-3">OpenCode CLI Settings</h6>
+                <div class="mb-3">
+                    <label class="form-label">Initial Message</label>
+                    <textarea class="form-control" id="opencode-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to OpenCode as soon as the session starts.">${initialMessage}</textarea>
+                    ${initialMessageHelp}
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Model</label>
+                    <select class="form-select" id="opencode-model">
+                        ${this.renderOpencodeModelOptions(model)}
+                    </select>
+                    <small class="form-text text-muted">Passed as <code>--model provider/model</code>; leave blank for OpenCode's default</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Agent</label>
+                    <input type="text" class="form-control" id="opencode-agent" value="${agent}" placeholder="Optional, e.g. build, plan, or a custom agent">
+                    <small class="form-text text-muted">Passed as <code>--agent</code> when launching OpenCode</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="opencode-yolo" ${s.yoloMode ? 'checked' : ''}>
+                        <label class="form-check-label" for="opencode-yolo">YOLO Mode</label>
+                    </div>
+                    <small class="form-text text-muted text-warning">Launches with <code>--auto</code>, auto-approving permissions not explicitly denied</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Additional Arguments</label>
+                    <input type="text" class="form-control" id="opencode-additional-args" value="${additionalArgs}" placeholder="Optional extra opencode flags">
                     <small class="form-text text-muted">Preserves advanced flags not covered above</small>
                 </div>
             `;

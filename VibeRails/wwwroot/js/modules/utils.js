@@ -4,7 +4,8 @@ export function getLlmName(llmEnum) {
         1: 'Codex',
         2: 'Claude',
         3: 'Antigravity',
-        4: 'Copilot'
+        4: 'Copilot',
+        6: 'OpenCode'
     };
     return names[llmEnum] || 'Unknown';
 }
@@ -91,6 +92,12 @@ export function getCliBrand(cli) {
             className: 'badge-cli-copilot',
             accentColor: '#ab7df8'
         },
+        opencode: {
+            label: 'OpenCode',
+            logo: getAssetPath('assets/img/opencode.svg'),
+            className: 'badge-cli-opencode',
+            accentColor: '#e0a530'
+        },
         shell: {
             label: 'Terminal',
             logo: getAssetPath('assets/img/terminal.svg'),
@@ -107,7 +114,8 @@ const BASE_LLM_CHOICES = Object.freeze([
     { cli: 'claude', label: 'Claude' },
     { cli: 'codex', label: 'Codex' },
     { cli: 'antigravity', label: 'Antigravity' },
-    { cli: 'copilot', label: 'Copilot' }
+    { cli: 'copilot', label: 'Copilot' },
+    { cli: 'opencode', label: 'OpenCode' }
 ]);
 
 // Plain shell — a no-agent terminal. Kept out of BASE_LLM_CHOICES so it only surfaces

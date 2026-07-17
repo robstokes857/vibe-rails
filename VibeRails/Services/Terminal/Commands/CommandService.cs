@@ -1,7 +1,7 @@
 using Serilog;
 using TokenSaver;
-using VibeRails.Services.AgentTools;
 using VibeRails.Services.LlmClis;
+using VibeRails.Services.LlmProxy;
 using static VibeRails.Utils.ShellArgSanitizer;
 
 namespace VibeRails.Services.Terminal;
@@ -15,7 +15,7 @@ public sealed record PreparedTerminalSession(
 public class CommandService : ICommandService
 {
     private readonly LlmCliEnvironmentService _envService;
-    private readonly ILocalToolApiContext _toolApiContext;
+    private readonly ILocalLlmProxyContext _llmProxyContext;
     private readonly ILlmProxySettingsService _llmProxySettings;
     private const string VibeRailsMcpServerName = "viberails-mcp";
     private static int _fakeCliWarningEmitted;
@@ -30,11 +30,11 @@ public class CommandService : ICommandService
 
     public CommandService(
         LlmCliEnvironmentService envService,
-        ILocalToolApiContext toolApiContext,
+        ILocalLlmProxyContext llmProxyContext,
         ILlmProxySettingsService llmProxySettings)
     {
         _envService = envService;
-        _toolApiContext = toolApiContext;
+        _llmProxyContext = llmProxyContext;
         _llmProxySettings = llmProxySettings;
     }
 
@@ -104,6 +104,9 @@ public class CommandService : ICommandService
             {
                 LLM.Copilot => $"{cliCommand} --interactive={quoted}",
                 LLM.Antigravity => $"{cliCommand} --prompt-interactive={quoted}",
+                // OpenCode's TUI treats a positional arg as the [project] path, not a prompt,
+                // so the initial prompt must ride on --prompt (never the default branch).
+                LLM.OpenCode => $"{cliCommand} --prompt={quoted}",
                 _ => $"{cliCommand} {quoted}"
             };
         }
@@ -144,6 +147,15 @@ public class CommandService : ICommandService
                 environment[kvp.Key] = kvp.Value;
         }
 
+        // Codex reads proxy auth headers from environment variables named in its generated
+        // provider config. Use process-local credentials here; the VIBERAILS_TOOL_* variables
+        // added by TerminalRunner intentionally continue to target the root agent-tool API.
+        if (ShouldUseCodexProxy(llm, extraArgs, proxySettings))
+        {
+            environment[LocalLlmProxyContext.SessionTokenVariable] = _llmProxyContext.SessionToken;
+            environment[LocalLlmProxyContext.TabTokenVariable] = _llmProxyContext.TabToken;
+        }
+
         // If Claude proxying is enabled separately, route Claude Code's Anthropic API traffic
         // through the local LLM proxy. Keep it independent from Codex's subscription/API setting:
         // Claude may use API tokens while Codex uses a ChatGPT subscription.
@@ -156,9 +168,9 @@ public class CommandService : ICommandService
             && !environment.ContainsKey(LlmProxyClaudeConfig.CustomHeadersVariable))
         {
             var claudeProxyEnv = LlmProxyClaudeConfig.BuildClaudeProxyEnvironment(
-                _toolApiContext.ApiBaseUrl,
-                _toolApiContext.SessionToken,
-                _toolApiContext.TabToken);
+                _llmProxyContext.ApiBaseUrl,
+                _llmProxyContext.SessionToken,
+                _llmProxyContext.TabToken);
             foreach (var kvp in claudeProxyEnv)
                 environment[kvp.Key] = kvp.Value;
         }
@@ -174,14 +186,14 @@ public class CommandService : ICommandService
 
     private string[] BuildLaunchArgs(LLM llm, string[]? extraArgs, LlmProxySettings proxySettings)
     {
-        if (!proxySettings.CodexLlmProxyEnabled || llm != LLM.Codex || ShouldSkipCodexProxy(extraArgs))
+        if (!ShouldUseCodexProxy(llm, extraArgs, proxySettings))
             return extraArgs ?? [];
 
         var proxyArgs = LlmProxyCodexConfig.BuildCodexProxyArgs(
-            _toolApiContext.ApiBaseUrl,
+            _llmProxyContext.ApiBaseUrl,
             proxySettings.CodexLlmProxyMode,
-            LocalToolApiContext.SessionTokenVariable,
-            LocalToolApiContext.TabTokenVariable);
+            LocalLlmProxyContext.SessionTokenVariable,
+            LocalLlmProxyContext.TabTokenVariable);
         if (extraArgs is not { Length: > 0 })
             return proxyArgs;
 
@@ -190,6 +202,14 @@ public class CommandService : ICommandService
         extraArgs.CopyTo(merged, proxyArgs.Length);
         return merged;
     }
+
+    private static bool ShouldUseCodexProxy(
+        LLM llm,
+        string[]? extraArgs,
+        LlmProxySettings proxySettings) =>
+        proxySettings.CodexLlmProxyEnabled
+        && llm == LLM.Codex
+        && !ShouldSkipCodexProxy(extraArgs);
 
     private static bool ShouldSkipCodexProxy(string[]? extraArgs)
     {

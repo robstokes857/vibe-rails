@@ -16,7 +16,7 @@ public sealed class LlmProxySettingsService(ITabTokenSaverState tabTokenSaverSta
         return Resolve(Config.LoadFresh(), tabTokenSaverState.Enabled);
     }
 
-    internal static LlmProxySettings Resolve(Settings settings, bool tabTokenSaverEnabled = true)
+    internal static LlmProxySettings Resolve(Settings settings, bool tabTokenSaverEnabled)
     {
         ArgumentNullException.ThrowIfNull(settings);
 

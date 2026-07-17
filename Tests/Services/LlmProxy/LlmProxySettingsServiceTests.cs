@@ -28,7 +28,7 @@ public sealed class LlmProxySettingsServiceTests
         var settings = ProxyOn(null);
         settings.ClaudeTokenSaverEnabled = false;
 
-        var resolved = LlmProxySettingsService.Resolve(settings);
+        var resolved = LlmProxySettingsService.Resolve(settings, tabTokenSaverEnabled: true);
 
         Assert.False(resolved.ClaudeTokenSaverEnabled);
         Assert.False(resolved.CodexTokenSaverEnabled);
@@ -40,7 +40,7 @@ public sealed class LlmProxySettingsServiceTests
         var settings = ProxyOn(null);
         settings.ClaudeLlmProxyEnabled = false;
 
-        var resolved = LlmProxySettingsService.Resolve(settings);
+        var resolved = LlmProxySettingsService.Resolve(settings, tabTokenSaverEnabled: true);
 
         Assert.False(resolved.ClaudeTokenSaverEnabled);
         Assert.True(resolved.CodexTokenSaverEnabled);
@@ -61,7 +61,7 @@ public sealed class LlmProxySettingsServiceTests
     [Fact]
     public void Resolve_NullStages_MeansNeverConfigured_AndTakesTheCatalogDefaults()
     {
-        var plan = LlmProxySettingsService.Resolve(ProxyOn(null)).ResolvedPlan;
+        var plan = LlmProxySettingsService.Resolve(ProxyOn(null), tabTokenSaverEnabled: true).ResolvedPlan;
 
         Assert.True(plan.EnabledIds.SetEquals(CompressionCatalog.DefaultSelection));
     }
@@ -72,7 +72,7 @@ public sealed class LlmProxySettingsServiceTests
         // The trap this test exists for: a `?? []` anywhere on this path silently turns the user's
         // "everything off" back into the defaults. Null and empty are different answers, and empty
         // is the one a human actually chose.
-        var plan = LlmProxySettingsService.Resolve(ProxyOn([])).ResolvedPlan;
+        var plan = LlmProxySettingsService.Resolve(ProxyOn([]), tabTokenSaverEnabled: true).ResolvedPlan;
 
         Assert.Empty(plan.EnabledIds);
         Assert.True(plan.IsNoOp);
@@ -86,7 +86,7 @@ public sealed class LlmProxySettingsServiceTests
         // A settings.json written by a newer build must degrade to "that stage is off here", never
         // to a hard failure on an LLM request.
         var plan = LlmProxySettingsService
-            .Resolve(ProxyOn(["not-a-real-stage", CompressionCatalog.AnsiStrip]))
+            .Resolve(ProxyOn(["not-a-real-stage", CompressionCatalog.AnsiStrip]), tabTokenSaverEnabled: true)
             .ResolvedPlan;
 
         Assert.True(plan.Flags.StripAnsiStyling);
@@ -103,7 +103,7 @@ public sealed class LlmProxySettingsServiceTests
         var settings = ProxyOn(null);
         settings.TokenSaverCaptureEnabled = true;
 
-        var resolved = LlmProxySettingsService.Resolve(settings);
+        var resolved = LlmProxySettingsService.Resolve(settings, tabTokenSaverEnabled: true);
 
         Assert.Same(resolved.TokenSaverPlan, resolved.ResolvedPlan);
         Assert.True(resolved.TokenSaverCaptureEnabled);

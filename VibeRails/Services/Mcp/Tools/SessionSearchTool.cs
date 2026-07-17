@@ -29,7 +29,7 @@ public class SessionSearchTool
     [McpServerTool]
     [Description(
         "Search the developer's own captured agent history — past user messages and whole-session " +
-        "summaries from previous Claude/Codex/Copilot/Antigravity sessions in this workspace. Use this " +
+        "summaries from previous Claude/Codex/Copilot/Antigravity/OpenCode sessions in this workspace. Use this " +
         "to recall what was previously asked, decided, tried, or fixed before redoing work or asking the " +
         "user. Results are ranked by reciprocal-rank fusion across semantic (BGE embedding) and literal " +
         "keyword matches, best first.")]

@@ -1,9 +1,9 @@
 using Moq;
 using VibeRails.Interfaces;
 using VibeRails.Services;
-using VibeRails.Services.AgentTools;
 using TokenSaver;
 using VibeRails.Services.LlmClis;
+using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Terminal;
 using Xunit;
 
@@ -141,6 +141,7 @@ public class LlmProxyClaudeConfigTests : IDisposable
     [InlineData(LLM.Codex)]
     [InlineData(LLM.Antigravity)]
     [InlineData(LLM.Copilot)]
+    [InlineData(LLM.OpenCode)]
     public async Task PrepareSession_NonClaude_DoesNotSetAnthropicProxyEnv(LLM llm)
     {
         var service = CreateService();
@@ -163,14 +164,15 @@ public class LlmProxyClaudeConfigTests : IDisposable
             new CodexLlmCliEnvironment(fileService),
             new AntigravityLlmCliEnvironment(fileService),
             new CopilotLlmCliEnvironment(fileService),
+            new OpencodeLlmCliEnvironment(fileService),
             fileService);
-        var toolApiContext = new Mock<ILocalToolApiContext>();
-        toolApiContext.Setup(x => x.ApiBaseUrl).Returns("http://127.0.0.1:4321");
-        toolApiContext.Setup(x => x.SessionToken).Returns("test-session-token");
-        toolApiContext.Setup(x => x.TabToken).Returns("test-tab-token");
+        var proxyContext = new Mock<ILocalLlmProxyContext>();
+        proxyContext.Setup(x => x.ApiBaseUrl).Returns("http://127.0.0.1:4321");
+        proxyContext.Setup(x => x.SessionToken).Returns("test-session-token");
+        proxyContext.Setup(x => x.TabToken).Returns("test-tab-token");
         var proxySettings = new Mock<ILlmProxySettingsService>();
         proxySettings.Setup(x => x.GetSettings())
             .Returns(new LlmProxySettings(codexLlmProxyEnabled, CodexLlmProxySettings.ModeSubscription, claudeLlmProxyEnabled));
-        return new CommandService(envService, toolApiContext.Object, proxySettings.Object);
+        return new CommandService(envService, proxyContext.Object, proxySettings.Object);
     }
 }

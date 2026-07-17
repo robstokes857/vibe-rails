@@ -904,7 +904,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             return null;
         }
 
-        using var request = CreateChildRequest(child, method, path, payload: (StartTerminalRequest?)null);
+        using var request = NewChildRequest(child, method, path);
         var http = _httpClientFactory.CreateClient();
         using var response = await http.SendAsync(request, cancellationToken);
 
@@ -937,7 +937,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             return null;
         }
 
-        using var request = CreateChildRequest(child, HttpMethod.Get, "/api/v1/terminal/status", payload: (StartTerminalRequest?)null);
+        using var request = NewChildRequest(child, HttpMethod.Get, "/api/v1/terminal/status");
         var http = _httpClientFactory.CreateClient();
         using var response = await http.SendAsync(request, cancellationToken);
 
@@ -953,16 +953,27 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             cancellationToken);
     }
 
+    // Header-only base. No payload overload participates in its resolution, so — unlike the old
+    // pattern where a typed overload reached the base by passing a (StartTerminalRequest?)null cast —
+    // no overload can accidentally recurse into itself if that argument is ever changed.
+    private static HttpRequestMessage NewChildRequest(
+        TerminalChildProcess child,
+        HttpMethod method,
+        string path)
+    {
+        var request = new HttpRequestMessage(method, $"http://127.0.0.1:{child.Port}{path}");
+        request.Headers.TryAddWithoutValidation("viberails_session", child.SessionToken);
+        request.Headers.TryAddWithoutValidation("viberails_tab", child.TabToken);
+        return request;
+    }
+
     private static HttpRequestMessage CreateChildRequest(
         TerminalChildProcess child,
         HttpMethod method,
         string path,
         StartTerminalRequest? payload)
     {
-        var request = new HttpRequestMessage(method, $"http://127.0.0.1:{child.Port}{path}");
-        request.Headers.TryAddWithoutValidation("viberails_session", child.SessionToken);
-        request.Headers.TryAddWithoutValidation("viberails_tab", child.TabToken);
-
+        var request = NewChildRequest(child, method, path);
         if (payload != null)
         {
             var json = JsonSerializer.Serialize(payload, AppJsonSerializerContext.Default.StartTerminalRequest);
@@ -978,7 +989,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         string path,
         TerminalInputRequest payload)
     {
-        var request = CreateChildRequest(child, method, path, payload: (StartTerminalRequest?)null);
+        var request = NewChildRequest(child, method, path);
         var json = JsonSerializer.Serialize(payload, AppJsonSerializerContext.Default.TerminalInputRequest);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         return request;
@@ -990,7 +1001,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         string path,
         TabTokenSaverStateRequest? payload)
     {
-        var request = CreateChildRequest(child, method, path, payload: (StartTerminalRequest?)null);
+        var request = NewChildRequest(child, method, path);
         if (payload != null)
         {
             var json = JsonSerializer.Serialize(

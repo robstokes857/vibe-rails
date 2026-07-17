@@ -1,9 +1,9 @@
 using Moq;
 using VibeRails.Interfaces;
 using VibeRails.Services;
-using VibeRails.Services.AgentTools;
 using TokenSaver;
 using VibeRails.Services.LlmClis;
+using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Terminal;
 using Xunit;
 
@@ -118,11 +118,17 @@ public class CommandServiceTests : IDisposable
         Assert.Contains("http://127.0.0.1:4321/llm/openai/v1", prepared.LaunchCommand);
         Assert.Contains("requires_openai_auth=true", prepared.LaunchCommand);
         Assert.Contains($"env_http_headers.{LlmProxyCodexConfig.SessionHeaderName}", prepared.LaunchCommand);
-        Assert.Contains(LocalToolApiContext.SessionTokenVariable, prepared.LaunchCommand);
+        Assert.Contains(LocalLlmProxyContext.SessionTokenVariable, prepared.LaunchCommand);
         Assert.Contains($"env_http_headers.{LlmProxyCodexConfig.TabHeaderName}", prepared.LaunchCommand);
-        Assert.Contains(LocalToolApiContext.TabTokenVariable, prepared.LaunchCommand);
+        Assert.Contains(LocalLlmProxyContext.TabTokenVariable, prepared.LaunchCommand);
         Assert.DoesNotContain("test-session-token", prepared.LaunchCommand);
         Assert.DoesNotContain("test-tab-token", prepared.LaunchCommand);
+        Assert.Equal(
+            "test-session-token",
+            prepared.Environment[LocalLlmProxyContext.SessionTokenVariable]);
+        Assert.Equal(
+            "test-tab-token",
+            prepared.Environment[LocalLlmProxyContext.TabTokenVariable]);
     }
 
     [Fact]
@@ -150,12 +156,15 @@ public class CommandServiceTests : IDisposable
         Assert.DoesNotContain(LlmProxyCodexConfig.OpenAiProviderName, prepared.LaunchCommand);
         Assert.Contains("model_provider", prepared.LaunchCommand);
         Assert.Contains("other", prepared.LaunchCommand);
+        Assert.False(prepared.Environment.ContainsKey(LocalLlmProxyContext.SessionTokenVariable));
+        Assert.False(prepared.Environment.ContainsKey(LocalLlmProxyContext.TabTokenVariable));
     }
 
     [Theory]
     [InlineData(LLM.Codex)]
     [InlineData(LLM.Antigravity)]
     [InlineData(LLM.Copilot)]
+    [InlineData(LLM.OpenCode)]
     public async Task PrepareSession_NonClaude_DoesNotSetForceSyncOutputEnvVar(LLM llm)
     {
         var service = CreateService();
@@ -193,6 +202,33 @@ public class CommandServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task PrepareSession_Opencode_UsesOpencodeExecutableAndNoMcpSetup()
+    {
+        var service = CreateService();
+
+        // OpenCode's binary is `opencode` (== enum name lowercased, so no remap like agy), and
+        // it is launch-flag-only with no MCP auto-registration (`opencode mcp add` is
+        // interactive), so the launch command is bare `opencode` with no mcp setup prefix.
+        var prepared = await service.PrepareSessionAsync(LLM.OpenCode, envName: null, extraArgs: null);
+
+        Assert.Equal("opencode", prepared.LaunchCommand);
+        Assert.DoesNotContain("mcp", prepared.Command);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Opencode_PassesPromptViaPromptFlag()
+    {
+        var service = CreateService();
+
+        // OpenCode's TUI treats a positional arg as the [project] path, not a prompt, so the
+        // initial prompt must ride on --prompt (never the default positional branch).
+        var prepared = await service.PrepareSessionAsync(
+            LLM.OpenCode, envName: null, extraArgs: null, initialPrompt: "hello world");
+
+        Assert.StartsWith("opencode --prompt=", prepared.LaunchCommand);
+    }
+
+    [Fact]
     public async Task PrepareSession_Shell_ReturnsEmptyCommandAndIgnoresEnvAndArgs()
     {
         var service = CreateService();
@@ -223,15 +259,16 @@ public class CommandServiceTests : IDisposable
             new CodexLlmCliEnvironment(fileService),
             new AntigravityLlmCliEnvironment(fileService),
             new CopilotLlmCliEnvironment(fileService),
+            new OpencodeLlmCliEnvironment(fileService),
             fileService);
-        var toolApiContext = new Mock<ILocalToolApiContext>();
-        toolApiContext.Setup(x => x.ApiBaseUrl).Returns("http://127.0.0.1:4321");
-        toolApiContext.Setup(x => x.SessionToken).Returns("test-session-token");
-        toolApiContext.Setup(x => x.TabToken).Returns("test-tab-token");
+        var proxyContext = new Mock<ILocalLlmProxyContext>();
+        proxyContext.Setup(x => x.ApiBaseUrl).Returns("http://127.0.0.1:4321");
+        proxyContext.Setup(x => x.SessionToken).Returns("test-session-token");
+        proxyContext.Setup(x => x.TabToken).Returns("test-tab-token");
         var proxySettings = new Mock<ILlmProxySettingsService>();
         proxySettings.Setup(x => x.GetSettings())
             .Returns(new LlmProxySettings(codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled));
-        return new CommandService(envService, toolApiContext.Object, proxySettings.Object);
+        return new CommandService(envService, proxyContext.Object, proxySettings.Object);
     }
 
     private static string ExpectedQuietRedirect() =>

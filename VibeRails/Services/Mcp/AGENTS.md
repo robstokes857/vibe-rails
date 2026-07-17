@@ -153,6 +153,10 @@ copilot mcp remove viberails-mcp         # output suppressed by CommandService
 copilot mcp add viberails-mcp -- "<path-to-vb>" mcp
 ```
 
+OpenCode is **not** auto-registered: `opencode mcp add` is interactive (no non-interactive
+flags), so the stdio registration pattern above does not apply. OpenCode environments do not
+get the VibeRails MCP server registered automatically.
+
 At launch time `CommandService` resolves the server command as either the published executable
 (`Environment.ProcessPath`, e.g. `vb.exe mcp`) or `dotnet <path-to-vb.dll> mcp` for
 framework-dependent/dev builds. Setup failures are non-blocking: commands are chained with `;`,

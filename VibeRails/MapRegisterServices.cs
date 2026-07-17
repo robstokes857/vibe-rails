@@ -76,6 +76,8 @@ namespace VibeRails
             serviceCollection.AddSingleton<ILlmParser, LlmParser>();
             serviceCollection.AddSingleton<ILocalToolApiContext>(sp =>
                 new LocalToolApiContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>()));
+            serviceCollection.AddSingleton<ILocalLlmProxyContext>(sp =>
+                new LocalLlmProxyContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>()));
             serviceCollection.AddSingleton<ITabTokenSaverState, TabTokenSaverState>();
             serviceCollection.AddSingleton<ILlmProxySettingsService, LlmProxySettingsService>();
             // Host adapters behind the TokenSaver library's seams: auth-gate → IAuthService,
@@ -137,6 +139,7 @@ namespace VibeRails
             serviceCollection.AddScoped<ICodexLlmCliEnvironment, CodexLlmCliEnvironment>();
             serviceCollection.AddScoped<IAntigravityLlmCliEnvironment, AntigravityLlmCliEnvironment>();
             serviceCollection.AddScoped<ICopilotLlmCliEnvironment, CopilotLlmCliEnvironment>();
+            serviceCollection.AddScoped<IOpencodeLlmCliEnvironment, OpencodeLlmCliEnvironment>();
             serviceCollection.AddScoped<LlmCliEnvironmentService>();
 
             // Sandbox service
@@ -147,6 +150,7 @@ namespace VibeRails
             serviceCollection.AddScoped<ICodexLlmCliLauncher, CodexLlmCliLauncher>();
             serviceCollection.AddScoped<IAntigravityLlmCliLauncher, AntigravityLlmCliLauncher>();
             serviceCollection.AddScoped<ICopilotLlmCliLauncher, CopilotLlmCliLauncher>();
+            serviceCollection.AddScoped<IOpencodeLlmCliLauncher, OpencodeLlmCliLauncher>();
             serviceCollection.AddScoped<ILaunchLLMService, LaunchLLMService>();
 
             // In-process MCP server, exposed over HTTP at /mcp (see app.MapMcp in Program.cs).

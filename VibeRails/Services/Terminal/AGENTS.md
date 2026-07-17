@@ -103,6 +103,9 @@ Session orchestrator.
   (Claude, Codex, Antigravity, Copilot).
 - Builds base env vars (`LANG`, `LC_ALL`, `PYTHONIOENCODING`).
 - Merges CLI-specific env vars via `LlmCliEnvironmentService` when environment name is provided.
+- Keeps agent-tool/MCP calls on the inherited root `ILocalToolApiContext`, while Claude/Codex use
+  `ILocalLlmProxyContext` for the current process's proxy URL and auth. This lets each terminal-tab
+  child apply its own process-local token-saver gate without breaking root tool routing.
 
 `CreateSessionAsync(...)`
 1. Creates DB/logging session via `ITerminalStateService.CreateSessionAsync`.
