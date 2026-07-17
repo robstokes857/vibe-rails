@@ -55,5 +55,6 @@ public class LlmParserTests
         Assert.Contains(LLM.Claude, _parser.All);
         Assert.Contains(LLM.Antigravity, _parser.All);
         Assert.Contains(LLM.Copilot, _parser.All);
+        Assert.Contains(LLM.OpenCode, _parser.All);
     }
 }

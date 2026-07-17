@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { TerminalTabTokenCompression } from '../../../VibeRails/wwwroot/js/modules/terminal-token-compression.js';
 
@@ -40,7 +41,8 @@ test('compression toggle updates only the addressed tab through its token-saver 
     assert.deepEqual(calls, [[
         '/api/v1/terminal/tabs/tab%20one/token-saver',
         'PUT',
-        { enabled: false }
+        { enabled: false },
+        { showLoading: false }
     ]]);
     assert.equal(state.tokenSaverEnabled, false);
     assert.equal(state.tokenSaverPending, false);
@@ -60,6 +62,8 @@ test('failed compression toggle preserves state and surfaces the backend error',
     assert.equal(saved.length, 0);
     assert.equal(toasts.length, 1);
     assert.match(toasts[0][1], /child unavailable/);
+    // Must be a real error toast, not an unrecognized type the toast service silently downgrades.
+    assert.equal(toasts[0][2], 'error');
 });
 
 test('a stale initial refresh cannot overwrite a user toggle', async () => {
@@ -142,4 +146,13 @@ test('compression control exposes polished state and an explicit per-tab label',
     assert.match(button.innerHTML, /fa-compress/);
     assert.equal(attributes.get('aria-pressed'), 'true');
     assert.match(attributes.get('aria-label'), /this tab/);
+});
+
+test('minimized tabs hide compression so restore remains their only hover action', () => {
+    const css = readFileSync('VibeRails/wwwroot/style.css', 'utf8');
+
+    assert.match(
+        css,
+        /\.is-minimized\s+\.vb-terminal-tab-token-compression,\s*\n\s*#vb-terminal-panel\s+\.vb-terminal-tab-item\.is-minimized\s+\.vb-terminal-tab-notify,/,
+        'the minimized action suppression list must include token compression');
 });

@@ -79,7 +79,7 @@ test.describe('terminal-multirun', () => {
         expect(sel2Value).toBe('base:codex');
     });
 
-    test('Multi Run dropdowns expose the four base CLIs and nothing else', async ({ page }) => {
+    test('Multi Run dropdowns expose the five base CLIs and nothing else', async ({ page }) => {
         await navigateToDashboard(page);
         await openMultiRunModal(page);
 
@@ -91,7 +91,7 @@ test.describe('terminal-multirun', () => {
         });
 
         expect(optionValues.sort()).toEqual(
-            ['base:claude', 'base:codex', 'base:copilot', 'base:antigravity'].sort()
+            ['base:claude', 'base:codex', 'base:copilot', 'base:antigravity', 'base:opencode'].sort()
         );
     });
 

@@ -405,7 +405,7 @@ export class VibeRailsAiController {
         // CLI breakdown from the most recent sample we already fetched.
         // captureCount weights each session by how active it was, which approximates
         // turn share better than raw session counts.
-        const cliBuckets = { codex: 0, claude: 0, antigravity: 0, copilot: 0, other: 0 };
+        const cliBuckets = { codex: 0, claude: 0, antigravity: 0, copilot: 0, opencode: 0, other: 0 };
         for (const sess of (this.state.recentSessions || [])) {
             const cli = String(sess.cli || '').toLowerCase();
             const w = Math.max(1, sess.captureCount || 1);
@@ -413,6 +413,7 @@ export class VibeRailsAiController {
             else if (cli.includes('claude')) cliBuckets.claude += w;
             else if (cli.includes('antigravity')) cliBuckets.antigravity += w;
             else if (cli.includes('copilot') || cli.includes('ghc')) cliBuckets.copilot += w;
+            else if (cli.includes('opencode')) cliBuckets.opencode += w;
             else if (cli) cliBuckets.other += w;
         }
         const cliEntries = [
@@ -420,6 +421,7 @@ export class VibeRailsAiController {
             { key: 'claude',  name: 'Claude',  count: cliBuckets.claude },
             { key: 'antigravity', name: 'Antigravity', count: cliBuckets.antigravity },
             { key: 'copilot', name: 'Copilot', count: cliBuckets.copilot },
+            { key: 'opencode', name: 'OpenCode', count: cliBuckets.opencode },
         ];
         if (cliBuckets.other > 0) cliEntries.push({ key: 'other', name: 'Other', count: cliBuckets.other });
         const distinctClis = cliEntries.filter(e => e.count > 0).length;

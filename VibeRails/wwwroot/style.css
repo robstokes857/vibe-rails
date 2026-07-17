@@ -3942,6 +3942,7 @@ code {
    full tab (restore first); clicking anywhere else on the chip activates it. */
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-edit,
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-pin,
+#vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-token-compression,
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-notify,
 #vb-terminal-panel .vb-terminal-tab-item.is-minimized .vb-terminal-tab-close {
     display: none !important;
@@ -9453,6 +9454,7 @@ kbd:not(.ch-search-kbd) {
 .vibe-rails-ai-view .insp-learn-llm.cli-claude  .bar .fill { background: #f59e0b; }
 .vibe-rails-ai-view .insp-learn-llm.cli-antigravity .bar .fill { background: #4d9de0; }
 .vibe-rails-ai-view .insp-learn-llm.cli-copilot .bar .fill { background: #c084fc; }
+.vibe-rails-ai-view .insp-learn-llm.cli-opencode .bar .fill { background: #14b8a6; }
 .vibe-rails-ai-view .insp-learn-llm.cli-other   .bar .fill { background: color-mix(in srgb, var(--color-text) 35%, transparent); }
 .vibe-rails-ai-view .insp-learn-llm .cnt {
     text-align: right;

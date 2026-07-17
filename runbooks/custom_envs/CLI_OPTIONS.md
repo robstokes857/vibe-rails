@@ -5,7 +5,7 @@ This describes the entire custom env option workflow but it has mainly been used
 # Custom Environment CLI Options
 
 This runbook explains how to change, add, or delete custom environment options
-for the four managed TUI CLIs: Claude, Codex, Antigravity, and Copilot.
+for the five managed TUI CLIs: Claude, Codex, Antigravity, Copilot, and OpenCode.
 
 Use it when editing the Environments page's create/edit modal, the per-CLI
 settings APIs, or the generated launch arguments stored in `CustomArgs`.
@@ -22,12 +22,14 @@ and launch behavior before changing generated arguments:
 - Antigravity (agy): https://antigravity.google/docs/cli-using (also `cli-getting-started`, `cli-settings`)
 - Antigravity authoritative flags: run `agy --help` (and `agy models` for the live model catalog)
 - Copilot: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference
+- OpenCode: https://opencode.ai/docs/cli/ (also `/docs/config/`, `/docs/models/`)
 
 Status checked against the upstream references above on July 2, 2026. The Codex
 catalog and pinned-list preference were refreshed from the live model picker on
 this host on July 10, 2026. agy flags were re-verified against `agy --help` on
 this host (unchanged since v1.0.8); the third-party write-ups still conflict
-with each other, so trust `--help`.
+with each other, so trust `--help`. OpenCode CLI/config/models were verified
+against the upstream docs on July 16, 2026.
 
 Important distinction: `CustomArgs` and `CustomPrompt` are VibeRails' launch
 contract. The DTO field lists below describe fields VibeRails currently
@@ -75,6 +77,7 @@ Where they live in code
 - Codex: `renderCodexModelOptions()`.
 - Antigravity: `renderAntigravityModelOptions()`.
 - Copilot: `renderCopilotModelOptions()`.
+- OpenCode: `renderOpencodeModelOptions()`.
 
 Current pinned values (Codex refreshed 2026-07-10; all others 2026-07-02):
 
@@ -116,6 +119,12 @@ Current pinned values (Codex refreshed 2026-07-10; all others 2026-07-02):
   available" at launch does NOT mean the ID is wrong (on this host even
   `claude-opus-4.7` is gated while `claude-sonnet-5` works). The pinned list
   follows the docs' supported-in-CLI table, not one account's entitlements.
+- OpenCode: `anthropic/claude-opus-4-5`, `anthropic/claude-sonnet-4-5`,
+  `openai/gpt-5.2`, `openai/gpt-5.1-codex`, `google/gemini-3-pro`,
+  `opencode/gpt-5.1-codex` (Zen), plus an empty "Default (OpenCode recommended)" entry.
+  OpenCode model IDs are `provider/model` (the format `--model` and `opencode models` use).
+  Refresh via `opencode models` (optionally `--refresh` to update the cache from models.dev).
+  Added 2026-07-16 alongside the OpenCode CLI integration.
 
 The rule:
 
@@ -278,13 +287,49 @@ Legacy flags still read:
 - `--plan`, normalized to `--mode plan`.
 - `--autopilot`, normalized to `--mode autopilot`.
 
+### OpenCode
+
+OpenCode is **launch-flag-only** (like Antigravity/Copilot): there is no `OpencodeSettingsDto`
+and no `/api/v1/opencode/settings` route. All options ride in `CustomArgs` / `CustomPrompt`.
+OpenCode's documented `OPENCODE_CONFIG_DIR` is an additive overlay: it is loaded after the
+standard global and project configuration and therefore does not isolate an environment from
+the user's global OpenCode config. VibeRails instead sets `XDG_CONFIG_HOME` to the environment
+root. OpenCode then resolves its standard config, agents, commands, and plugins beneath the
+existing `opencode/` subdirectory. Project-local config still applies by OpenCode design.
+VibeRails does **not** write or manage the `opencode.json` config file — the schema is large and
+merged from multiple locations, so per the compatibility policy only launch flags are managed.
+Credentials are NOT isolated: VibeRails leaves `XDG_DATA_HOME` unchanged, so `opencode auth
+login` continues to use the user's global OpenCode data directory (normally
+`~/.local/share/opencode/auth.json`).
+
+UI-managed launch and prompt settings (verified against https://opencode.ai/docs/cli/ on
+2026-07-16):
+
+- Initial Message: stored in `CustomPrompt`; sent as `--prompt=<text>`. The TUI treats a
+  positional arg as the `[project]` path, not a prompt, so this flag is mandatory for prompts.
+- Model: `--model`; pinned `provider/model` values from `renderOpencodeModelOptions()` (see
+  Model Lists). Empty means OpenCode's default.
+- Agent: `--agent <name>`; free text (built-ins like `build`/`plan` or a custom agent).
+- YOLO Mode: `--auto` — auto-approves permissions not explicitly denied. This is the only
+  permission control.
+- Additional Arguments: preserved in `CustomArgs` for advanced opencode flags not modeled by
+  VibeRails (e.g. `--continue`, `--session`, `--fork`).
+
+There is no `OpencodeSettingsDto`, no settings file, and no `/api/v1/opencode/settings` route.
+
+MCP auto-registration is **not** wired for OpenCode: `opencode mcp add` is interactive (no
+non-interactive flags), so the `cli mcp add viberails-mcp -- …` pattern used by the other CLIs
+does not apply. OpenCode environments therefore do not get the VibeRails MCP stdio server
+registered automatically. (Future option: write a minimal `opencode.json` `{ "mcp": {…} }` into
+the env config dir — requires config-file management, deliberately deferred.)
+
 ## Mental Model
 
 Custom environments have two layers:
 
 1. `CustomArgs` and `CustomPrompt` live in the `Environments` table and apply
    to every launch path.
-2. Per-CLI settings files exist for Claude and Codex only. Antigravity and Copilot
+2. Per-CLI settings files exist for Claude and Codex only. Antigravity, Copilot, and OpenCode
    are frontend-managed through `CustomArgs` and `CustomPrompt`.
 
 The important rule: a visible control is not enough. Every CLI option must
@@ -420,6 +465,23 @@ Copilot:
   `mergeCopilotSettingsFromCustomArgs()`.
 - Initial messages launch via `--interactive=<text>` through
   `LlmPromptArgvBuilder`.
+
+OpenCode:
+
+- No settings file integration — launch-flag-only (like Copilot/Antigravity), but
+  `XDG_CONFIG_HOME` points at the environment root for user-level
+  config/agents/commands/plugins isolation. `OPENCODE_CONFIG_DIR` is not injected because it is
+  only an additive overlay; `XDG_DATA_HOME` remains global for credentials.
+- Executable is `opencode` (== enum name lowercased); no remap is needed in
+  `CommandService.PrepareSession` (unlike `agy`).
+- Initial messages launch via `--prompt=<text>` through `LlmPromptArgvBuilder` (NOT positional —
+  a positional arg is the project path).
+- Current launch args come from `buildOpencodeCustomArgs()`; existing args are round-tripped by
+  `mergeOpencodeSettingsFromCustomArgs()`.
+- YOLO is `--auto` (the only permission control). Model is `--model provider/model` via
+  `renderOpencodeModelOptions()`. Agent is `--agent`.
+- `customPrompt` is populated from the OpenCode initial message.
+- No MCP auto-registration (`opencode mcp add` is interactive).
 
 ## Add A New Option
 

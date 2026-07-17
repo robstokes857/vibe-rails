@@ -11,6 +11,7 @@ namespace VibeRails.Services.LlmClis
         private readonly ICodexLlmCliEnvironment _codexLlmCliEnvironment;
         private readonly IAntigravityLlmCliEnvironment _antigravityLlmCliEnvironment;
         private readonly ICopilotLlmCliEnvironment _copilotLlmCliEnvironment;
+        private readonly IOpencodeLlmCliEnvironment _opencodeLlmCliEnvironment;
         private readonly IFileService _fileService;
 
         public LlmCliEnvironmentService(
@@ -18,12 +19,14 @@ namespace VibeRails.Services.LlmClis
             ICodexLlmCliEnvironment codexLlmCliEnvironment,
             IAntigravityLlmCliEnvironment antigravityLlmCliEnvironment,
             ICopilotLlmCliEnvironment copilotLlmCliEnvironment,
+            IOpencodeLlmCliEnvironment opencodeLlmCliEnvironment,
             IFileService fileService)
         {
             _claudeLlmCliEnvironment = claudeLlmCliEnvironment;
             _codexLlmCliEnvironment = codexLlmCliEnvironment;
             _antigravityLlmCliEnvironment = antigravityLlmCliEnvironment;
             _copilotLlmCliEnvironment = copilotLlmCliEnvironment;
+            _opencodeLlmCliEnvironment = opencodeLlmCliEnvironment;
             _fileService = fileService;
         }
 
@@ -47,6 +50,9 @@ namespace VibeRails.Services.LlmClis
                     break;
                 case LLM.Copilot:
                     await _copilotLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
+                    break;
+                case LLM.OpenCode:
+                    await _opencodeLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
                     break;
                 default:
                     throw new ArgumentException("Unsupported LLM type");
@@ -107,6 +113,14 @@ namespace VibeRails.Services.LlmClis
                 // env var, so (like Copilot) we inject none.
                 LLM.Antigravity => new Dictionary<string, string>(),
                 LLM.Copilot => new Dictionary<string, string>(),
+                // OPENCODE_CONFIG_DIR is an additive overlay and still loads the user's global
+                // config. Point OpenCode's XDG config root at the environment root instead;
+                // OpenCode then resolves its config under the existing "opencode" subdirectory.
+                // XDG_DATA_HOME stays untouched so credentials remain shared.
+                LLM.OpenCode => new Dictionary<string, string>
+                {
+                    ["XDG_CONFIG_HOME"] = envPath
+                },
                 _ => new Dictionary<string, string>()
             };
         }

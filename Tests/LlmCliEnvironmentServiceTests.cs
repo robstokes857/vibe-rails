@@ -4,6 +4,7 @@ using VibeRails.DB;
 using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
+using VibeRails.Services.LlmClis.Launchers;
 using VibeRails.Utils;
 using Xunit;
 
@@ -58,6 +59,54 @@ public class LlmCliEnvironmentServiceTests
         fileService.Verify(x => x.DeleteDirectory(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }
 
+    [Fact]
+    public void GetEnvironmentVariables_OpenCodeUsesIsolatedXdgConfigRoot()
+    {
+        var originalEnvPath = ParserConfigs.GetEnvPath();
+        var configuredEnvRoot = Path.Combine(Path.GetTempPath(), $"viberails-opencode-{Guid.NewGuid():N}");
+        var expectedPath = Path.GetFullPath(Path.Combine(configuredEnvRoot, "review"));
+        var service = CreateService(Mock.Of<IFileService>());
+
+        ParserConfigs.SetEnvPath(configuredEnvRoot);
+
+        try
+        {
+            var variables = service.GetEnvironmentVariables("review", LLM.OpenCode);
+
+            Assert.Equal(expectedPath, variables["XDG_CONFIG_HOME"]);
+            Assert.DoesNotContain("OPENCODE_CONFIG_DIR", variables.Keys);
+            Assert.DoesNotContain("XDG_DATA_HOME", variables.Keys);
+        }
+        finally
+        {
+            ParserConfigs.SetEnvPath(originalEnvPath);
+        }
+    }
+
+    [Fact]
+    public void OpencodeLauncher_UsesIsolatedXdgConfigRoot()
+    {
+        var originalEnvPath = ParserConfigs.GetEnvPath();
+        var configuredEnvRoot = Path.Combine(Path.GetTempPath(), $"viberails-opencode-{Guid.NewGuid():N}");
+        var expectedPath = Path.GetFullPath(Path.Combine(configuredEnvRoot, "review"));
+        var launcher = new OpencodeLlmCliLauncher();
+
+        ParserConfigs.SetEnvPath(configuredEnvRoot);
+
+        try
+        {
+            var variables = launcher.GetEnvironmentVariables("review");
+
+            Assert.Equal(expectedPath, variables["XDG_CONFIG_HOME"]);
+            Assert.DoesNotContain("OPENCODE_CONFIG_DIR", variables.Keys);
+            Assert.DoesNotContain("XDG_DATA_HOME", variables.Keys);
+        }
+        finally
+        {
+            ParserConfigs.SetEnvPath(originalEnvPath);
+        }
+    }
+
     private static LlmCliEnvironmentService CreateService(IFileService fileService)
     {
         return new LlmCliEnvironmentService(
@@ -65,6 +114,7 @@ public class LlmCliEnvironmentServiceTests
             new CodexLlmCliEnvironment(fileService),
             new AntigravityLlmCliEnvironment(fileService),
             new CopilotLlmCliEnvironment(fileService),
+            new OpencodeLlmCliEnvironment(fileService),
             fileService);
     }
 }

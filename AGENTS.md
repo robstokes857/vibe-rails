@@ -13,7 +13,7 @@
 ### Core Capabilities
 - **Agent File Management** - Create and manage `agent.md` files with customizable coding rules
 - **Rule Enforcement** - Define standards with three enforcement levels (WARN/COMMIT/STOP)
-- **Multi-LLM Support** - Unified interface for Claude, Codex, and Antigravity CLIs
+- **Multi-LLM Support** - Unified interface for Claude, Codex, Antigravity, Copilot, and OpenCode CLIs
 - **Environment Management** - Configure separate environments for different LLM providers with custom args and prompts. Launch environments directly in the Web UI terminal with the "Web UI" button or select from the terminal's environment dropdown
 - **Sandbox Management** - Create isolated git clone sandboxes for parallel AI workflows. Shallow clones current branch with all dirty/untracked files. Launch terminals or VS Code directly into sandbox directories.
 - **Session Logging** - Track and monitor all CLI session history and outputs
@@ -606,6 +606,14 @@ CODEX_HOME=~/.vibe_rails/envs/myenv/codex
 
 **Antigravity (agy)**: none — agy is launch-flag-only, so VibeRails injects no
 per-environment config env vars (sandbox/permissions are launch flags).
+
+**Copilot**: none — Copilot is launch-flag-only (no config-dir env var), like agy.
+
+**OpenCode**: `XDG_CONFIG_HOME=~/.vibe_rails/envs/myenv` — OpenCode resolves its standard
+config/agents/commands/plugins directory at `$XDG_CONFIG_HOME/opencode`. VibeRails does not set
+the additive `OPENCODE_CONFIG_DIR`, which would still merge the user's global config. Credentials
+are NOT isolated because `XDG_DATA_HOME` remains unchanged (auth stays in the user's global
+OpenCode data directory, normally `~/.local/share/opencode/auth.json`).
 
 ## Development Workflows
 

@@ -510,7 +510,8 @@ namespace VibeRails.DB
             FROM Environments
             WHERE CustomName != 'Default'
               AND NOT (
-                  CustomName IN ('Claude', 'Codex', 'Antigravity')
+                  CustomName IN ('Claude', 'Codex', 'Antigravity', 'Copilot', 'OpenCode')
+                  AND (Path IS NULL OR Path = '')
                   AND (CustomArgs IS NULL OR CustomArgs = '')
                   AND (CustomPrompt IS NULL OR CustomPrompt = '')
               )

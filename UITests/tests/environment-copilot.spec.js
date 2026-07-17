@@ -8,10 +8,11 @@ const { test, expect } = require('./fixtures');
 
 async function openCopilotEnvironmentForm(page) {
     await page.goto('/');
-    await expect(page.getByText('Global Context')).toBeVisible({ timeout: 15_000 });
 
     // Navigate to Environments view
-    await page.locator('.app-subnav-link[data-view="environments"]').click();
+    const environmentsNav = page.locator('.app-subnav-link[data-view="environments"]');
+    await expect(environmentsNav).toBeVisible({ timeout: 15_000 });
+    await environmentsNav.click();
     await expect(page.getByRole('heading', { name: /environments/i })).toBeVisible({ timeout: 10_000 });
 
     // Open the "Create Environment" modal

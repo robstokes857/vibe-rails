@@ -22,7 +22,7 @@ This document describes how Environments, Sandboxes, AgentMetadata, and Sessions
 
 ### Business Logic
 
-An **Environment** is a reusable configuration for a specific LLM CLI (Claude, Codex, or Antigravity). Environments are **global** — they are not tied to any project.
+An **Environment** is a reusable configuration for a specific LLM CLI (Claude, Codex, Antigravity, Copilot, or OpenCode). Environments are **global** — they are not tied to any project.
 
 | Rule | Details |
 |---|---|
@@ -31,7 +31,7 @@ An **Environment** is a reusable configuration for a specific LLM CLI (Claude, C
 | **Custom environments** | Created via the UI or `--env` flag. They store `CustomArgs` (CLI flags prepended to launch args) and `CustomPrompt` (system prompt override; falls back to `DefaultPrompt` if empty). |
 | **Config directory** | `Path` stores the filesystem location for the environment's LLM-specific config files. Set by `LlmCliEnvironmentService`, not the DB layer. |
 | **Recency tracking** | `LastUsedUTC` is bumped on every access or launch. Dashboard orders by `LastUsedUTC DESC`. |
-| **Querying** | `GetCustomEnvironmentsAsync` filters out default/bare environments. `GetAllEnvironmentsAsync` returns everything. |
+| **Querying** | `GetCustomEnvironmentsAsync` filters out default environments and legacy bare provider rows whose `Path`, `CustomArgs`, and `CustomPrompt` are all empty. A user-created provider-named environment has a populated `Path` and remains visible. `GetAllEnvironmentsAsync` returns everything. |
 | **Deletion guard** | Default environments cannot be deleted — enforced in the Routes layer, not the DB layer. |
 
 ### Technical Details
@@ -63,6 +63,9 @@ CREATE TABLE IF NOT EXISTS Environments (
 | 1 | Codex |
 | 2 | Claude |
 | 3 | Antigravity |
+| 4 | Copilot |
+| 5 | Shell |
+| 6 | OpenCode |
 
 **Key operations:**
 

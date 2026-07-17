@@ -1,5 +1,5 @@
 using TokenSaver;
-using VibeRails.Services.AgentTools;
+using VibeRails.Services.LlmProxy;
 using Xunit;
 
 namespace Tests.Services.LlmProxy;
@@ -29,21 +29,21 @@ public class LlmProxyCodexConfigTests
     [InlineData(CodexLlmProxySettings.ModeApi, "/v1")]
     public void BuildCodexProxyArgs_ConfiguresOnlyTheModelProvider(string mode, string expectedPath)
     {
-        // Pass the real tool-API env-var names (as CommandService does) so this test keeps pinning
-        // the header→env-var contract to LocalToolApiContext even though the builder lives in the
-        // TokenSaver library now.
+        // Pass the process-local proxy env-var names (as CommandService does) so this test pins
+        // the header→env-var contract without coupling Codex proxy auth to the inherited root
+        // agent-tool credentials.
         var args = LlmProxyCodexConfig.BuildCodexProxyArgs(
             "http://127.0.0.1:4321",
             mode,
-            LocalToolApiContext.SessionTokenVariable,
-            LocalToolApiContext.TabTokenVariable);
+            LocalLlmProxyContext.SessionTokenVariable,
+            LocalLlmProxyContext.TabTokenVariable);
         var joined = string.Join(' ', args);
 
         Assert.Contains($"model_provider=\"{LlmProxyCodexConfig.OpenAiProviderName}\"", joined);
         Assert.Contains($"/llm/openai{expectedPath}", joined);
         Assert.Contains("requires_openai_auth=true", joined);
-        Assert.Contains(LocalToolApiContext.SessionTokenVariable, joined);
-        Assert.Contains(LocalToolApiContext.TabTokenVariable, joined);
+        Assert.Contains(LocalLlmProxyContext.SessionTokenVariable, joined);
+        Assert.Contains(LocalLlmProxyContext.TabTokenVariable, joined);
         Assert.DoesNotContain("chatgpt_base_url", joined);
     }
 

@@ -448,7 +448,8 @@ public sealed class SessionParseV4 : ISessionOutputParser
             || line.Contains("Antigravity CLI", StringComparison.OrdinalIgnoreCase)
             || line.Contains("Gemini CLI", StringComparison.OrdinalIgnoreCase)
             || line.Contains("Gemini Code Assist", StringComparison.OrdinalIgnoreCase)
-            || line.Contains("Copilot CLI", StringComparison.OrdinalIgnoreCase))
+            || line.Contains("Copilot CLI", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("opencode v", StringComparison.OrdinalIgnoreCase))
             return true;
 
         // Claude Code model/banner lines (e.g. "▝▜█████▛▘  Opus 4.6 (1M context) ...")

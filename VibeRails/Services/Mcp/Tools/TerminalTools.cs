@@ -45,7 +45,7 @@ public sealed class TerminalTools
     }
 
     [McpServerTool]
-    [Description("Open a new VibeRails terminal tab. Defaults to a plain shell; pass cli as Shell, Claude, Codex, Antigravity, or Copilot.")]
+    [Description("Open a new VibeRails terminal tab. Defaults to a plain shell; pass cli as Shell, Claude, Codex, Antigravity, Copilot, or OpenCode.")]
     public async Task<string> OpenTerminal(
         [Description("CLI to start. Defaults to Shell.")] string? cli = "Shell",
         [Description("Optional working directory for the terminal.")] string? workingDirectory = null,
