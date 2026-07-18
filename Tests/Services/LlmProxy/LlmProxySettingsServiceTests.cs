@@ -12,19 +12,20 @@ namespace Tests.Services.LlmProxy;
 /// </summary>
 public sealed class LlmProxySettingsServiceTests
 {
-    /// <summary>Both proxies and the master saver switch on, so each test varies one thing.</summary>
+    /// <summary>All proxies and the master saver switch on, so each test varies one thing.</summary>
     private static Settings ProxyOn(List<string>? stages) => new()
     {
         ClaudeLlmProxyEnabled = true,
         CodexLlmProxyEnabled = true,
+        OpenCodeLlmProxyEnabled = true,
         ClaudeTokenSaverEnabled = true,
         TokenSaverStages = stages,
     };
 
     [Fact]
-    public void Resolve_MasterKillSwitchDisablesBothProviderSavers()
+    public void Resolve_MasterKillSwitchDisablesAllProviderSavers()
     {
-        // Named for Claude for legacy reasons; it governs Codex too.
+        // Named for Claude for legacy reasons; it governs every proxy rewriter.
         var settings = ProxyOn(null);
         settings.ClaudeTokenSaverEnabled = false;
 
@@ -32,6 +33,7 @@ public sealed class LlmProxySettingsServiceTests
 
         Assert.False(resolved.ClaudeTokenSaverEnabled);
         Assert.False(resolved.CodexTokenSaverEnabled);
+        Assert.False(resolved.OpenCodeTokenSaverEnabled);
     }
 
     [Fact]
@@ -44,10 +46,11 @@ public sealed class LlmProxySettingsServiceTests
 
         Assert.False(resolved.ClaudeTokenSaverEnabled);
         Assert.True(resolved.CodexTokenSaverEnabled);
+        Assert.True(resolved.OpenCodeTokenSaverEnabled);
     }
 
     [Fact]
-    public void Resolve_TabGateDisablesBothProviderSaversWithoutChangingTheirPlan()
+    public void Resolve_TabGateDisablesAllProviderSaversWithoutChangingTheirPlan()
     {
         var resolved = LlmProxySettingsService.Resolve(
             ProxyOn(null),
@@ -55,6 +58,7 @@ public sealed class LlmProxySettingsServiceTests
 
         Assert.False(resolved.ClaudeTokenSaverEnabled);
         Assert.False(resolved.CodexTokenSaverEnabled);
+        Assert.False(resolved.OpenCodeTokenSaverEnabled);
         Assert.True(resolved.ResolvedPlan.EnabledIds.SetEquals(CompressionCatalog.DefaultSelection));
     }
 
@@ -78,6 +82,7 @@ public sealed class LlmProxySettingsServiceTests
         Assert.True(plan.IsNoOp);
         Assert.Empty(plan.AnthropicAllowlist);
         Assert.Empty(plan.CodexAllowlist);
+        Assert.Empty(plan.ZaiAllowlist);
     }
 
     [Fact]
@@ -107,6 +112,22 @@ public sealed class LlmProxySettingsServiceTests
 
         Assert.Same(resolved.TokenSaverPlan, resolved.ResolvedPlan);
         Assert.True(resolved.TokenSaverCaptureEnabled);
+    }
+
+    [Fact]
+    public void Resolve_ActiveOpenCodeSessionKeepsProxyAndSaverEnabledAfterLaunchToggleTurnsOff()
+    {
+        var settings = ProxyOn(null);
+        settings.OpenCodeLlmProxyEnabled = false;
+
+        var resolved = LlmProxySettingsService.Resolve(
+            settings,
+            tabTokenSaverEnabled: true,
+            openCodeProxyActive: true);
+
+        Assert.True(resolved.OpenCodeLlmProxyEnabled);
+        Assert.False(resolved.OpenCodeLlmProxyLaunchEnabled);
+        Assert.True(resolved.OpenCodeTokenSaverEnabled);
     }
 
     [Fact]

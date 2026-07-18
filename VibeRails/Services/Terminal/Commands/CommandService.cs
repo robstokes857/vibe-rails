@@ -10,7 +10,8 @@ public sealed record PreparedTerminalSession(
     string Command,
     string LaunchCommand,
     IReadOnlyList<string> SetupCommands,
-    Dictionary<string, string> Environment);
+    Dictionary<string, string> Environment,
+    bool OpenCodeProxyActive = false);
 
 public class CommandService : ICommandService
 {
@@ -175,13 +176,35 @@ public class CommandService : ICommandService
                 environment[kvp.Key] = kvp.Value;
         }
 
+        // If OpenCode proxying is enabled, route OpenCode's zai (Z.AI/GLM) provider traffic through
+        // the local LLM proxy. Like the Claude path this is env-var-only — no opencode.json is
+        // written: OPENCODE_CONFIG_CONTENT carries an inline JSON override of the zai provider's
+        // baseURL + auth headers (see LlmProxyZaiConfig). Skip if the caller already set
+        // OPENCODE_CONFIG_CONTENT, so an explicit value is respected rather than clobbered.
+        var inheritedOpenCodeConfig = Environment.GetEnvironmentVariable(
+            LlmProxyZaiConfig.ConfigContentVariable);
+        var openCodeProxyActive = proxySettings.OpenCodeLlmProxyLaunchEnabled
+            && llm == LLM.OpenCode
+            && !environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable)
+            && string.IsNullOrEmpty(inheritedOpenCodeConfig);
+        if (openCodeProxyActive)
+        {
+            environment[LocalLlmProxyContext.SessionTokenVariable] = _llmProxyContext.SessionToken;
+            environment[LocalLlmProxyContext.TabTokenVariable] = _llmProxyContext.TabToken;
+            environment[LlmProxyZaiConfig.ConfigContentVariable] = LlmProxyZaiConfig.BuildOpencodeConfigContent(
+                _llmProxyContext.ApiBaseUrl,
+                _llmProxyContext.SessionToken,
+                _llmProxyContext.TabToken);
+        }
+
         LogMcpSetup(llm, envName, setupCommands);
 
         return Task.FromResult(new PreparedTerminalSession(
             builder.Build(),
             cliCommand,
             setupCommands.AsReadOnly(),
-            environment));
+            environment,
+            OpenCodeProxyActive: openCodeProxyActive));
     }
 
     private string[] BuildLaunchArgs(LLM llm, string[]? extraArgs, LlmProxySettings proxySettings)

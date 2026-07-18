@@ -230,34 +230,47 @@ public static class HookRoutes
             }
 
             var startedUtc = DateTime.UtcNow;
-            var snapshot = await snapshotProvider.CaptureAsync(rootPath, cancellationToken);
-            var result = await validator.ExecuteAsync(
-                new GitPreflightStepContext(
-                    Guid.NewGuid().ToString("N"),
-                    CreatePreCommitRequest(rootPath),
-                    snapshot,
-                    (_, _, _) => ValueTask.CompletedTask),
-                cancellationToken);
-            var succeeded = result.Status is not GitPreflightStepStatus.Blocked
-                and not GitPreflightStepStatus.Error
-                and not GitPreflightStepStatus.Cancelled;
-            var output = string.Join(Environment.NewLine, result.Output);
-            var validationSummary = result.VcaSummary ?? new VcaHookValidationSummary(
-                HasError: result.Status is GitPreflightStepStatus.Error or GitPreflightStepStatus.Cancelled,
-                HasStopViolation: result.Status == GitPreflightStepStatus.Blocked,
-                HasCommitViolations: result.Status == GitPreflightStepStatus.Warning,
-                RequiredAcknowledgments: [],
-                StagedFileCount: snapshot.Files.Count);
+            try
+            {
+                var snapshot = await snapshotProvider.CaptureAsync(rootPath, cancellationToken);
+                var result = await validator.ExecuteAsync(
+                    new GitPreflightStepContext(
+                        Guid.NewGuid().ToString("N"),
+                        CreatePreCommitRequest(rootPath),
+                        snapshot,
+                        (_, _, _) => ValueTask.CompletedTask),
+                    cancellationToken);
+                var succeeded = result.Status is not GitPreflightStepStatus.Blocked
+                    and not GitPreflightStepStatus.Error
+                    and not GitPreflightStepStatus.Cancelled;
+                var output = string.Join(Environment.NewLine, result.Output);
+                var validationSummary = result.VcaSummary ?? new VcaHookValidationSummary(
+                    HasError: result.Status is GitPreflightStepStatus.Error or GitPreflightStepStatus.Cancelled,
+                    HasStopViolation: result.Status == GitPreflightStepStatus.Blocked,
+                    HasCommitViolations: result.Status == GitPreflightStepStatus.Warning,
+                    RequiredAcknowledgments: [],
+                    StagedFileCount: snapshot.Files.Count);
 
-            return Results.Ok(new HookPreviewResponse(
-                Success: succeeded,
-                ExitCode: succeeded ? 0 : 1,
-                Status: ToWireStatus(result.Status),
-                Title: "VCA validation",
-                Output: output,
-                StartedUtc: startedUtc,
-                DurationMs: (long)(DateTime.UtcNow - startedUtc).TotalMilliseconds,
-                Validation: BuildVcaValidationOverview(validationSummary)));
+                return Results.Ok(new HookPreviewResponse(
+                    Success: succeeded,
+                    ExitCode: succeeded ? 0 : 1,
+                    Status: ToWireStatus(result.Status),
+                    Title: "VCA validation",
+                    Output: output,
+                    StartedUtc: startedUtc,
+                    DurationMs: (long)(DateTime.UtcNow - startedUtc).TotalMilliseconds,
+                    Validation: BuildVcaValidationOverview(validationSummary)));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // A validator failure must reach the Rules page as raw details, not as a
+                // bare 500: the card explicitly tells the user to review them.
+                return Results.Ok(ToValidatorFailure("VCA validation", startedUtc, ex));
+            }
         }).WithName("PreviewVcaHook");
 
         // POST /api/v1/code-analyzer - Analyze all current working-tree changes by itself.
@@ -290,18 +303,31 @@ public static class HookRoutes
             }
 
             var startedUtc = DateTime.UtcNow;
-            var snapshot = await snapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken);
-            var result = await analyzer.ExecuteAsync(
-                new GitPreflightStepContext(
-                    Guid.NewGuid().ToString("N"),
-                    CreatePreCommitRequest(rootPath) with
-                    {
-                        FullImpactScan = fullScan == true,
-                        WorkingTreeChanges = true
-                    },
-                    snapshot,
-                    (_, _, _) => ValueTask.CompletedTask),
-                cancellationToken);
+            GitPreflightStepResult result;
+            try
+            {
+                var snapshot = await snapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken);
+                result = await analyzer.ExecuteAsync(
+                    new GitPreflightStepContext(
+                        Guid.NewGuid().ToString("N"),
+                        CreatePreCommitRequest(rootPath) with
+                        {
+                            FullImpactScan = fullScan == true,
+                            WorkingTreeChanges = true
+                        },
+                        snapshot,
+                        (_, _, _) => ValueTask.CompletedTask),
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(ToValidatorFailure("Code analyzer", startedUtc, ex, includeValidation: false));
+            }
+
             var succeeded = result.Status is not GitPreflightStepStatus.Error
                 and not GitPreflightStepStatus.Cancelled;
             var output = string.Join(Environment.NewLine, result.Output);
@@ -369,6 +395,32 @@ public static class HookRoutes
                 ]));
         }).WithName("ValidateVca");
     }
+
+    /// <summary>
+    /// Shapes an exception from a preview/analyzer run as a normal error-status response,
+    /// so the Rules page renders its "the validator itself failed" card with the actual
+    /// failure text instead of receiving an empty 500.
+    /// </summary>
+    private static HookPreviewResponse ToValidatorFailure(
+        string title,
+        DateTime startedUtc,
+        Exception exception,
+        bool includeValidation = true) =>
+        new(
+            Success: false,
+            ExitCode: 1,
+            Status: "error",
+            Title: title,
+            Output: $"[error] {exception.Message}",
+            StartedUtc: startedUtc,
+            DurationMs: (long)(DateTime.UtcNow - startedUtc).TotalMilliseconds,
+            Validation: includeValidation
+                ? BuildVcaValidationOverview(new VcaHookValidationSummary(
+                    HasError: true,
+                    HasStopViolation: false,
+                    HasCommitViolations: false,
+                    RequiredAcknowledgments: []))
+                : null);
 
     private static HookFileStatusResponse ToResponse(GitHookFileStatus status) =>
         new(

@@ -554,6 +554,9 @@ namespace VibeRails.DTOs
         bool? CodexLlmProxyEnabled,
         string? CodexLlmProxyMode,
         bool? ClaudeLlmProxyEnabled,
+        // OpenCode (zai/Z.AI GLM) proxy toggle. Nullable for the same stale-client guard as the
+        // other proxy fields — a client that omits it leaves the stored value untouched.
+        bool? OpenCodeLlmProxyEnabled,
         // The enabled stage and scope ids, drawn from TokenSaver's CompressionCatalog (e.g.
         // "ansi-strip", "scope-shell"). Nullable for the same stale-client guard as the proxy
         // fields — but null and empty are NOT the same answer: null means the client didn't send

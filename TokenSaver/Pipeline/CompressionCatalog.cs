@@ -48,6 +48,7 @@ public sealed record CompressionScopeInfo(
     string Summary,
     IReadOnlyList<string> AnthropicTools,
     IReadOnlyList<string> CodexTools,
+    IReadOnlyList<string> OpenCodeTools,
     bool OnByDefault,
     string? Warning = null);
 
@@ -171,18 +172,21 @@ public static class CompressionCatalog
             "Output of Bash and PowerShell tool calls.",
             AnthropicTools: ["Bash", "PowerShell"],
             CodexTools: ["shell_command", "exec_command"],
+            OpenCodeTools: ["bash"],
             OnByDefault: true),
 
         new(ScopeShellBackground, "Background shell output",
             "Output of background shell reads (BashOutput). Same content class as Bash.",
             AnthropicTools: ["BashOutput"],
             CodexTools: ["write_stdin"],
+            OpenCodeTools: [],
             OnByDefault: true),
 
         new(ScopeRead, "File reads",
             "Output of the Read tool.",
             AnthropicTools: ["Read"],
             CodexTools: [],
+            OpenCodeTools: ["read"],
             OnByDefault: false,
             Warning: "The model builds Edit old_string values from Read output. Rewriting it can "
                    + "cause failed edits, not just smaller savings. Off by default on purpose."),
@@ -191,6 +195,7 @@ public static class CompressionCatalog
             "Output of the Grep tool.",
             AnthropicTools: ["Grep"],
             CodexTools: [],
+            OpenCodeTools: ["grep"],
             OnByDefault: false,
             Warning: "Lower risk than Read, but the model still navigates by these line numbers. "
                    + "Verify against captures before trusting it."),
@@ -247,6 +252,7 @@ public static class CompressionCatalog
             shapes,
             AnthropicAllowlist: ToolsFor(enabled, s => s.AnthropicTools),
             CodexAllowlist: ToolsFor(enabled, s => s.CodexTools),
+            ZaiAllowlist: ToolsFor(enabled, s => s.OpenCodeTools),
             EnabledIds: enabled);
     }
 

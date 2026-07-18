@@ -79,6 +79,7 @@ namespace VibeRails
             serviceCollection.AddSingleton<ILocalLlmProxyContext>(sp =>
                 new LocalLlmProxyContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>()));
             serviceCollection.AddSingleton<ITabTokenSaverState, TabTokenSaverState>();
+            serviceCollection.AddSingleton<ILlmProxySessionState, LlmProxySessionState>();
             serviceCollection.AddSingleton<ILlmProxySettingsService, LlmProxySettingsService>();
             // Host adapters behind the TokenSaver library's seams: auth-gate → IAuthService,
             // event sink → app event bus + Serilog + the state.db savings tally.

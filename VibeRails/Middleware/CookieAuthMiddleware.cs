@@ -27,6 +27,7 @@ public class CookieAuthMiddleware
         if (path.StartsWith("/auth/bootstrap") ||
             path.Equals("/health", StringComparison.OrdinalIgnoreCase) ||
             LlmProxyCodexConfig.IsOpenAiProxyPath(path) ||
+            LlmProxyZaiConfig.IsZaiProxyPath(path) ||
             context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);

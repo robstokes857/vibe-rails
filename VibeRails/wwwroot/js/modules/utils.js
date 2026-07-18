@@ -96,7 +96,11 @@ export function getCliBrand(cli) {
             label: 'OpenCode',
             logo: getAssetPath('assets/img/opencode.svg'),
             className: 'badge-cli-opencode',
-            accentColor: '#e0a530'
+            // Warm silver drawn from the OpenCode logo (#F1ECEC off-white /
+            // #4B4646 dark — the brand is monochrome). The previous amber
+            // (#e0a530) read as an ugly yellow on the tab strip and collided
+            // with the WAITING state's fixed yellow #f9e2af.
+            accentColor: '#c9c6c6'
         },
         shell: {
             label: 'Terminal',

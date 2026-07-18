@@ -25,11 +25,22 @@ public sealed record LlmProxySettings(
     bool CodexLlmProxyEnabled,
     string CodexLlmProxyMode,
     bool ClaudeLlmProxyEnabled,
+    bool OpenCodeLlmProxyEnabled = false,
     bool ClaudeTokenSaverEnabled = true,
     bool CodexTokenSaverEnabled = false,
+    bool OpenCodeTokenSaverEnabled = false,
     CompressionPlan? TokenSaverPlan = null,
     bool TokenSaverCaptureEnabled = false)
 {
+    /// <summary>
+    /// The persisted setting that controls whether a newly launched OpenCode process receives the
+    /// local proxy configuration. <see cref="OpenCodeLlmProxyEnabled"/> may remain true for an
+    /// already-active session after this value turns false, so launch code must use this property.
+    /// Defaults to the effective value for compatibility with test/host callers that do not need
+    /// session-stable routing.
+    /// </summary>
+    public bool OpenCodeLlmProxyLaunchEnabled { get; init; } = OpenCodeLlmProxyEnabled;
+
     /// <summary>
     /// The resolved stage selection (see <see cref="Pipeline.CompressionCatalog"/>), or a no-op
     /// plan when this snapshot predates the stage rework.

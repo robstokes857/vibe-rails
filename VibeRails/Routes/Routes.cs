@@ -15,6 +15,7 @@ public static class RouteExtensions
         DebugBundleRoutes.Map(app);
         LlmProxyRoutes.Map(app);
         LlmAnthropicProxyRoutes.Map(app);
+        LlmZaiProxyRoutes.Map(app);
         TokenSavingsRoutes.Map(app);
         CompressionCaptureRoutes.Map(app);
         TerminalRoutes.Map(app, launchDirectory);

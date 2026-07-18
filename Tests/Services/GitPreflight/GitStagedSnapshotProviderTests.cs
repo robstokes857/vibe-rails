@@ -120,6 +120,61 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CaptureAsync_RecordsAStagedSubmoduleWithoutReadingItsGitLink()
+    {
+        // A staged submodule is an index entry of mode 160000 whose object is a commit in
+        // the submodule's own history. `git show :<path>` on it fails with "bad object",
+        // which used to abort the whole snapshot (and with it Git Guard and the pre-commit
+        // hook). The commit SHA below intentionally exists nowhere.
+        await GitAsync(
+            "update-index", "--add", "--cacheinfo",
+            "160000,1111111111111111111111111111111111111111,PyBridge");
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        var gitLink = Assert.Single(snapshot.Files);
+        Assert.Equal("PyBridge", gitLink.RelativePath);
+        Assert.Equal(GitStagedChangeKind.Added, gitLink.ChangeKind);
+        Assert.True(gitLink.IsBinary);
+        Assert.Null(gitLink.Content);
+        Assert.DoesNotContain("PyBridge", snapshot.TrackedFiles!);
+    }
+
+    [Fact]
+    public async Task CaptureWorkingTreeAsync_RecordsASubmoduleWithoutReadingItsGitLink()
+    {
+        // A real embedded repository: `git add` stages it as a gitlink whose commit SHA
+        // lives only in the nested repository's object store.
+        var submodule = Path.Combine(_repository, "PyBridge");
+        Directory.CreateDirectory(submodule);
+        await GitInAsync(submodule, "init");
+        await GitInAsync(submodule, "config", "user.email", "tests@viberails.local");
+        await GitInAsync(submodule, "config", "user.name", "VibeRails Tests");
+        await File.WriteAllTextAsync(
+            Path.Combine(submodule, "bridge.py"),
+            "print('bridge')\n",
+            TestContext.Current.CancellationToken);
+        await GitInAsync(submodule, "add", ".");
+        await GitInAsync(submodule, "commit", "-m", "submodule content");
+        await GitAsync("add", "PyBridge");
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureWorkingTreeAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        var gitLink = Assert.Single(snapshot.Files, file => file.RelativePath == "PyBridge");
+        Assert.True(gitLink.IsBinary);
+        Assert.Null(gitLink.Content);
+        Assert.Null(gitLink.PreviousContent);
+        Assert.DoesNotContain("PyBridge", snapshot.TrackedFiles!);
+        Assert.DoesNotContain(
+            snapshot.Files,
+            file => file.RelativePath.StartsWith("PyBridge/", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task CaptureAsync_ReadsAgentInstructionsFromIndex()
     {
         await File.WriteAllTextAsync(
@@ -351,14 +406,16 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
         Assert.Null(untracked.PreviousContent);
     }
 
-    private async Task GitAsync(params string[] arguments)
+    private Task GitAsync(params string[] arguments) => GitInAsync(_repository, arguments);
+
+    private static async Task GitInAsync(string workingDirectory, params string[] arguments)
     {
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
                 FileName = "git",
-                WorkingDirectory = _repository,
+                WorkingDirectory = workingDirectory,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
