@@ -45,21 +45,7 @@ export class AgentController {
                 }
             });
             this.app.bindAction(root, '[data-action="create-agent-file"]', () => this.app.navigate('agent-create'));
-
-            const fileTree = root.querySelector('[data-agent-file-tree]');
-            if (fileTree) {
-                // Ensure we have data to render
-                if (this.app.data.agents && this.app.data.agents.length > 0) {
-                    fileTree.innerHTML = this.app.renderLocalFileTree();
-                    this.bindAgentListItems(fileTree, {
-                        onSaved: () => this.mountAgentsOverview(container)
-                    });
-                } else if (this.app.data.isInGit) {
-                    fileTree.innerHTML = '<p class="text-muted text-center">No agent files found in this project.</p>';
-                } else {
-                    fileTree.innerHTML = '<p class="text-muted text-center">Agent files are only available in local project context.</p>';
-                }
-            }
+            this.renderAgentFileTree(root);
         }
 
         container.appendChild(fragment);
@@ -67,6 +53,25 @@ export class AgentController {
             this.app.ruleController.attachRulesOverview(root);
         }
         return root;
+    }
+
+    // Paints (or repaints) just the Rule files list. A rename must not remount the whole
+    // overview: the live agent terminal now sits inside this view, and rebuilding the view
+    // would destroy the running terminal and re-trigger the validation and metrics runs.
+    renderAgentFileTree(root) {
+        const fileTree = root?.querySelector('[data-agent-file-tree]');
+        if (!fileTree) return;
+
+        if (this.app.data.agents && this.app.data.agents.length > 0) {
+            fileTree.innerHTML = this.app.renderLocalFileTree();
+            this.bindAgentListItems(fileTree, {
+                onSaved: () => this.renderAgentFileTree(root)
+            });
+        } else if (this.app.data.isInGit) {
+            fileTree.innerHTML = '<p class="text-muted text-center">No agent files found in this project.</p>';
+        } else {
+            fileTree.innerHTML = '<p class="text-muted text-center">Agent files are only available in local project context.</p>';
+        }
     }
 
     // Wire up the agent-file list rendered by app.renderLocalFileTree():

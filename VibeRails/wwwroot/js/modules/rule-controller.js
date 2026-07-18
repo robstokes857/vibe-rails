@@ -378,10 +378,10 @@ export class RuleController {
         this.app.bindAction(root, '[data-action="copy-fix-brief"]', () => this.copyVcaFixBrief());
         this.vcaConsole = new VcaConsole(root.querySelector('[data-vca-console]'));
         this.codeAnalyzerConsole = new VcaConsole(root.querySelector('[data-code-analyzer-console]'), {
-            defaultMessage: 'Code analyzer ready.\nChange a supported source file, then run the analyzer.',
+            defaultMessage: 'Code metrics ready.\nChange a supported source file, then run the scan.',
             runningMessage: 'Analyzing working-tree source changes…',
-            failureMessage: 'The code analysis could not be completed.',
-            failureMeta: 'Code analysis failed'
+            failureMessage: 'The code metrics scan could not be completed.',
+            failureMeta: 'Code metrics scan failed'
         });
     }
 
@@ -671,7 +671,7 @@ export class RuleController {
         const button = this.query('[data-action="run-code-analyzer"]');
         this.setButtonBusy(button, true, 'Refreshing…');
         this.setCodeAnalyzerUtilityButtonsDisabled(true);
-        this.codeAnalyzerConsole?.begin('code analyzer');
+        this.codeAnalyzerConsole?.begin('code metrics');
 
         try {
             const fullScan = this.query('[data-code-analyzer-full-scan]')?.checked === true;
@@ -710,7 +710,7 @@ export class RuleController {
                 if (message) {
                     message.textContent = fileCount > 0
                         ? ''
-                        : 'Change a supported source file, then run MintLint again.';
+                        : 'Change a supported source file, then run the scan again.';
                 }
             }
         }
@@ -1039,7 +1039,11 @@ export class RuleController {
     }
 
     findRulesTerminal() {
-        return this.viewRoot?.closest('[data-dashboard]')?.querySelector('[data-terminal-section]') || null;
+        // The terminal station lives inside the Rules view itself; the dashboard-level
+        // lookup remains as a fallback for any host that still mounts it as a sibling.
+        return this.viewRoot?.querySelector('[data-terminal-section]')
+            || this.viewRoot?.closest('[data-dashboard]')?.querySelector('[data-terminal-section]')
+            || null;
     }
 
     openFixTerminal() {
@@ -1060,7 +1064,7 @@ export class RuleController {
         const copied = await this.codeAnalyzerConsole?.copy();
         this.app.showToast(
             copied ? 'Results Copied' : 'Copy Unavailable',
-            copied ? 'Code analyzer results copied to the clipboard.' : 'Select the result text and copy it manually.',
+            copied ? 'Scan summary copied to the clipboard.' : 'Select the result text and copy it manually.',
             copied ? 'success' : 'warning');
     }
 

@@ -118,22 +118,12 @@
     <!-- Templates -->
     <template id="dashboard-template">
         <div class="dashboard" data-dashboard="unified">
-            <!-- Rules workspace. DashboardController mounts the existing Rules view here. -->
+            <!-- Rules workspace. DashboardController mounts the Rules view here; the terminal
+                 panel mounts into the [data-terminal-content] slot inside that view, directly
+                 below the validation results. -->
             <div class="row mb-3">
                 <div class="col-12 rules-dashboard-host" data-rules-overview-host></div>
             </div>
-
-            <div class="row g-4 mb-3">
-                <!-- Terminal Workspace (Full Width) -->
-                <div class="col-12 animate-fade-up delay-300">
-                    <div class="card border-0 bg-transparent shadow-none" data-terminal-section>
-                        <div class="card-body p-0" data-terminal-content>
-                            <!-- Terminal panel rendered here -->
-                        </div>
-                    </div>
-                </div>
-            </div>
-
         </div>
     </template>
 
@@ -223,8 +213,15 @@
     </template>
 
     <template id="agents-template">
-        <div class="view" data-view="agents">
-            <div class="rules-git-setting-row">
+        <div class="view rules-workspace" data-view="agents">
+
+            <header class="rules-page-header">
+                <div class="rules-page-heading">
+                    <span class="rules-page-eyebrow">Project safeguards</span>
+                    <h1>Rules</h1>
+                    <p>Validate staged work, hand fixes to an agent, and watch code health — before anything
+                        reaches a commit.</p>
+                </div>
                 <section class="rules-git-setting" data-hook-health data-tone="neutral" aria-busy="true"
                     aria-label="Git Guard setting">
                     <span class="rules-git-setting-icon" aria-hidden="true">
@@ -247,179 +244,224 @@
                         <span class="visually-hidden" data-button-label>Turn Git Guard on</span>
                     </button>
                 </section>
-            </div>
+            </header>
 
-            <section class="card rules-vca-panel mb-4 vca-console-card" data-vca-console data-tone="neutral"
-                aria-busy="false" aria-labelledby="rules-vca-results-title">
-                <div class="card-header rules-vca-results-header">
-                    <div class="d-flex align-items-center gap-2 min-w-0">
-                        <i class="fa-solid fa-terminal text-accent" aria-hidden="true"></i>
-                        <h2 id="rules-vca-results-title">Validation results</h2>
-                        <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
-                            <span class="spinner-border spinner-border-sm"></span>
-                        </span>
-                        <span class="vca-console-state" data-vca-console-state>Ready</span>
-                    </div>
-                    <div class="vca-console-utility-actions" aria-label="Validation result actions">
-                        <button class="btn btn-sm btn-outline-secondary" type="button"
-                            data-action="copy-hook-output" aria-label="Copy validation results" title="Copy results">
-                            <i class="fa-regular fa-copy" aria-hidden="true"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary" type="button"
-                            data-action="clear-hook-output" aria-label="Clear validation results" title="Clear results">
-                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body rules-vca-results">
-                    <section class="vca-explanation" data-vca-explanation hidden aria-live="polite">
-                        <div class="vca-explanation-verdict" data-vca-explanation-verdict data-tone="neutral">
-                            <span class="vca-explanation-icon" aria-hidden="true">
-                                <i class="fa-solid fa-circle-check"></i>
-                            </span>
-                            <div class="vca-explanation-copy">
-                                <span class="vca-explanation-eyebrow">What this means</span>
-                                <h3 data-vca-explanation-title>Validation ready</h3>
-                                <p data-vca-explanation-message>Run validation to review your staged changes.</p>
+            <div class="rules-rail">
+
+                <!-- Validate: what blocks the commit right now -->
+                <div class="rules-station" data-station="validate">
+                    <span class="rules-station-node" aria-hidden="true"></span>
+                    <section class="card rules-vca-panel vca-console-card" data-vca-console data-tone="neutral"
+                        aria-busy="false" aria-labelledby="rules-vca-results-title">
+                        <header class="rules-station-header">
+                            <div class="rules-station-heading">
+                                <span class="rules-station-eyebrow">Validate</span>
+                                <div class="rules-station-title-row">
+                                    <h2 id="rules-vca-results-title">Validation results</h2>
+                                    <span class="rules-check-running" data-vca-console-spinner hidden
+                                        aria-hidden="true">
+                                        <span class="spinner-border spinner-border-sm"></span>
+                                    </span>
+                                    <span class="vca-console-state" data-vca-console-state>Ready</span>
+                                </div>
                             </div>
-                            <div class="vca-explanation-stats" data-vca-explanation-stats></div>
-                        </div>
-                        <div class="vca-finding-list" data-vca-finding-list></div>
-                        <div class="vca-explanation-actions" data-vca-explanation-actions hidden>
-                            <button class="btn btn-sm btn-primary" type="button" data-action="open-fix-terminal">
-                                <i class="fa-solid fa-terminal me-1" aria-hidden="true"></i>
-                                Fix with an agent
-                            </button>
-                            <button class="btn btn-sm btn-outline-secondary" type="button" data-action="copy-fix-brief">
-                                <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>
-                                Copy fix brief
-                            </button>
+                            <div class="rules-station-actions" aria-label="Validation result actions">
+                                <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
+                                    data-action="copy-hook-output" aria-label="Copy validation results"
+                                    title="Copy results">
+                                    <i class="fa-regular fa-copy" aria-hidden="true"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
+                                    data-action="clear-hook-output" aria-label="Clear validation results"
+                                    title="Clear results">
+                                    <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                                </button>
+                                <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
+                                    type="button" data-action="run-hook-preview" data-idle-label="Run again" disabled>
+                                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                        aria-hidden="true"></span>
+                                    <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
+                                    <span data-button-label>Run again</span>
+                                </button>
+                            </div>
+                        </header>
+                        <div class="rules-station-body rules-vca-results">
+                            <section class="vca-explanation" data-vca-explanation hidden aria-live="polite">
+                                <div class="vca-explanation-verdict" data-vca-explanation-verdict data-tone="neutral">
+                                    <span class="vca-explanation-icon" aria-hidden="true">
+                                        <i class="fa-solid fa-circle-check"></i>
+                                    </span>
+                                    <div class="vca-explanation-copy">
+                                        <span class="vca-explanation-eyebrow">What this means</span>
+                                        <h3 data-vca-explanation-title>Validation ready</h3>
+                                        <p data-vca-explanation-message>Run validation to review your staged
+                                            changes.</p>
+                                    </div>
+                                    <div class="vca-explanation-stats" data-vca-explanation-stats></div>
+                                </div>
+                                <div class="vca-finding-list" data-vca-finding-list></div>
+                                <div class="vca-explanation-actions" data-vca-explanation-actions hidden>
+                                    <button class="btn btn-sm btn-primary" type="button"
+                                        data-action="open-fix-terminal">
+                                        <i class="fa-solid fa-terminal me-1" aria-hidden="true"></i>
+                                        Fix with an agent
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                                        data-action="copy-fix-brief">
+                                        <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>
+                                        Copy fix brief
+                                    </button>
+                                </div>
+                            </section>
+                            <details class="rules-console-transcript">
+                                <summary>
+                                    <span class="vca-console-pulse" aria-hidden="true"></span>
+                                    <span class="rules-console-transcript-label">Console transcript</span>
+                                    <small data-vca-console-meta>Waiting for validation</small>
+                                </summary>
+                                <div class="vca-console-shell">
+                                    <pre class="vca-console-output" data-vca-console-output role="log"
+                                        aria-live="polite" aria-atomic="false" tabindex="0"></pre>
+                                </div>
+                            </details>
                         </div>
                     </section>
-                    <div class="vca-console-shell">
-                        <pre class="vca-console-output" data-vca-console-output role="log" aria-live="polite"
-                            aria-atomic="false" tabindex="0"></pre>
-                        <div class="vca-console-footer">
-                            <span class="vca-console-pulse" aria-hidden="true"></span>
-                            <span data-vca-console-meta>Waiting for validation</span>
+                </div>
+
+                <!-- Fix: the agent terminal sits directly under the findings it fixes -->
+                <div class="rules-station" data-station="fix">
+                    <span class="rules-station-node" aria-hidden="true"></span>
+                    <section class="rules-terminal-station" data-terminal-section
+                        aria-label="Agent terminal">
+                        <header class="rules-station-header rules-station-header-bare">
+                            <div class="rules-station-heading">
+                                <span class="rules-station-eyebrow">Fix</span>
+                                <div class="rules-station-title-row">
+                                    <h2>Agent terminal</h2>
+                                </div>
+                            </div>
+                            <p class="rules-station-hint">Start an agent here and hand it the fix brief from the
+                                results above.</p>
+                        </header>
+                        <div class="rules-station-body" data-terminal-content>
+                            <!-- Terminal panel rendered here -->
                         </div>
-                    </div>
-                </div>
-                <div class="card-footer rules-vca-run-footer">
-                    <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center justify-content-center gap-2"
-                        type="button" data-action="run-hook-preview" data-idle-label="Run again" disabled>
-                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                            aria-hidden="true"></span>
-                        <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
-                        <span data-button-label>Run again</span>
-                    </button>
-                </div>
-            </section>
-
-            <section class="code-analyzer-panel mb-4 vca-console-card" data-code-analyzer-console
-                data-tone="neutral" aria-busy="false" aria-labelledby="code-analyzer-title">
-                <header class="code-analyzer-topbar">
-                    <div class="code-analyzer-brand-row">
-                        <span class="code-analyzer-brand-mark" aria-hidden="true">ML</span>
-                        <span class="code-analyzer-brand-copy">
-                            <strong id="code-analyzer-title">MintLint</strong>
-                            <small>Code health review</small>
-                        </span>
-                        <span class="code-analyzer-context-pill">
-                            <i class="fa-solid fa-code-commit" aria-hidden="true"></i>
-                            Working tree
-                        </span>
-                        <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
-                            <span class="spinner-border spinner-border-sm"></span>
-                        </span>
-                        <span class="vca-console-state" data-vca-console-state>Ready</span>
-                    </div>
-                    <div class="code-analyzer-actions" aria-label="Code analyzer actions">
-                        <label class="mintlint-scan-toggle"
-                            title="Usage counts normally consider tracked files only. Check to scan every source file under the repository, including untracked ones.">
-                            <input type="checkbox" data-code-analyzer-full-scan>
-                            <span>Full repo scan</span>
-                        </label>
-                        <button class="btn btn-sm btn-outline-secondary" type="button"
-                            data-action="copy-code-analyzer-output" title="Copy scan transcript">
-                            <i class="fa-regular fa-copy" aria-hidden="true"></i>
-                            <span>Copy summary</span>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary code-analyzer-clear" type="button"
-                            data-action="clear-code-analyzer-output" aria-label="Clear code analyzer results"
-                            title="Clear results">
-                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                        </button>
-                        <button class="btn btn-sm btn-primary" type="button" data-action="run-code-analyzer"
-                            data-idle-label="Run again">
-                            <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                                aria-hidden="true"></span>
-                            <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
-                            <span data-button-label>Run again</span>
-                        </button>
-                    </div>
-                </header>
-
-                <div class="code-analyzer-empty" data-code-analyzer-empty>
-                    <span class="code-analyzer-empty-icon" aria-hidden="true">
-                        <i class="fa-solid fa-chart-line"></i>
-                    </span>
-                    <div>
-                        <strong>Preparing the code-health review</strong>
-                        <p>MintLint will turn your staged, unstaged, and untracked changes into file, category, and metric-level findings.</p>
-                    </div>
+                    </section>
                 </div>
 
-                <div class="code-analyzer-dashboard" data-code-analyzer-report hidden></div>
+                <!-- Measure: MintLint-powered code metrics for the working tree -->
+                <div class="rules-station" data-station="measure">
+                    <span class="rules-station-node" aria-hidden="true"></span>
+                    <section class="card code-analyzer-panel vca-console-card" data-code-analyzer-console
+                        data-tone="neutral" aria-busy="false" aria-labelledby="code-analyzer-title">
+                        <header class="rules-station-header">
+                            <div class="rules-station-heading">
+                                <span class="rules-station-eyebrow">Measure</span>
+                                <div class="rules-station-title-row">
+                                    <h2 id="code-analyzer-title">Code metrics</h2>
+                                    <span class="rules-station-note">
+                                        <i class="fa-solid fa-code-commit" aria-hidden="true"></i>
+                                        Working tree · powered by MintLint
+                                    </span>
+                                    <span class="rules-check-running" data-vca-console-spinner hidden
+                                        aria-hidden="true">
+                                        <span class="spinner-border spinner-border-sm"></span>
+                                    </span>
+                                    <span class="vca-console-state" data-vca-console-state>Ready</span>
+                                </div>
+                            </div>
+                            <div class="rules-station-actions" aria-label="Code metrics actions">
+                                <label class="mintlint-scan-toggle"
+                                    title="Usage counts normally consider tracked files only. Check to scan every source file under the repository, including untracked ones.">
+                                    <input type="checkbox" data-code-analyzer-full-scan>
+                                    <span>Full repo scan</span>
+                                </label>
+                                <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
+                                    data-action="copy-code-analyzer-output" aria-label="Copy scan summary"
+                                    title="Copy scan summary">
+                                    <i class="fa-regular fa-copy" aria-hidden="true"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
+                                    data-action="clear-code-analyzer-output" aria-label="Clear code metrics results"
+                                    title="Clear results">
+                                    <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                                </button>
+                                <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
+                                    type="button" data-action="run-code-analyzer" data-idle-label="Run again">
+                                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                        aria-hidden="true"></span>
+                                    <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
+                                    <span data-button-label>Run again</span>
+                                </button>
+                            </div>
+                        </header>
 
-                <details class="code-analyzer-transcript">
-                    <summary>
-                        <span>Scan transcript</span>
-                        <small data-vca-console-meta>Waiting for analysis</small>
-                    </summary>
-                    <div class="vca-console-shell">
-                        <pre class="vca-console-output" data-vca-console-output role="log" aria-live="polite"
-                            aria-atomic="false" tabindex="0"></pre>
-                    </div>
-                </details>
-
-                <footer class="code-analyzer-note">
-                    <span>Concern scores are normalized so higher always means more concern.</span>
-                    <span class="code-analyzer-legend">
-                        <span><i data-tone="success"></i>Healthy</span>
-                        <span><i data-tone="warning"></i>Review</span>
-                        <span><i data-tone="danger"></i>Change required</span>
-                    </span>
-                </footer>
-            </section>
-
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span class="text-uppercase fw-bold" style="letter-spacing: 0.1em;">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
-                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                    stroke-linejoin="round" class="text-accent me-2"
-                                    style="vertical-align: text-bottom;">
-                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                                </svg>Agent Rules
+                        <div class="code-analyzer-empty" data-code-analyzer-empty>
+                            <span class="code-analyzer-empty-icon" aria-hidden="true">
+                                <i class="fa-solid fa-chart-line"></i>
                             </span>
-                            <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button"
-                                data-action="create-agent-file" title="Create a new AGENTS.md file">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
-                                    viewBox="0 0 16 16">
-                                    <path
-                                        d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4" />
-                                </svg>
-                                Add
-                            </button>
+                            <div>
+                                <strong>Preparing code metrics</strong>
+                                <p>Your staged, unstaged, and untracked changes become file, category, and
+                                    metric-level findings.</p>
+                            </div>
                         </div>
-                        <div class="card-body">
+
+                        <div class="code-analyzer-dashboard" data-code-analyzer-report hidden></div>
+
+                        <details class="rules-console-transcript code-analyzer-transcript">
+                            <summary>
+                                <span class="vca-console-pulse" aria-hidden="true"></span>
+                                <span class="rules-console-transcript-label">Scan transcript</span>
+                                <small data-vca-console-meta>Waiting for analysis</small>
+                            </summary>
+                            <div class="vca-console-shell">
+                                <pre class="vca-console-output" data-vca-console-output role="log" aria-live="polite"
+                                    aria-atomic="false" tabindex="0"></pre>
+                            </div>
+                        </details>
+
+                        <footer class="code-analyzer-note">
+                            <span>Concern scores are normalized so higher always means more concern.</span>
+                            <span class="code-analyzer-legend">
+                                <span><i data-tone="success"></i>Healthy</span>
+                                <span><i data-tone="warning"></i>Review</span>
+                                <span><i data-tone="danger"></i>Change required</span>
+                            </span>
+                        </footer>
+                    </section>
+                </div>
+
+                <!-- Govern: the AGENTS.md files every check above enforces -->
+                <div class="rules-station" data-station="govern">
+                    <span class="rules-station-node" aria-hidden="true"></span>
+                    <section class="card rules-files-card" aria-labelledby="rules-files-title">
+                        <header class="rules-station-header">
+                            <div class="rules-station-heading">
+                                <span class="rules-station-eyebrow">Govern</span>
+                                <div class="rules-station-title-row">
+                                    <h2 id="rules-files-title">Rule files</h2>
+                                    <span class="rules-station-note">AGENTS.md policies these checks enforce</span>
+                                </div>
+                            </div>
+                            <div class="rules-station-actions">
+                                <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button"
+                                    data-action="create-agent-file" title="Create a new AGENTS.md file">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                                        viewBox="0 0 16 16">
+                                        <path
+                                            d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4" />
+                                    </svg>
+                                    New AGENTS.md
+                                </button>
+                            </div>
+                        </header>
+                        <div class="rules-station-body">
                             <div data-agent-file-tree></div>
                         </div>
-                    </div>
+                    </section>
                 </div>
+
             </div>
         </div>
     </template>

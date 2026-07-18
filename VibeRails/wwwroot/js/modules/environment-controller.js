@@ -1035,6 +1035,7 @@ export class EnvironmentController {
             ['openai/gpt-5.2', 'openai/gpt-5.2'],
             ['openai/gpt-5.1-codex', 'openai/gpt-5.1-codex'],
             ['google/gemini-3-pro', 'google/gemini-3-pro'],
+            ['zai/glm-5.2', 'zai/glm-5.2'],
             ['opencode/gpt-5.1-codex', 'opencode/gpt-5.1-codex (Zen)'],
         ];
         const known = new Set(options.map(([value]) => value));

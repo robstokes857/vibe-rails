@@ -23,7 +23,7 @@ test('can navigate to Agent Files', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: 'Validation results' })).toBeVisible();
   await expect(page.locator('[data-vca-console]').getByRole('button', { name: 'Run again' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Code Analyzer' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Code metrics' })).toBeVisible();
   await expect(page.locator('[data-code-analyzer-console]').getByRole('button', { name: 'Run again' })).toBeVisible();
   await expect(page.locator('#vb-terminal-panel')).toHaveCount(1);
 
