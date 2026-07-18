@@ -32,6 +32,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MintLint\MintLint.csproj" />
+    <ProjectReference Include="..\PyBridge\src\PyBridge\PyBridge.csproj" />
     <ProjectReference Include="..\Pty.Net\Pty.Net.csproj" />
     <ProjectReference Include="..\TerminalEmulator\TerminalEmulator.csproj" />
     <ProjectReference Include="..\TokenSaver\TokenSaver.csproj" />

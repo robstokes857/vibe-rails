@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+
+    <!-- Make this library safe to consume from a NativeAOT / trimmed app.
+         These turn on the trim + AOT Roslyn analyzers at *build* time, so any
+         reflection / trim hazards in our own code surface as warnings without
+         needing the native toolchain installed. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>A tiny, AOT-friendly wrapper for running Python scripts from .NET and capturing their input/output.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CliWrap" Version="3.10.2" />
+  </ItemGroup>
+
+</Project>

@@ -45,14 +45,17 @@
 #### Build backend
 
 ```bash
-# Clone the repository
-git clone https://github.com/robstokes857/vibe-rails.git
+# Clone the repository and its library submodules
+git clone --recurse-submodules https://github.com/robstokes857/vibe-rails.git
 cd vibe-rails
 
 # Build and run
 cd VibeRails
 dotnet run
 ```
+
+For an existing clone, initialize the submodules once with
+`git submodule update --init --recursive`.
 
 The dashboard will open in your default browser at `http://localhost:{port 5000-5999}`.
 

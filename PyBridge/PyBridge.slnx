@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PyBridge.Bench/PyBridge.Bench.csproj" />
+    <Project Path="src/PyBridge.Console/PyBridge.Console.csproj" />
+    <Project Path="src/PyBridge.LongRun/PyBridge.LongRun.csproj" />
+    <Project Path="src/PyBridge.Tests/PyBridge.Tests.csproj" />
+    <Project Path="src/PyBridge/PyBridge.csproj" />
+  </Folder>
+</Solution>

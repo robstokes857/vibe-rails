@@ -1,0 +1,13 @@
+# PyBridge classifier dependencies (pip route).
+#
+# IMPORTANT: the plain PyPI wheels below are CPU-only. For GPU/CUDA (this machine has an
+# NVIDIA RTX 5060 Ti, a Blackwell card that needs CUDA 12.8+ wheels), install torch from
+# PyTorch's CUDA index INSTEAD of the generic pins, e.g.:
+#
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#
+# See README.md for the recommended conda route (environment.yml).
+
+torch
+torchvision
+pillow

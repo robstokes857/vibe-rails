@@ -1,0 +1,17 @@
+# .NET build output
+bin/
+obj/
+*.user
+
+# NativeAOT / publish output
+publish/
+*.pdb
+
+# Python caches
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# torch hub weight cache is per-user; never commit
+/.vs
