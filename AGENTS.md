@@ -27,6 +27,7 @@
 - **SQLite** - Local database with WAL mode for concurrency
 - **ModelContextProtocol NuGet Package** (v0.5.0-preview.1) - MCP foundation with custom service layer and tools
 - **Pty.Net** - Cross-platform pseudo-terminal support (git submodule)
+- **PyBridge** - AOT-friendly Python process and session runner (git submodule)
 
 ### Frontend
 - **Vanilla JavaScript** - No framework dependencies
@@ -111,6 +112,7 @@ VibeControl2/
 │       └── assets/                 # Images, fonts, icons
 │
 ├── Pty.Net/                        # Cross-platform PTY library (ConPTY/forkpty)
+├── PyBridge/                       # AOT-friendly Python runner library (git submodule)
 │
 ├── Tests/                          # xUnit test suite
 │   ├── AgentFileServiceTests.cs
@@ -938,6 +940,7 @@ vb --web  # Explicit web-dashboard launch
 - [Model Context Protocol Spec](https://modelcontextprotocol.io/)
 - [ModelContextProtocol NuGet Package](https://www.nuget.org/packages/ModelContextProtocol)
 - [Pty.Net](https://github.com/microsoft/vs-pty.net) (inlined fork, ConPTY only)
+- [PyBridge](https://github.com/robstokes857/PyBridge) (git submodule)
 - [XTerm.js Documentation](https://xtermjs.org/)
 
 ### Related Projects
@@ -950,6 +953,7 @@ vb --web  # Explicit web-dashboard launch
 - **Microsoft.Data.Sqlite** (v10.0.2) - SQLite database access
 - **ModelContextProtocol** (v0.5.0-preview.1) - MCP foundation
 - **Pty.Net** (git submodule) - Pseudo-terminal support
+- **PyBridge** (git submodule) - Python script execution, streaming, and warm worker sessions
 
 ---
 

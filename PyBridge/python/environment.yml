@@ -1,0 +1,24 @@
+# Conda environment for the PyBridge ResNet classifier.
+#
+# Create it with:
+#     conda env create -f environment.yml
+#     conda activate pybridge
+#
+# This pulls a CUDA-enabled PyTorch from the official pytorch channel. If `conda activate
+# pybridge` works and `python classifier.py check` reports "cuda_available": true, then
+# PyBridge will run it with CUDA too -- that is the guarantee.
+#
+# NOTE on GPUs: an NVIDIA RTX 5060 Ti (Blackwell / sm_120) needs CUDA 12.8+ builds. If the
+# conda pytorch-cuda pin below is too old for your card, use the pip cu128 index instead:
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+name: pybridge
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pytorch
+  - torchvision
+  - pytorch-cuda=12.4
+  - pillow
