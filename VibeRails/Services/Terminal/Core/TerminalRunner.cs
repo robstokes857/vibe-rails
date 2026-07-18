@@ -1,6 +1,7 @@
 using Serilog;
 using VibeRails.Services.Terminal.Consumers;
 using VibeRails.Services.AgentTools;
+using VibeRails.Services.LlmProxy;
 
 using VibeRails.Utils;
 
@@ -12,17 +13,20 @@ public class TerminalRunner
     private readonly ITerminalStateService _stateService;
     private readonly ICommandService _commandService;
     private readonly ILocalToolApiContext _toolApiContext;
+    private readonly ILlmProxySessionState _llmProxySessionState;
     private readonly IHostApplicationLifetime? _appLifetime;
 
     public TerminalRunner(
         ITerminalStateService stateService,
         ICommandService commandService,
         ILocalToolApiContext toolApiContext,
+        ILlmProxySessionState llmProxySessionState,
         IHostApplicationLifetime? appLifetime = null)
     {
         _stateService = stateService;
         _commandService = commandService;
         _toolApiContext = toolApiContext;
+        _llmProxySessionState = llmProxySessionState;
         _appLifetime = appLifetime;
     }
 
@@ -56,6 +60,7 @@ public class TerminalRunner
         var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct, initialUserInput: userInputToRecord);
         Terminal? terminal = null;
         IRemoteTerminalConnection? activeRemoteConn = null;
+        IDisposable? openCodeProxyLease = null;
 
         try
         {
@@ -68,6 +73,12 @@ public class TerminalRunner
             _stateService.PublishSessionStart(sessionId, llm.ToString(), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
 
             terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: sessionTitle, ct: ct);
+            if (preparedSession.OpenCodeProxyActive)
+            {
+                var lease = _llmProxySessionState.ActivateOpenCodeProxy();
+                openCodeProxyLease = lease;
+                terminal.Exited += (_, _) => lease.Dispose();
+            }
 
             // Always wire up DB logging
             terminal.Subscribe(new DbLoggingConsumer(_stateService, sessionId));
@@ -427,6 +438,8 @@ public class TerminalRunner
                     Log.Warning(ex, "[Terminal] Failed to dispose terminal during startup rollback");
                 }
             }
+
+            openCodeProxyLease?.Dispose();
 
             await _stateService.CompleteSessionAsync(sessionId, -1);
             throw;

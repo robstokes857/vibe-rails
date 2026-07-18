@@ -103,6 +103,7 @@ public static class CompressionCaptureRoutes
         {
             "anthropic" => plan.AnthropicAllowlist,
             "openai" => plan.CodexAllowlist,
+            "zai" => plan.ZaiAllowlist,
             _ => [],
         };
         var scopeAllowed = allowlist.Any(

@@ -22,6 +22,9 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         ? StringComparer.OrdinalIgnoreCase
         : StringComparer.Ordinal;
 
+    /// <summary>Index mode of a submodule (gitlink) entry.</summary>
+    private const string GitLinkMode = "160000";
+
     public async Task<GitStagedSnapshot> CaptureAsync(
         string workingDirectory,
         CancellationToken cancellationToken)
@@ -32,6 +35,10 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             cancellationToken);
         EnsureSucceeded(rootResult, "locate the Git repository", workingDirectory);
         var repositoryPath = Path.GetFullPath(rootResult.StdOut.Trim());
+
+        var indexEntries = await ReadIndexEntriesAsync(repositoryPath, cancellationToken);
+        var gitLinkPaths = CollectGitLinkPaths(indexEntries);
+        var trackedFiles = ToTrackedFiles(indexEntries);
 
         var statusResult = await RunTextGitAsync(
             repositoryPath,
@@ -50,7 +57,14 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             string? content = null;
             var isBinary = false;
 
-            if (existsInIndex)
+            if (existsInIndex && gitLinkPaths.Contains(entry.RelativePath))
+            {
+                // A staged submodule pointer (gitlink) names a commit in the submodule's
+                // history, not a blob in this repository — `git show :<path>` fails with
+                // "bad object". Record it as unanalyzable instead of reading it.
+                isBinary = true;
+            }
+            else if (existsInIndex)
             {
                 var blob = await ReadIndexBlobAsync(repositoryPath, entry.RelativePath, cancellationToken);
                 content = DecodeText(blob, out isBinary);
@@ -87,7 +101,6 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 previousContent));
         }
 
-        var trackedFiles = await ReadTrackedFilesAsync(repositoryPath, cancellationToken);
         var agentFiles = await ReadAgentFilesAsync(repositoryPath, trackedFiles, cancellationToken);
         return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles);
     }
@@ -108,7 +121,9 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         EnsureSucceeded(rootResult, "locate the Git repository", workingDirectory);
         var repositoryPath = Path.GetFullPath(rootResult.StdOut.Trim());
 
-        var trackedFiles = await ReadTrackedFilesAsync(repositoryPath, cancellationToken);
+        var indexEntries = await ReadIndexEntriesAsync(repositoryPath, cancellationToken);
+        var gitLinkPaths = CollectGitLinkPaths(indexEntries);
+        var trackedFiles = ToTrackedFiles(indexEntries);
         var hasHead = await HasHeadAsync(repositoryPath, cancellationToken);
         var changedEntries = hasHead
             ? await ReadWorkingTreeStatusAsync(repositoryPath, cancellationToken)
@@ -167,10 +182,14 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         {
             cancellationToken.ThrowIfCancellationRequested();
             var fullPath = ToFullPath(repositoryPath, entry.RelativePath);
-            var existsInWorkingTree = entry.Kind != GitStagedChangeKind.Deleted
+            // A submodule (gitlink) path is a directory whose "content" is a commit
+            // pointer; there is nothing to read here or from HEAD.
+            var isGitLink = gitLinkPaths.Contains(entry.RelativePath);
+            var existsInWorkingTree = !isGitLink
+                && entry.Kind != GitStagedChangeKind.Deleted
                 && pathGuard.IsReadableRegularFile(fullPath);
             string? content = null;
-            var isBinary = false;
+            var isBinary = isGitLink;
             if (existsInWorkingTree)
             {
                 var length = new FileInfo(fullPath).Length;
@@ -385,22 +404,55 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         return content[^1] == '\n' ? count : checked(count + 1);
     }
 
-    private static async Task<IReadOnlyList<string>> ReadTrackedFilesAsync(
+    private static async Task<IReadOnlyList<GitIndexEntry>> ReadIndexEntriesAsync(
         string repositoryPath,
         CancellationToken cancellationToken)
     {
         var indexResult = await RunTextGitAsync(
             repositoryPath,
-            ["ls-files", "-z"],
+            ["ls-files", "--stage", "-z"],
             cancellationToken);
         EnsureSucceeded(indexResult, "read the Git index", repositoryPath);
 
-        return SplitNull(indexResult.StdOut)
-            .Select(NormalizePath)
+        // Each record is "<mode> <object> <stage>\t<path>". The mode distinguishes
+        // regular files from gitlinks, which have no blob to read in this repository.
+        var entries = new List<GitIndexEntry>();
+        foreach (var record in SplitNull(indexResult.StdOut))
+        {
+            var tabIndex = record.IndexOf('\t');
+            var spaceIndex = record.IndexOf(' ');
+            if (tabIndex <= 0 || spaceIndex <= 0 || spaceIndex > tabIndex)
+            {
+                continue;
+            }
+
+            var path = NormalizePath(record[(tabIndex + 1)..]);
+            if (path.Length > 0)
+            {
+                entries.Add(new GitIndexEntry(path, record[..spaceIndex]));
+            }
+        }
+
+        return entries;
+    }
+
+    private static HashSet<string> CollectGitLinkPaths(IReadOnlyList<GitIndexEntry> entries) =>
+        entries
+            .Where(entry => entry.Mode == GitLinkMode)
+            .Select(entry => entry.RelativePath)
+            .ToHashSet(PathComparer);
+
+    /// <summary>
+    /// Tracked file paths, excluding gitlinks: a submodule entry is a directory pointer,
+    /// not a readable file, so consumers that iterate tracked files must never see it.
+    /// </summary>
+    private static IReadOnlyList<string> ToTrackedFiles(IReadOnlyList<GitIndexEntry> entries) =>
+        entries
+            .Where(entry => entry.Mode != GitLinkMode)
+            .Select(entry => entry.RelativePath)
             .Distinct(PathComparer)
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToList();
-    }
 
     private static async Task<IReadOnlyList<GitIndexTextFile>> ReadAgentFilesAsync(
         string repositoryPath,
@@ -698,6 +750,8 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         string RelativePath,
         GitStagedChangeKind Kind,
         string? PreviousRelativePath);
+
+    private sealed record GitIndexEntry(string RelativePath, string Mode);
 
     private sealed record TextGitResult(int ExitCode, string StdOut, string StdErr, bool TimedOut);
     private sealed record BinaryGitResult(int ExitCode, byte[] Bytes, string StdErr, bool TimedOut);

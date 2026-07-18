@@ -29,18 +29,25 @@ namespace Tests.Services.Terminal;
 public class CommandServiceTests : IDisposable
 {
     private readonly string? _originalFakeCliFlag;
+    private readonly string? _originalOpenCodeConfig;
 
     public CommandServiceTests()
     {
         // Isolate from any caller-set fake-CLI override that would short-circuit
         // PrepareSession before the LLM-specific env injection runs.
         _originalFakeCliFlag = Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI");
+        _originalOpenCodeConfig = Environment.GetEnvironmentVariable(
+            LlmProxyZaiConfig.ConfigContentVariable);
         Environment.SetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI", null);
+        Environment.SetEnvironmentVariable(LlmProxyZaiConfig.ConfigContentVariable, null);
     }
 
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI", _originalFakeCliFlag);
+        Environment.SetEnvironmentVariable(
+            LlmProxyZaiConfig.ConfigContentVariable,
+            _originalOpenCodeConfig);
     }
 
     [Fact]
@@ -229,6 +236,56 @@ public class CommandServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task PrepareSession_Opencode_InjectsZaiProxyConfigAndMarksSessionActive()
+    {
+        var service = CreateService(openCodeLlmProxyEnabled: true);
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.OpenCode, envName: null, extraArgs: null);
+
+        Assert.True(prepared.OpenCodeProxyActive);
+        Assert.Equal(
+            "test-session-token",
+            prepared.Environment[LocalLlmProxyContext.SessionTokenVariable]);
+        Assert.Equal(
+            "test-tab-token",
+            prepared.Environment[LocalLlmProxyContext.TabTokenVariable]);
+        var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
+        Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
+        Assert.Contains("test-session-token", config);
+        Assert.Contains("test-tab-token", config);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Opencode_DoesNotInjectProxyWhenDisabled()
+    {
+        var service = CreateService(openCodeLlmProxyEnabled: false);
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.OpenCode, envName: null, extraArgs: null);
+
+        Assert.False(prepared.OpenCodeProxyActive);
+        Assert.False(prepared.Environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable));
+    }
+
+    [Fact]
+    public async Task PrepareSession_Opencode_PreservesInheritedConfigContent()
+    {
+        const string inherited = "{\"plugin\":[\"caller-plugin\"]}";
+        Environment.SetEnvironmentVariable(LlmProxyZaiConfig.ConfigContentVariable, inherited);
+        var service = CreateService(openCodeLlmProxyEnabled: true);
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.OpenCode, envName: null, extraArgs: null);
+
+        Assert.False(prepared.OpenCodeProxyActive);
+        Assert.False(prepared.Environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable));
+        Assert.Equal(
+            inherited,
+            Environment.GetEnvironmentVariable(LlmProxyZaiConfig.ConfigContentVariable));
+    }
+
+    [Fact]
     public async Task PrepareSession_Shell_ReturnsEmptyCommandAndIgnoresEnvAndArgs()
     {
         var service = CreateService();
@@ -251,6 +308,7 @@ public class CommandServiceTests : IDisposable
     private static CommandService CreateService(
         bool codexLlmProxyEnabled = false,
         bool claudeLlmProxyEnabled = false,
+        bool openCodeLlmProxyEnabled = false,
         string codexLlmProxyMode = CodexLlmProxySettings.ModeSubscription)
     {
         var fileService = new Mock<IFileService>().Object;
@@ -267,7 +325,11 @@ public class CommandServiceTests : IDisposable
         proxyContext.Setup(x => x.TabToken).Returns("test-tab-token");
         var proxySettings = new Mock<ILlmProxySettingsService>();
         proxySettings.Setup(x => x.GetSettings())
-            .Returns(new LlmProxySettings(codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled));
+            .Returns(new LlmProxySettings(
+                CodexLlmProxyEnabled: codexLlmProxyEnabled,
+                CodexLlmProxyMode: codexLlmProxyMode,
+                ClaudeLlmProxyEnabled: claudeLlmProxyEnabled,
+                OpenCodeLlmProxyEnabled: openCodeLlmProxyEnabled));
         return new CommandService(envService, proxyContext.Object, proxySettings.Object);
     }
 

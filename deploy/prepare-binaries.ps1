@@ -133,6 +133,19 @@ foreach ($platform in $platforms) {
         Write-Host "    Copied $($extraFiles.Count) additional publish files (native DLLs, etc.)" -ForegroundColor Green
     }
 
+    # Copy the scripts/ subdirectory (git hook scripts, BERT download scripts). Like the
+    # Certs/ public key below, subdirectories are invisible to the top-level extra-files
+    # loop above — without this the packaged app cannot install or repair Git Guard hooks
+    # ("Hook script 'pre-commit-hook.sh' not found"). On Linux publishes the hook scripts
+    # ('scripts') and download scripts ('Scripts') are two distinct directories.
+    $scriptDirs = @(Get-ChildItem -Path $sourceDir -Directory | Where-Object { $_.Name -ieq 'scripts' })
+    foreach ($dir in $scriptDirs) {
+        $destScripts = Join-Path $platformDir $dir.Name
+        New-Item -ItemType Directory -Path $destScripts -Force | Out-Null
+        Copy-Item -Path (Join-Path $dir.FullName '*') -Destination $destScripts -Recurse -Force
+        Write-Host "    Copied $($dir.Name)/" -ForegroundColor Green
+    }
+
     # Copy ONLY the public key(s) from Certs/ (used to encrypt uploaded debug bundles).
     # Never recurse the whole folder: the private decryption key must never ship in a
     # client VSIX. The extra-files loop above only copies top-level files, so the public
@@ -179,6 +192,17 @@ foreach ($platform in $platforms) {
     # feature can't encrypt uploads and fails at runtime on the user's machine.
     if (-not (Test-Path (Join-Path $platformDir "Certs/rsa_public_key.pem"))) {
         throw "Public key missing from bin/$($platform.Name)/Certs/. Expected Certs/rsa_public_key.pem alongside vb. Did the AOT publish emit VibeRails/Certs/ into $sourceDir?"
+    }
+
+    # Assert the git hook scripts shipped. HookInstallationService loads them from
+    # <base>/scripts at runtime; without them Git Guard's Install/Repair fails on the
+    # user's machine with "Hook script 'pre-commit-hook.sh' not found".
+    foreach ($hookScript in @('pre-commit-hook.sh', 'commit-msg-hook.sh')) {
+        $shipped = @(Get-ChildItem -Path $platformDir -Directory | Where-Object { $_.Name -ieq 'scripts' }) |
+            Where-Object { Test-Path (Join-Path $_.FullName $hookScript) }
+        if (-not $shipped) {
+            throw "Hook script $hookScript missing from bin/$($platform.Name)/scripts/. Git Guard hook install/repair would fail at runtime. Did the AOT publish emit VibeRails/scripts/ into $sourceDir?"
+        }
     }
 }
 

@@ -40,6 +40,7 @@ export class SettingsController {
             codexLlmProxyEnabled: false,
             codexLlmProxyMode: 'subscription',
             claudeLlmProxyEnabled: false,
+            opencodeLlmProxyEnabled: false,
             // null = never configured. Distinct from [] ("everything off"); the catalog's
             // defaultSelection stands in for null, exactly as CompressionCatalog.Resolve does.
             tokenSaverStages: null,
@@ -95,6 +96,7 @@ export class SettingsController {
             const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
             const codexLlmProxyModeApi = root.querySelector('#setting-codex-llm-proxy-mode-api');
             const claudeLlmProxyEnabledToggle = root.querySelector('#setting-claude-llm-proxy-enabled');
+            const opencodeLlmProxyEnabledToggle = root.querySelector('#setting-opencode-llm-proxy-enabled');
             const tokenSaverCaptureToggle = root.querySelector('#setting-token-saver-capture');
 
             if (remoteAccessToggle) {
@@ -144,6 +146,9 @@ export class SettingsController {
             if (claudeLlmProxyEnabledToggle) {
                 claudeLlmProxyEnabledToggle.checked = settings.claudeLlmProxyEnabled === true;
             }
+            if (opencodeLlmProxyEnabledToggle) {
+                opencodeLlmProxyEnabledToggle.checked = settings.opencodeLlmProxyEnabled === true;
+            }
             if (tokenSaverCaptureToggle) {
                 tokenSaverCaptureToggle.checked = settings.tokenSaverCaptureEnabled === true;
             }
@@ -181,6 +186,7 @@ export class SettingsController {
                             codexLlmProxyEnabledToggle?.checked || false,
                             this._getCodexLlmProxyMode(root),
                             claudeLlmProxyEnabledToggle?.checked || false,
+                            opencodeLlmProxyEnabledToggle?.checked || false,
                             this._collectTokenSaverStages(root),
                             tokenSaverCaptureToggle?.checked ?? false
                         );
@@ -202,7 +208,7 @@ export class SettingsController {
         content.appendChild(fragment);
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, tokenSaverStages, tokenSaverCaptureEnabled) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, opencodeLlmProxyEnabled, tokenSaverStages, tokenSaverCaptureEnabled) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -213,6 +219,7 @@ export class SettingsController {
                 codexLlmProxyEnabled: codexLlmProxyEnabled,
                 codexLlmProxyMode: codexLlmProxyMode,
                 claudeLlmProxyEnabled: claudeLlmProxyEnabled,
+                opencodeLlmProxyEnabled: opencodeLlmProxyEnabled,
                 // An empty array is a real "everything off" choice and must reach the server as
                 // [], not as null/absent — the route treats null as "stale client, leave the
                 // stored selection alone". null only ever comes from the catalog having failed
@@ -295,6 +302,7 @@ export class SettingsController {
             '#setting-codex-llm-proxy-enabled',
             'input[name="setting-codex-llm-proxy-mode"]',
             '#setting-claude-llm-proxy-enabled',
+            '#setting-opencode-llm-proxy-enabled',
             '#setting-token-saver-capture',
             // Rendered from the catalog, so they must already be in the DOM when dirty tracking
             // initialises — see the render call in loadSettings.
@@ -314,6 +322,7 @@ export class SettingsController {
             codexLlmProxyEnabled: isChecked('#setting-codex-llm-proxy-enabled'),
             codexLlmProxyMode: this._getCodexLlmProxyMode(root),
             claudeLlmProxyEnabled: isChecked('#setting-claude-llm-proxy-enabled'),
+            opencodeLlmProxyEnabled: isChecked('#setting-opencode-llm-proxy-enabled'),
             // DOM order is catalog order, so this is stable across snapshots.
             tokenSaverStages: this._collectTokenSaverStages(root),
             tokenSaverCaptureEnabled: isChecked('#setting-token-saver-capture')
@@ -365,6 +374,7 @@ export class SettingsController {
         const codexLlmProxyModeSubscription = root.querySelector('#setting-codex-llm-proxy-mode-subscription');
         const codexLlmProxyModeApi = root.querySelector('#setting-codex-llm-proxy-mode-api');
         const claudeLlmProxyEnabledToggle = root.querySelector('#setting-claude-llm-proxy-enabled');
+        const opencodeLlmProxyEnabledToggle = root.querySelector('#setting-opencode-llm-proxy-enabled');
 
         if (remoteAccessToggle) remoteAccessToggle.checked = settings.remoteAccess === true;
         if (apiKeyInput) {
@@ -382,6 +392,7 @@ export class SettingsController {
         if (codexLlmProxyModeSubscription) codexLlmProxyModeSubscription.checked = codexLlmProxyMode === 'subscription';
         if (codexLlmProxyModeApi) codexLlmProxyModeApi.checked = codexLlmProxyMode === 'api';
         if (claudeLlmProxyEnabledToggle) claudeLlmProxyEnabledToggle.checked = settings.claudeLlmProxyEnabled === true;
+        if (opencodeLlmProxyEnabledToggle) opencodeLlmProxyEnabledToggle.checked = settings.opencodeLlmProxyEnabled === true;
 
         const tokenSaverCaptureToggle = root.querySelector('#setting-token-saver-capture');
         if (tokenSaverCaptureToggle) tokenSaverCaptureToggle.checked = settings.tokenSaverCaptureEnabled === true;

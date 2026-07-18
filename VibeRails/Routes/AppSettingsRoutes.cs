@@ -55,6 +55,8 @@ public static class AppSettingsRoutes
                 settings.CodexLlmProxyMode = CodexLlmProxySettings.NormalizeMode(settingsDto.CodexLlmProxyMode);
             if (settingsDto.ClaudeLlmProxyEnabled.HasValue)
                 settings.ClaudeLlmProxyEnabled = settingsDto.ClaudeLlmProxyEnabled.Value;
+            if (settingsDto.OpenCodeLlmProxyEnabled.HasValue)
+                settings.OpenCodeLlmProxyEnabled = settingsDto.OpenCodeLlmProxyEnabled.Value;
             // Same stale-client guard, with one extra wrinkle: null here means "key absent, leave
             // the stored selection alone", but an EMPTY list is a real choice (every stage off)
             // and must be written through untouched. Collapsing the two would make "turn
@@ -112,6 +114,7 @@ public static class AppSettingsRoutes
             settings.CodexLlmProxyEnabled,
             CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
             settings.ClaudeLlmProxyEnabled,
+            settings.OpenCodeLlmProxyEnabled,
             // Passed through as-is, null included: null means "never configured", which the client
             // resolves to the catalog's defaultSelection exactly as CompressionCatalog.Resolve
             // does server-side. Substituting the defaults here would make the two states

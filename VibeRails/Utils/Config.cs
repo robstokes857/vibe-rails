@@ -21,6 +21,10 @@ public class Settings
     public bool CodexLlmProxyEnabled { get; set; } = false;
     public string CodexLlmProxyMode { get; set; } = "subscription";
     public bool ClaudeLlmProxyEnabled { get; set; } = false;
+    // OpenCode (zai/Z.AI GLM) LLM proxy. Routes OpenCode's zai provider traffic through the local
+    // token-saver proxy via the OPENCODE_CONFIG_CONTENT env var (see LlmProxyZaiConfig). Off by
+    // default, like the Claude/Codex proxy toggles. Launch-flag-only — no opencode.json is written.
+    public bool OpenCodeLlmProxyEnabled { get; set; } = false;
     // Token saver. TokenSaverStages is the ONE knob: the set of enabled stage and scope ids drawn
     // from TokenSaver.Pipeline.CompressionCatalog (e.g. "ansi-strip", "scope-shell"). It replaced
     // the old TokenSaverLevel tier string and the five per-transform bools in 2026-07 — a tier
@@ -34,7 +38,7 @@ public class Settings
     // failing an LLM request.
     //
     // Despite its legacy provider-specific name, ClaudeTokenSaverEnabled is the master saver kill
-    // switch for BOTH Claude and Codex; false force-disables all rewriting regardless of stages. A
+    // switch for Claude, Codex, and OpenCode; false force-disables all rewriting regardless of stages. A
     // provider's saver only runs when that provider's proxy is also enabled. Changing the selection
     // mid-session busts the provider prompt cache once — the transforms must be deterministic
     // across turns, so the cost of a config change is paid at the change, by design.
