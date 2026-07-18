@@ -121,10 +121,10 @@ Current pinned values (Codex refreshed 2026-07-10; all others 2026-07-02):
   follows the docs' supported-in-CLI table, not one account's entitlements.
 - OpenCode: `anthropic/claude-opus-4-5`, `anthropic/claude-sonnet-4-5`,
   `openai/gpt-5.2`, `openai/gpt-5.1-codex`, `google/gemini-3-pro`,
-  `opencode/gpt-5.1-codex` (Zen), plus an empty "Default (OpenCode recommended)" entry.
+  `zai/glm-5.2`, `opencode/gpt-5.1-codex` (Zen), plus an empty "Default (OpenCode recommended)" entry.
   OpenCode model IDs are `provider/model` (the format `--model` and `opencode models` use).
   Refresh via `opencode models` (optionally `--refresh` to update the cache from models.dev).
-  Added 2026-07-16 alongside the OpenCode CLI integration.
+  Added 2026-07-16 alongside the OpenCode CLI integration; `zai/glm-5.2` added 2026-07-17.
 
 The rule:
 

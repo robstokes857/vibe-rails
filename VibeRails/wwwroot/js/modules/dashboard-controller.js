@@ -33,7 +33,9 @@ export class DashboardController {
         window.scrollTo(0, 0);
     }
 
-    // The dashboard is the Rules workspace plus the terminal mount below it.
+    // The dashboard is the Rules workspace. The Rules view provides the terminal slot
+    // between the validation results and the code metrics, so the terminal mounts into
+    // the slot that mountAgentsOverview just rendered.
     renderUnifiedDashboard(data = {}) {
         const fragment = this.app.cloneTemplate('dashboard-template');
         const root = fragment.querySelector('[data-dashboard]');

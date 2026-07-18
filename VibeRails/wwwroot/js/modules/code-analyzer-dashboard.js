@@ -543,11 +543,13 @@ function showEvidenceFallback(view) {
 
 function evidenceDecorationOptions(monaco, tone) {
     const suffix = ['danger', 'warning', 'success'].includes(tone) ? tone : 'okay';
+    // Monaco's ruler/minimap APIs need literal colors; keep these in sync with the
+    // Focus Dark status palette in style.css (--color-danger/-warning/-success/-accent).
     const colors = {
-        danger: '#ff6d80',
-        warning: '#f4be63',
-        success: '#68aaff',
-        okay: '#8b7cff'
+        danger: '#ef4444',
+        warning: '#f59e0b',
+        success: '#10b981',
+        okay: '#06b6d4'
     };
     return {
         isWholeLine: true,

@@ -503,7 +503,10 @@ code {
 
 /* LLM proxy/token-compression meter. It lives at the far right of the terminal controls bar and
    responds only to authenticated proxy_activity events. The savings value intentionally starts as
-   an em dash until backend instrumentation can supply an honest token count. */
+   an em dash until backend instrumentation can supply an honest token count.
+   Design: one quiet chip — icon, count, caption, status LED. The count self-describes
+   ("1.1K tokens saved"), so the separate "Token saver" text label stays in the DOM for
+   accessibility and tests but out of the visual chip. */
 .vb-terminal-proxy-activity-slot,
 .vb-activity-blinker {
     position: relative;
@@ -511,66 +514,56 @@ code {
     align-items: center;
 }
 
+.vb-activity-blinker-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    clip: rect(0 0 0 0);
+    overflow: hidden;
+    white-space: nowrap;
+}
+
 .vb-activity-blinker-trigger {
     position: relative;
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: 0.48rem;
-    height: 34px;
-    padding: 0.2rem 0.45rem 0.2rem 0.5rem;
-    color: color-mix(in srgb, var(--color-text-muted) 76%, transparent);
-    background: linear-gradient(135deg,
-        color-mix(in srgb, var(--color-bg-base) 92%, #fff 8%),
-        color-mix(in srgb, var(--color-bg-base) 72%, transparent));
-    border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
-    border-radius: 999px;
-    font-family: var(--vb-font-mono, 'JetBrains Mono', monospace);
-    font-weight: 700;
+    gap: 0.5rem;
+    height: 30px;
+    padding: 0 0.7rem 0 0.6rem;
+    color: var(--color-text-muted);
+    background: color-mix(in srgb, var(--color-bg-base) 55%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+    border-radius: 8px;
     cursor: pointer;
-    transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease,
-        box-shadow 0.18s ease, transform 0.18s ease;
+    transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease,
+        box-shadow 0.16s ease;
 }
 
 .vb-activity-blinker-trigger:hover,
 .vb-activity-blinker-trigger:focus-visible,
 .vb-activity-blinker.is-open .vb-activity-blinker-trigger {
     color: var(--color-text);
-    background: linear-gradient(135deg,
-        color-mix(in srgb, var(--color-text) 7%, var(--color-bg-base)),
-        color-mix(in srgb, var(--color-accent) 5%, var(--color-bg-base)));
-    border-color: color-mix(in srgb, var(--color-accent) 38%, var(--color-border));
+    background: color-mix(in srgb, var(--color-accent) 7%, var(--color-bg-base));
+    border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
     outline: none;
 }
 
-.vb-activity-blinker-trigger:hover {
-    transform: translateY(-1px);
-}
-
 .vb-activity-blinker-trigger:focus-visible {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
 .vb-activity-blinker-zip {
     position: relative;
     display: inline-grid;
     place-items: center;
-    width: 21px;
-    height: 23px;
-    flex: 0 0 21px;
-    color: #64748b;
-    filter: none;
-    transition: color 0.18s ease, filter 0.18s ease;
-}
-
-.vb-activity-blinker-zip::before {
-    position: absolute;
-    inset: -3px -4px;
-    content: '';
-    background: color-mix(in srgb, currentColor 8%, transparent);
-    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-    border-radius: 50%;
-    transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    color: color-mix(in srgb, var(--color-text-muted) 80%, transparent);
+    transition: color 0.16s ease;
 }
 
 .vb-activity-blinker-zip > i {
@@ -580,145 +573,106 @@ code {
     place-items: center;
     width: 100%;
     height: 100%;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     line-height: 1;
-    transition: opacity 0.18s ease, transform 0.18s ease;
+    transition: opacity 0.16s ease;
 }
 
 .vb-activity-blinker-zip-outline {
-    opacity: 0.76;
-    transform: scale(1);
+    opacity: 1;
 }
 
 .vb-activity-blinker-zip-solid {
     opacity: 0;
-    transform: scale(0.84);
-}
-
-.vb-activity-blinker-label {
-    color: color-mix(in srgb, currentColor 84%, var(--color-text-muted));
-    font-size: 0.62rem;
-    line-height: 1;
-    letter-spacing: 0.075em;
-    text-transform: uppercase;
-    white-space: nowrap;
 }
 
 .vb-activity-blinker-metric {
     display: inline-flex;
     align-items: baseline;
-    gap: 0.28rem;
-    min-height: 22px;
-    padding: 0.22rem 0.42rem;
-    color: color-mix(in srgb, var(--color-text) 76%, var(--color-text-muted));
-    background: color-mix(in srgb, var(--color-accent) 7%, transparent);
-    border: 1px solid color-mix(in srgb, var(--color-accent) 18%, transparent);
-    border-radius: 999px;
+    gap: 0.3rem;
     line-height: 1;
     white-space: nowrap;
-    transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease;
 }
 
 .vb-activity-blinker-value {
     min-width: 1ch;
-    color: color-mix(in srgb, var(--color-accent) 76%, var(--color-text));
-    font-size: 0.73rem;
+    color: color-mix(in srgb, var(--color-text) 88%, var(--color-text-muted));
+    font: 700 0.76rem/1 var(--vb-font-mono, 'JetBrains Mono', monospace);
     font-variant-numeric: tabular-nums;
-    letter-spacing: -0.025em;
+    letter-spacing: -0.02em;
 }
 
 .vb-activity-blinker-metric.is-placeholder .vb-activity-blinker-value {
-    color: color-mix(in srgb, var(--color-text-muted) 76%, transparent);
+    color: color-mix(in srgb, var(--color-text-muted) 70%, transparent);
+    font-weight: 500;
 }
 
 .vb-activity-blinker-metric-label {
-    color: color-mix(in srgb, currentColor 76%, transparent);
+    color: color-mix(in srgb, var(--color-text-muted) 85%, transparent);
     font-size: 0.62rem;
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    letter-spacing: 0.02em;
 }
 
 .vb-activity-blinker-dot {
-    width: 6px;
-    height: 6px;
-    flex: 0 0 6px;
-    background: #64748b;
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    width: 5px;
+    height: 5px;
+    flex: 0 0 5px;
+    background: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
     border-radius: 50%;
-    box-shadow: 0 0 0 rgba(100, 116, 139, 0);
-    transition: background 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+    transition: background 0.16s ease, box-shadow 0.16s ease;
 }
 
+/* Enabled: the saver is armed — cool cyan. */
 .vb-activity-blinker.is-enabled .vb-activity-blinker-trigger {
-    color: color-mix(in srgb, var(--color-accent) 76%, var(--color-text));
-    border-color: color-mix(in srgb, var(--color-accent) 36%, var(--color-border));
+    border-color: color-mix(in srgb, var(--color-accent) 26%, var(--color-border));
 }
 
 .vb-activity-blinker.is-enabled .vb-activity-blinker-zip {
-    color: color-mix(in srgb, var(--color-accent) 84%, #fff 16%);
+    color: color-mix(in srgb, var(--color-accent) 80%, var(--color-text));
 }
 
 .vb-activity-blinker.is-enabled .vb-activity-blinker-dot {
-    background: color-mix(in srgb, var(--color-accent) 72%, #22c55e);
-    box-shadow: 0 0 5px color-mix(in srgb, var(--color-accent) 44%, transparent);
+    background: var(--color-accent);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--color-accent) 55%, transparent);
 }
 
+/* Active: compressed traffic just flowed — a brief green breath, no neon. */
 .vb-activity-blinker.is-active .vb-activity-blinker-trigger {
-    color: #bbf7d0;
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.17), rgba(20, 83, 45, 0.1));
-    border-color: rgba(74, 222, 128, 0.72);
-    box-shadow: 0 0 18px rgba(34, 197, 94, 0.28), inset 0 0 12px rgba(74, 222, 128, 0.06);
+    border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-border));
+    background: color-mix(in srgb, var(--color-success) 8%, var(--color-bg-base));
 }
 
 .vb-activity-blinker.is-active .vb-activity-blinker-zip {
-    color: #4ade80;
-    filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.72));
-}
-
-.vb-activity-blinker.is-active .vb-activity-blinker-zip::before {
-    background: rgba(74, 222, 128, 0.12);
-    border-color: rgba(74, 222, 128, 0.38);
-    box-shadow: 0 0 9px rgba(74, 222, 128, 0.18);
+    color: var(--color-success);
 }
 
 .vb-activity-blinker.is-active .vb-activity-blinker-zip-outline {
-    animation: vb-proxy-zip-outline 450ms steps(1, end) 2;
+    opacity: 0;
 }
 
 .vb-activity-blinker.is-active .vb-activity-blinker-zip-solid {
-    animation: vb-proxy-zip-solid 450ms steps(1, end) 2;
-}
-
-.vb-activity-blinker.is-active .vb-activity-blinker-metric {
-    color: #dcfce7;
-    background: rgba(74, 222, 128, 0.1);
-    border-color: rgba(74, 222, 128, 0.28);
+    opacity: 1;
 }
 
 .vb-activity-blinker.is-active .vb-activity-blinker-value {
-    color: #86efac;
+    color: color-mix(in srgb, var(--color-success) 70%, var(--color-text));
 }
 
 .vb-activity-blinker.is-active .vb-activity-blinker-dot {
-    background: #4ade80;
+    background: var(--color-success);
     animation: vb-proxy-activity-pulse 0.9s ease-out;
 }
 
-@keyframes vb-proxy-zip-outline {
-    0%, 49% { opacity: 1; transform: scale(1); }
-    50%, 100% { opacity: 0; transform: scale(0.84); }
-}
-
-@keyframes vb-proxy-zip-solid {
-    0%, 49% { opacity: 0; transform: scale(0.84); }
-    50%, 100% { opacity: 1; transform: scale(1.05); }
-}
-
 @keyframes vb-proxy-activity-pulse {
-    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.9); }
-    35% { transform: scale(1.55); box-shadow: 0 0 12px 4px rgba(74, 222, 128, 0.72); }
-    100% { transform: scale(1); box-shadow: 0 0 3px 0 rgba(74, 222, 128, 0.35); }
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-success) 60%, transparent); }
+    100% { box-shadow: 0 0 0 6px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vb-activity-blinker.is-active .vb-activity-blinker-dot {
+        animation: none;
+    }
 }
 
 .vb-activity-blinker-popover {
@@ -1131,16 +1085,10 @@ code {
 }
 
 
-/* Terminal Hub on Dashboard */
-[data-terminal-section] .vb-terminal-panel {
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: #0d0e1c;
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
-}
-
-[data-terminal-section] .vb-terminal-panel-header {
-    background: rgba(255, 255, 255, 0.02);
-    border-bottom: 1px solid var(--color-border);
+/* Terminal panel inside the Rules fix station — align the border with the
+   station cards but leave the terminal's own chrome untouched. */
+[data-terminal-section] #vb-terminal-panel {
+    border-color: color-mix(in srgb, var(--color-border) 75%, transparent);
 }
 
 /* Local File Tree on Dashboard (Compact) */
@@ -3549,18 +3497,18 @@ code {
     color: #ff8a8a;
 }
 
-/* Per-tab compression is a compact two-state capsule. The compression arrows communicate the
-   action more clearly than a generic archive file, while the dot and soft green fill keep the
-   current state legible in the crowded hover action strip. */
+/* Per-tab token saver: a quiet ghost icon that fills soft green while the tab's
+   proxy is compressing. Flat fill + one inset ring — the corner dot is the state
+   LED that stays legible in the crowded hover action strip. Colors follow the tab
+   strip's own (Catppuccin-family) palette, not the app tokens. */
 #vb-terminal-panel .vb-terminal-tab-token-compression {
     position: relative;
     width: 27px;
     color: #7f849c;
-    box-shadow: inset 0 0 0 1px transparent;
 }
 
 #vb-terminal-panel .vb-terminal-tab-token-compression:hover {
-    color: #bac2de;
+    color: #cdd6f4;
     background: rgba(205, 214, 244, 0.09);
 }
 
@@ -3572,24 +3520,23 @@ code {
     height: 4px;
     background: currentColor;
     border-radius: 50%;
-    opacity: 0.48;
-    transition: opacity 0.16s ease, box-shadow 0.16s ease;
+    opacity: 0.4;
+    transition: opacity 0.16s ease;
 }
 
 #vb-terminal-panel .vb-terminal-tab-item.is-token-compression-on .vb-terminal-tab-token-compression {
     color: #a6e3a1;
-    background: linear-gradient(135deg, rgba(166, 227, 161, 0.16), rgba(74, 222, 128, 0.06));
-    box-shadow: inset 0 0 0 1px rgba(166, 227, 161, 0.26), 0 0 8px rgba(74, 222, 128, 0.08);
+    background: rgba(166, 227, 161, 0.12);
+    box-shadow: inset 0 0 0 1px rgba(166, 227, 161, 0.22);
 }
 
 #vb-terminal-panel .vb-terminal-tab-item.is-token-compression-on .vb-terminal-tab-token-compression:hover {
     color: #d2f6ce;
-    background: linear-gradient(135deg, rgba(166, 227, 161, 0.23), rgba(74, 222, 128, 0.1));
+    background: rgba(166, 227, 161, 0.2);
 }
 
 #vb-terminal-panel .vb-terminal-tab-item.is-token-compression-on .vb-terminal-tab-token-compression-dot {
     opacity: 1;
-    box-shadow: 0 0 5px rgba(166, 227, 161, 0.85);
 }
 
 #vb-terminal-panel .vb-terminal-tab-token-compression:disabled {
@@ -9982,7 +9929,11 @@ button.git-guard-menu-button:focus-visible {
     }
 }
 
-/* ─── Rules overview: compact VCA workspace ─────────────────────────────── */
+/* ─── Rules workspace: the guard rail ────────────────────────────────────
+   The Rules page is one column of stations hung on a literal rail — validate,
+   fix, measure, govern. Each station's node reads the live tone of the panel
+   it fronts (data-tone / aria-busy set by the controllers), so commit status
+   travels down the rail with no extra JS. */
 .rules-dashboard-host {
     min-width: 0;
 }
@@ -9991,220 +9942,271 @@ button.git-guard-menu-button:focus-visible {
     animation: none;
 }
 
-.rules-vca-panel {
-    --git-guard-tone: var(--color-text-muted);
+.rules-page-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.9rem 1.5rem;
+    margin: 0.35rem 0 1.4rem;
+}
+
+.rules-page-heading {
+    min-width: 0;
+    max-width: 640px;
+}
+
+.rules-page-eyebrow {
+    color: color-mix(in srgb, var(--color-accent) 60%, var(--color-text-muted));
+    font: 800 0.62rem/1 var(--vb-font-mono, ui-monospace, monospace);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.rules-page-heading h1 {
+    margin: 0.4rem 0 0.3rem;
+    color: var(--color-text);
+    font-size: 1.45rem;
+    font-weight: 750;
+    letter-spacing: -0.02em;
+}
+
+.rules-page-heading p {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 0.82rem;
+    line-height: 1.5;
+}
+
+.rules-rail {
+    position: relative;
+    display: grid;
+    gap: 1.35rem;
+    margin-bottom: 1rem;
+    padding-left: 34px;
+}
+
+.rules-rail::before {
+    content: '';
+    position: absolute;
+    top: 10px;
+    bottom: 14px;
+    left: 11px;
+    width: 2px;
+    border-radius: 999px;
+    background: linear-gradient(180deg,
+        color-mix(in srgb, var(--color-accent) 40%, var(--color-border)),
+        color-mix(in srgb, var(--color-border) 85%, transparent) 26%,
+        color-mix(in srgb, var(--color-border) 85%, transparent) 82%,
+        transparent);
+}
+
+.rules-station {
+    --station-tone: var(--color-text-muted);
+    position: relative;
+    min-width: 0;
+}
+
+.rules-station[data-station="fix"] {
+    --station-tone: var(--color-accent);
+}
+
+.rules-station:has(> [data-tone="success"]) { --station-tone: var(--color-success); }
+.rules-station:has(> [data-tone="warning"]) { --station-tone: var(--color-warning); }
+.rules-station:has(> [data-tone="danger"]) { --station-tone: var(--color-danger); }
+
+.rules-station-node {
+    position: absolute;
+    top: 26px;
+    left: -28px;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--station-tone);
+    border-radius: 50%;
+    background: var(--color-bg-base);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--station-tone) 14%, var(--color-bg-base));
+    transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.rules-station[data-station="fix"] .rules-station-node {
+    top: 13px;
+}
+
+.rules-station:has(> [aria-busy="true"]) .rules-station-node,
+.rules-station:has(> .is-running) .rules-station-node {
+    animation: rules-node-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes rules-node-pulse {
+    50% {
+        box-shadow: 0 0 0 7px color-mix(in srgb, var(--station-tone) 4%, transparent);
+    }
+}
+
+.rules-station > .card {
+    margin: 0;
     overflow: hidden;
-    border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-border));
-    background:
-        radial-gradient(circle at 0 0, color-mix(in srgb, var(--color-primary) 9%, transparent), transparent 34%),
-        var(--color-bg-surface);
+    border-radius: 12px;
+    background: var(--color-bg-surface);
+}
+
+/* One header component for every station. */
+.rules-station-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.7rem 1.1rem;
+    padding: 0.85rem 1.1rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+    background: color-mix(in srgb, var(--color-bg-base) 30%, transparent);
+}
+
+.rules-station-header-bare {
+    padding: 0 0 0.6rem;
+    border-bottom: 0;
+    background: none;
+}
+
+.rules-station-heading {
+    display: grid;
+    min-width: 0;
+    gap: 0.3rem;
+}
+
+.rules-station-eyebrow {
+    color: color-mix(in srgb, var(--color-accent) 52%, var(--color-text-muted));
+    font: 800 0.6rem/1 var(--vb-font-mono, ui-monospace, monospace);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.rules-station-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.rules-station-title-row h2 {
+    margin: 0;
+    color: var(--color-text);
+    font-size: 1.04rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+}
+
+.rules-station-note {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: color-mix(in srgb, var(--color-text-muted) 82%, transparent);
+    font: 500 0.66rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
+}
+
+.rules-station-actions {
+    display: flex;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.rules-station-actions .btn {
+    min-height: 30px;
+}
+
+.rules-icon-btn {
+    display: inline-grid;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    place-items: center;
+}
+
+.rules-station-hint {
+    max-width: 400px;
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    text-align: right;
+}
+
+.rules-station-body {
+    padding: 1rem 1.1rem;
+}
+
+/* The fix station has no card of its own — the terminal panel is the surface. */
+.rules-terminal-station .rules-station-body {
+    padding: 0;
+}
+
+.rules-terminal-station [data-terminal-content] > .card {
+    margin-bottom: 0;
+}
+
+/* Collapsible raw console shared by the validate and measure stations. */
+.rules-console-transcript {
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--color-bg-base) 55%, transparent);
+}
+
+.rules-console-transcript > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.6rem 0.85rem;
+    cursor: pointer;
+    color: color-mix(in srgb, var(--color-text) 82%, var(--color-text-muted));
+    font-size: 0.73rem;
+    font-weight: 700;
+    list-style: none;
+    user-select: none;
+}
+
+.rules-console-transcript > summary::-webkit-details-marker {
+    display: none;
+}
+
+.rules-console-transcript > summary::after {
+    content: '';
+    width: 7px;
+    height: 7px;
+    margin-left: 0.15rem;
+    border-right: 1.5px solid var(--color-text-muted);
+    border-bottom: 1.5px solid var(--color-text-muted);
+    transform: rotate(45deg);
+    transition: transform 150ms ease;
+}
+
+.rules-console-transcript[open] > summary::after {
+    transform: rotate(225deg);
+}
+
+.rules-console-transcript > summary small {
+    overflow: hidden;
+    margin-left: auto;
+    color: var(--color-text-muted);
+    font: 500 0.66rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rules-console-transcript .vca-console-shell {
+    border: 0;
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+    border-radius: 0;
+}
+
+.vca-explanation + .rules-console-transcript {
+    margin-top: 0.9rem;
 }
 
 .rules-vca-panel [hidden] {
     display: none !important;
-}
-
-.rules-vca-header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.85rem 1.25rem;
-    min-height: 66px;
-    padding: 0.8rem 1rem;
-}
-
-.rules-vca-heading,
-.rules-vca-primary-actions,
-.rules-vca-status-summary,
-.rules-vca-hook-actions,
-.rules-vca-results-header {
-    display: flex;
-    align-items: center;
-}
-
-.rules-vca-heading {
-    gap: 0.8rem;
-}
-
-.rules-vca-heading-icon {
-    display: grid;
-    width: 38px;
-    height: 38px;
-    flex: 0 0 38px;
-    place-items: center;
-    border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-    color: var(--color-primary);
-}
-
-.rules-vca-heading .git-guard-eyebrow {
-    margin-bottom: 0.1rem;
-    font-size: 0.6rem;
-}
-
-.rules-vca-heading h2 {
-    margin: 0;
-    color: var(--color-text);
-    font-size: 1.15rem;
-    letter-spacing: -0.015em;
-}
-
-.rules-vca-primary-actions {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 0.65rem;
-}
-
-.rules-vca-primary-actions .btn {
-    min-width: 150px;
-}
-
-.rules-vca-grid {
-    display: grid;
-    grid-template-columns: minmax(300px, 0.82fr) minmax(420px, 1.18fr);
-    border-top: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
-}
-
-.rules-vca-status,
-.rules-vca-results {
-    min-width: 0;
-    padding: 1rem;
-}
-
-.rules-vca-status {
-    --git-guard-tone: var(--color-text-muted);
-    border-right: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
-}
-
-.rules-vca-status[data-tone="success"] {
-    --git-guard-tone: var(--color-success);
-}
-
-.rules-vca-status[data-tone="warning"] {
-    --git-guard-tone: var(--color-warning);
-}
-
-.rules-vca-status[data-tone="danger"] {
-    --git-guard-tone: var(--color-danger);
-}
-
-.rules-vca-status-summary {
-    align-items: flex-start;
-    gap: 0.8rem;
-}
-
-.rules-vca-status .git-guard-health-icon {
-    width: 42px;
-    height: 42px;
-    flex-basis: 42px;
-    border-radius: 10px;
-    font-size: 1rem;
-}
-
-.rules-vca-status .git-guard-health-title {
-    font-size: 0.98rem;
-}
-
-.rules-vca-status .git-guard-health-message {
-    font-size: 0.76rem;
-    line-height: 1.45;
-}
-
-.rules-vca-hook-list {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.55rem;
-    margin-top: 0.9rem;
-}
-
-.rules-vca-hook {
-    min-width: 0;
-    padding: 0.65rem;
-    border: 1px solid color-mix(in srgb, var(--color-border) 62%, transparent);
-    border-radius: 7px;
-    background: color-mix(in srgb, var(--color-bg-base) 42%, transparent);
-}
-
-.rules-vca-hook-heading {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.4rem;
-}
-
-.rules-vca-hook code {
-    padding: 0;
-    background: transparent;
-    color: var(--color-text);
-    font-size: 0.72rem;
-    font-weight: 700;
-}
-
-.rules-vca-hook p {
-    margin: 0.35rem 0 0;
-    color: var(--color-text-muted);
-    font-size: 0.68rem;
-    line-height: 1.35;
-}
-
-.rules-vca-hook-actions {
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 0.8rem;
-}
-
-.rules-vca-repository-details {
-    margin-top: 0.75rem;
-    color: var(--color-text-muted);
-    font-size: 0.7rem;
-}
-
-.rules-vca-repository-details summary {
-    width: fit-content;
-    cursor: pointer;
-    color: var(--color-text-muted);
-    font-weight: 600;
-}
-
-.rules-vca-repository-details .git-guard-meta {
-    margin-top: 0.65rem;
-}
-
-.rules-vca-results {
-    --console-tone: var(--color-accent);
-    background: color-mix(in srgb, var(--color-bg-base) 28%, transparent);
-}
-
-.rules-vca-results[data-tone="success"] {
-    --console-tone: var(--color-success);
-}
-
-.rules-vca-results[data-tone="warning"] {
-    --console-tone: var(--color-warning);
-}
-
-.rules-vca-results[data-tone="danger"] {
-    --console-tone: var(--color-danger);
-}
-
-.rules-vca-results-header {
-    justify-content: space-between;
-    gap: 0.75rem;
-    margin-bottom: 0.7rem;
-}
-
-.rules-vca-results-header h3 {
-    margin: 0;
-    color: var(--color-text);
-    font-size: 0.86rem;
-    font-weight: 700;
-}
-
-.rules-vca-results-header .vca-console-state {
-    margin-left: 0.15rem;
 }
 
 .rules-check-running {
@@ -10255,76 +10257,46 @@ button.git-guard-menu-button:focus-visible {
     line-height: 1.5;
 }
 
-.rules-vca-results .vca-console-utility-actions {
-    flex-wrap: nowrap;
-}
-
-.rules-vca-results .vca-console-utility-actions .btn {
-    display: inline-grid;
-    width: 30px;
-    height: 30px;
-    padding: 0;
-    place-items: center;
-}
-
-.rules-vca-results .vca-console-output {
-    min-height: 170px;
-    max-height: 300px;
-    padding: 0.9rem 1rem;
-    font-size: 0.78rem;
-    line-height: 1.55;
-}
-
-.rules-vca-results .vca-console-footer {
-    min-height: 30px;
-}
-
-@media (max-width: 980px) {
-    .rules-vca-grid {
-        grid-template-columns: 1fr;
+@media (max-width: 900px) {
+    .rules-rail {
+        padding-left: 0;
     }
 
-    .rules-vca-status {
-        border-right: 0;
-        border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+    .rules-rail::before,
+    .rules-station-node {
+        display: none;
+    }
+
+    .rules-station-hint {
+        max-width: none;
+        text-align: left;
     }
 }
 
 @media (max-width: 600px) {
-    .rules-vca-header,
-    .rules-vca-primary-actions,
-    .rules-vca-primary-actions .btn {
-        width: 100%;
+    .rules-station-header {
+        padding: 0.75rem 0.85rem;
     }
 
-    .rules-vca-primary-actions {
-        justify-content: stretch;
-    }
-
-    .rules-vca-primary-actions .btn {
-        flex: 1 1 auto;
-    }
-
-    .rules-vca-hook-list {
-        grid-template-columns: 1fr;
-    }
-
-    .rules-vca-status,
-    .rules-vca-results {
+    .rules-station-body {
         padding: 0.85rem;
     }
 
-    .rules-vca-results .vca-console-output {
-        min-height: 150px;
+    .rules-terminal-station .rules-station-body {
+        padding: 0;
+    }
+
+    .rules-station-actions {
+        width: 100%;
+    }
+
+    .rules-station-actions .btn:not(.rules-icon-btn) {
+        flex: 1 1 auto;
+        justify-content: center;
     }
 }
 
-/* Git Guard is a setting on the Rules page, not a second workspace. */
-.rules-git-setting-row {
-    display: flex;
-    justify-content: flex-end;
-    margin: -0.25rem 0 0.75rem;
-}
+/* Git Guard is a setting in the Rules page header, not a second workspace. */
 
 .rules-git-setting {
     --git-setting-tone: var(--color-text-muted);
@@ -10446,62 +10418,12 @@ button.git-guard-menu-button:focus-visible {
     opacity: 0.55;
 }
 
-.rules-vca-panel > .rules-vca-results {
-    padding: 0.9rem 1rem;
-    background: color-mix(in srgb, var(--color-bg-base) 24%, transparent);
-}
-
-.rules-vca-results-header h2 {
-    margin: 0;
-    color: var(--color-text);
-    font-size: 1.05rem;
-    font-weight: 700;
-}
-
-.rules-vca-panel > .rules-vca-results-header {
-    margin-bottom: 0;
-    padding: 0.7rem 1rem;
-}
-
-.rules-results-subtitle {
-    display: block;
-    margin-top: 0.15rem;
-    color: color-mix(in srgb, var(--color-text-muted) 65%, var(--color-text) 35%);
-    font-size: 0.75rem;
-    font-weight: 500;
-}
-
-.rules-vca-panel .vca-console-utility-actions {
-    flex-wrap: nowrap;
-}
-
-.rules-vca-panel .vca-console-utility-actions .btn {
-    display: inline-grid;
-    width: 30px;
-    height: 30px;
-    padding: 0;
-    place-items: center;
-}
-
 .rules-vca-panel .vca-console-output {
-    min-height: 220px;
-    max-height: 420px;
+    min-height: 200px;
+    max-height: 380px;
     padding: 1rem 1.1rem;
     font-size: 0.8rem;
     line-height: 1.6;
-}
-
-.rules-vca-run-footer {
-    display: flex;
-    justify-content: flex-end;
-    min-height: 48px;
-    align-items: center;
-    padding: 0.5rem 0.75rem;
-    background: color-mix(in srgb, var(--color-bg-surface) 82%, transparent);
-}
-
-.rules-vca-run-footer .btn {
-    min-width: 118px;
 }
 
 .vca-explanation {
@@ -10637,8 +10559,8 @@ button.git-guard-menu-button:focus-visible {
 
 .vca-finding-detail {
     display: grid;
-    grid-template-columns: minmax(100px, 0.28fr) minmax(0, 1fr);
-    gap: 0.45rem;
+    grid-template-columns: 140px minmax(0, 1fr);
+    gap: 0.45rem 0.9rem;
     margin-top: 0.55rem;
     font-size: 0.78rem;
     line-height: 1.5;
@@ -10753,39 +10675,34 @@ button.git-guard-menu-button:focus-visible {
     }
 }
 
-/* ─── MintLint code-health dashboard ───────────────────────────────────── */
+/* ─── Code metrics dashboard (powered by MintLint) ──────────────────────
+   Rethemed to the app's Focus Dark tokens: the panel chrome comes from the
+   shared station card, and every tone maps to the app-wide status palette. */
 .code-analyzer-panel {
-    --analyzer-panel: #0f1522;
-    --analyzer-panel-raised: #141c2b;
-    --analyzer-line: #27344d;
-    --analyzer-line-soft: rgb(145 160 194 / 16%);
-    --analyzer-muted: #9ba7bc;
-    --analyzer-muted-2: #6c788e;
+    --analyzer-line: color-mix(in srgb, var(--color-border) 75%, transparent);
+    --analyzer-line-soft: color-mix(in srgb, var(--color-border) 42%, transparent);
+    --analyzer-muted: var(--color-text-muted);
+    --analyzer-muted-2: color-mix(in srgb, var(--color-text-muted) 70%, transparent);
     --analyzer-tone: var(--color-text-muted);
     overflow: hidden;
-    border: 1px solid var(--analyzer-line);
-    border-radius: 18px;
-    background:
-        radial-gradient(circle at 12% 0%, rgb(124 108 255 / 13%), transparent 30rem),
-        radial-gradient(circle at 92% 12%, rgb(70 139 255 / 8%), transparent 28rem),
-        #080b13;
-    box-shadow: 0 24px 70px rgb(0 0 0 / 28%);
-    color: #f4f7ff;
+    color: var(--color-text);
 }
 
 .code-analyzer-panel [hidden] {
     display: none !important;
 }
 
-.code-analyzer-panel [data-tone="success"] { --analyzer-tone: #68aaff; }
-.code-analyzer-panel [data-tone="okay"] { --analyzer-tone: #8b7cff; }
-.code-analyzer-panel [data-tone="warning"] { --analyzer-tone: #f4be63; }
-.code-analyzer-panel [data-tone="danger"] { --analyzer-tone: #ff6d80; }
+.code-analyzer-panel[data-tone="success"],
+.code-analyzer-panel [data-tone="success"] { --analyzer-tone: var(--color-success); }
+.code-analyzer-panel[data-tone="okay"],
+.code-analyzer-panel [data-tone="okay"] { --analyzer-tone: var(--color-accent); }
+.code-analyzer-panel[data-tone="warning"],
+.code-analyzer-panel [data-tone="warning"] { --analyzer-tone: var(--color-warning); }
+.code-analyzer-panel[data-tone="danger"],
+.code-analyzer-panel [data-tone="danger"] { --analyzer-tone: var(--color-danger); }
+.code-analyzer-panel[data-tone="neutral"],
 .code-analyzer-panel [data-tone="neutral"] { --analyzer-tone: var(--analyzer-muted); }
 
-.code-analyzer-topbar,
-.code-analyzer-brand-row,
-.code-analyzer-actions,
 .code-analyzer-grade-line,
 .code-analyzer-overview-head,
 .code-analyzer-category-score-row,
@@ -10801,105 +10718,6 @@ button.git-guard-menu-button:focus-visible {
     align-items: center;
 }
 
-.code-analyzer-topbar {
-    min-height: 72px;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid rgb(145 160 194 / 13%);
-    background: linear-gradient(180deg, rgb(8 11 19 / 97%), rgb(8 11 19 / 78%));
-}
-
-.code-analyzer-brand-row {
-    min-width: 0;
-    gap: 0.75rem;
-}
-
-.code-analyzer-brand-mark {
-    display: grid;
-    width: 38px;
-    height: 38px;
-    flex: 0 0 38px;
-    place-items: center;
-    border-radius: 11px;
-    background: linear-gradient(145deg, #b5aaff, #806fff 58%, #5350db);
-    box-shadow: 0 0 0 1px rgb(181 170 255 / 34%), 0 12px 30px rgb(111 92 255 / 22%);
-    color: #fff;
-    font-size: 0.72rem;
-    font-weight: 900;
-    letter-spacing: -0.04em;
-}
-
-.code-analyzer-brand-copy {
-    display: grid;
-    line-height: 1.15;
-}
-
-.code-analyzer-brand-copy strong {
-    color: #f4f7ff;
-    font-size: 1rem;
-}
-
-.code-analyzer-brand-copy small {
-    margin-top: 0.18rem;
-    color: var(--analyzer-muted);
-    font-size: 0.68rem;
-}
-
-.code-analyzer-context-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin-left: 0.45rem;
-    padding: 0.38rem 0.55rem;
-    border: 1px solid var(--analyzer-line);
-    border-radius: 8px;
-    background: rgb(255 255 255 / 2%);
-    color: #d7def0;
-    font: 0.65rem/1 var(--vb-font-mono, ui-monospace, monospace);
-    white-space: nowrap;
-}
-
-.code-analyzer-actions {
-    flex: 0 0 auto;
-    justify-content: flex-end;
-    gap: 0.5rem;
-}
-
-.code-analyzer-actions .mintlint-scan-toggle {
-    margin-right: 0.25rem;
-    color: var(--analyzer-muted);
-}
-
-.code-analyzer-actions .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    min-height: 34px;
-    border-color: var(--analyzer-line);
-    border-radius: 9px;
-    font-size: 0.7rem;
-    font-weight: 700;
-}
-
-.code-analyzer-actions .btn-outline-secondary {
-    background: rgb(18 24 39 / 72%);
-    color: #d9e0ef;
-}
-
-.code-analyzer-actions .btn-primary {
-    border-color: #8b7cff;
-    background: linear-gradient(135deg, #9285ff, #6f5cff);
-    box-shadow: 0 8px 24px rgb(111 92 255 / 24%);
-}
-
-.code-analyzer-actions .code-analyzer-clear {
-    display: inline-grid;
-    width: 34px;
-    padding: 0;
-    place-items: center;
-}
-
 .code-analyzer-panel .vca-console-state {
     --badge-tone: var(--analyzer-tone);
     border-color: color-mix(in srgb, var(--analyzer-tone) 38%, transparent);
@@ -10911,11 +10729,11 @@ button.git-guard-menu-button:focus-visible {
     display: flex;
     align-items: center;
     gap: 0.9rem;
-    margin: 1rem;
+    margin: 1rem 1.1rem;
     padding: 1rem;
-    border: 1px dashed rgb(139 124 255 / 32%);
-    border-radius: 13px;
-    background: rgb(139 124 255 / 6%);
+    border: 1px dashed color-mix(in srgb, var(--color-primary) 34%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-primary) 6%, transparent);
 }
 
 .code-analyzer-empty-icon {
@@ -10924,32 +10742,31 @@ button.git-guard-menu-button:focus-visible {
     height: 42px;
     flex: 0 0 42px;
     place-items: center;
-    border-radius: 11px;
-    background: rgb(139 124 255 / 13%);
-    color: #a99fff;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-primary) 13%, transparent);
+    color: color-mix(in srgb, var(--color-primary) 75%, var(--color-text));
 }
 
 .code-analyzer-empty strong {
-    color: #edf2ff;
-    font-size: 0.86rem;
+    color: var(--color-text);
+    font-size: 0.88rem;
 }
 
 .code-analyzer-empty p {
     margin: 0.22rem 0 0;
     color: var(--analyzer-muted);
-    font-size: 0.72rem;
+    font-size: 0.76rem;
 }
 
 .code-analyzer-dashboard {
-    padding: 1rem;
+    padding: 1rem 1.1rem;
 }
 
 .code-analyzer-panel-surface {
     min-width: 0;
     border: 1px solid var(--analyzer-line);
-    border-radius: 14px;
-    background: linear-gradient(180deg, rgb(18 25 41 / 97%), rgb(12 17 29 / 97%));
-    box-shadow: 0 18px 45px rgb(0 0 0 / 20%);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-bg-base) 42%, transparent);
 }
 
 .code-analyzer-scan-banner {
@@ -10989,16 +10806,16 @@ button.git-guard-menu-button:focus-visible {
     height: 122px;
     place-items: center;
     border-radius: 50%;
-    background: conic-gradient(var(--analyzer-tone) calc(var(--score) * 1%), rgb(145 160 194 / 13%) 0);
-    box-shadow: inset 0 0 26px rgb(0 0 0 / 25%), 0 15px 35px rgb(0 0 0 / 22%);
+    background: conic-gradient(var(--analyzer-tone) calc(var(--score) * 1%), color-mix(in srgb, var(--color-border) 45%, transparent) 0);
+    box-shadow: inset 0 0 20px rgb(0 0 0 / 18%);
 }
 
 .code-analyzer-score-ring::before {
     position: absolute;
     inset: 9px;
-    border: 1px solid rgb(145 160 194 / 13%);
+    border: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
     border-radius: inherit;
-    background: #0d1320;
+    background: color-mix(in srgb, var(--color-bg-base) 82%, var(--color-bg-surface));
     content: '';
 }
 
@@ -11009,7 +10826,7 @@ button.git-guard-menu-button:focus-visible {
 }
 
 .code-analyzer-score-value {
-    color: #f4f7ff;
+    color: var(--color-text);
     font-size: 2.15rem;
     font-weight: 850;
     letter-spacing: -0.07em;
@@ -11019,22 +10836,22 @@ button.git-guard-menu-button:focus-visible {
 .code-analyzer-score-label {
     margin-top: 0.35rem;
     color: var(--analyzer-muted);
-    font-size: 0.55rem;
+    font-size: 0.6rem;
     letter-spacing: 0.12em;
     text-transform: uppercase;
 }
 
 .code-analyzer-eyebrow {
-    color: #9b90ff;
-    font-size: 0.56rem;
+    color: color-mix(in srgb, var(--color-accent) 52%, var(--color-text-muted));
+    font-size: 0.6rem;
     font-weight: 800;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
 }
 
 .code-analyzer-score-copy h3 {
     margin: 0.42rem 0 0.32rem;
-    color: #f4f7ff;
+    color: var(--color-text);
     font-size: 1.25rem;
     letter-spacing: -0.035em;
     line-height: 1.1;
@@ -11043,7 +10860,7 @@ button.git-guard-menu-button:focus-visible {
 .code-analyzer-score-copy > p {
     margin: 0;
     color: var(--analyzer-muted);
-    font-size: 0.68rem;
+    font-size: 0.74rem;
     line-height: 1.45;
 }
 
@@ -11075,14 +10892,14 @@ button.git-guard-menu-button:focus-visible {
 }
 
 .code-analyzer-grade-copy strong {
-    color: #e8edfa;
-    font-size: 0.69rem;
+    color: var(--color-text);
+    font-size: 0.74rem;
 }
 
 .code-analyzer-grade-copy small {
     margin-top: 0.12rem;
     color: var(--analyzer-muted);
-    font-size: 0.6rem;
+    font-size: 0.64rem;
 }
 
 .code-analyzer-overview-card {
@@ -11101,15 +10918,15 @@ button.git-guard-menu-button:focus-visible {
 .code-analyzer-inspector-head h3,
 .code-analyzer-code-head h3 {
     margin: 0.2rem 0 0;
-    color: #f4f7ff;
-    font-size: 0.85rem;
+    color: var(--color-text);
+    font-size: 0.88rem;
     letter-spacing: -0.02em;
 }
 
 .code-analyzer-scan-time {
     max-width: 250px;
     color: var(--analyzer-muted);
-    font-size: 0.6rem;
+    font-size: 0.64rem;
     line-height: 1.45;
     text-align: right;
 }
@@ -11127,7 +10944,7 @@ button.git-guard-menu-button:focus-visible {
     padding: 0.65rem;
     border: 1px solid var(--analyzer-line-soft);
     border-radius: 9px;
-    background: rgb(255 255 255 / 1.8%);
+    background: color-mix(in srgb, var(--color-text) 2%, transparent);
 }
 
 .code-analyzer-stat-card strong {
@@ -11136,11 +10953,15 @@ button.git-guard-menu-button:focus-visible {
     letter-spacing: -0.04em;
 }
 
+.code-analyzer-stat-card[data-tone="neutral"] strong {
+    color: var(--color-text);
+}
+
 .code-analyzer-stat-card span {
     margin-top: 0.12rem;
     overflow: hidden;
     color: var(--analyzer-muted);
-    font-size: 0.56rem;
+    font-size: 0.62rem;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -11156,7 +10977,7 @@ button.git-guard-menu-button:focus-visible {
     padding: 0.58rem;
     border: 1px solid var(--analyzer-line-soft);
     border-radius: 9px;
-    background: rgb(255 255 255 / 1.6%);
+    background: color-mix(in srgb, var(--color-text) 1.6%, transparent);
 }
 
 .code-analyzer-category-name,
@@ -11168,8 +10989,8 @@ button.git-guard-menu-button:focus-visible {
 }
 
 .code-analyzer-category-name {
-    color: #d8dff1;
-    font-size: 0.58rem;
+    color: color-mix(in srgb, var(--color-text) 88%, var(--color-text-muted));
+    font-size: 0.64rem;
     font-weight: 700;
 }
 
@@ -11187,7 +11008,7 @@ button.git-guard-menu-button:focus-visible {
 .code-analyzer-category-score-row span,
 .code-analyzer-category-card > small {
     color: var(--analyzer-muted-2);
-    font-size: 0.5rem;
+    font-size: 0.58rem;
 }
 
 .code-analyzer-mini-track,
@@ -11195,7 +11016,7 @@ button.git-guard-menu-button:focus-visible {
     display: block;
     overflow: hidden;
     border-radius: 999px;
-    background: rgb(145 160 194 / 13%);
+    background: color-mix(in srgb, var(--color-border) 40%, transparent);
 }
 
 .code-analyzer-mini-track {
@@ -11239,8 +11060,8 @@ button.git-guard-menu-button:focus-visible {
 
 .code-analyzer-rail-title h3 {
     margin: 0;
-    color: #f4f7ff;
-    font-size: 0.77rem;
+    color: var(--color-text);
+    font-size: 0.8rem;
 }
 
 .code-analyzer-rail-title > span {
@@ -11248,7 +11069,7 @@ button.git-guard-menu-button:focus-visible {
     border: 1px solid var(--analyzer-line);
     border-radius: 999px;
     color: var(--analyzer-muted);
-    font-size: 0.5rem;
+    font-size: 0.6rem;
 }
 
 .code-analyzer-search-box {
@@ -11272,9 +11093,13 @@ button.git-guard-menu-button:focus-visible {
     border: 1px solid var(--analyzer-line);
     border-radius: 8px;
     outline: 0;
-    background: #0b111d;
-    color: #f4f7ff;
-    font-size: 0.62rem;
+    background: color-mix(in srgb, var(--color-bg-base) 70%, transparent);
+    color: var(--color-text);
+    font-size: 0.7rem;
+}
+
+.code-analyzer-search-box input:focus-visible {
+    border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
 }
 
 .code-analyzer-filter-row {
@@ -11290,14 +11115,14 @@ button.git-guard-menu-button:focus-visible {
     border-radius: 6px;
     background: transparent;
     color: var(--analyzer-muted);
-    font-size: 0.5rem;
+    font-size: 0.6rem;
     font-weight: 750;
 }
 
 .code-analyzer-filter-button.active {
-    border-color: var(--analyzer-line);
-    background: #182238;
-    color: #f4f7ff;
+    border-color: color-mix(in srgb, var(--color-primary) 38%, var(--color-border));
+    background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+    color: var(--color-text);
 }
 
 .code-analyzer-file-list {
@@ -11321,12 +11146,12 @@ button.git-guard-menu-button:focus-visible {
 }
 
 .code-analyzer-file-item:hover {
-    background: rgb(255 255 255 / 2.5%);
+    background: color-mix(in srgb, var(--color-text) 2.5%, transparent);
 }
 
 .code-analyzer-file-item.active {
-    border-color: rgb(139 124 255 / 30%);
-    background: rgb(139 124 255 / 12%);
+    border-color: color-mix(in srgb, var(--color-primary) 32%, transparent);
+    background: color-mix(in srgb, var(--color-primary) 11%, transparent);
 }
 
 .code-analyzer-severity-rail {
@@ -11334,7 +11159,6 @@ button.git-guard-menu-button:focus-visible {
     min-height: 42px;
     border-radius: 999px;
     background: var(--analyzer-tone);
-    box-shadow: 0 0 10px color-mix(in srgb, var(--analyzer-tone) 45%, transparent);
 }
 
 .code-analyzer-file-main,
@@ -11352,20 +11176,20 @@ button.git-guard-menu-button:focus-visible {
 }
 
 .code-analyzer-file-main strong {
-    color: #edf2ff;
-    font-size: 0.59rem;
+    color: var(--color-text);
+    font-size: 0.68rem;
 }
 
 .code-analyzer-file-main small {
     margin-top: 0.12rem;
     color: var(--analyzer-muted-2);
-    font-size: 0.5rem;
+    font-size: 0.58rem;
 }
 
 .code-analyzer-file-issues {
     margin-top: 0.32rem;
     color: var(--analyzer-muted);
-    font-size: 0.5rem;
+    font-size: 0.6rem;
 }
 
 .code-analyzer-file-score {
@@ -11373,13 +11197,13 @@ button.git-guard-menu-button:focus-visible {
 }
 
 .code-analyzer-file-score strong {
-    color: #f4f7ff;
-    font-size: 0.78rem;
+    color: var(--color-text);
+    font-size: 0.8rem;
 }
 
 .code-analyzer-file-score small {
     color: var(--analyzer-muted-2);
-    font-size: 0.44rem;
+    font-size: 0.52rem;
     letter-spacing: 0.07em;
     text-transform: uppercase;
 }
@@ -11388,7 +11212,7 @@ button.git-guard-menu-button:focus-visible {
     margin: 0;
     padding: 1rem 0.5rem;
     color: var(--analyzer-muted);
-    font-size: 0.62rem;
+    font-size: 0.7rem;
     text-align: center;
 }
 
@@ -11414,13 +11238,13 @@ button.git-guard-menu-button:focus-visible {
 
 .code-analyzer-file-kicker {
     color: var(--analyzer-muted);
-    font: 0.56rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
+    font: 0.62rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
 }
 
 .code-analyzer-file-title {
     margin: 0.25rem 0 0;
     overflow-wrap: anywhere;
-    color: #f4f7ff;
+    color: var(--color-text);
     font: 700 1.05rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
     letter-spacing: -0.035em;
 }
@@ -11433,17 +11257,17 @@ button.git-guard-menu-button:focus-visible {
 
 .code-analyzer-chip {
     display: inline-flex;
-    gap: 0.25rem;
-    padding: 0.28rem 0.4rem;
+    gap: 0.3rem;
+    padding: 0.28rem 0.45rem;
     border: 1px solid var(--analyzer-line);
     border-radius: 7px;
-    background: rgb(255 255 255 / 1.6%);
+    background: color-mix(in srgb, var(--color-text) 1.6%, transparent);
     color: var(--analyzer-muted);
-    font-size: 0.5rem;
+    font-size: 0.6rem;
 }
 
 .code-analyzer-chip strong {
-    color: #dce4f5;
+    color: color-mix(in srgb, var(--color-text) 90%, var(--color-text-muted));
 }
 
 .code-analyzer-file-grade-block {
@@ -11457,14 +11281,14 @@ button.git-guard-menu-button:focus-visible {
 }
 
 .code-analyzer-file-grade-copy strong {
-    color: #f4f7ff;
+    color: var(--color-text);
     font-size: 1rem;
     letter-spacing: -0.04em;
 }
 
 .code-analyzer-file-grade-copy small {
     color: var(--analyzer-muted);
-    font-size: 0.48rem;
+    font-size: 0.56rem;
 }
 
 .code-analyzer-large-rating {
@@ -11503,15 +11327,15 @@ button.git-guard-menu-button:focus-visible {
 }
 
 .code-analyzer-priority-copy strong {
-    color: #f0f3fc;
-    font-size: 0.67rem;
+    color: var(--color-text);
+    font-size: 0.72rem;
 }
 
 .code-analyzer-priority-copy small,
 .code-analyzer-priority-location small {
     margin-top: 0.14rem;
     color: var(--analyzer-muted);
-    font-size: 0.54rem;
+    font-size: 0.62rem;
 }
 
 .code-analyzer-priority-location {
@@ -11521,8 +11345,8 @@ button.git-guard-menu-button:focus-visible {
 
 .code-analyzer-priority-location strong {
     overflow-wrap: anywhere;
-    color: color-mix(in srgb, var(--analyzer-tone) 60%, #fff);
-    font: 0.58rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
+    color: color-mix(in srgb, var(--analyzer-tone) 60%, var(--color-text));
+    font: 0.64rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
 }
 
 .code-analyzer-detail-grid {
@@ -11557,7 +11381,7 @@ button.git-guard-menu-button:focus-visible {
 .code-analyzer-code-head p {
     margin: 0.2rem 0 0;
     color: var(--analyzer-muted);
-    font-size: 0.56rem;
+    font-size: 0.66rem;
     line-height: 1.45;
 }
 
@@ -11565,7 +11389,7 @@ button.git-guard-menu-button:focus-visible {
     flex: 0 0 auto;
     gap: 0.5rem;
     color: var(--analyzer-muted);
-    font-size: 0.48rem;
+    font-size: 0.58rem;
 }
 
 .code-analyzer-metrics-legend > span {
@@ -11601,15 +11425,15 @@ button.git-guard-menu-button:focus-visible {
 }
 
 .code-analyzer-metric-group-head strong {
-    color: #c8d0e3;
-    font-size: 0.5rem;
+    color: color-mix(in srgb, var(--color-text) 80%, var(--color-text-muted));
+    font-size: 0.58rem;
     letter-spacing: 0.12em;
     text-transform: uppercase;
 }
 
 .code-analyzer-metric-group-head span {
     color: var(--analyzer-muted);
-    font-size: 0.48rem;
+    font-size: 0.58rem;
 }
 
 .code-analyzer-metric-list-dashboard {
@@ -11626,19 +11450,19 @@ button.git-guard-menu-button:focus-visible {
     padding: 0.48rem 0.52rem;
     border: 1px solid var(--analyzer-line-soft);
     border-radius: 8px;
-    background: rgb(255 255 255 / 1.2%);
+    background: color-mix(in srgb, var(--color-text) 1.2%, transparent);
     color: inherit;
     text-align: left;
 }
 
 .code-analyzer-metric-row:hover {
-    border-color: #455b7c;
-    background: rgb(255 255 255 / 2.5%);
+    border-color: color-mix(in srgb, var(--color-border) 85%, var(--color-text));
+    background: color-mix(in srgb, var(--color-text) 2.5%, transparent);
 }
 
 .code-analyzer-metric-row.active {
-    border-color: rgb(139 124 255 / 42%);
-    background: rgb(139 124 255 / 12%);
+    border-color: color-mix(in srgb, var(--color-primary) 42%, transparent);
+    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
 }
 
 .code-analyzer-metric-title {
@@ -11654,21 +11478,20 @@ button.git-guard-menu-button:focus-visible {
     flex: 0 0 6px;
     border-radius: 50%;
     background: var(--analyzer-tone);
-    box-shadow: 0 0 9px color-mix(in srgb, var(--analyzer-tone) 45%, transparent);
 }
 
 .code-analyzer-metric-title span {
     overflow: hidden;
-    color: #e1e7f6;
-    font-size: 0.56rem;
+    color: color-mix(in srgb, var(--color-text) 92%, var(--color-text-muted));
+    font-size: 0.64rem;
     font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .code-analyzer-metric-raw {
-    color: #dce5f5;
-    font: 0.6rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
+    color: color-mix(in srgb, var(--color-text) 90%, var(--color-text-muted));
+    font: 0.66rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
     text-align: right;
 }
 
@@ -11680,17 +11503,20 @@ button.git-guard-menu-button:focus-visible {
 .code-analyzer-metric-concern small,
 .code-analyzer-metric-threshold small {
     color: var(--analyzer-muted-2);
-    font-size: 0.45rem;
+    font-size: 0.54rem;
 }
 
 .code-analyzer-metric-concern strong {
     color: var(--analyzer-tone);
-    font-size: 0.62rem;
+    font-size: 0.7rem;
 }
 
 .code-analyzer-risk-track {
     height: 5px;
-    background: linear-gradient(90deg, rgb(104 170 255 / 20%) 0 55%, rgb(244 190 99 / 20%) 55% 75%, rgb(255 109 128 / 20%) 75%);
+    background: linear-gradient(90deg,
+        color-mix(in srgb, var(--color-success) 16%, transparent) 0 55%,
+        color-mix(in srgb, var(--color-warning) 16%, transparent) 55% 75%,
+        color-mix(in srgb, var(--color-danger) 16%, transparent) 75%);
 }
 
 .code-analyzer-risk-track > span {
@@ -11707,7 +11533,7 @@ button.git-guard-menu-button:focus-visible {
 
 .code-analyzer-metric-threshold strong {
     color: var(--analyzer-tone);
-    font-size: 0.48rem;
+    font-size: 0.56rem;
     text-transform: capitalize;
 }
 
@@ -11723,12 +11549,12 @@ button.git-guard-menu-button:focus-visible {
 .code-analyzer-severity-badge {
     display: inline-flex;
     margin-top: 0.5rem;
-    padding: 0.28rem 0.42rem;
+    padding: 0.28rem 0.45rem;
     border: 1px solid color-mix(in srgb, var(--analyzer-tone) 30%, transparent);
     border-radius: 7px;
     background: color-mix(in srgb, var(--analyzer-tone) 12%, transparent);
     color: var(--analyzer-tone);
-    font-size: 0.48rem;
+    font-size: 0.56rem;
     font-weight: 850;
     letter-spacing: 0.07em;
     text-transform: uppercase;
@@ -11745,7 +11571,7 @@ button.git-guard-menu-button:focus-visible {
     padding: 0.65rem;
     border: 1px solid var(--analyzer-line-soft);
     border-radius: 9px;
-    background: rgb(255 255 255 / 1.6%);
+    background: color-mix(in srgb, var(--color-text) 1.6%, transparent);
 }
 
 .code-analyzer-metric-score-card > span {
@@ -11755,12 +11581,12 @@ button.git-guard-menu-button:focus-visible {
 .code-analyzer-metric-score-card small,
 .code-analyzer-concern-number small {
     color: var(--analyzer-muted);
-    font-size: 0.48rem;
+    font-size: 0.56rem;
 }
 
 .code-analyzer-metric-score-card strong {
     margin-top: 0.2rem;
-    color: #f4f7ff;
+    color: var(--color-text);
     font: 800 1rem/1 var(--vb-font-mono, ui-monospace, monospace);
 }
 
@@ -11783,8 +11609,8 @@ button.git-guard-menu-button:focus-visible {
 }
 
 .code-analyzer-section-label {
-    color: var(--analyzer-muted-2);
-    font-size: 0.46rem;
+    color: var(--analyzer-muted);
+    font-size: 0.56rem;
     font-weight: 850;
     letter-spacing: 0.12em;
     text-transform: uppercase;
@@ -11792,8 +11618,8 @@ button.git-guard-menu-button:focus-visible {
 
 .code-analyzer-inspector-section p {
     margin: 0.35rem 0 0;
-    color: #cdd6e8;
-    font-size: 0.56rem;
+    color: color-mix(in srgb, var(--color-text) 82%, var(--color-text-muted));
+    font-size: 0.66rem;
     line-height: 1.55;
 }
 
@@ -11805,16 +11631,16 @@ button.git-guard-menu-button:focus-visible {
 
 .code-analyzer-threshold-line {
     display: grid;
-    grid-template-columns: 7px 48px 1fr;
+    grid-template-columns: 7px 52px 1fr;
     align-items: center;
     gap: 0.35rem;
     color: var(--analyzer-muted);
-    font-size: 0.5rem;
+    font-size: 0.6rem;
 }
 
 .code-analyzer-threshold-line strong {
-    color: #dce4f3;
-    font: 0.5rem/1 var(--vb-font-mono, ui-monospace, monospace);
+    color: color-mix(in srgb, var(--color-text) 88%, var(--color-text-muted));
+    font: 0.6rem/1 var(--vb-font-mono, ui-monospace, monospace);
 }
 
 .code-analyzer-where-box {
@@ -11824,19 +11650,19 @@ button.git-guard-menu-button:focus-visible {
     padding: 0.5rem;
     border: 1px solid var(--analyzer-line);
     border-radius: 7px;
-    background: #0b111d;
+    background: color-mix(in srgb, var(--color-bg-base) 70%, transparent);
 }
 
 .code-analyzer-where-box strong {
     overflow-wrap: anywhere;
-    color: #e2e8f6;
-    font: 0.5rem/1.4 var(--vb-font-mono, ui-monospace, monospace);
+    color: color-mix(in srgb, var(--color-text) 90%, var(--color-text-muted));
+    font: 0.6rem/1.4 var(--vb-font-mono, ui-monospace, monospace);
 }
 
 .code-analyzer-where-box span {
     overflow-wrap: anywhere;
-    color: #9b90ff;
-    font-size: 0.48rem;
+    color: color-mix(in srgb, var(--color-accent) 70%, var(--color-text-muted));
+    font-size: 0.56rem;
 }
 
 .code-analyzer-code-head {
@@ -11846,11 +11672,11 @@ button.git-guard-menu-button:focus-visible {
 
 .code-analyzer-evidence-location {
     flex: 0 0 auto;
-    padding: 0.28rem 0.42rem;
+    padding: 0.28rem 0.45rem;
     border: 1px solid var(--analyzer-line);
     border-radius: 7px;
-    color: #aeb9ce;
-    font: 0.5rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
+    color: color-mix(in srgb, var(--color-text) 72%, var(--color-text-muted));
+    font: 0.6rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
 }
 
 .code-analyzer-monaco-shell {
@@ -11858,7 +11684,7 @@ button.git-guard-menu-button:focus-visible {
     height: clamp(280px, 38vh, 480px);
     min-height: 280px;
     overflow: hidden;
-    background: #1a1a22;
+    background: color-mix(in srgb, var(--color-bg-base) 78%, #000);
 }
 
 .code-analyzer-monaco-host,
@@ -11879,9 +11705,9 @@ button.git-guard-menu-button:focus-visible {
     align-items: center;
     justify-content: center;
     gap: 0.55rem;
-    background: #1a1a22;
+    background: color-mix(in srgb, var(--color-bg-base) 78%, #000);
     color: var(--analyzer-muted);
-    font-size: 0.65rem;
+    font-size: 0.7rem;
 }
 
 .code-analyzer-monaco-loading .spinner-border {
@@ -11895,9 +11721,9 @@ button.git-guard-menu-button:focus-visible {
     margin: 0;
     padding: 0.9rem 1rem;
     overflow: auto;
-    background: #080d17;
-    color: #dfe7f6;
-    font: 0.66rem/1.65 var(--vb-font-mono, "Cascadia Code", monospace);
+    background: color-mix(in srgb, var(--color-bg-base) 60%, #000);
+    color: color-mix(in srgb, var(--color-text) 92%, var(--color-text-muted));
+    font: 0.7rem/1.65 var(--vb-font-mono, "Cascadia Code", monospace);
     tab-size: 4;
     white-space: pre;
 }
@@ -11909,10 +11735,10 @@ button.git-guard-menu-button:focus-visible {
     justify-content: space-between;
     gap: 1rem;
     padding: 0.35rem 0.75rem;
-    border-top: 1px solid #2b2b36;
-    background: #15151d;
+    border-top: 1px solid var(--analyzer-line);
+    background: color-mix(in srgb, var(--color-bg-base) 45%, transparent);
     color: var(--analyzer-muted);
-    font: 0.5rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
+    font: 0.6rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
     text-transform: capitalize;
 }
 
@@ -11924,33 +11750,33 @@ button.git-guard-menu-button:focus-visible {
 
 .code-analyzer-editor-readonly {
     padding: 0.16rem 0.35rem;
-    border: 1px solid rgb(139 124 255 / 30%);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
     border-radius: 5px;
-    background: rgb(139 124 255 / 10%);
-    color: #b7afff;
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: color-mix(in srgb, var(--color-accent) 75%, var(--color-text));
     font-weight: 750;
     letter-spacing: 0.05em;
     text-transform: uppercase;
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-line-danger {
-    background: rgb(255 109 128 / 9%);
-    box-shadow: inset 3px 0 #ff6d80;
+    background: rgb(239 68 68 / 9%);
+    box-shadow: inset 3px 0 #ef4444;
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-line-warning {
-    background: rgb(244 190 99 / 7%);
-    box-shadow: inset 3px 0 #f4be63;
+    background: rgb(245 158 11 / 7%);
+    box-shadow: inset 3px 0 #f59e0b;
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-line-success {
-    background: rgb(104 170 255 / 7%);
-    box-shadow: inset 3px 0 #68aaff;
+    background: rgb(16 185 129 / 7%);
+    box-shadow: inset 3px 0 #10b981;
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-line-okay {
-    background: rgb(139 124 255 / 8%);
-    box-shadow: inset 3px 0 #8b7cff;
+    background: rgb(6 182 212 / 8%);
+    box-shadow: inset 3px 0 #06b6d4;
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph {
@@ -11962,63 +11788,42 @@ button.git-guard-menu-button:focus-visible {
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph-danger {
-    background: #ff6d80;
-    box-shadow: 0 0 9px rgb(255 109 128 / 75%);
+    background: #ef4444;
+    box-shadow: 0 0 7px rgb(239 68 68 / 65%);
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph-warning {
-    background: #f4be63;
-    box-shadow: 0 0 9px rgb(244 190 99 / 70%);
+    background: #f59e0b;
+    box-shadow: 0 0 7px rgb(245 158 11 / 60%);
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph-success {
-    background: #68aaff;
-    box-shadow: 0 0 9px rgb(104 170 255 / 70%);
+    background: #10b981;
+    box-shadow: 0 0 7px rgb(16 185 129 / 60%);
 }
 
 .code-analyzer-monaco-shell .monaco-editor .mintlint-monaco-glyph-okay {
-    background: #8b7cff;
-    box-shadow: 0 0 9px rgb(139 124 255 / 72%);
+    background: #06b6d4;
+    box-shadow: 0 0 7px rgb(6 182 212 / 62%);
 }
 
 .code-analyzer-no-metrics {
     padding: 1rem;
     color: var(--analyzer-muted);
-    font-size: 0.68rem;
+    font-size: 0.72rem;
 }
 
+/* The scan transcript shares .rules-console-transcript; it only needs placement
+   inside the metrics card. */
 .code-analyzer-transcript {
-    border-top: 1px solid var(--analyzer-line);
-    background: rgb(5 8 14 / 52%);
-}
-
-.code-analyzer-transcript > summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.65rem 1rem;
-    cursor: pointer;
-    color: #c8d0e3;
-    font-size: 0.65rem;
-    font-weight: 700;
-}
-
-.code-analyzer-transcript > summary small {
-    color: var(--analyzer-muted);
-    font-size: 0.56rem;
-    font-weight: 500;
-}
-
-.code-analyzer-transcript .vca-console-shell {
-    margin: 0 1rem 0.8rem;
+    margin: 0 1.1rem 1rem;
 }
 
 .code-analyzer-panel .vca-console-output {
-    min-height: 130px;
-    max-height: 280px;
+    min-height: 160px;
+    max-height: 320px;
     padding: 0.85rem 1rem;
-    font-size: 0.68rem;
+    font-size: 0.74rem;
 }
 
 .code-analyzer-note {
@@ -12026,10 +11831,11 @@ button.git-guard-menu-button:focus-visible {
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 0.65rem 1rem;
-    border-top: 1px solid rgb(145 160 194 / 10%);
-    color: var(--analyzer-muted-2);
-    font-size: 0.52rem;
+    padding: 0.6rem 1.1rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+    background: color-mix(in srgb, var(--color-bg-base) 30%, transparent);
+    color: var(--analyzer-muted);
+    font-size: 0.66rem;
 }
 
 .code-analyzer-legend {
@@ -12061,15 +11867,6 @@ button.git-guard-menu-button:focus-visible {
 }
 
 @media (max-width: 1050px) {
-    .code-analyzer-topbar {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .code-analyzer-actions {
-        justify-content: flex-start;
-    }
-
     .code-analyzer-scan-banner,
     .code-analyzer-detail-grid {
         grid-template-columns: 1fr;
@@ -12112,18 +11909,8 @@ button.git-guard-menu-button:focus-visible {
 }
 
 @media (max-width: 620px) {
-    .code-analyzer-context-pill,
-    .code-analyzer-actions .mintlint-scan-toggle {
+    .rules-station-actions .mintlint-scan-toggle {
         display: none;
-    }
-
-    .code-analyzer-actions {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    }
-
-    .code-analyzer-actions .btn {
-        justify-content: center;
     }
 
     .code-analyzer-scan-banner,
