@@ -1,6 +1,6 @@
 #!/bin/sh
 # Vibe Rails Pre-Commit Hook
-# VibeRails Hook Version: 3
+# VibeRails Hook Version: 4
 # Validates staged changes before Git creates a commit.
 # Installed by VibeRails - use the dashboard to repair or remove this section.
 
@@ -32,13 +32,16 @@ viberails_run() {
 viberails_repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 viberails_console_arg=
 
-# Git GUI clients usually capture hook output. On Git for Windows, ask the hook
-# host to mirror its transcript into a dedicated visible console as well.
+# Git GUI clients (VS Code SCM panel, SourceTree, etc.) capture hook output into a panel
+# the user may never look at. On Git for Windows, ask the hook host to re-spawn itself in
+# a dedicated popup console (CREATE_NEW_CONSOLE) so the VCA transcript stays visible.
+#
+# A GUI launch has neither terminal input nor terminal output. A terminal commit keeps
+# its transcript inline and needs no popup; a command such as `git commit >hook.log`
+# still has terminal input and should keep writing to the redirected stream. CI must
+# never open or wait on a window.
 case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*)
-        # A GUI launch has neither a terminal input nor terminal output. A command
-        # such as `git commit >hook.log` still has terminal input and should keep
-        # writing to the redirected stream. CI must never open or wait on a window.
         if [ ! -t 0 ] && [ ! -t 1 ] &&
            [ -z "${CI:-}${TF_BUILD:-}${GITHUB_ACTIONS:-}${GITLAB_CI:-}${JENKINS_URL:-}${TEAMCITY_VERSION:-}${BUILDKITE:-}${APPVEYOR:-}" ]; then
             viberails_console_arg=--console-window

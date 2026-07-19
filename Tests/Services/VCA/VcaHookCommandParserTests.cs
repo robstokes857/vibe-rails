@@ -77,6 +77,24 @@ public class VcaHookCommandParserTests
         var invocation = parser.Parse(["--vca-hook", "pre-commit", "--console-window"]);
 
         Assert.True(invocation.ShowConsoleWindow);
+        Assert.False(invocation.ConsoleWindowAttached);
+    }
+
+    [Fact]
+    public void Parse_ConsoleWindowAttachedFlag_MarksRespawnedChild()
+    {
+        var parser = new VcaHookCommandParser();
+
+        var invocation = parser.Parse([
+            "--vca-hook",
+            "pre-commit",
+            "--console-window-attached",
+            "--workdir",
+            @"C:\repo"]);
+
+        Assert.True(invocation.ShowConsoleWindow);
+        Assert.True(invocation.ConsoleWindowAttached);
+        Assert.Equal(@"C:\repo", invocation.WorkingDirectory);
     }
 }
 

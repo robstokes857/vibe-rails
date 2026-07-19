@@ -1,6 +1,6 @@
 #!/bin/sh
 # Vibe Rails Commit-Msg Hook
-# VibeRails Hook Version: 3
+# VibeRails Hook Version: 4
 # Enforces VCA acknowledgment requirements in the final commit message.
 # Installed by VibeRails - use the dashboard to repair or remove this section.
 
@@ -33,6 +33,10 @@ viberails_repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 viberails_console_arg=
 viberails_prompt_arg=
 
+# Git GUI clients capture hook output into a panel the user may never look at. On Git for
+# Windows, ask the hook host to re-spawn itself in a dedicated popup console so the VCA
+# transcript stays visible. A terminal commit keeps its transcript inline; a redirected
+# commit keeps writing to its stream. CI must never open or wait on a window.
 case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*)
         if [ ! -t 0 ] && [ ! -t 1 ] &&

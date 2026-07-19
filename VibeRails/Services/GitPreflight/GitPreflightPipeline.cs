@@ -12,13 +12,16 @@ public sealed class GitPreflightPipeline : IGitPreflightPipeline
     ];
 
     private readonly IGitStagedSnapshotProvider _snapshotProvider;
+    private readonly IGitWorkingTreeSnapshotProvider _workingTreeSnapshotProvider;
     private readonly IReadOnlyList<IGitPreflightStep> _steps;
 
     public GitPreflightPipeline(
         IGitStagedSnapshotProvider snapshotProvider,
+        IGitWorkingTreeSnapshotProvider workingTreeSnapshotProvider,
         IEnumerable<IGitPreflightStep> steps)
     {
         _snapshotProvider = snapshotProvider;
+        _workingTreeSnapshotProvider = workingTreeSnapshotProvider;
         var byId = steps.ToDictionary(step => step.StepId, StringComparer.Ordinal);
         _steps = StepOrder.Select(id => byId.TryGetValue(id, out var step)
             ? step
@@ -73,7 +76,11 @@ public sealed class GitPreflightPipeline : IGitPreflightPipeline
         {
             snapshot = request.Invocation.DemoUi
                 ? GitStagedSnapshot.Preview(request.WorkingDirectory)
-                : await _snapshotProvider.CaptureAsync(request.WorkingDirectory, cancellationToken);
+                : request.WorkingTreeChanges
+                    ? await _workingTreeSnapshotProvider.CaptureWorkingTreeAsync(
+                        request.WorkingDirectory, cancellationToken)
+                    : await _snapshotProvider.CaptureAsync(
+                        request.WorkingDirectory, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

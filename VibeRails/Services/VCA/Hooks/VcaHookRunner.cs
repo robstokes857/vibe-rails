@@ -82,20 +82,11 @@ public sealed class VcaHookRunner : IVcaHookRunner
         }
     }
 
-    private int RunPreCommitValidation(VcaHookValidationSummary summary)
-    {
-        if (_analyzer.ShouldBlockPreCommit(summary))
-        {
-            return 1;
-        }
-
-        if (summary.HasCommitViolations)
-        {
-            return 0;
-        }
-
-        return 0;
-    }
+    // Commit-level (acknowledgment-required) violations are surfaced in the transcript but
+    // do not block the pre-commit stage; they are enforced later by the commit-msg hook.
+    // Only STOP-level violations and errors block here.
+    private int RunPreCommitValidation(VcaHookValidationSummary summary) =>
+        _analyzer.ShouldBlockPreCommit(summary) ? 1 : 0;
 
     private async Task<int> RunCommitMessageValidationAsync(
         VcaHookInvocation invocation,
@@ -222,7 +213,7 @@ public sealed class VcaHookRunner : IVcaHookRunner
         VcaHookValidationSummary summary,
         CancellationToken cancellationToken)
     {
-        if (CanPromptInCurrentConsole())
+        if (VcaHookProcessLaunch.CanPromptInCurrentConsole())
         {
             return await RunAcknowledgmentPromptValidationAsync(
                 invocation with { Kind = VcaHookKind.AcknowledgeCommitMessage },
@@ -309,14 +300,9 @@ public sealed class VcaHookRunner : IVcaHookRunner
         return true;
     }
 
-    private static bool CanPromptInCurrentConsole() =>
-        Environment.UserInteractive &&
-        !Console.IsInputRedirected &&
-        !Console.IsOutputRedirected;
-
     private async Task PauseIfInteractiveAsync()
     {
-        if (CanPromptInCurrentConsole())
+        if (VcaHookProcessLaunch.CanPromptInCurrentConsole())
         {
             await _presenter.ReadLineAsync("Press Enter to close this VCA prompt.");
         }
@@ -335,33 +321,7 @@ public sealed class VcaHookRunner : IVcaHookRunner
             throw new InvalidOperationException("Unable to determine VibeRails executable path.");
         }
 
-        var commandLineArgs = Environment.GetCommandLineArgs();
-        var args = hookArgs.Select(QuoteArgument).ToList();
-
-        if (IsDotnetHost(processPath) &&
-            commandLineArgs.Length > 0 &&
-            commandLineArgs[0].EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-        {
-            args.Insert(0, QuoteArgument(commandLineArgs[0]));
-        }
-
-        return (processPath, string.Join(" ", args));
-    }
-
-    private static bool IsDotnetHost(string processPath)
-    {
-        var fileName = Path.GetFileName(processPath);
-        return fileName.Equals("dotnet", StringComparison.OrdinalIgnoreCase) ||
-               fileName.Equals("dotnet.exe", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string QuoteArgument(string value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return "\"\"";
-        }
-
-        return $"\"{value.Replace("\"", "\\\"")}\"";
+        var args = VcaHookProcessLaunch.WithManagedEntry(processPath, hookArgs);
+        return (processPath, string.Join(" ", args.Select(VcaHookProcessLaunch.QuoteArgument)));
     }
 }

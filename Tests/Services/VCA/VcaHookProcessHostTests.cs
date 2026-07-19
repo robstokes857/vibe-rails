@@ -28,4 +28,33 @@ public class VcaHookProcessHostTests
         Assert.Contains("Placeholder for automated workflows", text);
         Assert.Contains("[pass] Commit allowed", text);
     }
+
+    [Fact]
+    public async Task PauseForEnterAsync_ReturnsWhenTimeoutElapses()
+    {
+        using var output = new StringWriter();
+        using var input = new NeverCompletingTextReader();
+
+        var pauseTask = VcaHookProcessHost.PauseForEnterAsync(
+            output,
+            input,
+            exitCode: 0,
+            timeout: TimeSpan.FromMilliseconds(10),
+            TestContext.Current.CancellationToken);
+        var completed = await Task.WhenAny(
+            pauseTask,
+            Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
+
+        Assert.Same(pauseTask, completed);
+        await pauseTask;
+        Assert.Contains("auto-closes in 2 minutes", output.ToString());
+    }
+
+    private sealed class NeverCompletingTextReader : TextReader
+    {
+        private readonly TaskCompletionSource<string?> _completion = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override Task<string?> ReadLineAsync() => _completion.Task;
+    }
 }

@@ -62,6 +62,7 @@ public sealed class GitPreflightPipelineTests
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         var pipeline = new GitPreflightPipeline(
             new SnapshotProvider(),
+            new SnapshotProvider(),
             [
                 new CancellingStep(cts),
                 new TestStep(MintLintPreflightStep.Id, false, GitPreflightStepStatus.Passed, []),
@@ -123,6 +124,7 @@ public sealed class GitPreflightPipelineTests
         GitPreflightStepStatus mintLintStatus) =>
         new(
             new SnapshotProvider(),
+            new SnapshotProvider(),
             [
                 new TestStep(AutomatedWorkflowsPreflightStep.Id, false, GitPreflightStepStatus.Skipped, order),
                 new TestStep(MintLintPreflightStep.Id, false, mintLintStatus, order),
@@ -139,7 +141,7 @@ public sealed class GitPreflightPipelineTests
             DemoDuration: TimeSpan.Zero,
             PromptForAcknowledgment: false));
 
-    private sealed class SnapshotProvider : IGitStagedSnapshotProvider
+    private sealed class SnapshotProvider : IGitStagedSnapshotProvider, IGitWorkingTreeSnapshotProvider
     {
         public static GitStagedSnapshot Snapshot { get; } = new(
             Directory.GetCurrentDirectory(),
@@ -154,6 +156,9 @@ public sealed class GitPreflightPipelineTests
             []);
 
         public Task<GitStagedSnapshot> CaptureAsync(string workingDirectory, CancellationToken cancellationToken) =>
+            Task.FromResult(Snapshot);
+
+        public Task<GitStagedSnapshot> CaptureWorkingTreeAsync(string workingDirectory, CancellationToken cancellationToken) =>
             Task.FromResult(Snapshot);
     }
 

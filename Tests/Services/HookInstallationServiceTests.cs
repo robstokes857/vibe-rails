@@ -32,7 +32,7 @@ namespace Tests.Services
         {
             var preCommitScript = @"#!/bin/sh
 # Vibe Rails Pre-Commit Hook
-# VibeRails Hook Version: 3
+# VibeRails Hook Version: 4
 VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
 VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
 VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
@@ -44,7 +44,7 @@ if [ -n ""$VIBERAILS_CHAINED_HOOK"" ]; then ""$VIBERAILS_CHAINED_HOOK"" ""$@""; 
 
             var commitMsgScript = @"#!/bin/sh
 # Vibe Rails Commit-Msg Hook
-# VibeRails Hook Version: 3
+# VibeRails Hook Version: 4
 VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
 VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
 VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
