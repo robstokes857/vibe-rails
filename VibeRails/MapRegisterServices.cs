@@ -24,6 +24,7 @@ using VibeRails.Services.VCA.Validators;
 using VibeRails.Utils;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.GitPreflight;
+using VibeRails.Services.Jobs;
 
 namespace VibeRails
 {
@@ -78,7 +79,6 @@ namespace VibeRails
                 new LocalToolApiContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>()));
             serviceCollection.AddSingleton<ILocalLlmProxyContext>(sp =>
                 new LocalLlmProxyContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>()));
-            serviceCollection.AddSingleton<ITabTokenSaverState, TabTokenSaverState>();
             serviceCollection.AddSingleton<ILlmProxySessionState, LlmProxySessionState>();
             serviceCollection.AddSingleton<ILlmProxySettingsService, LlmProxySettingsService>();
             // Host adapters behind the TokenSaver library's seams: auth-gate → IAuthService,
@@ -88,6 +88,15 @@ namespace VibeRails
             serviceCollection.AddSingleton<ICompressionCaptureSink, CompressionCaptureSinkAdapter>();
             serviceCollection.AddSingleton<ITokenSavingsStore>(_ => new TokenSavingsStore(
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
+            // Files the user excluded from Code quality scans (Rules page). Singleton for the
+            // same reason as the other state.db stores: one writer, connection-per-operation.
+            serviceCollection.AddSingleton<ICodeAnalyzerIgnoreStore>(_ => new CodeAnalyzerIgnoreStore(
+                $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
+            serviceCollection.AddSingleton<IJobStore>(_ => new JobStore(
+                $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
+            serviceCollection.AddSingleton<IJobExecutableResolver, JobExecutableResolver>();
+            serviceCollection.AddSingleton<IJobWorkerSupervisor, JobWorkerSupervisor>();
+            serviceCollection.AddScoped<IJobService, JobService>();
             // Singleton for the same reason as the savings tally: one ordered writer, so concurrent
             // relays serialize capture inserts, re-sight counts, and clears before reaching SQLite.
             serviceCollection.AddSingleton<ICompressionCaptureStore>(_ => new CompressionCaptureStore(

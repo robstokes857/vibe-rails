@@ -4,9 +4,11 @@ using TokenSaver.Shape;
 namespace TokenSaver.Pipeline;
 
 /// <summary>
-/// What a stage costs you if it misfires. Drives the badge the settings UI paints next to each
-/// toggle, and — more importantly — the honesty of the "Defaults" button: nothing that can destroy
-/// information a human would miss is ever on by default.
+/// What a stage costs you if it misfires. Since the curated-set decision (2026-07-18) there is no
+/// per-stage settings UI; the kind still classifies risk for captures, the preview, and the
+/// default-set review below. A Lossy stage may only be on by default when it leaves an explicit
+/// marker where the destroyed information used to be, so the model always knows something was
+/// removed and can re-run the command if it needs the rest.
 /// </summary>
 public enum StageKind
 {
@@ -18,8 +20,8 @@ public enum StageKind
     /// dropped, but the model sees a shape it did not ask for.</summary>
     Reshaping,
 
-    /// <summary>Information is genuinely destroyed and a marker is left in its place. Only ever
-    /// opt-in.</summary>
+    /// <summary>Information is genuinely destroyed and an explicit marker (`[xN]`,
+    /// `[... N lines elided ...]`) is left in its place.</summary>
     Lossy,
 }
 
@@ -53,10 +55,11 @@ public sealed record CompressionScopeInfo(
     string? Warning = null);
 
 /// <summary>
-/// The single source of truth for what the token saver can do. The settings UI renders its toggles
-/// from here, the "Defaults" button reads <see cref="OnByDefault"/> from here, the what-if preview
-/// in Vibe AI resolves ids from here, and TokenSaver/README.md documents this table. Add a stage in
-/// exactly one place: this file.
+/// The single source of truth for what the token saver can do. <see cref="DefaultSelection"/> is
+/// the curated set the pipeline runs whenever the saver is on (per-LLM on/off is the only setting
+/// exposed since 2026-07-18; <c>TokenSaverStageOverride</c> in settings.json is the hand-edit
+/// escape hatch), the what-if preview in Vibe AI resolves ids from here, and
+/// TokenSaver/README.md documents this table. Add a stage in exactly one place: this file.
 ///
 /// Pipeline order is fixed and deliberate — it is not a user preference, because the stages are not
 /// commutative:
@@ -75,7 +78,7 @@ public sealed record CompressionScopeInfo(
 /// aborts the whole string, precisely because a later pass's trailing-whitespace deletion could
 /// make that CR line-final and reclassify it. Splitting them into five real passes would void that
 /// proof. They are individually killable (which is what the toggles give you); they are not
-/// individually schedulable. Same story for stages 8-9 and <see cref="OutputCondenser"/>.
+/// individually schedulable. Same story for stages 10-11 and <see cref="OutputCondenser"/>.
 /// </summary>
 public static class CompressionCatalog
 {
@@ -88,6 +91,7 @@ public static class CompressionCatalog
     public const string GitStatusGroup = "git-status-group";
     public const string GrepGroup = "grep-group";
     public const string FindGroup = "find-group";
+    public const string ElidePassedTests = "elide-passed-tests";
     public const string DedupeLines = "dedupe-lines";
     public const string TruncateLong = "truncate-long";
 
@@ -145,15 +149,27 @@ public static class CompressionCatalog
             + "was a recognised `find`.",
             StageKind.Reshaping, OnByDefault: true, Order: 8),
 
+        // The three lossy stages ship ON (2026-07-18/19, curated-set decision): they are the
+        // largest wins on the exact payloads that burn tokens (log/build/test spew), and each
+        // leaves an explicit marker where content was removed, so the model can always tell and
+        // re-run the command with a narrower filter if it needs what was elided.
+        new(ElidePassedTests, "Collapse passing tests",
+            "Replaces each run of individual passing-test lines (pytest -v, jest/vitest, dotnet "
+            + "test, go test -v, cargo test) with a `[... N passed ...]` marker. Failures, "
+            + "errors, skips, logs and summaries are kept verbatim, in place. Only fires when the "
+            + "command was a recognised test runner. Running before truncation also keeps failure "
+            + "details out of truncate-long's elided middle.",
+            StageKind.Lossy, OnByDefault: true, Order: 9),
+
         new(DedupeLines, "Collapse repeated lines",
             "A run of 3+ identical lines becomes one instance tagged `[xN]`. Lossy: the repeat "
             + "count survives, the repeats do not.",
-            StageKind.Lossy, OnByDefault: false, Order: 9),
+            StageKind.Lossy, OnByDefault: true, Order: 10),
 
         new(TruncateLong, "Truncate very long output",
             "Keeps the first 150 and last 50 lines and replaces the middle with a "
             + "`[... N lines elided ...]` marker. Lossy: the middle is gone.",
-            StageKind.Lossy, OnByDefault: false, Order: 10),
+            StageKind.Lossy, OnByDefault: true, Order: 11),
     ];
 
     /// <summary>
@@ -201,7 +217,11 @@ public static class CompressionCatalog
                    + "Verify against captures before trusting it."),
     ];
 
-    /// <summary>What the "Defaults" button writes: every stage and scope marked OnByDefault.</summary>
+    /// <summary>
+    /// The curated set: every stage and scope marked OnByDefault. This is what the pipeline runs
+    /// whenever a provider's saver is on and no <c>TokenSaverStageOverride</c> is present — the
+    /// per-stage picker UI was removed 2026-07-18.
+    /// </summary>
     public static IReadOnlyList<string> DefaultSelection { get; } =
     [
         .. Stages.Where(s => s.OnByDefault).Select(s => s.Id),
@@ -245,6 +265,8 @@ public static class CompressionCatalog
             shapes.Add(CommandShape.GrepMatches);
         if (enabled.Contains(FindGroup))
             shapes.Add(CommandShape.PathList);
+        if (enabled.Contains(ElidePassedTests))
+            shapes.Add(CommandShape.TestRun);
 
         return new CompressionPlan(
             flags,

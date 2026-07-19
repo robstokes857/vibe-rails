@@ -32,7 +32,10 @@ public sealed class VcaHookRunner : IVcaHookRunner
         try
         {
             var preflightResult = await _preflightPipeline.RunAsync(
-                new GitPreflightRequest(workingDirectory, invocation),
+                new GitPreflightRequest(
+                    workingDirectory,
+                    invocation,
+                    EnqueueAutomatedJobs: invocation.Kind == VcaHookKind.PreCommit && !invocation.DemoUi),
                 async (preflightEvent, ct) =>
                     await _presenter.WritePreflightEventAsync(preflightEvent, ct),
                 cancellationToken);

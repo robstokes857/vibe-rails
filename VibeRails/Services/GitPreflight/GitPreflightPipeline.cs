@@ -166,7 +166,8 @@ public sealed class GitPreflightPipeline : IGitPreflightPipeline
                         details,
                         blocking: step.CanBlock,
                         stepNumber: stepNumber,
-                        emitCancellationToken: ct));
+                        emitCancellationToken: ct),
+                    results.ToList());
                 result = await step.ExecuteAsync(context, cancellationToken);
                 result = result with { DurationMs = stepTimer.ElapsedMilliseconds, Blocking = step.CanBlock };
             }

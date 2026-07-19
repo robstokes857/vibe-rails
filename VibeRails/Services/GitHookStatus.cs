@@ -22,13 +22,14 @@ public sealed record GitHooksStatus(
     string RepositoryPath,
     string HooksPath,
     GitHookFileStatus PreCommit,
-    GitHookFileStatus CommitMessage)
+    GitHookFileStatus CommitMessage,
+    GitHookFileStatus PostCommit)
 {
-    public bool IsInstalled => PreCommit.IsCurrent && CommitMessage.IsCurrent;
+    public bool IsInstalled => PreCommit.IsCurrent && CommitMessage.IsCurrent && PostCommit.IsCurrent;
 
     public bool NeedsRepair =>
         !IsInstalled &&
-        (PreCommit.HasVibeRailsSection || CommitMessage.HasVibeRailsSection);
+        (PreCommit.HasVibeRailsSection || CommitMessage.HasVibeRailsSection || PostCommit.HasVibeRailsSection);
 
     public string State => IsInstalled
         ? "active"

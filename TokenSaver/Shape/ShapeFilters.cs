@@ -5,7 +5,7 @@ namespace TokenSaver.Shape;
 /// <summary>
 /// The token saver's shape-aware stage: rewrites a tool_result whose <see cref="CommandShape"/> is
 /// known, hoisting the field every line repeats (the path, the status code) into a header once.
-/// Three transforms, one per provable shape:
+/// Four transforms, one per provable shape:
 ///
 ///   G. <see cref="CommandShape.GitStatus"/> — <c>XY path</c> lines become <c>XY:</c> groups with
 ///      paths indented 2 spaces, groups and paths sorted ordinally.
@@ -13,6 +13,15 @@ namespace TokenSaver.Shape;
 ///      groups with <c>  line: content</c> beneath, in ORIGINAL order (see below).
 ///   P. <see cref="CommandShape.PathList"/> — paths become <c>directory:</c> groups with filenames
 ///      indented 2 spaces.
+///   T. <see cref="CommandShape.TestRun"/> — each run of lines reporting an individual PASSING
+///      test (pytest's <c>path::name PASSED</c>, jest/vitest's <c>✓ name</c> / <c>PASS file</c>,
+///      dotnet's <c>Passed Name [3 ms]</c>, go's <c>--- PASS:</c> / <c>=== RUN</c>, cargo's
+///      <c>test name ... ok</c>) becomes one <c>[... N passed ...]</c> marker. Everything else —
+///      failures, errors, skips, captured logs, summaries — is kept byte-verbatim, IN PLACE.
+///      T is the one transform here that destroys content (it is Lossy like the condenser's,
+///      not Reshaping): a green test's only information is that it passed, and the marker keeps
+///      exactly that. It is also the reason test output survives <c>truncate-long</c> intact —
+///      with the passing noise gone first, failures no longer land in an elided middle.
 ///
 /// <see cref="CommandShape.DirectoryListing"/>, <see cref="CommandShape.GitLog"/> and
 /// <see cref="CommandShape.GitDiff"/> are DELIBERATE no-ops in v1 — they return the same instance.
@@ -49,6 +58,10 @@ namespace TokenSaver.Shape;
 ///           emitted header, path + <c>:</c>, contains no <c>:digits:</c> anywhere and is ineligible.
 ///       P — a path line must not start with a space (every emitted entry does) and must not end
 ///           with <c>:</c> (every emitted header does).
+///       T — every emitted marker starts with <c>[</c>, which no drop pattern matches; every other
+///           output line is an input line kept byte-verbatim, which re-evaluates to the same
+///           verdict (a run kept for being unprofitable is re-kept for the same arithmetic). A
+///           second pass therefore elides nothing and returns its input.
 ///     Genuine lines that happen to land in an ineligible shape merely lose grouping — a savings
 ///     loss, never a correctness loss.
 ///   • Whole-string fail-open: input containing ESC, BEL, or any CR is returned untouched — the same
@@ -62,9 +75,12 @@ namespace TokenSaver.Shape;
 /// follows search order, and reordering results is a bigger semantic change than hoisting a repeated
 /// prefix — the savings do not need it. G and P do sort, because their inputs have no meaningful
 /// order to lose (git's index walk, find's filesystem walk) and a sorted payload is stable across
-/// runs, which is worth cache hits. All three move lines they could not parse to the END, so a
-/// warning that git printed above the status lines lands below them; that is the cost of grouping,
-/// and it is why an unparsed payload (zero groupable lines) is returned completely untouched instead.
+/// runs, which is worth cache hits. The three GROUPING transforms move lines they could not parse to
+/// the END, so a warning that git printed above the status lines lands below them; that is the cost
+/// of grouping, and it is why an unparsed payload (zero groupable lines) is returned completely
+/// untouched instead. T never reorders anything: kept lines stay exactly where they were, and each
+/// marker stands where its run stood — a failure's position relative to the log lines around it is
+/// part of its meaning.
 ///
 /// This is not on <see cref="Minify.OutputMinifier"/>'s hot path — it runs once per tool_result, on
 /// payloads already known to be one command's output — so it favors plain lines over span
@@ -96,6 +112,7 @@ public static class ShapeFilters
             CommandShape.GitStatus => GroupGitStatus(toolOutput),
             CommandShape.GrepMatches => GroupGrepMatches(toolOutput),
             CommandShape.PathList => GroupPathList(toolOutput),
+            CommandShape.TestRun => ElidePassedTests(toolOutput),
 
             // None, plus the deliberate v1 no-ops (DirectoryListing/GitLog/GitDiff) and any enum
             // value from a newer caller than this switch: unknown shape = leave the bytes alone.
@@ -337,6 +354,167 @@ public static class ShapeFilters
         // Keep the root's separator ("/usr" lives in "/", not in "").
         directory = separator == 0 ? line[..1] : line[..separator];
         name = line[(separator + 1)..];
+        return true;
+    }
+
+    // ---------------------------------------------------------------------
+    // T — test runs
+    // ---------------------------------------------------------------------
+
+    private static string ElidePassedTests(string text)
+    {
+        var lines = SplitLines(text, out var count, out var trailingNewline);
+        var output = new StringBuilder(text.Length);
+        var elided = false;
+
+        var i = 0;
+        while (i < count)
+        {
+            if (!IsPassingTestLine(lines[i], out _))
+            {
+                output.Append(lines[i]).Append('\n');
+                i++;
+                continue;
+            }
+
+            var start = i;
+            var passed = 0;
+            var runChars = 0;
+            while (i < count && IsPassingTestLine(lines[i], out var isResult))
+            {
+                if (isResult)
+                    passed++;
+                runChars += lines[i].Length + 1;
+                i++;
+            }
+
+            // A run of nothing but bookkeeping lines (go's === RUN before a test that then FAILS)
+            // has no pass to report, and a marker claiming "0 passed" would be noise pretending to
+            // be information. Profitability is strict and per-run, like the group transforms'.
+            var marker = $"[... {passed} passed ...]";
+            if (passed == 0 || marker.Length + 1 >= runChars)
+            {
+                for (var j = start; j < i; j++)
+                    output.Append(lines[j]).Append('\n');
+                continue;
+            }
+
+            output.Append(marker).Append('\n');
+            elided = true;
+        }
+
+        if (!elided)
+            return text;
+
+        if (!trailingNewline)
+            output.Length--; // safe: `elided` guarantees at least one marker was appended
+        return output.ToString();
+    }
+
+    /// <summary>
+    /// True when <paramref name="line"/> provably reports an individual PASSING test (or, for go,
+    /// the scheduler bookkeeping that only ever accompanies one). <paramref name="isResult"/> is
+    /// true for actual results — those are what the marker counts; bookkeeping lines are elided
+    /// with their run but never counted as a pass. Every pattern requires runner-specific
+    /// structure beyond the word "pass", so summaries (<c>Passed!</c>, bare <c>PASS</c>,
+    /// <c>test result: ok.</c>, <c>3 passed, 1 failed</c>) and ordinary prose never match — and
+    /// nothing here matches a line starting with <c>[</c>, which is what makes the emitted marker
+    /// a fixed point.
+    /// </summary>
+    private static bool IsPassingTestLine(string line, out bool isResult)
+    {
+        isResult = false;
+        var t = line.AsSpan().Trim();
+        if (t.IsEmpty)
+            return false;
+
+        // jest/vitest/mocha/playwright per-test lines. √ is jest on legacy Windows consoles.
+        if (t.Length >= 3 && t[0] is '✓' or '√' or '✔' && t[1] == ' ')
+        {
+            isResult = true;
+            return true;
+        }
+
+        // jest's per-suite banner: "PASS src/foo.test.ts (1.2 s)". go's bare "PASS" has no
+        // trailing space and stays.
+        if (t.StartsWith("PASS ", StringComparison.Ordinal))
+        {
+            isResult = true;
+            return true;
+        }
+
+        // dotnet test: VSTest "Passed Name [3 ms]" / MTP "passed Name (3ms)". The duration suffix
+        // is required structure — it is what keeps "Passed!" summaries and prose out.
+        if ((t.StartsWith("Passed ", StringComparison.Ordinal)
+                || t.StartsWith("passed ", StringComparison.Ordinal))
+            && t[^1] is ']' or ')')
+        {
+            isResult = true;
+            return true;
+        }
+
+        // go test -v results (subtests arrive indented; Trim already handled that)...
+        if (t.StartsWith("--- PASS: ", StringComparison.Ordinal))
+        {
+            isResult = true;
+            return true;
+        }
+
+        // ...and go's scheduler bookkeeping. Elidable noise, but not a result: a === RUN line can
+        // belong to a test that goes on to fail, so it must never increment the passed count.
+        if (t.StartsWith("=== RUN ", StringComparison.Ordinal)
+            || t.StartsWith("=== PAUSE ", StringComparison.Ordinal)
+            || t.StartsWith("=== CONT ", StringComparison.Ordinal))
+            return true;
+
+        // cargo test: "test module::name ... ok". The summary line ("test result: ok. 5 passed;
+        // …; finished in 0.05s") starts with "test " too but does not end with "... ok".
+        if (t.StartsWith("test ", StringComparison.Ordinal)
+            && t.EndsWith("... ok", StringComparison.Ordinal))
+        {
+            isResult = true;
+            return true;
+        }
+
+        if (IsPytestPassedLine(t))
+        {
+            isResult = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// pytest -v: <c>path::name PASSED</c>, optionally right-padded with a <c>[ 45%]</c> progress
+    /// tag. Requiring <c>::</c> before the verdict is the structure that keeps a test's own
+    /// captured stdout (and the <c>=== 3 passed in 0.12s ===</c> summary) from matching.
+    /// </summary>
+    private static bool IsPytestPassedLine(ReadOnlySpan<char> t)
+    {
+        if (t.Length >= 4 && t[^1] == ']')
+        {
+            var open = t.LastIndexOf('[');
+            if (open > 0)
+            {
+                var inner = t[(open + 1)..^1];
+                if (inner.Length >= 2 && inner[^1] == '%' && IsDigitsAndSpaces(inner[..^1]))
+                    t = t[..open].TrimEnd();
+            }
+        }
+
+        return t.EndsWith(" PASSED", StringComparison.Ordinal)
+            && t[..^7].IndexOf("::", StringComparison.Ordinal) >= 0;
+    }
+
+    private static bool IsDigitsAndSpaces(ReadOnlySpan<char> s)
+    {
+        foreach (var c in s)
+        {
+            if (c != ' ' && !char.IsAsciiDigit(c))
+                return false;
+        }
+
         return true;
     }
 

@@ -40,6 +40,12 @@ test('detailed current hook status produces a protected health model', () => {
             installed: true,
             current: true,
             message: 'Commit message is current.'
+        },
+        postCommit: {
+            state: 'Current',
+            installed: true,
+            current: true,
+            message: 'Post-commit is current.'
         }
     });
 
@@ -49,6 +55,7 @@ test('detailed current hook status produces a protected health model', () => {
     assert.equal(model.uninstallDisabled, false);
     assert.equal(model.preCommit.label, 'Current');
     assert.equal(model.commitMessage.label, 'Current');
+    assert.equal(model.postCommit.label, 'Current');
     assert.equal(model.autoInstall, 'Auto-install enabled');
 });
 
@@ -67,6 +74,11 @@ test('partial or stale hooks expose Repair Hooks instead of claiming protection'
             state: 'Missing',
             installed: false,
             current: false
+        },
+        postCommit: {
+            state: 'Missing',
+            installed: false,
+            current: false
         }
     });
 
@@ -76,6 +88,7 @@ test('partial or stale hooks expose Repair Hooks instead of claiming protection'
     assert.equal(model.uninstallDisabled, false);
     assert.equal(model.preCommit.label, 'Needs repair');
     assert.equal(model.commitMessage.label, 'Not installed');
+    assert.equal(model.postCommit.label, 'Not installed');
 });
 
 test('original minimal status payload remains useful without inventing detailed health', () => {
@@ -87,6 +100,7 @@ test('original minimal status payload remains useful without inventing detailed 
 
     assert.equal(model.badge, 'Protected');
     assert.equal(model.preCommit.label, 'Installed');
+    assert.equal(model.postCommit.label, 'Installed');
     assert.match(model.preCommit.message, /not reported/i);
     assert.equal(model.repositoryPath, '');
     assert.equal(model.autoInstall, null);

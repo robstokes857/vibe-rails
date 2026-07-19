@@ -240,3 +240,25 @@ Report: N captures, M changed by X, K judged WRONG, and the worst case quoted.
   settled with captures instead of argument. Persisted captures are uncapped by explicit
   decision, while the best-effort in-memory writer is bounded so database backpressure cannot
   block or exhaust the relay — see `Config.TokenSaverCaptureEnabled`.
+- **2026-07-18** — Curated-set simplification. The per-stage settings UI was removed;
+  the user-facing surface is now one on/off switch per LLM (Claude/Codex/OpenCode),
+  and an enabled saver always runs `CompressionCatalog.DefaultSelection`.
+  `dedupe-lines` and `truncate-long` joined the defaults (both leave explicit
+  markers); `cr-collapse`/`ansi-strip` stay off (terminal-shaped output, owner
+  preference reaffirmed), `scope-read`/`scope-grep` stay off (failed-Edit risk).
+  For bisecting a misbehaving stage on live traffic, hand-edit
+  `TokenSaverStageOverride` in settings.json (null = curated set; the old
+  `TokenSaverStages` key is dead). This runbook's preview-based workflows are
+  unchanged — `POST /api/v1/compression/preview` still takes any `enabledIds` set.
+- **2026-07-19** — New stage `elide-passed-tests` (Lossy, in the curated defaults),
+  rtk-inspired. A new `CommandShape.TestRun` recognises test-runner commands
+  (pytest / python -m pytest / uv run pytest, dotnet test, go test, cargo test,
+  npm/pnpm/yarn/bun test scripts, npx jest/vitest/mocha, playwright test); the
+  filter replaces each run of individual passing-test lines with a
+  `[... N passed ...]` marker and keeps failures, errors, skips, logs and
+  summaries verbatim, in place. Per-line patterns require runner-specific
+  structure (`::…PASSED`, `✓ `, `Passed … [ms]`, `--- PASS:`, `… ... ok`), so
+  summaries and prose never match; pipes/redirects/wrappers decline via the
+  existing whole-command rule; ESC/BEL/CR still fail-open the whole string.
+  Ordering bonus: running before `truncate-long` keeps a big suite's failure
+  section out of the truncated middle. Condenser stages renumbered 9-10 → 10-11.

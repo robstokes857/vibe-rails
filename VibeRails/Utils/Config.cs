@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using TokenSaver.Pipeline;
 
 namespace VibeRails.Utils;
 
@@ -25,35 +24,32 @@ public class Settings
     // token-saver proxy via the OPENCODE_CONFIG_CONTENT env var (see LlmProxyZaiConfig). Off by
     // default, like the Claude/Codex proxy toggles. Launch-flag-only — no opencode.json is written.
     public bool OpenCodeLlmProxyEnabled { get; set; } = false;
-    // Token saver. TokenSaverStages is the ONE knob: the set of enabled stage and scope ids drawn
-    // from TokenSaver.Pipeline.CompressionCatalog (e.g. "ansi-strip", "scope-shell"). It replaced
-    // the old TokenSaverLevel tier string and the five per-transform bools in 2026-07 — a tier
-    // could only ever express the combinations we thought of in advance, and the whole point of
-    // this feature is that we are still learning which combinations are good.
+    // ---- Token saver: on/off per LLM is the whole user-facing surface (2026-07-18). ----
+    // When a provider's saver is on (and that provider's proxy is on), the pipeline runs
+    // CompressionCatalog.DefaultSelection — the curated safe set. The per-stage picker is gone.
     //
-    // null means "never configured" and resolves to CompressionCatalog.DefaultSelection. An EMPTY
-    // list is a real, honored choice (everything off) — the two are NOT interchangeable, which is
-    // why this is nullable rather than defaulting to an empty list. Unknown ids are ignored, so a
-    // settings.json written by a newer build degrades to "that stage is off here" instead of
-    // failing an LLM request.
-    //
-    // Despite its legacy provider-specific name, ClaudeTokenSaverEnabled is the master saver kill
-    // switch for Claude, Codex, and OpenCode; false force-disables all rewriting regardless of stages. A
-    // provider's saver only runs when that provider's proxy is also enabled. Changing the selection
-    // mid-session busts the provider prompt cache once — the transforms must be deterministic
-    // across turns, so the cost of a config change is paid at the change, by design.
-    public List<string>? TokenSaverStages { get; set; }
+    // ClaudeTokenSaverEnabled keeps its legacy name because it is settings.json wire format: it
+    // used to be the master kill switch for every provider. It is now the Claude toggle AND the
+    // inherited default for the two nullable per-provider toggles below, so a pre-split file whose
+    // owner had turned the master off stays entirely off until they choose otherwise. null on the
+    // other two = key absent (pre-split file) → inherit; the settings route writes explicit
+    // values, which severs the inheritance from then on.
     public bool ClaudeTokenSaverEnabled { get; set; } = true;
+    public bool? CodexTokenSaverEnabled { get; set; }
+    public bool? OpenCodeTokenSaverEnabled { get; set; }
 
-    // ---- Legacy token-saver knobs. Superseded by TokenSaverStages. ----
-    // Retained so existing settings.json files can be migrated once by Config.LoadCore. Runtime
-    // compression reads only TokenSaverStages; do not wire these back into the UI.
-    public string TokenSaverLevel { get; set; } = "safest";
-    public bool TokenSaverCollapseCrRedraws { get; set; } = true;
-    public bool TokenSaverStripAnsi { get; set; } = true;
-    public bool TokenSaverStripTrailingWhitespace { get; set; } = true;
-    public bool TokenSaverTrimBlankLines { get; set; } = true;
-    public bool TokenSaverCollapseBlankRuns { get; set; } = false;
+    // Hand-edit escape hatch, deliberately not exposed in any UI: a non-null list of stage/scope
+    // ids from CompressionCatalog replaces the curated set wholesale, so a misbehaving stage can
+    // be bisected on live traffic without turning the whole saver off. null (the only value the
+    // product itself writes) = curated defaults; [] = saver on but a no-op. Unknown ids are
+    // ignored. Changing it mid-session busts the provider prompt cache once, by design.
+    //
+    // Deliberately NOT the old TokenSaverStages key: the retired stage picker persisted that key
+    // on every save, and honoring it would freeze early adopters on whatever selection the picker
+    // last wrote — silently exempting them from the curated set. The rename is the one-time
+    // reset. The old key (and the pre-2026-07 tier/bool knobs) are ignored on read and dropped on
+    // the next save.
+    public List<string>? TokenSaverStageOverride { get; set; }
 
     // Raw before/after captures to state.db (see ICompressionCaptureSink). UNCAPPED by explicit
     // product decision (2026-07-15): captures are the only evidence that a stage is correct rather
@@ -113,17 +109,6 @@ public static class Config
         var settings = JsonSerializer.Deserialize(json, ConfigJsonContext.Default.Settings)
             ?? throw new InvalidOperationException($"Failed to deserialize {_settingsPath}");
 
-        // TokenSaverStages did not exist in older settings files. Preserve the user's old tier
-        // (especially the explicit "off" choice) once, then persist the new representation so all
-        // subsequent reads have one source of truth. A present JSON property whose value is null is
-        // already the new "use catalog defaults" state and must not be mistaken for legacy data.
-        if (!LegacyTokenSaverSettingsMigration.HasStageProperty(json))
-        {
-            settings.TokenSaverStages = LegacyTokenSaverSettingsMigration.FromLegacy(settings);
-            SaveCore(settings);
-            return settings;
-        }
-
         _settings = settings;
 
         return _settings;
@@ -168,53 +153,5 @@ public static class Config
             _settings = null;
             return LoadCore();
         }
-    }
-}
-
-internal static class LegacyTokenSaverSettingsMigration
-{
-    internal static bool HasStageProperty(string json)
-    {
-        using var document = JsonDocument.Parse(json);
-        return document.RootElement.EnumerateObject().Any(property =>
-            property.Name.Equals(nameof(Settings.TokenSaverStages), StringComparison.OrdinalIgnoreCase));
-    }
-
-    internal static List<string> FromLegacy(Settings settings)
-    {
-        var level = (settings.TokenSaverLevel ?? string.Empty).Trim().ToLowerInvariant();
-        if (level == "off")
-            return [];
-
-        var ids = new List<string>();
-        void Add(bool enabled, string id)
-        {
-            if (enabled)
-                ids.Add(id);
-        }
-
-        if (level is "safest" or "safe" or "medium" or "high")
-        {
-            Add(true, CompressionCatalog.CrCollapse);
-            Add(true, CompressionCatalog.AnsiStrip);
-            Add(true, CompressionCatalog.TrailingWhitespace);
-            Add(true, CompressionCatalog.BlankEdges);
-            Add(level is "safe" or "medium" or "high", CompressionCatalog.BlankRuns);
-            Add(level is "medium" or "high", CompressionCatalog.DedupeLines);
-            Add(level == "high", CompressionCatalog.TruncateLong);
-            Add(true, CompressionCatalog.ScopeShell);
-            Add(level is "safe" or "medium" or "high", CompressionCatalog.ScopeShellBackground);
-            return ids;
-        }
-
-        // Legacy "custom" and unrecognised strings used the five persisted bools and foreground
-        // shell tools only. Preserve that exact escape-hatch behaviour.
-        Add(settings.TokenSaverCollapseCrRedraws, CompressionCatalog.CrCollapse);
-        Add(settings.TokenSaverStripAnsi, CompressionCatalog.AnsiStrip);
-        Add(settings.TokenSaverStripTrailingWhitespace, CompressionCatalog.TrailingWhitespace);
-        Add(settings.TokenSaverTrimBlankLines, CompressionCatalog.BlankEdges);
-        Add(settings.TokenSaverCollapseBlankRuns, CompressionCatalog.BlankRuns);
-        Add(true, CompressionCatalog.ScopeShell);
-        return ids;
     }
 }

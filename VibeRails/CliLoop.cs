@@ -44,13 +44,17 @@ public static class CliLoop
         var repository = scopedServices.GetRequiredService<IRepository>();
         var sessionService = scopedServices.GetRequiredService<ITerminalSessionService>();
         var runner = scopedServices.GetRequiredService<TerminalRunner>();
+        var llmParser = scopedServices.GetRequiredService<ILlmParser>();
 
         // Resolve LLM type (smart resolution: LLM enum name → base CLI, otherwise → DB lookup).
+        // Use ILlmParser instead of Enum.TryParse so pseudo-CLI strings like "glm-5.2" and
+        // "kimi-k3" (which can't be C# enum names due to hyphens/periods) resolve correctly.
         LLM llm;
         string? environmentName = null;
         string? environmentInitialMessage = null;
 
-        if (Enum.TryParse<LLM>(parsedArgs.LMBootstrapCli, true, out var parsedLlm))
+        var parsedLlm = llmParser.Parse(parsedArgs.LMBootstrapCli);
+        if (parsedLlm != LLM.NotSet)
         {
             llm = parsedLlm;
         }

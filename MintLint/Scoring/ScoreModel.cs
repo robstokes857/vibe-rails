@@ -9,6 +9,23 @@ namespace MintLint;
 public sealed record OverallScore(double Score, string Rating);
 
 /// <summary>
+/// Which way a RAW measured value reads, so a UI can say "higher is better" next to
+/// quality-named metrics (a maintainability index of 0 is bad; a complexity of 0 is good).
+/// The normalized concern score is always higher-is-worse regardless of this.
+/// </summary>
+public enum MetricDirection
+{
+    /// <summary>Direction unknown or not applicable.</summary>
+    NA,
+
+    /// <summary>Lower raw values are healthier (e.g. cyclomatic complexity).</summary>
+    LB,
+
+    /// <summary>Higher raw values are healthier (e.g. maintainability index).</summary>
+    HB
+}
+
+/// <summary>
 /// How one raw metric was interpreted: the measured value, the thresholds it was judged
 /// against, and the normalized 0–100 concern score that resulted. This is the finest
 /// grain of "how the score was made" and is what UIs should show per metric.
@@ -21,6 +38,7 @@ public sealed record OverallScore(double Score, string Rating);
 /// <param name="HigherIsBetter">True when larger raw values are healthier (e.g. maintainability index).</param>
 /// <param name="Source">Name of the function or class the worst value came from; null for file-level metrics.</param>
 /// <param name="Line">1-based line of <paramref name="Source"/>; null when unattributed.</param>
+/// <param name="Direction">Which way the raw value reads; see <see cref="MetricDirection"/>.</param>
 public sealed record MetricScore(
     string Name,
     double Value,
@@ -29,7 +47,8 @@ public sealed record MetricScore(
     double Critical,
     bool HigherIsBetter,
     string? Source = null,
-    int? Line = null);
+    int? Line = null,
+    MetricDirection Direction = MetricDirection.NA);
 
 /// <summary>
 /// The score for one smell category (Complexity, Testability, Cohesion, …), including the
@@ -40,11 +59,16 @@ public sealed record MetricScore(
 /// <param name="Score">Concern score from 0 (clean) to 100 (severe), combined from the category's metrics.</param>
 /// <param name="Weight">Relative weight of this category in the overall roll-up.</param>
 /// <param name="Metrics">The scored metrics that fed this category.</param>
+/// <param name="Direction">
+/// The shared direction of this category's raw metrics — <see cref="MetricDirection.NA"/>
+/// when the category mixes directions or scored nothing.
+/// </param>
 public sealed record CategoryScore(
     string Name,
     double Score,
     double Weight,
-    IReadOnlyList<MetricScore> Metrics)
+    IReadOnlyList<MetricScore> Metrics,
+    MetricDirection Direction = MetricDirection.NA)
 {
     /// <summary>The category's contribution to the overall roll-up (score × weight).</summary>
     public double WeightedScore => Math.Round(Score * Weight, 1);

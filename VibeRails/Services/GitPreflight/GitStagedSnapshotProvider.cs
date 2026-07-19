@@ -147,9 +147,12 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             entryIndexByPath[changedEntries[i].RelativePath] = i;
         }
 
-        foreach (var path in SplitNull(untrackedResult.StdOut)
+        var untrackedPaths = SplitNull(untrackedResult.StdOut)
             .Select(NormalizePath)
-            .Where(path => path.Length > 0))
+            .Where(path => path.Length > 0)
+            .ToList();
+
+        foreach (var path in untrackedPaths)
         {
             var existing = entryIndexByPath.TryGetValue(path, out var existingIndex);
             var entry = new StagedStatusEntry(
@@ -255,8 +258,53 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 skippedForBudget);
         }
 
-        var agentFiles = await ReadAgentFilesAsync(repositoryPath, trackedFiles, cancellationToken);
+        var agentFiles = await ReadWorkingTreeAgentFilesAsync(
+            repositoryPath,
+            trackedFiles,
+            untrackedPaths,
+            pathGuard,
+            cancellationToken);
         return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles);
+    }
+
+    /// <summary>
+    /// Rules for the working-tree snapshot come from the working tree itself: an unstaged
+    /// AGENTS.md edit — or a brand-new untracked AGENTS.md — applies to this preview, even
+    /// though the commit hooks keep reading rules from the index. By the same principle, an
+    /// AGENTS.md deleted from the working tree contributes no rules here.
+    /// </summary>
+    private static async Task<IReadOnlyList<GitIndexTextFile>> ReadWorkingTreeAgentFilesAsync(
+        string repositoryPath,
+        IReadOnlyList<string> trackedFiles,
+        IReadOnlyList<string> untrackedFiles,
+        WorkingTreePathGuard pathGuard,
+        CancellationToken cancellationToken)
+    {
+        var paths = trackedFiles
+            .Concat(untrackedFiles)
+            .Where(IsAgentFile)
+            .Distinct(PathComparer)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+        var results = new List<GitIndexTextFile>(paths.Count);
+
+        foreach (var path in paths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var fullPath = ToFullPath(repositoryPath, path);
+            if (!pathGuard.IsReadableRegularFile(fullPath))
+            {
+                continue;
+            }
+
+            var (content, isBinary) = await ReadWorkingTreeContentAsync(fullPath, cancellationToken);
+            if (!isBinary && content != null)
+            {
+                results.Add(new GitIndexTextFile(path, content));
+            }
+        }
+
+        return results;
     }
 
     private static async Task<bool> HasHeadAsync(
@@ -313,7 +361,9 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     /// target), so a hardlinked file inside the tree can still be read. Symlinks and
     /// junctions — the practical exfiltration vectors — are what this guards against.
     /// </summary>
-    private sealed class WorkingTreePathGuard(string repositoryPath)
+    // Internal (not private): the code-analyzer source endpoint reuses the same guard so a
+    // requested path gets exactly the symlink/junction containment checks a scan would apply.
+    internal sealed class WorkingTreePathGuard(string repositoryPath)
     {
         private readonly string _repositoryPath = Normalize(repositoryPath);
         private readonly Dictionary<string, bool> _directoryIsContained = new(PathComparer);
@@ -609,7 +659,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         return result.ExitCode == 0 && !result.TimedOut ? result.Bytes : null;
     }
 
-    private static string? DecodeText(byte[] bytes, out bool isBinary)
+    internal static string? DecodeText(byte[] bytes, out bool isBinary)
     {
         if (bytes.Length > MaximumTextFileBytes || Array.IndexOf(bytes, (byte)0) >= 0)
         {

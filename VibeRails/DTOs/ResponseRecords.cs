@@ -251,7 +251,8 @@ namespace VibeRails.DTOs
         string? HooksPath,
         bool AutoInstallEnabled,
         HookFileStatusResponse? PreCommit,
-        HookFileStatusResponse? CommitMessage
+        HookFileStatusResponse? CommitMessage,
+        HookFileStatusResponse? PostCommit
     );
 
     public record HookActionResponse(
@@ -294,11 +295,14 @@ namespace VibeRails.DTOs
         int? AnalyzedFileCount = null,
         int? SkippedFileCount = null,
         VcaValidationOverviewResponse? Validation = null,
-        MintLintReportResponse? Report = null
+        MintLintReportResponse? Report = null,
+        int? IgnoredFileCount = null
     );
 
     // MintLint code-analyzer report: every metric measured per file and how each score
     // was assembled (metric → category worst-signal → weighted overall roll-up).
+    // Direction describes the RAW measured value: "LB" = lower is better, "HB" = higher is
+    // better, "NA" = unknown/mixed. Concern scores are always higher-is-worse.
     public record MintLintMetricResponse(
         string Name,
         double Value,
@@ -308,7 +312,8 @@ namespace VibeRails.DTOs
         bool HigherIsBetter,
         string? Source = null,
         int? Line = null,
-        string? Snippet = null
+        string? Snippet = null,
+        string Direction = "NA"
     );
 
     public record MintLintCategoryResponse(
@@ -316,7 +321,8 @@ namespace VibeRails.DTOs
         double Score,
         double Weight,
         double WeightedScore,
-        List<MintLintMetricResponse> Metrics
+        List<MintLintMetricResponse> Metrics,
+        string Direction = "NA"
     );
 
     // ReferencedByCount = distinct other repo files referencing this file's declared
@@ -347,7 +353,45 @@ namespace VibeRails.DTOs
         bool HigherIsBetter,
         string? Source = null,
         int? Line = null,
-        string? Snippet = null
+        string? Snippet = null,
+        string Direction = "NA"
+    );
+
+    // One card of the Overview strip, aggregated across the whole scan so the frontend
+    // renders what the backend decided instead of re-deriving it. Concern is the AVERAGE
+    // category risk across the files that have the category (the changeset picture);
+    // WorstConcern keeps the single worst file's number, and the worst measurement
+    // behind it stays attributed.
+    public record MintLintOverviewCardResponse(
+        string Category,
+        double Concern,
+        string Direction,
+        double? WorstConcern = null,
+        string? WorstMetricName = null,
+        double? WorstMetricValue = null,
+        string? WorstMetricDirection = null,
+        string? WorstMetricFile = null
+    );
+
+    // One fixed row of the score card's always-present metric roster, describing the
+    // WHOLE changeset: the average value/risk across every file where the metric was
+    // measured, with the single worst measurement kept alongside for context. Combined
+    // rows (Coupling, Testability) carry the member metric with the higher average risk;
+    // MetricName says which member that was. Measured=false rows render as
+    // "not measured", never disappear.
+    public record MintLintScorecardEntryResponse(
+        string Label,
+        bool Measured,
+        int FileCount = 0,
+        double? AverageValue = null,
+        double? AverageConcern = null,
+        double? WorstValue = null,
+        double? WorstConcern = null,
+        string Direction = "NA",
+        string? MetricName = null,
+        string? File = null,
+        string? Source = null,
+        int? Line = null
     );
 
     public record MintLintReportResponse(
@@ -356,7 +400,38 @@ namespace VibeRails.DTOs
         int AnalyzedFileCount,
         int SkippedFileCount,
         List<MintLintFileReportResponse> Files,
-        List<MintLintWorstMetricResponse>? WorstMetrics = null
+        List<MintLintWorstMetricResponse>? WorstMetrics = null,
+        List<MintLintOverviewCardResponse>? Overview = null,
+        List<MintLintScorecardEntryResponse>? Scorecard = null
+    );
+
+    // Full working-tree file content for the Code quality source pane. Content is null
+    // when the file is missing, unreadable, binary, or over the size cap.
+    public record CodeAnalyzerSourceResponse(
+        string Path,
+        string? Content,
+        bool Exists = true,
+        bool IsBinary = false,
+        bool Truncated = false
+    );
+
+    // Code quality ignore list: files the user removed from scan results, with an
+    // optional reason ("test" / "config" / "other" plus free text).
+    public record CodeAnalyzerIgnoreEntryResponse(
+        string Path,
+        string? ReasonKind,
+        string? ReasonText,
+        DateTime CreatedUtc
+    );
+
+    public record CodeAnalyzerIgnoreListResponse(
+        List<CodeAnalyzerIgnoreEntryResponse> Files
+    );
+
+    public record CodeAnalyzerIgnoreRequest(
+        string Path,
+        string? ReasonKind = null,
+        string? ReasonText = null
     );
 
     public record GitPreflightEventResponse(
@@ -412,10 +487,6 @@ namespace VibeRails.DTOs
         List<TerminalTabStatusResponse> Tabs,
         int MaxTabs
     );
-
-    public record TabTokenSaverStateRequest(bool Enabled);
-
-    public record TabTokenSaverStateResponse(bool Enabled);
 
     public record StartTerminalRequest(
         string? WorkingDirectory = null,
@@ -557,12 +628,12 @@ namespace VibeRails.DTOs
         // OpenCode (zai/Z.AI GLM) proxy toggle. Nullable for the same stale-client guard as the
         // other proxy fields — a client that omits it leaves the stored value untouched.
         bool? OpenCodeLlmProxyEnabled,
-        // The enabled stage and scope ids, drawn from TokenSaver's CompressionCatalog (e.g.
-        // "ansi-strip", "scope-shell"). Nullable for the same stale-client guard as the proxy
-        // fields — but null and empty are NOT the same answer: null means the client didn't send
-        // the key (leave the stored selection alone), while [] is a real "everything off" choice
-        // that must round-trip. See CompressionCatalog.Resolve, which draws the same line.
-        List<string>? TokenSaverStages,
+        // Per-LLM token saver on/off — the whole saver surface since 2026-07-18 (the stage
+        // selection is fixed to the catalog's curated set; the old TokenSaverStages field is
+        // gone). Nullable for the same stale-client guard as the proxy fields.
+        bool? ClaudeTokenSaverEnabled,
+        bool? CodexTokenSaverEnabled,
+        bool? OpenCodeTokenSaverEnabled,
         bool? TokenSaverCaptureEnabled,
         // Read-only: the live machine name, used by the client as the placeholder
         // and as the push-notification fallback when ComputerName is blank. Never
@@ -612,10 +683,10 @@ namespace VibeRails.DTOs
 
     // Compression capture DTOs — served by /api/v1/compression/*.
     //
-    // Outcome and Kind cross the wire as strings, not enum ordinals: the capture view and the
-    // settings UI render these directly, and an ordinal would silently change meaning if a value is
-    // ever inserted into StageOutcome/StageKind. Same wire-format discipline CompressionCatalog
-    // applies to stage ids.
+    // Outcome and Kind cross the wire as strings, not enum ordinals: the capture view renders
+    // these directly, and an ordinal would silently change meaning if a value is ever inserted
+    // into StageOutcome/StageKind. Same wire-format discipline CompressionCatalog applies to
+    // stage ids.
     public record CompressionStageTraceResponse(
         string StageId,
         string Outcome,
@@ -1028,7 +1099,16 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<MintLintFileReportResponse>))]
     [JsonSerializable(typeof(MintLintWorstMetricResponse))]
     [JsonSerializable(typeof(List<MintLintWorstMetricResponse>))]
+    [JsonSerializable(typeof(MintLintOverviewCardResponse))]
+    [JsonSerializable(typeof(List<MintLintOverviewCardResponse>))]
+    [JsonSerializable(typeof(MintLintScorecardEntryResponse))]
+    [JsonSerializable(typeof(List<MintLintScorecardEntryResponse>))]
     [JsonSerializable(typeof(MintLintReportResponse))]
+    [JsonSerializable(typeof(CodeAnalyzerSourceResponse))]
+    [JsonSerializable(typeof(CodeAnalyzerIgnoreEntryResponse))]
+    [JsonSerializable(typeof(List<CodeAnalyzerIgnoreEntryResponse>))]
+    [JsonSerializable(typeof(CodeAnalyzerIgnoreListResponse))]
+    [JsonSerializable(typeof(CodeAnalyzerIgnoreRequest))]
     [JsonSerializable(typeof(GitPreflightEventResponse))]
     [JsonSerializable(typeof(ValidationResultResponse))]
     [JsonSerializable(typeof(List<ValidationResultResponse>))]
@@ -1048,6 +1128,24 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(EnvironmentResponse))]
     [JsonSerializable(typeof(EnvironmentListResponse))]
     [JsonSerializable(typeof(List<EnvironmentResponse>))]
+    // Jobs DTOs
+    [JsonSerializable(typeof(JobTriggerDto))]
+    [JsonSerializable(typeof(List<JobTriggerDto>))]
+    [JsonSerializable(typeof(JobResponse))]
+    [JsonSerializable(typeof(List<JobResponse>))]
+    [JsonSerializable(typeof(JobListResponse))]
+    [JsonSerializable(typeof(JobTriggerRequest))]
+    [JsonSerializable(typeof(List<JobTriggerRequest>))]
+    [JsonSerializable(typeof(CreateJobRequest))]
+    [JsonSerializable(typeof(UpdateJobRequest))]
+    [JsonSerializable(typeof(JobRunResponse))]
+    [JsonSerializable(typeof(List<JobRunResponse>))]
+    [JsonSerializable(typeof(JobRunListResponse))]
+    [JsonSerializable(typeof(JobRunLogResponse))]
+    [JsonSerializable(typeof(List<JobRunLogResponse>))]
+    [JsonSerializable(typeof(JobRunLogsResponse))]
+    [JsonSerializable(typeof(JobWorkerStatusResponse))]
+    [JsonSerializable(typeof(JobActionResponse))]
     // Codex Settings DTOs
     [JsonSerializable(typeof(CodexSettingsDto))]
     // Claude Settings DTOs
@@ -1057,8 +1155,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(TerminalTabStatusResponse))]
     [JsonSerializable(typeof(List<TerminalTabStatusResponse>))]
     [JsonSerializable(typeof(TerminalTabListResponse))]
-    [JsonSerializable(typeof(TabTokenSaverStateRequest))]
-    [JsonSerializable(typeof(TabTokenSaverStateResponse))]
     [JsonSerializable(typeof(StartTerminalRequest))]
     [JsonSerializable(typeof(TerminalInputRequest))]
     [JsonSerializable(typeof(TerminalInputResponse))]

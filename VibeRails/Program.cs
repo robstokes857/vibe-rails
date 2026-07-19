@@ -10,6 +10,7 @@ using VibeRails.Services;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Terminal;
 using VibeRails.Services.VCA.Hooks;
+using VibeRails.Services.Jobs;
 
 using VibeRails.Utils;
 
@@ -131,6 +132,22 @@ if (McpStdioHost.IsRequested(args))
 if (VcaHookProcessHost.IsRequested(args))
 {
     Environment.ExitCode = await VcaHookProcessHost.RunAsync(args);
+    return;
+}
+
+// Durable Jobs worker mode: no Kestrel, browser, auth session, PTY, or normal session logging.
+// User-level OS supervision launches this process independently of the dashboard process.
+if (JobWorkerProcessHost.IsRequested(args))
+{
+    Environment.ExitCode = await JobWorkerProcessHost.RunAsync();
+    return;
+}
+
+// Lightweight post-commit enqueue mode used by the managed Git hook. This process never
+// starts the dashboard and never changes the already-completed commit's result.
+if (JobTriggerProcessHost.IsRequested(args))
+{
+    Environment.ExitCode = await JobTriggerProcessHost.RunAsync(args);
     return;
 }
 

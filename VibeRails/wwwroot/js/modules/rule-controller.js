@@ -113,9 +113,13 @@ export function normalizeHookStatus(status = {}, { isError = false } = {}) {
         fallbackInstalled: reportedInstalled,
         inGitRepo
     });
-    const needsRepair = inGitRepo && (explicitRepair || preCommit.needsRepair || commitMessage.needsRepair);
-    const isInstalled = inGitRepo && (reportedInstalled || (preCommit.current === true && commitMessage.current === true));
-    const anyHookInstalled = preCommit.installed || commitMessage.installed;
+    const postCommit = normalizeHookDetail(payload.postCommit, {
+        fallbackInstalled: reportedInstalled,
+        inGitRepo
+    });
+    const needsRepair = inGitRepo && (explicitRepair || preCommit.needsRepair || commitMessage.needsRepair || postCommit.needsRepair);
+    const isInstalled = inGitRepo && (reportedInstalled || (preCommit.current === true && commitMessage.current === true && postCommit.current === true));
+    const anyHookInstalled = preCommit.installed || commitMessage.installed || postCommit.installed;
 
     if (isError) {
         return {
@@ -133,14 +137,15 @@ export function normalizeHookStatus(status = {}, { isError = false } = {}) {
             hooksPath: '',
             autoInstall: null,
             preCommit,
-            commitMessage
+            commitMessage,
+            postCommit
         };
     }
 
     let tone = 'neutral';
     let badge = 'Not installed';
     let title = 'Git Guard is off';
-    let fallbackMessage = 'Install both hooks to run VCA checks whenever git commit runs.';
+    let fallbackMessage = 'Install all three hooks to run VCA checks and post-commit Jobs whenever git commit runs.';
 
     if (!inGitRepo) {
         tone = 'warning';
@@ -176,7 +181,8 @@ export function normalizeHookStatus(status = {}, { isError = false } = {}) {
             ? (payload.autoInstallEnabled ? 'Auto-install enabled' : 'Manual installation')
             : null,
         preCommit,
-        commitMessage
+        commitMessage,
+        postCommit
     };
 }
 
@@ -255,16 +261,16 @@ export function buildVcaExplanationViewModel(response = {}) {
 
     let tone = 'success';
     let icon = 'fa-circle-check';
-    let title = 'Staged changes satisfy your VCA rules';
+    let title = 'Your changes satisfy your VCA rules';
     let message = applicableRuleCount > 0
-        ? `${stagedFileCount} staged file${stagedFileCount === 1 ? '' : 's'} passed ${applicableRuleCount} applicable rule${applicableRuleCount === 1 ? '' : 's'}.`
-        : 'No VCA violations were found in the staged changes.';
+        ? `${stagedFileCount} changed file${stagedFileCount === 1 ? '' : 's'} passed ${applicableRuleCount} applicable rule${applicableRuleCount === 1 ? '' : 's'}.`
+        : 'No VCA violations were found in your uncommitted changes.';
 
     if (outcome === 'blocked') {
         tone = 'danger';
         icon = 'fa-circle-xmark';
         title = `Commit blocked — ${stopCount || findings.length} issue${(stopCount || findings.length) === 1 ? '' : 's'} must be fixed`;
-        message = 'STOP rules cannot be bypassed. Fix the items below, stage the corrections, and run validation again.';
+        message = 'STOP rules cannot be bypassed. Fix the items below, then run validation again.';
     } else if (outcome === 'attention') {
         tone = 'warning';
         icon = 'fa-triangle-exclamation';
@@ -280,8 +286,8 @@ export function buildVcaExplanationViewModel(response = {}) {
     } else if (outcome === 'empty') {
         tone = 'info';
         icon = 'fa-circle-info';
-        title = 'Nothing staged to validate';
-        message = 'Stage the files you want to commit, then run validation again.';
+        title = 'No uncommitted changes to validate';
+        message = 'Your working tree matches the last commit. Change a file, then run validation again.';
     } else if (outcome === 'error') {
         tone = 'danger';
         icon = 'fa-circle-exclamation';
@@ -295,7 +301,7 @@ export function buildVcaExplanationViewModel(response = {}) {
     }
 
     const stats = [
-        { value: stagedFileCount, label: 'Staged' },
+        { value: stagedFileCount, label: 'Changed' },
         { value: applicableRuleCount, label: 'Rules' },
         { value: findings.length, label: 'Findings' }
     ];
@@ -378,10 +384,10 @@ export class RuleController {
         this.app.bindAction(root, '[data-action="copy-fix-brief"]', () => this.copyVcaFixBrief());
         this.vcaConsole = new VcaConsole(root.querySelector('[data-vca-console]'));
         this.codeAnalyzerConsole = new VcaConsole(root.querySelector('[data-code-analyzer-console]'), {
-            defaultMessage: 'Code metrics ready.\nChange a supported source file, then run the scan.',
+            defaultMessage: 'Code quality scan ready.\nChange a supported source file, then run the scan.',
             runningMessage: 'Analyzing working-tree source changes…',
-            failureMessage: 'The code metrics scan could not be completed.',
-            failureMeta: 'Code metrics scan failed'
+            failureMessage: 'The code quality scan could not be completed.',
+            failureMeta: 'Code quality scan failed'
         });
     }
 
@@ -584,6 +590,7 @@ export class RuleController {
         this.setText('[data-hook-status-message]', viewModel.message);
         this.renderHookDetail('pre-commit', viewModel.preCommit);
         this.renderHookDetail('commit-message', viewModel.commitMessage);
+        this.renderHookDetail('post-commit', viewModel.postCommit);
         this.renderOptionalValue('[data-hook-repository-row]', '[data-hook-repository-path]', viewModel.repositoryPath);
         this.renderOptionalValue('[data-hook-path-row]', '[data-hook-path]', viewModel.hooksPath);
         this.renderOptionalValue('[data-hook-auto-install-row]', '[data-hook-auto-install]', viewModel.autoInstall);
@@ -636,6 +643,7 @@ export class RuleController {
         this.setText('[data-hook-status-message]', 'Inspecting the repository hook files…');
         this.renderHookDetail('pre-commit', { tone: 'neutral', label: 'Checking', message: 'Inspecting hook…' });
         this.renderHookDetail('commit-message', { tone: 'neutral', label: 'Checking', message: 'Inspecting hook…' });
+        this.renderHookDetail('post-commit', { tone: 'neutral', label: 'Checking', message: 'Inspecting hook…' });
         this.setHookActionButtonsDisabled(true);
     }
 
@@ -671,13 +679,16 @@ export class RuleController {
         const button = this.query('[data-action="run-code-analyzer"]');
         this.setButtonBusy(button, true, 'Refreshing…');
         this.setCodeAnalyzerUtilityButtonsDisabled(true);
-        this.codeAnalyzerConsole?.begin('code metrics');
+        this.codeAnalyzerConsole?.begin('code quality');
 
         try {
             const fullScan = this.query('[data-code-analyzer-full-scan]')?.checked === true;
-            const response = await this.app.apiCall(
-                `/api/v1/code-analyzer${fullScan ? '?fullScan=true' : ''}`,
-                'POST', null, { showLoading: false });
+            const [response] = await Promise.all([
+                this.app.apiCall(
+                    `/api/v1/code-analyzer${fullScan ? '?fullScan=true' : ''}`,
+                    'POST', null, { showLoading: false }),
+                this.fetchAnalyzerIgnores()
+            ]);
             this.codeAnalyzerConsole?.complete(response);
             this.renderCodeAnalyzerSummary(response);
         } catch (error) {
@@ -700,7 +711,18 @@ export class RuleController {
         }
 
         if (reportContainer) {
-            const fileCount = renderCodeAnalyzerDashboard(reportContainer, response);
+            const fileCount = renderCodeAnalyzerDashboard(reportContainer, response, undefined, {
+                // The source pane shows whole files from the working tree; the report
+                // itself only carries short snippets.
+                fetchSource: path => this.app.apiCall(
+                    `/api/v1/code-analyzer/source?path=${encodeURIComponent(path)}`,
+                    'GET',
+                    null,
+                    { showLoading: false }),
+                ignoredFiles: this.analyzerIgnores || [],
+                onIgnoreFile: file => this.promptIgnoreAnalyzerFile(file),
+                onRestoreFile: entry => this.restoreAnalyzerFile(entry)
+            });
             reportContainer.hidden = fileCount === 0;
             if (empty) {
                 empty.hidden = fileCount > 0;
@@ -713,6 +735,93 @@ export class RuleController {
                         : 'Change a supported source file, then run the scan again.';
                 }
             }
+        }
+    }
+
+    // ── Code quality ignore list ────────────────────────────────────────────
+
+    async fetchAnalyzerIgnores() {
+        try {
+            const response = await this.app.apiCall(
+                '/api/v1/code-analyzer/ignores', 'GET', null, { showLoading: false });
+            this.analyzerIgnores = Array.isArray(response?.files) ? response.files : [];
+        } catch {
+            // The scan still renders without the list; ignore actions surface their own errors.
+            this.analyzerIgnores = this.analyzerIgnores || [];
+        }
+        return this.analyzerIgnores;
+    }
+
+    promptIgnoreAnalyzerFile(file) {
+        const path = String(file?.path || '');
+        if (!path) return;
+        const safePath = this.app.escapeHtml(path);
+        this.app.showModal('Ignore this file?', `
+            <div class="analyzer-ignore-modal">
+                <p class="analyzer-ignore-intro">
+                    <code>${safePath}</code> will be removed from Code quality results until you
+                    restore it from the Ignored files list.
+                </p>
+                <div class="form-label mb-2">Reason <span class="text-muted">(optional)</span></div>
+                <div class="analyzer-ignore-reasons" role="radiogroup" aria-label="Reason for ignoring">
+                    <label><input type="radio" name="analyzer-ignore-reason" value="" checked><span>No reason</span></label>
+                    <label><input type="radio" name="analyzer-ignore-reason" value="test"><span>Test files</span></label>
+                    <label><input type="radio" name="analyzer-ignore-reason" value="config"><span>Config file</span></label>
+                    <label><input type="radio" name="analyzer-ignore-reason" value="other"><span>Other</span></label>
+                </div>
+                <input type="text" class="form-control form-control-sm analyzer-ignore-text mt-2"
+                    data-analyzer-ignore-text placeholder="Why is this file ignored?" maxlength="200" disabled>
+                <div class="d-flex justify-content-end gap-2 mt-4">
+                    <button type="button" class="btn btn-outline-secondary" data-action="close-modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" data-analyzer-ignore-confirm>
+                        <i class="fa-solid fa-eye-slash me-1" aria-hidden="true"></i>
+                        Ignore file
+                    </button>
+                </div>
+            </div>
+        `);
+
+        const modal = document.getElementById('modal-container');
+        const textInput = modal?.querySelector('[data-analyzer-ignore-text]');
+        modal?.querySelectorAll('input[name="analyzer-ignore-reason"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                if (!textInput) return;
+                textInput.disabled = radio.value !== 'other';
+                if (radio.value === 'other') textInput.focus();
+            });
+        });
+        modal?.querySelector('[data-analyzer-ignore-confirm]')?.addEventListener('click', async () => {
+            const reasonKind = modal.querySelector('input[name="analyzer-ignore-reason"]:checked')?.value || '';
+            const reasonText = reasonKind === 'other' ? String(textInput?.value || '').trim() : '';
+            this.app.closeModal();
+            await this.ignoreAnalyzerFile(path, reasonKind || null, reasonText || null);
+        }, { once: true });
+    }
+
+    async ignoreAnalyzerFile(path, reasonKind, reasonText) {
+        try {
+            await this.app.apiCall('/api/v1/code-analyzer/ignores', 'POST',
+                { path, reasonKind, reasonText }, { showLoading: false });
+            this.app.showToast('File Ignored', `${path} is now excluded from Code quality scans.`, 'success');
+            // Re-run so the report (scores, overview, roster) is honestly recomputed
+            // without the file, not client-side filtered.
+            await this.runCodeAnalyzer();
+        } catch (error) {
+            this.app.showError(`Could not ignore ${path}: ${error.message}`);
+        }
+    }
+
+    async restoreAnalyzerFile(entry) {
+        const path = String(entry?.path || '');
+        if (!path) return;
+        try {
+            await this.app.apiCall(
+                `/api/v1/code-analyzer/ignores?path=${encodeURIComponent(path)}`,
+                'DELETE', null, { showLoading: false });
+            this.app.showToast('File Restored', `${path} will be scanned again.`, 'info');
+            await this.runCodeAnalyzer();
+        } catch (error) {
+            this.app.showError(`Could not restore ${path}: ${error.message}`);
         }
     }
 
@@ -943,8 +1052,8 @@ export class RuleController {
         if (!explanation) return;
         explanation.hidden = false;
         if (verdict) verdict.dataset.tone = 'neutral';
-        this.setText('[data-vca-explanation-title]', 'Checking staged changes…');
-        this.setText('[data-vca-explanation-message]', 'Matching each staged file against the applicable rules.');
+        this.setText('[data-vca-explanation-title]', 'Checking your changes…');
+        this.setText('[data-vca-explanation-message]', 'Matching each changed file against the applicable rules.');
         this.setVcaExplanationIcon('fa-spinner fa-spin');
         this.query('[data-vca-explanation-stats]')?.replaceChildren();
         this.query('[data-vca-finding-list]')?.replaceChildren();

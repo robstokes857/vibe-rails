@@ -5,7 +5,8 @@ This describes the entire custom env option workflow but it has mainly been used
 # Custom Environment CLI Options
 
 This runbook explains how to change, add, or delete custom environment options
-for the five managed TUI CLIs: Claude, Codex, Antigravity, Copilot, and OpenCode.
+for the managed TUI CLIs: Claude, Codex, Antigravity, Copilot, OpenCode, and the
+OpenCode-backed pseudo-CLIs GLM 5.2 and Kimi K3.
 
 Use it when editing the Environments page's create/edit modal, the per-CLI
 settings APIs, or the generated launch arguments stored in `CustomArgs`.
@@ -121,10 +122,15 @@ Current pinned values (Codex refreshed 2026-07-10; all others 2026-07-02):
   follows the docs' supported-in-CLI table, not one account's entitlements.
 - OpenCode: `anthropic/claude-opus-4-5`, `anthropic/claude-sonnet-4-5`,
   `openai/gpt-5.2`, `openai/gpt-5.1-codex`, `google/gemini-3-pro`,
-  `zai/glm-5.2`, `opencode/gpt-5.1-codex` (Zen), plus an empty "Default (OpenCode recommended)" entry.
+  `zai/glm-5.2`, `moonshotai/kimi-k3`, `opencode/gpt-5.1-codex` (Zen), plus an empty "Default (OpenCode recommended)" entry.
   OpenCode model IDs are `provider/model` (the format `--model` and `opencode models` use).
   Refresh via `opencode models` (optionally `--refresh` to update the cache from models.dev).
-  Added 2026-07-16 alongside the OpenCode CLI integration; `zai/glm-5.2` added 2026-07-17.
+  Added 2026-07-16 alongside the OpenCode CLI integration; `zai/glm-5.2` added 2026-07-17;
+  `moonshotai/kimi-k3` added 2026-07-19 (verified present in `opencode models` on this host).
+  `zai/glm-5.2` and `moonshotai/kimi-k3` are also exposed as first-class base CLIs and custom
+  env types (see "GLM 5.2" and "Kimi K3" sections below) — they launch `opencode` with the
+  model pinned via `--model`, so users get a dedicated dropdown entry instead of picking the
+  model from the OpenCode list.
 
 The rule:
 
@@ -303,7 +309,7 @@ login` continues to use the user's global OpenCode data directory (normally
 `~/.local/share/opencode/auth.json`).
 
 UI-managed launch and prompt settings (verified against https://opencode.ai/docs/cli/ on
-2026-07-16):
+2026-07-16; `--pure` toggle added 2026-07-19):
 
 - Initial Message: stored in `CustomPrompt`; sent as `--prompt=<text>`. The TUI treats a
   positional arg as the `[project]` path, not a prompt, so this flag is mandatory for prompts.
@@ -312,6 +318,9 @@ UI-managed launch and prompt settings (verified against https://opencode.ai/docs
 - Agent: `--agent <name>`; free text (built-ins like `build`/`plan` or a custom agent).
 - YOLO Mode: `--auto` — auto-approves permissions not explicitly denied. This is the only
   permission control.
+- Run Without Plugins: `--pure` — runs OpenCode without loading external plugins. Useful for
+  isolated/reproducible environments where third-party plugin behavior would otherwise leak in.
+  Verified against `opencode --help` on 2026-07-19.
 - Additional Arguments: preserved in `CustomArgs` for advanced opencode flags not modeled by
   VibeRails (e.g. `--continue`, `--session`, `--fork`).
 
@@ -323,17 +332,79 @@ does not apply. OpenCode environments therefore do not get the VibeRails MCP std
 registered automatically. (Future option: write a minimal `opencode.json` `{ "mcp": {…} }` into
 the env config dir — requires config-file management, deliberately deferred.)
 
+### GLM 5.2 
+
+GLM 5.2 is an **OpenCode-backed pseudo-CLI**: it launches `opencode` with `--model=zai/glm-5.2`
+pinned. It exists as a first-class base CLI (dropdown entry in the terminal launcher) and as a
+custom env type, so users get a dedicated entry instead of picking `zai/glm-5.2` from the
+OpenCode model list every time.
+
+Backend wiring (added 2026-07-19):
+
+- Enum: `LLM.Glm52` (value 7). C# enum names can't contain hyphens/periods, so `LlmParser`
+  special-cases the string `"glm-5.2"` → `LLM.Glm52` via a `SpecialCaseMap` dictionary.
+- Executable: `opencode` (mapped in `CommandService.PrepareSessionAsync`, like `agy` for
+  Antigravity). The enum name lowercased (`glm52`) is NOT the executable.
+- Model injection: for **base CLI launches** (no envName), `CommandService` prepends
+  `--model=zai/glm-5.2` to the launch args. For **custom env launches**, the model is already
+  in `CustomArgs` (emitted by `buildOpencodeCustomArgs`), so no injection happens — this avoids
+  a duplicate `--model` flag.
+- Prompt convention: `--prompt=<text>` (same as OpenCode).
+- Proxy: the Z.AI/GLM proxy (`OpenCodeLlmProxyLaunchEnabled`) applies to GLM 5.2 because it IS
+  the `zai` provider model. See `CommandService.PrepareSessionAsync`.
+- Env isolation: `XDG_CONFIG_HOME` (same as OpenCode).
+- Launcher: `IOpencodeLlmCliLauncher` (reused from OpenCode).
+- `getLlmName()` (frontend) maps `7` → `'GLM 5.2'`.
+
+UI-managed launch and prompt settings (same as OpenCode, with Model pinned):
+
+- Initial Message: stored in `CustomPrompt`; sent as `--prompt=<text>`.
+- Model: **pinned to `zai/glm-5.2`** — the model field is a read-only display, not a dropdown.
+  To use a different model, create a plain OpenCode env instead.
+- Agent: `--agent <name>`; free text.
+- YOLO Mode: `--auto`.
+- Run Without Plugins: `--pure`.
+- Additional Arguments: preserved in `CustomArgs`.
+
+Frontend helpers (environment-controller.js):
+
+- `isOpencodeBackedCli(cli)` returns true for `opencode`, `glm-5.2`, `kimi-k3` — use this
+  instead of `=== 'opencode'` when routing to the OpenCode settings form / arg builder.
+- `pinnedModelForCli(cli)` returns `'zai/glm-5.2'` for `glm-5.2`, `'moonshotai/kimi-k3'` for
+  `kimi-k3`, and `null` for plain OpenCode.
+
+### Kimi K3
+
+Kimi K3 is an **OpenCode-backed pseudo-CLI**: it launches `opencode` with
+`--model=moonshotai/kimi-k3` pinned. Identical architecture to GLM 5.2 (see above), with these
+differences:
+
+- Enum: `LLM.KimiK3` (value 8). `LlmParser` special-cases `"kimi-k3"` → `LLM.KimiK3`.
+- Pinned model: `moonshotai/kimi-k3` (the `moonshotai` provider, NOT `zai`).
+- Proxy: the Z.AI proxy does **not** apply to Kimi K3 (it runs through the `moonshotai`
+  provider, not `zai`). See `CommandService.PrepareSessionAsync`.
+- `getLlmName()` (frontend) maps `8` → `'Kimi K3'`.
+
+UI-managed launch and prompt settings: identical to GLM 5.2 (see above) with the model pinned
+to `moonshotai/kimi-k3`.
+
 ## Mental Model
 
 Custom environments have two layers:
 
 1. `CustomArgs` and `CustomPrompt` live in the `Environments` table and apply
    to every launch path.
-2. Per-CLI settings files exist for Claude and Codex only. Antigravity, Copilot, and OpenCode
-   are frontend-managed through `CustomArgs` and `CustomPrompt`.
+2. Per-CLI settings files exist for Claude and Codex only. Antigravity, Copilot, OpenCode,
+   GLM 5.2, and Kimi K3 are frontend-managed through `CustomArgs` and `CustomPrompt`.
 
 The important rule: a visible control is not enough. Every CLI option must
 round-trip through render, read, save, parse existing args, and launch.
+
+GLM 5.2 and Kimi K3 are **OpenCode-backed pseudo-CLIs**: they reuse OpenCode's settings form,
+arg builder, env isolation (`XDG_CONFIG_HOME`), and launcher, but pin `--model` to a specific
+provider/model. In the frontend, `isOpencodeBackedCli(cli)` routes them to the OpenCode branch;
+in the backend, `CommandService.PrepareSession` maps the enum to `opencode` and injects the
+pinned `--model` for base CLI launches.
 
 ## Launch Flow
 
@@ -479,9 +550,32 @@ OpenCode:
 - Current launch args come from `buildOpencodeCustomArgs()`; existing args are round-tripped by
   `mergeOpencodeSettingsFromCustomArgs()`.
 - YOLO is `--auto` (the only permission control). Model is `--model provider/model` via
-  `renderOpencodeModelOptions()`. Agent is `--agent`.
+  `renderOpencodeModelOptions()`. Agent is `--agent`. Run Without Plugins is `--pure`.
 - `customPrompt` is populated from the OpenCode initial message.
 - No MCP auto-registration (`opencode mcp add` is interactive).
+
+GLM 5.2 :
+
+- Pseudo-CLI backed by OpenCode. Enum `LLM.Glm52` (7); `LlmParser` special-cases `"glm-5.2"`.
+- Executable is `opencode` (remapped in `CommandService.PrepareSession` — the enum name
+  lowercased `glm52` is NOT the executable). `--model=zai/glm-5.2` is injected for base CLI
+  launches; custom envs carry it in `CustomArgs`.
+- Settings form reuses OpenCode's (`isOpencodeBackedCli()` routes `glm-5.2` to the OpenCode
+  branch); the Model field is a read-only display pinned to `zai/glm-5.2`.
+- The Z.AI proxy applies (GLM 5.2 IS the `zai` provider model).
+- `customPrompt` is populated from the initial message.
+- No MCP auto-registration (inherited from OpenCode).
+
+Kimi K3 :
+
+- Pseudo-CLI backed by OpenCode. Enum `LLM.KimiK3` (8); `LlmParser` special-cases `"kimi-k3"`.
+- Executable is `opencode` (remapped in `CommandService.PrepareSession`). `--model=moonshotai/kimi-k3`
+  is injected for base CLI launches; custom envs carry it in `CustomArgs`.
+- Settings form reuses OpenCode's; the Model field is a read-only display pinned to
+  `moonshotai/kimi-k3`.
+- The Z.AI proxy does **not** apply (Kimi uses the `moonshotai` provider, not `zai`).
+- `customPrompt` is populated from the initial message.
+- No MCP auto-registration (inherited from OpenCode).
 
 ## Add A New Option
 

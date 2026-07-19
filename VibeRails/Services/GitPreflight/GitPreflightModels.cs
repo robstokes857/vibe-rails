@@ -69,7 +69,10 @@ public sealed record GitPreflightRequest(
     string WorkingDirectory,
     VcaHookInvocation Invocation,
     bool FullImpactScan = false,
-    bool WorkingTreeChanges = false);
+    bool WorkingTreeChanges = false,
+    // Only the standalone native pre-commit hook sets this. Browser/Rules previews use
+    // the same pipeline but must never enqueue real automation.
+    bool EnqueueAutomatedJobs = false);
 
 public sealed record GitPreflightEvent(
     string RunId,
@@ -137,7 +140,8 @@ public sealed record GitPreflightStepContext(
     string RunId,
     GitPreflightRequest Request,
     GitStagedSnapshot Snapshot,
-    Func<string, IReadOnlyDictionary<string, string>?, CancellationToken, ValueTask> WriteOutputAsync);
+    Func<string, IReadOnlyDictionary<string, string>?, CancellationToken, ValueTask> WriteOutputAsync,
+    IReadOnlyList<GitPreflightStepResult>? CompletedSteps = null);
 
 public interface IGitPreflightPipeline
 {

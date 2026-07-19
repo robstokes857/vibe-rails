@@ -15,6 +15,7 @@ import { SandboxController } from './js/modules/sandbox-controller.js';
 import { SettingsController } from './js/modules/settings-controller.js';
 import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
 import { McpController } from './js/modules/mcp-controller.js';
+import { JobController } from './js/modules/jobs-controller.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
 import { TerminalTokenCompressionMeter } from './js/modules/terminal-token-compression.js';
 import { showAppToast } from './js/modules/toast-service.js';
@@ -50,6 +51,7 @@ export class VibeControlApp {
         this.settingsController = new SettingsController(this);
         this.vibeRailsAiController = new VibeRailsAiController(this);
         this.mcpController = new McpController(this);
+        this.jobController = new JobController(this);
         this.appEventClient = new AppEventClient(this);
         this.lifecycleHeartbeatTimer = null;
         this.lifecycleClientId = this.getOrCreateLifecycleClientId();
@@ -74,9 +76,10 @@ export class VibeControlApp {
         // The light lives in the terminal controls bar (see renderTerminalPanel); it's created
         // detached and TerminalManager.initialize() re-parents it each time that bar renders.
         this.terminalTokenCompression = new TerminalTokenCompressionMeter({
-            title: 'Token compression',
+            title: 'Token saver',
             enabled: this.appSettings.codexLlmProxyEnabled === true
                 || this.appSettings.claudeLlmProxyEnabled === true
+                || this.appSettings.openCodeLlmProxyEnabled === true
         }).connect(this);
         // If the terminal view mounted before this ran, drop the meter into its slot now.
         this.terminalTokenCompression.relocate(document.getElementById('terminal-proxy-activity-slot'));
@@ -538,7 +541,8 @@ export class VibeControlApp {
             'terminal-focus',
             'sandboxes',
             'vibe-rails-ai',
-            'mcp'
+            'mcp',
+            'jobs'
         ]);
 
         return duplicateableViews.has(normalizedView) ? normalizedView : 'terminal-focus';
@@ -744,6 +748,7 @@ export class VibeControlApp {
     loadView(view, data = {}) {
         this.settingsController?.unload?.();
         this.ruleController?.unload?.();
+        this.jobController?.unload?.();
         this.updateActiveSubNav(view);
         this.terminalController?.resetLayoutStateForNavigation();
         // Tear down the MCP Explorer's global listener / xterm instances when navigating away
@@ -766,7 +771,8 @@ export class VibeControlApp {
             'terminal-focus': () => this.terminalController.loadTerminalFocusView(data),
             'sandboxes': () => this.sandboxController.loadSandboxes(),
             'vibe-rails-ai': () => this.vibeRailsAiController.loadView(),
-            'mcp': () => this.mcpController.loadView()
+            'mcp': () => this.mcpController.loadView(),
+            'jobs': () => this.jobController.loadView(data)
         };
 
         const loadFunc = views[view];

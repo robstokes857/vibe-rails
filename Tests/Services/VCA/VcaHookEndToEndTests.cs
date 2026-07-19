@@ -61,7 +61,7 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
         Assert.Contains("[STOP] Log all file changes", result.Output);
         Assert.Contains("[block] Commit blocked", result.Output);
         Assert.Contains("MintLint code health", result.Output);
-        Assert.Contains("Placeholder for automated workflows", result.Output);
+        Assert.Contains("VCA Jobs", result.Output);
     }
 
     [Fact]
@@ -323,7 +323,7 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
         Assert.Equal(1, missingReason.ExitCode);
         Assert.Contains("missing required VCA acknowledgment", missingReason.Output);
         Assert.DoesNotContain("[pass] Commit allowed", missingReason.Output);
-        Assert.DoesNotContain("Placeholder for automated workflows", missingReason.Output);
+        Assert.DoesNotContain("Queued", missingReason.Output, StringComparison.OrdinalIgnoreCase);
 
         await File.WriteAllTextAsync(
             messagePath,

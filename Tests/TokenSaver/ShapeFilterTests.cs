@@ -20,14 +20,21 @@ public class ShapeFilterTests
     private const string Esc = "\u001b";
 
     [Fact]
-    public void Catalog_WiresGitStatusFilter_AndKeepsLossyStagesOptIn()
+    public void Catalog_WiresGitStatusFilter_AndRunsTheLossyMarkerStagesByDefault()
     {
+        // Curated-set decision (2026-07-18/19): the marker-leaving lossy stages ride in the
+        // defaults; the TUI-shaped cleanups stay off. The exclusion pins live in
+        // LlmProxySettingsServiceTests.CuratedDefaults_*.
         var plan = CompressionCatalog.Resolve(null);
 
         Assert.Contains(CompressionCatalog.GitStatusGroup, plan.EnabledIds);
         Assert.Contains(CommandShape.GitStatus, plan.Shapes);
-        Assert.DoesNotContain(CompressionCatalog.DedupeLines, plan.EnabledIds);
-        Assert.DoesNotContain(CompressionCatalog.TruncateLong, plan.EnabledIds);
+        Assert.Contains(CompressionCatalog.ElidePassedTests, plan.EnabledIds);
+        Assert.Contains(CommandShape.TestRun, plan.Shapes);
+        Assert.Contains(CompressionCatalog.DedupeLines, plan.EnabledIds);
+        Assert.Contains(CompressionCatalog.TruncateLong, plan.EnabledIds);
+        Assert.True(plan.Condense.DedupeConsecutiveLines);
+        Assert.True(plan.Condense.TruncateLongOutput);
     }
 
     // ---------------------------------------------------------------------
@@ -103,6 +110,61 @@ public class ShapeFilterTests
     public void Classify_PathList(string command)
     {
         Assert.Equal(CommandShape.PathList, CommandShapes.Classify(command));
+    }
+
+    [Theory]
+    [InlineData("pytest")]
+    [InlineData("pytest -v tests/")]
+    [InlineData("python -m pytest tests/test_foo.py -v")]
+    [InlineData("python3 -m pytest")]
+    [InlineData("uv run pytest -q")]
+    [InlineData("dotnet test")]
+    [InlineData("dotnet test Tests/Tests.csproj --filter FullyQualifiedName~TokenSaver")]
+    [InlineData("go test ./...")]
+    [InlineData("go test -v -run TestFoo ./pkg")]
+    [InlineData("cargo test")]
+    [InlineData("npm test")]
+    [InlineData("npm t")]
+    [InlineData("npm run test:unit")]
+    [InlineData("pnpm test")]
+    [InlineData("yarn test:unit")]
+    [InlineData("bun test")]
+    [InlineData("npx jest --ci")]
+    [InlineData("npx vitest run")]
+    [InlineData("npx playwright test")]
+    [InlineData("jest")]
+    [InlineData("vitest run")]
+    [InlineData("mocha")]
+    [InlineData("playwright test")]
+    public void Classify_TestRun(string command)
+    {
+        Assert.Equal(CommandShape.TestRun, CommandShapes.Classify(command));
+    }
+
+    [Theory]
+    [InlineData("dotnet build")]                     // not the test subcommand
+    [InlineData("go build ./...")]
+    [InlineData("cargo bench")]
+    [InlineData("npm install")]
+    [InlineData("npm run build")]
+    [InlineData("npx tsc")]
+    [InlineData("playwright codegen")]
+    [InlineData("python script.py")]                 // not the pytest module
+    [InlineData("uv pip install pytest")]
+    [InlineData("docker compose run app pytest")]    // wrapper: first token must BE the runner
+    [InlineData("sudo pytest")]
+    public void Classify_NotATestRun_IsNone(string command)
+    {
+        Assert.Equal(CommandShape.None, CommandShapes.Classify(command));
+    }
+
+    [Theory]
+    [InlineData("pytest -v | tail -20")]
+    [InlineData("dotnet test 2>&1")]
+    [InlineData("go test ./... && echo done")]
+    public void Classify_TestRunWithMetacharacters_IsNone(string command)
+    {
+        Assert.Equal(CommandShape.None, CommandShapes.Classify(command));
     }
 
     // ---------------------------------------------------------------------
@@ -496,6 +558,174 @@ public class ShapeFilterTests
     }
 
     // ---------------------------------------------------------------------
+    // T — test runs
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void T_Pytest_ElidesPassesKeepsFailureAndSummary()
+    {
+        var input =
+            "tests/test_a.py::test_one PASSED                                    [ 25%]\n" +
+            "tests/test_a.py::test_two PASSED                                    [ 50%]\n" +
+            "tests/test_a.py::test_three FAILED                                  [ 75%]\n" +
+            "tests/test_a.py::test_four PASSED                                   [100%]\n" +
+            "=================================== FAILURES ===================================\n" +
+            "E       assert 1 == 2\n" +
+            "========================= 3 passed, 1 failed in 0.12s ==========================\n";
+
+        Assert.Equal(
+            "[... 2 passed ...]\n" +
+            "tests/test_a.py::test_three FAILED                                  [ 75%]\n" +
+            "[... 1 passed ...]\n" +
+            "=================================== FAILURES ===================================\n" +
+            "E       assert 1 == 2\n" +
+            "========================= 3 passed, 1 failed in 0.12s ==========================\n",
+            ShapeFilters.Apply(input, CommandShape.TestRun));
+    }
+
+    [Fact]
+    public void T_Jest_SuiteBannerAndChecksElide_FailureKept()
+    {
+        var input =
+            "PASS src/sum.test.js (1.2 s)\n" +
+            "  ✓ adds 1 + 2 to equal 3 (3 ms)\n" +
+            "  ✓ adds 2 + 2 to equal 4\n" +
+            "  ✕ adds 3 + 3 to equal 7 (1 ms)\n" +
+            "    Expected: 7\n" +
+            "Tests:       2 passed, 1 failed, 3 total\n";
+
+        Assert.Equal(
+            "[... 3 passed ...]\n" +
+            "  ✕ adds 3 + 3 to equal 7 (1 ms)\n" +
+            "    Expected: 7\n" +
+            "Tests:       2 passed, 1 failed, 3 total\n",
+            ShapeFilters.Apply(input, CommandShape.TestRun));
+    }
+
+    [Fact]
+    public void T_GoTest_RunLinesElideUncounted_FailBlockAndPackageLinesKept()
+    {
+        // === RUN is bookkeeping: elided with its run but never counted as a pass. TestB's RUN
+        // line rides into the marker; its identity survives in the kept --- FAIL line.
+        var input =
+            "=== RUN   TestA\n" +
+            "--- PASS: TestA (0.00s)\n" +
+            "=== RUN   TestB\n" +
+            "    b_test.go:12: boom\n" +
+            "--- FAIL: TestB (0.01s)\n" +
+            "FAIL\n" +
+            "FAIL\texample.com/pkg\t0.5s\n";
+
+        Assert.Equal(
+            "[... 1 passed ...]\n" +
+            "    b_test.go:12: boom\n" +
+            "--- FAIL: TestB (0.01s)\n" +
+            "FAIL\n" +
+            "FAIL\texample.com/pkg\t0.5s\n",
+            ShapeFilters.Apply(input, CommandShape.TestRun));
+    }
+
+    [Fact]
+    public void T_Cargo_OkLinesElide_FailedAndResultSummaryKept()
+    {
+        var input =
+            "test tests::alpha ... ok\n" +
+            "test tests::beta ... ok\n" +
+            "test tests::gamma ... FAILED\n" +
+            "test result: FAILED. 2 passed; 1 failed; 0 ignored\n";
+
+        Assert.Equal(
+            "[... 2 passed ...]\n" +
+            "test tests::gamma ... FAILED\n" +
+            "test result: FAILED. 2 passed; 1 failed; 0 ignored\n",
+            ShapeFilters.Apply(input, CommandShape.TestRun));
+    }
+
+    [Fact]
+    public void T_DotnetTest_PassedLinesElide_FailureAndBangSummaryKept()
+    {
+        // "Passed!" (the VSTest summary) must never match: the drop pattern requires "Passed "
+        // plus a trailing duration bracket.
+        var input =
+            "  Passed LlmProxySettingsServiceTests.Resolve_A [5 ms]\n" +
+            "  Passed LlmProxySettingsServiceTests.Resolve_B [< 1 ms]\n" +
+            "  Failed LlmProxySettingsServiceTests.Resolve_C [10 ms]\n" +
+            "  Error Message: Assert.True() Failure\n" +
+            "Passed!  - Failed:     0, Passed:   438, Skipped:     0\n";
+
+        Assert.Equal(
+            "[... 2 passed ...]\n" +
+            "  Failed LlmProxySettingsServiceTests.Resolve_C [10 ms]\n" +
+            "  Error Message: Assert.True() Failure\n" +
+            "Passed!  - Failed:     0, Passed:   438, Skipped:     0\n",
+            ShapeFilters.Apply(input, CommandShape.TestRun));
+    }
+
+    [Fact]
+    public void T_AllGreenRun_CollapsesToMarkerPlusSummary()
+    {
+        var input = new StringBuilder();
+        for (var i = 0; i < 40; i++)
+            input.Append("tests/test_big.py::test_case_").Append(i).Append(" PASSED\n");
+        input.Append("============================== 40 passed in 1.02s ==============================\n");
+
+        Assert.Equal(
+            "[... 40 passed ...]\n" +
+            "============================== 40 passed in 1.02s ==============================\n",
+            ShapeFilters.Apply(input.ToString(), CommandShape.TestRun));
+    }
+
+    [Fact]
+    public void T_UnprofitableTinyRun_IsKeptVerbatim()
+    {
+        // One 3-char checkmark line costs less than the marker that would replace it.
+        var input = "✓ a\nsome other line\n";
+        Assert.Same(input, ShapeFilters.Apply(input, CommandShape.TestRun));
+    }
+
+    [Fact]
+    public void T_ProseAndSummaries_NeverMatch()
+    {
+        // Near-misses for every pattern: no "::" for pytest, no duration bracket for dotnet,
+        // bare PASS, cargo's summary, and a sentence that merely starts with "Passed".
+        var input =
+            "Passed the review stage\n" +
+            "PASS\n" +
+            "3 passed, 1 failed\n" +
+            "test result: ok. 5 passed; 0 failed; finished in 0.05s\n" +
+            "something PASSED\n";
+        Assert.Same(input, ShapeFilters.Apply(input, CommandShape.TestRun));
+    }
+
+    [Fact]
+    public void T_OwnMarkerFedBack_IsAFixedPoint()
+    {
+        var input = "[... 3 passed ...]\n  ✕ nope (1 ms)\n";
+        Assert.Same(input, ShapeFilters.Apply(input, CommandShape.TestRun));
+    }
+
+    [Fact]
+    public void T_PreservesLineOrder_NoPassthroughReordering()
+    {
+        // Unlike the grouping transforms, T must not move anything: interleaved output stays
+        // exactly where it was relative to the kept lines around it.
+        var input =
+            "  ✓ renders the header with a title (2 ms)\n" +
+            "  console.log\n" +
+            "    debugging output\n" +
+            "  ✓ second (1 ms)\n" +
+            "  ✓ third\n" +
+            "  ✓ fourth (4 ms)\n";
+
+        Assert.Equal(
+            "[... 1 passed ...]\n" +
+            "  console.log\n" +
+            "    debugging output\n" +
+            "[... 3 passed ...]\n",
+            ShapeFilters.Apply(input, CommandShape.TestRun));
+    }
+
+    // ---------------------------------------------------------------------
     // The v1 no-ops
     // ---------------------------------------------------------------------
 
@@ -616,6 +846,17 @@ public class ShapeFilterTests
         yield return "bare.cs\nother.cs\nthird.cs\nfourth.cs\n";
         yield return "./src/app:\n  main.cs\n  util.cs\n"; // our own output, fed back in
 
+        // test-run shapes: green runs, mixed runs, our own marker fed back, and near-misses.
+        yield return "tests/test_a.py::test_one PASSED                          [ 50%]\ntests/test_a.py::test_two PASSED                          [100%]\n=== 2 passed in 0.01s ===\n";
+        yield return "PASS src/a.test.ts\n  ✓ adds numbers (3 ms)\n  ✕ divides (1 ms)\nTests: 1 passed, 1 failed\n";
+        yield return "=== RUN   TestA\n--- PASS: TestA (0.00s)\n=== RUN   TestB\n--- FAIL: TestB (0.00s)\nFAIL\n";
+        yield return "test alpha ... ok\ntest beta ... ok\ntest result: ok. 2 passed; 0 failed\n";
+        yield return "  Passed TestA [5 ms]\n  Passed TestB [< 1 ms]\nPassed!  - Failed:     0\n";
+        yield return "[... 3 passed ...]\n✕ nope\n";
+        yield return "✓ a\n";                    // a run too small to be worth a marker
+        yield return "Passed the review\n";      // prose near-miss: no duration suffix
+        yield return "✓✓ not a checkmark line\n"; // second char is not a space
+
         // A payload big enough that grouping definitely fires.
         var many = new StringBuilder();
         for (var i = 0; i < 200; i++)
@@ -670,6 +911,13 @@ public class ShapeFilterTests
         // out of their lines. What must still hold is that no line silently disappears: every
         // non-empty input line's own characters are still findable, in order, somewhere in the
         // output (its header comes before its entry, so order survives grouping).
+        //
+        // TestRun is exempt BY DESIGN: it is the one Lossy transform here — runs of passing-test
+        // lines are replaced by a counting marker. Its keep-the-failures contract is pinned by the
+        // T_* tests above instead.
+        if (shape == CommandShape.TestRun)
+            return;
+
         foreach (var input in AdversarialInputs())
         {
             var once = ShapeFilters.Apply(input, shape);

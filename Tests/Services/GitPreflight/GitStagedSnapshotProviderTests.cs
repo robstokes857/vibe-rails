@@ -196,6 +196,38 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CaptureWorkingTreeAsync_ReadsAgentRulesFromTheWorkingTree()
+    {
+        // An unstaged AGENTS.md edit and a brand-new untracked AGENTS.md both govern the
+        // working-tree preview, even though the commit hooks keep reading the index.
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "AGENTS.md"),
+            "# Staged instructions\n",
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", "AGENTS.md");
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "AGENTS.md"),
+            "# Unstaged instructions\n",
+            TestContext.Current.CancellationToken);
+        var nested = Path.Combine(_repository, "src");
+        Directory.CreateDirectory(nested);
+        await File.WriteAllTextAsync(
+            Path.Combine(nested, "AGENTS.md"),
+            "# Untracked instructions\n",
+            TestContext.Current.CancellationToken);
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureWorkingTreeAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, snapshot.AgentFiles.Count);
+        var root = Assert.Single(snapshot.AgentFiles, file => file.RelativePath == "AGENTS.md");
+        Assert.Equal("# Unstaged instructions\n", root.Content);
+        var untracked = Assert.Single(snapshot.AgentFiles, file => file.RelativePath == "src/AGENTS.md");
+        Assert.Equal("# Untracked instructions\n", untracked.Content);
+    }
+
+    [Fact]
     public async Task CaptureWorkingTreeAsync_IncludesUnstagedAndUntrackedFiles()
     {
         await File.WriteAllTextAsync(

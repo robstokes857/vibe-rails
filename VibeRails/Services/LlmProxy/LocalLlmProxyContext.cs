@@ -6,8 +6,8 @@ namespace VibeRails.Services.LlmProxy;
 /// <summary>
 /// Connection details for the LLM proxy hosted by the current VibeRails process.
 /// This is deliberately separate from <c>ILocalToolApiContext</c>: terminal-tab children inherit
-/// the root tool API context, while their Claude/Codex traffic must stay in the child so its
-/// process-local token-saver gate is applied.
+/// the root tool API context, while their Claude/Codex traffic must stay in the child — the child
+/// owns that traffic's relay lifetime, auth tokens, and savings attribution.
 /// </summary>
 public interface ILocalLlmProxyContext
 {

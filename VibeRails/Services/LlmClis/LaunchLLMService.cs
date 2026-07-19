@@ -40,7 +40,9 @@ namespace VibeRails.Services.LlmClis
                 LLM.Codex => _codexLauncher,
                 LLM.Antigravity => _antigravityLauncher,
                 LLM.Copilot => _copilotLauncher,
-                LLM.OpenCode => _opencodeLauncher,
+                // Glm52/KimiK3 are OpenCode-backed pseudo-CLIs — they reuse the OpenCode launcher
+                // (the --model pin is injected by CommandService.PrepareSession).
+                LLM.OpenCode or LLM.Glm52 or LLM.KimiK3 => _opencodeLauncher,
                 _ => throw new ArgumentException($"Unsupported LLM type: {llm}")
             };
         }

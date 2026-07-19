@@ -329,11 +329,18 @@ export class EnvironmentController {
             }
             this.mergeCopilotSettingsFromCustomArgs(cliSettings, env.customArgs || '');
         }
-        if (cliLower === 'opencode') {
+        if (this.isOpencodeBackedCli(cliLower)) {
             if (env.customPrompt) {
                 cliSettings.initialMessage = env.customPrompt;
             }
             this.mergeOpencodeSettingsFromCustomArgs(cliSettings, env.customArgs || '');
+            // For pseudo-CLIs (GLM 5.2 / Kimi K3), force the model to the pinned value so
+            // the form always reflects the env type's contract — a saved --model that
+            // drifted to a different provider would otherwise mislead the user.
+            const pinnedModel = this.pinnedModelForCli(cliLower);
+            if (pinnedModel) {
+                cliSettings.model = pinnedModel;
+            }
         }
 
         this.showEnvironmentForm({ mode: 'edit', env, cliSettings });
@@ -347,8 +354,19 @@ export class EnvironmentController {
             return div.innerHTML;
         };
 
-        const cliOptions = ['codex', 'claude', 'antigravity', 'copilot', 'opencode'];
-        const initialCli = isEdit ? env.cli : cliOptions[0];
+        // CLI types selectable in the create-environment modal. `glm-5.2` and `kimi-k3` are
+        // OpenCode-backed pseudo-CLIs (they launch `opencode --model <pinned>`); they reuse
+        // the OpenCode settings form with the Model field pinned.
+        const cliOptions = [
+            { value: 'codex', label: 'Codex' },
+            { value: 'claude', label: 'Claude' },
+            { value: 'opencode', label: 'OpenCode' },
+            { value: 'glm-5.2', label: 'GLM 5.2' },
+            { value: 'kimi-k3', label: 'Kimi K3' },
+            { value: 'antigravity', label: 'Antigravity' },
+            { value: 'copilot', label: 'Copilot' }
+        ];
+        const initialCli = isEdit ? env.cli : cliOptions[0].value;
         const title = isEdit ? `Edit Environment: ${env.name}` : 'Create New Environment';
         const submitLabel = isEdit ? 'Save Changes' : 'Create Environment';
         const submitIcon = isEdit
@@ -366,7 +384,7 @@ export class EnvironmentController {
         const cliField = isEdit
             ? `<input type="text" class="form-control" value="${escapeHtml(env.cli)}" disabled>`
             : `<select class="form-select" id="env-cli" required>
-                ${cliOptions.map(c => `<option value="${c}">${c.charAt(0).toUpperCase() + c.slice(1)}</option>`).join('')}
+                ${cliOptions.map(c => `<option value="${c.value}">${c.label}</option>`).join('')}
               </select>`;
 
         const customArgsValue = isEdit ? escapeHtml(env.customArgs || '') : '';
@@ -457,9 +475,29 @@ export class EnvironmentController {
         return null;
     }
 
-    usesManagedCustomArgs(cli) {
+    // GLM 5.2 and Kimi K3 are OpenCode-backed pseudo-CLIs: they launch `opencode` with a
+    // pinned --model flag. They share the OpenCode settings form, env handling, and arg
+    // builder, so most call sites route through this helper instead of checking === 'opencode'.
+    isOpencodeBackedCli(cli) {
         const cliLower = (cli || '').toLowerCase();
-        return cliLower === 'codex' || cliLower === 'claude' || cliLower === 'antigravity' || cliLower === 'copilot' || cliLower === 'opencode';
+        return cliLower === 'opencode' || cliLower === 'glm-5.2' || cliLower === 'kimi-k3';
+    }
+
+    // Returns the pinned provider/model ID for a pseudo-CLI, or null for plain OpenCode
+    // (which lets the user pick any model from the dropdown).
+    pinnedModelForCli(cli) {
+        const cliLower = (cli || '').toLowerCase();
+        if (cliLower === 'glm-5.2') return 'zai/glm-5.2';
+        if (cliLower === 'kimi-k3') return 'moonshotai/kimi-k3';
+        return null;
+    }
+
+    usesManagedCustomArgs(cli) {
+        return this.isOpencodeBackedCli(cli)
+            || (cli || '').toLowerCase() === 'codex'
+            || (cli || '').toLowerCase() === 'claude'
+            || (cli || '').toLowerCase() === 'antigravity'
+            || (cli || '').toLowerCase() === 'copilot';
     }
 
     async loadCliSettings(cli, envName) {
@@ -515,8 +553,14 @@ export class EnvironmentController {
             };
         }
 
-        if (cliLower === 'opencode') {
+        if (this.isOpencodeBackedCli(cliLower)) {
             const opencodeSettings = settingsPayload || this.extractCliSettingsPayload(cli);
+            // Pseudo-CLIs always pin their model — override whatever the form had so the
+            // saved CustomArgs carry the right --model value.
+            const pinnedModel = this.pinnedModelForCli(cliLower);
+            if (pinnedModel && opencodeSettings) {
+                opencodeSettings.model = pinnedModel;
+            }
             return {
                 customArgs: this.buildOpencodeCustomArgs(opencodeSettings),
                 customPrompt: opencodeSettings?.initialMessage ?? ''
@@ -1036,6 +1080,7 @@ export class EnvironmentController {
             ['openai/gpt-5.1-codex', 'openai/gpt-5.1-codex'],
             ['google/gemini-3-pro', 'google/gemini-3-pro'],
             ['zai/glm-5.2', 'zai/glm-5.2'],
+            ['moonshotai/kimi-k3', 'moonshotai/kimi-k3'],
             ['opencode/gpt-5.1-codex', 'opencode/gpt-5.1-codex (Zen)'],
         ];
         const known = new Set(options.map(([value]) => value));
@@ -1062,6 +1107,12 @@ export class EnvironmentController {
             args.push('--auto');
         }
 
+        // Run without external plugins (--pure). Useful for isolated/reproducible envs
+        // where third-party plugin behavior would otherwise leak in.
+        if (s.pureMode) {
+            args.push('--pure');
+        }
+
         args.push(...this.parseArgString(s.additionalArgs || ''));
 
         return args.map(arg => this.quoteCustomArg(arg)).join(' ');
@@ -1080,6 +1131,12 @@ export class EnvironmentController {
             // YOLO Mode for OpenCode.
             if (arg === '--auto') {
                 settings.yoloMode = true;
+                continue;
+            }
+
+            // Run without external plugins.
+            if (arg === '--pure') {
+                settings.pureMode = true;
                 continue;
             }
 
@@ -1312,12 +1369,13 @@ export class EnvironmentController {
                 additionalArgs: document.getElementById('copilot-additional-args').value
             };
         }
-        if (cliLower === 'opencode') {
+        if (this.isOpencodeBackedCli(cliLower)) {
             return {
                 initialMessage: document.getElementById('opencode-initial-message').value,
                 model: document.getElementById('opencode-model').value.trim(),
                 agent: document.getElementById('opencode-agent').value.trim(),
                 yoloMode: document.getElementById('opencode-yolo').checked,
+                pureMode: document.getElementById('opencode-pure')?.checked ?? false,
                 additionalArgs: document.getElementById('opencode-additional-args').value
             };
         }
@@ -1484,15 +1542,29 @@ export class EnvironmentController {
             `;
         }
 
-        if (cliLower === 'opencode') {
+        if (this.isOpencodeBackedCli(cliLower)) {
             const initialMessage = this.app.escapeHtml(s.initialMessage || '');
-            const model = s.model || '';
+            const pinnedModel = this.pinnedModelForCli(cliLower);
+            // For pseudo-CLIs (GLM 5.2 / Kimi K3) the model is pinned — show a read-only
+            // display of the pinned provider/model instead of the editable dropdown, so
+            // users can't accidentally switch a "GLM 5.2" env to a different model.
+            const model = pinnedModel || (s.model || '');
+            const modelField = pinnedModel
+                ? `<input type="text" class="form-control" id="opencode-model" value="${this.app.escapeHtml(pinnedModel)}" disabled>
+                   <small class="form-text text-muted">Pinned to <code>${this.app.escapeHtml(pinnedModel)}</code> — this env always launches with this model. Use a plain OpenCode env for other models.</small>`
+                : `<select class="form-select" id="opencode-model">
+                       ${this.renderOpencodeModelOptions(model)}
+                   </select>
+                   <small class="form-text text-muted">Passed as <code>--model provider/model</code>; leave blank for OpenCode's default</small>`;
+            const headerLabel = pinnedModel
+                ? `${cliLower === 'glm-5.2' ? 'GLM 5.2' : 'Kimi K3'} CLI Settings`
+                : 'OpenCode CLI Settings';
             const agent = this.app.escapeHtml(s.agent || '');
             const additionalArgs = this.app.escapeHtml(s.additionalArgs || '');
 
             return `
                 <hr class="my-4">
-                <h6 class="text-muted mb-3">OpenCode CLI Settings</h6>
+                <h6 class="text-muted mb-3">${headerLabel}</h6>
                 <div class="mb-3">
                     <label class="form-label">Initial Message</label>
                     <textarea class="form-control" id="opencode-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to OpenCode as soon as the session starts.">${initialMessage}</textarea>
@@ -1500,10 +1572,7 @@ export class EnvironmentController {
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Model</label>
-                    <select class="form-select" id="opencode-model">
-                        ${this.renderOpencodeModelOptions(model)}
-                    </select>
-                    <small class="form-text text-muted">Passed as <code>--model provider/model</code>; leave blank for OpenCode's default</small>
+                    ${modelField}
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Agent</label>
@@ -1516,6 +1585,13 @@ export class EnvironmentController {
                         <label class="form-check-label" for="opencode-yolo">YOLO Mode</label>
                     </div>
                     <small class="form-text text-muted text-warning">Launches with <code>--auto</code>, auto-approving permissions not explicitly denied</small>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="opencode-pure" ${s.pureMode ? 'checked' : ''}>
+                        <label class="form-check-label" for="opencode-pure">Run Without Plugins</label>
+                    </div>
+                    <small class="form-text text-muted">Launches with <code>--pure</code>, skipping external plugins for a clean/reproducible environment</small>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Additional Arguments</label>

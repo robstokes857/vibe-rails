@@ -16,6 +16,13 @@ namespace VibeRails.Services
         // OpenCode CLI — binary is `opencode` (== enum name lowercased, so no executable
         // remap is needed in CommandService.PrepareSession). Per-env config isolation uses
         // XDG_CONFIG_HOME; launch-flag-only (no settings file, like Copilot/Antigravity).
-        OpenCode
+        OpenCode,
+
+        // Pseudo-CLIs: OpenCode launched with a pinned --model flag. The binary is
+        // `opencode` (mapped in CommandService.PrepareSession), and the model arg is
+        // injected server-side. Enum names can't contain hyphens/periods, so LlmParser
+        // special-cases the strings "glm-5.2" and "kimi-k3" to these values.
+        Glm52,
+        KimiK3
     }
 }

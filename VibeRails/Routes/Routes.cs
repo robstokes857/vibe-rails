@@ -9,6 +9,7 @@ public static class RouteExtensions
         AuthRoutes.Map(app);  // Must be first - no auth required for this endpoint
         ProjectRoutes.Map(app, launchDirectory);
         EnvironmentRoutes.Map(app);
+        JobRoutes.Map(app);
         CliLaunchRoutes.Map(app, launchDirectory);
         SessionRoutes.Map(app);
         ChatHistoryRoutes.Map(app);

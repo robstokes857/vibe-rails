@@ -194,27 +194,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             cancellationToken);
     }
 
-    public Task<TabTokenSaverStateResponse> GetTokenSaverStateAsync(
-        string tabId,
-        CancellationToken cancellationToken = default)
-    {
-        var child = GetChildOrThrow(tabId);
-        return SendTokenSaverStateRequestAsync(child, HttpMethod.Get, payload: null, cancellationToken);
-    }
-
-    public Task<TabTokenSaverStateResponse> SetTokenSaverStateAsync(
-        string tabId,
-        bool enabled,
-        CancellationToken cancellationToken = default)
-    {
-        var child = GetChildOrThrow(tabId);
-        return SendTokenSaverStateRequestAsync(
-            child,
-            HttpMethod.Put,
-            new TabTokenSaverStateRequest(enabled),
-            cancellationToken);
-    }
-
     public async Task<TerminalInputResponse> SendInputAsync(string tabId, TerminalInputRequest request, CancellationToken cancellationToken = default)
     {
         if (request == null || string.IsNullOrEmpty(request.Text))
@@ -856,42 +835,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         return inputResponse ?? new TerminalInputResponse(false, "Child did not return an input response.");
     }
 
-    private async Task<TabTokenSaverStateResponse> SendTokenSaverStateRequestAsync(
-        TerminalChildProcess child,
-        HttpMethod method,
-        TabTokenSaverStateRequest? payload,
-        CancellationToken cancellationToken)
-    {
-        if (child.Process.HasExited)
-        {
-            RemoveChild(child.TabId, child.Process.Id);
-            throw new InvalidOperationException(
-                $"Terminal tab process has exited (tab {child.TabId[..Math.Min(8, child.TabId.Length)]}).");
-        }
-
-        using var request = CreateChildRequest(
-            child,
-            method,
-            "/api/v1/token-savings/tab",
-            payload);
-        var http = _httpClientFactory.CreateClient();
-        using var response = await http.SendAsync(request, cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var errorText = await ReadErrorTextAsync(response, cancellationToken);
-            throw new InvalidOperationException(
-                $"Child token-saver request failed ({(int)response.StatusCode}): {errorText}");
-        }
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        return await JsonSerializer.DeserializeAsync(
-            stream,
-            AppJsonSerializerContext.Default.TabTokenSaverStateResponse,
-            cancellationToken)
-            ?? throw new InvalidOperationException("Child did not return a token-saver state response.");
-    }
-
     private async Task<TerminalSnapshotResponse?> SendTerminalSnapshotRequestAsync(
         TerminalChildProcess child,
         HttpMethod method,
@@ -992,23 +935,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         var request = NewChildRequest(child, method, path);
         var json = JsonSerializer.Serialize(payload, AppJsonSerializerContext.Default.TerminalInputRequest);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        return request;
-    }
-
-    private static HttpRequestMessage CreateChildRequest(
-        TerminalChildProcess child,
-        HttpMethod method,
-        string path,
-        TabTokenSaverStateRequest? payload)
-    {
-        var request = NewChildRequest(child, method, path);
-        if (payload != null)
-        {
-            var json = JsonSerializer.Serialize(
-                payload,
-                AppJsonSerializerContext.Default.TabTokenSaverStateRequest);
-            request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        }
         return request;
     }
 

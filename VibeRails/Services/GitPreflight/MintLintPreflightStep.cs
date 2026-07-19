@@ -1,10 +1,12 @@
 using System.Globalization;
 using MintLint;
+using Serilog;
+using VibeRails.DB;
 using VibeRails.Services.VCA.Hooks;
 
 namespace VibeRails.Services.GitPreflight;
 
-public sealed class MintLintPreflightStep : IGitPreflightStep
+public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore = null) : IGitPreflightStep
 {
     public const string Id = "mintlint";
 
@@ -31,24 +33,49 @@ public sealed class MintLintPreflightStep : IGitPreflightStep
                 Blocking: false);
         }
 
-        var candidates = context.Snapshot.Files
+        // The user's ignore list removes files from Code quality results entirely — both
+        // here and in the Rules-page scan, which share this step. Never let a store failure
+        // break the (non-blocking) analysis; a missing list just means nothing is ignored.
+        HashSet<string> ignoredPaths = [];
+        if (ignoreStore is not null)
+        {
+            try
+            {
+                ignoredPaths = await ignoreStore.GetIgnoredPathsAsync(
+                    context.Snapshot.RepositoryPath,
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                Log.Warning(exception, "[MintLint] Could not load the Code quality ignore list; scanning everything.");
+            }
+        }
+
+        var supported = context.Snapshot.Files
             .Where(file => file.ExistsInIndex
                 && !file.IsBinary
                 && file.Content != null
                 && MintLintAnalyzer.SupportsFile(file.RelativePath))
+            .ToList();
+        var ignoredCount = supported.Count(file => ignoredPaths.Contains(file.RelativePath));
+        var candidates = supported
+            .Where(file => !ignoredPaths.Contains(file.RelativePath))
             .Select(file => new SourceInput(file.RelativePath, file.Content!))
             .ToList();
-        var skippedCount = context.Snapshot.Files.Count - candidates.Count;
+        var skippedCount = context.Snapshot.Files.Count - supported.Count;
         var sourceScope = context.Request.WorkingTreeChanges ? "changed" : "staged";
 
         if (candidates.Count == 0)
         {
-            var skipped = $"No supported {sourceScope} source files to scan ({skippedCount} skipped).";
-            await context.WriteOutputAsync(skipped, new Dictionary<string, string>
+            var ignoredSuffix = ignoredCount > 0 ? $", {ignoredCount} ignored" : "";
+            var skipped = $"No supported {sourceScope} source files to scan ({skippedCount} skipped{ignoredSuffix}).";
+            var emptyDetails = new Dictionary<string, string>
             {
                 ["supportedFileCount"] = "0",
-                ["skippedFileCount"] = skippedCount.ToString(CultureInfo.InvariantCulture)
-            }, cancellationToken);
+                ["skippedFileCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
+                ["ignoredFileCount"] = ignoredCount.ToString(CultureInfo.InvariantCulture)
+            };
+            await context.WriteOutputAsync(skipped, emptyDetails, cancellationToken);
             return new GitPreflightStepResult(
                 Id,
                 DisplayName,
@@ -57,11 +84,7 @@ public sealed class MintLintPreflightStep : IGitPreflightStep
                 [skipped],
                 DurationMs: 0,
                 Blocking: false,
-                new Dictionary<string, string>
-                {
-                    ["supportedFileCount"] = "0",
-                    ["skippedFileCount"] = skippedCount.ToString(CultureInfo.InvariantCulture)
-                });
+                new Dictionary<string, string>(emptyDetails));
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -88,6 +111,7 @@ public sealed class MintLintPreflightStep : IGitPreflightStep
         // concern this change introduced from debt the file already carried.
         var baselineInputs = context.Snapshot.Files
             .Where(file => file.PreviousContent != null
+                && !ignoredPaths.Contains(file.RelativePath)
                 && MintLintAnalyzer.SupportsFile(file.RelativePath))
             .Select(file => new SourceInput(file.RelativePath, file.PreviousContent!))
             .ToList();
@@ -114,8 +138,10 @@ public sealed class MintLintPreflightStep : IGitPreflightStep
 
         var output = new List<string>
         {
-            $"Scanned {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}.",
-            $"Overall concern: {scan.Overall.Score:0.0}/100 · {scan.Overall.Rating}"
+            ignoredCount > 0
+                ? $"Scanned {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}, ignored {ignoredCount} by user preference."
+                : $"Scanned {scan.Files.Count} supported {sourceScope} source file(s); skipped {skippedCount}.",
+            $"Overall risk: {scan.Overall.Score:0.0}/100 · {scan.Overall.Rating}"
         };
 
         foreach (var file in scan.Files.Take(5))
@@ -144,6 +170,7 @@ public sealed class MintLintPreflightStep : IGitPreflightStep
         {
             ["supportedFileCount"] = scan.Files.Count.ToString(CultureInfo.InvariantCulture),
             ["skippedFileCount"] = skippedCount.ToString(CultureInfo.InvariantCulture),
+            ["ignoredFileCount"] = ignoredCount.ToString(CultureInfo.InvariantCulture),
             ["overallScore"] = scan.Overall.Score.ToString("0.0", CultureInfo.InvariantCulture),
             ["overallRating"] = scan.Overall.Rating,
             ["worstFiles"] = string.Join("\n", output.Skip(2)),

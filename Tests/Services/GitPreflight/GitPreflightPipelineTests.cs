@@ -76,7 +76,7 @@ public sealed class GitPreflightPipelineTests
     }
 
     [Fact]
-    public async Task AutomatedWorkflowStep_PrintsExactPlaceholder()
+    public async Task AutomatedWorkflowStep_PreviewDoesNotQueueJobs()
     {
         var output = new List<string>();
         var result = await new AutomatedWorkflowsPreflightStep().ExecuteAsync(
@@ -91,7 +91,7 @@ public sealed class GitPreflightPipelineTests
                 }),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal("Placeholder for automated workflows", Assert.Single(output));
+        Assert.Equal("Automated Jobs are not queued from preview checks.", Assert.Single(output));
         Assert.Equal(GitPreflightStepStatus.Skipped, result.Status);
     }
 
@@ -115,7 +115,7 @@ public sealed class GitPreflightPipelineTests
                 }),
             TestContext.Current.CancellationToken);
 
-        Assert.DoesNotContain(AutomatedWorkflowsPreflightStep.PlaceholderMessage, messages);
+        Assert.DoesNotContain(messages, message => message.Contains("Queued", StringComparison.OrdinalIgnoreCase));
     }
 
     private static GitPreflightPipeline Pipeline(

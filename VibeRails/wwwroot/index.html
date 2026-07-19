@@ -80,6 +80,11 @@
                 <i class="fa-solid fa-plug me-1"></i>
                 <span>MCP</span>
             </button>
+            <button class="app-subnav-link" data-action="navigate" data-view="jobs"
+                title="Durable scheduled and Git-triggered LLM Jobs">
+                <i class="fa-solid fa-clock-rotate-left me-1"></i>
+                <span>Jobs</span>
+            </button>
             <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
                 <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="me-1 icon-light settings-card-cog">
                 <span>Settings</span>
@@ -219,8 +224,8 @@
                 <div class="rules-page-heading">
                     <span class="rules-page-eyebrow">Project safeguards</span>
                     <h1>Rules</h1>
-                    <p>Validate staged work, hand fixes to an agent, and watch code health — before anything
-                        reaches a commit.</p>
+                    <p>Validate every uncommitted change, hand fixes to an agent, and watch code health — before
+                        anything reaches a commit.</p>
                 </div>
                 <section class="rules-git-setting" data-hook-health data-tone="neutral" aria-busy="true"
                     aria-label="Git Guard setting">
@@ -294,7 +299,7 @@
                                     <div class="vca-explanation-copy">
                                         <span class="vca-explanation-eyebrow">What this means</span>
                                         <h3 data-vca-explanation-title>Validation ready</h3>
-                                        <p data-vca-explanation-message>Run validation to review your staged
+                                        <p data-vca-explanation-message>Run validation to review your uncommitted
                                             changes.</p>
                                     </div>
                                     <div class="vca-explanation-stats" data-vca-explanation-stats></div>
@@ -349,7 +354,7 @@
                     </section>
                 </div>
 
-                <!-- Measure: MintLint-powered code metrics for the working tree -->
+                <!-- Measure: working-tree code quality analysis -->
                 <div class="rules-station" data-station="measure">
                     <span class="rules-station-node" aria-hidden="true"></span>
                     <section class="card code-analyzer-panel vca-console-card" data-code-analyzer-console
@@ -358,10 +363,10 @@
                             <div class="rules-station-heading">
                                 <span class="rules-station-eyebrow">Measure</span>
                                 <div class="rules-station-title-row">
-                                    <h2 id="code-analyzer-title">Code metrics</h2>
+                                    <h2 id="code-analyzer-title">Code quality</h2>
                                     <span class="rules-station-note">
                                         <i class="fa-solid fa-code-commit" aria-hidden="true"></i>
-                                        Working tree · powered by MintLint
+                                        Working tree analysis
                                     </span>
                                     <span class="rules-check-running" data-vca-console-spinner hidden
                                         aria-hidden="true">
@@ -370,7 +375,7 @@
                                     <span class="vca-console-state" data-vca-console-state>Ready</span>
                                 </div>
                             </div>
-                            <div class="rules-station-actions" aria-label="Code metrics actions">
+                            <div class="rules-station-actions" aria-label="Code quality actions">
                                 <label class="mintlint-scan-toggle"
                                     title="Usage counts normally consider tracked files only. Check to scan every source file under the repository, including untracked ones.">
                                     <input type="checkbox" data-code-analyzer-full-scan>
@@ -382,7 +387,7 @@
                                     <i class="fa-regular fa-copy" aria-hidden="true"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
-                                    data-action="clear-code-analyzer-output" aria-label="Clear code metrics results"
+                                    data-action="clear-code-analyzer-output" aria-label="Clear code quality results"
                                     title="Clear results">
                                     <i class="fa-solid fa-eraser" aria-hidden="true"></i>
                                 </button>
@@ -401,9 +406,9 @@
                                 <i class="fa-solid fa-chart-line"></i>
                             </span>
                             <div>
-                                <strong>Preparing code metrics</strong>
-                                <p>Your staged, unstaged, and untracked changes become file, category, and
-                                    metric-level findings.</p>
+                                <strong>Preparing code quality</strong>
+                                <p>Your staged, unstaged, and untracked changes will be organized into an overview,
+                                    file metrics, and source evidence.</p>
                             </div>
                         </div>
 
@@ -422,13 +427,35 @@
                         </details>
 
                         <footer class="code-analyzer-note">
-                            <span>Concern scores are normalized so higher always means more concern.</span>
+                            <span>Risk scores are normalized so higher always means more risk.</span>
                             <span class="code-analyzer-legend">
                                 <span><i data-tone="success"></i>Healthy</span>
                                 <span><i data-tone="warning"></i>Review</span>
                                 <span><i data-tone="danger"></i>Change required</span>
                             </span>
                         </footer>
+                    </section>
+                </div>
+
+                <!-- Govern: the AGENTS.md files every check above enforces -->
+                <div class="rules-station" data-station="automate">
+                    <span class="rules-station-node" aria-hidden="true"></span>
+                    <section class="card jobs-automation-station" aria-labelledby="rules-automation-title">
+                        <header class="rules-station-header">
+                            <div class="rules-station-heading">
+                                <span class="rules-station-eyebrow">Automate</span>
+                                <div class="rules-station-title-row">
+                                    <h2 id="rules-automation-title">LLM Jobs</h2>
+                                    <span class="rules-station-note">Real hooks only — previews never queue jobs</span>
+                                </div>
+                            </div>
+                            <div class="rules-station-actions">
+                                <button class="btn btn-sm btn-outline-secondary" type="button" data-action="new-vca-job">+ VCA job</button>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" data-action="new-commit-job">+ Commit job</button>
+                                <button class="btn btn-sm btn-primary" type="button" data-action="open-jobs">Open Jobs</button>
+                            </div>
+                        </header>
+                        <div class="rules-station-body" data-jobs-automation-host></div>
                     </section>
                 </div>
 
@@ -821,6 +848,18 @@
                                 <p data-hook-detail-message>Inspecting hook…</p>
                             </div>
                         </article>
+                        <article class="git-guard-hook" data-hook-detail="post-commit" role="listitem">
+                            <div class="git-guard-hook-mark" aria-hidden="true">
+                                <i class="fa-solid fa-clock-rotate-left"></i>
+                            </div>
+                            <div class="git-guard-hook-copy">
+                                <div class="git-guard-hook-heading">
+                                    <code>post-commit</code>
+                                    <span class="hook-detail-badge" data-hook-detail-badge data-tone="neutral">Checking</span>
+                                </div>
+                                <p data-hook-detail-message>Inspecting hook…</p>
+                            </div>
+                        </article>
                     </div>
 
                     <dl class="git-guard-meta">
@@ -1138,7 +1177,7 @@
                                 <input class="form-check-input" type="checkbox" id="setting-codex-llm-proxy-enabled">
                                 <label class="form-check-label" for="setting-codex-llm-proxy-enabled">Enable Codex proxy</label>
                             </div>
-                            <small class="form-text text-muted">Route newly launched Codex sessions through the local VibeRails proxy. When enabled, tool output is also compressed using the stages selected under Token Saver.</small>
+                            <small class="form-text text-muted">Route newly launched Codex sessions through the local VibeRails proxy. Required for the Token Saver to act on Codex traffic.</small>
                         </div>
                         <div class="mb-3">
                             <div class="form-label mb-2">Codex auth type</div>
@@ -1191,7 +1230,7 @@
                                 <input class="form-check-input" type="checkbox" id="setting-opencode-llm-proxy-enabled">
                                 <label class="form-check-label" for="setting-opencode-llm-proxy-enabled">Enable OpenCode proxy (zai / GLM)</label>
                             </div>
-                            <small class="form-text text-muted">Route OpenCode's <code>zai</code> provider (GLM models, e.g. <code>zai/glm-5.2</code>) through the local VibeRails proxy. Rides the <code>OPENCODE_CONFIG_CONTENT</code> env var — no <code>opencode.json</code> is written. Tool output is compressed using the stages selected under Token Saver.</small>
+                            <small class="form-text text-muted">Route OpenCode's <code>zai</code> provider (GLM models, e.g. <code>zai/glm-5.2</code>) through the local VibeRails proxy. Rides the <code>OPENCODE_CONFIG_CONTENT</code> env var — no <code>opencode.json</code> is written. Required for the Token Saver to act on OpenCode traffic.</small>
                         </div>
                         <small class="form-text text-muted">Changes apply the next time an OpenCode terminal starts.</small>
                     </div>
@@ -1219,31 +1258,32 @@
             <div class="row justify-content-center">
                 <div class="col-md-8 col-lg-6 mb-4">
                     <div class="sandbox-item-card text-start">
-                        <div class="mb-3 d-flex align-items-center justify-content-between gap-2">
+                        <div class="mb-3">
                             <span class="sandbox-item-name">Token Saver</span>
-                            <button type="button" class="btn btn-sm btn-outline-secondary ts-defaults-btn"
-                                data-action="token-saver-defaults"
-                                title="Set every toggle back to the catalog's recommended selection. Does not save — press Save Settings to apply.">
-                                <i class="fa-solid fa-rotate-left me-1" aria-hidden="true"></i>
-                                Reset to recommended
-                            </button>
                         </div>
-                        <small class="form-text text-muted d-block mb-3">Applies to tool output sent through either
-                            enabled Codex or Claude proxy. Changing the selection can invalidate a provider prompt
-                            cache once.</small>
+                        <small class="form-text text-muted d-block mb-3">Shrinks shell tool output on its way to the
+                            model: repeated lines collapse to one with a count, very long output keeps its head and
+                            tail with an elision marker, and recognized git/grep/find output is regrouped. Nothing you
+                            see in the terminal changes, and the model's replies are never touched. Each switch needs
+                            that LLM's proxy enabled above; flipping one can invalidate that provider's prompt cache
+                            once.</small>
 
-                        <div class="mb-4">
-                            <div class="form-label mb-2">Compression stages</div>
-                            <!-- Rendered from GET /api/v1/compression/catalog — never a hardcoded list. -->
-                            <div data-token-saver-stages>
-                                <div class="ts-loading">Loading stages…</div>
+                        <div class="mb-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="setting-token-saver-claude">
+                                <label class="form-check-label" for="setting-token-saver-claude">Claude</label>
                             </div>
                         </div>
-
+                        <div class="mb-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="setting-token-saver-codex">
+                                <label class="form-check-label" for="setting-token-saver-codex">Codex</label>
+                            </div>
+                        </div>
                         <div class="mb-4">
-                            <div class="form-label mb-2">What we compress</div>
-                            <div data-token-saver-scopes>
-                                <div class="ts-loading">Loading scopes…</div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="setting-token-saver-opencode">
+                                <label class="form-check-label" for="setting-token-saver-opencode">OpenCode</label>
                             </div>
                         </div>
 

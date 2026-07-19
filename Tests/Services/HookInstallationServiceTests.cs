@@ -32,7 +32,7 @@ namespace Tests.Services
         {
             var preCommitScript = @"#!/bin/sh
 # Vibe Rails Pre-Commit Hook
-# VibeRails Hook Version: 4
+# VibeRails Hook Version: 5
 VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
 VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
 VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
@@ -44,7 +44,7 @@ if [ -n ""$VIBERAILS_CHAINED_HOOK"" ]; then ""$VIBERAILS_CHAINED_HOOK"" ""$@""; 
 
             var commitMsgScript = @"#!/bin/sh
 # Vibe Rails Commit-Msg Hook
-# VibeRails Hook Version: 4
+# VibeRails Hook Version: 5
 VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
 VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
 VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
@@ -53,6 +53,18 @@ vb --vca-hook commit-msg --commit-message ""$1""
 # End Vibe Rails Hook
 ";
             File.WriteAllText(Path.Combine(_scriptsDir, "commit-msg-hook.sh"), commitMsgScript);
+
+            var postCommitScript = @"#!/bin/sh
+# Vibe Rails Post-Commit Hook
+# VibeRails Hook Version: 5
+VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
+VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
+VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
+vb --job-trigger post-commit
+if [ -n ""$VIBERAILS_CHAINED_HOOK"" ]; then ""$VIBERAILS_CHAINED_HOOK"" ""$@""; fi
+# End Vibe Rails Hook
+";
+            File.WriteAllText(Path.Combine(_scriptsDir, "post-commit-hook.sh"), postCommitScript);
         }
 
         [Fact]

@@ -57,7 +57,9 @@ public sealed class VcaPreflightStep : IGitPreflightStep
                     : GitPreflightStepStatus.Passed;
         var summary = status switch
         {
-            GitPreflightStepStatus.Error => "VCA could not validate the staged snapshot.",
+            GitPreflightStepStatus.Error => context.Request.Invocation.WorkingTreeScope
+                ? "VCA could not validate the working tree."
+                : "VCA could not validate the staged snapshot.",
             GitPreflightStepStatus.Blocked => "VCA found STOP-level violations.",
             GitPreflightStepStatus.Warning when validation.Summary.HasCommitViolations =>
                 hasWarnings
