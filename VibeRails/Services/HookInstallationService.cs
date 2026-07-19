@@ -19,7 +19,7 @@ namespace VibeRails.Services
         private const string COMMIT_MSG_MARKER = "# Vibe Rails Commit-Msg Hook";
         private const string END_MARKER = "# End Vibe Rails Hook";
         private const string HOOK_MARKER = "# Vibe Rails Pre-Commit Hook"; // Legacy compatibility
-        private const string HOOK_VERSION = "3";
+        private const string HOOK_VERSION = "4";
         private const string VERSION_MARKER = "# VibeRails Hook Version: " + HOOK_VERSION;
         private const string EXECUTABLE_PLACEHOLDER = "__VIBERAILS_EXECUTABLE__";
         private const string EXECUTABLE_ARGUMENT_PLACEHOLDER = "__VIBERAILS_EXECUTABLE_ARGUMENT__";

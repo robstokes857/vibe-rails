@@ -308,6 +308,10 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     /// reparse point. So every directory between the file and the repository root is checked
     /// too, and the walk stops at the root — a repository that legitimately sits under a
     /// junction stays readable.
+    ///
+    /// Limitation: hardlinks are not detected (they carry no reparse point and no link
+    /// target), so a hardlinked file inside the tree can still be read. Symlinks and
+    /// junctions — the practical exfiltration vectors — are what this guards against.
     /// </summary>
     private sealed class WorkingTreePathGuard(string repositoryPath)
     {

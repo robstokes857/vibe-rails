@@ -22,6 +22,7 @@ public class VcaHookAcknowledgmentPromptTests
             var runner = new VcaHookRunner(
                 new GitPreflightPipeline(
                     new TestSnapshotProvider(tempDir),
+                    new TestSnapshotProvider(tempDir),
                     [
                         new VcaPreflightStep(validationService),
                         new MintLintPreflightStep(),
@@ -76,7 +77,7 @@ public class VcaHookAcknowledgmentPromptTests
                     RequiredAcknowledgments: [_token])));
     }
 
-    private sealed class TestSnapshotProvider : IGitStagedSnapshotProvider
+    private sealed class TestSnapshotProvider : IGitStagedSnapshotProvider, IGitWorkingTreeSnapshotProvider
     {
         private readonly string _repositoryPath;
 
@@ -97,6 +98,9 @@ public class VcaHookAcknowledgmentPromptTests
                     ChangedLineCount: 1,
                     Content: "class Demo { }")],
                 []));
+
+        public Task<GitStagedSnapshot> CaptureWorkingTreeAsync(string workingDirectory, CancellationToken cancellationToken) =>
+            CaptureAsync(workingDirectory, cancellationToken);
     }
 
     private sealed class TestPresenter : IVcaHookPresenter

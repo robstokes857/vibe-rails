@@ -15,7 +15,8 @@ public sealed record VcaHookInvocation(
     bool DemoUi,
     TimeSpan DemoDuration,
     bool PromptForAcknowledgment,
-    bool ShowConsoleWindow = false);
+    bool ShowConsoleWindow = false,
+    bool ConsoleWindowAttached = false);
 
 public sealed record VcaHookDisplayInfo(
     string Title,
