@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services;
@@ -32,12 +33,13 @@ public static class HookRoutes
                     HooksPath: null,
                     AutoInstallEnabled: IsAutoInstallEnabled(configuration),
                     PreCommit: null,
-                    CommitMessage: null));
+                    CommitMessage: null,
+                    PostCommit: null));
             }
 
             var status = await hookService.GetStatusAsync(rootPath, cancellationToken);
             var message = status.IsInstalled
-                ? "Both VCA hooks are active and current."
+                ? "VCA and Jobs Git hooks are active and current."
                 : status.NeedsRepair
                     ? "VCA hooks are stale, disabled, or only partially installed. Repair is recommended."
                     : "VCA hooks are not installed.";
@@ -52,7 +54,8 @@ public static class HookRoutes
                 HooksPath: status.HooksPath,
                 AutoInstallEnabled: IsAutoInstallEnabled(configuration),
                 PreCommit: ToResponse(status.PreCommit),
-                CommitMessage: ToResponse(status.CommitMessage)));
+                CommitMessage: ToResponse(status.CommitMessage),
+                PostCommit: ToResponse(status.PostCommit)));
         }).WithName("GetHookStatus");
 
         // POST /api/v1/hooks/install - Install the VCA git hooks
@@ -197,10 +200,12 @@ public static class HookRoutes
             }
         }).WithName("StreamGitPreflight");
 
-        // POST /api/v1/hooks/preview - Run staged VCA validation by itself for the Rules page.
-        // The full Git Guard pipeline remains available through /api/v1/git/preflight/stream.
+        // POST /api/v1/hooks/preview - Run VCA validation over the whole working tree
+        // (staged + unstaged + untracked) for the Rules page, so problems surface before
+        // anything is staged. Git Guard's commit-time validation keeps using the exact
+        // staged index via /api/v1/git/preflight/stream and the real hooks.
         app.MapPost("/api/v1/hooks/preview", async (
-            IGitStagedSnapshotProvider snapshotProvider,
+            IGitWorkingTreeSnapshotProvider snapshotProvider,
             IEnumerable<IGitPreflightStep> preflightSteps,
             IGitService gitService,
             CancellationToken cancellationToken) =>
@@ -232,11 +237,16 @@ public static class HookRoutes
             var startedUtc = DateTime.UtcNow;
             try
             {
-                var snapshot = await snapshotProvider.CaptureAsync(rootPath, cancellationToken);
+                var snapshot = await snapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken);
+                var baseRequest = CreatePreCommitRequest(rootPath);
                 var result = await validator.ExecuteAsync(
                     new GitPreflightStepContext(
                         Guid.NewGuid().ToString("N"),
-                        CreatePreCommitRequest(rootPath),
+                        baseRequest with
+                        {
+                            WorkingTreeChanges = true,
+                            Invocation = baseRequest.Invocation with { WorkingTreeScope = true }
+                        },
                         snapshot,
                         (_, _, _) => ValueTask.CompletedTask),
                     cancellationToken);
@@ -344,6 +354,10 @@ public static class HookRoutes
                 && int.TryParse(skippedText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var skippedCount)
                     ? skippedCount
                     : null;
+            int? ignoredFileCount = details?.TryGetValue("ignoredFileCount", out var ignoredText) == true
+                && int.TryParse(ignoredText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ignoredCount)
+                    ? ignoredCount
+                    : null;
             var rating = details?.GetValueOrDefault("overallRating");
             var report = MintLintReportFactory.FromJson(details?.GetValueOrDefault(MintLintReportFactory.DetailsKey));
 
@@ -359,8 +373,134 @@ public static class HookRoutes
                 Rating: rating,
                 AnalyzedFileCount: analyzedFileCount,
                 SkippedFileCount: skippedFileCount,
-                Report: report));
+                Report: report,
+                IgnoredFileCount: ignoredFileCount));
         }).WithName("RunCodeAnalyzer");
+
+        // GET /api/v1/code-analyzer/source?path=... - Full working-tree file content for the
+        // Code quality source pane, so a clicked metric can reveal its line inside the whole
+        // file instead of an 8-line snippet. Repo-relative paths only; the same
+        // symlink/junction guard a working-tree scan applies decides readability.
+        app.MapGet("/api/v1/code-analyzer/source", async (
+            string? path,
+            IGitService gitService,
+            CancellationToken cancellationToken) =>
+        {
+            const long MaxSourceBytes = 5 * 1024 * 1024;
+            var rootPath = await gitService.GetRootPathAsync(cancellationToken);
+            if (string.IsNullOrEmpty(rootPath))
+            {
+                return Results.BadRequest(new ErrorResponse("Not in a git repository."));
+            }
+
+            var relativePath = (path ?? string.Empty).Replace('\\', '/').Trim();
+            if (relativePath.Length == 0 || System.IO.Path.IsPathRooted(relativePath))
+            {
+                return Results.BadRequest(new ErrorResponse("A repository-relative path is required."));
+            }
+
+            var repositoryRoot = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(rootPath));
+            var fullPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(repositoryRoot, relativePath));
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!fullPath.StartsWith(repositoryRoot + System.IO.Path.DirectorySeparatorChar, comparison))
+            {
+                return Results.BadRequest(new ErrorResponse("The path must stay inside the repository."));
+            }
+
+            var guard = new GitStagedSnapshotProvider.WorkingTreePathGuard(repositoryRoot);
+            if (!guard.IsReadableRegularFile(fullPath))
+            {
+                return Results.Ok(new CodeAnalyzerSourceResponse(relativePath, Content: null, Exists: false));
+            }
+
+            if (new FileInfo(fullPath).Length > MaxSourceBytes)
+            {
+                return Results.Ok(new CodeAnalyzerSourceResponse(relativePath, Content: null, Truncated: true));
+            }
+
+            var bytes = await File.ReadAllBytesAsync(fullPath, cancellationToken);
+            var content = GitStagedSnapshotProvider.DecodeText(bytes, out var isBinary);
+            return Results.Ok(new CodeAnalyzerSourceResponse(relativePath, content, IsBinary: isBinary));
+        }).WithName("GetCodeAnalyzerSource");
+
+        // Code quality ignore list — files the user removed from scan results, persisted
+        // per repository in state.db. The MintLint step drops them before analysis.
+        app.MapGet("/api/v1/code-analyzer/ignores", async (
+            ICodeAnalyzerIgnoreStore ignoreStore,
+            IGitService gitService,
+            CancellationToken cancellationToken) =>
+        {
+            var rootPath = await gitService.GetRootPathAsync(cancellationToken);
+            if (string.IsNullOrEmpty(rootPath))
+            {
+                return Results.BadRequest(new ErrorResponse("Not in a git repository."));
+            }
+
+            var files = await ignoreStore.ListAsync(rootPath, cancellationToken);
+            return Results.Ok(new CodeAnalyzerIgnoreListResponse(
+                [.. files.Select(file => new CodeAnalyzerIgnoreEntryResponse(
+                    file.Path, file.ReasonKind, file.ReasonText, file.CreatedUtc))]));
+        }).WithName("ListCodeAnalyzerIgnores");
+
+        app.MapPost("/api/v1/code-analyzer/ignores", async (
+            CodeAnalyzerIgnoreRequest request,
+            ICodeAnalyzerIgnoreStore ignoreStore,
+            IGitService gitService,
+            CancellationToken cancellationToken) =>
+        {
+            var rootPath = await gitService.GetRootPathAsync(cancellationToken);
+            if (string.IsNullOrEmpty(rootPath))
+            {
+                return Results.BadRequest(new ErrorResponse("Not in a git repository."));
+            }
+
+            var path = CodeAnalyzerIgnoreStore.NormalizePath(request.Path ?? string.Empty);
+            if (path.Length == 0 || System.IO.Path.IsPathRooted(path))
+            {
+                return Results.BadRequest(new ErrorResponse("A repository-relative path is required."));
+            }
+
+            var reasonKind = string.IsNullOrWhiteSpace(request.ReasonKind)
+                ? null
+                : request.ReasonKind.Trim().ToLowerInvariant();
+            if (reasonKind is not (null or "test" or "config" or "other"))
+            {
+                return Results.BadRequest(new ErrorResponse("Reason must be test, config, or other."));
+            }
+
+            var reasonText = string.IsNullOrWhiteSpace(request.ReasonText) ? null : request.ReasonText.Trim();
+            await ignoreStore.UpsertAsync(
+                rootPath,
+                new CodeAnalyzerIgnoredFile(path, reasonKind, reasonText, DateTime.UtcNow),
+                cancellationToken);
+            return Results.Ok(new HookActionResponse(true, $"{path} is now ignored by Code quality scans."));
+        }).WithName("AddCodeAnalyzerIgnore");
+
+        app.MapDelete("/api/v1/code-analyzer/ignores", async (
+            string? path,
+            ICodeAnalyzerIgnoreStore ignoreStore,
+            IGitService gitService,
+            CancellationToken cancellationToken) =>
+        {
+            var rootPath = await gitService.GetRootPathAsync(cancellationToken);
+            if (string.IsNullOrEmpty(rootPath))
+            {
+                return Results.BadRequest(new ErrorResponse("Not in a git repository."));
+            }
+
+            var normalized = CodeAnalyzerIgnoreStore.NormalizePath(path ?? string.Empty);
+            if (normalized.Length == 0)
+            {
+                return Results.BadRequest(new ErrorResponse("A repository-relative path is required."));
+            }
+
+            var removed = await ignoreStore.RemoveAsync(rootPath, normalized, cancellationToken);
+            return Results.Ok(new HookActionResponse(
+                removed,
+                removed
+                    ? $"{normalized} will be scanned again."
+                    : $"{normalized} was not on the ignore list."));
+        }).WithName("RemoveCodeAnalyzerIgnore");
 
         // POST /api/v1/hooks/validate - Run VCA validation manually
         app.MapPost("/api/v1/hooks/validate", async (

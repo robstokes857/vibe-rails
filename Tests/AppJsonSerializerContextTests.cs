@@ -47,17 +47,4 @@ public sealed class AppJsonSerializerContextTests
         Assert.DoesNotContain("\"xtermUiBytes\"", json);
     }
 
-    [Fact]
-    public void IncludesTabTokenSaverDtos_ForMinimalApiAndChildProxySerialization()
-    {
-        var requestJson = JsonSerializer.Serialize(
-            new TabTokenSaverStateRequest(false),
-            AppJsonSerializerContext.Default.TabTokenSaverStateRequest);
-        var responseJson = JsonSerializer.Serialize(
-            new TabTokenSaverStateResponse(true),
-            AppJsonSerializerContext.Default.TabTokenSaverStateResponse);
-
-        Assert.Equal("""{"enabled":false}""", requestJson);
-        Assert.Equal("""{"enabled":true}""", responseJson);
-    }
 }

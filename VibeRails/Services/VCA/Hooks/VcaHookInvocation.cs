@@ -16,7 +16,11 @@ public sealed record VcaHookInvocation(
     TimeSpan DemoDuration,
     bool PromptForAcknowledgment,
     bool ShowConsoleWindow = false,
-    bool ConsoleWindowAttached = false);
+    bool ConsoleWindowAttached = false,
+    // True when the snapshot being validated is the whole working tree (the Rules page
+    // preview) rather than the staged index (the real commit hooks). Only affects how
+    // results are worded — the validation logic is identical.
+    bool WorkingTreeScope = false);
 
 public sealed record VcaHookDisplayInfo(
     string Title,

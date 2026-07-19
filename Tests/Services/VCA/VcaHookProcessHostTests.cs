@@ -25,7 +25,7 @@ public class VcaHookProcessHostTests
         Assert.Contains("[1/3]", text);
         Assert.Contains("PASS: VCA hook preview completed.", text);
         Assert.Contains("MintLint code health", text);
-        Assert.Contains("Placeholder for automated workflows", text);
+        Assert.Contains("Automated Jobs are not queued from preview checks.", text);
         Assert.Contains("[pass] Commit allowed", text);
     }
 

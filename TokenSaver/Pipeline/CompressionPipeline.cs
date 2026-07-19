@@ -82,10 +82,10 @@ public static class CompressionPipeline
 
         TraceMinifyStages(plan, beforeMinify, minifyStats, trace);
 
-        // ---- Stages 6-8: shape filters. Keyed off the COMMAND, never off output sniffing. ----
+        // ---- Stages 6-9: shape filters. Keyed off the COMMAND, never off output sniffing. ----
         current = RunShape(current, plan, shape, ref changed, trace);
 
-        // ---- Stages 9-10: condense. Fused, same reason as 1-5. ----
+        // ---- Stages 10-11: condense. Fused, same reason as 1-5. ----
         var beforeCondense = condenseStats;
         if (!plan.Condense.IsNoOp
             && OutputCondenser.TryCondense(
@@ -215,5 +215,6 @@ public static class CompressionPipeline
         (CompressionCatalog.GitStatusGroup, CommandShape.GitStatus),
         (CompressionCatalog.GrepGroup, CommandShape.GrepMatches),
         (CompressionCatalog.FindGroup, CommandShape.PathList),
+        (CompressionCatalog.ElidePassedTests, CommandShape.TestRun),
     ];
 }

@@ -51,6 +51,7 @@ export class AgentController {
         container.appendChild(fragment);
         if (root) {
             this.app.ruleController.attachRulesOverview(root);
+            this.app.jobController.attachRulesAutomation(root);
         }
         return root;
     }

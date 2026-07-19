@@ -57,15 +57,15 @@ public static class AppSettingsRoutes
                 settings.ClaudeLlmProxyEnabled = settingsDto.ClaudeLlmProxyEnabled.Value;
             if (settingsDto.OpenCodeLlmProxyEnabled.HasValue)
                 settings.OpenCodeLlmProxyEnabled = settingsDto.OpenCodeLlmProxyEnabled.Value;
-            // Same stale-client guard, with one extra wrinkle: null here means "key absent, leave
-            // the stored selection alone", but an EMPTY list is a real choice (every stage off)
-            // and must be written through untouched. Collapsing the two would make "turn
-            // everything off" silently save as "never configured" — which resolves back to the
-            // catalog defaults on the next request. Ids are persisted as sent rather than
-            // filtered against the catalog: unknown ids are already ignored at Resolve time, so
-            // dropping them here would only destroy a newer build's selection.
-            if (settingsDto.TokenSaverStages is not null)
-                settings.TokenSaverStages = [.. settingsDto.TokenSaverStages];
+            // Per-LLM saver toggles, same stale-client guard. Writing an explicit Codex/OpenCode
+            // value deliberately severs the pre-split inheritance from the legacy master switch
+            // (see Settings) — from then on each LLM stands on its own value.
+            if (settingsDto.ClaudeTokenSaverEnabled.HasValue)
+                settings.ClaudeTokenSaverEnabled = settingsDto.ClaudeTokenSaverEnabled.Value;
+            if (settingsDto.CodexTokenSaverEnabled.HasValue)
+                settings.CodexTokenSaverEnabled = settingsDto.CodexTokenSaverEnabled.Value;
+            if (settingsDto.OpenCodeTokenSaverEnabled.HasValue)
+                settings.OpenCodeTokenSaverEnabled = settingsDto.OpenCodeTokenSaverEnabled.Value;
             if (settingsDto.TokenSaverCaptureEnabled.HasValue)
                 settings.TokenSaverCaptureEnabled = settingsDto.TokenSaverCaptureEnabled.Value;
 
@@ -115,11 +115,11 @@ public static class AppSettingsRoutes
             CodexLlmProxySettings.NormalizeMode(settings.CodexLlmProxyMode),
             settings.ClaudeLlmProxyEnabled,
             settings.OpenCodeLlmProxyEnabled,
-            // Passed through as-is, null included: null means "never configured", which the client
-            // resolves to the catalog's defaultSelection exactly as CompressionCatalog.Resolve
-            // does server-side. Substituting the defaults here would make the two states
-            // indistinguishable to the UI.
-            settings.TokenSaverStages,
+            settings.ClaudeTokenSaverEnabled,
+            // The effective values: an absent per-LLM key inherits the legacy master switch,
+            // exactly as LlmProxySettingsService.Resolve does, so the UI shows what actually runs.
+            settings.CodexTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
+            settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
             settings.TokenSaverCaptureEnabled,
             GetMachineName()
         );

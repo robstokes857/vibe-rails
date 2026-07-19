@@ -66,7 +66,8 @@ public sealed class VcaRulesHookValidationService : IVcaHookValidationService
             commitMessage,
             validateCommitMessage,
             cancellationToken,
-            snapshot);
+            snapshot,
+            workingTreeScope: invocation.WorkingTreeScope);
         return new VcaHookValidationResult(
             report.Output,
             new VcaHookValidationSummary(

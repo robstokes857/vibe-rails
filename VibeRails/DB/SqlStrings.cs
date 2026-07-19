@@ -395,8 +395,48 @@ namespace VibeRails.DB
 
         public const string DeleteAllCompressionCaptures = "DELETE FROM CompressionCaptures;";
 
+        /// <summary>
+        /// Files the user excluded from Code quality scans, keyed per repository. ReasonKind is
+        /// one of "test" / "config" / "other" (or NULL when no reason was given); ReasonText is
+        /// the optional free-text note. NOCASE on both keys because Windows paths compare
+        /// case-insensitively. Also created on demand by <c>CodeAnalyzerIgnoreStore</c>
+        /// (IF NOT EXISTS), since its writer can run before the first <c>Repository</c>
+        /// initializes the schema.
+        /// </summary>
+        public const string CreateCodeAnalyzerIgnoresTable = """
+            CREATE TABLE IF NOT EXISTS CodeAnalyzerIgnores (
+                RepositoryPath TEXT NOT NULL COLLATE NOCASE,
+                Path           TEXT NOT NULL COLLATE NOCASE,
+                ReasonKind     TEXT,
+                ReasonText     TEXT,
+                CreatedUTC     TEXT NOT NULL,
+                PRIMARY KEY (RepositoryPath, Path)
+            )
+            """;
+
+        public const string UpsertCodeAnalyzerIgnore = """
+            INSERT INTO CodeAnalyzerIgnores (RepositoryPath, Path, ReasonKind, ReasonText, CreatedUTC)
+            VALUES ($repositoryPath, $path, $reasonKind, $reasonText, $createdUTC)
+            ON CONFLICT(RepositoryPath, Path) DO UPDATE SET
+                ReasonKind = excluded.ReasonKind,
+                ReasonText = excluded.ReasonText
+            """;
+
+        public const string SelectCodeAnalyzerIgnores = """
+            SELECT Path, ReasonKind, ReasonText, CreatedUTC
+            FROM CodeAnalyzerIgnores
+            WHERE RepositoryPath = $repositoryPath
+            ORDER BY Path
+            """;
+
+        public const string DeleteCodeAnalyzerIgnore = """
+            DELETE FROM CodeAnalyzerIgnores
+            WHERE RepositoryPath = $repositoryPath AND Path = $path
+            """;
+
         public static readonly string[] InitStatements =
         [
+            CreateCodeAnalyzerIgnoresTable,
             CreateEnvironmentsTable,
             CreateEnvironmentsIndex,
             CreateAgentMetadataTable,

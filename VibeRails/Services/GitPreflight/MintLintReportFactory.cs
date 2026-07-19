@@ -29,10 +29,17 @@ public static class MintLintReportFactory
         List<MintLintFileReportResponse> files = [];
         Dictionary<string, (MintLintWorstMetricResponse Entry, double Score, double Value)> worst =
             new(StringComparer.Ordinal);
+        // Running totals per metric so the score card can describe the whole changeset
+        // (averages), not just its single worst measurement.
+        Dictionary<string, (double SumValue, double SumScore, int Count)> totals =
+            new(StringComparer.Ordinal);
 
         foreach (var file in scan.Files)
         {
             List<MintLintCategoryResponse> categories = [];
+            // A metric can belong to more than one category (hard-coded dependencies is
+            // in both Coupling and Testability); count it once per file in the totals.
+            HashSet<string> countedForFile = new(StringComparer.Ordinal);
             foreach (var category in file.Categories)
             {
                 List<MintLintMetricResponse> metrics = [];
@@ -47,7 +54,15 @@ public static class MintLintReportFactory
                         metric.HigherIsBetter,
                         metric.Source,
                         metric.Line,
-                        ExtractSnippet(contentByFile, file.File, metric.Line)));
+                        ExtractSnippet(contentByFile, file.File, metric.Line),
+                        metric.Direction.ToString()));
+
+                    if (countedForFile.Add(metric.Name))
+                    {
+                        totals[metric.Name] = totals.TryGetValue(metric.Name, out var runningTotal)
+                            ? (runningTotal.SumValue + metric.Value, runningTotal.SumScore + metric.Score, runningTotal.Count + 1)
+                            : (metric.Value, metric.Score, 1);
+                    }
 
                     // Track the single worst measurement of each metric across the scan.
                     if (!worst.TryGetValue(metric.Name, out var current)
@@ -64,7 +79,8 @@ public static class MintLintReportFactory
                             metric.HigherIsBetter,
                             metric.Source,
                             metric.Line,
-                            ExtractSnippet(contentByFile, file.File, metric.Line)), metric.Score, metric.Value);
+                            ExtractSnippet(contentByFile, file.File, metric.Line),
+                            metric.Direction.ToString()), metric.Score, metric.Value);
                     }
                 }
 
@@ -73,7 +89,8 @@ public static class MintLintReportFactory
                     category.Score,
                     category.Weight,
                     category.WeightedScore,
-                    metrics));
+                    metrics,
+                    category.Direction.ToString()));
             }
 
             int referencedBy = referencedByFile?.GetValueOrDefault(file.File) ?? 0;
@@ -118,7 +135,146 @@ public static class MintLintReportFactory
             scan.Files.Count,
             skippedFileCount,
             files,
-            worstMetrics);
+            worstMetrics,
+            BuildOverview(scan),
+            BuildScorecard(worst, totals));
+    }
+
+    /// <summary>
+    /// The score card's fixed roster, in display order. Combined rows report the worst
+    /// of their member metrics (hard-coded dependencies deliberately feeds both Coupling
+    /// and Testability — it hurts both).
+    /// </summary>
+    private static readonly (string Label, string[] Metrics)[] ScorecardDefinitions =
+    [
+        ("Cyclomatic complexity", ["cyclomatic_complexity"]),
+        ("Cognitive complexity", ["cognitive_complexity"]),
+        ("NPath complexity", ["npath_complexity"]),
+        ("Lack of cohesion (LCOM4)", ["lack_of_cohesion"]),
+        ("Maintainability index", ["maintainability_index"]),
+        ("Halstead difficulty", ["halstead_difficulty"]),
+        ("Coupling", ["fan_out", "hard_coded_dependencies"]),
+        ("Testability", ["hard_coded_dependencies", "ambient_dependencies"]),
+    ];
+
+    /// <summary>
+    /// Every roster entry is always present: a metric the scan never measured comes back
+    /// with <c>Measured = false</c> so the card can say "not measured" instead of
+    /// silently dropping the row. Averages describe the changeset; the worst measurement
+    /// rides along for context. A combined row uses the member with the higher AVERAGE
+    /// risk across the scan.
+    /// </summary>
+    private static List<MintLintScorecardEntryResponse> BuildScorecard(
+        IReadOnlyDictionary<string, (MintLintWorstMetricResponse Entry, double Score, double Value)> worstByMetric,
+        IReadOnlyDictionary<string, (double SumValue, double SumScore, int Count)> totalsByMetric)
+    {
+        List<MintLintScorecardEntryResponse> scorecard = [];
+        foreach (var (label, metricNames) in ScorecardDefinitions)
+        {
+            string? winnerName = null;
+            (double SumValue, double SumScore, int Count) winnerTotals = default;
+            foreach (var metricName in metricNames)
+            {
+                if (!totalsByMetric.TryGetValue(metricName, out var candidate) || candidate.Count == 0)
+                {
+                    continue;
+                }
+
+                var candidateMean = candidate.SumScore / candidate.Count;
+                var winnerMean = winnerName is null ? double.MinValue : winnerTotals.SumScore / winnerTotals.Count;
+                if (winnerName is null
+                    || candidateMean > winnerMean
+                    || (candidateMean == winnerMean && candidate.Count > winnerTotals.Count))
+                {
+                    winnerName = metricName;
+                    winnerTotals = candidate;
+                }
+            }
+
+            if (winnerName is null || !worstByMetric.TryGetValue(winnerName, out var worstEntry))
+            {
+                scorecard.Add(new MintLintScorecardEntryResponse(label, Measured: false));
+                continue;
+            }
+
+            scorecard.Add(new MintLintScorecardEntryResponse(
+                label,
+                Measured: true,
+                winnerTotals.Count,
+                Math.Round(winnerTotals.SumValue / winnerTotals.Count, 3),
+                Math.Round(winnerTotals.SumScore / winnerTotals.Count, 1),
+                worstEntry.Entry.Value,
+                worstEntry.Entry.Score,
+                worstEntry.Entry.Direction,
+                winnerName,
+                worstEntry.Entry.File,
+                worstEntry.Entry.Source,
+                worstEntry.Entry.Line));
+        }
+
+        return scorecard;
+    }
+
+    /// <summary>
+    /// The Overview strip, decided here rather than in the browser: one card per category
+    /// seen in the scan, carrying its worst concern, which way its raw values read, and
+    /// the single worst measurement behind that concern. Worst concern first.
+    /// </summary>
+    private static List<MintLintOverviewCardResponse> BuildOverview(ScanResult scan)
+    {
+        Dictionary<string, (CategoryScore Category, MetricScore? Worst, string File)> cards = new(StringComparer.Ordinal);
+        // Per-category running totals: the card's headline is the AVERAGE risk across
+        // the files that have the category (the changeset picture); the worst file's
+        // number rides along as WorstConcern.
+        Dictionary<string, (double Sum, int Count)> categoryTotals = new(StringComparer.Ordinal);
+        foreach (var file in scan.Files)
+        {
+            foreach (var category in file.Categories)
+            {
+                categoryTotals[category.Name] = categoryTotals.TryGetValue(category.Name, out var runningTotal)
+                    ? (runningTotal.Sum + category.Score, runningTotal.Count + 1)
+                    : (category.Score, 1);
+
+                MetricScore? worstMetric = null;
+                foreach (var metric in category.Metrics)
+                {
+                    if (worstMetric is null
+                        || metric.Score > worstMetric.Score
+                        || (metric.Score == worstMetric.Score && WorseValue(metric, worstMetric.Value)))
+                    {
+                        worstMetric = metric;
+                    }
+                }
+
+                if (!cards.TryGetValue(category.Name, out var current)
+                    || category.Score > current.Category.Score)
+                {
+                    cards[category.Name] = (category, worstMetric, file.File);
+                }
+            }
+        }
+
+        List<MintLintOverviewCardResponse> overview = [];
+        foreach (var (category, worstMetric, filePath) in cards.Values)
+        {
+            var (sum, count) = categoryTotals[category.Name];
+            overview.Add(new MintLintOverviewCardResponse(
+                category.Name,
+                Math.Round(sum / count, 1),
+                category.Direction.ToString(),
+                category.Score,
+                worstMetric?.Name,
+                worstMetric?.Value,
+                worstMetric?.Direction.ToString(),
+                worstMetric is null ? null : filePath));
+        }
+
+        overview.Sort(static (left, right) =>
+        {
+            int byConcern = right.Concern.CompareTo(left.Concern);
+            return byConcern != 0 ? byConcern : string.CompareOrdinal(left.Category, right.Category);
+        });
+        return overview;
     }
 
     /// <summary>Concern scaled by reach: refs 0 → ×1, 9 → ×2, 99 → ×3.</summary>

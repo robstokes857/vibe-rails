@@ -1,7 +1,7 @@
 # TokenSaver
 
-TokenSaver is the library that sits between a coding CLI (Claude Code, Codex) and its
-model provider, and makes the request smaller on the way up.
+TokenSaver is the library that sits between a coding CLI (Claude Code, Codex,
+OpenCode) and its model provider, and makes the request smaller on the way up.
 
 It is a **library**, not a service. It is compiled into `vb.exe` and its routes are
 mapped into the same Kestrel host as the rest of VibeRails. There is no separate
@@ -42,8 +42,8 @@ whole thing:
 | 1 | **`Pipeline/CompressionCatalog.cs`** | **The source of truth.** Every stage, its id, its default, its order. The settings UI, the what-if preview, and this README all render from here. Adding a stage starts here. |
 | 2 | **`Pipeline/CompressionPipeline.cs`** | **The whole compression path for one string.** If you set one breakpoint, set it on `Run`. There is no other path. |
 | 3 | **`Minify/OutputMinifier.cs`** | Stages 1–5, fused into one forward scan. The lossless pass. Its class comment is the real spec — read it before touching a byte. |
-| 4 | **`Shape/ShapeFilters.cs`** | Stages 6–8. Regroups the output of a *recognised command* (`git status --short`, `rg -n`, `find`). |
-| 5 | **`Minify/OutputCondenser.cs`** | Stages 9–10, fused. The lossy pass — dedupe runs, elide long middles. |
+| 4 | **`Shape/ShapeFilters.cs`** | Stages 6–9. Rewrites the output of a *recognised command*: regroups `git status --short`/`rg -n`/`find`, elides passing tests from a recognised test runner. |
+| 5 | **`Minify/OutputCondenser.cs`** | Stages 10–11, fused. The lossy pass — dedupe runs, elide long middles. |
 
 And the two files that decide **which strings ever reach the pipeline**:
 
@@ -75,9 +75,9 @@ seams. If you are debugging *compression*, it is one of the seven files above.
                           |   CompressionPipeline.Run  |   <-- BREAKPOINT HERE
                           +----------------------------+
                                         |
-             1-5 OutputMinifier (fused)  |  lossless
-             6-8 ShapeFilters            |  reshaping
-             9-10 OutputCondenser (fused)|  lossy
+             1-5  OutputMinifier (fused) |  lossless
+             6-9  ShapeFilters           |  reshaping + test elision
+             10-11 OutputCondenser (fused)| lossy
                                         |
                                         v
                           rewritten string + StageTrace[]
@@ -106,14 +106,30 @@ payload under the truncation threshold).
 | 6 | `git-status-group` | Reshaping | on | Groups porcelain `XY path` lines under one header per status. |
 | 7 | `grep-group` | Reshaping | on | Groups `path:line:content` under one header per file. |
 | 8 | `find-group` | Reshaping | on | Groups a flat path list under one header per directory. |
-| 9 | `dedupe-lines` | Lossy | **off** | 3+ identical lines → one, tagged `[xN]`. |
-| 10 | `truncate-long` | Lossy | **off** | Keeps first 150 + last 50 lines, elides the middle. |
+| 9 | `elide-passed-tests` | Lossy | on | Runs of individual passing-test lines from a recognised test runner → one `[... N passed ...]` marker. Failures/errors/skips/logs/summaries kept verbatim, in place. |
+| 10 | `dedupe-lines` | Lossy | on | 3+ identical lines → one, tagged `[xN]`. |
+| 11 | `truncate-long` | Lossy | on | Keeps first 150 + last 50 lines, elides the middle. |
 
 **Why are `cr-collapse` and `ansi-strip` off by default?** They are the two largest
-lossless wins available, and they are off by deliberate product decision (2026-07-15):
-they reshape terminal-looking output, and the owner wants to opt into that
-consciously rather than inherit it. This is a preference, not a safety finding. Do
-not "fix" it by flipping the defaults.
+lossless wins available, and they are off by deliberate product decision (2026-07-15,
+reaffirmed 2026-07-18): they reshape terminal-looking output, and the owner wants to
+opt into that consciously rather than inherit it. This is a preference, not a safety
+finding. Do not "fix" it by flipping the defaults.
+
+**Why are the three lossy stages on by default?** Curated-set decision (2026-07-18/19):
+they are the largest wins on the payloads that actually burn tokens (log/build/test
+spew), and each leaves an explicit marker (`[... N passed ...]`, `[xN]`,
+`[... N lines elided ...]`) where content was removed, so the model always knows
+something is missing and can re-run the command with a narrower filter. The default
+set is pinned by `LlmProxySettingsServiceTests.CuratedDefaults_*`.
+
+**`elide-passed-tests` earns its place twice.** A green test's only information is
+that it passed, so per-test pass lines (pytest -v, jest/vitest `✓`, dotnet test,
+go test -v, cargo test — commands recognised in `CommandShape.Classify`, wrappers
+and pipes declined) compress to a counting marker at near-zero information cost.
+And because it runs *before* `truncate-long`, it fixes that stage's worst case on
+test output: without it, a big suite's failure section can land in the truncated
+middle while 150 lines of passes survive at the head.
 
 ### Scopes — a separate axis
 
@@ -246,7 +262,7 @@ composed — which is the exact bug class that quietly destroys prompt caching.
 
 So: the transforms are individually **killable** (that's what the toggles give you,
 and it's what makes bisecting a misbehaving transform possible). They are not
-individually **schedulable**. Same story for stages 9–10 in `OutputCondenser`.
+individually **schedulable**. Same story for stages 10–11 in `OutputCondenser`.
 
 ## Captures
 
@@ -285,23 +301,31 @@ compression correct", which is not a question byte counts can answer.
 
 ## Settings
 
-One knob: `TokenSaverStages` in `settings.json` — a list of enabled stage/scope ids.
+**On/off per LLM is the whole user-facing surface** (2026-07-18): one switch each for
+Claude, Codex, and OpenCode in the settings UI. When a provider's saver is on (and
+that provider's proxy is on), the pipeline runs `CompressionCatalog.DefaultSelection`
+— the curated set in the table above. The per-stage picker UI is gone.
 
-- `null` = never configured → `CompressionCatalog.DefaultSelection`.
-- `[]` = a real choice: everything off. **Not** the same as `null`.
-- Unknown ids are ignored, so a settings.json from a newer build degrades to "that
-  stage is off here" rather than failing a request.
-- `ClaudeTokenSaverEnabled` is the master kill switch for **both** providers, despite
-  the name. A provider's saver only runs if that provider's proxy is also on.
-- Every Web UI terminal tab also has a process-local zip toggle. It is on by default and acts as
-  an additional gate over the global switch: turning it off bypasses compression for that tab's
-  Claude and Codex proxy requests without changing sibling tabs or restarting the CLI.
+- `ClaudeTokenSaverEnabled` / `CodexTokenSaverEnabled` / `OpenCodeTokenSaverEnabled`
+  in `settings.json` are the three switches. The Codex/OpenCode keys are **nullable**:
+  a pre-split file has only `ClaudeTokenSaverEnabled` (which used to be the master
+  kill switch for every provider), and an absent key inherits its value — so an old
+  "everything off" choice stays off after upgrading. Saving from the UI writes
+  explicit values and severs the inheritance.
+- `TokenSaverStageOverride` is a hand-edit escape hatch with no UI: a non-null list of
+  stage/scope ids replaces the curated set wholesale, so a misbehaving stage can be
+  bisected on live traffic without turning the whole saver off. `null` (the only value
+  the product itself writes) = curated defaults; `[]` = saver on but a no-op. Unknown
+  ids are ignored. It is deliberately **not** the old `TokenSaverStages` key — the
+  retired stage picker persisted that key on every save, and honoring it would have
+  frozen early adopters on their old selection, silently exempting them from the
+  curated set. The old key and the pre-2026-07 tier/bool knobs are ignored on read
+  and dropped on the next save.
 - `TokenSaverCaptureEnabled` independently opts into raw diagnostic captures; it defaults off.
 
-This replaced the old `TokenSaverLevel` tier string (`off`/`safest`/…/`high`) and its
-five per-transform bools in 2026-07. A tier can only express the combinations we
-thought of in advance, and the entire premise of this feature is that we are still
-learning which combinations are good.
+The per-tab toggle that used to sit on each terminal tab was removed 2026-07-19 (the tab action
+strip was overcrowded, and per-LLM is the granularity that matters). The three settings switches
+are now the only gates.
 
 Settings are read in **one fresh snapshot per request** (`ILlmProxySettingsService`)
 so a concurrent save can't tear a single body's rewrite in half.
@@ -377,7 +401,9 @@ smudge byte-exact fixtures on a fresh Windows checkout and you'll get failures w
   counts to compare stages; use the rewriter's byte counts to quote savings.
 - **A shorter string can serialize larger** (surrogate escaping). Hence the wire-level
   size check.
-- **`ClaudeTokenSaverEnabled` controls Codex too.** Legacy name.
+- **`ClaudeTokenSaverEnabled` is still the inherited default for Codex and OpenCode**
+  when their nullable keys are absent from settings.json (pre-split files). Once the
+  UI saves, each provider stands on its own value. See [Settings](#settings).
 - **Shape filters key off the command, never off output sniffing.** `CommandShape.Classify`
   refuses anything containing a pipe, redirect, `&&`, `;`, or `$(` — if we can't see
   the whole command, we don't know the output's shape, and guessing means mangling

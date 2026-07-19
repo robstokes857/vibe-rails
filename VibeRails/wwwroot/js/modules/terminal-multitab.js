@@ -13,7 +13,6 @@ import { TerminalMultiRun } from './terminal-multirun.js';
 import { TerminalEditorModal } from './terminal-editor-modal.js';
 import { TerminalToast } from './terminal-toast.js';
 import { TerminalNotifications } from './terminal-notifications.js';
-import { TerminalTabTokenCompression } from './terminal-token-compression.js';
 import { showSendDebugLogModal } from './debug-bundle.js';
 import { resolvePromptTemplateForLaunch } from './prompt-template-modal.js';
 
@@ -39,12 +38,6 @@ const TAB_META_PREFIX = 'viberails_terminal_tab_meta_';
 // dismissed it or opened the editor at least once — then we never nudge again.
 const EDITOR_NUDGE_SEEN_KEY = 'viberails_terminal_editor_nudge_seen';
 
-// Glyphs for the dual-mode connection button (#terminal-stop-btn). It flips
-// between a red "Disconnect" (X) and a green "Connect" (play) — swap the icon
-// with the label so green never shows the X, which reads as "disconnect".
-const DISCONNECT_ICON_PATH = '<path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>';
-const CONNECT_ICON_PATH = '<path d="m11.596 8.697-6.363 3.692C4.53 12.793 4 12.49 4 11.998V4.002c0-.492.53-.795.997-.51l6.363 3.692a.802.802 0 0 1 0 1.393z"/>';
-
 function lower(value) {
     return (value || '').toString().trim().toLowerCase();
 }
@@ -66,7 +59,6 @@ class TerminalManager {
         this.app = app;
         this.container = container;
         this.options = options;
-        this.tabTokenCompression = new TerminalTabTokenCompression(this);
         this._destroyed = false;
 
         this.maxTabs = 8;
@@ -342,14 +334,13 @@ class TerminalManager {
             void this.reconnectActiveTab();
         });
 
+        // Connect-only button: visible only while a session is disconnected
+        // (see updateUi), so the only action it ever needs is reconnect.
         this.stopBtn?.addEventListener('click', () => {
             const active = this.getActiveTab();
             if (active?.state?.hasActiveSession && active.state.status === 'disconnected') {
                 void this.reconnectActiveTab();
-                return;
             }
-
-            void this.stopActiveTab();
         });
 
         this.closeDot?.addEventListener('click', () => {
@@ -517,7 +508,6 @@ class TerminalManager {
                 minimized: metadata?.minimized === true,
                 pinned: metadata?.pinned === true,
                 notifyEnabled: metadata?.notifyEnabled === true,
-                ...this.tabTokenCompression.readMetadata(metadata),
                 workingDirectory
             });
         });
@@ -548,7 +538,6 @@ class TerminalManager {
             minimized: options.minimized === true,
             pinned: options.pinned === true,
             notifyEnabled: options.notifyEnabled === true,
-            ...this.tabTokenCompression.createState(options),
             workingDirectory,
             renaming: false,
             hasActiveSession: tabInfo.hasActiveSession === true,
@@ -624,8 +613,6 @@ class TerminalManager {
             this.toggleTabPinned(state.id);
         });
 
-        const tokenCompression = this.tabTokenCompression.createButton(state.id);
-
         const notify = document.createElement('button');
         notify.type = 'button';
         notify.className = 'vb-terminal-tab-notify';
@@ -653,7 +640,6 @@ class TerminalManager {
         actions.className = 'vb-terminal-tab-actions';
         actions.appendChild(edit);
         actions.appendChild(pin);
-        actions.appendChild(tokenCompression);
         actions.appendChild(notify);
         actions.appendChild(min);
         actions.appendChild(close);
@@ -706,7 +692,7 @@ class TerminalManager {
         }
         this.tabPanels?.appendChild(panel);
 
-        state.ui = { item, button, edit, pin, tokenCompression, notify, min, close, actions, watchBadge, panel, terminalElement, toastLayer };
+        state.ui = { item, button, edit, pin, notify, min, close, actions, watchBadge, panel, terminalElement, toastLayer };
 
         const instance = new TerminalTab(this, state);
         instance.statusController = new TabStatusController(state, state.ui, {
@@ -742,13 +728,8 @@ class TerminalManager {
         this.renderTabButton(tab);
         this.applyTabAccent(tab);
         this.applyTabPinned(tab);
-        this.tabTokenCompression.render(tab);
         this.applyTabMinimized(tab);
         this.applyTabNotify(tab);
-
-        // The child process is authoritative. Session storage gives an immediate paint across a
-        // reload; this quiet refresh corrects it if another viewer changed the tab meanwhile.
-        void this.tabTokenCompression.refresh(state.id);
 
         this.updateAddButtonState();
         return tab;
@@ -1522,9 +1503,6 @@ class TerminalManager {
             button.disabled = !enabled;
             button.setAttribute('aria-hidden', enabled ? 'false' : 'true');
         });
-
-        // The compression controller keeps its pending spinner visible while disabling clicks.
-        this.tabTokenCompression.render(tab);
     }
 
     renderTabButton(tab) {
@@ -1943,7 +1921,7 @@ class TerminalManager {
             this.keyboardBtn?.classList.add('d-none');
             this.editorBtn?.classList.add('d-none');
             this.setBadge('Not Started', 'bg-secondary');
-            this.updateActionButtons({ start: true, reconnect: false, stop: false });
+            this.updateActionButtons({ start: true, connect: false });
             this.showPlaceholder();
             this.updateAddButtonState();
             return;
@@ -1954,8 +1932,7 @@ class TerminalManager {
 
         this.updateActionButtons({
             start: true,
-            reconnect: active.state.hasActiveSession && active.state.status === 'disconnected',
-            stop: active.state.hasActiveSession
+            connect: active.state.hasActiveSession && active.state.status === 'disconnected'
         });
 
         if (this.keyboardBtn) {
@@ -2022,34 +1999,14 @@ class TerminalManager {
         }
     }
 
-    updateActionButtons({ start, reconnect, stop }) {
+    updateActionButtons({ start, connect }) {
         this.startBtn?.classList.toggle('d-none', !start);
         this.reconnectBtn?.classList.add('d-none');
-        this.stopBtn?.classList.toggle('d-none', !stop);
-        this.updateConnectionButtonMode(reconnect);
+        // #terminal-stop-btn is Connect-only — shown only when a disconnected
+        // session can be reconnected. Its green "Connect" styling is static in
+        // the panel HTML; there's no Disconnect mode to flip into.
+        this.stopBtn?.classList.toggle('d-none', !connect);
         this.controlsBar?.classList.remove('d-none');
-    }
-
-    updateConnectionButtonMode(reconnect) {
-        if (!this.stopBtn) return;
-
-        const label = this.stopBtn.querySelector('span');
-        const icon = this.stopBtn.querySelector('svg');
-        const nextLabel = reconnect ? 'Connect' : 'Disconnect';
-        const nextTitle = reconnect ? 'Reconnect terminal session' : 'Disconnect terminal session';
-
-        this.stopBtn.title = nextTitle;
-        this.stopBtn.setAttribute('aria-label', nextTitle);
-        this.stopBtn.classList.toggle('btn-outline-success', reconnect);
-        this.stopBtn.classList.toggle('btn-outline-danger', !reconnect);
-
-        if (icon) {
-            icon.innerHTML = reconnect ? CONNECT_ICON_PATH : DISCONNECT_ICON_PATH;
-        }
-
-        if (label) {
-            label.textContent = nextLabel;
-        }
     }
 
     showPlaceholder() {
@@ -2564,7 +2521,6 @@ class TerminalManager {
             minimized: state.minimized === true,
             pinned: state.pinned === true,
             notifyEnabled: state.notifyEnabled === true,
-            ...this.tabTokenCompression.writeMetadata(state),
             workingDirectory: state.workingDirectory,
             ...overrides
         };
@@ -2581,7 +2537,6 @@ class TerminalManager {
                 minimized: metadata.minimized === true,
                 pinned: metadata.pinned === true,
                 notifyEnabled: metadata.notifyEnabled === true,
-                ...this.tabTokenCompression.readMetadata(metadata),
                 workingDirectory: cleanString(metadata.workingDirectory) || null
             };
             window.sessionStorage.setItem(`${TAB_META_PREFIX}${tabId}`, JSON.stringify(payload));
@@ -2602,7 +2557,6 @@ class TerminalManager {
                 minimized: parsed?.minimized === true,
                 pinned: parsed?.pinned === true,
                 notifyEnabled: parsed?.notifyEnabled === true,
-                ...this.tabTokenCompression.readMetadata(parsed),
                 workingDirectory: cleanString(parsed?.workingDirectory) || null
             };
         } catch {
@@ -2942,11 +2896,11 @@ export class TerminalController {
                         ${projectDirHtml}
                     </div>
                     <div class="d-flex gap-2 align-items-center" id="terminal-actions">
-                        <button class="btn btn-sm btn-outline-danger d-none d-inline-flex align-items-center gap-1" id="terminal-stop-btn" title="Disconnect terminal session">
+                        <button class="btn btn-sm btn-outline-success d-none d-inline-flex align-items-center gap-1" id="terminal-stop-btn" title="Reconnect terminal session">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>
+                                <path d="m11.596 8.697-6.363 3.692C4.53 12.793 4 12.49 4 11.998V4.002c0-.492.53-.795.997-.51l6.363 3.692a.802.802 0 0 1 0 1.393z"/>
                             </svg>
-                            <span>Disconnect</span>
+                            <span>Connect</span>
                         </button>
                     </div>
                 </div>

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Vibe Rails Commit-Msg Hook
-# VibeRails Hook Version: 4
+# VibeRails Hook Version: 5
 # Enforces VCA acknowledgment requirements in the final commit message.
 # Installed by VibeRails - use the dashboard to repair or remove this section.
 

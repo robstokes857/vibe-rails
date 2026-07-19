@@ -16,6 +16,7 @@ namespace VibeRails.Utils
         public const string HISTORY_SUBDIR = "history";
         public const string MODELS_SUBDIR = "models";
         public const string VECTOR_SUBDIR = "vector";
+        public const string JOB_WORKSPACES_SUBDIR = "job-workspaces";
 
         // File names
         public const string CONFIG_FILENAME = "config.json";

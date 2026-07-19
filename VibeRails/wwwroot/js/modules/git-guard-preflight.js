@@ -376,7 +376,23 @@ export function mintLintConcernTone(score) {
     if (!Number.isFinite(value)) return 'neutral';
     if (value >= 75) return 'danger';
     if (value >= 55) return 'warning';
-    return value >= 30 ? 'okay' : 'success';
+    // One color below the warning band: the legend calls 0–54 healthy, so healthy is
+    // always green — no separate "okay" blue tier.
+    return 'success';
+}
+
+/**
+ * Which way a RAW measured value reads: 'LB' lower is better, 'HB' higher is better,
+ * 'NA' unknown. Prefers the report's explicit direction; falls back to the legacy
+ * higherIsBetter boolean so older payloads still resolve.
+ */
+export function normalizeMintLintDirection(direction, higherIsBetter) {
+    const token = String(direction ?? '').trim().toUpperCase();
+    if (token === 'LB' || token === 'HB') return token;
+    if (token === 'NA') return 'NA';
+    if (higherIsBetter === true) return 'HB';
+    if (higherIsBetter === false) return 'LB';
+    return 'NA';
 }
 
 function normalizeMintLintMetric(rawMetric) {
@@ -391,6 +407,7 @@ function normalizeMintLintMetric(rawMetric) {
         warn: Number(metric.warn),
         critical: Number(metric.critical),
         higherIsBetter: metric.higherIsBetter === true,
+        direction: normalizeMintLintDirection(metric.direction, metric.higherIsBetter),
         source: metric.source ? String(metric.source) : '',
         line: Number.isFinite(line) && line > 0 ? line : null,
         snippet: metric.snippet ? String(metric.snippet) : ''
@@ -430,6 +447,7 @@ function buildMintLintReportModel(rawReport) {
                 score: Number(category.score),
                 weight: Number(category.weight),
                 weightedScore: Number(category.weightedScore),
+                direction: normalizeMintLintDirection(category.direction),
                 metrics: (Array.isArray(category.metrics) ? category.metrics : []).map(normalizeMintLintMetric)
             };
         });
@@ -457,7 +475,55 @@ function buildMintLintReportModel(rawReport) {
         };
     });
 
-    return { detailed: true, files, worstMetrics };
+    // Backend-decided fixed roster for the score card. Rows stay in backend order and
+    // include unmeasured entries. Averages describe the changeset; the worst measurement
+    // rides along. (entry.value/entry.concern are accepted as legacy synonyms.)
+    const scorecard = (Array.isArray(report.scorecard) ? report.scorecard : []).map(rawEntry => {
+        const entry = asObject(rawEntry);
+        const averageValue = Number(entry.averageValue ?? entry.value);
+        const averageConcern = Number(entry.averageConcern ?? entry.concern);
+        const worstValue = Number(entry.worstValue ?? entry.value);
+        const worstConcern = Number(entry.worstConcern ?? entry.concern);
+        const fileCount = Number(entry.fileCount);
+        const line = Number(entry.line);
+        const metricName = String(entry.metricName ?? '');
+        return {
+            label: String(entry.label ?? 'Metric'),
+            measured: entry.measured === true,
+            fileCount: Number.isFinite(fileCount) && fileCount > 0 ? fileCount : 0,
+            averageValue: Number.isFinite(averageValue) ? averageValue : null,
+            averageConcern: Number.isFinite(averageConcern) ? averageConcern : null,
+            worstValue: Number.isFinite(worstValue) ? worstValue : null,
+            worstConcern: Number.isFinite(worstConcern) ? worstConcern : null,
+            direction: normalizeMintLintDirection(entry.direction),
+            metricName,
+            metricLabel: metricName ? formatMintLintMetricLabel(metricName) : '',
+            file: String(entry.file ?? ''),
+            source: entry.source ? String(entry.source) : '',
+            line: Number.isFinite(line) && line > 0 ? line : null
+        };
+    });
+
+    // Backend-decided Overview strip: one card per category across the scan.
+    const overview = (Array.isArray(report.overview) ? report.overview : []).map(rawCard => {
+        const card = asObject(rawCard);
+        const worstValue = Number(card.worstMetricValue);
+        const worstConcern = Number(card.worstConcern);
+        const worstName = String(card.worstMetricName ?? '');
+        return {
+            name: String(card.category ?? 'Category'),
+            concern: Number(card.concern),
+            worstConcern: Number.isFinite(worstConcern) ? worstConcern : null,
+            direction: normalizeMintLintDirection(card.direction),
+            worstMetricName: worstName,
+            worstMetricLabel: worstName ? formatMintLintMetricLabel(worstName) : '',
+            worstMetricValue: Number.isFinite(worstValue) ? worstValue : null,
+            worstMetricDirection: normalizeMintLintDirection(card.worstMetricDirection),
+            worstMetricFile: String(card.worstMetricFile ?? '')
+        };
+    });
+
+    return { detailed: true, files, worstMetrics, overview, scorecard };
 }
 
 /**

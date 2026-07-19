@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using VibeRails.Services.GitPreflight;
+using VibeRails.DB;
+using VibeRails.Utils;
 
 namespace VibeRails.Services.VCA.Hooks;
 
@@ -152,6 +154,13 @@ public static class VcaHookProcessHost
         services.AddSingleton<IVcaHookCommandParser, VcaHookCommandParser>();
         services.AddSingleton<IVcaHookRunner, VcaHookRunner>();
         services.AddSingleton<IVcaHookValidationAnalyzer, VcaHookValidationAnalyzer>();
+        services.AddSingleton<IJobStore>(_ =>
+        {
+            var installDirectory = PathConstants.GetInstallDirPath();
+            Directory.CreateDirectory(installDirectory);
+            var statePath = Path.Combine(installDirectory, PathConstants.STATE_FILENAME);
+            return new JobStore($"Data Source={statePath};Mode=ReadWriteCreate;Cache=Shared");
+        });
         services.AddGitPreflight();
         services.AddSingleton<IVcaHookPresenter>(_ =>
             new VcaConsoleHookPresenter(new VcaHookConsoleOptions(output, error, input, enableSpinner)));

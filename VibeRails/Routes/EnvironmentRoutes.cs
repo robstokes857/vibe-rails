@@ -201,6 +201,7 @@ public static class EnvironmentRoutes
         app.MapDelete("/api/v1/environments/{name}", async (
             LlmCliEnvironmentService envService,
             IRepository repository,
+            IJobStore jobStore,
             string name,
             CancellationToken cancellationToken) =>
         {
@@ -215,6 +216,13 @@ public static class EnvironmentRoutes
             if (environment.CustomName == "Default")
             {
                 return Results.BadRequest(new ErrorResponse("Cannot delete default environments"));
+            }
+
+            var enabledJobCount = await jobStore.CountEnabledJobsForEnvironmentAsync(environment.Id, cancellationToken);
+            if (enabledJobCount > 0)
+            {
+                return Results.Conflict(new ErrorResponse(
+                    $"Cannot delete this environment because {enabledJobCount} enabled job(s) use it. Disable or edit those jobs first."));
             }
 
             await envService.DeleteEnvironmentAsync(environment, cancellationToken);

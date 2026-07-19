@@ -172,6 +172,8 @@ public class CommandServiceTests : IDisposable
     [InlineData(LLM.Antigravity)]
     [InlineData(LLM.Copilot)]
     [InlineData(LLM.OpenCode)]
+    [InlineData(LLM.Glm52)]
+    [InlineData(LLM.KimiK3)]
     public async Task PrepareSession_NonClaude_DoesNotSetForceSyncOutputEnvVar(LLM llm)
     {
         var service = CreateService();
@@ -283,6 +285,107 @@ public class CommandServiceTests : IDisposable
         Assert.Equal(
             inherited,
             Environment.GetEnvironmentVariable(LlmProxyZaiConfig.ConfigContentVariable));
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm52_UsesOpencodeExecutableWithPinnedModel()
+    {
+        var service = CreateService();
+
+        // GLM 5.2 is a pseudo-CLI backed by OpenCode. The binary is `opencode` (not `glm52`),
+        // and base CLI launches inject --model=zai/glm-5.2 so the session picks the right model.
+        var prepared = await service.PrepareSessionAsync(LLM.Glm52, envName: null, extraArgs: null);
+
+        Assert.Equal("opencode --model=zai/glm-5.2", prepared.LaunchCommand);
+        Assert.DoesNotContain("mcp", prepared.Command);
+    }
+
+    [Fact]
+    public async Task PrepareSession_KimiK3_UsesOpencodeExecutableWithPinnedModel()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(LLM.KimiK3, envName: null, extraArgs: null);
+
+        Assert.Equal("opencode --model=moonshotai/kimi-k3", prepared.LaunchCommand);
+        Assert.DoesNotContain("mcp", prepared.Command);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm52_PassesPromptViaPromptFlag()
+    {
+        var service = CreateService();
+
+        // GLM 5.2 shares OpenCode's --prompt=<text> convention (a positional arg is the
+        // project path in OpenCode's TUI, not a prompt).
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Glm52, envName: null, extraArgs: null, initialPrompt: "hello world");
+
+        Assert.StartsWith("opencode --model=zai/glm-5.2 --prompt=", prepared.LaunchCommand);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm52_InjectsZaiProxyConfig()
+    {
+        // GLM 5.2 IS the zai provider model, so the Z.AI proxy applies (same as plain OpenCode).
+        var service = CreateService(openCodeLlmProxyEnabled: true);
+
+        var prepared = await service.PrepareSessionAsync(LLM.Glm52, envName: null, extraArgs: null);
+
+        Assert.True(prepared.OpenCodeProxyActive);
+        Assert.Equal(
+            "test-session-token",
+            prepared.Environment[LocalLlmProxyContext.SessionTokenVariable]);
+        Assert.Equal(
+            "test-tab-token",
+            prepared.Environment[LocalLlmProxyContext.TabTokenVariable]);
+        Assert.True(prepared.Environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable));
+    }
+
+    [Fact]
+    public async Task PrepareSession_KimiK3_DoesNotInjectZaiProxy()
+    {
+        // Kimi K3 runs through the moonshotai provider, not zai, so the Z.AI proxy config
+        // is irrelevant and must NOT be injected even when the proxy is enabled.
+        var service = CreateService(openCodeLlmProxyEnabled: true);
+
+        var prepared = await service.PrepareSessionAsync(LLM.KimiK3, envName: null, extraArgs: null);
+
+        Assert.False(prepared.OpenCodeProxyActive);
+        Assert.False(prepared.Environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable));
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm52_DoesNotInjectModelWhenEnvIsSet()
+    {
+        var service = CreateService();
+
+        // For custom env launches, the model is already in CustomArgs (built by the env
+        // settings form). CommandService must NOT inject --model again — that would duplicate
+        // the flag. The env's CustomArgs arrive as extraArgs.
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Glm52,
+            envName: "my-glm-env",
+            extraArgs: ["--model=zai/glm-5.2", "--auto"]);
+
+        Assert.Equal("opencode --model=zai/glm-5.2 --auto", prepared.LaunchCommand);
+        // Exactly one --model arg — no duplicate injection.
+        Assert.Equal(
+            1,
+            prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("--model")));
+    }
+
+    [Fact]
+    public async Task PrepareSession_Glm52_SetsXdgConfigHomeForEnvIsolation()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Glm52, envName: "my-glm-env", extraArgs: null);
+
+        Assert.True(
+            prepared.Environment.ContainsKey("XDG_CONFIG_HOME"),
+            "GLM 5.2 must share OpenCode's XDG_CONFIG_HOME env isolation.");
     }
 
     [Fact]

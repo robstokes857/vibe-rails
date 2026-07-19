@@ -5,7 +5,9 @@ export function getLlmName(llmEnum) {
         2: 'Claude',
         3: 'Antigravity',
         4: 'Copilot',
-        6: 'OpenCode'
+        6: 'OpenCode',
+        7: 'GLM 5.2',
+        8: 'Kimi K3'
     };
     return names[llmEnum] || 'Unknown';
 }
@@ -102,6 +104,20 @@ export function getCliBrand(cli) {
             // with the WAITING state's fixed yellow #f9e2af.
             accentColor: '#c9c6c6'
         },
+        'glm-5.2': {
+            label: 'GLM 5.2',
+            logo: getAssetPath('assets/img/z-ai.svg'),
+            className: 'badge-cli-glm',
+            // Brand blue pulled from the z-ai.svg logo (#1F63EC appears
+            // throughout the SVG's style block).
+            accentColor: '#1F63EC'
+        },
+        'kimi-k3': {
+            label: 'Kimi K3',
+            logo: getAssetPath('assets/img/kimi.png'),
+            className: 'badge-cli-kimi',
+            accentColor: '#7c3aed'
+        },
         shell: {
             label: 'Terminal',
             logo: getAssetPath('assets/img/terminal.svg'),
@@ -117,9 +133,11 @@ export function getCliBrand(cli) {
 const BASE_LLM_CHOICES = Object.freeze([
     { cli: 'claude', label: 'Claude' },
     { cli: 'codex', label: 'Codex' },
-    { cli: 'antigravity', label: 'Antigravity' },
+    { cli: 'glm-5.2', label: 'GLM 5.2' },
+    { cli: 'kimi-k3', label: 'Kimi K3' },
+    { cli: 'opencode', label: 'OpenCode' },
     { cli: 'copilot', label: 'Copilot' },
-    { cli: 'opencode', label: 'OpenCode' }
+    { cli: 'antigravity', label: 'Antigravity' }
 ]);
 
 // Plain shell — a no-agent terminal. Kept out of BASE_LLM_CHOICES so it only surfaces

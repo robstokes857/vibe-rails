@@ -98,8 +98,12 @@ public class RulesTool
         string? commitMessage = null,
         bool validateCommitMessage = false,
         CancellationToken cancellationToken = default,
-        GitStagedSnapshot? stagedSnapshot = null)
+        GitStagedSnapshot? stagedSnapshot = null,
+        bool workingTreeScope = false)
     {
+        // "changed" when validating a working-tree snapshot, "staged" when validating the
+        // index — the transcript must name what was actually looked at.
+        var scopeNoun = workingTreeScope ? "changed" : "staged";
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -129,7 +133,7 @@ public class RulesTool
             if (stagedFiles.Count == 0 && !validateCommitMessage)
             {
                 return VcaToolValidationReport.Pass(
-                    "PASS: No staged files to validate.",
+                    $"PASS: No {scopeNoun} files to validate.",
                     stagedFileCount: 0);
             }
 
@@ -278,7 +282,7 @@ public class RulesTool
 
             // Build response
             var result = new System.Text.StringBuilder();
-            result.AppendLine($"Validated {stagedFiles.Count} staged file(s) against {evaluatedRuleCount} applicable rule(s).");
+            result.AppendLine($"Validated {stagedFiles.Count} {scopeNoun} file(s) against {evaluatedRuleCount} applicable rule(s).");
             result.AppendLine();
 
             if (violations.Count == 0 && warnings.Count == 0 && deferredChecks.Count == 0)

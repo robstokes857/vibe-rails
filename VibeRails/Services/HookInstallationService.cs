@@ -17,9 +17,10 @@ namespace VibeRails.Services
     {
         private const string PRE_COMMIT_MARKER = "# Vibe Rails Pre-Commit Hook";
         private const string COMMIT_MSG_MARKER = "# Vibe Rails Commit-Msg Hook";
+        private const string POST_COMMIT_MARKER = "# Vibe Rails Post-Commit Hook";
         private const string END_MARKER = "# End Vibe Rails Hook";
         private const string HOOK_MARKER = "# Vibe Rails Pre-Commit Hook"; // Legacy compatibility
-        private const string HOOK_VERSION = "4";
+        private const string HOOK_VERSION = "5";
         private const string VERSION_MARKER = "# VibeRails Hook Version: " + HOOK_VERSION;
         private const string EXECUTABLE_PLACEHOLDER = "__VIBERAILS_EXECUTABLE__";
         private const string EXECUTABLE_ARGUMENT_PLACEHOLDER = "__VIBERAILS_EXECUTABLE_ARGUMENT__";
@@ -73,7 +74,8 @@ namespace VibeRails.Services
             // GetStatusAsync so worktrees and core.hooksPath are resolved by Git.
             var hooksPath = Path.Combine(repoPath, ".git", "hooks");
             return InspectHookFile(Path.Combine(hooksPath, "pre-commit"), "pre-commit", PRE_COMMIT_MARKER).IsCurrent
-                && InspectHookFile(Path.Combine(hooksPath, "commit-msg"), "commit-msg", COMMIT_MSG_MARKER).IsCurrent;
+                && InspectHookFile(Path.Combine(hooksPath, "commit-msg"), "commit-msg", COMMIT_MSG_MARKER).IsCurrent
+                && InspectHookFile(Path.Combine(hooksPath, "post-commit"), "post-commit", POST_COMMIT_MARKER).IsCurrent;
         }
 
         public async Task<GitHooksStatus> GetStatusAsync(
@@ -85,7 +87,8 @@ namespace VibeRails.Services
                 Path.GetFullPath(repoPath),
                 hooksPath,
                 InspectHookFile(Path.Combine(hooksPath, "pre-commit"), "pre-commit", PRE_COMMIT_MARKER),
-                InspectHookFile(Path.Combine(hooksPath, "commit-msg"), "commit-msg", COMMIT_MSG_MARKER));
+                InspectHookFile(Path.Combine(hooksPath, "commit-msg"), "commit-msg", COMMIT_MSG_MARKER),
+                InspectHookFile(Path.Combine(hooksPath, "post-commit"), "post-commit", POST_COMMIT_MARKER));
         }
 
         public async Task<HookInstallationResult> InstallHooksAsync(string repoPath, CancellationToken cancellationToken)
@@ -153,13 +156,32 @@ namespace VibeRails.Services
                     );
                 }
 
+                var postCommitResult = await InstallPostCommitHookAsync(repoPath, cancellationToken);
+                if (!postCommitResult.Success)
+                {
+                    _logger.LogError("Post-commit hook installation failed: {Error}", postCommitResult.ErrorMessage);
+                    var rollback = await RestoreSnapshotsAsync(snapshots, CancellationToken.None);
+                    if (!rollback.Success)
+                    {
+                        return HookInstallationResult.Fail(
+                            HookInstallationError.PartialInstallationFailure,
+                            "Post-commit hook installation failed and rollback was incomplete",
+                            FormatFailureWithRollback(postCommitResult, rollback));
+                    }
+
+                    return HookInstallationResult.Fail(
+                        HookInstallationError.PartialInstallationFailure,
+                        "Post-commit hook installation failed; previous hooks were restored",
+                        postCommitResult.ErrorMessage);
+                }
+
                 _logger.LogInformation("All hooks installed successfully");
                 return HookInstallationResult.Ok();
             }
             catch (OperationCanceledException cancellationException) when (cancellationToken.IsCancellationRequested)
             {
                 // Cancellation must not interrupt rollback. Once the first hook is touched,
-                // the two-hook install is a transaction and restores from its snapshots.
+                // the three-hook install is a transaction and restores from its snapshots.
                 _logger.LogInformation("Hook installation was cancelled; restoring hook snapshots");
                 var rollback = await RestoreSnapshotsAsync(snapshots, CancellationToken.None);
                 if (!rollback.Success)
@@ -194,14 +216,15 @@ namespace VibeRails.Services
 
             var preCommitResult = await UninstallPreCommitHookAsync(repoPath, cancellationToken);
             var commitMsgResult = await UninstallCommitMsgHookAsync(repoPath, cancellationToken);
+            var postCommitResult = await UninstallPostCommitHookAsync(repoPath, cancellationToken);
 
-            if (!preCommitResult.Success || !commitMsgResult.Success)
+            if (!preCommitResult.Success || !commitMsgResult.Success || !postCommitResult.Success)
             {
                 _logger.LogWarning("Some hooks failed to uninstall");
                 return HookInstallationResult.Fail(
                     HookInstallationError.PartialInstallationFailure,
                     "One or more hooks failed to uninstall",
-                    $"Pre-commit: {preCommitResult.Success}, Commit-msg: {commitMsgResult.Success}"
+                    $"Pre-commit: {preCommitResult.Success}, Commit-msg: {commitMsgResult.Success}, Post-commit: {postCommitResult.Success}"
                 );
             }
 
@@ -219,6 +242,18 @@ namespace VibeRails.Services
         {
             _logger.LogInformation("Uninstalling commit-msg hook for repository: {RepoPath}", repoPath);
             return await UninstallHookAsync(repoPath, "commit-msg", COMMIT_MSG_MARKER, cancellationToken);
+        }
+
+        private async Task<HookInstallationResult> InstallPostCommitHookAsync(string repoPath, CancellationToken cancellationToken)
+        {
+            _logger.LogInformation("Installing post-commit hook for repository: {RepoPath}", repoPath);
+            return await InstallHookAsync(repoPath, "post-commit", POST_COMMIT_MARKER, "post-commit-hook.sh", cancellationToken);
+        }
+
+        private async Task<HookInstallationResult> UninstallPostCommitHookAsync(string repoPath, CancellationToken cancellationToken)
+        {
+            _logger.LogInformation("Uninstalling post-commit hook for repository: {RepoPath}", repoPath);
+            return await UninstallHookAsync(repoPath, "post-commit", POST_COMMIT_MARKER, cancellationToken);
         }
 
         private async Task<HookInstallationResult> InstallHookAsync(
@@ -635,9 +670,12 @@ namespace VibeRails.Services
                     }
                 }
 
-                var expectedInvocation = hookName.Equals("commit-msg", StringComparison.Ordinal)
-                    ? "--vca-hook commit-msg"
-                    : "--vca-hook pre-commit";
+                var expectedInvocation = hookName switch
+                {
+                    "commit-msg" => "--vca-hook commit-msg",
+                    "post-commit" => "--job-trigger post-commit",
+                    _ => "--vca-hook pre-commit"
+                };
                 var launchError = _launchCommand.GetValidationError();
                 if (launchError != null)
                 {
@@ -835,7 +873,9 @@ namespace VibeRails.Services
                          "pre-commit",
                          "pre-commit" + CHAINED_HOOK_SUFFIX,
                          "commit-msg",
-                         "commit-msg" + CHAINED_HOOK_SUFFIX
+                         "commit-msg" + CHAINED_HOOK_SUFFIX,
+                         "post-commit",
+                         "post-commit" + CHAINED_HOOK_SUFFIX
                      })
             {
                 var path = Path.Combine(hooksPath, name);

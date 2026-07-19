@@ -223,13 +223,46 @@ public static class MintLintScorer
                     threshold.Critical,
                     threshold.HigherIsBetter,
                     origin?.Source,
-                    origin?.Line));
+                    origin?.Line,
+                    threshold.HigherIsBetter ? MetricDirection.HB : MetricDirection.LB));
                 score = Math.Max(score, normalized);
             }
         }
 
         double weight = profile.CategoryWeights.TryGetValue(definition.Name, out double configured) ? configured : 1.0;
-        return new CategoryScore(definition.Name, Math.Round(score, 1), weight, scoredMetrics);
+        return new CategoryScore(
+            definition.Name,
+            Math.Round(score, 1),
+            weight,
+            scoredMetrics,
+            SharedDirection(scoredMetrics));
+    }
+
+    /// <summary>
+    /// A category reads one way only when every scored metric in it reads that way;
+    /// a mixed or empty category is <see cref="MetricDirection.NA"/>.
+    /// </summary>
+    private static MetricDirection SharedDirection(IReadOnlyList<MetricScore> scoredMetrics)
+    {
+        MetricDirection shared = MetricDirection.NA;
+        foreach (MetricScore metric in scoredMetrics)
+        {
+            if (metric.Direction == MetricDirection.NA)
+            {
+                return MetricDirection.NA;
+            }
+
+            if (shared == MetricDirection.NA)
+            {
+                shared = metric.Direction;
+            }
+            else if (shared != metric.Direction)
+            {
+                return MetricDirection.NA;
+            }
+        }
+
+        return shared;
     }
 
     private static double Normalize(double raw, MetricThreshold threshold)
