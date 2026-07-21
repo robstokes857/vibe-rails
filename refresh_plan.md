@@ -1,1 +1,0 @@
- Model picker refresh — a button that shells opencode models --refresh to pull the live catalog from models.dev (the dropdown is hand-maintained per CLI_OPTIONS.md:65-80).
