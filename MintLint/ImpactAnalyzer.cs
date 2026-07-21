@@ -40,17 +40,7 @@ public static class ImpactAnalyzer
         ArgumentNullException.ThrowIfNull(targets);
         options ??= MintLintOptions.Default;
 
-        Dictionary<string, int> counts = new(StringComparer.Ordinal);
-        List<(string File, HashSet<string> Names)> lookups = [];
-        foreach (FileMetrics target in targets)
-        {
-            counts[target.File] = 0;
-            HashSet<string> names = DeclaredNames(target);
-            if (names.Count > 0)
-            {
-                lookups.Add((target.File, names));
-            }
-        }
+        var (counts, lookups) = BuildLookups(targets);
 
         if (lookups.Count == 0 || !Directory.Exists(rootDirectory))
         {
@@ -98,23 +88,46 @@ public static class ImpactAnalyzer
                 continue;
             }
 
-            HashSet<string> identifiers = ExtractIdentifiers(text);
-            foreach ((string targetFile, HashSet<string> names) in lookups)
-            {
-                if (PathsEqual(relative, targetFile))
-                {
-                    continue;
-                }
+            CountSourceReferences(relative, text, lookups, counts);
+        }
 
-                foreach (string name in names)
-                {
-                    if (identifiers.Contains(name))
-                    {
-                        counts[targetFile]++;
-                        break;
-                    }
-                }
+        return counts;
+    }
+
+    /// <summary>
+    /// Counts references from an already captured source corpus. This is the immutable-source
+    /// counterpart to <see cref="CountReferencingFiles"/>: callers such as a Git HEAD scan can
+    /// rank impact without reading a newer index or working tree from disk.
+    /// </summary>
+    public static IReadOnlyDictionary<string, int> CountReferencingSources(
+        IReadOnlyList<FileMetrics> targets,
+        IReadOnlyList<SourceInput> sources)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+        ArgumentNullException.ThrowIfNull(sources);
+
+        var (counts, lookups) = BuildLookups(targets);
+        if (lookups.Count == 0)
+        {
+            return counts;
+        }
+
+        HashSet<string> seen = new(PathComparer);
+        int scanned = 0;
+        foreach (SourceInput source in sources)
+        {
+            if (++scanned > MaxScannedFiles)
+            {
+                break;
             }
+
+            string path = source.Path.Replace('\\', '/');
+            if (!seen.Add(path) || !MintLintAnalyzer.SupportsFile(path))
+            {
+                continue;
+            }
+
+            CountSourceReferences(path, source.Content, lookups, counts);
         }
 
         return counts;
@@ -170,6 +183,49 @@ public static class ImpactAnalyzer
         }
 
         return names;
+    }
+
+    private static (Dictionary<string, int> Counts, List<(string File, HashSet<string> Names)> Lookups)
+        BuildLookups(IReadOnlyList<FileMetrics> targets)
+    {
+        Dictionary<string, int> counts = new(StringComparer.Ordinal);
+        List<(string File, HashSet<string> Names)> lookups = [];
+        foreach (FileMetrics target in targets)
+        {
+            counts[target.File] = 0;
+            HashSet<string> names = DeclaredNames(target);
+            if (names.Count > 0)
+            {
+                lookups.Add((target.File, names));
+            }
+        }
+
+        return (counts, lookups);
+    }
+
+    private static void CountSourceReferences(
+        string relativePath,
+        string text,
+        IReadOnlyList<(string File, HashSet<string> Names)> lookups,
+        Dictionary<string, int> counts)
+    {
+        HashSet<string> identifiers = ExtractIdentifiers(text);
+        foreach ((string targetFile, HashSet<string> names) in lookups)
+        {
+            if (PathsEqual(relativePath, targetFile))
+            {
+                continue;
+            }
+
+            foreach (string name in names)
+            {
+                if (identifiers.Contains(name))
+                {
+                    counts[targetFile]++;
+                    break;
+                }
+            }
+        }
     }
 
     private static void AddName(HashSet<string> names, string name)

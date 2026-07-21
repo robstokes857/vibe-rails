@@ -96,6 +96,7 @@ namespace VibeRails
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
             serviceCollection.AddSingleton<IJobExecutableResolver, JobExecutableResolver>();
             serviceCollection.AddSingleton<IJobWorkerSupervisor, JobWorkerSupervisor>();
+            serviceCollection.AddSingleton<JobWorkspaceService>();
             serviceCollection.AddScoped<IJobService, JobService>();
             // Singleton for the same reason as the savings tally: one ordered writer, so concurrent
             // relays serialize capture inserts, re-sight counts, and clears before reaching SQLite.

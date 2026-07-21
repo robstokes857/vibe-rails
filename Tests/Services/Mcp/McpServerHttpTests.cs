@@ -29,6 +29,9 @@ public class McpServerHttpTests : IAsyncLifetime
 {
     private WebApplication _app = null!;
     private Uri _endpoint = null!;
+    // One shared client for the whole Kestrel test class instead of the SDK creating and disposing
+    // its own internal HttpClient per ConnectAsync (which clogs TCP ports across a run).
+    private static readonly HttpClient SharedClient = new();
 
     private static readonly string[] ExpectedTools =
     {
@@ -84,7 +87,9 @@ public class McpServerHttpTests : IAsyncLifetime
                 Name = "viberails-mcp-test",
                 TransportMode = HttpTransportMode.StreamableHttp,
             },
-            NullLoggerFactory.Instance);
+            SharedClient,
+            NullLoggerFactory.Instance,
+            ownsHttpClient: false);
 
         return await McpClientService.ConnectAsync(transport, cancellationToken: ct);
     }
@@ -92,8 +97,8 @@ public class McpServerHttpTests : IAsyncLifetime
     [Fact]
     public async Task ListTools_ExposesExpectedToolsAsSnakeCase()
     {
-        await using var client = await ConnectAsync();
-        var tools = await client.GetAvailableToolsAsync();
+        await using var client = await ConnectAsync(TestContext.Current.CancellationToken);
+        var tools = await client.GetAvailableToolsAsync(TestContext.Current.CancellationToken);
         var names = tools.Select(t => t.Name).ToHashSet();
 
         foreach (var expected in ExpectedTools)
@@ -109,8 +114,8 @@ public class McpServerHttpTests : IAsyncLifetime
         // Regression: the Explorer used to send {} and report "Call succeeded" because IsError was
         // ignored. A missing required parameter must now surface as a tool error (IsError=true).
         // search_history's `query` is required, so an empty argument map trips schema validation.
-        await using var client = await ConnectAsync();
-        var result = await client.CallToolAsync("search_history", new Dictionary<string, object?>());
+        await using var client = await ConnectAsync(TestContext.Current.CancellationToken);
+        var result = await client.CallToolAsync("search_history", new Dictionary<string, object?>(), TestContext.Current.CancellationToken);
         Assert.True(result.IsError);
         Assert.NotEmpty(result.Text);
     }
@@ -118,8 +123,8 @@ public class McpServerHttpTests : IAsyncLifetime
     [Fact]
     public async Task CallSearchHistory_ReturnsFusedHits()
     {
-        await using var client = await ConnectAsync();
-        var result = await client.CallToolAsync("search_history", new Dictionary<string, object?> { ["query"] = "websocket timeout" });
+        await using var client = await ConnectAsync(TestContext.Current.CancellationToken);
+        var result = await client.CallToolAsync("search_history", new Dictionary<string, object?> { ["query"] = "websocket timeout" }, TestContext.Current.CancellationToken);
 
         Assert.False(result.IsError);
         // The fake returns one fused hit; the tool should surface its session id, agent, and preview.
@@ -131,8 +136,8 @@ public class McpServerHttpTests : IAsyncLifetime
     [Fact]
     public async Task CallSearchHistory_EmptyQueryFails()
     {
-        await using var client = await ConnectAsync();
-        var result = await client.CallToolAsync("search_history", new Dictionary<string, object?> { ["query"] = "   " });
+        await using var client = await ConnectAsync(TestContext.Current.CancellationToken);
+        var result = await client.CallToolAsync("search_history", new Dictionary<string, object?> { ["query"] = "   " }, TestContext.Current.CancellationToken);
         // Empty query is a graceful "FAIL" verdict, not a tool error.
         Assert.False(result.IsError);
         Assert.StartsWith("FAIL", result.Text);
@@ -141,8 +146,8 @@ public class McpServerHttpTests : IAsyncLifetime
     [Fact]
     public async Task Ping_Succeeds()
     {
-        await using var client = await ConnectAsync();
-        Assert.True(await client.PingAsync());
+        await using var client = await ConnectAsync(TestContext.Current.CancellationToken);
+        Assert.True(await client.PingAsync(TestContext.Current.CancellationToken));
     }
 
     /// <summary>Deterministic stand-in for the BGE/sqlite-vec unified search.</summary>

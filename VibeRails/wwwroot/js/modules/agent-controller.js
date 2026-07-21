@@ -231,8 +231,12 @@ export class AgentController {
         }
 
         const getEnforcementBadge = (level) => {
-            const className = level ? `badge-${level.toLowerCase()}` : 'bg-secondary';
-            return `<span class="badge ${className} px-3 py-2">${level}</span>`;
+            const normalizedLevel = ['WARN', 'COMMIT', 'STOP'].includes(String(level || '').toUpperCase())
+                ? String(level).toUpperCase()
+                : '';
+            const className = normalizedLevel ? `badge-${normalizedLevel.toLowerCase()}` : 'bg-secondary';
+            const label = normalizedLevel || String(level || 'Unknown');
+            return `<span class="badge ${className} px-3 py-2">${this.app.escapeHtml(label)}</span>`;
         };
 
         return `
@@ -242,7 +246,7 @@ export class AgentController {
                         <div class="card-body p-3 d-flex justify-content-between align-items-center">
                             <div class="pe-3 d-flex align-items-center flex-grow-1">
                                 <span class="rule-icon me-3 text-muted">📜</span>
-                                <span class="fw-medium text-light" style="font-size: 1.05rem;">${rule.text}</span>
+                                <span class="fw-medium text-light" style="font-size: 1.05rem;">${this.app.escapeHtml(rule.text)}</span>
                             </div>
                             <div class="d-flex align-items-center gap-3">
                                 <button class="btn btn-sm btn-primary d-flex align-items-center gap-2">
@@ -406,7 +410,7 @@ export class AgentController {
                 `/api/v1/agents/validate?path=${encodeURIComponent(agent.path)}`, 'POST'
             );
 
-            resultsContainer.innerHTML = this.app.ruleController.renderValidationResults(response);
+            resultsContainer.innerHTML = this.renderValidationResults(response);
 
             if (response.passed) {
                 this.app.showToast('Validation Passed', response.message, 'success');
@@ -419,6 +423,39 @@ export class AgentController {
             resultsContainer.innerHTML = `<p class="text-danger">Error: ${errorMsg}</p>`;
             this.app.showError('Validation failed');
         }
+    }
+
+    renderValidationResults(response = {}) {
+        const passed = response?.passed === true;
+        const message = this.app.escapeHtml(response?.message || (passed ? 'Validation passed' : 'Validation failed'));
+        const results = Array.isArray(response?.results) ? response.results : [];
+        const summaryTone = passed ? 'success' : 'danger';
+        const resultCards = results.map(result => {
+            const enforcement = String(result?.enforcement || 'Unknown').toUpperCase();
+            const enforcementTone = {
+                WARN: 'warning',
+                COMMIT: 'info',
+                STOP: 'danger'
+            }[enforcement] || 'secondary';
+            const affectedFiles = Array.isArray(result?.affectedFiles) ? result.affectedFiles : [];
+            const filesHtml = affectedFiles.length === 0
+                ? ''
+                : `<ul class="mb-0 mt-2">${affectedFiles.map(file => `<li><code>${this.app.escapeHtml(file)}</code></li>`).join('')}</ul>`;
+
+            return `
+                <div class="border rounded p-3 mb-2">
+                    <div class="d-flex justify-content-between align-items-start gap-3">
+                        <strong>${this.app.escapeHtml(result?.ruleName || 'Rule')}</strong>
+                        <span class="badge bg-${enforcementTone}">${this.app.escapeHtml(enforcement)}</span>
+                    </div>
+                    <p class="mb-0 mt-2 ${result?.passed === true ? 'text-success' : 'text-danger'}">${this.app.escapeHtml(result?.message || (result?.passed === true ? 'Passed' : 'Failed'))}</p>
+                    ${filesHtml}
+                </div>`;
+        }).join('');
+
+        return `
+            <div class="alert alert-${summaryTone}" role="status">${message}</div>
+            ${resultCards}`;
     }
 
     selectRule(element, index) {
@@ -486,7 +523,7 @@ export class AgentController {
 
         this.app.showModal('Select Enforcement Level', `
             <p class="text-muted mb-3">How should this rule be enforced?</p>
-            <p class="mb-4"><strong>${ruleText}</strong></p>
+            <p class="mb-4"><strong>${this.app.escapeHtml(ruleText)}</strong></p>
             <div class="d-flex flex-column gap-3">
                 <div class="card enforcement-option ${currentEnforcement === 'WARN' ? 'border-warning' : ''}" data-enforcement="WARN" style="cursor: pointer;">
                     <div class="card-body d-flex align-items-center gap-3">
@@ -964,14 +1001,18 @@ export class AgentController {
             'STOP': '🛑'
         };
 
-        const ruleSummary = this.wizardState.selectedRules.map(rule => `
-            <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
-                <span>${this.app.escapeHtml(rule.text)}</span>
-                <span class="badge badge-${rule.enforcement.toLowerCase()}">
-                    ${enforcementIcons[rule.enforcement]} ${rule.enforcement}
-                </span>
-            </div>
-        `).join('');
+        const ruleSummary = this.wizardState.selectedRules.map(rule => {
+            const enforcement = ['WARN', 'COMMIT', 'STOP'].includes(String(rule.enforcement || '').toUpperCase())
+                ? String(rule.enforcement).toUpperCase()
+                : 'WARN';
+            return `
+                <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                    <span>${this.app.escapeHtml(rule.text)}</span>
+                    <span class="badge badge-${enforcement.toLowerCase()}">
+                        ${enforcementIcons[enforcement]} ${this.app.escapeHtml(enforcement)}
+                    </span>
+                </div>`;
+        }).join('');
 
         container.innerHTML = `
             <h5 class="mb-4">Step 4: Review & Create</h5>

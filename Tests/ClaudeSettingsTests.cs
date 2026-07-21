@@ -329,5 +329,6 @@ public class ClaudeSettingsTests : IDisposable
         public string GetGlobalSavePath() => "";
         public string GetTempPath() => Path.GetTempPath();
         public string GetUserProfilePath() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        public void MoveDirectory(string sourceDirName, string destDirName) { }
     }
 }

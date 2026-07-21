@@ -62,7 +62,8 @@ public sealed class VcaHookRunner : IVcaHookRunner
                 VcaHookKind.AcknowledgeCommitMessage => await RunAcknowledgmentPromptValidationAsync(
                     invocation,
                     validationOutput,
-                    summary),
+                    summary,
+                    cancellationToken),
                 VcaHookKind.CommitMessage => await RunCommitMessageValidationAsync(
                     invocation,
                     validationOutput,
@@ -117,7 +118,9 @@ public sealed class VcaHookRunner : IVcaHookRunner
             return 1;
         }
 
-        var rawCommitMessage = await File.ReadAllTextAsync(invocation.CommitMessagePath);
+        var rawCommitMessage = await File.ReadAllTextAsync(
+            invocation.CommitMessagePath,
+            cancellationToken);
         // Match against the message git will actually record: drop comment lines. An
         // acknowledgment token pasted into the commented template region would otherwise
         // pass here but be stripped from the final commit, defeating the audit trail.
@@ -160,8 +163,11 @@ public sealed class VcaHookRunner : IVcaHookRunner
     private async Task<int> RunAcknowledgmentPromptValidationAsync(
         VcaHookInvocation invocation,
         string validationOutput,
-        VcaHookValidationSummary summary)
+        VcaHookValidationSummary summary,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (summary.HasError || summary.HasStopViolation)
         {
             await _presenter.WriteFailureAsync("Blocking VCA validation still fails. Fix STOP-level violations before committing.");
@@ -184,11 +190,13 @@ public sealed class VcaHookRunner : IVcaHookRunner
             return 1;
         }
 
-        var rawCommitMessage = await File.ReadAllTextAsync(invocation.CommitMessagePath);
+        var rawCommitMessage = await File.ReadAllTextAsync(
+            invocation.CommitMessagePath,
+            cancellationToken);
         var commitMessage = await VcaCommitMessageCleaner.StripCommentsAsync(
             rawCommitMessage,
             invocation.WorkingDirectory ?? Directory.GetCurrentDirectory(),
-            CancellationToken.None);
+            cancellationToken);
         var missingAcknowledgments = _analyzer.GetMissingAcknowledgments(
             commitMessage,
             summary.RequiredAcknowledgments);
@@ -203,7 +211,8 @@ public sealed class VcaHookRunner : IVcaHookRunner
         var accepted = await PromptAndAppendAcknowledgmentsAsync(
             invocation.CommitMessagePath,
             validationOutput,
-            missingAcknowledgments);
+            missingAcknowledgments,
+            cancellationToken);
 
         await PauseIfInteractiveAsync();
         return accepted ? 0 : 1;
@@ -221,7 +230,8 @@ public sealed class VcaHookRunner : IVcaHookRunner
             return await RunAcknowledgmentPromptValidationAsync(
                 invocation with { Kind = VcaHookKind.AcknowledgeCommitMessage },
                 validationOutput,
-                summary) == 0;
+                summary,
+                cancellationToken) == 0;
         }
 
         if (!OperatingSystem.IsWindows())
@@ -258,6 +268,10 @@ public sealed class VcaHookRunner : IVcaHookRunner
             await process.WaitForExitAsync(cancellationToken);
             return process.ExitCode == 0;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             Log.Warning(ex, "Failed to launch VCA acknowledgment prompt");
@@ -268,8 +282,10 @@ public sealed class VcaHookRunner : IVcaHookRunner
     private async Task<bool> PromptAndAppendAcknowledgmentsAsync(
         string commitMessagePath,
         string validationOutput,
-        IReadOnlyList<string> missingAcknowledgments)
+        IReadOnlyList<string> missingAcknowledgments,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         await _presenter.WriteWarningAsync("This commit requires a VCA acknowledgment reason.");
         await _presenter.WriteWarningAsync("Required token(s):");
 
@@ -298,7 +314,10 @@ public sealed class VcaHookRunner : IVcaHookRunner
             lines.Add($"{token} Reason: {reason}");
         }
 
-        await File.AppendAllTextAsync(commitMessagePath, string.Join(Environment.NewLine, lines) + Environment.NewLine);
+        await File.AppendAllTextAsync(
+            commitMessagePath,
+            string.Join(Environment.NewLine, lines) + Environment.NewLine,
+            cancellationToken);
         await _presenter.WriteSuccessAsync("VCA acknowledgment appended to the commit message.");
         return true;
     }

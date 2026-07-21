@@ -9,20 +9,46 @@ namespace TokenSaver.Pipeline;
 /// the largest tool_result in the body and reused across every string in it — renting per string on
 /// the LLM hot path would be the single largest allocation source in the proxy.
 /// </summary>
-public sealed class PipelineScratch(int maxCharLength) : IDisposable
+public sealed class PipelineScratch : IDisposable
 {
+    private readonly ArrayPool<char> _pool;
+
+    public PipelineScratch(int maxCharLength)
+        : this(maxCharLength, ArrayPool<char>.Shared)
+    {
+    }
+
+    internal PipelineScratch(int maxCharLength, ArrayPool<char> pool)
+    {
+        ArgumentNullException.ThrowIfNull(pool);
+        _pool = pool;
+
+        var minified = pool.Rent(maxCharLength);
+        try
+        {
+            var condensed = pool.Rent(maxCharLength);
+            Minified = minified;
+            Condensed = condensed;
+        }
+        catch
+        {
+            pool.Return(minified);
+            throw;
+        }
+    }
+
     /// <summary>Minify destination. Deletion-only, so input.Length is always enough.</summary>
-    public char[] Minified { get; private set; } = ArrayPool<char>.Shared.Rent(maxCharLength);
+    public char[] Minified { get; private set; } = [];
 
     /// <summary>Condense destination. No stage before it can grow, so the same size holds.</summary>
-    public char[] Condensed { get; private set; } = ArrayPool<char>.Shared.Rent(maxCharLength);
+    public char[] Condensed { get; private set; } = [];
 
     public void Dispose()
     {
         if (Minified.Length > 0)
-            ArrayPool<char>.Shared.Return(Minified);
+            _pool.Return(Minified);
         if (Condensed.Length > 0)
-            ArrayPool<char>.Shared.Return(Condensed);
+            _pool.Return(Condensed);
         Minified = [];
         Condensed = [];
     }

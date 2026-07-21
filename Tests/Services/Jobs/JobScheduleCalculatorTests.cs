@@ -62,6 +62,21 @@ public sealed class JobScheduleCalculatorTests
     }
 
     [Fact]
+    public void ComputeNext_AcceptsBrowserIanaTimeZoneOnWindows()
+    {
+        var now = new DateTime(2026, 7, 19, 12, 0, 0, DateTimeKind.Utc);
+        var trigger = new JobTriggerRequest(
+            JobTriggerKind.Schedule,
+            JobScheduleKind.Daily,
+            LocalTime: "09:00",
+            TimeZoneId: "America/Chicago");
+
+        Assert.Equal(
+            new DateTime(2026, 7, 19, 14, 0, 0, DateTimeKind.Utc),
+            JobScheduleCalculator.ComputeNext(trigger, now));
+    }
+
+    [Fact]
     public void Validate_RejectsScheduleFieldsOnGitTrigger()
     {
         var trigger = new JobTriggerRequest(

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -28,16 +29,61 @@ function createApp() {
     };
 }
 
-test('Jobs page explains durable timer, VCA, commit, and manual automation', () => {
+test('Jobs page uses the shared shimmering title and explains its automation triggers', () => {
     const controller = new JobController(createApp());
     const html = controller.renderPage();
 
-    assert.match(html, /Durable local automation/);
+    assert.match(html, /text-gradient">Jobs/);
+    assert.doesNotMatch(html, /Durable local automation/);
     assert.match(html, /schedule/);
     assert.match(html, /VCA checks/);
     assert.match(html, /successful commits/);
     assert.match(html, /Run now/i);
     assert.match(html, /Recent runs/);
+});
+
+test('Jobs page warns that execution modes are not security boundaries', () => {
+    const controller = new JobController(createApp());
+    const html = controller.renderPage();
+
+    assert.match(html, /Jobs are not sandboxed/);
+    assert.match(html, /operating-system account's permissions/);
+    assert.match(html, /not security boundaries/);
+    assert.match(html, /outside the selected repository or clone/);
+    assert.match(html, /disposable account or machine/);
+});
+
+test('Jobs editor does not promise read-only or clone isolation', () => {
+    const source = readFileSync(modulePath, 'utf8');
+
+    assert.doesNotMatch(source, /cannot edit files/);
+    assert.doesNotMatch(source, /edits a private clone/);
+    assert.match(source, /Review only — requests read-only behavior; not a sandbox/);
+    assert.match(source, /Isolated write — throwaway clone only; not a sandbox/);
+    assert.match(source, /not an operating-system or process sandbox/);
+    assert.match(source, /outside the clone/);
+});
+
+test('Jobs worker status stays hidden until at least one job exists', () => {
+    const controller = new JobController(createApp());
+    const worker = { hidden: false, dataset: {}, innerHTML: '' };
+    controller.root = {
+        querySelector(selector) {
+            return selector === '[data-jobs-worker]' ? worker : null;
+        }
+    };
+    controller.jobs = [];
+    controller.renderWorker();
+
+    assert.equal(worker.hidden, true);
+    assert.equal(worker.innerHTML, '');
+
+    controller.jobs = [{ id: 1 }];
+    controller.workerStatus = { running: false, installed: false };
+    controller.renderWorker();
+
+    assert.equal(worker.hidden, false);
+    assert.match(worker.innerHTML, /Jobs worker is off/);
 });
 
 test('Jobs renderer escapes job data and shows configured triggers', () => {
@@ -78,6 +124,59 @@ test('Jobs renderer escapes job data and shows configured triggers', () => {
     assert.match(list.innerHTML, /Every VCA check/);
     assert.match(list.innerHTML, /Every commit/);
     assert.match(list.innerHTML, /Run now/);
+});
+
+test('Jobs renderer escapes job ids used in data attributes', () => {
+    const controller = new JobController(createApp());
+    const list = { innerHTML: '' };
+    controller.root = {
+        querySelector(selector) {
+            if (selector === '[data-jobs-list]') return list;
+            return null;
+        }
+    };
+    controller.jobs = [{
+        id: '7" data-owned="yes',
+        name: 'Review',
+        projectPath: '/repo',
+        llm: 1,
+        prompt: 'Review.',
+        executionMode: 0,
+        timeoutMinutes: 30,
+        enabled: true,
+        triggers: []
+    }];
+
+    controller.renderJobs();
+
+    assert.doesNotMatch(list.innerHTML, /data-job-id="7" data-owned=/);
+    assert.match(list.innerHTML, /data-job-id="7&quot; data-owned=&quot;yes"/);
+});
+
+test('Rules automation escapes job ids used in data attributes', async () => {
+    const app = createApp();
+    app.data = { configs: { rootPath: '/repo' }, isInGit: true };
+    app.apiCall = async () => ({
+        jobs: [{
+            id: '9" data-owned="yes',
+            name: 'Review',
+            llm: 1,
+            enabled: true,
+            triggers: [{ kind: 1 }]
+        }]
+    });
+    const host = { innerHTML: '', querySelectorAll: () => [] };
+    const root = {
+        querySelector(selector) {
+            return selector === '[data-jobs-automation-host]' ? host : null;
+        }
+    };
+    const controller = new JobController(app);
+
+    await controller.attachRulesAutomation(root);
+
+    assert.doesNotMatch(host.innerHTML, /data-rules-job-run="9" data-owned=/);
+    assert.match(host.innerHTML, /data-rules-job-run="9&quot; data-owned=&quot;yes"/);
 });
 
 test('Run now and enable actions call the durable Jobs API with stable trigger fields', async () => {
@@ -150,4 +249,156 @@ test('Run history exposes cancel only while active and retry after completion', 
     assert.doesNotMatch(failed, /Cancel/);
     assert.match(failed, /Security &lt;review&gt;/);
     assert.doesNotMatch(failed, /run<&>/);
+});
+
+test('Opening another run invalidates callbacks queued by the previous modal', async (t) => {
+    const intervalCallbacks = [];
+    const originalWindow = globalThis.window;
+    const originalDocument = globalThis.document;
+    t.after(() => {
+        globalThis.window = originalWindow;
+        globalThis.document = originalDocument;
+    });
+
+    globalThis.window = {
+        setInterval(callback) {
+            intervalCallbacks.push(callback);
+            return intervalCallbacks.length;
+        },
+        clearInterval() {}
+    };
+
+    let currentDetail = null;
+    globalThis.document = {
+        querySelector(selector) {
+            return selector === '[data-job-run-detail]' ? currentDetail : null;
+        }
+    };
+
+    const app = createApp();
+    app.showModal = () => {
+        const summary = { innerHTML: '', textContent: '' };
+        const log = { textContent: '', scrollTop: 0, scrollHeight: 0 };
+        const actions = { innerHTML: '', querySelector: () => null };
+        currentDetail = {
+            querySelector(selector) {
+                if (selector === '[data-run-summary]') return summary;
+                if (selector === '[data-run-log]') return log;
+                if (selector === '[data-run-modal-actions]') return actions;
+                if (selector === '.job-run-result') return null;
+                return null;
+            }
+        };
+    };
+    app.closeModal = () => {};
+    app.apiCall = async (url) => {
+        app.calls.push({ url });
+        if (url.includes('/logs?')) return { logs: [] };
+        const runId = url.includes('/run-a') ? 'run-a' : 'run-b';
+        return {
+            id: runId,
+            jobName: runId,
+            status: 1,
+            workspacePath: '/repo',
+            projectPath: '/repo'
+        };
+    };
+
+    const controller = new JobController(app);
+    await controller.openRun('run-a');
+    const staleCallback = intervalCallbacks[0];
+    await controller.openRun('run-b');
+    const callsBeforeStaleTick = app.calls.length;
+
+    await staleCallback();
+
+    assert.equal(app.calls.length, callsBeforeStaleTick, 'the stale callback must not fetch or mutate the new modal');
+});
+
+test('An in-flight refresh cannot render after another run replaces its modal', async (t) => {
+    const originalWindow = globalThis.window;
+    const originalDocument = globalThis.document;
+    t.after(() => {
+        globalThis.window = originalWindow;
+        globalThis.document = originalDocument;
+    });
+
+    globalThis.window = {
+        setInterval() { return 1; },
+        clearInterval() {}
+    };
+
+    const modalDetails = [];
+    let currentDetail = null;
+    globalThis.document = {
+        querySelector(selector) {
+            return selector === '[data-job-run-detail]' ? currentDetail : null;
+        }
+    };
+
+    const app = createApp();
+    app.showModal = () => {
+        const summary = { innerHTML: 'Loading run…', textContent: '' };
+        const log = { textContent: '', scrollTop: 0, scrollHeight: 0 };
+        const actions = { innerHTML: '', querySelector: () => null };
+        currentDetail = {
+            summary,
+            log,
+            actions,
+            querySelector(selector) {
+                if (selector === '[data-run-summary]') return summary;
+                if (selector === '[data-run-log]') return log;
+                if (selector === '[data-run-modal-actions]') return actions;
+                if (selector === '.job-run-result') return null;
+                return null;
+            }
+        };
+        modalDetails.push(currentDetail);
+    };
+    app.closeModal = () => {};
+
+    let resolveRunA;
+    let resolveLogsA;
+    const runAResponse = new Promise(resolve => { resolveRunA = resolve; });
+    const runALogs = new Promise(resolve => { resolveLogsA = resolve; });
+    app.apiCall = (url) => {
+        if (url.includes('/run-a/logs?')) return runALogs;
+        if (url.includes('/run-a')) return runAResponse;
+        if (url.includes('/run-b/logs?')) {
+            return Promise.resolve({ logs: [{ sequence: 1, content: 'run B log' }] });
+        }
+        return Promise.resolve({
+            id: 'run-b',
+            jobName: 'run-b',
+            status: 1,
+            workspacePath: '/repo',
+            projectPath: '/repo'
+        });
+    };
+
+    const controller = new JobController(app);
+    const openingRunA = controller.openRun('run-a');
+    const runADetail = modalDetails[0];
+
+    await controller.openRun('run-b');
+    const runBDetail = modalDetails[1];
+    const runBSummary = runBDetail.summary.innerHTML;
+    const runBLog = runBDetail.log.textContent;
+
+    resolveRunA({
+        id: 'run-a',
+        jobName: 'run-a',
+        status: 1,
+        workspacePath: '/repo',
+        projectPath: '/repo'
+    });
+    resolveLogsA({ logs: [{ sequence: 1, content: 'stale run A log' }] });
+    await openingRunA;
+
+    assert.equal(runADetail.summary.innerHTML, 'Loading run…', 'stale data must stop before rendering');
+    assert.equal(runADetail.log.textContent, '');
+    assert.equal(runBDetail.summary.innerHTML, runBSummary);
+    assert.equal(runBDetail.log.textContent, runBLog);
+    assert.match(runBDetail.summary.innerHTML, /run-b/);
+    assert.equal(runBDetail.log.textContent, 'run B log');
 });

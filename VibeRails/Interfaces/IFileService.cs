@@ -22,6 +22,7 @@ namespace VibeRails.Interfaces
         string GetGlobalSavePath();
         string GetTempPath();
         string GetUserProfilePath();
+        void MoveDirectory(string sourceDirName, string destDirName);
         Task<string> ReadAllTextAsync(string path, CancellationToken cancellationToken);
         Task WriteAllTextAsync(string path, string content, FileMode mode, FileShare share, CancellationToken cancellationToken);
         

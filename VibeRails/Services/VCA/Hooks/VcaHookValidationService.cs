@@ -13,8 +13,7 @@ public interface IVcaHookValidationService
     Task<VcaHookValidationResult> ValidateAsync(
         VcaHookInvocation invocation,
         GitStagedSnapshot snapshot,
-        CancellationToken cancellationToken) =>
-        ValidateAsync(invocation, snapshot.RepositoryPath, cancellationToken);
+        CancellationToken cancellationToken);
 }
 
 public sealed class VcaRulesHookValidationService : IVcaHookValidationService

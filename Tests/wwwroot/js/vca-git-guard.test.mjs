@@ -134,6 +134,29 @@ test('Rules overview automatically starts validation and analysis together', asy
     assert.deepEqual(calls.sort(), ['analysis', 'validation']);
 });
 
+test('Rules overview restores its MintLint result instead of rescanning on return', async () => {
+    const controller = new RuleController({});
+    const root = {};
+    const calls = [];
+    const cachedResponse = { healthScore: 90 };
+    controller.viewRoot = root;
+    controller.codeAnalyzerCache = {
+        repositoryPath: 'C:\\source\\project',
+        response: cachedResponse,
+        ignoredFiles: [],
+        unpushed: false
+    };
+    controller.refreshHookStatus = async () => {
+        controller.hookStatus = { inGitRepo: true, repositoryPath: 'C:\\source\\project' };
+    };
+    controller.runHookPreview = async () => calls.push('validation');
+    controller.runCodeAnalyzer = async () => calls.push('analysis');
+    controller.renderCodeAnalyzerSummary = response => calls.push(response === cachedResponse ? 'restored' : 'wrong-response');
+
+    assert.equal(await controller.runRulesOverviewChecks(root), true);
+    assert.deepEqual(calls.sort(), ['restored', 'validation']);
+});
+
 test('focused Git Guard autoruns again when the view is reopened', async () => {
     const root = { dataset: {} };
     const fragment = { querySelector: () => root };

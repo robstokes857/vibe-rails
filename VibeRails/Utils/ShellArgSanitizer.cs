@@ -4,7 +4,8 @@ using System.Text;
 namespace VibeRails.Utils;
 
 /// <summary>
-/// Validates and escapes CLI arguments to prevent shell command injection.
+/// Validates and escapes CLI arguments for POSIX sh and PowerShell command strings.
+/// It does not produce cmd.exe-compatible escaping.
 /// CustomArgs are intended to be flags/values passed to LLM CLIs (claude, codex, agy).
 /// </summary>
 public static partial class ShellArgSanitizer
@@ -12,11 +13,11 @@ public static partial class ShellArgSanitizer
     /// <summary>
     /// Characters that cannot appear in CLI arguments under any circumstances.
     /// Every other shell metacharacter (<c>; | &amp; $ ` { } &lt; &gt; ! ( ) *</c>) is
-    /// neutralized at emit time by <see cref="EscapeArg"/>, which always wraps args in
-    /// single quotes (POSIX) or backtick-escaped double quotes (PowerShell). Inside
-    /// those quotes those metacharacters are literal, so blocking them here would
-    /// just reject legitimate prompts (<c>--system-prompt "Use $HOME!"</c>) without
-    /// adding any safety. The chars below are different: they cannot survive our
+    /// neutralized at emit time by <see cref="EscapeArg"/>, which wraps any arg that is
+    /// not already shell-inert in single quotes (POSIX) or backtick-escaped double quotes
+    /// (PowerShell). Inside those quotes those metacharacters are literal, so blocking them
+    /// here would just reject legitimate prompts (<c>--system-prompt "Use $HOME!"</c>)
+    /// without adding any safety. The chars below are different: they cannot survive our
     /// per-arg quoting (NUL terminates strings; CR/LF break command lines and our
     /// own argument tokenizer treats them as whitespace separators).
     /// </summary>
@@ -24,6 +25,16 @@ public static partial class ShellArgSanitizer
 
     [GeneratedRegex(@"^--?[a-zA-Z][a-zA-Z0-9_-]*$")]
     private static partial Regex FlagPattern();
+
+    /// <summary>
+    /// An argument made up exclusively of these characters carries no shell metacharacter in
+    /// either POSIX sh or PowerShell, so <see cref="EscapeArg"/> emits it bare. The allowlist is
+    /// deliberately conservative — anything outside it (spaces, quotes, <c>$ ` ; | &amp; ( ) { } &lt; &gt; * ? ! ~ , @ % \</c>)
+    /// falls through to full quoting — so skipping the quotes stays injection-safe while keeping
+    /// clean launch commands like <c>opencode --model=zai/glm-5.2</c>.
+    /// </summary>
+    [GeneratedRegex(@"^[A-Za-z0-9_+=:./-]+$")]
+    private static partial Regex ShellInertArgPattern();
 
     /// <summary>
     /// Validates a CustomArgs string (space-separated CLI args) for shell safety.
@@ -166,13 +177,19 @@ public static partial class ShellArgSanitizer
         => "'" + value.Replace("'", "'\\''") + "'";
 
     /// <summary>
-    /// Escapes a single argument for safe inclusion in a shell command string.
-    /// Wraps in single quotes (Unix) or double quotes (Windows) with proper internal escaping.
+    /// Escapes a single argument for safe inclusion in a POSIX sh command string, or in a
+    /// PowerShell command string on Windows. This output is not intended for cmd.exe.
     /// </summary>
     public static string EscapeArg(string arg)
     {
         if (string.IsNullOrEmpty(arg))
             return "\"\"";
+
+        // Already shell-inert (e.g. --model=zai/glm-5.2, --auto): emit bare so launch commands read
+        // cleanly. Callers rely on the =-form surviving without re-quoting (see CommandService's
+        // WithPinnedModel). Anything containing a metacharacter falls through to the quoting below.
+        if (ShellInertArgPattern().IsMatch(arg))
+            return arg;
 
         if (OperatingSystem.IsWindows())
         {

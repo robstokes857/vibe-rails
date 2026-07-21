@@ -5,6 +5,7 @@ using TokenSaver;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Terminal;
+using VibeRails.Utils;
 using Xunit;
 
 namespace Tests.Services.Terminal;
@@ -30,6 +31,7 @@ public class CommandServiceTests : IDisposable
 {
     private readonly string? _originalFakeCliFlag;
     private readonly string? _originalOpenCodeConfig;
+    private readonly string _originalEnvPath;
 
     public CommandServiceTests()
     {
@@ -40,6 +42,14 @@ public class CommandServiceTests : IDisposable
             LlmProxyZaiConfig.ConfigContentVariable);
         Environment.SetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI", null);
         Environment.SetEnvironmentVariable(LlmProxyZaiConfig.ConfigContentVariable, null);
+
+        // The env-name launch tests resolve GetEnvironmentVariables -> ParserConfigs.GetEnvPath(),
+        // a process-global that is empty unless startup set it. Pin it to a temp root here so those
+        // tests don't depend on another parallel collection having initialized it first
+        // (Path.GetFullPath("") throws otherwise). Same set/restore pattern as
+        // LlmCliEnvironmentServiceTests.
+        _originalEnvPath = ParserConfigs.GetEnvPath();
+        ParserConfigs.SetEnvPath(Path.Combine(Path.GetTempPath(), "viberails-cmdsvc-tests-envs"));
     }
 
     public void Dispose()
@@ -48,6 +58,7 @@ public class CommandServiceTests : IDisposable
         Environment.SetEnvironmentVariable(
             LlmProxyZaiConfig.ConfigContentVariable,
             _originalOpenCodeConfig);
+        ParserConfigs.SetEnvPath(_originalEnvPath);
     }
 
     [Fact]

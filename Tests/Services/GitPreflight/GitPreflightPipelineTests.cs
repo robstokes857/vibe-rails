@@ -160,6 +160,9 @@ public sealed class GitPreflightPipelineTests
 
         public Task<GitStagedSnapshot> CaptureWorkingTreeAsync(string workingDirectory, CancellationToken cancellationToken) =>
             Task.FromResult(Snapshot);
+
+        public Task<GitStagedSnapshot> CaptureUnpushedAsync(string workingDirectory, CancellationToken cancellationToken) =>
+            Task.FromResult(Snapshot);
     }
 
     private sealed class TestStep : IGitPreflightStep

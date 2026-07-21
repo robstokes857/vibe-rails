@@ -14,6 +14,9 @@ const HISTORY_OPEN_STORAGE_KEY = 'viberails_history_sidebar_open';
 const HISTORY_SEEN_STORAGE_KEY = 'viberails_history_sidebar_seen';
 // Standard dashed GUID (8-4-4-4-12) or "N" format (32 hex chars), case-insensitive.
 const SESSION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[0-9a-f]{32}$/i;
+// Keep inline filter values to CSS filter syntax. Brand metadata is currently hardcoded,
+// but validating at the HTML boundary prevents future metadata sources from injecting CSS.
+const SAFE_CSS_FILTER = /^[a-z0-9\s().,%#-]+$/i;
 
 export class ChatHistorySidebar {
     constructor(app) {
@@ -36,6 +39,10 @@ export class ChatHistorySidebar {
         this.refreshButton = null;
         this.llmFilterContainer = null;
         this.currentDirToggle = null;
+        this._documentClickHandler = null;
+        this._documentKeydownHandler = null;
+        this._bodyResizeObserver = null;
+        this._sidebarMutationObserver = null;
     }
 
     static renderHtml() {
@@ -108,6 +115,7 @@ export class ChatHistorySidebar {
     }
 
     mount(root, { onToggle } = {}) {
+        this.destroy();
         const sidebar = root.querySelector('#ch-sidebar');
         const search = root.querySelector('.ch-sidebar-search');
         const body = root.querySelector('#ch-sidebar-body');
@@ -306,15 +314,16 @@ export class ChatHistorySidebar {
         // dimensions change.  Items that filled the collapsed peek strip may
         // leave empty space at full width — trigger a load check.
         if (body) {
-            new ResizeObserver(() => {
+            this._bodyResizeObserver = new ResizeObserver(() => {
                 if (this._shouldLoadNextPage()) {
                     void this._loadNextPage();
                 }
-            }).observe(body);
+            });
+            this._bodyResizeObserver.observe(body);
         }
 
         // Close menu on click outside
-        document.addEventListener('click', (e) => {
+        this._documentClickHandler = (e) => {
             const isMenuBtn = e.target.closest('.ch-item-menu-btn');
             const isMenu = e.target.closest('.ch-context-menu');
             const isMenuItem = e.target.closest('.ch-context-menu-item') && !e.target.closest('.ch-has-submenu');
@@ -322,11 +331,12 @@ export class ChatHistorySidebar {
             if (!isMenuBtn && (!isMenu || isMenuItem)) {
                 this._closeContextMenu();
             }
-        });
+        };
+        document.addEventListener('click', this._documentClickHandler);
 
         // "/" focuses the search input when the sidebar is open and the user
         // is not already typing somewhere else.
-        document.addEventListener('keydown', (e) => {
+        this._documentKeydownHandler = (e) => {
             if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
             if (!sidebar || sidebar.classList.contains('ch-sidebar-collapsed')) return;
             const active = document.activeElement;
@@ -337,11 +347,12 @@ export class ChatHistorySidebar {
             e.preventDefault();
             searchInput.focus();
             searchInput.select?.();
-        });
+        };
+        document.addEventListener('keydown', this._documentKeydownHandler);
 
         if (sidebar && this.closeButton && typeof MutationObserver === 'function') {
-            new MutationObserver(() => syncCloseButtonState())
-                .observe(sidebar, { attributes: true, attributeFilter: ['class'] });
+            this._sidebarMutationObserver = new MutationObserver(() => syncCloseButtonState());
+            this._sidebarMutationObserver.observe(sidebar, { attributes: true, attributeFilter: ['class'] });
         }
 
         syncCloseButtonState();
@@ -358,6 +369,31 @@ export class ChatHistorySidebar {
         }
         onToggle?.(initialOpen);
         void this._load();
+    }
+
+    destroy() {
+        if (this._documentClickHandler) {
+            document.removeEventListener('click', this._documentClickHandler);
+            this._documentClickHandler = null;
+        }
+        if (this._documentKeydownHandler) {
+            document.removeEventListener('keydown', this._documentKeydownHandler);
+            this._documentKeydownHandler = null;
+        }
+        this._bodyResizeObserver?.disconnect();
+        this._bodyResizeObserver = null;
+        this._sidebarMutationObserver?.disconnect();
+        this._sidebarMutationObserver = null;
+        this.sidebar = null;
+        this.search = null;
+        this.body = null;
+        this.contextMenu = null;
+        this.refreshButton = null;
+        this.closeButton = null;
+        this.llmFilterContainer = null;
+        this.currentDirToggle = null;
+        this.filterDrawerToggle = null;
+        this.filterDrawerContent = null;
     }
 
     async _load() {
@@ -905,7 +941,7 @@ export class ChatHistorySidebar {
         const activeItemSnapshot = this.activeItem;
         this._closeContextMenu();
 
-        this.app.showModal(`Sending to ${escapeHtml(llmDisplayLabel)}`, `
+        this.app.showModal(`Sending to ${llmDisplayLabel}`, `
             <div class="text-muted small mb-3">${escapeHtml(sessionId)}</div>
             <div id="ch-resume-body">
                 <div class="d-flex flex-column gap-2 py-2 text-muted">
@@ -1179,7 +1215,10 @@ export class ChatHistorySidebar {
         if (this._isShellBrand(brand)) {
             return `<span class="${logoClass} ch-brand-terminal-glyph"><i class="fa-solid fa-terminal" aria-hidden="true"></i></span>`;
         }
-        const logoStyle = brand.logoFilter ? ` style="filter: ${brand.logoFilter}"` : '';
+        const filterValue = typeof brand.logoFilter === 'string' && SAFE_CSS_FILTER.test(brand.logoFilter)
+            ? brand.logoFilter
+            : '';
+        const logoStyle = filterValue ? ` style="filter: ${filterValue}"` : '';
         return brand.logo
             ? `<img src="${escapeHtml(brand.logo)}" alt="${escapeHtml(brand.label)}" class="${logoClass}"${logoStyle}>`
             : `<span class="${logoClass} ch-item-logo-fallback">${escapeHtml((brand.label || '?')[0])}</span>`;

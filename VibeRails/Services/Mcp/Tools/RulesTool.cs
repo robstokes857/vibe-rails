@@ -1018,7 +1018,11 @@ public class RulesTool
         int complexity = 1;
         foreach (var keyword in keywords)
         {
-            complexity += Regex.Matches(content, $@"\b{Regex.Escape(keyword)}\b", RegexOptions.IgnoreCase).Count;
+            var escapedKeyword = Regex.Escape(keyword);
+            var pattern = keyword is "&&" or "||"
+                ? escapedKeyword
+                : $@"\b{escapedKeyword}\b";
+            complexity += Regex.Matches(content, pattern, RegexOptions.IgnoreCase).Count;
         }
         return complexity;
     }

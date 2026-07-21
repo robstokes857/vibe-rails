@@ -57,5 +57,10 @@ public sealed class VcaPreflightStepTests
             VcaHookInvocation invocation,
             string workingDirectory,
             CancellationToken cancellationToken) => Task.FromResult(result);
+
+        public Task<VcaHookValidationResult> ValidateAsync(
+            VcaHookInvocation invocation,
+            GitStagedSnapshot snapshot,
+            CancellationToken cancellationToken) => Task.FromResult(result);
     }
 }

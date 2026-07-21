@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Jobs;
@@ -14,17 +16,22 @@ public interface IJobStore
     Task<JobDefinitionRecord?> UpdateJobAsync(long id, UpdateJobRequest request, string? executablePath, CancellationToken cancellationToken = default);
     Task<bool> SoftDeleteJobAsync(long id, CancellationToken cancellationToken = default);
     Task<int> CountEnabledJobsAsync(CancellationToken cancellationToken = default);
-    Task<int> CountEnabledJobsForEnvironmentAsync(int environmentId, CancellationToken cancellationToken = default);
+    Task<int> CountJobsForEnvironmentAsync(int environmentId, CancellationToken cancellationToken = default);
+    Task<bool> TryDeleteEnvironmentIfUnusedAsync(
+        int environmentId,
+        Action stageFilesystemDeletion,
+        CancellationToken cancellationToken = default);
     Task<string?> EnqueueManualRunAsync(long jobId, string? contextJson = null, CancellationToken cancellationToken = default);
-    Task<string?> EnqueueRetryAsync(string runId, CancellationToken cancellationToken = default);
+    Task<string?> EnqueueRetryAsync(string runId, string? contextJsonOverride = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> EnqueueEventRunsAsync(string projectPath, JobTriggerKind kind, string eventKey, string? contextJson, CancellationToken cancellationToken = default);
     Task<int> EnqueueDueSchedulesAsync(DateTime nowUtc, CancellationToken cancellationToken = default);
     Task<JobRunRecord?> ClaimNextRunAsync(string instanceId, int processId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JobRunRecord>> GetRunsAsync(long? jobId = null, int limit = 100, CancellationToken cancellationToken = default);
     Task<JobRunRecord?> GetRunAsync(string runId, CancellationToken cancellationToken = default);
+    Task<JobSnapshotArtifactReferences> GetActiveSnapshotArtifactReferencesAsync(CancellationToken cancellationToken = default);
     Task AppendRunLogAsync(string runId, long sequence, string stream, string content, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JobRunLogResponse>> GetRunLogsAsync(string runId, long afterSequence, int limit = 1000, CancellationToken cancellationToken = default);
-    Task CompleteRunAsync(string runId, JobRunStatus status, int? exitCode, string? resultText, string? errorMessage, CancellationToken cancellationToken = default);
+    Task CompleteRunAsync(string runId, JobRunStatus status, int? exitCode, string? resultText, string? errorMessage, string? expectedOwnerInstanceId = null, CancellationToken cancellationToken = default);
     Task SetRunWorkspaceAsync(string runId, string? workspacePath, CancellationToken cancellationToken = default);
     Task<bool> RequestCancelAsync(string runId, CancellationToken cancellationToken = default);
     Task<bool> IsCancelRequestedAsync(string runId, CancellationToken cancellationToken = default);
@@ -55,9 +62,9 @@ public sealed class JobStore : IJobStore
         var jobs = new List<JobDefinitionRecord>();
         await using (var command = connection.CreateCommand())
         {
-            command.CommandText = JobSelectSql + "\n" + """
+            command.CommandText = JobSelectSql + "\n" + $"""
                 WHERE ($includeDeleted = 1 OR j.DeletedUTC IS NULL)
-                  AND ($projectPath IS NULL OR j.ProjectPath = $projectPath)
+                  AND ($projectPath IS NULL OR j.ProjectPath = $projectPath{ProjectPathCollation})
                 ORDER BY j.Enabled DESC, j.UpdatedUTC DESC, j.Id DESC;
                 """;
             command.Parameters.AddWithValue("$includeDeleted", includeDeleted ? 1 : 0);
@@ -67,8 +74,18 @@ public sealed class JobStore : IJobStore
                 jobs.Add(ReadJob(reader));
         }
 
+        var triggersByJob = await ReadTriggersForJobsAsync(
+            connection,
+            projectPath,
+            includeDeleted,
+            cancellationToken);
         for (var index = 0; index < jobs.Count; index++)
-            jobs[index] = jobs[index] with { Triggers = await ReadTriggersAsync(connection, jobs[index].Id, cancellationToken) };
+        {
+            IReadOnlyList<JobTriggerDto> triggers = triggersByJob.TryGetValue(jobs[index].Id, out var jobTriggers)
+                ? jobTriggers
+                : [];
+            jobs[index] = jobs[index] with { Triggers = triggers };
+        }
         return jobs;
     }
 
@@ -206,13 +223,95 @@ public sealed class JobStore : IJobStore
         return changed > 0;
     }
 
-    public async Task<int> CountEnabledJobsForEnvironmentAsync(int environmentId, CancellationToken cancellationToken = default)
+    public async Task<int> CountJobsForEnvironmentAsync(int environmentId, CancellationToken cancellationToken = default)
     {
+        // Count ALL non-deleted jobs referencing the environment, not just enabled ones. Jobs
+        // default to disabled (Enabled DEFAULT 0), so an "enabled only" guard let the common case
+        // (a freshly created, still-disabled job) silently have its EnvironmentId nulled by the
+        // ON DELETE SET NULL foreign key when the environment was deleted.
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM Jobs WHERE EnvironmentId = $id AND Enabled = 1 AND DeletedUTC IS NULL;";
+        command.CommandText = "SELECT COUNT(*) FROM Jobs WHERE EnvironmentId = $id AND DeletedUTC IS NULL;";
         command.Parameters.AddWithValue("$id", environmentId);
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+    }
+
+    public async Task<bool> TryDeleteEnvironmentIfUnusedAsync(
+        int environmentId,
+        Action stageFilesystemDeletion,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stageFilesystemDeletion);
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        try
+        {
+            await using (var eligibility = connection.CreateCommand())
+            {
+                eligibility.Transaction = transaction;
+                eligibility.CommandText = """
+                    SELECT EXISTS (
+                        SELECT 1 FROM Environments e
+                        WHERE e.Id = $id
+                          AND NOT EXISTS (
+                              SELECT 1 FROM Jobs j
+                              WHERE j.EnvironmentId = e.Id AND j.DeletedUTC IS NULL
+                          )
+                    );
+                    """;
+                eligibility.Parameters.AddWithValue("$id", environmentId);
+                var canDelete = Convert.ToInt32(
+                    await eligibility.ExecuteScalarAsync(cancellationToken),
+                    CultureInfo.InvariantCulture) != 0;
+                if (!canDelete)
+                {
+                    await transaction.RollbackAsync(CancellationToken.None);
+                    return false;
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // BEGIN IMMEDIATE holds SQLite's writer reservation across this atomic rename. A stale
+            // request whose row no longer exists returns above without ever touching the path, and
+            // environment/job writers cannot race between the eligibility check and commit.
+            stageFilesystemDeletion();
+
+            await using (var delete = connection.CreateCommand())
+            {
+                delete.Transaction = transaction;
+                delete.CommandText = "DELETE FROM Environments WHERE Id = $id;";
+                delete.Parameters.AddWithValue("$id", environmentId);
+                var changed = await delete.ExecuteNonQueryAsync(CancellationToken.None);
+                if (changed != 1)
+                {
+                    throw new InvalidOperationException(
+                        $"Environment {environmentId} changed during its guarded deletion.");
+                }
+            }
+
+            // Once the filesystem is staged, finish the small DB critical section without request
+            // cancellation so the caller receives a definite committed-or-rolled-back outcome.
+            await transaction.CommitAsync(CancellationToken.None);
+            return true;
+        }
+        catch (Exception deleteException)
+        {
+            try
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
+            catch (Exception rollbackException)
+            {
+                throw new EnvironmentDeleteRollbackException(
+                    environmentId,
+                    deleteException,
+                    rollbackException);
+            }
+
+            throw;
+        }
     }
 
     public async Task<int> CountEnabledJobsAsync(CancellationToken cancellationToken = default)
@@ -226,7 +325,10 @@ public sealed class JobStore : IJobStore
     public Task<string?> EnqueueManualRunAsync(long jobId, string? contextJson = null, CancellationToken cancellationToken = default) =>
         EnqueueJobRunAsync(jobId, null, JobTriggerKind.Manual, $"manual:{Guid.NewGuid():N}", contextJson, requireEnabled: false, cancellationToken);
 
-    public async Task<string?> EnqueueRetryAsync(string runId, CancellationToken cancellationToken = default)
+    public async Task<string?> EnqueueRetryAsync(
+        string runId,
+        string? contextJsonOverride = null,
+        CancellationToken cancellationToken = default)
     {
         var retryId = Guid.NewGuid().ToString("N");
         await using var connection = await OpenAsync(cancellationToken);
@@ -241,7 +343,9 @@ public sealed class JobStore : IJobStore
                 source.JobName, source.ProjectPath, source.Llm, source.EnvironmentId,
                 source.EnvironmentName, source.EnvironmentPath, source.EnvironmentArgs,
                 source.Prompt, source.ExecutionMode, source.TimeoutMinutes, source.ExecutablePath,
-                source.TriggerContextJson, $now
+                CASE WHEN $contextJsonOverride IS NULL
+                     THEN source.TriggerContextJson ELSE $contextJsonOverride END,
+                $now
             FROM JobRuns source
             JOIN Jobs j ON j.Id = source.JobId
             WHERE source.Id = $runId AND j.DeletedUTC IS NULL
@@ -253,6 +357,9 @@ public sealed class JobStore : IJobStore
         command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
         command.Parameters.AddWithValue("$now", ToDb(DateTime.UtcNow));
         command.Parameters.AddWithValue("$runId", runId);
+        command.Parameters.AddWithValue(
+            "$contextJsonOverride",
+            contextJsonOverride is null ? DBNull.Value : contextJsonOverride);
         command.Parameters.AddWithValue("$succeeded", (int)JobRunStatus.Succeeded);
         command.Parameters.AddWithValue("$failed", (int)JobRunStatus.Failed);
         command.Parameters.AddWithValue("$cancelled", (int)JobRunStatus.Cancelled);
@@ -275,11 +382,11 @@ public sealed class JobStore : IJobStore
         var candidates = new List<(long JobId, long TriggerId)>();
         await using (var query = connection.CreateCommand())
         {
-            query.CommandText = """
+            query.CommandText = $"""
                 SELECT j.Id, t.Id
                 FROM Jobs j
                 JOIN JobTriggers t ON t.JobId = j.Id AND t.Kind = $kind
-                WHERE j.Enabled = 1 AND j.DeletedUTC IS NULL AND j.ProjectPath = $projectPath;
+                WHERE j.Enabled = 1 AND j.DeletedUTC IS NULL AND j.ProjectPath = $projectPath{ProjectPathCollation};
                 """;
             query.Parameters.AddWithValue("$kind", (int)kind);
             query.Parameters.AddWithValue("$projectPath", NormalizeProjectPath(projectPath));
@@ -344,7 +451,38 @@ public sealed class JobStore : IJobStore
         var queued = 0;
         foreach (var item in due)
         {
-            var next = JobScheduleCalculator.ComputeNext(item.Trigger, nowUtc);
+            DateTime next;
+            try
+            {
+                next = JobScheduleCalculator.ComputeNext(item.Trigger, nowUtc);
+            }
+            catch (Exception ex)
+            {
+                // A schedule whose parameters no longer resolve (e.g. a time zone that was dropped
+                // from the OS database) throws deterministically here on every poll. Because its
+                // NextRunUTC is never advanced, the worker would re-select it forever and, before
+                // this guard, crash the whole loop. Clear NextRunUTC so it stops being due; a later
+                // job edit recomputes it. Transient DB failures below are NOT caught here — they
+                // bubble up to the worker's per-iteration retry instead of disabling the trigger.
+                Log.Error(ex, "[Jobs] Trigger {TriggerId} has an unresolvable schedule; clearing its next run", item.TriggerId);
+                try
+                {
+                    await using var disable = connection.CreateCommand();
+                    disable.CommandText = """
+                        UPDATE JobTriggers SET LastRunUTC = NextRunUTC, NextRunUTC = NULL
+                        WHERE Id = $id AND NextRunUTC = $expected;
+                        """;
+                    disable.Parameters.AddWithValue("$id", item.TriggerId);
+                    disable.Parameters.AddWithValue("$expected", ToDb(item.ScheduledUtc));
+                    await disable.ExecuteNonQueryAsync(cancellationToken);
+                }
+                catch (Exception disableEx)
+                {
+                    Log.Error(disableEx, "[Jobs] Could not clear failing trigger {TriggerId}", item.TriggerId);
+                }
+                continue;
+            }
+
             await using var transaction = connection.BeginTransaction(deferred: false);
             await using var advance = connection.CreateCommand();
             advance.Transaction = transaction;
@@ -361,7 +499,13 @@ public sealed class JobStore : IJobStore
                 continue;
             }
 
-            var context = $"{{\"scheduledUtc\":\"{ToDb(item.ScheduledUtc)}\",\"coalescedAtUtc\":\"{ToDb(nowUtc)}\"}}";
+            var context = JsonSerializer.Serialize(
+                new Dictionary<string, string>
+                {
+                    ["scheduledUtc"] = ToDb(item.ScheduledUtc),
+                    ["coalescedAtUtc"] = ToDb(nowUtc)
+                },
+                AppJsonSerializerContext.Default.DictionaryStringString);
             var inserted = await InsertRunAsync(
                 connection,
                 transaction,
@@ -389,7 +533,13 @@ public sealed class JobStore : IJobStore
         await using (var select = connection.CreateCommand())
         {
             select.Transaction = transaction;
-            select.CommandText = """
+            // Two exclusions serialize concurrent runs:
+            //  * the first NOT EXISTS keeps a single job from running twice at once;
+            //  * the second stops a LiveWrite run from being claimed while another LiveWrite run
+            //    (of any job) is already writing the same working tree. Review runs are read-only
+            //    and IsolatedWrite runs each clone their own workspace, so only LiveWrite needs
+            //    per-path serialization.
+            select.CommandText = $"""
                 SELECT r.Id
                 FROM JobRuns r
                 JOIN Jobs j ON j.Id = r.JobId
@@ -398,11 +548,19 @@ public sealed class JobStore : IJobStore
                   AND NOT EXISTS (
                       SELECT 1 FROM JobRuns active
                       WHERE active.JobId = r.JobId AND active.Status = $running)
+                  AND NOT (
+                      r.ExecutionMode = $liveWrite
+                      AND EXISTS (
+                          SELECT 1 FROM JobRuns active
+                          WHERE active.Status = $running
+                            AND active.ExecutionMode = $liveWrite
+                            AND active.ProjectPath = r.ProjectPath{ProjectPathCollation}))
                 ORDER BY r.QueuedUTC, r.Id
                 LIMIT 1;
                 """;
             select.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
             select.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
+            select.Parameters.AddWithValue("$liveWrite", (int)JobExecutionMode.LiveWrite);
             id = (string?)await select.ExecuteScalarAsync(cancellationToken);
         }
         if (id == null)
@@ -464,6 +622,51 @@ public sealed class JobStore : IJobStore
         return await reader.ReadAsync(cancellationToken) ? ReadRun(reader) : null;
     }
 
+    public async Task<JobSnapshotArtifactReferences> GetActiveSnapshotArtifactReferencesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var activeRunIds = new HashSet<string>(StringComparer.Ordinal);
+        var activeSnapshotIds = new HashSet<string>(StringComparer.Ordinal);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, TriggerContextJson
+            FROM JobRuns
+            WHERE Status IN ($queued, $running);
+            """;
+        command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
+        command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            activeRunIds.Add(reader.GetString(0));
+            if (reader.IsDBNull(1))
+                continue;
+
+            try
+            {
+                using var context = JsonDocument.Parse(reader.GetString(1));
+                if (context.RootElement.ValueKind != JsonValueKind.Object
+                    || !context.RootElement.TryGetProperty(
+                        JobWorkspaceService.StagedSnapshotIdContextKey,
+                        out var snapshotProperty)
+                    || snapshotProperty.ValueKind != JsonValueKind.String
+                    || !Guid.TryParseExact(snapshotProperty.GetString(), "N", out var snapshotId))
+                {
+                    continue;
+                }
+                activeSnapshotIds.Add(snapshotId.ToString("N"));
+            }
+            catch (JsonException)
+            {
+                // Malformed context fails closed during workspace preparation. It cannot name a
+                // trustworthy shared artifact, but its run id still protects any per-run copy.
+            }
+        }
+
+        return new JobSnapshotArtifactReferences(activeRunIds, activeSnapshotIds);
+    }
+
     public async Task AppendRunLogAsync(
         string runId,
         long sequence,
@@ -515,20 +718,28 @@ public sealed class JobStore : IJobStore
         int? exitCode,
         string? resultText,
         string? errorMessage,
+        string? expectedOwnerInstanceId = null,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
+        // Only finalize a run that is still Running and (when an owner is supplied) still owned by
+        // the caller. This makes completion a no-op for a stale executor whose lease was taken over:
+        // the replacement worker has already flipped the run to Interrupted, so this UPDATE matches
+        // zero rows and cannot overwrite the correct terminal status.
         command.CommandText = """
             UPDATE JobRuns SET Status = $status, EndedUTC = $ended, ExitCode = $exitCode,
                 ResultText = $resultText, ErrorMessage = $errorMessage
-            WHERE Id = $id;
+            WHERE Id = $id AND Status = $running
+              AND ($expectedOwner IS NULL OR OwnerInstanceId = $expectedOwner);
             """;
         command.Parameters.AddWithValue("$status", (int)status);
+        command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
         command.Parameters.AddWithValue("$ended", ToDb(DateTime.UtcNow));
         command.Parameters.AddWithValue("$exitCode", exitCode is null ? DBNull.Value : exitCode.Value);
         command.Parameters.AddWithValue("$resultText", resultText is null ? DBNull.Value : resultText);
         command.Parameters.AddWithValue("$errorMessage", errorMessage is null ? DBNull.Value : errorMessage);
+        command.Parameters.AddWithValue("$expectedOwner", expectedOwnerInstanceId is null ? DBNull.Value : expectedOwnerInstanceId);
         command.Parameters.AddWithValue("$id", runId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -743,6 +954,11 @@ public sealed class JobStore : IJobStore
         DateTime nowUtc,
         CancellationToken cancellationToken)
     {
+        // Snapshot the current triggers first so editing an unrelated field (name, prompt) does not
+        // silently re-arm an unchanged schedule to "now". UNIQUE(JobId, Kind) guarantees at most one
+        // trigger per kind, so a same-Kind prior row is the match.
+        var existing = await ReadTriggersAsync(connection, jobId, cancellationToken);
+
         await using (var delete = connection.CreateCommand())
         {
             delete.Transaction = transaction;
@@ -752,18 +968,39 @@ public sealed class JobStore : IJobStore
         }
         foreach (var trigger in triggers)
         {
-            var next = trigger.Kind == JobTriggerKind.Schedule
-                ? JobScheduleCalculator.ComputeNext(trigger, nowUtc)
-                : (DateTime?)null;
+            var prior = existing.FirstOrDefault(t => t.Kind == trigger.Kind);
+            DateTime? next;
+            if (trigger.Kind == JobTriggerKind.Schedule)
+            {
+                // Preserve the existing cadence only when every schedule parameter is unchanged;
+                // any real edit recomputes the next run from now.
+                var unchanged = prior is not null
+                    && prior.ScheduleKind == trigger.ScheduleKind
+                    && prior.IntervalMinutes == trigger.IntervalMinutes
+                    && prior.LocalTime == trigger.LocalTime
+                    && prior.DaysOfWeekMask == trigger.DaysOfWeekMask
+                    && prior.TimeZoneId == trigger.TimeZoneId;
+                next = unchanged && prior!.NextRunUtc is not null
+                    ? prior.NextRunUtc
+                    : JobScheduleCalculator.ComputeNext(trigger, nowUtc);
+            }
+            else
+            {
+                next = null;
+            }
+
+            // LastRunUTC is historical fact, not a cadence input — carry it forward for the same kind.
+            var lastRun = prior?.LastRunUtc;
+
             await using var insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO JobTriggers
                     (JobId, Kind, ScheduleKind, IntervalMinutes, LocalTime, DaysOfWeekMask,
-                     TimeZoneId, NextRunUTC)
+                     TimeZoneId, NextRunUTC, LastRunUTC)
                 VALUES
                     ($jobId, $kind, $scheduleKind, $intervalMinutes, $localTime, $daysMask,
-                     $timeZone, $nextRun);
+                     $timeZone, $nextRun, $lastRun);
                 """;
             insert.Parameters.AddWithValue("$jobId", jobId);
             insert.Parameters.AddWithValue("$kind", (int)trigger.Kind);
@@ -773,6 +1010,7 @@ public sealed class JobStore : IJobStore
             insert.Parameters.AddWithValue("$daysMask", trigger.DaysOfWeekMask);
             insert.Parameters.AddWithValue("$timeZone", trigger.TimeZoneId is null ? DBNull.Value : trigger.TimeZoneId);
             insert.Parameters.AddWithValue("$nextRun", next is null ? DBNull.Value : ToDb(next.Value));
+            insert.Parameters.AddWithValue("$lastRun", lastRun is null ? DBNull.Value : ToDb(lastRun.Value));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
     }
@@ -839,20 +1077,56 @@ public sealed class JobStore : IJobStore
         command.Parameters.AddWithValue("$jobId", jobId);
         await using var triggerReader = await command.ExecuteReaderAsync(cancellationToken);
         while (await triggerReader.ReadAsync(cancellationToken))
-        {
-            triggers.Add(new JobTriggerDto(
-                triggerReader.GetInt64(0),
-                (JobTriggerKind)triggerReader.GetInt32(1),
-                triggerReader.IsDBNull(2) ? null : (JobScheduleKind)triggerReader.GetInt32(2),
-                triggerReader.IsDBNull(3) ? null : triggerReader.GetInt32(3),
-                triggerReader.IsDBNull(4) ? null : triggerReader.GetString(4),
-                triggerReader.GetInt32(5),
-                triggerReader.IsDBNull(6) ? null : triggerReader.GetString(6),
-                triggerReader.IsDBNull(7) ? null : ParseDb(triggerReader.GetString(7)),
-                triggerReader.IsDBNull(8) ? null : ParseDb(triggerReader.GetString(8))));
-        }
+            triggers.Add(ReadTrigger(triggerReader));
         return triggers;
     }
+
+    private static async Task<Dictionary<long, List<JobTriggerDto>>> ReadTriggersForJobsAsync(
+        SqliteConnection connection,
+        string? projectPath,
+        bool includeDeleted,
+        CancellationToken cancellationToken)
+    {
+        var triggersByJob = new Dictionary<long, List<JobTriggerDto>>();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT t.JobId, t.Id, t.Kind, t.ScheduleKind, t.IntervalMinutes, t.LocalTime,
+                   t.DaysOfWeekMask, t.TimeZoneId, t.NextRunUTC, t.LastRunUTC
+            FROM JobTriggers t
+            JOIN Jobs j ON j.Id = t.JobId
+            WHERE ($includeDeleted = 1 OR j.DeletedUTC IS NULL)
+              AND ($projectPath IS NULL OR j.ProjectPath = $projectPath{ProjectPathCollation})
+            ORDER BY t.JobId, t.Kind, t.Id;
+            """;
+        command.Parameters.AddWithValue("$includeDeleted", includeDeleted ? 1 : 0);
+        command.Parameters.AddWithValue(
+            "$projectPath",
+            projectPath is null ? DBNull.Value : NormalizeProjectPath(projectPath));
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var jobId = reader.GetInt64(0);
+            if (!triggersByJob.TryGetValue(jobId, out var triggers))
+            {
+                triggers = [];
+                triggersByJob.Add(jobId, triggers);
+            }
+            triggers.Add(ReadTrigger(reader, offset: 1));
+        }
+        return triggersByJob;
+    }
+
+    private static JobTriggerDto ReadTrigger(SqliteDataReader reader, int offset = 0) => new(
+        reader.GetInt64(offset),
+        (JobTriggerKind)reader.GetInt32(offset + 1),
+        reader.IsDBNull(offset + 2) ? null : (JobScheduleKind)reader.GetInt32(offset + 2),
+        reader.IsDBNull(offset + 3) ? null : reader.GetInt32(offset + 3),
+        reader.IsDBNull(offset + 4) ? null : reader.GetString(offset + 4),
+        reader.GetInt32(offset + 5),
+        reader.IsDBNull(offset + 6) ? null : reader.GetString(offset + 6),
+        reader.IsDBNull(offset + 7) ? null : ParseDb(reader.GetString(offset + 7)),
+        reader.IsDBNull(offset + 8) ? null : ParseDb(reader.GetString(offset + 8)));
 
     private static JobRunRecord ReadRun(SqliteDataReader reader) => new(
         reader.GetString(0), reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetInt64(2),
@@ -887,11 +1161,15 @@ public sealed class JobStore : IJobStore
         command.ExecuteNonQuery();
     }
 
-    public static string NormalizeProjectPath(string path)
-    {
-        var normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim()));
-        return OperatingSystem.IsWindows() ? normalized.ToUpperInvariant() : normalized;
-    }
+    // Windows filesystems compare paths case-insensitively; Linux does not. Project paths are stored
+    // with their ORIGINAL casing (so the Jobs UI and the child process working directory read
+    // naturally instead of SHOUTING) — case-insensitive matching on Windows is applied at the SQL
+    // comparison sites through this collation suffix rather than by uppercasing the stored value.
+    private static readonly string ProjectPathCollation =
+        OperatingSystem.IsWindows() ? " COLLATE NOCASE" : string.Empty;
+
+    public static string NormalizeProjectPath(string path) =>
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim()));
 
     private static string ToDb(DateTime value) => value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
     private static DateTime ParseDb(string value) => DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
@@ -915,9 +1193,9 @@ public sealed class JobStore : IJobStore
         """;
 
     private const string SchemaSql = """
+        PRAGMA busy_timeout=5000;
         PRAGMA journal_mode=WAL;
         PRAGMA foreign_keys=ON;
-        PRAGMA busy_timeout=5000;
 
         CREATE TABLE IF NOT EXISTS Jobs (
             Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1010,4 +1288,17 @@ public sealed class JobStore : IJobStore
         CREATE INDEX IF NOT EXISTS idx_job_runs_job ON JobRuns(JobId, QueuedUTC DESC);
         CREATE INDEX IF NOT EXISTS idx_job_logs_run ON JobRunLogs(RunId, Sequence);
         """;
+}
+
+public sealed class EnvironmentDeleteRollbackException : Exception
+{
+    internal EnvironmentDeleteRollbackException(
+        int environmentId,
+        Exception deleteException,
+        Exception rollbackException)
+        : base(
+            $"Could not confirm rollback while deleting environment {environmentId}.",
+            new AggregateException(deleteException, rollbackException))
+    {
+    }
 }

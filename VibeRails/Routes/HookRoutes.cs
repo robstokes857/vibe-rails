@@ -41,8 +41,8 @@ public static class HookRoutes
             var message = status.IsInstalled
                 ? "VCA and Jobs Git hooks are active and current."
                 : status.NeedsRepair
-                    ? "VCA hooks are stale, disabled, or only partially installed. Repair is recommended."
-                    : "VCA hooks are not installed.";
+                    ? "Git Guard hooks are stale, disabled, or only partially installed. Repair is recommended."
+                    : "VCA and Jobs Git hooks are not installed.";
 
             return Results.Ok(new HookStatusResponse(
                 InGitRepo: true,
@@ -76,7 +76,7 @@ public static class HookRoutes
                 : null;
             var success = result.Success && verified?.IsInstalled == true;
             var message = success
-                ? "VCA git hooks installed and verified"
+                ? "VCA and Jobs Git hooks installed and verified"
                 : $"{result.ErrorMessage} {(result.Details != null ? $"({result.Details})" : "")}";
             if (result.Success && !success)
             {
@@ -100,7 +100,7 @@ public static class HookRoutes
 
             var result = await hookService.UninstallHooksAsync(rootPath, cancellationToken);
             var message = result.Success
-                ? "VCA git hooks uninstalled"
+                ? "VCA and Jobs Git hooks uninstalled"
                 : $"{result.ErrorMessage} {(result.Details != null ? $"({result.Details})" : "")}";
             return Results.Ok(new HookActionResponse(result.Success, message));
         }).WithName("UninstallHook");
@@ -286,8 +286,12 @@ public static class HookRoutes
         // POST /api/v1/code-analyzer - Analyze all current working-tree changes by itself.
         // Git Guard continues to use IGitStagedSnapshotProvider and the exact staged index.
         // ?fullScan=true widens the impact scan from tracked files to the whole directory.
+        // ?scope=unpushed swaps the working-tree snapshot for an "unpushed commits" one
+        //   (diff @{upstream}..HEAD) so the user can review what their local commits will do
+        //   before pushing. Takes precedence over the default working-tree scope.
         app.MapPost("/api/v1/code-analyzer", async (
             bool? fullScan,
+            string? scope,
             IGitWorkingTreeSnapshotProvider snapshotProvider,
             IEnumerable<IGitPreflightStep> preflightSteps,
             IGitService gitService,
@@ -312,18 +316,25 @@ public static class HookRoutes
                 return Results.Problem("The code analyzer is unavailable.");
             }
 
+            var unpushedScope = string.Equals(scope, "unpushed", StringComparison.OrdinalIgnoreCase);
             var startedUtc = DateTime.UtcNow;
             GitPreflightStepResult result;
             try
             {
-                var snapshot = await snapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken);
+                // The unpushed snapshot captures committed-but-not-pushed changes; the default
+                // working-tree snapshot captures staged/unstaged/untracked changes. They share
+                // the same downstream MintLint pipeline.
+                var snapshot = unpushedScope
+                    ? await snapshotProvider.CaptureUnpushedAsync(rootPath, cancellationToken)
+                    : await snapshotProvider.CaptureWorkingTreeAsync(rootPath, cancellationToken);
                 result = await analyzer.ExecuteAsync(
                     new GitPreflightStepContext(
                         Guid.NewGuid().ToString("N"),
                         CreatePreCommitRequest(rootPath) with
                         {
                             FullImpactScan = fullScan == true,
-                            WorkingTreeChanges = true
+                            WorkingTreeChanges = true,
+                            UnpushedChanges = unpushedScope
                         },
                         snapshot,
                         (_, _, _) => ValueTask.CompletedTask),
@@ -332,6 +343,12 @@ public static class HookRoutes
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
+            }
+            catch (InvalidOperationException ex) when (unpushedScope)
+            {
+                // The most common unpushed-scope failure is "no upstream configured". Surface
+                // it as a normal scan failure (not a 500) so the UI can show the message.
+                return Results.Ok(ToValidatorFailure("Code analyzer", startedUtc, ex, includeValidation: false));
             }
             catch (Exception ex)
             {
@@ -383,6 +400,7 @@ public static class HookRoutes
         // symlink/junction guard a working-tree scan applies decides readability.
         app.MapGet("/api/v1/code-analyzer/source", async (
             string? path,
+            string? scope,
             IGitService gitService,
             CancellationToken cancellationToken) =>
         {
@@ -405,6 +423,27 @@ public static class HookRoutes
             if (!fullPath.StartsWith(repositoryRoot + System.IO.Path.DirectorySeparatorChar, comparison))
             {
                 return Results.BadRequest(new ErrorResponse("The path must stay inside the repository."));
+            }
+
+            if (string.Equals(scope, "unpushed", StringComparison.OrdinalIgnoreCase))
+            {
+                // An unpushed scan scores the HEAD-committed revision (see F14), so serve HEAD here
+                // too — otherwise the line/offset anchors from the scan wouldn't match unstaged edits
+                // on disk. The working-tree guard defends against symlink/junction exfiltration and
+                // doesn't apply to a blob read from the object store; containment is already enforced
+                // by the repositoryRoot check above.
+                var headBytes = await GitStagedSnapshotProvider.TryReadHeadBlobPublicAsync(
+                    repositoryRoot, relativePath, cancellationToken);
+                if (headBytes is null)
+                {
+                    return Results.Ok(new CodeAnalyzerSourceResponse(relativePath, Content: null, Exists: false));
+                }
+                if (headBytes.Length > MaxSourceBytes)
+                {
+                    return Results.Ok(new CodeAnalyzerSourceResponse(relativePath, Content: null, Truncated: true));
+                }
+                var headContent = GitStagedSnapshotProvider.DecodeText(headBytes, out var headBinary);
+                return Results.Ok(new CodeAnalyzerSourceResponse(relativePath, headContent, IsBinary: headBinary));
             }
 
             var guard = new GitStagedSnapshotProvider.WorkingTreePathGuard(repositoryRoot);
@@ -439,7 +478,7 @@ public static class HookRoutes
             var files = await ignoreStore.ListAsync(rootPath, cancellationToken);
             return Results.Ok(new CodeAnalyzerIgnoreListResponse(
                 [.. files.Select(file => new CodeAnalyzerIgnoreEntryResponse(
-                    file.Path, file.ReasonKind, file.ReasonText, file.CreatedUtc))]));
+                    file.Path, file.MatchKind, file.ReasonKind, file.ReasonText, file.CreatedUtc))]));
         }).WithName("ListCodeAnalyzerIgnores");
 
         app.MapPost("/api/v1/code-analyzer/ignores", async (
@@ -455,26 +494,72 @@ public static class HookRoutes
             }
 
             var path = CodeAnalyzerIgnoreStore.NormalizePath(request.Path ?? string.Empty);
-            if (path.Length == 0 || System.IO.Path.IsPathRooted(path))
+            if (path.Length == 0 || System.IO.Path.IsPathRooted(path) || HasParentTraversal(path))
             {
                 return Results.BadRequest(new ErrorResponse("A repository-relative path is required."));
             }
 
-            var reasonKind = string.IsNullOrWhiteSpace(request.ReasonKind)
-                ? null
-                : request.ReasonKind.Trim().ToLowerInvariant();
-            if (reasonKind is not (null or "test" or "config" or "other"))
-            {
-                return Results.BadRequest(new ErrorResponse("Reason must be test, config, or other."));
-            }
-
+            var matchKind = NormalizeMatchKind(request.MatchKind);
+            var reasonKind = NormalizeReasonKind(request.ReasonKind);
             var reasonText = string.IsNullOrWhiteSpace(request.ReasonText) ? null : request.ReasonText.Trim();
             await ignoreStore.UpsertAsync(
                 rootPath,
-                new CodeAnalyzerIgnoredFile(path, reasonKind, reasonText, DateTime.UtcNow),
+                new CodeAnalyzerIgnoredFile(path, matchKind, reasonKind, reasonText, DateTime.UtcNow),
                 cancellationToken);
-            return Results.Ok(new HookActionResponse(true, $"{path} is now ignored by Code quality scans."));
+            var label = matchKind == CodeAnalyzerIgnoreMatchKind.Directory ? "directory" : "file";
+            return Results.Ok(new HookActionResponse(true, $"{path} ({label}) is now ignored by Code quality scans."));
         }).WithName("AddCodeAnalyzerIgnore");
+
+        // Multi-file ignore with a shared reason — one request per bulk selection in the UI,
+        // so the user doesn't watch N toasts fire as each round-trip completes. MatchKind is
+        // shared across all paths (you typically select "ignore these files" OR "ignore these
+        // directories", not a mix). Empty/duplicate paths are silently skipped.
+        app.MapPost("/api/v1/code-analyzer/ignores/bulk", async (
+            CodeAnalyzerIgnoreBulkRequest request,
+            ICodeAnalyzerIgnoreStore ignoreStore,
+            IGitService gitService,
+            CancellationToken cancellationToken) =>
+        {
+            var rootPath = await gitService.GetRootPathAsync(cancellationToken);
+            if (string.IsNullOrEmpty(rootPath))
+            {
+                return Results.BadRequest(new ErrorResponse("Not in a git repository."));
+            }
+
+            const int MaxBulkPaths = 500;
+            var requestedCount = request.Paths?.Count ?? 0;
+            var paths = (request.Paths ?? [])
+                .Select(p => CodeAnalyzerIgnoreStore.NormalizePath(p ?? string.Empty))
+                .Where(p => p.Length > 0 && !System.IO.Path.IsPathRooted(p) && !HasParentTraversal(p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (paths.Count == 0)
+            {
+                return Results.BadRequest(new ErrorResponse("At least one repository-relative path is required."));
+            }
+            if (paths.Count > MaxBulkPaths)
+            {
+                return Results.BadRequest(new ErrorResponse($"Too many paths in one request (max {MaxBulkPaths})."));
+            }
+
+            var matchKind = NormalizeMatchKind(request.MatchKind);
+            var reasonKind = NormalizeReasonKind(request.ReasonKind);
+            var reasonText = string.IsNullOrWhiteSpace(request.ReasonText) ? null : request.ReasonText.Trim();
+            var createdUtc = DateTime.UtcNow;
+            var files = paths
+                .Select(path => new CodeAnalyzerIgnoredFile(path, matchKind, reasonKind, reasonText, createdUtc))
+                .ToList();
+            await ignoreStore.UpsertManyAsync(rootPath, files, cancellationToken);
+
+            // Empty, absolute, "..", and duplicate entries were dropped above — report them honestly
+            // instead of the previous hardcoded 0.
+            var skipped = Math.Max(0, requestedCount - paths.Count);
+            var label = matchKind == CodeAnalyzerIgnoreMatchKind.Directory ? "directories" : "files";
+            return Results.Ok(new CodeAnalyzerIgnoreBulkResponse(
+                paths.Count,
+                skipped,
+                $"Ignored {paths.Count} {label}."));
+        }).WithName("BulkAddCodeAnalyzerIgnores");
 
         app.MapDelete("/api/v1/code-analyzer/ignores", async (
             string? path,
@@ -678,5 +763,34 @@ public static class HookRoutes
         var hooksSection = configuration.GetSection("VibeRails:Hooks");
         return hooksSection.GetValue("AutoInstall", true)
             && hooksSection.GetValue("InstallOnStartup", true);
+    }
+
+    // Repo-relative paths must not escape the repository via parent-directory segments.
+    // NormalizePath already forward-slashes and strips a leading "./", so a ".." as a whole path
+    // segment is a traversal attempt.
+    private static bool HasParentTraversal(string normalizedPath) =>
+        normalizedPath == ".."
+        || normalizedPath.StartsWith("../", StringComparison.Ordinal)
+        || normalizedPath.EndsWith("/..", StringComparison.Ordinal)
+        || normalizedPath.Contains("/../", StringComparison.Ordinal);
+
+    // Coerces incoming MatchKind (file/directory) to a canonical lowercase value,
+    // defaulting to "file" for null/empty/unknown so the column invariant holds.
+    private static string NormalizeMatchKind(string? matchKind)
+    {
+        if (string.IsNullOrWhiteSpace(matchKind)) return CodeAnalyzerIgnoreMatchKind.File;
+        var lower = matchKind.Trim().ToLowerInvariant();
+        return lower is CodeAnalyzerIgnoreMatchKind.File or CodeAnalyzerIgnoreMatchKind.Directory
+            ? lower
+            : CodeAnalyzerIgnoreMatchKind.File;
+    }
+
+    // Validates reason kinds against the fixed set the UI offers (test/config/other).
+    // Returns null for "no reason given" so the column stays NULL, matching the schema.
+    private static string? NormalizeReasonKind(string? reasonKind)
+    {
+        if (string.IsNullOrWhiteSpace(reasonKind)) return null;
+        var lower = reasonKind.Trim().ToLowerInvariant();
+        return lower is "test" or "config" or "other" ? lower : null;
     }
 }

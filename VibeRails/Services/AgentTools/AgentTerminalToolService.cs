@@ -45,7 +45,7 @@ public sealed class AgentTerminalToolService : IAgentTerminalToolService
                 tab.TabId,
                 new StartTerminalRequest(
                     WorkingDirectory: request.WorkingDirectory,
-                    Cli: llm.ToString(),
+                    Cli: LlmParser.ToWireName(llm),
                     EnvironmentName: request.EnvironmentName,
                     Title: request.Title,
                     InitialPrompt: request.InitialPrompt),

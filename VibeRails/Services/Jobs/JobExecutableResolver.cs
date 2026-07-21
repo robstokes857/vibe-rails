@@ -85,9 +85,12 @@ public sealed class JobExecutableResolver : IJobExecutableResolver
             yield break;
         }
 
+        // .cmd/.bat are intentionally excluded: they can only be launched through cmd.exe, whose
+        // parser re-interprets the escaped argv and would let prompt text inject commands (see
+        // JobRunExecutor.ConfigureScriptShim). Native installs ship a real .exe; npm/pnpm/yarn ship
+        // a .ps1 shim that pwsh runs safely.
         yield return $"{command}.exe";
-        yield return $"{command}.cmd";
-        yield return $"{command}.bat";
+        yield return $"{command}.ps1";
         yield return command;
     }
 }

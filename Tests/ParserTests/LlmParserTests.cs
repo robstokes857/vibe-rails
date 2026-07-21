@@ -106,4 +106,30 @@ public class LlmParserTests
         Assert.Contains(LLM.Glm52, _parser.All);
         Assert.Contains(LLM.KimiK3, _parser.All);
     }
+
+    [Theory]
+    [InlineData(LLM.Glm52, "glm-5.2")]
+    [InlineData(LLM.KimiK3, "kimi-k3")]
+    [InlineData(LLM.Claude, "Claude")]
+    [InlineData(LLM.Codex, "Codex")]
+    public void ToWireName_ReturnsWireFormat_ForEnumValue(LLM llm, string expected)
+    {
+        // Outbound boundaries persist session Cli, the environments API, etc. through ToWireName /
+        // Normalize(LLM); both must emit the hyphenated wire name for the pseudo-CLIs, not "Glm52".
+        Assert.Equal(expected, LlmParser.ToWireName(llm));
+        Assert.Equal(expected, _parser.Normalize(llm));
+    }
+
+    [Fact]
+    public void WireName_RoundTripsForEveryLlm()
+    {
+        // Regression guard for the enum-name/wire-name divergence (the Antigravity bug class): every
+        // outbound wire name must Parse back to the same enum. A future pseudo-CLI that adds a
+        // hyphenated wire name without a SpecialCaseMap reverse entry would fail here.
+        foreach (var llm in _parser.All)
+        {
+            var wire = LlmParser.ToWireName(llm);
+            Assert.Equal(llm, _parser.Parse(wire));
+        }
+    }
 }

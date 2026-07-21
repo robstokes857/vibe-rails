@@ -19,8 +19,9 @@ namespace VibeRails.Services
         private const string COMMIT_MSG_MARKER = "# Vibe Rails Commit-Msg Hook";
         private const string POST_COMMIT_MARKER = "# Vibe Rails Post-Commit Hook";
         private const string END_MARKER = "# End Vibe Rails Hook";
+        private const string DISABLED_MARKER = "# VibeRails: disabled";
         private const string HOOK_MARKER = "# Vibe Rails Pre-Commit Hook"; // Legacy compatibility
-        private const string HOOK_VERSION = "5";
+        private const string HOOK_VERSION = "6";
         private const string VERSION_MARKER = "# VibeRails Hook Version: " + HOOK_VERSION;
         private const string EXECUTABLE_PLACEHOLDER = "__VIBERAILS_EXECUTABLE__";
         private const string EXECUTABLE_ARGUMENT_PLACEHOLDER = "__VIBERAILS_EXECUTABLE_ARGUMENT__";
@@ -539,7 +540,7 @@ namespace VibeRails.Services
                 var after = content.Substring(endIndex + END_MARKER.Length);
                 var newContent = (before + after).Trim();
 
-                if (string.IsNullOrWhiteSpace(newContent) || newContent == "#!/bin/sh")
+                if (IsEmptyOrShebangOnly(newContent))
                 {
                     _logger.LogDebug("Deleting hook file as it only contained Vibe Rails content: {HookPath}", hookPath);
                     File.Delete(hookPath);
@@ -555,7 +556,7 @@ namespace VibeRails.Services
                 // Handle case where end marker is missing (shouldn't happen, but be defensive)
                 _logger.LogWarning("End marker not found for hook section, removing from start marker to end of file");
                 var newContent = content.Substring(0, startIndex).Trim();
-                if (string.IsNullOrWhiteSpace(newContent) || newContent == "#!/bin/sh")
+                if (IsEmptyOrShebangOnly(newContent))
                 {
                     File.Delete(hookPath);
                 }
@@ -643,7 +644,7 @@ namespace VibeRails.Services
                         "Hook file exists, but it has no VibeRails section.");
                 }
 
-                if (content.Contains("temporarily disabled", StringComparison.OrdinalIgnoreCase))
+                if (ManagedSectionContains(content, marker, DISABLED_MARKER))
                 {
                     return new GitHookFileStatus(
                         hookName,
@@ -718,6 +719,28 @@ namespace VibeRails.Services
                     HasVibeRailsSection: true,
                     $"Hook could not be inspected: {ex.Message}");
             }
+        }
+
+        private static bool IsEmptyOrShebangOnly(string content)
+        {
+            var trimmed = content.Trim();
+            return trimmed.Length == 0
+                || (trimmed.StartsWith("#!", StringComparison.Ordinal)
+                    && !trimmed.Contains('\r')
+                    && !trimmed.Contains('\n'));
+        }
+
+        private static bool ManagedSectionContains(string content, string marker, string value)
+        {
+            var startIndex = content.IndexOf(marker, StringComparison.Ordinal);
+            if (startIndex < 0)
+                return false;
+
+            var endIndex = content.IndexOf(END_MARKER, startIndex, StringComparison.Ordinal);
+            var count = endIndex < 0
+                ? content.Length - startIndex
+                : endIndex + END_MARKER.Length - startIndex;
+            return content.IndexOf(value, startIndex, count, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private string MaterializeHookScript(string hookContent, string chainedHookPath)

@@ -1,4 +1,5 @@
 using System.Globalization;
+using TimeZoneConverter;
 using VibeRails.DTOs;
 
 namespace VibeRails.Services.Jobs;
@@ -74,7 +75,7 @@ public static class JobScheduleCalculator
         if (weekly && (trigger.DaysOfWeekMask & 0x7f) == 0)
             throw new ArgumentException("At least one weekday is required.");
 
-        var zone = TimeZoneInfo.FindSystemTimeZoneById(trigger.TimeZoneId);
+        var zone = ResolveTimeZone(trigger.TimeZoneId);
         var localNow = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, zone);
 
         for (var offset = 0; offset <= (weekly ? 14 : 2); offset++)
@@ -93,5 +94,21 @@ public static class JobScheduleCalculator
         }
 
         throw new InvalidOperationException("Unable to compute the next scheduled time.");
+    }
+
+    private static TimeZoneInfo ResolveTimeZone(string timeZoneId)
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            // Browsers report IANA IDs on every platform, while invariant-globalization
+            // Windows builds only resolve the registry's Windows IDs. The runtime's own
+            // IANA/Windows conversion table is disabled in invariant mode, so use the
+            // embedded cross-platform map before rejecting the schedule.
+            return TZConvert.GetTimeZoneInfo(timeZoneId);
+        }
     }
 }

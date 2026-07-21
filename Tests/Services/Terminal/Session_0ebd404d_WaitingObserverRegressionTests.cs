@@ -50,7 +50,7 @@ public sealed class Session_0ebd404d_WaitingObserverRegressionTests
             EnvName: null,
             SetupCommands: Array.Empty<string>(),
             LaunchCommand: string.Empty,
-            TimestampUtc: clock.GetUtcNow()));
+            TimestampUtc: clock.GetUtcNow()), TestContext.Current.CancellationToken);
 
         var startUtc = clock.GetUtcNow();
         var lastEventCount = 0;
@@ -62,7 +62,7 @@ public sealed class Session_0ebd404d_WaitingObserverRegressionTests
                 Direction: TerminalIoDirection.Output,
                 Source: TerminalIoSource.Pty,
                 Text: Encoding.UTF8.GetString(chunk.Bytes),
-                TimestampUtc: clock.GetUtcNow()));
+                TimestampUtc: clock.GetUtcNow()), TestContext.Current.CancellationToken);
             if (events.Count != lastEventCount)
             {
                 _output.WriteLine($"event #{events.Count} fired at T+{chunk.MsOffset / 1000.0:F2}s");

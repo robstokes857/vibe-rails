@@ -9766,19 +9766,12 @@ button.git-guard-menu-button:focus-visible {
     max-width: 640px;
 }
 
-.rules-page-eyebrow {
-    color: color-mix(in srgb, var(--color-accent) 60%, var(--color-text-muted));
-    font: 800 0.62rem/1 var(--vb-font-mono, ui-monospace, monospace);
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
+.rules-page-title {
+    letter-spacing: 0.05em;
 }
 
-.rules-page-heading h1 {
-    margin: 0.4rem 0 0.3rem;
-    color: var(--color-text);
-    font-size: 1.45rem;
-    font-weight: 750;
-    letter-spacing: -0.02em;
+.rules-page-title + p {
+    margin-top: 0.55rem;
 }
 
 .rules-page-heading p {
@@ -11253,7 +11246,7 @@ button.git-guard-menu-button:focus-visible {
 .code-analyzer-file-item {
     display: grid;
     width: 100%;
-    grid-template-columns: 5px minmax(0, 1fr) auto;
+    grid-template-columns: auto 5px minmax(0, 1fr) auto;
     align-items: start;
     gap: 0.55rem;
     margin-bottom: 0.22rem;
@@ -11263,6 +11256,7 @@ button.git-guard-menu-button:focus-visible {
     background: transparent;
     color: inherit;
     text-align: left;
+    cursor: pointer;
 }
 
 .code-analyzer-file-item:hover {
@@ -11272,6 +11266,57 @@ button.git-guard-menu-button:focus-visible {
 .code-analyzer-file-item.active {
     border-color: color-mix(in srgb, var(--color-primary) 32%, transparent);
     background: color-mix(in srgb, var(--color-primary) 11%, transparent);
+}
+
+/* Selected (multi-select) gets a soft tint to read as "checked for bulk action"
+   on top of whatever active/tone state the row already has. */
+.code-analyzer-file-item.selected {
+    border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
+    background: color-mix(in srgb, var(--color-primary) 7%, transparent);
+}
+
+.code-analyzer-file-item:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
+    outline-offset: 1px;
+}
+
+.code-analyzer-file-checkbox {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    margin: 1px 0 0;
+    border: 1.5px solid color-mix(in srgb, var(--color-text-muted) 60%, var(--color-border));
+    border-radius: 3px;
+    background: transparent;
+    cursor: pointer;
+    flex: 0 0 auto;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.code-analyzer-file-checkbox:hover {
+    border-color: color-mix(in srgb, var(--color-primary) 65%, var(--color-border));
+}
+
+.code-analyzer-file-checkbox:checked {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+.code-analyzer-file-checkbox:checked::after {
+    content: '';
+    display: block;
+    width: 4px;
+    height: 8px;
+    margin: 1px auto 0;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.code-analyzer-file-checkbox:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
+    outline-offset: 2px;
 }
 
 .code-analyzer-severity-rail {
@@ -11334,6 +11379,171 @@ button.git-guard-menu-button:focus-visible {
     color: var(--analyzer-muted);
     font-size: 0.7rem;
     text-align: center;
+}
+
+/* ── Bulk action bar (multi-select) ───────────────────────────────────────
+   Sits between the rail head and the file list. Dormant (low-contrast, no
+   actions enabled) when nothing is selected; promoted to a visible toolbar
+   with a primary-tinted background as soon as the user checks something. */
+.code-analyzer-bulk-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.55rem;
+    border-bottom: 1px solid var(--analyzer-line-soft);
+    background: transparent;
+    color: var(--analyzer-muted);
+    font-size: 0.6rem;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.code-analyzer-bulk-bar.is-hidden {
+    display: none;
+}
+
+.code-analyzer-bulk-bar.is-active {
+    background: color-mix(in srgb, var(--color-primary) 9%, transparent);
+    color: var(--color-text);
+}
+
+.code-analyzer-select-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    cursor: pointer;
+    color: var(--analyzer-muted);
+    font-weight: 600;
+    user-select: none;
+}
+
+.code-analyzer-select-all:hover {
+    color: var(--color-text);
+}
+
+.code-analyzer-bulk-checkbox {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid color-mix(in srgb, var(--color-text-muted) 60%, var(--color-border));
+    border-radius: 3px;
+    background: transparent;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.code-analyzer-bulk-checkbox:hover {
+    border-color: color-mix(in srgb, var(--color-primary) 65%, var(--color-border));
+}
+
+.code-analyzer-bulk-checkbox:checked {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+.code-analyzer-bulk-checkbox:checked::after {
+    content: '';
+    display: block;
+    width: 4px;
+    height: 8px;
+    margin: 1px auto 0;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.code-analyzer-bulk-checkbox:indeterminate {
+    border-color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.code-analyzer-bulk-checkbox:indeterminate::after {
+    content: '';
+    display: block;
+    width: 8px;
+    height: 2px;
+    margin: 5px auto 0;
+    background: var(--color-primary);
+}
+
+.code-analyzer-bulk-summary {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+.code-analyzer-bulk-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 0 0 auto;
+}
+
+.code-analyzer-bulk-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--analyzer-line);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--analyzer-muted);
+    font-size: 0.58rem;
+    font-weight: 700;
+    white-space: nowrap;
+    transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.code-analyzer-bulk-button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--color-warning) 45%, var(--color-border));
+    background: color-mix(in srgb, var(--color-warning) 9%, transparent);
+    color: color-mix(in srgb, var(--color-warning) 70%, var(--color-text));
+}
+
+.code-analyzer-bulk-button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
+    outline-offset: 2px;
+}
+
+.code-analyzer-bulk-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.code-analyzer-bulk-clear {
+    padding: 0.3rem 0.45rem;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--analyzer-muted-2);
+    font-size: 0.58rem;
+    font-weight: 700;
+}
+
+.code-analyzer-bulk-clear:hover:not(:disabled) {
+    color: var(--color-text);
+    background: color-mix(in srgb, var(--color-text) 5%, transparent);
+}
+
+.code-analyzer-bulk-clear:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* "Ignore folder" variant on the file overview — visually distinct from the
+   per-file Ignore button so the directory-level action doesn't read as the
+   same thing. */
+.code-analyzer-ignore-folder-button {
+    color: color-mix(in srgb, var(--color-accent) 70%, var(--color-text-muted));
+}
+
+.code-analyzer-ignore-folder-button:hover {
+    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: color-mix(in srgb, var(--color-accent) 80%, var(--color-text));
 }
 
 /* ── Ignored files (user's Code quality ignore list) ─────────────────────── */
@@ -12937,11 +13147,12 @@ body.git-guard-focus-active #app-content {
     margin-bottom: 1.25rem;
 }
 
-.jobs-page-header h1 {
-    margin: 0.15rem 0 0.35rem;
-    color: var(--color-text);
-    font-size: clamp(2rem, 4vw, 3.2rem);
-    letter-spacing: -0.045em;
+.jobs-page-title {
+    letter-spacing: 0.05em;
+}
+
+.jobs-page-title + p {
+    margin-top: 0.55rem;
 }
 
 .jobs-page-header p {
@@ -12950,6 +13161,26 @@ body.git-guard-focus-active #app-content {
     color: var(--color-text-muted);
     line-height: 1.55;
 }
+
+.jobs-security-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+    margin-bottom: 1rem;
+    padding: 1rem 1.1rem;
+    border: 1px solid color-mix(in srgb, var(--color-warning) 52%, var(--color-border));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--color-warning) 10%, var(--color-bg-elevated));
+}
+
+.jobs-security-notice > i {
+    margin-top: 0.16rem;
+    color: var(--color-warning);
+    font-size: 1.1rem;
+}
+
+.jobs-security-notice strong { color: var(--color-warning); }
+.jobs-security-notice p { margin: 0.25rem 0 0; color: var(--color-text); font-size: 0.78rem; line-height: 1.55; }
 
 .jobs-eyebrow {
     color: var(--color-accent);
@@ -12969,6 +13200,8 @@ body.git-guard-focus-active #app-content {
     background: color-mix(in srgb, var(--color-bg-elevated) 88%, transparent);
     box-shadow: 0 18px 42px rgb(0 0 0 / 9%);
 }
+
+.jobs-worker-card[hidden] { display: none; }
 
 .jobs-worker-card[data-tone="success"] {
     border-color: color-mix(in srgb, var(--color-success) 42%, var(--color-border));
@@ -13156,7 +13389,8 @@ body.git-guard-focus-active #app-content {
 .job-schedule-editor { margin: 0.3rem 0 0.65rem 1.5rem; padding: 0.85rem; border-left: 2px solid color-mix(in srgb, var(--color-accent) 45%, transparent); background: color-mix(in srgb, var(--color-accent) 4%, transparent); }
 .job-weekdays { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .job-weekdays label { display: flex; align-items: center; gap: 0.28rem; padding: 0.28rem 0.45rem; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-text-muted); font-size: 0.7rem; }
-.job-live-warning { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.55rem; padding: 0.65rem; border: 1px solid color-mix(in srgb, var(--color-warning) 42%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--color-warning) 8%, transparent); color: var(--color-warning); font-size: 0.74rem; }
+.job-mode-warning { display: flex; align-items: flex-start; gap: 0.6rem; margin-top: 0.55rem; padding: 0.65rem; border: 1px solid color-mix(in srgb, var(--color-warning) 42%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--color-warning) 8%, transparent); color: var(--color-warning); font-size: 0.74rem; line-height: 1.45; }
+.job-mode-warning i { margin-top: 0.12rem; }
 
 .job-run-detail-summary { display: grid; gap: 0.35rem; margin-bottom: 0.75rem; }
 .job-run-detail-summary > div { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }

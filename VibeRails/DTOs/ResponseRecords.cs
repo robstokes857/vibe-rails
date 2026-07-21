@@ -416,9 +416,12 @@ namespace VibeRails.DTOs
     );
 
     // Code quality ignore list: files the user removed from scan results, with an
-    // optional reason ("test" / "config" / "other" plus free text).
+    // optional reason ("test" / "config" / "other" plus free text). MatchKind is
+    // "file" (default, exact path) or "directory" (the path itself plus everything
+    // underneath it — used to drop a whole Tests/ or node_modules/ folder at once).
     public record CodeAnalyzerIgnoreEntryResponse(
         string Path,
+        string MatchKind,
         string? ReasonKind,
         string? ReasonText,
         DateTime CreatedUtc
@@ -430,8 +433,27 @@ namespace VibeRails.DTOs
 
     public record CodeAnalyzerIgnoreRequest(
         string Path,
+        string? MatchKind = null,
         string? ReasonKind = null,
         string? ReasonText = null
+    );
+
+    /// <summary>
+    /// Body for POST /api/v1/code-analyzer/ignores/bulk. Applies one MatchKind + reason
+    /// to many paths in a single request so the UI can multi-select files without
+    /// firing N round-trips. Returns the count actually applied.
+    /// </summary>
+    public record CodeAnalyzerIgnoreBulkRequest(
+        List<string> Paths,
+        string? MatchKind = null,
+        string? ReasonKind = null,
+        string? ReasonText = null
+    );
+
+    public record CodeAnalyzerIgnoreBulkResponse(
+        int Applied,
+        int Skipped,
+        string Message
     );
 
     public record GitPreflightEventResponse(
@@ -1109,6 +1131,8 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(List<CodeAnalyzerIgnoreEntryResponse>))]
     [JsonSerializable(typeof(CodeAnalyzerIgnoreListResponse))]
     [JsonSerializable(typeof(CodeAnalyzerIgnoreRequest))]
+    [JsonSerializable(typeof(CodeAnalyzerIgnoreBulkRequest))]
+    [JsonSerializable(typeof(CodeAnalyzerIgnoreBulkResponse))]
     [JsonSerializable(typeof(GitPreflightEventResponse))]
     [JsonSerializable(typeof(ValidationResultResponse))]
     [JsonSerializable(typeof(List<ValidationResultResponse>))]

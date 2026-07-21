@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
+using MintLint;
 using Serilog;
 
 namespace VibeRails.Services.GitPreflight;
@@ -18,12 +20,24 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     /// allocate all of them simultaneously.
     /// </summary>
     private const long MaximumSnapshotBytes = 64L * 1024 * 1024;
+    private readonly long _maximumUnpushedSnapshotBytes;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
         : StringComparer.Ordinal;
 
     /// <summary>Index mode of a submodule (gitlink) entry.</summary>
     private const string GitLinkMode = "160000";
+
+    public GitStagedSnapshotProvider()
+        : this(MaximumSnapshotBytes)
+    {
+    }
+
+    internal GitStagedSnapshotProvider(long maximumUnpushedSnapshotBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumUnpushedSnapshotBytes);
+        _maximumUnpushedSnapshotBytes = maximumUnpushedSnapshotBytes;
+    }
 
     public async Task<GitStagedSnapshot> CaptureAsync(
         string workingDirectory,
@@ -36,38 +50,77 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         EnsureSucceeded(rootResult, "locate the Git repository", workingDirectory);
         var repositoryPath = Path.GetFullPath(rootResult.StdOut.Trim());
 
-        var indexEntries = await ReadIndexEntriesAsync(repositoryPath, cancellationToken);
-        var gitLinkPaths = CollectGitLinkPaths(indexEntries);
-        var trackedFiles = ToTrackedFiles(indexEntries);
+        // Freeze the moving index into a tree object once, then perform every subsequent read from
+        // immutable objects. VCA, MintLint, and queued jobs therefore share exactly one identity.
+        var identity = await CaptureStagedIdentityAsync(repositoryPath, cancellationToken);
+        var stagedTreeEntries = await ReadTreeEntriesAsync(
+            repositoryPath,
+            identity.StagedTree,
+            cancellationToken);
+        var baseTreeEntries = await ReadTreeEntriesAsync(
+            repositoryPath,
+            identity.BaseTree,
+            cancellationToken);
+        var stagedByPath = stagedTreeEntries.ToDictionary(entry => entry.RelativePath, PathComparer);
+        var baseByPath = baseTreeEntries.ToDictionary(entry => entry.RelativePath, PathComparer);
+        var trackedFiles = stagedTreeEntries
+            .Where(entry => entry.Type == "blob" && entry.Mode != GitLinkMode)
+            .Select(entry => entry.RelativePath)
+            .Distinct(PathComparer)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
 
         var statusResult = await RunTextGitAsync(
             repositoryPath,
-            ["--no-pager", "diff", "--cached", "--name-status", "-z", "--find-renames"],
+            [
+                "--no-pager", "diff", "--name-status", "-z", "--find-renames",
+                identity.BaseTree, identity.StagedTree, "--"
+            ],
             cancellationToken);
         EnsureSucceeded(statusResult, "read staged file status", repositoryPath);
 
         var stagedEntries = ParseNameStatus(statusResult.StdOut);
-        var changedLines = await ReadChangedLineCountsAsync(repositoryPath, cancellationToken);
+        var changedLines = await ReadChangedLineCountsAsync(
+            repositoryPath,
+            identity.BaseTree,
+            identity.StagedTree,
+            cancellationToken);
         var files = new List<GitStagedFileSnapshot>(stagedEntries.Count);
+        var contentBudget = new SnapshotMemoryBudget(long.MaxValue);
+        var textByObject = new Dictionary<string, BlobTextResult>(StringComparer.Ordinal);
+
+        async Task<BlobTextResult> ReadTreeTextAsync(GitTreeEntry treeEntry)
+        {
+            if (textByObject.TryGetValue(treeEntry.ObjectId, out var cached))
+                return cached;
+            var loaded = await TryReadTextBlobAsync(
+                repositoryPath,
+                treeEntry.ObjectId,
+                treeEntry.Size,
+                contentBudget,
+                cancellationToken);
+            textByObject[treeEntry.ObjectId] = loaded;
+            return loaded;
+        }
 
         foreach (var entry in stagedEntries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var existsInIndex = entry.Kind != GitStagedChangeKind.Deleted;
+            GitTreeEntry? stagedTreeEntry = null;
+            var existsInIndex = entry.Kind != GitStagedChangeKind.Deleted
+                && stagedByPath.TryGetValue(entry.RelativePath, out stagedTreeEntry);
             string? content = null;
-            var isBinary = false;
+            var isBinary = !existsInIndex;
 
-            if (existsInIndex && gitLinkPaths.Contains(entry.RelativePath))
+            if (existsInIndex && stagedTreeEntry!.Mode == GitLinkMode)
             {
-                // A staged submodule pointer (gitlink) names a commit in the submodule's
-                // history, not a blob in this repository — `git show :<path>` fails with
-                // "bad object". Record it as unanalyzable instead of reading it.
                 isBinary = true;
             }
-            else if (existsInIndex)
+            else if (existsInIndex && stagedTreeEntry!.Type == "blob")
             {
-                var blob = await ReadIndexBlobAsync(repositoryPath, entry.RelativePath, cancellationToken);
-                content = DecodeText(blob, out isBinary);
+                var blob = await ReadTreeTextAsync(stagedTreeEntry);
+                content = blob.Content;
+                isBinary = blob.IsBinary;
             }
 
             // The committed version of the file, so consumers can tell newly introduced
@@ -77,14 +130,13 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             if (!isBinary && entry.Kind is GitStagedChangeKind.Modified or GitStagedChangeKind.Renamed)
             {
                 var previousPath = entry.PreviousRelativePath ?? entry.RelativePath;
-                var headBlob = await TryReadHeadBlobAsync(repositoryPath, previousPath, cancellationToken);
-                if (headBlob != null)
+                if (baseByPath.TryGetValue(previousPath, out var baseTreeEntry)
+                    && baseTreeEntry.Type == "blob"
+                    && baseTreeEntry.Mode != GitLinkMode)
                 {
-                    previousContent = DecodeText(headBlob, out var previousBinary);
-                    if (previousBinary)
-                    {
-                        previousContent = null;
-                    }
+                    var previousBlob = await ReadTreeTextAsync(baseTreeEntry);
+                    if (!previousBlob.IsBinary)
+                        previousContent = previousBlob.Content;
                 }
             }
 
@@ -101,8 +153,20 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 previousContent));
         }
 
-        var agentFiles = await ReadAgentFilesAsync(repositoryPath, trackedFiles, cancellationToken);
-        return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles);
+        var agentFiles = new List<GitIndexTextFile>();
+        foreach (var entry in stagedTreeEntries.Where(entry => entry.Type == "blob" && IsAgentFile(entry.RelativePath)))
+        {
+            var agent = await ReadTreeTextAsync(entry);
+            if (!agent.IsBinary && agent.Content is not null)
+                agentFiles.Add(new GitIndexTextFile(entry.RelativePath, agent.Content));
+        }
+
+        return new GitStagedSnapshot(
+            repositoryPath,
+            files,
+            agentFiles,
+            trackedFiles,
+            StagedIdentity: identity);
     }
 
     /// <summary>
@@ -265,6 +329,223 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             pathGuard,
             cancellationToken);
         return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles);
+    }
+
+    /// <summary>
+    /// Captures the diff between the current branch's upstream tracking ref and HEAD —
+    /// i.e. every file touched by commits the user has made but not yet pushed. The
+    /// working tree is intentionally ignored: this scan answers "what did my unpushed
+    /// commits change", not "what is on disk right now".
+    ///
+    /// Throws <see cref="InvalidOperationException"/> with a user-actionable message when
+    /// the branch has no upstream (e.g. a brand-new branch that has never been pushed).
+    /// The caller maps that to a friendly API response.
+    /// </summary>
+    public async Task<GitStagedSnapshot> CaptureUnpushedAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        var rootResult = await RunTextGitAsync(
+            workingDirectory,
+            ["rev-parse", "--show-toplevel"],
+            cancellationToken);
+        EnsureSucceeded(rootResult, "locate the Git repository", workingDirectory);
+        var repositoryPath = Path.GetFullPath(rootResult.StdOut.Trim());
+
+        // Resolve @{upstream}. `--symbolic-full-name` returns e.g. "origin/main"; without
+        // it we'd get the SHA, which works for diffs but produces worse error messages.
+        var upstreamResult = await RunTextGitAsync(
+            repositoryPath,
+            ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            cancellationToken);
+        if (upstreamResult.ExitCode != 0 || string.IsNullOrWhiteSpace(upstreamResult.StdOut)
+            || upstreamResult.StdOut.Trim().Equals("@{upstream}", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "This branch has no upstream tracking branch. Push it first with "
+                + "`git push -u origin <branch>` so VibeRails can diff against it.");
+        }
+        var upstreamRef = upstreamResult.StdOut.Trim();
+
+        // Pin both moving refs before reading any tree or blob. Every command below uses these
+        // immutable object ids, so a concurrent commit/fetch cannot splice two revisions together.
+        var headResult = await RunTextGitAsync(
+            repositoryPath,
+            ["rev-parse", "--verify", "HEAD^{commit}"],
+            cancellationToken);
+        EnsureSucceeded(headResult, "resolve HEAD", repositoryPath);
+        var headCommit = headResult.StdOut.Trim();
+
+        var upstreamCommitResult = await RunTextGitAsync(
+            repositoryPath,
+            ["rev-parse", "--verify", $"{upstreamRef}^{{commit}}"],
+            cancellationToken);
+        EnsureSucceeded(upstreamCommitResult, $"resolve upstream branch {upstreamRef}", repositoryPath);
+        var upstreamCommit = upstreamCommitResult.StdOut.Trim();
+
+        // "What did my unpushed commits change" is a fork-point question: diff from the merge base of
+        // upstream and HEAD, not from the (possibly diverged) upstream tip. Two-dot `upstream..HEAD`
+        // misattributes commits the upstream gained independently — they show up reversed as "your"
+        // deletions — and pins the baseline to the upstream tip. Three-dot `upstream...HEAD` is
+        // defined as `merge-base(upstream, HEAD)..HEAD`; resolve the merge base explicitly so
+        // name-status, numstat, and the previous-content blobs all read from the same fork point.
+        var mergeBaseResult = await RunTextGitAsync(
+            repositoryPath,
+            ["merge-base", upstreamCommit, headCommit],
+            cancellationToken);
+        EnsureSucceeded(mergeBaseResult, $"find the merge base of {upstreamRef} and HEAD", repositoryPath);
+        var mergeBaseRef = mergeBaseResult.StdOut.Trim();
+
+        // This scope represents committed state, so enumerate HEAD's tree rather than the index.
+        // `-l` supplies each blob's size before any content is read.
+        var headEntries = await ReadTreeEntriesAsync(repositoryPath, headCommit, cancellationToken);
+        var headByPath = headEntries.ToDictionary(entry => entry.RelativePath, PathComparer);
+        var trackedFiles = headEntries
+            .Where(entry => entry.Type == "blob" && entry.Mode != GitLinkMode)
+            .Select(entry => entry.RelativePath)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+
+        var statusResult = await RunTextGitAsync(
+            repositoryPath,
+            ["--no-pager", "diff", "--name-status", "-z", "--find-renames", $"{mergeBaseRef}..{headCommit}"],
+            cancellationToken);
+        EnsureSucceeded(statusResult, $"read unpushed file status ({upstreamRef}...HEAD)", repositoryPath);
+
+        var changedEntries = ParseNameStatus(statusResult.StdOut);
+        var changedLines = await ReadUnpushedChangedLineCountsAsync(
+            repositoryPath,
+            mergeBaseRef,
+            headCommit,
+            cancellationToken);
+
+        var budget = new SnapshotMemoryBudget(_maximumUnpushedSnapshotBytes);
+        var headTextByObject = new Dictionary<string, BlobTextResult>(StringComparer.Ordinal);
+
+        async Task<BlobTextResult> ReadHeadTextAsync(GitTreeEntry entry)
+        {
+            if (headTextByObject.TryGetValue(entry.ObjectId, out var cached))
+            {
+                return cached;
+            }
+
+            var loaded = await TryReadTextBlobAsync(
+                repositoryPath,
+                entry.ObjectId,
+                entry.Size,
+                budget,
+                cancellationToken);
+            headTextByObject[entry.ObjectId] = loaded;
+            return loaded;
+        }
+
+        // Rules are part of the snapshot's meaning, so reserve memory for HEAD's agent files before
+        // lower-priority baselines and impact-only sources consume the aggregate budget.
+        var agentFiles = new List<GitIndexTextFile>();
+        foreach (var entry in headEntries.Where(entry => entry.Type == "blob" && IsAgentFile(entry.RelativePath)))
+        {
+            var agent = await ReadHeadTextAsync(entry);
+            if (!agent.IsBinary && agent.Content is not null)
+            {
+                agentFiles.Add(new GitIndexTextFile(entry.RelativePath, agent.Content));
+            }
+        }
+
+        var files = new List<GitStagedFileSnapshot>(changedEntries.Count);
+        foreach (var entry in changedEntries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // The "current" version is the file at HEAD. Deleted files have no HEAD blob
+            // (the path no longer exists in the tree) — record them as unanalyzable so
+            // they still appear in the snapshot count but contribute nothing to the scan.
+            GitTreeEntry? headEntry = null;
+            var existsInHead = entry.Kind != GitStagedChangeKind.Deleted
+                && headByPath.TryGetValue(entry.RelativePath, out headEntry)
+                && headEntry.Type == "blob"
+                && headEntry.Mode != GitLinkMode;
+            string? content = null;
+            var isBinary = !existsInHead;
+            if (existsInHead && headEntry is not null)
+            {
+                var headBlob = await ReadHeadTextAsync(headEntry);
+                content = headBlob.Content;
+                isBinary = headBlob.IsBinary;
+            }
+
+            // The "previous" version is the file at the merge base (fork point) of upstream and HEAD,
+            // matching the three-dot diff above. Added files have no blob there (the path didn't
+            // exist before this branch's commits) — the scan treats them as newly introduced. If the
+            // merge base couldn't be resolved (unrelated histories), there is no baseline and every
+            // changed file reads as newly introduced.
+            string? previousContent = null;
+            if (!isBinary
+                && entry.Kind is GitStagedChangeKind.Modified or GitStagedChangeKind.Renamed)
+            {
+                var previousPath = entry.PreviousRelativePath ?? entry.RelativePath;
+                var baseBlob = await TryReadTextBlobAsync(
+                    repositoryPath,
+                    $"{mergeBaseRef}:./{previousPath}",
+                    knownSize: null,
+                    budget,
+                    cancellationToken);
+                if (!baseBlob.IsBinary)
+                {
+                    previousContent = baseBlob.Content;
+                }
+            }
+
+            changedLines.TryGetValue(entry.RelativePath, out var lineCount);
+            files.Add(new GitStagedFileSnapshot(
+                entry.RelativePath,
+                ToFullPath(repositoryPath, entry.RelativePath),
+                entry.Kind,
+                existsInHead,
+                isBinary,
+                lineCount,
+                content,
+                entry.PreviousRelativePath,
+                previousContent));
+        }
+
+        // Impact ranking also consumes immutable HEAD contents. Reuse blobs retained above and fill
+        // the remaining aggregate budget with supported source files from the HEAD tree.
+        var impactFiles = new List<GitIndexTextFile>();
+        foreach (var entry in headEntries.Where(entry =>
+                     entry.Type == "blob" && MintLintAnalyzer.SupportsFile(entry.RelativePath)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var source = await ReadHeadTextAsync(entry);
+            if (!source.IsBinary && source.Content is not null)
+            {
+                impactFiles.Add(new GitIndexTextFile(entry.RelativePath, source.Content));
+            }
+        }
+
+        if (budget.SkippedFileCount > 0)
+        {
+            Log.Warning(
+                "[GitPreflight] Unpushed snapshot reached its {BudgetBytes} byte content budget; "
+                + "{SkippedCount} blob(s) were left unanalyzed.",
+                _maximumUnpushedSnapshotBytes,
+                budget.SkippedFileCount);
+        }
+
+        return new GitStagedSnapshot(repositoryPath, files, agentFiles, trackedFiles, impactFiles);
+    }
+
+    private static async Task<Dictionary<string, int?>> ReadUnpushedChangedLineCountsAsync(
+        string repositoryPath,
+        string mergeBaseRef,
+        string headCommit,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunTextGitAsync(
+            repositoryPath,
+            ["--no-pager", "diff", "--numstat", "-z", $"{mergeBaseRef}..{headCommit}"],
+            cancellationToken);
+        EnsureSucceeded(result, "count unpushed changed lines", repositoryPath);
+        return ParseChangedLineCounts(result.StdOut);
     }
 
     /// <summary>
@@ -490,6 +771,163 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         return entries;
     }
 
+    private static async Task<IReadOnlyList<GitTreeEntry>> ReadTreeEntriesAsync(
+        string repositoryPath,
+        string treeish,
+        CancellationToken cancellationToken)
+    {
+        var treeResult = await RunTextGitAsync(
+            repositoryPath,
+            ["ls-tree", "-r", "-z", "-l", "--full-tree", treeish],
+            cancellationToken);
+        EnsureSucceeded(treeResult, $"read the Git tree {treeish}", repositoryPath);
+
+        // With -l each record is "<mode> <type> <object> <size>\t<path>". Blob size is
+        // therefore known before content is requested; gitlinks have type "commit" and no size.
+        var entries = new List<GitTreeEntry>();
+        foreach (var record in SplitNull(treeResult.StdOut))
+        {
+            var tabIndex = record.IndexOf('\t');
+            if (tabIndex <= 0)
+            {
+                continue;
+            }
+
+            var fields = record[..tabIndex].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var path = NormalizePath(record[(tabIndex + 1)..]);
+            if (fields.Length < 4 || path.Length == 0)
+            {
+                continue;
+            }
+
+            long? size = long.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out var parsedSize)
+                ? parsedSize
+                : null;
+            entries.Add(new GitTreeEntry(path, fields[0], fields[1], fields[2], size));
+        }
+
+        return entries;
+    }
+
+    private static async Task<GitStagedSnapshotIdentity> CaptureStagedIdentityAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken)
+    {
+        var headResult = await RunTextGitAsync(
+            repositoryPath,
+            ["rev-parse", "--verify", "HEAD^{commit}"],
+            cancellationToken);
+
+        string? baseCommit = null;
+        string baseTree;
+        if (headResult.ExitCode == 0 && !headResult.TimedOut)
+        {
+            baseCommit = headResult.StdOut.Trim();
+            if (!IsObjectId(baseCommit))
+                throw new InvalidOperationException("Git returned an invalid staged snapshot base commit id.");
+            var baseTreeResult = await RunTextGitAsync(
+                repositoryPath,
+                ["rev-parse", "--verify", $"{baseCommit}^{{tree}}"],
+                cancellationToken);
+            EnsureSucceeded(baseTreeResult, "resolve the staged snapshot base tree", repositoryPath);
+            baseTree = baseTreeResult.StdOut.Trim();
+        }
+        else
+        {
+            if (headResult.TimedOut)
+                throw new TimeoutException("Git timed out while resolving the staged snapshot base commit.");
+
+            // Distinguish a legitimate unborn branch from a corrupt/detached HEAD before treating
+            // the base as an empty tree.
+            var symbolicHead = await RunTextGitAsync(
+                repositoryPath,
+                ["symbolic-ref", "-q", "HEAD"],
+                cancellationToken);
+            EnsureSucceeded(symbolicHead, "verify the unborn branch", repositoryPath);
+
+            var emptyTreeResult = await RunTextGitAsync(
+                repositoryPath,
+                ["mktree"],
+                cancellationToken,
+                standardInput: ReadOnlyMemory<byte>.Empty);
+            EnsureSucceeded(emptyTreeResult, "create the empty initial-commit tree", repositoryPath);
+            baseTree = emptyTreeResult.StdOut.Trim();
+        }
+
+        if (!IsObjectId(baseTree))
+            throw new InvalidOperationException("Git returned an invalid staged snapshot base tree id.");
+
+        var stagedTreeResult = await RunTextGitAsync(
+            repositoryPath,
+            ["write-tree"],
+            cancellationToken);
+        EnsureSucceeded(stagedTreeResult, "freeze the staged index tree", repositoryPath);
+        var stagedTree = stagedTreeResult.StdOut.Trim();
+        if (!IsObjectId(stagedTree))
+            throw new InvalidOperationException("Git returned an invalid staged index tree id.");
+
+        return new GitStagedSnapshotIdentity(baseCommit, baseTree, stagedTree);
+    }
+
+    private static async Task<BlobTextResult> TryReadTextBlobAsync(
+        string repositoryPath,
+        string objectSpec,
+        long? knownSize,
+        SnapshotMemoryBudget budget,
+        CancellationToken cancellationToken)
+    {
+        var size = knownSize;
+        if (size is null)
+        {
+            var sizeResult = await RunTextGitAsync(
+                repositoryPath,
+                ["cat-file", "-s", objectSpec],
+                cancellationToken);
+            if (sizeResult.ExitCode != 0
+                || sizeResult.TimedOut
+                || !long.TryParse(
+                    sizeResult.StdOut.Trim(),
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var parsedSize))
+            {
+                return BlobTextResult.Binary;
+            }
+
+            size = parsedSize;
+        }
+
+        if (size < 0 || size > MaximumTextFileBytes)
+        {
+            return BlobTextResult.Binary;
+        }
+
+        if (!budget.TryReserve(size.Value))
+        {
+            return BlobTextResult.Binary;
+        }
+
+        var result = await RunBinaryGitAsync(
+            repositoryPath,
+            ["cat-file", "blob", objectSpec],
+            cancellationToken,
+            MaximumTextFileBytes);
+        if (result.ExitCode != 0 || result.TimedOut || result.OutputLimitExceeded)
+        {
+            budget.Release(size.Value);
+            return BlobTextResult.Binary;
+        }
+
+        var content = DecodeText(result.Bytes, out var binary);
+        if (binary || content is null)
+        {
+            budget.Release(size.Value);
+            return BlobTextResult.Binary;
+        }
+
+        return new BlobTextResult(content, IsBinary: false);
+    }
+
     private static HashSet<string> CollectGitLinkPaths(IReadOnlyList<GitIndexEntry> entries) =>
         entries
             .Where(entry => entry.Mode == GitLinkMode)
@@ -508,36 +946,15 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToList();
 
-    private static async Task<IReadOnlyList<GitIndexTextFile>> ReadAgentFilesAsync(
-        string repositoryPath,
-        IReadOnlyList<string> trackedFiles,
-        CancellationToken cancellationToken)
-    {
-        var paths = trackedFiles
-            .Where(IsAgentFile)
-            .ToList();
-        var results = new List<GitIndexTextFile>(paths.Count);
-
-        foreach (var path in paths)
-        {
-            var bytes = await ReadIndexBlobAsync(repositoryPath, path, cancellationToken);
-            var content = DecodeText(bytes, out var binary);
-            if (!binary && content != null)
-            {
-                results.Add(new GitIndexTextFile(path, content));
-            }
-        }
-
-        return results;
-    }
-
     private static async Task<Dictionary<string, int?>> ReadChangedLineCountsAsync(
         string repositoryPath,
+        string baseTree,
+        string stagedTree,
         CancellationToken cancellationToken)
     {
         var result = await RunTextGitAsync(
             repositoryPath,
-            ["--no-pager", "diff", "--cached", "--numstat", "-z"],
+            ["--no-pager", "diff", "--numstat", "-z", baseTree, stagedTree, "--"],
             cancellationToken);
         EnsureSucceeded(result, "count staged changed lines", repositoryPath);
 
@@ -625,24 +1042,6 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         _ => GitStagedChangeKind.Unknown
     };
 
-    private static async Task<byte[]> ReadIndexBlobAsync(
-        string repositoryPath,
-        string relativePath,
-        CancellationToken cancellationToken)
-    {
-        var result = await RunBinaryGitAsync(
-            repositoryPath,
-            ["--no-pager", "show", "--no-textconv", $":./{relativePath}"],
-            cancellationToken);
-        if (result.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"Git could not read staged content for '{relativePath}': {result.StdErr.Trim()}");
-        }
-
-        return result.Bytes;
-    }
-
     /// <summary>
     /// Reads the committed (HEAD) version of a path. Returns null instead of throwing:
     /// an unborn branch or a path new to this commit simply has no baseline.
@@ -652,12 +1051,44 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         string relativePath,
         CancellationToken cancellationToken)
     {
+        var objectSpec = $"HEAD:./{relativePath}";
+        var sizeResult = await RunTextGitAsync(
+            repositoryPath,
+            ["cat-file", "-s", objectSpec],
+            cancellationToken);
+        if (sizeResult.ExitCode != 0
+            || sizeResult.TimedOut
+            || !long.TryParse(
+                sizeResult.StdOut.Trim(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var size)
+            || size < 0
+            || size > MaximumTextFileBytes)
+        {
+            return null;
+        }
+
         var result = await RunBinaryGitAsync(
             repositoryPath,
-            ["--no-pager", "show", "--no-textconv", $"HEAD:./{relativePath}"],
-            cancellationToken);
-        return result.ExitCode == 0 && !result.TimedOut ? result.Bytes : null;
+            ["cat-file", "blob", objectSpec],
+            cancellationToken,
+            MaximumTextFileBytes);
+        return result.ExitCode == 0 && !result.TimedOut && !result.OutputLimitExceeded
+            ? result.Bytes
+            : null;
     }
+
+    /// <summary>
+    /// Reads the committed (HEAD) bytes of a repo-relative path; null when absent. Used by the
+    /// code-analyzer source endpoint so an unpushed scan shows the exact revision it scored (HEAD),
+    /// not the working-tree file.
+    /// </summary>
+    internal static Task<byte[]?> TryReadHeadBlobPublicAsync(
+        string repositoryPath,
+        string relativePath,
+        CancellationToken cancellationToken) =>
+        TryReadHeadBlobAsync(repositoryPath, relativePath, cancellationToken);
 
     internal static string? DecodeText(byte[] bytes, out bool isBinary)
     {
@@ -683,9 +1114,14 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     private static async Task<TextGitResult> RunTextGitAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ReadOnlyMemory<byte>? standardInput = null)
     {
-        var binary = await RunBinaryGitAsync(workingDirectory, arguments, cancellationToken);
+        var binary = await RunBinaryGitAsync(
+            workingDirectory,
+            arguments,
+            cancellationToken,
+            standardInput: standardInput);
         return new TextGitResult(
             binary.ExitCode,
             Encoding.UTF8.GetString(binary.Bytes),
@@ -693,10 +1129,27 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             binary.TimedOut);
     }
 
+    internal static async Task<(bool TimedOut, byte[] Bytes)> RunBinaryGitForTestAsync(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunBinaryGitAsync(
+            workingDirectory,
+            arguments,
+            cancellationToken,
+            timeoutOverride: timeout);
+        return (result.TimedOut, result.Bytes);
+    }
+
     private static async Task<BinaryGitResult> RunBinaryGitAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? maximumOutputBytes = null,
+        TimeSpan? timeoutOverride = null,
+        ReadOnlyMemory<byte>? standardInput = null)
     {
         using var process = new Process
         {
@@ -706,6 +1159,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 WorkingDirectory = workingDirectory,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = standardInput.HasValue,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 StandardErrorEncoding = Encoding.UTF8
@@ -717,25 +1171,49 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         }
 
         process.Start();
+        if (standardInput.HasValue)
+        {
+            if (!standardInput.Value.IsEmpty)
+                await process.StandardInput.BaseStream.WriteAsync(standardInput.Value, cancellationToken);
+            process.StandardInput.Close();
+        }
         await using var output = new MemoryStream();
-        var copyTask = process.StandardOutput.BaseStream.CopyToAsync(output, cancellationToken);
+        var copyTask = CopyStandardOutputAsync(
+            process.StandardOutput.BaseStream,
+            output,
+            maximumOutputBytes,
+            cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(GitTimeout);
+        timeoutCts.CancelAfter(timeoutOverride ?? GitTimeout);
         var timedOut = false;
+        var outputLimitExceeded = false;
         try
         {
-            await process.WaitForExitAsync(timeoutCts.Token);
-            await copyTask;
+            var waitTask = process.WaitForExitAsync(timeoutCts.Token);
+            var completed = await Task.WhenAny(waitTask, copyTask);
+            if (completed == copyTask)
+            {
+                outputLimitExceeded = await copyTask;
+                if (outputLimitExceeded)
+                {
+                    TryKill(process);
+                }
+            }
+
+            await waitTask;
+            outputLimitExceeded |= await copyTask;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             timedOut = true;
             TryKill(process);
+            await ObserveCopyTaskAsync(copyTask);
         }
         catch (OperationCanceledException)
         {
             TryKill(process);
+            await ObserveCopyTaskAsync(copyTask);
             throw;
         }
 
@@ -744,7 +1222,52 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             process.HasExited ? process.ExitCode : -1,
             output.ToArray(),
             stdErr,
-            timedOut);
+            timedOut,
+            outputLimitExceeded);
+    }
+
+    private static async Task<bool> CopyStandardOutputAsync(
+        Stream source,
+        Stream destination,
+        int? maximumOutputBytes,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new byte[81_920];
+        var written = 0L;
+        while (true)
+        {
+            var read = await source.ReadAsync(buffer, cancellationToken);
+            if (read == 0)
+            {
+                return false;
+            }
+
+            if (maximumOutputBytes is int limit && written + read > limit)
+            {
+                var allowed = Math.Max(0, limit - written);
+                if (allowed > 0)
+                {
+                    await destination.WriteAsync(buffer.AsMemory(0, (int)allowed), cancellationToken);
+                }
+
+                return true;
+            }
+
+            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            written += read;
+        }
+    }
+
+    private static async Task ObserveCopyTaskAsync(Task<bool> copyTask)
+    {
+        try
+        {
+            await copyTask;
+        }
+        catch (Exception exception) when (exception is IOException or OperationCanceledException)
+        {
+            // The process was killed for timeout/cancellation; its stdout pipe may close abruptly.
+        }
     }
 
     private static void EnsureSucceeded(TextGitResult result, string operation, string directory)
@@ -800,6 +1323,9 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     private static string ToFullPath(string root, string relativePath) =>
         Path.GetFullPath(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
+    private static bool IsObjectId(string? value) =>
+        value is { Length: 40 or 64 } && value.All(Uri.IsHexDigit);
+
     private sealed record StagedStatusEntry(
         string RelativePath,
         GitStagedChangeKind Kind,
@@ -807,6 +1333,44 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
 
     private sealed record GitIndexEntry(string RelativePath, string Mode);
 
+    private sealed record GitTreeEntry(
+        string RelativePath,
+        string Mode,
+        string Type,
+        string ObjectId,
+        long? Size);
+
+    private sealed record BlobTextResult(string? Content, bool IsBinary)
+    {
+        public static BlobTextResult Binary { get; } = new(null, IsBinary: true);
+    }
+
+    private sealed class SnapshotMemoryBudget(long maximumBytes)
+    {
+        private long _reservedBytes;
+
+        public int SkippedFileCount { get; private set; }
+
+        public bool TryReserve(long bytes)
+        {
+            if (bytes > maximumBytes - _reservedBytes)
+            {
+                SkippedFileCount++;
+                return false;
+            }
+
+            _reservedBytes += bytes;
+            return true;
+        }
+
+        public void Release(long bytes) => _reservedBytes -= bytes;
+    }
+
     private sealed record TextGitResult(int ExitCode, string StdOut, string StdErr, bool TimedOut);
-    private sealed record BinaryGitResult(int ExitCode, byte[] Bytes, string StdErr, bool TimedOut);
+    private sealed record BinaryGitResult(
+        int ExitCode,
+        byte[] Bytes,
+        string StdErr,
+        bool TimedOut,
+        bool OutputLimitExceeded);
 }

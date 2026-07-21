@@ -194,7 +194,7 @@ export class VibeRailsAiController {
         this._renderEmptyColumns('Run a search to see how each strategy ranks your query.');
         this.refreshAll({ silent: true });
 
-        // The compression capture browser owns the panel above the search UI. It is independent
+        // The compression capture browser owns the panel below the search UI. It is independent
         // of the BERT corpus — different store, different API — so it loads on its own and a
         // failure there must not take the search view down with it.
         this.captures = new CompressionCapturesController(this.app, this.root);

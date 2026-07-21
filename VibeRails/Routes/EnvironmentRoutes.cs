@@ -1,5 +1,6 @@
 using VibeRails.DB;
 using VibeRails.DTOs;
+using Serilog;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Utils;
@@ -24,7 +25,7 @@ public static class EnvironmentRoutes
                 .Select(e => new EnvironmentResponse(
                     e.Id,
                     e.CustomName,
-                    e.LLM.ToString(),
+                    LlmParser.ToWireName(e.LLM),
                     e.Path,
                     e.CustomArgs,
                     e.CustomPrompt,
@@ -54,7 +55,7 @@ public static class EnvironmentRoutes
             return Results.Ok(new EnvironmentResponse(
                 environment.Id,
                 environment.CustomName,
-                environment.LLM.ToString(),
+                LlmParser.ToWireName(environment.LLM),
                 environment.Path,
                 environment.CustomArgs,
                 environment.CustomPrompt,
@@ -140,7 +141,7 @@ public static class EnvironmentRoutes
             return Results.Ok(new EnvironmentResponse(
                 environment.Id,
                 environment.CustomName,
-                environment.LLM.ToString(),
+                LlmParser.ToWireName(environment.LLM),
                 environment.Path,
                 environment.CustomArgs,
                 environment.CustomPrompt,
@@ -188,7 +189,7 @@ public static class EnvironmentRoutes
             return Results.Ok(new EnvironmentResponse(
                 environment.Id,
                 environment.CustomName,
-                environment.LLM.ToString(),
+                LlmParser.ToWireName(environment.LLM),
                 environment.Path,
                 environment.CustomArgs,
                 environment.CustomPrompt,
@@ -218,16 +219,130 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse("Cannot delete default environments"));
             }
 
-            var enabledJobCount = await jobStore.CountEnabledJobsForEnvironmentAsync(environment.Id, cancellationToken);
-            if (enabledJobCount > 0)
+            // Count ALL referencing jobs, not just enabled ones: jobs default to disabled, so an
+            // "enabled only" guard let a freshly created job silently have its EnvironmentId nulled
+            // (ON DELETE SET NULL) when the environment was deleted.
+            var referencingJobCount = await jobStore.CountJobsForEnvironmentAsync(environment.Id, cancellationToken);
+            if (referencingJobCount > 0)
             {
                 return Results.Conflict(new ErrorResponse(
-                    $"Cannot delete this environment because {enabledJobCount} enabled job(s) use it. Disable or edit those jobs first."));
+                    $"Cannot delete this environment because {referencingJobCount} job(s) use it. Delete or reassign those jobs first."));
             }
 
-            await envService.DeleteEnvironmentAsync(environment, cancellationToken);
-            await repository.DeleteEnvironmentAsync(environment.Id, cancellationToken);
+            try
+            {
+                if (!await TryDeleteEnvironmentSafelyAsync(
+                    envService,
+                    jobStore,
+                    environment,
+                    cancellationToken))
+                {
+                    referencingJobCount = await jobStore.CountJobsForEnvironmentAsync(environment.Id, cancellationToken);
+                    return referencingJobCount > 0
+                        ? Results.Conflict(new ErrorResponse(
+                            $"Cannot delete this environment because {referencingJobCount} job(s) use it. Delete or reassign those jobs first."))
+                        : Results.Conflict(new ErrorResponse(
+                            "The environment changed while it was being deleted. Refresh and try again."));
+                }
+            }
+            catch (LlmCliEnvironmentService.EnvironmentDeletionInProgressException)
+            {
+                return Results.Conflict(new ErrorResponse(
+                    "This environment is already being deleted. Refresh and try again."));
+            }
+
             return Results.Ok(new OK("Environment deleted"));
         }).WithName("DeleteEnvironment");
+    }
+
+    /// <summary>
+    /// Coordinates the filesystem rename with the guarded database deletion. The database result
+    /// is the irreversible boundary: after it succeeds, this method never restores or otherwise
+    /// touches the original path because another request may already have recreated it.
+    /// </summary>
+    internal static async Task<bool> TryDeleteEnvironmentSafelyAsync(
+        LlmCliEnvironmentService envService,
+        IJobStore jobStore,
+        LLM_Environment environment,
+        CancellationToken cancellationToken)
+    {
+        LlmCliEnvironmentService.StagedEnvironmentDirectory? stagedDirectory = null;
+        bool deleted;
+        try
+        {
+            // JobStore takes BEGIN IMMEDIATE, proves this exact row still exists and has no live
+            // jobs, then invokes the rename while the SQLite writer lock prevents environment/job
+            // writers from racing the proof. A stale request never invokes this callback.
+            deleted = await jobStore.TryDeleteEnvironmentIfUnusedAsync(
+                environment.Id,
+                () => stagedDirectory = envService.StageEnvironmentDirectoryForDeletion(environment),
+                cancellationToken);
+        }
+        catch (EnvironmentDeleteRollbackException rollbackException)
+        {
+            // Commit/rollback outcome could not be proven. Leave any tombstone quarantined; an
+            // attempted restore could overwrite a newly recreated environment after a commit.
+            Log.Error(
+                rollbackException,
+                "[Environment] Could not confirm rollback for environment {EnvironmentId}; its staged directory remains quarantined.",
+                environment.Id);
+            throw;
+        }
+        catch
+        {
+            // JobStore only propagates an ordinary failure after confirming rollback. Restore the
+            // same directory staged by this request; if staging never ran there is nothing to do.
+            if (stagedDirectory != null)
+            {
+                try
+                {
+                    envService.RestoreStagedEnvironmentDirectory(stagedDirectory);
+                }
+                catch (Exception restoreException)
+                {
+                    Log.Error(
+                        restoreException,
+                        "[Environment] The guarded delete for environment {EnvironmentId} rolled back, but its staged directory could not be restored and remains quarantined.",
+                        environment.Id);
+                }
+            }
+            throw;
+        }
+
+        if (!deleted)
+        {
+            // The callback is contractually never invoked for a missing/referenced row. In
+            // particular, a stale delete returns here without touching a replacement's path.
+            return false;
+        }
+
+        if (stagedDirectory == null)
+        {
+            throw new InvalidOperationException(
+                "The environment row was deleted without staging its filesystem directory.");
+        }
+
+        // Crossing the committed DB-delete boundary makes restoration unsafe. A cleanup error
+        // leaves the unique tombstone for later/manual cleanup and still reports success.
+        TryFinalizeStagedDirectory(envService, environment, stagedDirectory);
+        return true;
+    }
+
+    private static void TryFinalizeStagedDirectory(
+        LlmCliEnvironmentService envService,
+        LLM_Environment environment,
+        LlmCliEnvironmentService.StagedEnvironmentDirectory stagedDirectory)
+    {
+        try
+        {
+            envService.FinalizeStagedEnvironmentDirectoryDeletion(stagedDirectory);
+        }
+        catch (Exception cleanupException)
+        {
+            Log.Error(
+                cleanupException,
+                "[Environment] Environment {EnvironmentId} was deleted, but its staged directory could not be cleaned up and remains quarantined.",
+                environment.Id);
+        }
     }
 }

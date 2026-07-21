@@ -26,7 +26,7 @@ public sealed class JobRunExecutorTests : IDisposable
         var run = Run(
             LLM.Codex,
             JobExecutionMode.Review,
-            environmentArgs: "--sandbox danger-full-access --json --model gpt-5",
+            environmentArgs: "--sandbox danger-full-access --add-dir C:\\outside --json --model gpt-5",
             environmentName: "nightly",
             environmentPath: _directory,
             triggerContextJson: "{\"commit\":\"abc\"}");
@@ -34,14 +34,18 @@ public sealed class JobRunExecutorTests : IDisposable
         var startInfo = JobRunExecutor.BuildStartInfo(run, "codex", _directory);
         var arguments = startInfo.ArgumentList.ToArray();
 
-        Assert.Equal("exec", arguments[0]);
+        Assert.Equal("--ask-for-approval", arguments[0]);
+        Assert.Equal("never", arguments[1]);
+        Assert.Equal("exec", arguments[2]);
         Assert.Contains("--model", arguments);
         Assert.Contains("gpt-5", arguments);
         Assert.Equal(1, arguments.Count(argument => argument == "--json"));
         Assert.Contains("--ephemeral", arguments);
         Assert.Equal("read-only", arguments[Array.IndexOf(arguments, "--sandbox") + 1]);
-        Assert.Equal("never", arguments[Array.IndexOf(arguments, "--ask-for-approval") + 1]);
+        Assert.Equal(0, Array.IndexOf(arguments, "--ask-for-approval"));
         Assert.DoesNotContain("danger-full-access", arguments);
+        Assert.DoesNotContain("--add-dir", arguments);
+        Assert.DoesNotContain("C:\\outside", arguments);
         Assert.Contains("VibeRails trigger metadata follows", arguments[^1]);
         Assert.Equal(Path.Combine(_directory, "codex"), startInfo.Environment["CODEX_HOME"]);
     }
@@ -52,7 +56,7 @@ public sealed class JobRunExecutorTests : IDisposable
         var run = Run(
             LLM.Claude,
             JobExecutionMode.LiveWrite,
-            environmentArgs: "--permission-mode bypassPermissions --output-format text --model opus --dangerously-skip-permissions",
+            environmentArgs: "--permission-mode bypassPermissions --output-format text --add-dir /outside /also-outside --model opus --dangerously-skip-permissions",
             environmentName: "reviewer",
             environmentPath: _directory);
 
@@ -67,7 +71,24 @@ public sealed class JobRunExecutorTests : IDisposable
         Assert.Contains("--no-session-persistence", arguments);
         Assert.DoesNotContain("bypassPermissions", arguments);
         Assert.DoesNotContain("dangerously-skip-permissions", arguments);
+        Assert.DoesNotContain("--add-dir", arguments);
+        Assert.DoesNotContain("/outside", arguments);
+        Assert.DoesNotContain("/also-outside", arguments);
         Assert.Equal(Path.Combine(_directory, "claude"), startInfo.Environment["CLAUDE_CONFIG_DIR"]);
+    }
+
+    [Fact]
+    public void BuildStartInfo_RejectsTraversalInLegacyEnvironmentNameWhenPathIsMissing()
+    {
+        var run = Run(
+            LLM.Codex,
+            JobExecutionMode.Review,
+            environmentArgs: "",
+            environmentName: "../outside",
+            environmentPath: null);
+
+        Assert.Throws<ArgumentException>(() =>
+            JobRunExecutor.BuildStartInfo(run, "codex", _directory));
     }
 
     [Fact]
@@ -100,32 +121,57 @@ public sealed class JobRunExecutorTests : IDisposable
 
         var executor = new JobRunExecutor(_store, new MissingExecutableResolver(), new JobWorkspaceService());
         var execution = executor.ExecuteAsync(run, TestContext.Current.CancellationToken);
-        await WaitForFileAsync(markerPath, TestContext.Current.CancellationToken);
-        Assert.True(await _store.RequestCancelAsync(run.Id, TestContext.Current.CancellationToken));
-        await execution.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        try
+        {
+            await WaitForFileAsync(markerPath, TestContext.Current.CancellationToken);
+            Assert.True(await _store.RequestCancelAsync(run.Id, TestContext.Current.CancellationToken));
+            await execution.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
-        var completed = await _store.GetRunAsync(run.Id, TestContext.Current.CancellationToken);
-        Assert.NotNull(completed);
-        Assert.Equal(JobRunStatus.Cancelled, completed.Status);
-        Assert.Equal("Job was cancelled.", completed.ErrorMessage);
-        Assert.True(completed.CancelRequested);
+            var completed = await _store.GetRunAsync(run.Id, TestContext.Current.CancellationToken);
+            Assert.NotNull(completed);
+            Assert.Equal(JobRunStatus.Cancelled, completed.Status);
+            Assert.Equal("Job was cancelled.", completed.ErrorMessage);
+            Assert.True(completed.CancelRequested);
+        }
+        finally
+        {
+            // Kill the fake CLI even if an assertion above fails, so Dispose's recursive delete does
+            // not throw over a locked file and mask the real failure.
+            await _store.RequestCancelAsync(run.Id, CancellationToken.None);
+            try { await execution.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None); }
+            catch { /* best-effort drain; Dispose is the backstop */ }
+        }
     }
 
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
-        if (Directory.Exists(_directory))
-            Directory.Delete(_directory, recursive: true);
+        try
+        {
+            if (Directory.Exists(_directory))
+                Directory.Delete(_directory, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Best-effort temp cleanup; a lingering fake CLI can still hold a file handle.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best-effort temp cleanup.
+        }
     }
 
     private async Task<string> CreateLongRunningExecutableAsync(string markerPath)
     {
         if (OperatingSystem.IsWindows())
         {
-            var path = Path.Combine(_directory, "fake-codex.cmd");
+            // A PowerShell shim (not .cmd): the executor only launches CLIs via pwsh -File now, so
+            // this mirrors how a real npm-installed CLI's .ps1 shim is invoked.
+            var path = Path.Combine(_directory, "fake-codex.ps1");
+            var escapedMarker = markerPath.Replace("'", "''", StringComparison.Ordinal);
             await File.WriteAllTextAsync(
                 path,
-                $"@echo off\r\ntype nul > \"{markerPath}\"\r\nping 127.0.0.1 -n 31 > nul\r\n",
+                $"Set-Content -LiteralPath '{escapedMarker}' -Value ''\r\nStart-Sleep -Seconds 30\r\n",
                 TestContext.Current.CancellationToken);
             return path;
         }

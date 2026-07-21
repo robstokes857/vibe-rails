@@ -438,6 +438,112 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
         Assert.Null(untracked.PreviousContent);
     }
 
+    [Fact]
+    public async Task CaptureUnpushedAsync_UsesHeadTreeAndBlobs_NotIndexOrWorkingTree()
+    {
+        await ConfigureUpstreamAtHeadAsync();
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            "public class HeadVersion { }\n",
+            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "head-caller.cs"),
+            "public class HeadCaller { HeadVersion value; }\n",
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", ".");
+        await GitAsync("commit", "-m", "unpushed head content");
+
+        // Disturb both the index and working tree after the commit being scanned.
+        await GitAsync("rm", "--cached", "tracked.cs");
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            "public class WorkingTreeVersion { }\n",
+            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "staged-only.cs"),
+            "public class StagedOnly { HeadVersion value; }\n",
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", "staged-only.cs");
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureUnpushedAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("tracked.cs", snapshot.TrackedFiles!);
+        Assert.Contains("head-caller.cs", snapshot.TrackedFiles!);
+        Assert.DoesNotContain("staged-only.cs", snapshot.TrackedFiles!);
+        var changed = Assert.Single(snapshot.Files, file => file.RelativePath == "tracked.cs");
+        Assert.Equal("public class HeadVersion { }\n", changed.Content);
+        Assert.DoesNotContain("WorkingTreeVersion", changed.Content);
+        Assert.Contains(snapshot.ImpactFiles!, file =>
+            file.RelativePath == "head-caller.cs" && file.Content.Contains("HeadVersion", StringComparison.Ordinal));
+        Assert.DoesNotContain(snapshot.ImpactFiles!, file => file.RelativePath == "staged-only.cs");
+    }
+
+    [Fact]
+    public async Task CaptureUnpushedAsync_RejectsOversizedHeadBlobBeforeReadingIt()
+    {
+        await ConfigureUpstreamAtHeadAsync();
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "oversized.cs"),
+            new string('a', (5 * 1024 * 1024) + 1),
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", "oversized.cs");
+        await GitAsync("commit", "-m", "large committed source");
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureUnpushedAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        var oversized = Assert.Single(snapshot.Files, file => file.RelativePath == "oversized.cs");
+        Assert.True(oversized.IsBinary);
+        Assert.Null(oversized.Content);
+        Assert.DoesNotContain(snapshot.ImpactFiles!, file => file.RelativePath == "oversized.cs");
+    }
+
+    [Fact]
+    public async Task CaptureUnpushedAsync_EnforcesAggregateBlobBudget()
+    {
+        await ConfigureUpstreamAtHeadAsync();
+        await GitAsync("rm", "AGENTS.md");
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "first.cs"),
+            "public class FirstHeadSource { }\n",
+            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "second.cs"),
+            "public class SecondHeadSource { }\n",
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", ".");
+        await GitAsync("commit", "-m", "two unpushed sources");
+
+        var snapshot = await new GitStagedSnapshotProvider(maximumUnpushedSnapshotBytes: 40)
+            .CaptureUnpushedAsync(_repository, TestContext.Current.CancellationToken);
+
+        Assert.Single(snapshot.Files, file => file.Content is not null);
+        Assert.Single(snapshot.ImpactFiles!);
+        Assert.True(snapshot.ImpactFiles!.Sum(file => Encoding.UTF8.GetByteCount(file.Content)) <= 40);
+    }
+
+    [Fact]
+    public async Task RunBinaryGitAsync_TimeoutDrainsStdoutCopyBeforeReturningBytes()
+    {
+        var result = await GitStagedSnapshotProvider.RunBinaryGitForTestAsync(
+            _repository,
+            ["-c", "alias.vr-timeout=!printf pre-timeout; sleep 5", "vr-timeout"],
+            TimeSpan.FromMilliseconds(150),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.TimedOut);
+        Assert.Equal("pre-timeout", Encoding.UTF8.GetString(result.Bytes));
+    }
+
+    private async Task ConfigureUpstreamAtHeadAsync()
+    {
+        await GitAsync("branch", "upstream-base", "HEAD");
+        await GitAsync("branch", "--set-upstream-to=upstream-base");
+    }
+
     private Task GitAsync(params string[] arguments) => GitInAsync(_repository, arguments);
 
     private static async Task GitInAsync(string workingDirectory, params string[] arguments)

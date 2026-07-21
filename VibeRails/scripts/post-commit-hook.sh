@@ -1,6 +1,6 @@
 #!/bin/sh
 # Vibe Rails Post-Commit Hook
-# VibeRails Hook Version: 5
+# VibeRails Hook Version: 6
 # Queues successful-commit Jobs after Git has created the commit.
 # Installed by VibeRails - use the dashboard to repair or remove this section.
 
@@ -30,7 +30,10 @@ viberails_repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 viberails_commit=$(git rev-parse HEAD 2>/dev/null || true)
 
 # The commit already succeeded. Queueing is best-effort and must not interfere with Git.
-viberails_run --job-trigger post-commit --workdir "$viberails_repo_root" --commit "$viberails_commit" >/dev/null 2>&1 || true
+# Do not enqueue an ambiguous run if HEAD could not be resolved; still allow any chained hook below.
+if [ -n "$viberails_commit" ]; then
+    viberails_run --job-trigger post-commit --workdir "$viberails_repo_root" --commit "$viberails_commit" >/dev/null 2>&1 || true
+fi
 
 if [ -n "$VIBERAILS_CHAINED_HOOK" ] && [ -f "$VIBERAILS_CHAINED_HOOK" ]; then
     "$VIBERAILS_CHAINED_HOOK" "$@"
