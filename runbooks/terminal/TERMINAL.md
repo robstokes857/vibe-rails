@@ -123,6 +123,101 @@
 > wrapping is fixed upstream), but it's belt-only — not the
 > suspenders. Full triage below.
 
+## 2026-07-21 OpenCode mouse wheel cycles input history instead of scrolling chat — FIXED
+
+**Status:** FIXED. VibeRails-side translation in `terminal-tab.js`; upstream bug
+remains open at [anomalyco/opencode#35295](https://github.com/anomalyco/opencode/issues/35295).
+
+**Symptom (Rob, on 1.8.6, Windows 11 + VS Code extension):** scrolling the mouse
+wheel over an OpenCode tab intermittently cycles through input history (showing
+previously-sent prompts in the input box) instead of scrolling the chat viewport.
+Once it switches to the broken state, it sticks — the user can't scroll the chat
+at all until the session is restarted. Sometimes it works fine for a whole session.
+
+**Root cause (upstream):** OpenCode's TUI is built on `opentui`, which enables SGR
+mouse tracking (DECSET 1000/1002/1003/1006 — confirmed in session
+`8d181d25-a5b8-462e-b7dc-d9ac910d00c1`, zero `\e[?1000l` disables across 190k
+chunks) and routes wheel events via hit-testing to whatever renderable is under
+the cursor. The `<scrollbox>` (messages) receives them when the cursor is over
+the chat; the `<textarea>` (input) receives them when over the input. The textarea
+binds `prompt.history.previous`/`next` to up/down arrow keys, and once it grabs
+wheel focus it sticks — producing the "can't get it out of the input area" lock-in.
+
+**Why `mouse: false` in `tui.json` is NOT the fix:** the OpenCode docs claim it
+"preserves the terminal's native mouse selection/scrolling behavior," but in
+alternate-screen mode the terminal's native wheel fallback is to emit up/down
+arrow-key sequences — which hit the focused textarea and cycle input history
+*every time*, not just intermittently. That's strictly worse. (Confirmed by the
+upstream issue and the opentui renderer source.)
+
+**Fix (VibeRails-side, `terminal-tab.js`):** for OpenCode tabs (and the
+OpenCode-backed pseudo-CLIs Glm52/KimiK3, whose `LlmParser.ToWireName()` wire
+names are `'glm-5.2'` and `'kimi-k3'` — with hyphens, not the enum names),
+translate SGR mouse wheel events to PageUp/PageDown in the `onData` input path,
+before `socket.send`. OpenCode binds PageUp/PageDown to
+`messages_page_up`/`messages_page_down` (and `dialog.select.page_up`/`page_down`
+when a dialog is open), so the wheel always scrolls the chat regardless of where
+opentui's hit-test routes the mouse event.
+
+```js
+_translateOpenCodeMouseWheel(data) {
+    const cli = (this.state.cli || '').toLowerCase();
+    if (cli !== 'opencode' && cli !== 'glm-5.2' && cli !== 'kimi-k3') {
+        return data;
+    }
+    if (typeof data !== 'string' || data.indexOf('\x1b[<6') === -1) {
+        return data;
+    }
+    return data
+        .replace(/\x1b\[<64;\d+;\d+M/g, '\x1b[5~')   // wheel up  → PageUp
+        .replace(/\x1b\[<65;\d+;\d+M/g, '\x1b[6~');  // wheel down → PageDown
+}
+```
+
+**Scope/guardrails:**
+- **OpenCode/Glm52/KimiK3 only.** Other CLIs (Claude, Codex, Copilot,
+  Antigravity) handle mouse wheel correctly; do not extend this to them. Gated
+  on `state.cli` lowercase, same pattern as the Codex cursor-suppression gate
+  (`terminal-tab.js:691`).
+- **Wire name gotcha (bit us once):** `state.cli` carries the
+  `LlmParser.ToWireName()` value, not the enum name. Glm52/KimiK3 serialize as
+  `'glm-5.2'`/`'kimi-k3'` (with hyphens), NOT `'glm52'`/`'kimik3'`. The first
+  iteration of this fix checked the enum names and silently no-op'd for every
+  GLM 5.2 session (e.g. `00e400f8-4f4d-4071-92c3-73b556d22e68`). Always check
+  the wire names — see `LlmParser.cs:55-66`.
+- **Only SGR wheel events (button 64/65) are translated.** Clicks, drags, and
+  other mouse buttons pass through untouched — mouse selection and click-to-focus
+  still work normally.
+- **No `setTimeout`, no receive-path changes, no byte-stream stripping on
+  output.** This is input-path only (xterm.js → VibeRails → PTY), before the
+  bytes hit the socket. The output path is untouched.
+- **Pre-filter** (`data.indexOf('\x1b[<6') === -1`) avoids running the regex on
+  every keystroke; only data containing a wheel-event prefix pays the cost.
+- `_trackTypingForNudge` and `statusController.onTerminalData` both already
+  ignore escape sequences (control-char filter / single-printable-byte check),
+  so they see the original `data` unchanged — no behavior change for typing
+  detection or status transitions.
+
+**Trade-off:** mouse-position-based scrolling is lost (wheel always scrolls the
+chat, even when hovering over the input textarea). Acceptable because (a) the
+native behavior was already broken intermittently, (b) the input textarea rarely
+needs wheel scroll (multi-line inputs are the only case, and arrow keys work),
+(c) OpenCode's `messages_page_up`/`page_down` keybinds are the documented way to
+scroll the chat — we're just routing the wheel to them.
+
+**Verification:** session `8d181d25-a5b8-462e-b7dc-d9ac910d00c1` is a "good"
+session (scroll worked) — mouse tracking modes 1000/1002/1003/1006 confirmed
+active from chunk 23729882 onward. The fix is input-side only, so it doesn't
+change the byte stream captured in SessionLogs; verify by scrolling in a fresh
+OpenCode tab after the fix and confirming the chat scrolls (not the input
+history).
+
+**Upstream tracking:** [anomalyco/opencode#35295](https://github.com/anomalyco/opencode/issues/35295)
+(open as of 2026-07-21). If opentui fixes the hit-test routing, this translation
+becomes a no-op (wheel events would still work via PageUp/PageDown) and can stay
+in place. Do not remove it until the upstream fix is confirmed across both
+Windows (ConPTY) and macOS/Linux.
+
 ## 2026-06-13 Small typing-echo lag while the CLI is streaming — OPEN, watching (do NOT fix yet)
 
 > **Status: OPEN / observation phase.** Rob's call (2026-06-13): pin down *when*

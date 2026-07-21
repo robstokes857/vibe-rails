@@ -748,6 +748,7 @@ export class VibeControlApp {
         this.settingsController?.unload?.();
         this.ruleController?.unload?.();
         this.jobController?.unload?.();
+        this.environmentController?.unload?.();
         this.updateActiveSubNav(view);
         this.terminalController?.resetLayoutStateForNavigation();
         // Tear down the MCP Explorer's global listener / xterm instances when navigating away
@@ -1319,8 +1320,10 @@ export class VibeControlApp {
     setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                const modalContainer = document.getElementById('modal-container');
+                const hadOpenModal = Boolean(modalContainer?.firstElementChild);
                 this.closeModal();
-                if (this.navigationStack.length > 1) {
+                if (!hadOpenModal && this.navigationStack.length > 1) {
                     this.goBack();
                 }
             }

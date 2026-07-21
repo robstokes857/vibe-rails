@@ -1,13 +1,16 @@
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.LlmClis;
+using VibeRails.Utils;
 using Xunit;
 
 namespace Tests;
 
+[Collection("ProcessEnvIsolation")]
 public class ClaudeSettingsTests : IDisposable
 {
     private readonly string _testDirectory;
+    private readonly string _previousEnvPath;
     private readonly ClaudeLlmCliEnvironment _service;
     private readonly MockFileService _mockFileService;
 
@@ -16,7 +19,8 @@ public class ClaudeSettingsTests : IDisposable
         _testDirectory = Path.Combine(Path.GetTempPath(), $"ClaudeSettingsTests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
 
-        Environment.SetEnvironmentVariable("VIBE_CONTROL_ENVPATH", _testDirectory);
+        _previousEnvPath = ParserConfigs.GetEnvPath();
+        ParserConfigs.SetEnvPath(_testDirectory);
 
         _mockFileService = new MockFileService();
         _service = new ClaudeLlmCliEnvironment(_mockFileService);
@@ -24,7 +28,7 @@ public class ClaudeSettingsTests : IDisposable
 
     public void Dispose()
     {
-        Environment.SetEnvironmentVariable("VIBE_CONTROL_ENVPATH", null);
+        ParserConfigs.SetEnvPath(_previousEnvPath);
         if (Directory.Exists(_testDirectory))
         {
             Directory.Delete(_testDirectory, recursive: true);
@@ -46,6 +50,15 @@ public class ClaudeSettingsTests : IDisposable
         Assert.Equal("", settings.SystemPrompt);
         Assert.False(settings.Bare);
         Assert.False(settings.Debug);
+    }
+
+    [Fact]
+    public async Task SettingsOperations_RejectEnvironmentPathTraversal()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.GetSettings("../../outside", CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.SaveSettings("../../outside", new ClaudeSettingsDto(), CancellationToken.None));
     }
 
     [Fact]

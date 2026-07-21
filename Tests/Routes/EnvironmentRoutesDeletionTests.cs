@@ -1,4 +1,10 @@
+using System.Net;
+using System.Net.Http.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Data.Sqlite;
 using Moq;
 using VibeRails.DB;
@@ -15,6 +21,67 @@ namespace Tests.Routes;
 [Collection("ProcessEnvIsolation")]
 public sealed class EnvironmentRoutesDeletionTests
 {
+    [Fact]
+    public async Task UpdateEnvironment_BlankPromptIsRejectedWhenJobReferencesWorker()
+    {
+        var environment = NewEnvironment(path: "unused");
+        environment.CustomPrompt = "Review every commit for security issues.";
+        var repository = new Mock<IRepository>();
+        repository
+            .Setup(item => item.FindEnvironmentByNameAsync(
+                "review",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(environment);
+        var jobStore = new Mock<IJobStore>();
+        jobStore
+            .Setup(item => item.CountJobsForEnvironmentAsync(
+                environment.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddSingleton<IRepository>(repository.Object);
+        builder.Services.AddSingleton<IJobStore>(jobStore.Object);
+
+        await using var app = builder.Build();
+        EnvironmentRoutes.Map(app);
+        await app.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            using var client = new HttpClient();
+            using var request = new HttpRequestMessage(
+                HttpMethod.Put,
+                new Uri(new Uri(app.Urls.First()), "/api/v1/environments/review"))
+            {
+                Content = JsonContent.Create(new UpdateEnvironmentRequest(
+                    "review",
+                    CustomPrompt: "   "))
+            };
+
+            using var response = await client.SendAsync(
+                request,
+                TestContext.Current.CancellationToken);
+            var error = await response.Content.ReadFromJsonAsync<ErrorResponse>(
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.NotNull(error);
+            Assert.Contains("used by a Job", error.Error, StringComparison.Ordinal);
+            Assert.Equal("Review every commit for security issues.", environment.CustomPrompt);
+            repository.Verify(
+                item => item.UpdateEnvironmentAsync(
+                    It.IsAny<LLM_Environment>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+        finally
+        {
+            await app.StopAsync(CancellationToken.None);
+        }
+    }
+
     [Fact]
     public async Task TryDeleteEnvironmentSafelyAsync_StaleRequestCannotTouchRecreatedEnvironment()
     {

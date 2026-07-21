@@ -31,11 +31,9 @@ public static class AuthRoutes
                 IsEssential = true            // Exempt from GDPR consent requirements
             });
 
-            // Redirect to the requested page, or default to /
-            // Validate: must start with '/' but not '//' (protocol-relative URLs like //evil.com)
-            var destination = (!string.IsNullOrWhiteSpace(redirect) && redirect.StartsWith('/') && !redirect.StartsWith("//"))
-                ? redirect
-                : "/";
+            // Redirect to the requested page, or default to /. Backslashes are rejected because
+            // browsers normalize /\evil.example into a protocol-relative external URL.
+            var destination = NormalizeRedirect(redirect);
             //Set the tab token header for the next request, which the client-side script will save to sessionStorage
             authService.SetTabTokenHeader(context);
 
@@ -47,5 +45,19 @@ public static class AuthRoutes
             html = authService.ReplaceTabInHtmlString(html);
             return Results.Content(html, "text/html");
         }).WithName("AuthBootstrap");
+    }
+
+    internal static string NormalizeRedirect(string? redirect)
+    {
+        if (string.IsNullOrWhiteSpace(redirect)
+            || !redirect.StartsWith("/", StringComparison.Ordinal)
+            || redirect.StartsWith("//", StringComparison.Ordinal)
+            || redirect.Contains('\\')
+            || redirect.Any(char.IsControl))
+        {
+            return "/";
+        }
+
+        return redirect;
     }
 }

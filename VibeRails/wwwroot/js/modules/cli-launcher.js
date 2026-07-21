@@ -7,7 +7,7 @@ export class CliLauncher {
         const content = document.getElementById('app-content');
         if (!content) return;
 
-        content.innerHTML = '';
+        content.replaceChildren();
         const fragment = this.app.cloneTemplate('launch-cli-template');
         const root = fragment.querySelector('[data-view="launch-cli"]');
 
@@ -27,7 +27,8 @@ export class CliLauncher {
     async launchCLI(cliType, environmentName = null) {
         const terminal = document.getElementById('cli-terminal');
         if (terminal) {
-            terminal.innerHTML = `<div class="vb-terminal-line">Launching ${cliType.toUpperCase()} CLI...</div>`;
+            terminal.replaceChildren();
+            this.appendTerminalLine(terminal, `Launching ${cliType.toUpperCase()} CLI...`);
         }
 
         try {
@@ -39,12 +40,12 @@ export class CliLauncher {
             const response = await this.app.apiCall(`/api/v1/cli/launch/${cliType}`, 'POST', requestBody);
 
             if (terminal) {
-                terminal.innerHTML += `<div class="vb-terminal-line">${response.message}</div>`;
+                this.appendTerminalLine(terminal, response.message);
                 if (response.standardOutput) {
-                    terminal.innerHTML += `<div class="vb-terminal-line">${response.standardOutput}</div>`;
+                    this.appendTerminalLine(terminal, response.standardOutput);
                 }
                 if (response.standardError) {
-                    terminal.innerHTML += `<div class="vb-terminal-line" style="color: #ff6b6b;">${response.standardError}</div>`;
+                    this.appendTerminalLine(terminal, response.standardError, { isError: true });
                 }
             }
 
@@ -55,9 +56,19 @@ export class CliLauncher {
             }
         } catch (error) {
             if (terminal) {
-                terminal.innerHTML += `<div class="vb-terminal-line" style="color: #ff6b6b;">Error: ${error.message}</div>`;
+                this.appendTerminalLine(terminal, `Error: ${error.message}`, { isError: true });
             }
             this.app.showError(`Failed to launch ${cliType} CLI`);
         }
+    }
+
+    appendTerminalLine(terminal, value, { isError = false } = {}) {
+        const line = document.createElement('div');
+        line.className = 'vb-terminal-line';
+        line.textContent = value == null ? '' : String(value);
+        if (isError) {
+            line.style.color = '#ff6b6b';
+        }
+        terminal.appendChild(line);
     }
 }

@@ -21,9 +21,16 @@ module.exports = async () => {
     // portable echo+sleep so we exercise PTY+WS+xterm without needing a real LLM CLI.
     const env = { ...process.env, VIBERAILS_TEST_FAKE_CLI: '1' };
 
+    // Local developer instances can lock the default VibeRails bin output on Windows. Allow
+    // callers to point the suite at an already-built isolated artifact without changing CI's
+    // normal `dotnet run` path.
+    const backendDll = process.env.VIBERAILS_E2E_BACKEND_DLL;
+    const backendArgs = backendDll
+        ? [path.resolve(backendDll), '--vs-code-v1']
+        : ['run', '--project', path.join(REPO_ROOT, 'VibeRails'), '-c', 'Debug', '--', '--vs-code-v1'];
     const child = spawn(
         'dotnet',
-        ['run', '--project', path.join(REPO_ROOT, 'VibeRails'), '-c', 'Debug', '--', '--vs-code-v1'],
+        backendArgs,
         { cwd: REPO_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], shell: false }
     );
 

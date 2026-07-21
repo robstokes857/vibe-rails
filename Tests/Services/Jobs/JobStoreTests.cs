@@ -116,6 +116,98 @@ public sealed class JobStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task EnqueueManualRunAsync_SnapshotsCurrentWorkerAndKeepsQueuedRunImmutable()
+    {
+        var originalPath = Path.Combine(_directory, "envs", "nightly");
+        var environmentId = await InsertEnvironmentAsync(
+            "nightly",
+            originalPath,
+            "--model original-model",
+            "Review the commit for security issues.");
+        var job = await _store.CreateJobAsync(
+            new CreateJobRequest(
+                "Environment snapshot",
+                _directory,
+                LLM.Claude,
+                environmentId,
+                "Stale duplicated Job prompt.",
+                JobExecutionMode.Review,
+                TimeoutMinutes: 30,
+                Enabled: false,
+                Triggers: []),
+            executablePath: "codex",
+            TestContext.Current.CancellationToken);
+
+        var firstRunId = await _store.EnqueueManualRunAsync(
+            job.Id,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(firstRunId);
+
+        var updatedPath = Path.Combine(_directory, "envs", "nightly-updated");
+        await UpdateEnvironmentAsync(
+            environmentId,
+            "nightly-updated",
+            updatedPath,
+            "--model updated-model",
+            "Review the latest commit for security regressions.");
+
+        var firstRun = await _store.GetRunAsync(
+            firstRunId!,
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(firstRun);
+        Assert.Equal(environmentId, firstRun.EnvironmentId);
+        Assert.Equal("nightly", firstRun.EnvironmentName);
+        Assert.Equal(originalPath, firstRun.EnvironmentPath);
+        Assert.Equal("--model original-model", firstRun.EnvironmentArgs);
+        Assert.Equal(LLM.Codex, firstRun.Llm);
+        Assert.Equal("Review the commit for security issues.", firstRun.Prompt);
+
+        var secondRunId = await _store.EnqueueManualRunAsync(
+            job.Id,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(secondRunId);
+        var secondRun = await _store.GetRunAsync(
+            secondRunId!,
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(secondRun);
+        Assert.Equal("nightly-updated", secondRun.EnvironmentName);
+        Assert.Equal(updatedPath, secondRun.EnvironmentPath);
+        Assert.Equal("--model updated-model", secondRun.EnvironmentArgs);
+        Assert.Equal(LLM.Codex, secondRun.Llm);
+        Assert.Equal("Review the latest commit for security regressions.", secondRun.Prompt);
+    }
+
+    [Fact]
+    public async Task EnqueueManualRunAsync_LegacyJobWithoutWorkerUsesStoredPrompt()
+    {
+        var job = await _store.CreateJobAsync(
+            new CreateJobRequest(
+                "Legacy base Job",
+                _directory,
+                LLM.Claude,
+                EnvironmentId: null,
+                Prompt: "Use the prompt stored on the Job.",
+                JobExecutionMode.Review,
+                TimeoutMinutes: 30,
+                Enabled: false,
+                Triggers: []),
+            executablePath: "claude",
+            TestContext.Current.CancellationToken);
+
+        var runId = await _store.EnqueueManualRunAsync(
+            job.Id,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var run = await _store.GetRunAsync(
+            Assert.IsType<string>(runId),
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(run);
+        Assert.Null(run.EnvironmentId);
+        Assert.Equal(LLM.Claude, run.Llm);
+        Assert.Equal("Use the prompt stored on the Job.", run.Prompt);
+    }
+
+    [Fact]
     public async Task EnqueueEventRunsAsync_DeduplicatesSameEventButQueuesDistinctEvents()
     {
         await CreateJobAsync("VCA", [new JobTriggerRequest(JobTriggerKind.Vca)]);
@@ -576,7 +668,11 @@ public sealed class JobStoreTests : IDisposable
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
-    private async Task<int> InsertEnvironmentAsync(string name)
+    private async Task<int> InsertEnvironmentAsync(
+        string name,
+        string path = "",
+        string customArgs = "",
+        string customPrompt = "")
     {
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(TestContext.Current.CancellationToken);
@@ -585,13 +681,46 @@ public sealed class JobStoreTests : IDisposable
             INSERT INTO Environments
                 (CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC)
             VALUES
-                ($name, $llm, '', '', '', $now, $now)
+                ($name, $llm, $path, $customArgs, $customPrompt, $now, $now)
             RETURNING Id;
             """;
         command.Parameters.AddWithValue("$name", name);
         command.Parameters.AddWithValue("$llm", (int)LLM.Codex);
+        command.Parameters.AddWithValue("$path", path);
+        command.Parameters.AddWithValue("$customArgs", customArgs);
+        command.Parameters.AddWithValue("$customPrompt", customPrompt);
         command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
         return Convert.ToInt32(
             await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+    }
+
+    private async Task UpdateEnvironmentAsync(
+        int environmentId,
+        string name,
+        string path,
+        string customArgs,
+        string customPrompt)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE Environments
+            SET CustomName = $name,
+                Path = $path,
+                CustomArgs = $customArgs,
+                CustomPrompt = $customPrompt,
+                LastUsedUTC = $now
+            WHERE Id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", environmentId);
+        command.Parameters.AddWithValue("$name", name);
+        command.Parameters.AddWithValue("$path", path);
+        command.Parameters.AddWithValue("$customArgs", customArgs);
+        command.Parameters.AddWithValue("$customPrompt", customPrompt);
+        command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+        Assert.Equal(
+            1,
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken));
     }
 }

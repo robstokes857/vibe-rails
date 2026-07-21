@@ -50,6 +50,12 @@ public sealed class JobService(
 
     public async Task<JobResponse> CreateJobAsync(CreateJobRequest request, CancellationToken cancellationToken = default)
     {
+        if (request.EnvironmentId is null)
+        {
+            throw JobServiceException.BadRequest(
+                "Choose an Environment / Worker before creating an automation Job.");
+        }
+
         var normalized = await ValidateAndNormalizeAsync(request, cancellationToken);
         if (normalized.Enabled)
             await EnsureWorkerAvailableAsync(cancellationToken);
@@ -64,6 +70,11 @@ public sealed class JobService(
         var existing = await store.GetJobAsync(id, cancellationToken);
         if (existing is null || existing.DeletedUtc is not null)
             throw JobServiceException.NotFound("Job not found.");
+        if (existing.EnvironmentId is not null && request.EnvironmentId is null)
+        {
+            throw JobServiceException.BadRequest(
+                "A worker-backed Job cannot be detached from its Environment / Worker. Choose another worker instead.");
+        }
 
         var normalized = await ValidateAndNormalizeAsync(request, cancellationToken);
         if (normalized.Enabled)
@@ -226,15 +237,16 @@ public sealed class JobService(
         CancellationToken cancellationToken)
     {
         var projectPath = await ValidateProjectAsync(request.ProjectPath, cancellationToken);
-        await ValidateCommonAsync(
+        var worker = await ValidateCommonAsync(
             request.Name, request.Llm, request.EnvironmentId, request.Prompt,
             request.ExecutionMode, request.TimeoutMinutes, request.Enabled,
-            request.Triggers, cancellationToken);
+            request.Triggers, requireEnvironmentPrompt: true, cancellationToken);
         return request with
         {
             Name = request.Name.Trim(),
             ProjectPath = projectPath,
-            Prompt = request.Prompt.Trim(),
+            Llm = worker.Llm,
+            Prompt = worker.Prompt,
             Triggers = request.Triggers?.ToList() ?? []
         };
     }
@@ -244,20 +256,21 @@ public sealed class JobService(
         CancellationToken cancellationToken)
     {
         var projectPath = await ValidateProjectAsync(request.ProjectPath, cancellationToken);
-        await ValidateCommonAsync(
+        var worker = await ValidateCommonAsync(
             request.Name, request.Llm, request.EnvironmentId, request.Prompt,
             request.ExecutionMode, request.TimeoutMinutes, request.Enabled,
-            request.Triggers, cancellationToken);
+            request.Triggers, requireEnvironmentPrompt: request.EnvironmentId is not null, cancellationToken);
         return request with
         {
             Name = request.Name.Trim(),
             ProjectPath = projectPath,
-            Prompt = request.Prompt.Trim(),
+            Llm = worker.Llm,
+            Prompt = worker.Prompt,
             Triggers = request.Triggers?.ToList() ?? []
         };
     }
 
-    private async Task ValidateCommonAsync(
+    private async Task<(LLM Llm, string Prompt)> ValidateCommonAsync(
         string name,
         LLM llm,
         int? environmentId,
@@ -266,28 +279,52 @@ public sealed class JobService(
         int timeoutMinutes,
         bool enabled,
         IReadOnlyList<JobTriggerRequest>? triggers,
+        bool requireEnvironmentPrompt,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > MaximumNameLength)
             throw JobServiceException.BadRequest($"Job name is required and must be at most {MaximumNameLength} characters.");
-        if (llm is not (LLM.Codex or LLM.Claude))
-            throw JobServiceException.BadRequest("Jobs currently support only Codex and Claude.");
-        if (string.IsNullOrWhiteSpace(prompt) || prompt.Trim().Length > MaximumPromptLength)
-            throw JobServiceException.BadRequest($"Initial message is required and must be at most {MaximumPromptLength} characters.");
-        if (!Enum.IsDefined(executionMode))
-            throw JobServiceException.BadRequest("Unknown execution mode.");
-        if (timeoutMinutes is < MinimumTimeoutMinutes or > MaximumTimeoutMinutes)
-            throw JobServiceException.BadRequest($"Timeout must be {MinimumTimeoutMinutes}–{MaximumTimeoutMinutes} minutes.");
 
+        // Environment-backed Jobs use the shared Environment / Worker as their source of truth.
+        // Keep accepting the duplicated wire fields for legacy clients and base-CLI Jobs, but do
+        // not let a caller run a saved worker with a different provider or initial message.
+        var resolvedLlm = llm;
+        var resolvedPrompt = prompt?.Trim() ?? string.Empty;
         if (environmentId is not null)
         {
             var environment = (await repository.GetAllEnvironmentsAsync(cancellationToken))
                 .FirstOrDefault(item => item.Id == environmentId.Value);
             if (environment is null)
-                throw JobServiceException.BadRequest("The selected environment no longer exists.");
-            if (environment.LLM != llm)
-                throw JobServiceException.BadRequest("The selected environment belongs to a different LLM.");
+                throw JobServiceException.BadRequest("The selected environment / worker no longer exists.");
+
+            resolvedLlm = environment.LLM;
+            if (!string.IsNullOrWhiteSpace(environment.CustomPrompt))
+            {
+                resolvedPrompt = environment.CustomPrompt.Trim();
+            }
+            else if (requireEnvironmentPrompt)
+            {
+                throw JobServiceException.BadRequest(
+                    "The selected environment / worker needs an Initial Message before it can run as a Job.");
+            }
         }
+
+        if (resolvedLlm is not (LLM.Codex
+            or LLM.Claude
+            or LLM.Antigravity
+            or LLM.Copilot
+            or LLM.OpenCode
+            or LLM.Glm52
+            or LLM.KimiK3))
+        {
+            throw JobServiceException.BadRequest("The selected LLM cannot run as an automated Job.");
+        }
+        if (string.IsNullOrWhiteSpace(resolvedPrompt) || resolvedPrompt.Length > MaximumPromptLength)
+            throw JobServiceException.BadRequest($"Initial message is required and must be at most {MaximumPromptLength} characters.");
+        if (!Enum.IsDefined(executionMode))
+            throw JobServiceException.BadRequest("Unknown execution mode.");
+        if (timeoutMinutes is < MinimumTimeoutMinutes or > MaximumTimeoutMinutes)
+            throw JobServiceException.BadRequest($"Timeout must be {MinimumTimeoutMinutes}–{MaximumTimeoutMinutes} minutes.");
 
         var triggerList = triggers ?? [];
         var duplicate = triggerList.GroupBy(trigger => trigger.Kind).FirstOrDefault(group => group.Count() > 1);
@@ -304,8 +341,10 @@ public sealed class JobService(
                 throw JobServiceException.BadRequest(error);
         }
 
-        if (enabled && executableResolver.Resolve(llm) is null)
-            throw JobServiceException.BadRequest($"The {llm} CLI was not found. Install it or add it to PATH before enabling this job.");
+        if (enabled && executableResolver.Resolve(resolvedLlm) is null)
+            throw JobServiceException.BadRequest($"The {resolvedLlm} CLI was not found. Install it or add it to PATH before enabling this job.");
+
+        return (resolvedLlm, resolvedPrompt);
     }
 
     private static async Task<string> ValidateProjectAsync(string projectPath, CancellationToken cancellationToken)

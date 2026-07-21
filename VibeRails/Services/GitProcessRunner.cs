@@ -15,7 +15,7 @@ internal static class GitProcessRunner
     {
         var startInfo = CreateStartInfo(workingDirectory);
         startInfo.Arguments = arguments;
-        return await RunAsync(startInfo, arguments, timeout, cancellationToken);
+        return await RunAsync(startInfo, arguments, timeout, trimOutput: true, cancellationToken);
     }
 
     public static async Task<Result> RunAsync(
@@ -30,7 +30,32 @@ internal static class GitProcessRunner
             startInfo.ArgumentList.Add(argument);
         }
 
-        return await RunAsync(startInfo, string.Join(' ', arguments), timeout, cancellationToken);
+        return await RunAsync(
+            startInfo,
+            string.Join(' ', arguments),
+            timeout,
+            trimOutput: true,
+            cancellationToken);
+    }
+
+    public static async Task<Result> RunRawAsync(
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        var startInfo = CreateStartInfo(workingDirectory);
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        return await RunAsync(
+            startInfo,
+            string.Join(' ', arguments),
+            timeout,
+            trimOutput: false,
+            cancellationToken);
     }
 
     private static ProcessStartInfo CreateStartInfo(string workingDirectory) => new()
@@ -47,6 +72,7 @@ internal static class GitProcessRunner
         ProcessStartInfo startInfo,
         string displayArguments,
         TimeSpan timeout,
+        bool trimOutput,
         CancellationToken cancellationToken)
     {
         using var process = new Process
@@ -97,7 +123,7 @@ internal static class GitProcessRunner
 
         return new Result(
             process.HasExited ? process.ExitCode : -1,
-            stdout.Trim(),
+            trimOutput ? stdout.Trim() : stdout,
             stderr.Trim(),
             timedOut);
     }

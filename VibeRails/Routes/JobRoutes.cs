@@ -1,11 +1,13 @@
 using VibeRails.DTOs;
+using VibeRails.Services;
 using VibeRails.Services.Jobs;
+using VibeRails.Utils;
 
 namespace VibeRails.Routes;
 
 public static class JobRoutes
 {
-    public static void Map(WebApplication app)
+    public static void Map(WebApplication app, string launchDirectory)
     {
         app.MapGet("/api/v1/jobs", (
             IJobService service,
@@ -21,19 +23,27 @@ public static class JobRoutes
             ExecuteAsync(() => service.GetJobAsync(id, cancellationToken)))
             .WithName("GetJob");
 
-        app.MapPost("/api/v1/jobs", (
+        app.MapPost("/api/v1/jobs", async (
             IJobService service,
             CreateJobRequest request,
             CancellationToken cancellationToken) =>
-            ExecuteAsync(() => service.CreateJobAsync(request, cancellationToken)))
+            await ExecuteAsync(async () =>
+            {
+                var projectPath = await ResolveCurrentRepositoryAsync(launchDirectory, cancellationToken);
+                return await service.CreateJobAsync(request with { ProjectPath = projectPath }, cancellationToken);
+            }))
             .WithName("CreateJob");
 
-        app.MapPut("/api/v1/jobs/{id:long}", (
+        app.MapPut("/api/v1/jobs/{id:long}", async (
             IJobService service,
             long id,
             UpdateJobRequest request,
             CancellationToken cancellationToken) =>
-            ExecuteAsync(() => service.UpdateJobAsync(id, request, cancellationToken)))
+            await ExecuteAsync(async () =>
+            {
+                var projectPath = await ResolveCurrentRepositoryAsync(launchDirectory, cancellationToken);
+                return await service.UpdateJobAsync(id, request with { ProjectPath = projectPath }, cancellationToken);
+            }))
             .WithName("UpdateJob");
 
         app.MapDelete("/api/v1/jobs/{id:long}", async (
@@ -122,5 +132,28 @@ public static class JobRoutes
         {
             return Results.Json(new ErrorResponse(ex.Message), statusCode: ex.StatusCode);
         }
+    }
+
+    private static async Task<string> ResolveCurrentRepositoryAsync(
+        string launchDirectory,
+        CancellationToken cancellationToken)
+    {
+        var configuredRoot = ParserConfigs.GetRootPath();
+        if (ParserConfigs.GetIsInGit()
+            && !string.IsNullOrWhiteSpace(configuredRoot)
+            && Directory.Exists(configuredRoot))
+        {
+            return configuredRoot;
+        }
+
+        var result = await GitProcessRunner.RunAsync(
+            ["rev-parse", "--show-toplevel"],
+            launchDirectory,
+            TimeSpan.FromSeconds(5),
+            cancellationToken);
+        if (result.TimedOut || result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StdOut))
+            throw JobServiceException.BadRequest("Jobs require VibeRails to be opened in a Git repository.");
+
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(result.StdOut.Trim()));
     }
 }

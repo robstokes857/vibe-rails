@@ -33,6 +33,7 @@ namespace VibeRails
 
             var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
             repository.InitializeDatabase();
+            PrivateFilePermissions.EnsureFile(ParserConfigs.GetStatePath());
         }
 
         /// <summary>

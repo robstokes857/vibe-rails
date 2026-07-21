@@ -138,6 +138,32 @@ export class TerminalTab {
         }
     }
 
+    _translateOpenCodeMouseWheel(data) {
+        // OpenCode's TUI (and the OpenCode-backed pseudo-CLIs Glm52/KimiK3)
+        // intermittently routes SGR mouse wheel events to the input history
+        // (cycling previous prompts) instead of the chat viewport. Once the
+        // textarea grabs the events, the focus sticks and the user can't
+        // scroll the chat at all. Root cause is opentui's hit-test routing
+        // (upstream bug: anomalyco/opencode#35295); mouse tracking stays on
+        // the whole session, so this is a routing/state issue, not a mode
+        // toggle. Translate wheel events to PageUp/PageDown, which OpenCode
+        // binds to messages_page_up/messages_page_down — works regardless of
+        // where opentui's hit-test routes the mouse event. Only SGR wheel
+        // events (button 64/65, mode 1006) are translated; clicks/drags pass
+        // through untouched. See runbooks/terminal/TERMINAL.md "OpenCode
+        // mouse wheel" entry.
+        const cli = (this.state.cli || '').toLowerCase();
+        if (cli !== 'opencode' && cli !== 'glm-5.2' && cli !== 'kimi-k3') {
+            return data;
+        }
+        if (typeof data !== 'string' || data.indexOf('\x1b[<6') === -1) {
+            return data;
+        }
+        return data
+            .replace(/\x1b\[<64;\d+;\d+M/g, '\x1b[5~')   // wheel up  → PageUp
+            .replace(/\x1b\[<65;\d+;\d+M/g, '\x1b[6~');  // wheel down → PageDown
+    }
+
     ensureTerminal() {
         if (this.vibeTerminal || !this.state.ui?.terminalElement) {
             return;
@@ -169,7 +195,7 @@ export class TerminalTab {
             this.statusController?.onTerminalData(data);
             this._trackTypingForNudge(data);
             if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                this.socket.send(data);
+                this.socket.send(this._translateOpenCodeMouseWheel(data));
             }
         });
 

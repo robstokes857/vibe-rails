@@ -78,8 +78,9 @@ public static class Config
 
         // Use the consolidated directory
         var dir = Path.Combine(home, PathConstants.DEFAULT_INSTALL_DIR_NAME);
-        Directory.CreateDirectory(dir);
+        PrivateFilePermissions.EnsureDirectory(dir);
         _settingsPath = Path.Combine(dir, PathConstants.SETTINGS_FILENAME);
+        PrivateFilePermissions.EnsureFile(_settingsPath);
     }
 
     public static string SettingsDirectory => Path.GetDirectoryName(_settingsPath)!;
@@ -127,6 +128,7 @@ public static class Config
     {
         var json = JsonSerializer.Serialize(settings, ConfigJsonContext.Default.Settings);
         File.WriteAllText(_settingsPath, json);
+        PrivateFilePermissions.EnsureFile(_settingsPath);
         _settings = settings;
     }
 

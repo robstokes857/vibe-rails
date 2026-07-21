@@ -95,6 +95,23 @@ test.describe('terminal-multirun', () => {
         );
     });
 
+    test('LLM dropdown has an accessible search box that filters options', async ({ page }) => {
+        await navigateToDashboard(page);
+        await openMultiRunModal(page);
+
+        const select = page.locator('#vb-multirun-cli-1');
+        await select.evaluate((element) => element.tomselect.open());
+
+        const search = page.locator('.ts-dropdown.plugin-dropdown_input .dropdown-input:visible');
+        await expect(search).toBeVisible();
+        await expect(search).toHaveAttribute('aria-label', 'Search LLMs...');
+        await search.fill('copilot');
+
+        const visibleOptions = page.locator('.ts-dropdown.plugin-dropdown_input:visible .option:visible');
+        await expect(visibleOptions).toHaveCount(1);
+        await expect(visibleOptions.first()).toContainText('Copilot');
+    });
+
     test('Run with empty prompt shows error and does not start sessions', async ({ page }) => {
         await navigateToDashboard(page);
         // Read tab count after panel renders rather than asserting an absolute number —

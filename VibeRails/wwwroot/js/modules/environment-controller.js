@@ -3,6 +3,49 @@ import { enhanceLlmSelectWithTomSelect } from './utils.js';
 export class EnvironmentController {
     constructor(app) {
         this.app = app;
+        this.environmentFormRequestGeneration = 0;
+        this.environmentFormLifecycleCleanup = null;
+    }
+
+    unload() {
+        this.environmentFormRequestGeneration += 1;
+        this.disposeEnvironmentFormLifecycle();
+    }
+
+    disposeEnvironmentFormLifecycle() {
+        const cleanup = this.environmentFormLifecycleCleanup;
+        this.environmentFormLifecycleCleanup = null;
+        cleanup?.();
+    }
+
+    beginEnvironmentFormRequest() {
+        this.environmentFormRequestGeneration += 1;
+        this.disposeEnvironmentFormLifecycle();
+        return this.environmentFormRequestGeneration;
+    }
+
+    captureEnvironmentFormOrigin() {
+        if (typeof document === 'undefined') {
+            return { container: null, modal: null, view: this.app.currentView, hasDocument: false };
+        }
+
+        const container = document.getElementById('modal-container');
+        return {
+            container,
+            modal: container?.firstElementChild || null,
+            view: this.app.currentView,
+            hasDocument: true
+        };
+    }
+
+    environmentFormOriginIsCurrent(origin, requestGeneration) {
+        if (requestGeneration !== this.environmentFormRequestGeneration) return false;
+        if (origin.view !== this.app.currentView) return false;
+        if (!origin.hasDocument) return true;
+
+        const container = document.getElementById('modal-container');
+        return container === origin.container
+            && (container?.firstElementChild || null) === origin.modal;
     }
 
     async loadEnvironments() {
@@ -28,33 +71,7 @@ export class EnvironmentController {
             const tableSlot = root.querySelector('[data-environments-table]');
             if (tableSlot) {
                 tableSlot.innerHTML = this.renderEnvironmentsTable();
-                this.app.bindActions(tableSlot, '[data-action="remove-environment"]', (element) => {
-                    const name = element.dataset.envName;
-                    if (name) {
-                        this.removeEnvironment(name);
-                    }
-                });
-                this.app.bindActions(tableSlot, '[data-action="edit-environment"]', (element) => {
-                    const name = element.dataset.envName;
-                    if (name) {
-                        this.editEnvironment(name);
-                    }
-                });
-                this.app.bindActions(tableSlot, '[data-action="launch-environment"]', (element) => {
-                    const name = element.dataset.envName;
-                    const cli = element.dataset.envCli;
-                    if (name && cli) {
-                        this.launchEnvironment(name, cli);
-                    }
-                });
-                this.app.bindActions(tableSlot, '[data-action="launch-in-webui"]', (element) => {
-                    const envId = parseInt(element.dataset.envId);
-                    const envName = element.dataset.envName;
-                    const envCli = element.dataset.envCli;
-                    if (envId && envName && envCli) {
-                        this.launchInWebUI(envId, envName, envCli);
-                    }
-                });
+                this.bindEnvironmentTableActions(tableSlot);
             }
 
             const sandboxesTableSlot = root.querySelector('[data-sandboxes-table]');
@@ -126,9 +143,41 @@ export class EnvironmentController {
         content.appendChild(fragment);
     }
 
+    bindEnvironmentTableActions(tableSlot, { onChanged = null } = {}) {
+        if (!tableSlot) return;
+
+        this.app.bindActions(tableSlot, '[data-action="remove-environment"]', (element) => {
+            const name = element.dataset.envName;
+            if (name) {
+                this.removeEnvironment(name, { onChanged });
+            }
+        });
+        this.app.bindActions(tableSlot, '[data-action="edit-environment"]', (element) => {
+            const name = element.dataset.envName;
+            if (name) {
+                this.editEnvironment(name, { onChanged });
+            }
+        });
+        this.app.bindActions(tableSlot, '[data-action="launch-environment"]', (element) => {
+            const name = element.dataset.envName;
+            const cli = element.dataset.envCli;
+            if (name && cli) {
+                this.launchEnvironment(name, cli);
+            }
+        });
+        this.app.bindActions(tableSlot, '[data-action="launch-in-webui"]', (element) => {
+            const envId = parseInt(element.dataset.envId);
+            const envName = element.dataset.envName;
+            const envCli = element.dataset.envCli;
+            if (envId && envName && envCli) {
+                this.launchInWebUI(envId, envName, envCli);
+            }
+        });
+    }
+
     renderEnvironmentsTable() {
         if (this.app.data.environments.length === 0) {
-            return '<p class="text-muted text-center py-3">No environments configured. Create your first environment to get started.</p>';
+            return '<p class="text-muted text-center py-3">No Environment / Workers configured. Create your first worker to get started.</p>';
         }
 
         const escape = (value) => this.app.escapeHtml(value);
@@ -289,15 +338,22 @@ export class EnvironmentController {
         `;
     }
 
-    createEnvironment() {
-        this.showEnvironmentForm({ mode: 'create' });
+    createEnvironment(options = {}) {
+        this.beginEnvironmentFormRequest();
+        this.showEnvironmentForm({ mode: 'create', ...options });
     }
 
-    async editEnvironment(name) {
+    async editEnvironment(name, options = {}) {
         const env = this.app.data.environments.find(e => e.name === name);
-        if (!env) return;
+        if (!env) return false;
+
+        const requestGeneration = this.beginEnvironmentFormRequest();
+        const origin = this.captureEnvironmentFormOrigin();
 
         const cliSettings = await this.loadCliSettings(env.cli, env.name);
+        if (!this.environmentFormOriginIsCurrent(origin, requestGeneration)) {
+            return false;
+        }
 
         // For Codex, env.customPrompt is the source of truth for terminal launch
         // (TerminalRoutes.cs threads it into the initial prompt). The settings panel's
@@ -343,10 +399,12 @@ export class EnvironmentController {
             }
         }
 
-        this.showEnvironmentForm({ mode: 'edit', env, cliSettings });
+        this.showEnvironmentForm({ mode: 'edit', env, cliSettings, ...options });
+        return true;
     }
 
-    showEnvironmentForm({ mode, env = null, cliSettings = {} }) {
+    showEnvironmentForm({ mode, env = null, cliSettings = {}, onChanged = null, onCancel = null }) {
+        this.disposeEnvironmentFormLifecycle();
         const isEdit = mode === 'edit';
 
         // CLI types selectable in the create-environment modal. `glm-5.2` and `kimi-k3` are
@@ -362,8 +420,8 @@ export class EnvironmentController {
             { value: 'copilot', label: 'Copilot' }
         ];
         const initialCli = isEdit ? env.cli : cliOptions[0].value;
-        const title = isEdit ? `Edit Environment: ${env.name}` : 'Create New Environment';
-        const submitLabel = isEdit ? 'Save Changes' : 'Create Environment';
+        const title = isEdit ? `Edit Environment / Worker: ${env.name}` : 'Create Environment / Worker';
+        const submitLabel = isEdit ? 'Save Changes' : 'Create Worker';
         const submitIcon = isEdit
             ? `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                 <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
@@ -388,7 +446,7 @@ export class EnvironmentController {
         this.app.showModal(title, `
             <form id="env-form">
                 <div class="mb-3">
-                    <label class="form-label">Environment Name</label>
+                    <label class="form-label">Environment / Worker Name</label>
                     ${nameField}
                 </div>
                 <div class="mb-3">
@@ -409,9 +467,10 @@ export class EnvironmentController {
         `);
 
         const slot = document.querySelector('[data-cli-settings-slot]');
+        let cliSelect = null;
 
         if (!isEdit) {
-            const cliSelect = document.getElementById('env-cli');
+            cliSelect = document.getElementById('env-cli');
             enhanceLlmSelectWithTomSelect(cliSelect, {
                 placeholder: 'Select CLI...',
                 cliKey: 'value'
@@ -429,8 +488,62 @@ export class EnvironmentController {
 
         this.bindCliSettingsInteractions(initialCli);
 
-        document.getElementById('env-form').addEventListener('submit', async (e) => {
+        const form = document.getElementById('env-form');
+        const modalContainer = document.getElementById('modal-container');
+        const closeButtons = [...(modalContainer?.querySelectorAll('[data-action="close-modal"]') || [])];
+        const keydownTarget = typeof window !== 'undefined' ? window : document;
+        let completed = false;
+        let lifecycleDisposed = false;
+        const cleanupLifecycle = () => {
+            if (lifecycleDisposed) return;
+            lifecycleDisposed = true;
+            keydownTarget.removeEventListener('keydown', handleEscape, true);
+            closeButtons.forEach(button => button.removeEventListener('click', handleClose));
+            if (cliSelect?.tomselect && typeof cliSelect.tomselect.destroy === 'function') {
+                cliSelect.tomselect.destroy();
+            }
+            if (this.environmentFormLifecycleCleanup === disposeLifecycle) {
+                this.environmentFormLifecycleCleanup = null;
+            }
+        };
+        const handleCancel = () => {
+            if (completed) return;
+            completed = true;
+            this.environmentFormRequestGeneration += 1;
+            cleanupLifecycle();
+            onCancel?.();
+        };
+        const handleClose = () => handleCancel();
+        const handleEscape = event => {
+            if (event.key !== 'Escape' || completed) return;
+            if (modalContainer && form && !modalContainer.contains(form)) {
+                completed = true;
+                cleanupLifecycle();
+                return;
+            }
+
+            if (!onCancel) {
+                handleCancel();
+                return;
+            }
+
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            this.app.closeModal();
+            handleCancel();
+        };
+        const disposeLifecycle = () => {
+            completed = true;
+            cleanupLifecycle();
+        };
+
+        keydownTarget.addEventListener('keydown', handleEscape, true);
+        closeButtons.forEach(button => button.addEventListener('click', handleClose));
+        this.environmentFormLifecycleCleanup = disposeLifecycle;
+
+        form.addEventListener('submit', async (e) => {
             e.preventDefault();
+            const submissionGeneration = this.environmentFormRequestGeneration;
 
             try {
                 if (isEdit) {
@@ -439,7 +552,7 @@ export class EnvironmentController {
                     await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(env.name)}`, 'PUT', payload);
                     await this.saveCliSettings(env.cli, env.name, settingsPayload);
                 } else {
-                    const name = document.getElementById('env-name').value;
+                    const name = document.getElementById('env-name').value.trim();
                     const cli = document.getElementById('env-cli').value;
                     const settingsPayload = this.extractCliSettingsPayload(cli);
                     const payload = {
@@ -451,10 +564,26 @@ export class EnvironmentController {
                     await this.saveCliSettings(cli, name, settingsPayload);
                 }
 
+                if (submissionGeneration !== this.environmentFormRequestGeneration
+                    || (modalContainer && form && !modalContainer.contains(form))) {
+                    return;
+                }
+                completed = true;
+                cleanupLifecycle();
                 this.app.closeModal();
                 await this.refreshEnvironments();
-                this.app.navigate('environments');
+                if (submissionGeneration !== this.environmentFormRequestGeneration) {
+                    return;
+                }
+                if (onChanged) {
+                    await onChanged();
+                } else {
+                    this.app.navigate('environments');
+                }
             } catch (error) {
+                if (submissionGeneration !== this.environmentFormRequestGeneration) {
+                    return;
+                }
                 const verb = isEdit ? 'update' : 'create';
                 this.app.showError(`Failed to ${verb} environment: ${error.message}`);
             }
@@ -1684,7 +1813,7 @@ export class EnvironmentController {
         `;
     }
 
-    async removeEnvironment(name) {
+    async removeEnvironment(name, { onChanged = null } = {}) {
         this.app.showModal('Remove Environment', `
             <div class="text-center py-3">
                 <div class="mb-3 text-danger">
@@ -1707,7 +1836,11 @@ export class EnvironmentController {
             try {
                 await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(name)}`, 'DELETE');
                 await this.refreshEnvironments();
-                this.app.navigate('environments');
+                if (onChanged) {
+                    await onChanged();
+                } else {
+                    this.app.navigate('environments');
+                }
             } catch (error) {
                 this.app.showError(`Failed to remove environment: ${error.message}`);
             }
@@ -1766,21 +1899,28 @@ export class EnvironmentController {
         }
     }
 
+    setEnvironments(environments = []) {
+        this.app.data.environments = (environments || []).map(env => ({
+            id: env.id,
+            name: env.name,
+            cli: env.cli,
+            customArgs: env.customArgs,
+            customPrompt: env.customPrompt,
+            defaultPrompt: env.defaultPrompt,
+            lastUsed: env.lastUsed || this.app.formatRelativeTime(env.lastUsedUTC)
+        }));
+        return this.app.data.environments;
+    }
+
     async refreshEnvironments() {
         try {
             const response = await this.app.apiCall('/api/v1/environments', 'GET');
-            this.app.data.environments = (response.environments || []).map(env => ({
-                id: env.id,
-                name: env.name,
-                cli: env.cli,
-                customArgs: env.customArgs,
-                customPrompt: env.customPrompt,
-                defaultPrompt: env.defaultPrompt,
-                lastUsed: this.app.formatRelativeTime(env.lastUsedUTC)
-            }));
+            this.setEnvironments(response.environments || []);
         } catch (error) {
             console.error('Failed to refresh environments:', error);
-            this.app.data.environments = [];
+            // Keep the last known-good profiles. Clearing them after a successful edit can make
+            // a Jobs draft silently reopen on the base CLI and drop its environment reference if
+            // the user saves before the next refresh succeeds.
         }
     }
 
