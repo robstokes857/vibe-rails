@@ -23,8 +23,10 @@ string exeDirectory = AppContext.BaseDirectory;
 string webRootPath = Path.Combine(exeDirectory, "wwwroot");
 
 // Configure Serilog — file sink to ~/.vibe_rails/logs/
-var logDir = Path.Combine(PathConstants.GetInstallDirPath(), "logs");
-Directory.CreateDirectory(logDir);
+var installDir = PathConstants.GetInstallDirPath();
+PrivateFilePermissions.EnsureDirectory(installDir);
+var logDir = Path.Combine(installDir, "logs");
+PrivateFilePermissions.EnsureDirectory(logDir);
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .WriteTo.File(
@@ -188,11 +190,11 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("VSCodeWebview", policy =>
     {
-        policy.WithOrigins($"http://localhost:{port}", $"http://127.0.0.1:{port}")
-            .SetIsOriginAllowed(origin =>
-                origin.StartsWith("vscode-webview://", StringComparison.OrdinalIgnoreCase) ||
-                origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
-                origin.StartsWith("http://127.0.0.1:", StringComparison.OrdinalIgnoreCase))
+        var localhostOrigin = $"http://localhost:{port}";
+        var loopbackOrigin = $"http://127.0.0.1:{port}";
+        var ipv6LoopbackOrigin = $"http://[::1]:{port}";
+        policy.WithOrigins(localhostOrigin, loopbackOrigin, ipv6LoopbackOrigin)
+            .SetIsOriginAllowed(origin => LocalCorsOriginPolicy.IsAllowed(origin, port))
             .AllowAnyMethod()
             .AllowAnyHeader()
             .AllowCredentials();
@@ -310,6 +312,7 @@ app.Use(async (context, next) =>
     Log.Information("[{Tag} ←] {Method} {Path} → {Status} ({ElapsedMs}ms)", tag, method, path, context.Response.StatusCode, sw.ElapsedMilliseconds);
 });
 
+app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseCors("VSCodeWebview");
 app.UseWebSockets();
 app.UseMiddleware<CookieAuthMiddleware>();  // Auth checks happen FIRST

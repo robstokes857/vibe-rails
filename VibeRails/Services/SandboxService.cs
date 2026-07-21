@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.RegularExpressions;
 using VibeRails.DB;
 using VibeRails.DTOs;
@@ -33,29 +32,36 @@ namespace VibeRails.Services
     public class SandboxService : ISandboxService
     {
         private readonly IRepository _repository;
+        private readonly string _sandboxBasePath;
 
-        private static readonly Regex ValidNameRegex = new(@"^[a-zA-Z0-9_-]+$", RegexOptions.Compiled);
+        private static readonly Regex ValidNameRegex = new(@"^[a-zA-Z0-9_][a-zA-Z0-9_-]*$", RegexOptions.Compiled);
+        private static readonly Regex ValidObjectIdRegex = new(
+            @"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$",
+            RegexOptions.Compiled);
+
+        private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromMinutes(2);
+        private static readonly TimeSpan GitCloneTimeout = TimeSpan.FromMinutes(10);
 
         // Bounds the name that becomes a path segment (Path.Combine) and a git branch.
         // Mirrors EnvironmentNameValidator's cap so an over-long name can't overrun MAX_PATH.
         private const int MaxSandboxNameLength = 64;
+        private const long MaxDiffFileBytes = 5 * 1024 * 1024;
 
         public SandboxService(IRepository repository)
+            : this(repository, GetConfiguredSandboxBasePath())
+        {
+        }
+
+        internal SandboxService(IRepository repository, string sandboxBasePath)
         {
             _repository = repository;
+            ArgumentException.ThrowIfNullOrWhiteSpace(sandboxBasePath);
+            _sandboxBasePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sandboxBasePath));
         }
 
         public async Task<Sandbox> CreateSandboxAsync(string name, string projectPath, CancellationToken ct = default)
         {
-            // Validate name
-            if (string.IsNullOrWhiteSpace(name))
-                throw new InvalidOperationException("Sandbox name is required.");
-
-            if (name.Length > MaxSandboxNameLength)
-                throw new InvalidOperationException($"Sandbox name must be {MaxSandboxNameLength} characters or fewer.");
-
-            if (!ValidNameRegex.IsMatch(name))
-                throw new InvalidOperationException("Sandbox name can only contain alphanumeric characters, hyphens, and underscores.");
+            ValidateSandboxName(name);
 
             // Check for duplicate
             var existing = await _repository.GetSandboxByNameAndProjectAsync(name, projectPath, ct);
@@ -63,8 +69,7 @@ namespace VibeRails.Services
                 throw new InvalidOperationException($"A sandbox named '{name}' already exists for this project.");
 
             // Compute sandbox path (global sandboxes dir)
-            var sandboxBasePath = ParserConfigs.GetSandboxPath();
-            var sandboxPath = Path.Combine(sandboxBasePath, name);
+            var sandboxPath = ResolveSandboxChildPath(name);
 
             if (Directory.Exists(sandboxPath))
                 throw new InvalidOperationException($"Directory already exists at '{sandboxPath}'. Choose a different name.");
@@ -86,7 +91,7 @@ namespace VibeRails.Services
 
             // Create and checkout a sandbox-specific branch
             var sandboxBranch = name;
-            await RunGitCommandAsync(sandboxPath, $"checkout -b \"{sandboxBranch}\"", ct);
+            await RunGitCommandAsync(sandboxPath, ["checkout", "-b", sandboxBranch], throwOnError: true, ct);
 
             // Save to DB
             var sandbox = new Sandbox
@@ -110,13 +115,17 @@ namespace VibeRails.Services
             if (sandbox == null)
                 throw new InvalidOperationException("Sandbox not found.");
 
+            var sandboxPath = ResolveStoredSandboxPath(sandbox.Path);
+
             // Delete the directory if it exists
-            if (Directory.Exists(sandbox.Path))
+            if (Directory.Exists(sandboxPath))
             {
+                EnsureSandboxDirectoryIsNotReparsePoint(sandboxPath);
+
                 // Git marks objects as read-only; clear those flags so Directory.Delete works on Windows.
                 // On Linux this is a harmless no-op for most files.
-                ClearReadOnlyAttributes(sandbox.Path);
-                Directory.Delete(sandbox.Path, recursive: true);
+                ClearReadOnlyAttributes(sandboxPath);
+                Directory.Delete(sandboxPath, recursive: true);
             }
 
             await _repository.DeleteSandboxAsync(sandboxId, ct);
@@ -133,53 +142,57 @@ namespace VibeRails.Services
             if (sandbox == null)
                 throw new InvalidOperationException("Sandbox not found.");
 
-            if (!Directory.Exists(sandbox.Path))
+            var sandboxPath = ResolveStoredSandboxPath(sandbox.Path);
+            if (!Directory.Exists(sandboxPath))
                 throw new InvalidOperationException("Sandbox directory no longer exists.");
+            EnsureSandboxDirectoryIsNotReparsePoint(sandboxPath);
+
+            var baseCommit = sandbox.CommitHash?.Trim();
+            if (!string.IsNullOrWhiteSpace(baseCommit) && !ValidObjectIdRegex.IsMatch(baseCommit))
+                throw new InvalidOperationException("Sandbox base commit is invalid.");
 
             var files = new List<SandboxDiffFile>();
 
             // Get committed changes since the original commit
             var changedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            if (!string.IsNullOrWhiteSpace(sandbox.CommitHash))
+            if (!string.IsNullOrWhiteSpace(baseCommit))
             {
-                var diffOutput = await RunGitCommandAsync(sandbox.Path,
-                    $"diff --name-only {sandbox.CommitHash}..HEAD", ct);
+                var diffOutput = await RunGitCommandRawAsync(sandboxPath,
+                    ["diff", "--name-only", "-z", $"{baseCommit}..HEAD", "--"], ct);
                 if (!string.IsNullOrWhiteSpace(diffOutput))
                 {
-                    foreach (var line in diffOutput.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
-                        changedFiles.Add(line.Trim());
+                    foreach (var path in diffOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+                        changedFiles.Add(path);
                 }
             }
 
             // Also get uncommitted changes
-            var statusOutput = await RunGitCommandAsync(sandbox.Path,
-                "status --porcelain=v1 --untracked-files=all --ignore-submodules", ct);
+            var statusOutput = await RunGitCommandRawAsync(sandboxPath,
+                ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules"], ct);
             if (!string.IsNullOrWhiteSpace(statusOutput))
             {
-                foreach (var line in statusOutput.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    if (line.Length < 4) continue;
-                    var filePath = line.Substring(3).Trim();
-                    var arrowIndex = filePath.IndexOf("->", StringComparison.Ordinal);
-                    if (arrowIndex >= 0)
-                        filePath = filePath.Substring(arrowIndex + 2).Trim();
-                    changedFiles.Add(filePath.Replace('\\', '/'));
-                }
+                foreach (var (_, filePath) in ParsePorcelainStatus(statusOutput))
+                    changedFiles.Add(filePath);
             }
 
             foreach (var filePath in changedFiles.OrderBy(f => f))
             {
+                var fullPath = ResolveDiffFilePath(sandboxPath, filePath);
+
                 // Get original content from the base commit
                 var originalContent = "";
-                if (!string.IsNullOrWhiteSpace(sandbox.CommitHash))
+                if (!string.IsNullOrWhiteSpace(baseCommit))
                 {
                     try
                     {
-                        originalContent = await RunGitCommandAsync(sandbox.Path,
-                            $"show {sandbox.CommitHash}:\"{filePath}\"", ct);
+                        originalContent = await ReadOriginalContentAsync(
+                            sandboxPath,
+                            baseCommit,
+                            filePath,
+                            ct);
                     }
-                    catch
+                    catch (InvalidOperationException)
                     {
                         // File didn't exist at the base commit (new file)
                     }
@@ -187,8 +200,9 @@ namespace VibeRails.Services
 
                 // Get modified content from disk
                 var modifiedContent = "";
-                var fullPath = Path.Combine(sandbox.Path, filePath);
-                if (File.Exists(fullPath))
+                if (TryGetReadableRegularFile(sandboxPath, fullPath, out var fileInfo)
+                    && fileInfo.Length <= MaxDiffFileBytes
+                    && await GitConfirmsRegularFileAsync(sandboxPath, fullPath, ct))
                 {
                     modifiedContent = await File.ReadAllTextAsync(fullPath, ct);
                 }
@@ -214,15 +228,22 @@ namespace VibeRails.Services
             if (string.IsNullOrWhiteSpace(sandbox.RemoteUrl))
                 throw new InvalidOperationException("Cannot push: sandbox has no remote URL configured.");
 
-            if (!Directory.Exists(sandbox.Path))
+            ValidateStoredGitName(sandbox.Branch, "branch");
+            var sandboxPath = ResolveStoredSandboxPath(sandbox.Path);
+            if (!Directory.Exists(sandboxPath))
                 throw new InvalidOperationException("Sandbox directory no longer exists.");
+            EnsureSandboxDirectoryIsNotReparsePoint(sandboxPath);
 
             // Check for uncommitted changes
-            var status = await RunGitCommandAsync(sandbox.Path, "status --porcelain", ct);
+            var status = await RunGitCommandAsync(sandboxPath, ["status", "--porcelain"], ct);
             if (!string.IsNullOrWhiteSpace(status))
                 throw new InvalidOperationException("Sandbox has uncommitted changes. Please commit or stash them before pushing.");
 
-            await RunGitCommandAsync(sandbox.Path, $"push -u origin \"{sandbox.Branch}\"", throwOnError: true, ct);
+            await RunGitCommandAsync(
+                sandboxPath,
+                ["push", "-u", "origin", "--", sandbox.Branch],
+                throwOnError: true,
+                ct);
 
             return $"Branch '{sandbox.Branch}' pushed to remote successfully.";
         }
@@ -233,26 +254,37 @@ namespace VibeRails.Services
             if (sandbox == null)
                 throw new InvalidOperationException("Sandbox not found.");
 
-            if (!Directory.Exists(sandbox.Path))
+            ValidateStoredGitName(sandbox.Name, "name");
+            ValidateStoredGitName(sandbox.Branch, "branch");
+            var sandboxPath = ResolveStoredSandboxPath(sandbox.Path);
+            if (!Directory.Exists(sandboxPath))
                 throw new InvalidOperationException("Sandbox directory no longer exists.");
+            EnsureSandboxDirectoryIsNotReparsePoint(sandboxPath);
 
             if (!Directory.Exists(sandbox.ProjectPath))
                 throw new InvalidOperationException("Source project directory no longer exists.");
 
             // Auto-commit any uncommitted changes in the sandbox before merging
-            var sandboxStatus = await RunGitCommandAsync(sandbox.Path, "status --porcelain", ct);
+            var sandboxStatus = await RunGitCommandAsync(sandboxPath, ["status", "--porcelain"], ct);
             if (!string.IsNullOrWhiteSpace(sandboxStatus))
             {
-                await RunGitCommandAsync(sandbox.Path, "add -A", throwOnError: true, ct);
-                await RunGitCommandAsync(sandbox.Path,
-                    "commit -m \"Auto-commit before merge\"", throwOnError: true, ct);
+                await RunGitCommandAsync(sandboxPath, ["add", "-A"], throwOnError: true, ct);
+                await RunGitCommandAsync(
+                    sandboxPath,
+                    ["commit", "-m", "Auto-commit before merge"],
+                    throwOnError: true,
+                    ct);
             }
 
             // Stash any uncommitted changes in the source project so the merge can proceed
-            var sourceStatus = await RunGitCommandAsync(sandbox.ProjectPath, "status --porcelain", ct);
+            var sourceStatus = await RunGitCommandAsync(sandbox.ProjectPath, ["status", "--porcelain"], ct);
             var sourceHasChanges = !string.IsNullOrWhiteSpace(sourceStatus);
             if (sourceHasChanges)
-                await RunGitCommandAsync(sandbox.ProjectPath, "stash push --include-untracked -m \"viberails-merge-stash\"", throwOnError: true, ct);
+                await RunGitCommandAsync(
+                    sandbox.ProjectPath,
+                    ["stash", "push", "--include-untracked", "-m", "viberails-merge-stash"],
+                    throwOnError: true,
+                    ct);
 
             // Check source project is on the expected branch
             var sourceBranch = sandbox.SourceBranch ?? "main";
@@ -268,20 +300,20 @@ namespace VibeRails.Services
             try
             {
                 await RunGitCommandAsync(sandbox.ProjectPath,
-                    $"remote add \"{remoteName}\" \"{sandbox.Path}\"", throwOnError: true, ct);
+                    ["remote", "add", "--", remoteName, sandboxPath], throwOnError: true, ct);
 
                 await RunGitCommandAsync(sandbox.ProjectPath,
-                    $"fetch \"{remoteName}\"", throwOnError: true, ct);
+                    ["fetch", "--", remoteName], throwOnError: true, ct);
 
                 await RunGitCommandAsync(sandbox.ProjectPath,
-                    $"merge \"{remoteName}/{sandbox.Branch}\" --no-edit", throwOnError: true, ct);
+                    ["merge", "--no-edit", "--", $"{remoteName}/{sandbox.Branch}"], throwOnError: true, ct);
 
                 return $"Sandbox '{sandbox.Name}' merged into '{sourceBranch}' successfully.";
             }
             catch (Exception ex) when (ex.Message.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
                                        ex.Message.Contains("merge", StringComparison.OrdinalIgnoreCase))
             {
-                try { await RunGitCommandAsync(sandbox.ProjectPath, "merge --abort", ct); }
+                try { await RunGitCommandAsync(sandbox.ProjectPath, ["merge", "--abort"], ct); }
                 catch { /* best effort abort */ }
 
                 throw new InvalidOperationException(
@@ -290,12 +322,12 @@ namespace VibeRails.Services
             }
             finally
             {
-                try { await RunGitCommandAsync(sandbox.ProjectPath, $"remote remove \"{remoteName}\"", ct); }
+                try { await RunGitCommandAsync(sandbox.ProjectPath, ["remote", "remove", "--", remoteName], ct); }
                 catch { /* best effort cleanup */ }
 
                 if (sourceHasChanges)
                 {
-                    try { await RunGitCommandAsync(sandbox.ProjectPath, "stash pop", ct); }
+                    try { await RunGitCommandAsync(sandbox.ProjectPath, ["stash", "pop"], ct); }
                     catch { /* best effort stash restore */ }
                 }
             }
@@ -343,7 +375,7 @@ namespace VibeRails.Services
             string? remoteUrl = null;
             try
             {
-                remoteUrl = await RunGitCommandAsync(projectPath, "remote get-url origin", ct);
+                remoteUrl = await RunGitCommandAsync(projectPath, ["remote", "get-url", "origin"], ct);
             }
             catch
             {
@@ -353,7 +385,11 @@ namespace VibeRails.Services
             if (!string.IsNullOrWhiteSpace(remoteUrl))
             {
                 // Source has a real remote — point the sandbox at it
-                await RunGitCommandAsync(sandboxPath, $"remote set-url origin \"{remoteUrl}\"", ct);
+                await RunGitCommandAsync(
+                    sandboxPath,
+                    ["remote", "set-url", "--", "origin", remoteUrl],
+                    throwOnError: true,
+                    ct);
                 return remoteUrl;
             }
             else
@@ -361,7 +397,7 @@ namespace VibeRails.Services
                 // Source has no remote — remove the local-path origin from the sandbox
                 try
                 {
-                    await RunGitCommandAsync(sandboxPath, "remote remove origin", ct);
+                    await RunGitCommandAsync(sandboxPath, ["remote", "remove", "--", "origin"], ct);
                 }
                 catch
                 {
@@ -373,69 +409,39 @@ namespace VibeRails.Services
 
         private static async Task RunGitCloneAsync(string sourcePath, string destPath, string branch, CancellationToken ct)
         {
-            var arguments = $"clone --depth 1 --branch \"{branch}\" --single-branch \"{sourcePath}\" \"{destPath}\"";
+            var workingDirectory = Path.GetDirectoryName(destPath)
+                ?? throw new InvalidOperationException("Sandbox destination has no parent directory.");
+            var result = await GitProcessRunner.RunAsync(
+                ["clone", "--depth", "1", "--branch", branch, "--single-branch", "--", sourcePath, destPath],
+                workingDirectory,
+                GitCloneTimeout,
+                ct);
 
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "git",
-                    Arguments = arguments,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-
-            process.Start();
-
-            var outputTask = process.StandardOutput.ReadToEndAsync(ct);
-            var errorTask = process.StandardError.ReadToEndAsync(ct);
-
-            await process.WaitForExitAsync(ct);
-
-            var error = await errorTask;
-
-            if (process.ExitCode != 0)
-            {
-                throw new InvalidOperationException($"Git clone failed: {error}");
-            }
+            if (result.TimedOut)
+                throw new TimeoutException("Git clone timed out.");
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"Git clone failed: {result.StdErr}");
         }
 
         private static async Task CopyDirtyFilesAsync(string projectPath, string sandboxPath, CancellationToken ct)
         {
             // Get all dirty/untracked files via git status --porcelain
-            var output = await RunGitCommandAsync(projectPath, "status --porcelain=v1 --untracked-files=all --ignore-submodules", ct);
+            var output = await RunGitCommandRawAsync(
+                projectPath,
+                ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules"],
+                ct);
 
             if (string.IsNullOrWhiteSpace(output))
                 return;
 
-            var lines = output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (var line in lines)
+            foreach (var (statusCode, filePath) in ParsePorcelainStatus(output))
             {
-                if (line.Length < 4) continue;
-
-                var statusCode = line.Substring(0, 2);
-                var filePath = line.Substring(3).Trim();
-
-                // Handle renames (e.g., "R  old -> new")
-                var arrowIndex = filePath.IndexOf("->", StringComparison.Ordinal);
-                if (arrowIndex >= 0)
-                {
-                    filePath = filePath.Substring(arrowIndex + 2).Trim();
-                }
-
-                // Normalize path separators
-                filePath = filePath.Replace('\\', '/');
-
                 // Skip .vibe_rails directory contents
                 if (filePath.StartsWith($"{PathConstants.DEFAULT_INSTALL_DIR_NAME}/", StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                var sourceFull = Path.Combine(projectPath, filePath);
-                var destFull = Path.Combine(sandboxPath, filePath);
+                var sourceFull = ResolveDiffFilePath(projectPath, filePath);
+                var destFull = ResolveDiffFilePath(sandboxPath, filePath);
 
                 // Deleted files: remove from sandbox if they exist
                 if (statusCode.Contains('D'))
@@ -448,13 +454,18 @@ namespace VibeRails.Services
                 }
 
                 // For all other statuses: copy the file
-                if (File.Exists(sourceFull))
+                if (TryGetReadableRegularFile(projectPath, sourceFull, out _)
+                    && await GitConfirmsRegularFileAsync(projectPath, sourceFull, ct))
                 {
                     var destDir = Path.GetDirectoryName(destFull);
-                    if (destDir != null && !Directory.Exists(destDir))
+                    if (destDir != null)
                     {
+                        EnsureDirectoryPathIsSafe(sandboxPath, destDir);
                         Directory.CreateDirectory(destDir);
+                        EnsureDirectoryPathIsSafe(sandboxPath, destDir);
                     }
+
+                    EnsureDestinationFileIsSafe(destFull);
                     File.Copy(sourceFull, destFull, overwrite: true);
                 }
             }
@@ -462,7 +473,15 @@ namespace VibeRails.Services
 
         private static void ClearReadOnlyAttributes(string directory)
         {
-            foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+            var options = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                AttributesToSkip = FileAttributes.ReparsePoint,
+                IgnoreInaccessible = false,
+                ReturnSpecialDirectories = false
+            };
+
+            foreach (var file in Directory.EnumerateFiles(directory, "*", options))
             {
                 var attrs = File.GetAttributes(file);
                 if ((attrs & FileAttributes.ReadOnly) != 0)
@@ -470,44 +489,305 @@ namespace VibeRails.Services
             }
         }
 
-        private static async Task<string> RunGitCommandAsync(string workingDirectory, string arguments, CancellationToken ct)
+        private static IEnumerable<(string StatusCode, string FilePath)> ParsePorcelainStatus(string output)
         {
-            return await RunGitCommandAsync(workingDirectory, arguments, throwOnError: false, ct);
+            var entries = output.Split('\0');
+            for (var index = 0; index < entries.Length; index++)
+            {
+                var entry = entries[index];
+                if (entry.Length < 4)
+                    continue;
+
+                var statusCode = entry[..2];
+                var filePath = entry[3..];
+                yield return (statusCode, filePath);
+
+                // With porcelain v1 -z, a rename/copy is "XY target\0source\0".
+                // The target is the path whose working-tree content matters; skip the source.
+                if ((statusCode.Contains('R') || statusCode.Contains('C'))
+                    && index + 1 < entries.Length)
+                {
+                    index++;
+                }
+            }
         }
 
-        private static async Task<string> RunGitCommandAsync(string workingDirectory, string arguments, bool throwOnError, CancellationToken ct)
+        private static string GetConfiguredSandboxBasePath()
         {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "git",
-                    Arguments = $"--no-pager {arguments}",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    WorkingDirectory = workingDirectory
-                }
-            };
+            var configuredPath = ParserConfigs.GetSandboxPath();
+            return string.IsNullOrWhiteSpace(configuredPath)
+                ? Path.Combine(PathConstants.GetInstallDirPath(), PathConstants.SANDBOXES_SUBDIR)
+                : configuredPath;
+        }
 
-            process.Start();
-
-            var outputTask = process.StandardOutput.ReadToEndAsync(ct);
-            var errorTask = process.StandardError.ReadToEndAsync(ct);
-
-            await process.WaitForExitAsync(ct);
-
-            var output = (await outputTask).Trim();
-            var error = (await errorTask).Trim();
-
-            if (throwOnError && process.ExitCode != 0)
+        private static void ValidateSandboxName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                throw new InvalidOperationException("Sandbox name is required.");
+            if (name.Length > MaxSandboxNameLength)
+                throw new InvalidOperationException($"Sandbox name must be {MaxSandboxNameLength} characters or fewer.");
+            if (!ValidNameRegex.IsMatch(name))
             {
                 throw new InvalidOperationException(
-                    !string.IsNullOrWhiteSpace(error) ? error : $"Git command failed with exit code {process.ExitCode}");
+                    "Sandbox name must start with an alphanumeric character or underscore and can only contain alphanumeric characters, hyphens, and underscores.");
+            }
+        }
+
+        private static void ValidateStoredGitName(string value, string field)
+        {
+            if (string.IsNullOrWhiteSpace(value)
+                || value.Length > MaxSandboxNameLength
+                || !ValidNameRegex.IsMatch(value))
+            {
+                throw new InvalidOperationException($"Sandbox {field} is invalid.");
+            }
+        }
+
+        private string ResolveSandboxChildPath(string name) =>
+            ResolveStoredSandboxPath(Path.Combine(_sandboxBasePath, name));
+
+        private string ResolveStoredSandboxPath(string storedPath)
+        {
+            if (string.IsNullOrWhiteSpace(storedPath))
+                throw new InvalidOperationException("Sandbox path is invalid.");
+
+            string fullPath;
+            try
+            {
+                fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(storedPath));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                throw new InvalidOperationException("Sandbox path is invalid.", ex);
             }
 
-            return output;
+            if (!IsStrictChildPath(_sandboxBasePath, fullPath))
+            {
+                throw new InvalidOperationException(
+                    "Refusing to access a sandbox outside the configured sandbox directory.");
+            }
+
+            return fullPath;
+        }
+
+        internal static string ResolveDiffFilePath(string sandboxPath, string relativePath)
+        {
+            if (string.IsNullOrEmpty(relativePath) || Path.IsPathRooted(relativePath))
+                throw new InvalidOperationException("Git returned an invalid sandbox file path.");
+
+            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sandboxPath));
+            string fullPath;
+            try
+            {
+                var platformPath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+                fullPath = Path.GetFullPath(Path.Combine(root, platformPath));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                throw new InvalidOperationException("Git returned an invalid sandbox file path.", ex);
+            }
+
+            if (!IsStrictChildPath(root, fullPath))
+            {
+                throw new InvalidOperationException(
+                    "Refusing to read a file outside the sandbox directory.");
+            }
+
+            return fullPath;
+        }
+
+        private void EnsureSandboxDirectoryIsNotReparsePoint(string sandboxPath)
+        {
+            EnsureDirectoryPathIsSafe(_sandboxBasePath, sandboxPath);
+        }
+
+        private static void EnsureDirectoryPathIsSafe(string rootPath, string directoryPath)
+        {
+            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+            var current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directoryPath));
+            if (!PathsEqual(root, current) && !IsStrictChildPath(root, current))
+                throw new InvalidOperationException("Directory path escapes its configured root.");
+
+            while (!PathsEqual(root, current))
+            {
+                var info = new DirectoryInfo(current);
+                if (info.Exists
+                    && (info.LinkTarget is not null
+                        || info.Attributes.HasFlag(FileAttributes.ReparsePoint)))
+                {
+                    throw new InvalidOperationException(
+                        "Refusing to access a sandbox through a symbolic link or junction.");
+                }
+
+                current = Path.GetDirectoryName(current)
+                    ?? throw new InvalidOperationException("Directory path escapes its configured root.");
+            }
+        }
+
+        private static bool TryGetReadableRegularFile(
+            string rootPath,
+            string fullPath,
+            out FileInfo fileInfo)
+        {
+            fileInfo = new FileInfo(fullPath);
+            try
+            {
+                if (!fileInfo.Exists
+                    || fileInfo.LinkTarget is not null
+                    || fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return false;
+                }
+
+                EnsureDirectoryPathIsSafe(
+                    rootPath,
+                    fileInfo.DirectoryName
+                        ?? throw new InvalidOperationException("Sandbox file has no parent directory."));
+                _ = fileInfo.Length;
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        internal static async Task<bool> GitConfirmsRegularFileAsync(
+            string rootPath,
+            string fullPath,
+            CancellationToken ct)
+        {
+            var relativePath = Path.GetRelativePath(rootPath, fullPath).Replace('\\', '/');
+            var result = await GitProcessRunner.RunAsync(
+                ["--no-pager", "hash-object", "--no-filters", "--", relativePath],
+                rootPath,
+                GitCommandTimeout,
+                ct);
+
+            return !result.TimedOut && result.ExitCode == 0;
+        }
+
+        private static void EnsureDestinationFileIsSafe(string path)
+        {
+            var info = new FileInfo(path);
+            try
+            {
+                if (Directory.Exists(path)
+                    || info.LinkTarget is not null
+                    || (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint)))
+                {
+                    throw new InvalidOperationException(
+                        "Refusing to overwrite a symbolic link, junction, or directory in the sandbox.");
+                }
+            }
+            catch (FileNotFoundException)
+            {
+                // A missing destination is safe to create.
+            }
+            catch (DirectoryNotFoundException)
+            {
+                // The caller creates and validates the parent directory before copying.
+            }
+        }
+
+        private static async Task<string> ReadOriginalContentAsync(
+            string sandboxPath,
+            string commitHash,
+            string filePath,
+            CancellationToken ct)
+        {
+            var objectName = $"{commitHash}:{filePath}";
+            var sizeOutput = await RunGitCommandAsync(
+                sandboxPath,
+                ["cat-file", "-s", objectName],
+                throwOnError: true,
+                ct);
+            if (!long.TryParse(sizeOutput, out var size) || size < 0)
+                throw new InvalidOperationException("Git returned an invalid file size.");
+            if (size > MaxDiffFileBytes)
+                return string.Empty;
+
+            return await RunGitCommandAsync(
+                sandboxPath,
+                ["show", objectName],
+                throwOnError: true,
+                ct);
+        }
+
+        private static bool IsStrictChildPath(string rootPath, string candidatePath)
+        {
+            var rootWithSeparator = Path.TrimEndingDirectorySeparator(rootPath) + Path.DirectorySeparatorChar;
+            return candidatePath.StartsWith(rootWithSeparator, PathComparison);
+        }
+
+        private static bool PathsEqual(string left, string right) =>
+            string.Equals(left, right, PathComparison);
+
+        private static StringComparison PathComparison =>
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+        private static Task<string> RunGitCommandAsync(
+            string workingDirectory,
+            IReadOnlyList<string> arguments,
+            CancellationToken ct) =>
+            RunGitCommandAsync(workingDirectory, arguments, throwOnError: false, ct);
+
+        private static Task<string> RunGitCommandRawAsync(
+            string workingDirectory,
+            IReadOnlyList<string> arguments,
+            CancellationToken ct) =>
+            RunGitCommandCoreAsync(
+                workingDirectory,
+                arguments,
+                throwOnError: false,
+                preserveOutput: true,
+                ct);
+
+        private static Task<string> RunGitCommandAsync(
+            string workingDirectory,
+            IReadOnlyList<string> arguments,
+            bool throwOnError,
+            CancellationToken ct) =>
+            RunGitCommandCoreAsync(
+                workingDirectory,
+                arguments,
+                throwOnError,
+                preserveOutput: false,
+                ct);
+
+        private static async Task<string> RunGitCommandCoreAsync(
+            string workingDirectory,
+            IReadOnlyList<string> arguments,
+            bool throwOnError,
+            bool preserveOutput,
+            CancellationToken ct)
+        {
+            var gitArguments = new List<string>(arguments.Count + 1) { "--no-pager" };
+            gitArguments.AddRange(arguments);
+            var result = preserveOutput
+                ? await GitProcessRunner.RunRawAsync(
+                    gitArguments,
+                    workingDirectory,
+                    GitCommandTimeout,
+                    ct)
+                : await GitProcessRunner.RunAsync(
+                    gitArguments,
+                    workingDirectory,
+                    GitCommandTimeout,
+                    ct);
+
+            if (result.TimedOut)
+                throw new TimeoutException("Git command timed out.");
+
+            if (throwOnError && result.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    !string.IsNullOrWhiteSpace(result.StdErr)
+                        ? result.StdErr
+                        : $"Git command failed with exit code {result.ExitCode}");
+            }
+
+            return result.StdOut;
         }
     }
 }

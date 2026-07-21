@@ -26,7 +26,7 @@ public sealed class JobRunExecutorTests : IDisposable
         var run = Run(
             LLM.Codex,
             JobExecutionMode.Review,
-            environmentArgs: "--sandbox danger-full-access --add-dir C:\\outside --json --model gpt-5",
+            environmentArgs: "--sandbox danger-full-access --add-dir C:\\outside --json --no-alt-screen --model gpt-5",
             environmentName: "nightly",
             environmentPath: _directory,
             triggerContextJson: "{\"commit\":\"abc\"}");
@@ -46,6 +46,7 @@ public sealed class JobRunExecutorTests : IDisposable
         Assert.DoesNotContain("danger-full-access", arguments);
         Assert.DoesNotContain("--add-dir", arguments);
         Assert.DoesNotContain("C:\\outside", arguments);
+        Assert.DoesNotContain("--no-alt-screen", arguments);
         Assert.Contains("VibeRails trigger metadata follows", arguments[^1]);
         Assert.Equal(Path.Combine(_directory, "codex"), startInfo.Environment["CODEX_HOME"]);
     }
@@ -75,6 +76,182 @@ public sealed class JobRunExecutorTests : IDisposable
         Assert.DoesNotContain("/outside", arguments);
         Assert.DoesNotContain("/also-outside", arguments);
         Assert.Equal(Path.Combine(_directory, "claude"), startInfo.Environment["CLAUDE_CONFIG_DIR"]);
+    }
+
+    [Fact]
+    public void BuildStartInfo_AntigravityReviewForcesFiniteSandboxedPrintMode()
+    {
+        var run = Run(
+            LLM.Antigravity,
+            JobExecutionMode.Review,
+            environmentArgs: "--dangerously-skip-permissions --prompt-interactive old-prompt --add-dir C:\\outside --model \"Gemini 3.5 Flash (High)\"",
+            environmentName: "agy-review",
+            environmentPath: _directory);
+
+        var inheritedXdgConfigHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        var startInfo = JobRunExecutor.BuildStartInfo(run, "agy", _directory);
+        var arguments = startInfo.ArgumentList.ToArray();
+
+        Assert.Contains("--model", arguments);
+        Assert.Contains("Gemini 3.5 Flash (High)", arguments);
+        Assert.Equal(1, arguments.Count(argument => argument == "--sandbox"));
+        Assert.DoesNotContain("--dangerously-skip-permissions", arguments);
+        Assert.DoesNotContain("--prompt-interactive", arguments);
+        Assert.DoesNotContain("old-prompt", arguments);
+        Assert.DoesNotContain("--add-dir", arguments);
+        Assert.DoesNotContain("C:\\outside", arguments);
+        Assert.Equal("30m", arguments[Array.IndexOf(arguments, "--print-timeout") + 1]);
+        Assert.Equal("Review this repository.", arguments[Array.IndexOf(arguments, "--print") + 1]);
+        Assert.Equal(inheritedXdgConfigHome, GetEnvironmentValue(startInfo, "XDG_CONFIG_HOME"));
+    }
+
+    [Fact]
+    public void BuildStartInfo_AntigravityWriteForcesNonBlockingPermissions()
+    {
+        var run = Run(
+            LLM.Antigravity,
+            JobExecutionMode.IsolatedWrite,
+            environmentArgs: "--sandbox --dangerously-skip-permissions --model test-model");
+
+        var arguments = JobRunExecutor.BuildStartInfo(run, "agy", _directory).ArgumentList.ToArray();
+
+        Assert.Equal(1, arguments.Count(argument => argument == "--sandbox"));
+        Assert.Equal(1, arguments.Count(argument => argument == "--dangerously-skip-permissions"));
+        Assert.Equal(1, arguments.Count(argument => argument == "--print"));
+    }
+
+    [Fact]
+    public void BuildStartInfo_CopilotReviewOverridesSavedModeAndYoloFlags()
+    {
+        var run = Run(
+            LLM.Copilot,
+            JobExecutionMode.Review,
+            environmentArgs: "--mode autopilot --yolo --interactive old-prompt --allow-all-paths --model gpt-5.4",
+            environmentName: "copilot-review",
+            environmentPath: _directory);
+
+        var inheritedXdgConfigHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        var startInfo = JobRunExecutor.BuildStartInfo(run, "copilot", _directory);
+        var arguments = startInfo.ArgumentList.ToArray();
+
+        Assert.Equal("plan", arguments[Array.IndexOf(arguments, "--mode") + 1]);
+        Assert.Equal(1, arguments.Count(argument => argument == "--allow-all-tools"));
+        Assert.Contains("--no-ask-user", arguments);
+        Assert.Contains("--no-remote", arguments);
+        Assert.Equal("json", arguments[Array.IndexOf(arguments, "--output-format") + 1]);
+        Assert.Equal("Review this repository.", arguments[Array.IndexOf(arguments, "--prompt") + 1]);
+        Assert.DoesNotContain("--yolo", arguments);
+        Assert.DoesNotContain("--allow-all-paths", arguments);
+        Assert.DoesNotContain("old-prompt", arguments);
+        Assert.Contains("gpt-5.4", arguments);
+        Assert.Equal(inheritedXdgConfigHome, GetEnvironmentValue(startInfo, "XDG_CONFIG_HOME"));
+    }
+
+    [Fact]
+    public void BuildStartInfo_CopilotWriteForcesAutopilotPromptMode()
+    {
+        var run = Run(
+            LLM.Copilot,
+            JobExecutionMode.LiveWrite,
+            environmentArgs: "--plan --allow-all --prompt old-prompt --model claude-sonnet-4.5");
+
+        var arguments = JobRunExecutor.BuildStartInfo(run, "copilot", _directory).ArgumentList.ToArray();
+
+        Assert.Equal("autopilot", arguments[Array.IndexOf(arguments, "--mode") + 1]);
+        Assert.Equal(1, arguments.Count(argument => argument == "--allow-all-tools"));
+        Assert.DoesNotContain("--plan", arguments);
+        Assert.DoesNotContain("--allow-all", arguments);
+        Assert.DoesNotContain("old-prompt", arguments);
+        Assert.Equal(1, arguments.Count(argument => argument == "--prompt"));
+    }
+
+    [Fact]
+    public void BuildStartInfo_OpenCodeReviewUsesRunModeAndEnvironmentConfigRoot()
+    {
+        var run = Run(
+            LLM.OpenCode,
+            JobExecutionMode.Review,
+            environmentArgs: "--auto --agent build --prompt=old-prompt --dir C:\\outside --model openai/gpt-5.1-codex --pure",
+            environmentName: "open-code-review",
+            environmentPath: _directory);
+
+        var startInfo = JobRunExecutor.BuildStartInfo(run, "opencode", _directory);
+        var arguments = startInfo.ArgumentList.ToArray();
+
+        Assert.Equal("run", arguments[0]);
+        Assert.Equal("plan", arguments[Array.IndexOf(arguments, "--agent") + 1]);
+        Assert.DoesNotContain("--auto", arguments);
+        Assert.DoesNotContain("old-prompt", arguments);
+        Assert.DoesNotContain("--dir", arguments);
+        Assert.DoesNotContain("C:\\outside", arguments);
+        Assert.Contains("openai/gpt-5.1-codex", arguments);
+        Assert.Contains("--pure", arguments);
+        Assert.Equal("json", arguments[Array.IndexOf(arguments, "--format") + 1]);
+        Assert.Equal("Review this repository.", arguments[^1]);
+        Assert.Equal(_directory, startInfo.Environment["XDG_CONFIG_HOME"]);
+    }
+
+    [Theory]
+    [InlineData(LLM.OpenCode, JobExecutionMode.LiveWrite, "--agent plan --auto --model anthropic/claude-sonnet-4-5")]
+    [InlineData(LLM.Glm52, JobExecutionMode.IsolatedWrite, "--agent=plan --auto")]
+    [InlineData(LLM.KimiK3, JobExecutionMode.LiveWrite, "--agent plan")]
+    public void BuildStartInfo_OpenCodeFamilyWriteOverridesSavedAgentAndForcesAutoApproval(
+        LLM llm,
+        JobExecutionMode executionMode,
+        string environmentArgs)
+    {
+        var run = Run(
+            llm,
+            executionMode,
+            environmentArgs: environmentArgs);
+
+        var arguments = JobRunExecutor.BuildStartInfo(run, "opencode", _directory).ArgumentList.ToArray();
+
+        Assert.Equal("build", arguments[Array.IndexOf(arguments, "--agent") + 1]);
+        Assert.Equal(1, arguments.Count(argument => argument == "--agent"));
+        Assert.DoesNotContain(arguments, argument => argument.StartsWith("--agent=", StringComparison.Ordinal));
+        Assert.DoesNotContain("plan", arguments);
+        Assert.Equal(1, arguments.Count(argument => argument == "--auto"));
+    }
+
+    [Theory]
+    [InlineData(LLM.Glm52, "--model=zai/glm-5.2")]
+    [InlineData(LLM.KimiK3, "--model=moonshotai/kimi-k3")]
+    public void BuildStartInfo_OpenCodePseudoCliBaseLaunchPinsModel(LLM llm, string modelArgument)
+    {
+        var run = Run(llm, JobExecutionMode.Review, environmentArgs: "");
+
+        var arguments = JobRunExecutor.BuildStartInfo(run, "opencode", _directory).ArgumentList.ToArray();
+
+        Assert.Contains(modelArgument, arguments);
+        Assert.Equal(1, arguments.Count(argument => argument.StartsWith("--model", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void BuildStartInfo_CustomPseudoCliDoesNotDuplicatePinnedModel()
+    {
+        var run = Run(
+            LLM.Glm52,
+            JobExecutionMode.Review,
+            environmentArgs: "--model wrong/provider-model",
+            environmentName: "glm-review",
+            environmentPath: _directory);
+
+        var arguments = JobRunExecutor.BuildStartInfo(run, "opencode", _directory).ArgumentList.ToArray();
+
+        Assert.Equal(1, arguments.Count(argument => argument.StartsWith("--model", StringComparison.Ordinal)));
+        Assert.Contains("--model=zai/glm-5.2", arguments);
+        Assert.DoesNotContain("wrong/provider-model", arguments);
+        Assert.Equal(_directory, JobRunExecutor.BuildStartInfo(run, "opencode", _directory).Environment["XDG_CONFIG_HOME"]);
+    }
+
+    [Theory]
+    [InlineData(LLM.Copilot, "{\"type\":\"assistant.message\",\"data\":{\"content\":\"Copilot result\"}}", "Copilot result")]
+    [InlineData(LLM.OpenCode, "{\"type\":\"text\",\"part\":{\"text\":\"OpenCode result\"}}", "OpenCode result")]
+    [InlineData(LLM.Glm52, "{\"type\":\"text\",\"text\":\"GLM result\"}", "GLM result")]
+    public void TryExtractResult_ReadsAdditionalProviderJson(LLM llm, string line, string expected)
+    {
+        Assert.Equal(expected, JobRunExecutor.TryExtractResult(llm, line));
     }
 
     [Fact]
@@ -194,6 +371,9 @@ public sealed class JobRunExecutorTests : IDisposable
             await Task.Delay(50, cancellationToken);
         Assert.True(File.Exists(path), "The fake LLM process did not start within five seconds.");
     }
+
+    private static string? GetEnvironmentValue(System.Diagnostics.ProcessStartInfo startInfo, string name) =>
+        startInfo.Environment.TryGetValue(name, out var value) ? value : null;
 
     private JobRunRecord Run(
         LLM llm,

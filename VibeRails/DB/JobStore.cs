@@ -918,8 +918,9 @@ public sealed class JobStore : IJobStore
                  EnvironmentId, EnvironmentName, EnvironmentPath, EnvironmentArgs, Prompt,
                  ExecutionMode, TimeoutMinutes, ExecutablePath, TriggerContextJson, QueuedUTC)
             SELECT
-                $runId, j.Id, $triggerId, $triggerKind, $triggerKey, $status, j.Name, j.ProjectPath, j.Llm,
-                j.EnvironmentId, e.CustomName, e.Path, COALESCE(e.CustomArgs, ''), j.Prompt,
+                $runId, j.Id, $triggerId, $triggerKind, $triggerKey, $status, j.Name, j.ProjectPath,
+                COALESCE(e.LLM, j.Llm), j.EnvironmentId, e.CustomName, e.Path,
+                COALESCE(e.CustomArgs, ''), COALESCE(NULLIF(TRIM(e.CustomPrompt), ''), j.Prompt),
                 j.ExecutionMode, j.TimeoutMinutes, j.ExecutablePath, $contextJson, $queuedUtc
             FROM Jobs j
             LEFT JOIN Environments e ON e.Id = j.EnvironmentId
@@ -1175,8 +1176,9 @@ public sealed class JobStore : IJobStore
     private static DateTime ParseDb(string value) => DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
 
     private const string JobSelectSql = """
-        SELECT j.Id, j.Name, j.ProjectPath, j.Llm, j.EnvironmentId,
-               e.CustomName, e.Path, e.CustomArgs, j.Prompt, j.ExecutionMode,
+        SELECT j.Id, j.Name, j.ProjectPath, COALESCE(e.LLM, j.Llm), j.EnvironmentId,
+               e.CustomName, e.Path, e.CustomArgs,
+               COALESCE(NULLIF(TRIM(e.CustomPrompt), ''), j.Prompt), j.ExecutionMode,
                j.TimeoutMinutes, j.Enabled, j.ExecutablePath, j.CreatedUTC,
                j.UpdatedUTC, j.DeletedUTC
         FROM Jobs j LEFT JOIN Environments e ON e.Id = j.EnvironmentId

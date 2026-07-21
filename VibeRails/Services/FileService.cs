@@ -39,27 +39,16 @@ namespace VibeRails.Services
             ParserConfigs.SetSandboxPath(sandboxDir);
             ParserConfigs.SetHistoryPath(historyDir);
 
-            if (!Directory.Exists(globalDir))
-            {
-                Directory.CreateDirectory(globalDir);
-            }
-            if (!Directory.Exists(envDir))
-            {
-                Directory.CreateDirectory(envDir);
-            }
-            if (!Directory.Exists(sandboxDir))
-            {
-                Directory.CreateDirectory(sandboxDir);
-            }
-            if (!Directory.Exists(historyDir))
-            {
-                Directory.CreateDirectory(historyDir);
-            }
+            PrivateFilePermissions.EnsureDirectory(globalDir);
+            PrivateFilePermissions.EnsureDirectory(envDir);
+            PrivateFilePermissions.EnsureDirectory(sandboxDir);
+            PrivateFilePermissions.EnsureDirectory(historyDir);
             // SQLite database will be created by StateService.InitializeDatabase()
             if (!File.Exists(configFile))
             {
                 File.WriteAllText(configFile, EMPTY_JSON);
             }
+            PrivateFilePermissions.EnsureFile(configFile);
         }
 
         public void InitLocal(string rootPath)

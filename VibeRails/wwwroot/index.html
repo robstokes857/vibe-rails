@@ -66,9 +66,9 @@
                 <span>RULES</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="environments"
-                title="Manage Custom Environments & Sandboxes">
+                title="Manage Environment / Workers & Sandboxes">
                 <img src="assets/img/icons/layer-group-solid-full.svg" alt="" class="me-1 icon-light">
-                <span>ENVS</span>
+                <span>WORKERS</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="vibe-rails-ai"
                 title="Vibe Rails AI — query and inspect captures">
@@ -124,8 +124,7 @@
     <template id="dashboard-template">
         <div class="dashboard" data-dashboard="unified">
             <!-- Rules workspace. DashboardController mounts the Rules view here; the terminal
-                 panel mounts into the [data-terminal-content] slot inside that view, directly
-                 below the validation results. -->
+                 panel mounts into the [data-terminal-content] slot at the end of that view. -->
             <div class="row mb-3">
                 <div class="col-12 rules-dashboard-host" data-rules-overview-host></div>
             </div>
@@ -332,27 +331,6 @@
                     </section>
                 </div>
 
-                <!-- Fix: the agent terminal sits directly under the findings it fixes -->
-                <div class="rules-station" data-station="fix">
-                    <span class="rules-station-node" aria-hidden="true"></span>
-                    <section class="rules-terminal-station" data-terminal-section
-                        aria-label="Agent terminal">
-                        <header class="rules-station-header rules-station-header-bare">
-                            <div class="rules-station-heading">
-                                <span class="rules-station-eyebrow">Fix</span>
-                                <div class="rules-station-title-row">
-                                    <h2>Agent terminal</h2>
-                                </div>
-                            </div>
-                            <p class="rules-station-hint">Start an agent here and hand it the fix brief from the
-                                results above.</p>
-                        </header>
-                        <div class="rules-station-body" data-terminal-content>
-                            <!-- Terminal panel rendered here -->
-                        </div>
-                    </section>
-                </div>
-
                 <!-- Measure: working-tree code quality analysis -->
                 <div class="rules-station" data-station="measure">
                     <span class="rules-station-node" aria-hidden="true"></span>
@@ -453,13 +431,13 @@
                             <div class="rules-station-heading">
                                 <span class="rules-station-eyebrow">Automate</span>
                                 <div class="rules-station-title-row">
-                                    <h2 id="rules-automation-title">LLM Jobs</h2>
+                                    <h2 id="rules-automation-title">Automation rules</h2>
                                     <span class="rules-station-note">Real hooks only — previews never queue jobs</span>
                                 </div>
                             </div>
                             <div class="rules-station-actions">
-                                <button class="btn btn-sm btn-outline-secondary" type="button" data-action="new-vca-job">+ VCA job</button>
-                                <button class="btn btn-sm btn-outline-secondary" type="button" data-action="new-commit-job">+ Commit job</button>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" data-action="new-vca-job">+ Pre-commit VCA</button>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" data-action="new-commit-job">+ After commit</button>
                                 <button class="btn btn-sm btn-primary" type="button" data-action="open-jobs">Open Jobs</button>
                             </div>
                         </header>
@@ -493,6 +471,27 @@
                         </header>
                         <div class="rules-station-body">
                             <div data-agent-file-tree></div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- Fix: keep the terminal at the end of the Rules workflow. -->
+                <div class="rules-station" data-station="fix">
+                    <span class="rules-station-node" aria-hidden="true"></span>
+                    <section class="rules-terminal-station" data-terminal-section
+                        aria-label="Agent terminal">
+                        <header class="rules-station-header rules-station-header-bare">
+                            <div class="rules-station-heading">
+                                <span class="rules-station-eyebrow">Fix</span>
+                                <div class="rules-station-title-row">
+                                    <h2>Agent terminal</h2>
+                                </div>
+                            </div>
+                            <p class="rules-station-hint">Start an agent here and hand it the fix brief from the
+                                results above.</p>
+                        </header>
+                        <div class="rules-station-body" data-terminal-content>
+                            <!-- Terminal panel rendered here -->
                         </div>
                     </section>
                 </div>
@@ -1012,7 +1011,7 @@
         <div class="view" data-view="environments">
             <div class="row">
                 <div class="col-12 mb-3">
-                    <h4 class="text-uppercase fw-bold mb-0" style="letter-spacing: 0.05em;"><span class="text-gradient">Custom Environments</span></h4>
+                    <h4 class="text-uppercase fw-bold mb-0" style="letter-spacing: 0.05em;"><span class="text-gradient">Environment / Workers</span></h4>
                 </div>
             </div>
 
@@ -1022,8 +1021,8 @@
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <span class="text-uppercase fw-bold" style="letter-spacing: 0.05em;"><img
                                     src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-light"
-                                    style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom;">Custom
-                                Environments</span>
+                                    style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom;">Environment /
+                                Workers</span>
                             <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" type="button"
                                 data-action="create-environment">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
@@ -1031,7 +1030,7 @@
                                     <path
                                         d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4" />
                                 </svg>
-                                <span>Add</span>
+                                <span>Add Worker</span>
                             </button>
                         </div>
                         <div class="card-body">
@@ -3314,7 +3313,7 @@
     <script src="assets/xterm/addon-attach.js"></script>
     <script src="assets/xterm/addon-progress.js"></script>
     <script src="assets/xterm/addon-unicode-graphemes.js"></script>
-    <script src="assets/xterm/addon-clipboard.js"></script>
+    <!-- Intentionally omit addon-clipboard: PTY-controlled OSC 52 must not access the browser clipboard. -->
     <script src="assets/xterm/terminal-themes.js"></script>
     <script src="assets/sortable.min.js"></script>
     <script src="assets/tom-select/tom-select.complete.min.js"></script>

@@ -13,19 +13,28 @@ namespace Tests.Services.Jobs;
 public sealed class JobServiceTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"viberails_job_service_{Guid.NewGuid():N}");
+    private readonly string _connectionString;
     private readonly JobStore _store;
     private readonly Mock<IRepository> _repository = new();
     private readonly Mock<IJobExecutableResolver> _resolver = new();
     private readonly Mock<IJobWorkerSupervisor> _supervisor = new();
     private readonly JobWorkspaceService _workspaceService;
     private readonly JobService _service;
+    private readonly LLM_Environment _defaultWorker;
 
     public JobServiceTests()
     {
         Directory.CreateDirectory(_directory);
-        var connectionString = $"Data Source={Path.Combine(_directory, "state.db")};Mode=ReadWriteCreate;Cache=Shared";
-        CreateEnvironmentTable(connectionString);
-        _store = new JobStore(connectionString);
+        _connectionString = $"Data Source={Path.Combine(_directory, "state.db")};Mode=ReadWriteCreate;Cache=Shared";
+        CreateEnvironmentTable(_connectionString);
+        _store = new JobStore(_connectionString);
+        _defaultWorker = InsertEnvironment(
+            "default-job-worker",
+            LLM.Codex,
+            "Check this.");
+        _repository
+            .Setup(repository => repository.GetAllEnvironmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([_defaultWorker]);
         _supervisor
             .Setup(supervisor => supervisor.EnsureInstalledAndRunningAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -44,7 +53,11 @@ public sealed class JobServiceTests : IDisposable
         await InitializeRepositoryAsync();
 
         var created = await _service.CreateJobAsync(
-            Request(enabled: false) with { Name = "  Review  ", Prompt = "  Check this.  " },
+            WorkerRequest(enabled: false) with
+            {
+                Name = "  Review  ",
+                Prompt = "This stale client prompt is ignored."
+            },
             TestContext.Current.CancellationToken);
 
         Assert.Equal("Review", created.Name);
@@ -55,13 +68,125 @@ public sealed class JobServiceTests : IDisposable
             Times.Never);
     }
 
+    [Theory]
+    [InlineData(LLM.Codex)]
+    [InlineData(LLM.Claude)]
+    [InlineData(LLM.Antigravity)]
+    [InlineData(LLM.Copilot)]
+    [InlineData(LLM.OpenCode)]
+    [InlineData(LLM.Glm52)]
+    [InlineData(LLM.KimiK3)]
+    public async Task CreateJobAsync_AcceptsEveryNonShellPickerProvider(LLM llm)
+    {
+        await InitializeRepositoryAsync();
+        var worker = InsertEnvironment(
+            $"worker-{llm}",
+            llm,
+            $"Run the {llm} review.");
+        _repository
+            .Setup(repository => repository.GetAllEnvironmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([worker]);
+
+        var created = await _service.CreateJobAsync(
+            WorkerRequest(enabled: false) with
+            {
+                Llm = LLM.Claude,
+                EnvironmentId = worker.Id,
+                Prompt = "Ignore the stale client copy."
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(llm, created.Llm);
+    }
+
+    [Fact]
+    public async Task CreateJobAsync_CanonicalizesLlmAndPromptFromSelectedWorker()
+    {
+        await InitializeRepositoryAsync();
+        var environment = InsertEnvironment(
+            "nightly-open-code",
+            LLM.OpenCode,
+            "Perform a security review of the commit.");
+        _repository
+            .Setup(repository => repository.GetAllEnvironmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([environment]);
+
+        var created = await _service.CreateJobAsync(
+            Request(enabled: false) with
+            {
+                Llm = LLM.Claude,
+                EnvironmentId = environment.Id,
+                Prompt = "Ignore this stale client copy."
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(environment.Id, created.EnvironmentId);
+        Assert.Equal(environment.CustomName, created.EnvironmentName);
+        Assert.Equal(LLM.OpenCode, created.Llm);
+        Assert.Equal("Perform a security review of the commit.", created.Prompt);
+    }
+
+    [Fact]
+    public async Task CreateJobAsync_BlankWorkerPromptIsRejected()
+    {
+        await InitializeRepositoryAsync();
+        var environment = InsertEnvironment("blank-worker", LLM.Claude, "   ");
+        _repository
+            .Setup(repository => repository.GetAllEnvironmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([environment]);
+
+        var error = await Assert.ThrowsAsync<JobServiceException>(() =>
+            _service.CreateJobAsync(
+                Request(enabled: false) with
+                {
+                    EnvironmentId = environment.Id,
+                    Prompt = "A duplicated Job prompt must not fill in a blank worker."
+                },
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Contains("environment / worker", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Initial Message", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateJobAsync_RejectsMissingWorkerSelection()
+    {
+        await InitializeRepositoryAsync();
+
+        var error = await Assert.ThrowsAsync<JobServiceException>(() =>
+            _service.CreateJobAsync(
+                Request(enabled: false),
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Contains("Choose an Environment / Worker", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateJobAsync_RejectsMissingCustomEnvironment()
+    {
+        await InitializeRepositoryAsync();
+        _repository
+            .Setup(repository => repository.GetAllEnvironmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        var missing = await Assert.ThrowsAsync<JobServiceException>(() =>
+            _service.CreateJobAsync(
+                Request(enabled: false) with { EnvironmentId = 999 },
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(400, missing.StatusCode);
+        Assert.Contains("environment / worker no longer exists", missing.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task CreateJobAsync_EnabledJobRequiresInstalledCli()
     {
         await InitializeRepositoryAsync();
 
         var error = await Assert.ThrowsAsync<JobServiceException>(() =>
-            _service.CreateJobAsync(Request(enabled: true), TestContext.Current.CancellationToken));
+            _service.CreateJobAsync(WorkerRequest(enabled: true), TestContext.Current.CancellationToken));
 
         Assert.Equal(400, error.StatusCode);
         Assert.Contains("Codex CLI was not found", error.Message, StringComparison.Ordinal);
@@ -77,7 +202,7 @@ public sealed class JobServiceTests : IDisposable
         _resolver.Setup(resolver => resolver.Resolve(LLM.Codex)).Returns("codex");
 
         var created = await _service.CreateJobAsync(
-            Request(enabled: true) with
+            WorkerRequest(enabled: true) with
             {
                 Triggers = [new JobTriggerRequest(JobTriggerKind.Vca)]
             },
@@ -98,7 +223,7 @@ public sealed class JobServiceTests : IDisposable
 
         var error = await Assert.ThrowsAsync<JobServiceException>(() =>
             _service.CreateJobAsync(
-                Request(enabled: false) with { ProjectPath = nested },
+                WorkerRequest(enabled: false) with { ProjectPath = nested },
                 TestContext.Current.CancellationToken));
 
         Assert.Equal(400, error.StatusCode);
@@ -106,17 +231,32 @@ public sealed class JobServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateJobAsync_RejectsUnsupportedLlmAndMalformedSchedule()
+    public async Task CreateJobAsync_RejectsShellAndMalformedSchedule()
     {
         await InitializeRepositoryAsync();
+        var shellWorker = InsertEnvironment(
+            "unsupported-shell-worker",
+            LLM.Shell,
+            "Run a shell review.");
+        var notSetWorker = InsertEnvironment(
+            "unsupported-not-set-worker",
+            LLM.NotSet,
+            "Run an unknown review.");
+        _repository
+            .Setup(repository => repository.GetAllEnvironmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([_defaultWorker, shellWorker, notSetWorker]);
 
         var unsupported = await Assert.ThrowsAsync<JobServiceException>(() =>
             _service.CreateJobAsync(
-                Request(enabled: false) with { Llm = LLM.Antigravity },
+                WorkerRequest(enabled: false) with { EnvironmentId = shellWorker.Id },
+                TestContext.Current.CancellationToken));
+        var notSet = await Assert.ThrowsAsync<JobServiceException>(() =>
+            _service.CreateJobAsync(
+                WorkerRequest(enabled: false) with { EnvironmentId = notSetWorker.Id },
                 TestContext.Current.CancellationToken));
         var malformedSchedule = await Assert.ThrowsAsync<JobServiceException>(() =>
             _service.CreateJobAsync(
-                Request(enabled: false) with
+                WorkerRequest(enabled: false) with
                 {
                     Triggers = [new JobTriggerRequest(
                         JobTriggerKind.Schedule,
@@ -126,9 +266,95 @@ public sealed class JobServiceTests : IDisposable
                 TestContext.Current.CancellationToken));
 
         Assert.Equal(400, unsupported.StatusCode);
-        Assert.Contains("only Codex and Claude", unsupported.Message, StringComparison.Ordinal);
+        Assert.Contains("cannot run as an automated Job", unsupported.Message, StringComparison.Ordinal);
+        Assert.Equal(400, notSet.StatusCode);
+        Assert.Contains("cannot run as an automated Job", notSet.Message, StringComparison.Ordinal);
         Assert.Equal(400, malformedSchedule.StatusCode);
         Assert.Contains("Interval must be", malformedSchedule.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_AllowsAlreadyLegacyJobToRemainWithoutWorker()
+    {
+        await InitializeRepositoryAsync();
+        var legacy = await _store.CreateJobAsync(
+            Request(enabled: false),
+            executablePath: "codex",
+            TestContext.Current.CancellationToken);
+
+        var updated = await _service.UpdateJobAsync(
+            legacy.Id,
+            UpdateRequest(Request(enabled: false)) with
+            {
+                Name = "  Updated legacy Job  ",
+                Prompt = "  Keep supporting this stored legacy prompt.  "
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(updated.EnvironmentId);
+        Assert.Equal("Updated legacy Job", updated.Name);
+        Assert.Equal("Keep supporting this stored legacy prompt.", updated.Prompt);
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_RejectsDetachingWorkerBackedJob()
+    {
+        await InitializeRepositoryAsync();
+        var workerBacked = await _store.CreateJobAsync(
+            WorkerRequest(enabled: false),
+            executablePath: "codex",
+            TestContext.Current.CancellationToken);
+
+        var error = await Assert.ThrowsAsync<JobServiceException>(() =>
+            _service.UpdateJobAsync(
+                workerBacked.Id,
+                UpdateRequest(Request(enabled: false)),
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Contains("cannot be detached", error.Message, StringComparison.OrdinalIgnoreCase);
+        var unchanged = await _store.GetJobAsync(
+            workerBacked.Id,
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(unchanged);
+        Assert.Equal(_defaultWorker.Id, unchanged.EnvironmentId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UpdateJobAsync_RejectsSelectingBlankPromptWorker(bool startsWorkerBacked)
+    {
+        await InitializeRepositoryAsync();
+        var blankWorker = InsertEnvironment("blank-update-worker", LLM.Claude, "   ");
+        _repository
+            .Setup(repository => repository.GetAllEnvironmentsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([_defaultWorker, blankWorker]);
+        var originalRequest = startsWorkerBacked
+            ? WorkerRequest(enabled: false)
+            : Request(enabled: false);
+        var existing = await _store.CreateJobAsync(
+            originalRequest,
+            executablePath: "codex",
+            TestContext.Current.CancellationToken);
+
+        var error = await Assert.ThrowsAsync<JobServiceException>(() =>
+            _service.UpdateJobAsync(
+                existing.Id,
+                UpdateRequest(originalRequest) with
+                {
+                    EnvironmentId = blankWorker.Id,
+                    Prompt = "A Job-owned prompt must not replace the Worker's Initial Message."
+                },
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Contains("environment / worker", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Initial Message", error.Message, StringComparison.Ordinal);
+        var unchanged = await _store.GetJobAsync(existing.Id, TestContext.Current.CancellationToken);
+        Assert.NotNull(unchanged);
+        Assert.Equal(originalRequest.EnvironmentId, unchanged.EnvironmentId);
+        Assert.Equal(originalRequest.Prompt, unchanged.Prompt);
     }
 
     [Fact]
@@ -274,6 +500,22 @@ public sealed class JobServiceTests : IDisposable
         Enabled: enabled,
         Triggers: []);
 
+    private CreateJobRequest WorkerRequest(bool enabled) => Request(enabled) with
+    {
+        EnvironmentId = _defaultWorker.Id
+    };
+
+    private static UpdateJobRequest UpdateRequest(CreateJobRequest request) => new(
+        request.Name,
+        request.ProjectPath,
+        request.Llm,
+        request.EnvironmentId,
+        request.Prompt,
+        request.ExecutionMode,
+        request.TimeoutMinutes,
+        request.Enabled,
+        request.Triggers);
+
     private async Task InitializeRepositoryAsync()
     {
         var result = await GitProcessRunner.RunAsync(
@@ -282,6 +524,41 @@ public sealed class JobServiceTests : IDisposable
             TimeSpan.FromSeconds(10),
             TestContext.Current.CancellationToken);
         Assert.Equal(0, result.ExitCode);
+    }
+
+    private LLM_Environment InsertEnvironment(
+        string name,
+        LLM llm,
+        string customPrompt)
+    {
+        var now = DateTime.UtcNow;
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO Environments
+                (CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC)
+            VALUES
+                ($name, $llm, $path, '--model test-model', $customPrompt, $now, $now)
+            RETURNING Id;
+            """;
+        command.Parameters.AddWithValue("$name", name);
+        command.Parameters.AddWithValue("$llm", (int)llm);
+        command.Parameters.AddWithValue("$path", Path.Combine(_directory, "environments", name));
+        command.Parameters.AddWithValue("$customPrompt", customPrompt);
+        command.Parameters.AddWithValue("$now", now.ToString("O"));
+        var id = Convert.ToInt32(command.ExecuteScalar());
+        return new LLM_Environment
+        {
+            Id = id,
+            CustomName = name,
+            LLM = llm,
+            Path = Path.Combine(_directory, "environments", name),
+            CustomArgs = "--model test-model",
+            CustomPrompt = customPrompt,
+            CreatedUTC = now,
+            LastUsedUTC = now
+        };
     }
 
     private async Task InitializeCommittedRepositoryAsync()

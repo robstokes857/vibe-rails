@@ -153,6 +153,7 @@ public static class EnvironmentRoutes
         // PUT /api/v1/environments/{name} - Update environment
         app.MapPut("/api/v1/environments/{name}", async (
             IRepository repository,
+            IJobStore jobStore,
             string name,
             UpdateEnvironmentRequest request,
             CancellationToken cancellationToken) =>
@@ -179,6 +180,12 @@ public static class EnvironmentRoutes
                 if (request.CustomPrompt.Length > MaxCustomPromptLength)
                 {
                     return Results.BadRequest(new ErrorResponse($"CustomPrompt exceeds {MaxCustomPromptLength} character limit."));
+                }
+                if (string.IsNullOrWhiteSpace(request.CustomPrompt)
+                    && await jobStore.CountJobsForEnvironmentAsync(environment.Id, cancellationToken) > 0)
+                {
+                    return Results.BadRequest(new ErrorResponse(
+                        "This environment / worker is used by a Job, so its Initial Message cannot be empty."));
                 }
                 environment.CustomPrompt = request.CustomPrompt;
             }

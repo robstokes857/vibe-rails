@@ -118,7 +118,8 @@ namespace VibeRails.Services.LlmClis
         private string GetSettingsFilePath(string envName)
         {
             var envBasePath = ParserConfigs.GetEnvPath();
-            return Path.Combine(envBasePath, envName, GetConfigSubdirectory(), "config.toml");
+            var envDirectory = EnvironmentNameValidator.ResolveEnvironmentDirectory(envBasePath, envName);
+            return Path.Combine(envDirectory, GetConfigSubdirectory(), "config.toml");
         }
 
         private static bool IsFastModeEnabled(string content)

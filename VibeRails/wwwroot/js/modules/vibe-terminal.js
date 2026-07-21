@@ -239,14 +239,9 @@ export class VibeTerminal {
         };
         if (!tryWebgl() && !tryCanvas()) this._setActiveRenderer('dom');
 
-        if (window.ClipboardAddon?.ClipboardAddon) {
-            try {
-                this._terminal.loadAddon(new window.ClipboardAddon.ClipboardAddon());
-            } catch {
-                // no-op
-            }
-        }
-
+        // Do not load xterm's ClipboardAddon here. It registers an OSC 52 handler,
+        // which would let arbitrary PTY output read or overwrite the browser clipboard
+        // without a user gesture. User-initiated copy shortcuts are handled below.
         this._onScrollDispose = this._terminal.onScroll(() => {
             this._followOutput = this._isNearBottom(1);
         });

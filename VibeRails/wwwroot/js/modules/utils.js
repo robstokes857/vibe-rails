@@ -170,7 +170,8 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
     const {
         includeGroups = true,
         includeDefaultSuffix = true,
-        includeShell = false
+        includeShell = false,
+        includeBase = true
     } = options;
 
     const items = [];
@@ -195,17 +196,19 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
         });
     });
 
-    BASE_LLM_CHOICES.forEach((baseCli) => {
-        items.push({
-            group: includeGroups ? 'Base CLIs' : null,
-            value: buildLlmSelectionValue(baseCli.cli),
-            label: includeDefaultSuffix ? `${baseCli.label} (default)` : baseCli.label,
-            cli: baseCli.cli,
-            environmentId: null,
-            environmentName: null,
-            kind: 'base'
+    if (includeBase) {
+        BASE_LLM_CHOICES.forEach((baseCli) => {
+            items.push({
+                group: includeGroups ? 'Base CLIs' : null,
+                value: buildLlmSelectionValue(baseCli.cli),
+                label: includeDefaultSuffix ? `${baseCli.label} (default)` : baseCli.label,
+                cli: baseCli.cli,
+                environmentId: null,
+                environmentName: null,
+                kind: 'base'
+            });
         });
-    });
+    }
 
     if (includeShell) {
         items.push({
@@ -283,13 +286,16 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
         includeGroups = true,
         includeDefaultSuffix = true,
         includeShell = false,
-        enhance = true
+        includeBase = true,
+        enhance = true,
+        searchable = true
     } = options;
 
     const optionItems = buildLlmSelectionOptions(environments, {
         includeGroups,
         includeDefaultSuffix,
-        includeShell
+        includeShell,
+        includeBase
     });
 
     if (selectEl.tomselect) {
@@ -334,7 +340,8 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
 
     if (enhance) {
         enhanceLlmSelectWithTomSelect(selectEl, {
-            placeholder: placeholder || 'Select LLM...'
+            placeholder: placeholder || 'Select LLM...',
+            searchable
         });
     }
 
@@ -358,7 +365,8 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
     const {
         placeholder = 'Select LLM...',
         cliKey = 'cli',
-        searchable = false
+        searchable = true,
+        searchPlaceholder = 'Search LLMs...'
     } = options;
 
     if (selectEl.tomselect) {
@@ -369,7 +377,7 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
         placeholder,
         allowEmptyOption: true,
         maxOptions: null,
-        plugins: [],
+        plugins: searchable ? ['dropdown_input'] : [],
         // Render the dropdown in <body> so parent cards with overflow:hidden
         // (#vb-terminal-panel, sandbox cards) can't clip it.
         dropdownParent: 'body',
@@ -384,6 +392,15 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
     }
 
     const ts = new window.TomSelect(selectEl, config);
+
+    if (searchable) {
+        const configureSearchInput = () => {
+            ts.control_input.placeholder = searchPlaceholder;
+            ts.control_input.setAttribute('aria-label', searchPlaceholder);
+        };
+        configureSearchInput();
+        ts.on('dropdown_open', configureSearchInput);
+    }
 
     // Wrap TomSelect's body-parent positioning to (a) clear the inline width
     // it sets to match the control (our content needs more room — see CSS

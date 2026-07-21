@@ -790,13 +790,6 @@ namespace VibeRails.DTOs
     public record SetPinRequest(string Pin);
     public record PinStatusResponse(bool IsSet);
 
-    // Signed Message DTOs (matches VibeRails-Front TerminalSignedMessage shape)
-    public record SignedMessage(string Message, string Signature);
-    public record SignatureVerificationResponse(bool Verified, string Message);
-
-    // Proxy relay DTOs (sent from proxy WS to browser)
-    public record ProxyRelayMessage(string Type, string Message, string? Signature = null, bool? Verified = null);
-
     // BERT Explorer DTOs
     public record BertStatusResponse(
         bool DatabaseExists,
@@ -1225,10 +1218,6 @@ namespace VibeRails.DTOs
     // Remote PIN DTOs
     [JsonSerializable(typeof(SetPinRequest))]
     [JsonSerializable(typeof(PinStatusResponse))]
-    // Signed Message DTOs
-    [JsonSerializable(typeof(SignedMessage))]
-    [JsonSerializable(typeof(SignatureVerificationResponse))]
-    [JsonSerializable(typeof(ProxyRelayMessage))]
     // BERT explorer DTOs
     [JsonSerializable(typeof(BertStatusResponse))]
     [JsonSerializable(typeof(BertFileChangeResponse))]
