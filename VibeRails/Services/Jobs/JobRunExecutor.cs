@@ -23,7 +23,7 @@ public sealed class JobRunExecutor(
         {
             if (await store.IsCancelRequestedAsync(run.Id, workerCancellation))
             {
-                await store.CompleteRunAsync(run.Id, JobRunStatus.Cancelled, null, null, "Cancelled before start.", workerCancellation);
+                await store.CompleteRunAsync(run.Id, JobRunStatus.Cancelled, null, null, "Cancelled before start.", run.OwnerInstanceId, workerCancellation);
                 return;
             }
 
@@ -35,10 +35,11 @@ public sealed class JobRunExecutor(
 
             var executable = ResolveExecutable(run);
             var startInfo = BuildStartInfo(run, executable, workspace);
-            using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+            using var process = new Process { StartInfo = startInfo };
             try
             {
                 process.Start();
+                process.StandardInput.Close();
             }
             catch (Exception ex)
             {
@@ -74,7 +75,24 @@ public sealed class JobRunExecutor(
                 });
 
             var termination = await WaitForCompletionAsync(process, run, workerCancellation);
-            await Task.WhenAll(stdoutTask, stderrTask);
+            var drain = Task.WhenAll(stdoutTask, stderrTask);
+            if (termination is null)
+            {
+                // Clean exit: both pipes reach EOF once the child closes them, so wait for the full
+                // final flush (it must never be truncated).
+                await drain;
+            }
+            else
+            {
+                // Termination was forced. If Kill() failed, a surviving process keeps the stdout/
+                // stderr pipes open forever and an unbounded await here would pin this worker slot
+                // indefinitely, so bound the drain and abandon the (uncancellable) readers.
+                var finished = await Task.WhenAny(drain, Task.Delay(TimeSpan.FromSeconds(5), CancellationToken.None));
+                if (finished != drain)
+                    Log.Warning(
+                        "[Jobs] Output drain timed out for run {RunId}; abandoning pipe readers after forced termination.",
+                        run.Id);
+            }
 
             string result;
             string errorOutput;
@@ -93,6 +111,7 @@ public sealed class JobRunExecutor(
                     process.HasExited ? process.ExitCode : null,
                     string.IsNullOrWhiteSpace(result) ? null : result,
                     termination.Message,
+                    run.OwnerInstanceId,
                     CancellationToken.None);
                 return;
             }
@@ -109,13 +128,14 @@ public sealed class JobRunExecutor(
                 process.ExitCode,
                 string.IsNullOrWhiteSpace(result) ? null : result,
                 error,
+                run.OwnerInstanceId,
                 CancellationToken.None);
         }
         catch (OperationCanceledException) when (workerCancellation.IsCancellationRequested)
         {
             await store.CompleteRunAsync(
                 run.Id, JobRunStatus.Interrupted, null, null,
-                "Jobs worker stopped while the run was active.", CancellationToken.None);
+                "Jobs worker stopped while the run was active.", run.OwnerInstanceId, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -124,12 +144,18 @@ public sealed class JobRunExecutor(
             {
                 await AppendAsync(run.Id, sequence, "system", $"{ex.Message}\n", CancellationToken.None);
                 await store.CompleteRunAsync(
-                    run.Id, JobRunStatus.Failed, null, null, ex.Message, CancellationToken.None);
+                    run.Id, JobRunStatus.Failed, null, null, ex.Message, run.OwnerInstanceId, CancellationToken.None);
             }
             catch (Exception persistenceError)
             {
                 Log.Error(persistenceError, "[Jobs] Could not persist failure for run {RunId}", run.Id);
             }
+        }
+        finally
+        {
+            // Delete the throwaway isolated clone (and its staged patch) on every exit path. This is
+            // a no-op for Review/LiveWrite runs, which operate on the real project path.
+            workspaceService.Cleanup(run, workspace);
         }
     }
 
@@ -165,7 +191,9 @@ public sealed class JobRunExecutor(
         if (!string.IsNullOrWhiteSpace(run.EnvironmentName))
         {
             var environmentRoot = string.IsNullOrWhiteSpace(run.EnvironmentPath)
-                ? Path.Combine(PathConstants.GetInstallDirPath(), PathConstants.ENVS_SUBDIR, run.EnvironmentName)
+                ? EnvironmentNameValidator.ResolveEnvironmentDirectory(
+                    Path.Combine(PathConstants.GetInstallDirPath(), PathConstants.ENVS_SUBDIR),
+                    run.EnvironmentName)
                 : run.EnvironmentPath;
             var variableName = run.Llm == LLM.Codex ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR";
             var providerDirectory = run.Llm == LLM.Codex ? "codex" : "claude";
@@ -177,14 +205,14 @@ public sealed class JobRunExecutor(
 
     private static IReadOnlyList<string> BuildCodexArguments(JobRunRecord run)
     {
-        var args = new List<string> { "exec" };
+        // Codex currently defines approval policy on the root command rather than the
+        // exec subcommand, so this option must precede "exec".
+        var args = new List<string> { "--ask-for-approval", "never", "exec" };
         args.AddRange(FilterCustomArguments(run.EnvironmentArgs, LLM.Codex));
         args.Add("--json");
         args.Add("--ephemeral");
         args.Add("--sandbox");
         args.Add(run.ExecutionMode == JobExecutionMode.Review ? "read-only" : "workspace-write");
-        args.Add("--ask-for-approval");
-        args.Add("never");
         args.Add(BuildPrompt(run));
         return args;
     }
@@ -218,18 +246,28 @@ public sealed class JobRunExecutor(
 
     private static IReadOnlyList<string> FilterCustomArguments(string customArguments, LLM llm)
     {
+        // This filter keeps common custom arguments from overriding the invocation VibeRails builds;
+        // it is defense against accidental conflicts, not a security boundary. Equivalent CLI forms,
+        // configuration, MCP servers, tools, and scripts may still grant access outside a job's
+        // selected repository or throwaway clone because the process runs as the VibeRails user.
         var parsed = ShellArgSanitizer.ParseAndValidate(customArguments);
         var result = new List<string>(parsed.Length);
         var flagsWithValue = llm == LLM.Codex
-            ? new HashSet<string>(["--sandbox", "-s", "--ask-for-approval", "-a", "--cd", "-C", "--output-last-message", "-o", "--output-schema"], StringComparer.Ordinal)
+            ? new HashSet<string>(["--sandbox", "-s", "--ask-for-approval", "-a", "--cd", "-C", "--add-dir", "--output-last-message", "-o", "--output-schema"], StringComparer.Ordinal)
             : new HashSet<string>(["--permission-mode", "--output-format", "--input-format", "--resume", "-r"], StringComparer.Ordinal);
         var standalone = llm == LLM.Codex
             ? new HashSet<string>(["--json", "--ephemeral", "--full-auto", "--dangerously-bypass-approvals-and-sandbox"], StringComparer.Ordinal)
-            : new HashSet<string>(["--print", "-p", "--verbose", "--no-session-persistence", "--continue", "-c", "--dangerously-skip-permissions"], StringComparer.Ordinal);
+            : new HashSet<string>(["--print", "-p", "--verbose", "--no-session-persistence", "--continue", "-c", "--allow-dangerously-skip-permissions", "--dangerously-skip-permissions"], StringComparer.Ordinal);
 
         for (var index = 0; index < parsed.Length; index++)
         {
             var argument = parsed[index];
+            if (llm == LLM.Claude && argument == "--add-dir")
+            {
+                while (index + 1 < parsed.Length && !parsed[index + 1].StartsWith("-", StringComparison.Ordinal))
+                    index++;
+                continue;
+            }
             if (flagsWithValue.Contains(argument))
             {
                 if (index + 1 < parsed.Length) index++;
@@ -249,27 +287,22 @@ public sealed class JobRunExecutor(
         IReadOnlyList<string> arguments)
     {
         var extension = Path.GetExtension(executable);
-        if (OperatingSystem.IsWindows() && extension is ".cmd" or ".bat")
+        if (OperatingSystem.IsWindows()
+            && extension.Equals(".ps1", StringComparison.OrdinalIgnoreCase))
         {
-            var powershellShim = Path.ChangeExtension(executable, ".ps1");
-            if (File.Exists(powershellShim))
-            {
-                startInfo.FileName = "powershell.exe";
-                startInfo.ArgumentList.Add("-NoLogo");
-                startInfo.ArgumentList.Add("-NoProfile");
-                startInfo.ArgumentList.Add("-ExecutionPolicy");
-                startInfo.ArgumentList.Add("Bypass");
-                startInfo.ArgumentList.Add("-File");
-                startInfo.ArgumentList.Add(powershellShim);
-            }
-            else
-            {
-                startInfo.FileName = "cmd.exe";
-                startInfo.ArgumentList.Add("/d");
-                startInfo.ArgumentList.Add("/s");
-                startInfo.ArgumentList.Add("/c");
-                startInfo.ArgumentList.Add(executable);
-            }
+            // npm/pnpm/yarn installs expose a PowerShell shim (e.g. claude.ps1) next to the CLI.
+            // Launch it through pwsh (PowerShell 7.5+) with -File so the prompt is bound as a plain
+            // script argument. cmd.exe is deliberately never used: its parser re-interprets the
+            // already-escaped argv produced for CommandLineToArgvW (expanding %VARS%, treating an
+            // embedded quote as a toggle and un-escaped &/|/> as operators), which would let prompt
+            // text inject commands. .cmd/.bat CLIs are not supported for exactly that reason.
+            startInfo.FileName = "pwsh.exe";
+            startInfo.ArgumentList.Add("-NoLogo");
+            startInfo.ArgumentList.Add("-NoProfile");
+            startInfo.ArgumentList.Add("-ExecutionPolicy");
+            startInfo.ArgumentList.Add("Bypass");
+            startInfo.ArgumentList.Add("-File");
+            startInfo.ArgumentList.Add(executable);
         }
 
         foreach (var argument in arguments)
@@ -281,7 +314,9 @@ public sealed class JobRunExecutor(
         JobRunRecord run,
         CancellationToken workerCancellation)
     {
-        var deadline = DateTime.UtcNow.AddMinutes(run.TimeoutMinutes);
+        var elapsed = Stopwatch.StartNew();
+        var timeout = TimeSpan.FromMinutes(run.TimeoutMinutes);
+        var exitTask = process.WaitForExitAsync();
         while (!process.HasExited)
         {
             if (workerCancellation.IsCancellationRequested)
@@ -289,7 +324,7 @@ public sealed class JobRunExecutor(
                 TryKill(process);
                 return new Termination(JobRunStatus.Interrupted, "Jobs worker stopped while the run was active.");
             }
-            if (DateTime.UtcNow >= deadline)
+            if (elapsed.Elapsed >= timeout)
             {
                 TryKill(process);
                 return new Termination(JobRunStatus.TimedOut, $"Job exceeded its {run.TimeoutMinutes}-minute timeout.");
@@ -300,7 +335,7 @@ public sealed class JobRunExecutor(
                 return new Termination(JobRunStatus.Cancelled, "Job was cancelled.");
             }
 
-            await Task.WhenAny(process.WaitForExitAsync(), Task.Delay(500));
+            await Task.WhenAny(exitTask, Task.Delay(500, workerCancellation));
         }
         return null;
     }
@@ -312,17 +347,28 @@ public sealed class JobRunExecutor(
         Func<long> nextSequence,
         Action<string> inspect)
     {
-        while (await reader.ReadLineAsync() is { } line)
+        try
         {
-            inspect(line);
-            try
+            while (await reader.ReadLineAsync() is { } line)
             {
-                await store.AppendRunLogAsync(run.Id, nextSequence(), stream, line + "\n", CancellationToken.None);
+                inspect(line);
+                try
+                {
+                    await store.AppendRunLogAsync(run.Id, nextSequence(), stream, line + "\n", CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "[Jobs] Could not append {Stream} log for run {RunId}", stream, run.Id);
+                }
             }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "[Jobs] Could not append {Stream} log for run {RunId}", stream, run.Id);
-            }
+        }
+        catch (Exception ex)
+        {
+            // When a forced-termination drain times out (see ExecuteAsync), this pump is abandoned
+            // and the process is later disposed, which tears down the underlying pipe mid-read
+            // (ObjectDisposedException/IOException). Swallow it so the abandoned task completes
+            // rather than faulting unobserved.
+            Log.Warning(ex, "[Jobs] {Stream} pump stopped early for run {RunId}", stream, run.Id);
         }
     }
 
@@ -346,9 +392,11 @@ public sealed class JobRunExecutor(
                 && root.TryGetProperty("result", out var result))
                 return result.GetString();
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
-            // The full unparsed line remains in the run log.
+            // A malformed or unexpectedly-typed JSON line must never fault the output pump:
+            // JsonElement.GetString() throws InvalidOperationException when "result"/"text" is an
+            // object, number, or bool rather than a string. The full raw line stays in the run log.
         }
         return null;
     }

@@ -222,8 +222,7 @@
 
             <header class="rules-page-header">
                 <div class="rules-page-heading">
-                    <span class="rules-page-eyebrow">Project safeguards</span>
-                    <h1>Rules</h1>
+                    <h4 class="rules-page-title text-uppercase fw-bold mb-0"><span class="text-gradient">Rules</span></h4>
                     <p>Validate every uncommitted change, hand fixes to an agent, and watch code health — before
                         anything reaches a commit.</p>
                 </div>
@@ -390,6 +389,15 @@
                                     data-action="clear-code-analyzer-output" aria-label="Clear code quality results"
                                     title="Clear results">
                                     <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-2"
+                                    type="button" data-action="run-code-analyzer-unpushed"
+                                    title="Scan committed-but-not-pushed changes (diff @{upstream}..HEAD)"
+                                    data-idle-label="Scan unpushed">
+                                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                        aria-hidden="true"></span>
+                                    <i class="fa-solid fa-cloud-arrow-up" data-button-icon aria-hidden="true"></i>
+                                    <span data-button-label>Scan unpushed</span>
                                 </button>
                                 <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
                                     type="button" data-action="run-code-analyzer" data-idle-label="Run again">
@@ -2912,31 +2920,6 @@
 
             <div class="insp" data-view="vibe-rails-ai">
 
-                <!-- Compression captures — rendered by compression-captures-controller.js -->
-                <section class="insp-cap">
-                    <header class="insp-cap-head">
-                        <div>
-                            <h2 class="insp-cap-h2">Compression Captures</h2>
-                            <p class="insp-cap-sub">Every tool result the token saver considered — the raw bytes, what
-                                came off, and what a different stage selection would have done to the same input.</p>
-                        </div>
-                        <div class="insp-cap-tools">
-                            <span class="insp-query-count"><b data-cap-count>0</b> <span data-cap-count-label>captures</span></span>
-                            <button class="insp-refresh" type="button" data-cap-refresh title="Reload the capture list">↻ Refresh</button>
-                            <button class="insp-refresh" type="button" data-cap-clear title="Permanently delete all compression captures">Clear</button>
-                            <button class="insp-toggle" type="button" data-cap-toggle aria-expanded="true" aria-controls="insp-cap-body"><span class="chev">▸</span>Captures</button>
-                        </div>
-                    </header>
-                    <div class="insp-cap-body open" id="insp-cap-body" data-cap-body>
-                        <div class="insp-banner" data-cap-banner></div>
-                        <div class="insp-cap-list" data-cap-list></div>
-                        <div data-cap-more-row hidden>
-                            <button class="insp-refresh" type="button" data-cap-more>Load more</button>
-                        </div>
-                        <div class="insp-cap-lens" data-cap-lens hidden></div>
-                    </div>
-                </section>
-
                 <!-- Masthead -->
                 <header class="insp-masthead">
                     <div class="insp-title">
@@ -3013,6 +2996,31 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Compression captures — rendered by compression-captures-controller.js -->
+                <section class="insp-cap">
+                    <header class="insp-cap-head">
+                        <div>
+                            <h2 class="insp-cap-h2">Compression Captures</h2>
+                            <p class="insp-cap-sub">Every tool result the token saver considered — the raw bytes, what
+                                came off, and what a different stage selection would have done to the same input.</p>
+                        </div>
+                        <div class="insp-cap-tools">
+                            <span class="insp-query-count"><b data-cap-count>0</b> <span data-cap-count-label>captures</span></span>
+                            <button class="insp-refresh" type="button" data-cap-refresh title="Reload the capture list">↻ Refresh</button>
+                            <button class="insp-refresh" type="button" data-cap-clear title="Permanently delete all compression captures">Clear</button>
+                            <button class="insp-toggle" type="button" data-cap-toggle aria-expanded="true" aria-controls="insp-cap-body"><span class="chev">▸</span>Captures</button>
+                        </div>
+                    </header>
+                    <div class="insp-cap-body open" id="insp-cap-body" data-cap-body>
+                        <div class="insp-banner" data-cap-banner></div>
+                        <div class="insp-cap-list" data-cap-list></div>
+                        <div data-cap-more-row hidden>
+                            <button class="insp-refresh" type="button" data-cap-more>Load more</button>
+                        </div>
+                        <div class="insp-cap-lens" data-cap-lens hidden></div>
+                    </div>
+                </section>
             </div>
         </div>
     </template>

@@ -127,7 +127,7 @@ public class TerminalSessionService : ITerminalSessionService
             {
                 s_terminal = terminal;
                 s_sessionId = sessionId;
-                s_cli = llm.ToString();
+                s_cli = LlmParser.ToWireName(llm);
                 s_workingDirectory = workingDirectory;
                 s_sessionOwnerId = BuildSessionOwnerId(sessionId);
             }

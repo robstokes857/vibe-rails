@@ -348,11 +348,6 @@ export class EnvironmentController {
 
     showEnvironmentForm({ mode, env = null, cliSettings = {} }) {
         const isEdit = mode === 'edit';
-        const escapeHtml = (text) => {
-            const div = document.createElement('div');
-            div.textContent = text ?? '';
-            return div.innerHTML;
-        };
 
         // CLI types selectable in the create-environment modal. `glm-5.2` and `kimi-k3` are
         // OpenCode-backed pseudo-CLIs (they launch `opencode --model <pinned>`); they reuse
@@ -378,16 +373,16 @@ export class EnvironmentController {
               </svg>`;
 
         const nameField = isEdit
-            ? `<input type="text" class="form-control" value="${escapeHtml(env.name)}" disabled>`
+            ? `<input type="text" class="form-control" value="${this.app.escapeHtml(env.name)}" disabled>`
             : `<input type="text" class="form-control" id="env-name" required>`;
 
         const cliField = isEdit
-            ? `<input type="text" class="form-control" value="${escapeHtml(env.cli)}" disabled>`
+            ? `<input type="text" class="form-control" value="${this.app.escapeHtml(env.cli)}" disabled>`
             : `<select class="form-select" id="env-cli" required>
                 ${cliOptions.map(c => `<option value="${c.value}">${c.label}</option>`).join('')}
               </select>`;
 
-        const customArgsValue = isEdit ? escapeHtml(env.customArgs || '') : '';
+        const customArgsValue = isEdit ? this.app.escapeHtml(env.customArgs || '') : '';
         const usesManagedArgs = this.usesManagedCustomArgs(initialCli);
 
         this.app.showModal(title, `

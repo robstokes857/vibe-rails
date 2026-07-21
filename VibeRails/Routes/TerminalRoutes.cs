@@ -101,7 +101,7 @@ public static class TerminalRoutes
                 // Link parent session if this was resumed from a previous session
                 if (!string.IsNullOrEmpty(request.ResumeSessionId) && !string.IsNullOrEmpty(terminalService.ActiveSessionId))
                 {
-                    await sessionResumeService.LinkParentSessionAsync(terminalService.ActiveSessionId, request.ResumeSessionId, llm.ToString(), cancellationToken);
+                    await sessionResumeService.LinkParentSessionAsync(terminalService.ActiveSessionId, request.ResumeSessionId, LlmParser.ToWireName(llm), cancellationToken);
                 }
 
                 return Results.Ok(new TerminalStatusResponse(

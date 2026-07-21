@@ -39,8 +39,9 @@ public static class JobWorkerProcessHost
 
             var store = new JobStore($"Data Source={statePath};Mode=ReadWriteCreate;Cache=Shared");
             var resolver = new JobExecutableResolver();
-            var executor = new JobRunExecutor(store, resolver, new JobWorkspaceService());
-            return await new JobWorker(store, executor).RunAsync(shutdown.Token);
+            var workspaceService = new JobWorkspaceService();
+            var executor = new JobRunExecutor(store, resolver, workspaceService);
+            return await new JobWorker(store, executor, workspaceService).RunAsync(shutdown.Token);
         }
         catch (Exception ex)
         {

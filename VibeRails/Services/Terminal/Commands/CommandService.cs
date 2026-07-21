@@ -248,8 +248,8 @@ public class CommandService : ICommandService
     /// <summary>
     /// Prepends a <c>--model=&lt;model&gt;</c> arg to <paramref name="extraArgs"/>. Used by the
     /// OpenCode-backed pseudo-CLIs (Glm52, KimiK3) to pin their model on base CLI launches.
-    /// Uses =-form so the arg survives ShellArgSanitizer without re-quoting, and prepends so any
-    /// existing --model in extraArgs (from a custom env) wins under yargs' last-value semantics.
+    /// Uses =-form so the arg survives ShellArgSanitizer without re-quoting. It is prepended so a
+    /// later caller-supplied <c>--model</c> retains yargs' last-value precedence.
     /// </summary>
     private static string[] WithPinnedModel(string[]? extraArgs, string model)
     {

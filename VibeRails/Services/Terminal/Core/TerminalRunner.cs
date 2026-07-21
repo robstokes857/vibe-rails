@@ -57,7 +57,7 @@ public class TerminalRunner
         // null; that path passes initialUserInput explicitly to record without
         // double-encoding the prompt into the launch command.
         var userInputToRecord = initialUserInput ?? initialPrompt;
-        var sessionId = await _stateService.CreateSessionAsync(llm.ToString(), workDir, envName, shouldEnableRemote, ct, initialUserInput: userInputToRecord);
+        var sessionId = await _stateService.CreateSessionAsync(LlmParser.ToWireName(llm), workDir, envName, shouldEnableRemote, ct, initialUserInput: userInputToRecord);
         Terminal? terminal = null;
         IRemoteTerminalConnection? activeRemoteConn = null;
         IDisposable? openCodeProxyLease = null;
@@ -70,7 +70,7 @@ public class TerminalRunner
             {
                 preparedSession.Environment[kvp.Key] = kvp.Value;
             }
-            _stateService.PublishSessionStart(sessionId, llm.ToString(), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
+            _stateService.PublishSessionStart(sessionId, LlmParser.ToWireName(llm), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
 
             terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: sessionTitle, ct: ct);
             if (preparedSession.OpenCodeProxyActive)

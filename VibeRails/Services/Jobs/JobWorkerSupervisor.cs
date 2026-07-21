@@ -64,7 +64,7 @@ public sealed class JobWorkerSupervisor(IJobStore store) : IJobWorkerSupervisor
         }
         else if (OperatingSystem.IsMacOS())
         {
-            var domain = $"gui/{GetUnixUserId()}";
+            var domain = $"gui/{await GetUnixUserIdAsync(cancellationToken)}";
             await RunIgnoringFailureAsync("launchctl", ["bootout", domain, LaunchAgentPath], cancellationToken);
             if (File.Exists(LaunchAgentPath))
                 File.Delete(LaunchAgentPath);
@@ -141,7 +141,7 @@ public sealed class JobWorkerSupervisor(IJobStore store) : IJobWorkerSupervisor
             """;
         await File.WriteAllTextAsync(LaunchAgentPath, plist, Encoding.UTF8, cancellationToken);
 
-        var domain = $"gui/{GetUnixUserId()}";
+        var domain = $"gui/{await GetUnixUserIdAsync(cancellationToken)}";
         await RunIgnoringFailureAsync("launchctl", ["bootout", domain, LaunchAgentPath], cancellationToken);
         await RunAsync("launchctl", ["bootstrap", domain, LaunchAgentPath], cancellationToken);
         await RunAsync("launchctl", ["kickstart", "-k", $"{domain}/{LaunchAgentLabel}"], cancellationToken);
@@ -204,24 +204,14 @@ public sealed class JobWorkerSupervisor(IJobStore store) : IJobWorkerSupervisor
         .Replace("\"", "&quot;", StringComparison.Ordinal)
         .Replace("'", "&apos;", StringComparison.Ordinal);
 
-    private static int GetUnixUserId()
+    private static async Task<int> GetUnixUserIdAsync(CancellationToken cancellationToken)
     {
         var value = Environment.GetEnvironmentVariable("UID");
         if (int.TryParse(value, out var uid))
             return uid;
 
-        using var process = Process.Start(new ProcessStartInfo
-        {
-            FileName = "id",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            CreateNoWindow = true
-        }.Also(info => info.ArgumentList.Add("-u")));
-        if (process is null)
-            throw new InvalidOperationException("Unable to determine the current macOS user id.");
-        var output = process.StandardOutput.ReadToEnd();
-        process.WaitForExit(3000);
-        return process.ExitCode == 0 && int.TryParse(output.Trim(), out uid)
+        var result = await RunAsync("id", ["-u"], cancellationToken);
+        return int.TryParse(result.StdOut.Trim(), out uid)
             ? uid
             : throw new InvalidOperationException("Unable to determine the current macOS user id.");
     }
@@ -268,10 +258,12 @@ public sealed class JobWorkerSupervisor(IJobStore store) : IJobWorkerSupervisor
         {
             await process.WaitForExitAsync(timeout.Token);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             TryKill(process);
-            throw new TimeoutException($"Timed out while running {executable}.");
+            if (!cancellationToken.IsCancellationRequested)
+                throw new TimeoutException($"Timed out while running {executable}.");
+            throw;
         }
 
         var result = new CommandResult(process.ExitCode, await stdoutTask, await stderrTask);
@@ -335,14 +327,5 @@ public sealed class JobWorkerSupervisor(IJobStore store) : IJobWorkerSupervisor
             lease?.Version,
             heartbeatUtc,
             message);
-    }
-}
-
-internal static class ProcessStartInfoExtensions
-{
-    public static T Also<T>(this T value, Action<T> configure)
-    {
-        configure(value);
-        return value;
     }
 }

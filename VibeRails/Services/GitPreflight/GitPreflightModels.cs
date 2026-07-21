@@ -35,6 +35,11 @@ public enum GitStagedChangeKind
 
 public sealed record GitIndexTextFile(string RelativePath, string Content);
 
+public sealed record GitStagedSnapshotIdentity(
+    string? BaseCommit,
+    string BaseTree,
+    string StagedTree);
+
 public sealed record GitStagedFileSnapshot(
     string RelativePath,
     string FullPath,
@@ -50,7 +55,13 @@ public sealed record GitStagedSnapshot(
     string RepositoryPath,
     IReadOnlyList<GitStagedFileSnapshot> Files,
     IReadOnlyList<GitIndexTextFile> AgentFiles,
-    IReadOnlyList<string>? TrackedFiles = null)
+    IReadOnlyList<string>? TrackedFiles = null,
+    // Optional immutable source corpus used for impact ranking. Unpushed scans populate this
+    // from HEAD blobs so index and working-tree changes cannot affect their reference counts.
+    IReadOnlyList<GitIndexTextFile>? ImpactFiles = null,
+    // Present only for the staged-index scope. These object ids bind validation and any queued VCA
+    // job to one immutable base/tree pair even if the live index changes later in the preflight.
+    GitStagedSnapshotIdentity? StagedIdentity = null)
 {
     public static GitStagedSnapshot Preview(string repositoryPath) => new(
         Path.GetFullPath(repositoryPath),
@@ -70,6 +81,10 @@ public sealed record GitPreflightRequest(
     VcaHookInvocation Invocation,
     bool FullImpactScan = false,
     bool WorkingTreeChanges = false,
+    // Set when scanning unpushed commits (@{upstream}..HEAD). Controls the scope label
+    // in step output ("unpushed" instead of "changed"/"staged") so the user can tell
+    // at a glance which scan they're reading.
+    bool UnpushedChanges = false,
     // Only the standalone native pre-commit hook sets this. Browser/Rules previews use
     // the same pipeline but must never enqueue real automation.
     bool EnqueueAutomatedJobs = false);
@@ -121,6 +136,17 @@ public interface IGitStagedSnapshotProvider
 public interface IGitWorkingTreeSnapshotProvider
 {
     Task<GitStagedSnapshot> CaptureWorkingTreeAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Captures every file changed in commits that exist on the current branch but
+    /// not on its upstream tracking branch (<c>@{upstream}..HEAD</c>). For each file,
+    /// <c>Content</c> is the HEAD (current committed) version and <c>PreviousContent</c>
+    /// is the upstream (last pushed) version. Throws <see cref="InvalidOperationException"/>
+    /// when the branch has no upstream configured — the caller surfaces that to the user.
+    /// </summary>
+    Task<GitStagedSnapshot> CaptureUnpushedAsync(
         string workingDirectory,
         CancellationToken cancellationToken);
 }

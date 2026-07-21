@@ -90,6 +90,23 @@ public sealed class ImpactAnalyzerTests : IDisposable
         Assert.Equal(1, counts["src/alpha.cs"]);
     }
 
+    [Fact]
+    public void CountReferencingSources_UsesCapturedContentInsteadOfFilesOnDisk()
+    {
+        Write("src/alpha.cs", "public class AlphaService { }");
+        Write("src/caller.cs", "public class DiskCaller { }");
+        var targets = MintLintAnalyzer.AnalyzePath(_root);
+
+        var counts = ImpactAnalyzer.CountReferencingSources(
+            targets,
+            [
+                new SourceInput("src/alpha.cs", "public class AlphaService { }"),
+                new SourceInput("src/caller.cs", "public class HeadCaller { AlphaService service; }")
+            ]);
+
+        Assert.Equal(1, counts["src/alpha.cs"]);
+    }
+
     private void Write(string relativePath, string content)
     {
         string fullPath = Path.Combine(_root, relativePath);

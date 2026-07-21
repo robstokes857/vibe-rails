@@ -5,6 +5,7 @@ public interface ILlmParser
     IReadOnlyList<LLM> All { get; }
     LLM Parse(string? value);
     string Normalize(string? value);
+    string Normalize(LLM llm);
 }
 
 public sealed class LlmParser : ILlmParser
@@ -21,6 +22,9 @@ public sealed class LlmParser : ILlmParser
         ["glm-5.2"] = LLM.Glm52,
         ["kimi-k3"] = LLM.KimiK3
     };
+
+    private static readonly Dictionary<LLM, string> SpecialCaseWireNames =
+        SpecialCaseMap.ToDictionary(pair => pair.Value, pair => pair.Key);
 
     public IReadOnlyList<LLM> All => AllValues;
 
@@ -39,20 +43,25 @@ public sealed class LlmParser : ILlmParser
         return LLM.NotSet;
     }
 
-    public string Normalize(string? value)
+    public string Normalize(string? value) => ToWireName(Parse(value));
+
+    public string Normalize(LLM llm) => ToWireName(llm);
+
+    // Reverse of Parse: maps an LLM enum back to the exact wire string the frontend keys on —
+    // "glm-5.2"/"kimi-k3" for the pseudo-CLIs, the canonical enum name otherwise. Every outbound
+    // boundary (session Cli persistence, PublishSessionStart, ActiveCli, parent-cli links, the
+    // environments API) must round-trip through here so wire names match what Parse accepts and what
+    // the frontend filter/brand maps expect. Static so callers without ILlmParser injected can use it.
+    public static string ToWireName(LLM llm)
     {
-        var result = Parse(value);
-        if (result == LLM.NotSet)
+        if (llm == LLM.NotSet)
             return string.Empty;
 
-        // Reverse-lookup the special-case strings so Normalize("glm-5.2") returns
-        // "glm-5.2" (not "Glm52"), preserving the wire format callers expect.
-        foreach (var (key, mapped) in SpecialCaseMap)
-        {
-            if (mapped == result)
-                return key;
-        }
+        // Keep reverse lookup constant-time because this method sits on session and route
+        // serialization boundaries.
+        if (SpecialCaseWireNames.TryGetValue(llm, out var wireName))
+            return wireName;
 
-        return result.ToString();
+        return llm.ToString();
     }
 }

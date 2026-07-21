@@ -170,6 +170,46 @@ public sealed class MintLintPreflightStepTests
         Assert.StartsWith("Scanned 1 supported changed source file(s)", result.Output[0]);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_UnpushedImpactUsesCapturedHeadSources_NotWorkingTree()
+    {
+        var repository = Path.Combine(Path.GetTempPath(), $"mintlint_unpushed_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repository);
+        try
+        {
+            await System.IO.File.WriteAllTextAsync(
+                Path.Combine(repository, "caller.cs"),
+                "public class WorkingTreeCaller { }",
+                TestContext.Current.CancellationToken);
+            var snapshot = new GitStagedSnapshot(
+                repository,
+                [File("alpha.cs", "public class AlphaService { }")],
+                [],
+                TrackedFiles: ["alpha.cs", "caller.cs"],
+                ImpactFiles:
+                [
+                    new GitIndexTextFile("alpha.cs", "public class AlphaService { }"),
+                    new GitIndexTextFile("caller.cs", "public class HeadCaller { AlphaService service; }")
+                ]);
+
+            var result = await new MintLintPreflightStep().ExecuteAsync(
+                new GitPreflightStepContext(
+                    "run",
+                    Request() with { UnpushedChanges = true },
+                    snapshot,
+                    (_, _, _) => ValueTask.CompletedTask),
+                TestContext.Current.CancellationToken);
+
+            var report = MintLintReportFactory.FromJson(result.Details![MintLintReportFactory.DetailsKey]);
+            Assert.NotNull(report);
+            Assert.Equal(1, Assert.Single(report.Files).ReferencedByCount);
+        }
+        finally
+        {
+            Directory.Delete(repository, recursive: true);
+        }
+    }
+
     private static GitStagedFileSnapshot File(string path, string content) => new(
         path,
         path,

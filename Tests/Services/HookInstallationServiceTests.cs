@@ -32,7 +32,7 @@ namespace Tests.Services
         {
             var preCommitScript = @"#!/bin/sh
 # Vibe Rails Pre-Commit Hook
-# VibeRails Hook Version: 5
+# VibeRails Hook Version: 6
 VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
 VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
 VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
@@ -44,7 +44,7 @@ if [ -n ""$VIBERAILS_CHAINED_HOOK"" ]; then ""$VIBERAILS_CHAINED_HOOK"" ""$@""; 
 
             var commitMsgScript = @"#!/bin/sh
 # Vibe Rails Commit-Msg Hook
-# VibeRails Hook Version: 5
+# VibeRails Hook Version: 6
 VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
 VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
 VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
@@ -56,7 +56,7 @@ vb --vca-hook commit-msg --commit-message ""$1""
 
             var postCommitScript = @"#!/bin/sh
 # Vibe Rails Post-Commit Hook
-# VibeRails Hook Version: 5
+# VibeRails Hook Version: 6
 VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
 VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
 VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
@@ -253,6 +253,41 @@ echo ""Another hook""
         }
 
         [Fact]
+        public async Task InstallHooksAsync_InstallsPostCommitHook()
+        {
+            // Act
+            var result = await _service.InstallHooksAsync(_testRepoPath, CancellationToken.None);
+
+            // Assert
+            Assert.True(result.Success);
+            var postCommitPath = Path.Combine(_hooksDir, "post-commit");
+            Assert.True(File.Exists(postCommitPath));
+            var content = await File.ReadAllTextAsync(postCommitPath, TestContext.Current.CancellationToken);
+            Assert.Contains("# Vibe Rails Post-Commit Hook", content);
+            Assert.Contains("# End Vibe Rails Hook", content);
+        }
+
+        [Fact]
+        public async Task UninstallHooksAsync_RemovesPostCommitHook()
+        {
+            // Arrange
+            await _service.InstallHooksAsync(_testRepoPath, CancellationToken.None);
+            var postCommitPath = Path.Combine(_hooksDir, "post-commit");
+            Assert.True(File.Exists(postCommitPath));
+
+            // Act
+            var result = await _service.UninstallHooksAsync(_testRepoPath, CancellationToken.None);
+
+            // Assert
+            Assert.True(result.Success);
+            // The hook file is either deleted (it held only VibeRails content) or has its block stripped.
+            var stillManaged = File.Exists(postCommitPath)
+                && (await File.ReadAllTextAsync(postCommitPath, TestContext.Current.CancellationToken))
+                    .Contains("# Vibe Rails Post-Commit Hook", StringComparison.Ordinal);
+            Assert.False(stillManaged);
+        }
+
+        [Fact]
         public async Task IsHookInstalled_ReturnsFalse_WhenOnlyPreCommitHookInstalled()
         {
             // Arrange
@@ -287,11 +322,11 @@ echo ""Another hook""
         {
             await File.WriteAllTextAsync(
                 Path.Combine(_hooksDir, "pre-commit"),
-                "#!/bin/sh\n# Vibe Rails Pre-Commit Hook\necho temporarily disabled\n# End Vibe Rails Hook",
+                "#!/bin/sh\n# Vibe Rails Pre-Commit Hook\n# VibeRails: disabled\n# End Vibe Rails Hook",
                 TestContext.Current.CancellationToken);
             await File.WriteAllTextAsync(
                 Path.Combine(_hooksDir, "commit-msg"),
-                "#!/bin/sh\n# Vibe Rails Commit-Msg Hook\necho temporarily disabled\n# End Vibe Rails Hook",
+                "#!/bin/sh\n# Vibe Rails Commit-Msg Hook\n# VibeRails: disabled\n# End Vibe Rails Hook",
                 TestContext.Current.CancellationToken);
 
             var status = await _service.GetStatusAsync(
@@ -302,6 +337,45 @@ echo ""Another hook""
             Assert.True(status.NeedsRepair);
             Assert.Equal(GitHookFileState.Disabled, status.PreCommit.State);
             Assert.Equal(GitHookFileState.Disabled, status.CommitMessage.State);
+        }
+
+        [Fact]
+        public async Task GetStatusAsync_IgnoresDisabledPhraseOutsideManagedSection()
+        {
+            Assert.True((await _service.InstallHooksAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken)).Success);
+            await File.AppendAllTextAsync(
+                Path.Combine(_hooksDir, "pre-commit"),
+                "\n# Third-party hook is not temporarily disabled.\n# VibeRails: disabled\n",
+                TestContext.Current.CancellationToken);
+
+            var status = await _service.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(GitHookFileState.Current, status.PreCommit.State);
+            Assert.True(status.IsInstalled);
+        }
+
+        [Fact]
+        public async Task UninstallPreCommitHookAsync_DeletesBashShebangOnlyRemainder()
+        {
+            var hookPath = Path.Combine(_hooksDir, "pre-commit");
+            await File.WriteAllTextAsync(
+                hookPath,
+                "#!/bin/bash\n",
+                TestContext.Current.CancellationToken);
+            Assert.True((await _service.InstallPreCommitHookAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken)).Success);
+
+            var result = await _service.UninstallPreCommitHookAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.Success);
+            Assert.False(File.Exists(hookPath));
         }
 
         [Theory]

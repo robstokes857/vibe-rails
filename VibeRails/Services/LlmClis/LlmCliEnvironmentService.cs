@@ -32,9 +32,15 @@ namespace VibeRails.Services.LlmClis
 
         public async Task CreateEnvironmentAsync(LLM_Environment environment, CancellationToken cancellationToken)
         {
-            // Set the environment path
+            ArgumentNullException.ThrowIfNull(environment);
+
+            // Treat the service boundary as a security boundary too. Routes validate names, but
+            // direct/future callers must not be able to redirect copied CLI credentials outside
+            // the configured environments root.
             var envBasePath = ParserConfigs.GetEnvPath();
-            environment.Path = Path.Combine(envBasePath, environment.CustomName);          
+            environment.Path = EnvironmentNameValidator.ResolveEnvironmentDirectory(
+                envBasePath,
+                environment.CustomName);
             environment.LastUsedUTC = DateTime.UtcNow;
 
             switch (environment.LLM)
@@ -65,36 +71,181 @@ namespace VibeRails.Services.LlmClis
             }
         }
 
-        public Task DeleteEnvironmentAsync(LLM_Environment environment, CancellationToken cancellationToken)
+        /// <summary>
+        /// Atomically moves an environment directory to a unique sibling before its database row
+        /// becomes eligible for deletion. Keeping the original path absent while the row still
+        /// exists prevents a concurrent create from claiming that path until the guarded database
+        /// delete has completed.
+        /// </summary>
+        public StagedEnvironmentDirectory StageEnvironmentDirectoryForDeletion(LLM_Environment environment)
         {
             ArgumentNullException.ThrowIfNull(environment);
 
-            var envBasePath = ParserConfigs.GetEnvPath();
+            var envBasePath = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(ParserConfigs.GetEnvPath()));
             var environmentPath = string.IsNullOrWhiteSpace(environment.Path)
-                ? Path.Combine(envBasePath, environment.CustomName)
-                : environment.Path;
+                ? EnvironmentNameValidator.ResolveEnvironmentDirectory(envBasePath, environment.CustomName)
+                : Path.TrimEndingDirectorySeparator(Path.GetFullPath(environment.Path));
 
-            // Containment guard: the create/launch paths are hardened, but environment.Path
-            // here comes from a stored DB row that could predate that hardening or have been
-            // hand-edited to point outside the envs root. Never recursively delete a path
-            // outside the root — skip the filesystem delete and let the caller drop the DB row.
+            // environment.Path comes from a stored DB row that could predate create-time
+            // hardening or have been hand-edited. Never move or recursively delete it when it
+            // resolves outside the configured root; the caller may still remove the stale row.
             if (!EnvironmentNameValidator.IsWithinEnvironmentRoot(envBasePath, environmentPath))
             {
                 Log.Warning(
-                    "[Environment] Refusing recursive delete of '{Path}' for environment '{Name}' — resolves outside the environments root.",
+                    "[Environment] Refusing filesystem deletion of '{Path}' for environment '{Name}' — resolves outside the environments root.",
                     environmentPath, environment.CustomName);
-                return Task.CompletedTask;
+                return new StagedEnvironmentDirectory(envBasePath, originalPath: null, tombstonePath: null);
             }
+
+            var parentPath = Path.GetDirectoryName(environmentPath)
+                ?? throw new InvalidOperationException("Environment directory has no parent.");
 
             if (!_fileService.DirectoryExists(environmentPath))
             {
-                return Task.CompletedTask;
+                // A second delete request must not interpret the first request's atomic rename as
+                // a genuinely absent config directory and delete the row out from under it.
+                if (HasDeletionTombstone(parentPath, environment.Id))
+                {
+                    throw new EnvironmentDeletionInProgressException(environment.Id);
+                }
+
+                return new StagedEnvironmentDirectory(envBasePath, environmentPath, tombstonePath: null);
             }
 
-            _fileService.DeleteDirectory(environmentPath, recursive: true);
-            return Task.CompletedTask;
+            // A same-parent rename is atomic on the supported filesystems and cannot cross a
+            // volume boundary. The random name prevents one delete request from reusing another
+            // request's tombstone.
+            var tombstonePath = Path.Combine(
+                parentPath,
+                $".viberails-delete-{environment.Id}-{Guid.NewGuid():N}");
+
+            if (!EnvironmentNameValidator.IsWithinEnvironmentRoot(envBasePath, tombstonePath))
+            {
+                throw new InvalidOperationException("Environment deletion tombstone resolved outside the environments root.");
+            }
+
+            try
+            {
+                _fileService.MoveDirectory(environmentPath, tombstonePath);
+            }
+            catch (IOException) when (
+                !_fileService.DirectoryExists(environmentPath)
+                && HasDeletionTombstone(parentPath, environment.Id))
+            {
+                // Two requests may both observe the original before either rename. The loser of
+                // the atomic move reports a conflict and, critically, never reaches the DB delete.
+                throw new EnvironmentDeletionInProgressException(environment.Id);
+            }
+
+            return new StagedEnvironmentDirectory(envBasePath, environmentPath, tombstonePath);
         }
 
+        private bool HasDeletionTombstone(string parentPath, int environmentId)
+        {
+            if (!_fileService.DirectoryExists(parentPath))
+            {
+                return false;
+            }
+
+            var prefix = $".viberails-delete-{environmentId}-";
+            var directories = _fileService.EnumerateDirectories(
+                parentPath,
+                $"{prefix}*",
+                new EnumerationOptions { RecurseSubdirectories = false });
+
+            return directories?.Any(path =>
+                Path.GetFileName(path).StartsWith(prefix, StringComparison.Ordinal)) == true;
+        }
+
+        /// <summary>
+        /// Restores a staged directory when the guarded database delete was refused or failed.
+        /// Existing content at the original path is never overwritten.
+        /// </summary>
+        public void RestoreStagedEnvironmentDirectory(StagedEnvironmentDirectory stagedDirectory)
+        {
+            ArgumentNullException.ThrowIfNull(stagedDirectory);
+            ValidateStagedDirectory(stagedDirectory);
+
+            if (stagedDirectory.TombstonePath == null
+                || !_fileService.DirectoryExists(stagedDirectory.TombstonePath))
+            {
+                return;
+            }
+
+            if (stagedDirectory.OriginalPath == null)
+            {
+                throw new InvalidOperationException("A staged environment tombstone has no original path.");
+            }
+
+            if (_fileService.DirectoryExists(stagedDirectory.OriginalPath))
+            {
+                throw new IOException(
+                    $"Refusing to overwrite an environment directory recreated at '{stagedDirectory.OriginalPath}'.");
+            }
+
+            _fileService.MoveDirectory(stagedDirectory.TombstonePath, stagedDirectory.OriginalPath);
+        }
+
+        /// <summary>
+        /// Finalizes a successful database deletion by deleting only the staged tombstone. A new
+        /// environment created at the original path after the row deletion is left untouched.
+        /// </summary>
+        public void FinalizeStagedEnvironmentDirectoryDeletion(StagedEnvironmentDirectory stagedDirectory)
+        {
+            ArgumentNullException.ThrowIfNull(stagedDirectory);
+            ValidateStagedDirectory(stagedDirectory);
+
+            if (stagedDirectory.TombstonePath != null
+                && _fileService.DirectoryExists(stagedDirectory.TombstonePath))
+            {
+                _fileService.DeleteDirectory(stagedDirectory.TombstonePath, recursive: true);
+            }
+        }
+
+        private static void ValidateStagedDirectory(StagedEnvironmentDirectory stagedDirectory)
+        {
+            if (stagedDirectory.OriginalPath != null
+                && !EnvironmentNameValidator.IsWithinEnvironmentRoot(
+                    stagedDirectory.EnvironmentRoot,
+                    stagedDirectory.OriginalPath))
+            {
+                throw new InvalidOperationException("Staged environment path resolves outside the environments root.");
+            }
+
+            if (stagedDirectory.TombstonePath != null
+                && !EnvironmentNameValidator.IsWithinEnvironmentRoot(
+                    stagedDirectory.EnvironmentRoot,
+                    stagedDirectory.TombstonePath))
+            {
+                throw new InvalidOperationException("Staged environment tombstone resolves outside the environments root.");
+            }
+        }
+
+        public sealed class StagedEnvironmentDirectory
+        {
+            internal StagedEnvironmentDirectory(
+                string environmentRoot,
+                string? originalPath,
+                string? tombstonePath)
+            {
+                EnvironmentRoot = environmentRoot;
+                OriginalPath = originalPath;
+                TombstonePath = tombstonePath;
+            }
+
+            internal string EnvironmentRoot { get; }
+            public string? OriginalPath { get; }
+            public string? TombstonePath { get; }
+        }
+
+        public sealed class EnvironmentDeletionInProgressException : InvalidOperationException
+        {
+            internal EnvironmentDeletionInProgressException(int environmentId)
+                : base($"Environment {environmentId} is already being deleted.")
+            {
+            }
+        }
 
         public Dictionary<string, string> GetEnvironmentVariables(string envName, LLM llm)
         {

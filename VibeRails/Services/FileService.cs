@@ -197,5 +197,8 @@ namespace VibeRails.Services
 
         public void DeleteFile(string path)
             => File.Delete(path);
+
+        public void MoveDirectory(string sourceDirName, string destDirName)
+            => Directory.Move(sourceDirName, destDirName);
     }
 }

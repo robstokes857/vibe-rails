@@ -341,9 +341,9 @@ TokenSaver/
 │  └─ CompressionTrace.cs        ← StageTrace / StageOutcome.
 ├─ Minify/
 │  ├─ OutputMinifier.cs          ← Stages 1-5, fused. Read the class comment.
-│  ├─ OutputCondenser.cs         ← Stages 9-10, fused. Read the class comment.
+│  ├─ OutputCondenser.cs         ← Stages 10-11, fused. Read the class comment.
 │  ├─ MinifyFlags.cs             ← 5 bools ← catalog stages 1-5.
-│  ├─ CondenseOptions.cs         ← 2 bools ← catalog stages 9-10.
+│  ├─ CondenseOptions.cs         ← 2 bools ← catalog stages 10-11.
 │  ├─ MinifyStats.cs             ← Per-transform char counters (= the trace source).
 │  ├─ CondenseStats.cs
 │  ├─ AnthropicMessagesRewriter.cs  ← JSON walk + splice (Claude).
@@ -355,7 +355,7 @@ TokenSaver/
 │  └─ ToolOutputRewriteResult.cs
 ├─ Shape/
 │  ├─ CommandShape.cs            ← Classifies a COMMAND (not output) into a shape.
-│  └─ ShapeFilters.cs            ← Stages 6-8.
+│  └─ ShapeFilters.cs            ← Stages 6-9.
 ├─ LlmProxyRelay.cs              ← The generic forwarding relay.
 ├─ LlmProxyRoutes.cs             ← Codex proxy endpoints.
 ├─ LlmAnthropicProxyRoutes.cs    ← Claude proxy endpoints.
@@ -408,6 +408,14 @@ smudge byte-exact fixtures on a fresh Windows checkout and you'll get failures w
   refuses anything containing a pipe, redirect, `&&`, `;`, or `$(` — if we can't see
   the whole command, we don't know the output's shape, and guessing means mangling
   output we didn't understand.
+- **On Windows-native runners the shape stages silently no-op on `dotnet test`.**
+  `ShapeFilters.Apply` fail-opens on *any* CR (`IndexOfAny('\x1b', '\a', '\r')`), and
+  `cr-collapse` — the only stage that normalizes CRLF→LF — is **off** by default. So a
+  `dotnet test` (or any) payload with CRLF line endings reaches the shape stage still carrying
+  `\r`, and `elide-passed-tests` plus the three group stages return it untouched. The
+  `dotnet test` win advertised under "The stage catalog" assumes LF line endings; on a
+  Windows-native runner it does not fire unless `cr-collapse` is enabled. Fail-open is the
+  correct behavior (idempotency guard); the catalog copy just overpromises.
 - **The relay must never wait on SQLite.** `TokenSavingsStore` persists in the background and
   `CompressionCaptureStore` enqueues work to its single ordered consumer; both set `busy_timeout`
   and swallow write failures. `state.db` has known lock contention; a lost capture is a bad

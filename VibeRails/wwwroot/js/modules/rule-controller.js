@@ -1,5 +1,6 @@
 import { VcaConsole, copyVcaConsoleText } from './vca-console.js';
 import {
+    directoryOf,
     disposeCodeAnalyzerDashboard,
     renderCodeAnalyzerDashboard
 } from './code-analyzer-dashboard.js';
@@ -342,6 +343,15 @@ export class RuleController {
         this.preflightState = createGitPreflightState();
         this.preflightRunner = null;
         this.focusedMode = false;
+        // The dashboard's last-known UI state (tab + selected file/metric) so a re-render
+        // after an ignore action can drop the user back where they were instead of
+        // bouncing them to the Overview tab with file #1 selected.
+        this.codeAnalyzerState = null;
+        // A Rules overview is remounted each time the user navigates away and back. Keep the
+        // most recent MintLint response so remounting can restore it without starting another
+        // scan. A manual scan (or an ignore/restore that deliberately rescans) replaces this.
+        this.codeAnalyzerCache = null;
+        this.codeAnalyzerScanInProgress = null;
     }
 
     loadCheckViolations() {
@@ -363,10 +373,25 @@ export class RuleController {
     async runRulesOverviewChecks(root) {
         await this.refreshHookStatus();
         if (this.viewRoot !== root || !this.hookStatus?.inGitRepo) return false;
+
+        const repositoryPath = this.hookStatus?.repositoryPath;
+        const restoreCachedAnalyzer = this.restoreCodeAnalyzerCache()
+            || (this.codeAnalyzerScanInProgress
+                && this.codeAnalyzerScanInProgress.repositoryPath === repositoryPath);
         await Promise.all([
             this.runHookPreview(),
-            this.runCodeAnalyzer()
+            restoreCachedAnalyzer ? Promise.resolve() : this.runCodeAnalyzer()
         ]);
+        return true;
+    }
+
+    restoreCodeAnalyzerCache() {
+        const cache = this.codeAnalyzerCache;
+        if (!cache || cache.repositoryPath !== this.hookStatus?.repositoryPath) return false;
+
+        this.lastAnalyzerUnpushed = cache.unpushed;
+        this.analyzerIgnores = cache.ignoredFiles;
+        this.renderCodeAnalyzerSummary(cache.response);
         return true;
     }
 
@@ -378,6 +403,7 @@ export class RuleController {
         this.app.bindAction(root, '[data-action="copy-hook-output"]', () => this.copyHookOutput());
         this.app.bindAction(root, '[data-action="clear-hook-output"]', () => this.clearHookOutput());
         this.app.bindAction(root, '[data-action="run-code-analyzer"]', () => this.runCodeAnalyzer());
+        this.app.bindAction(root, '[data-action="run-code-analyzer-unpushed"]', () => this.runCodeAnalyzer({ unpushed: true }));
         this.app.bindAction(root, '[data-action="copy-code-analyzer-output"]', () => this.copyCodeAnalyzerOutput());
         this.app.bindAction(root, '[data-action="clear-code-analyzer-output"]', () => this.clearCodeAnalyzerOutput());
         this.app.bindAction(root, '[data-action="open-fix-terminal"]', () => this.openFixTerminal());
@@ -648,7 +674,7 @@ export class RuleController {
     }
 
     setHookActionButtonsDisabled(disabled) {
-        this.viewRoot?.querySelectorAll('[data-action="toggle-hooks"], [data-action="install-hooks"], [data-action="uninstall-hooks"], [data-action="run-hook-preview"], [data-action="run-code-analyzer"]')
+        this.viewRoot?.querySelectorAll('[data-action="toggle-hooks"], [data-action="install-hooks"], [data-action="uninstall-hooks"], [data-action="run-hook-preview"], [data-action="run-code-analyzer"], [data-action="run-code-analyzer-unpushed"]')
             .forEach(button => {
                 this.setButtonDisabled(button, disabled);
             });
@@ -675,26 +701,65 @@ export class RuleController {
         }
     }
 
-    async runCodeAnalyzer() {
-        const button = this.query('[data-action="run-code-analyzer"]');
-        this.setButtonBusy(button, true, 'Refreshing…');
+    /**
+     * Runs the Code quality scan. The default scope is the working tree (staged +
+     * unstaged + untracked changes); pass { unpushed: true } to swap it for the
+     * committed-but-not-pushed scope (diff @{upstream}..HEAD).
+     */
+    async runCodeAnalyzer({ unpushed = false } = {}) {
+        const repositoryPath = this.hookStatus?.repositoryPath;
+        if (this.codeAnalyzerScanInProgress
+            && this.codeAnalyzerScanInProgress.repositoryPath === repositoryPath) return false;
+
+        this.codeAnalyzerScanInProgress = { repositoryPath };
+        // Remember the scope so ignore/restore rescans replay it instead of silently reverting to
+        // the working-tree scope, and so the source pane can request the matching revision.
+        this.lastAnalyzerUnpushed = unpushed === true;
+        const button = unpushed
+            ? this.query('[data-action="run-code-analyzer-unpushed"]')
+            : this.query('[data-action="run-code-analyzer"]');
+        this.setButtonBusy(button, true, unpushed ? 'Scanning…' : 'Refreshing…');
         this.setCodeAnalyzerUtilityButtonsDisabled(true);
         this.codeAnalyzerConsole?.begin('code quality');
 
         try {
             const fullScan = this.query('[data-code-analyzer-full-scan]')?.checked === true;
+            // Build the query string. scope=unpushed takes precedence over the default
+            // working-tree scope; fullScan is independent and can be combined with either.
+            const params = [];
+            if (fullScan) params.push('fullScan=true');
+            if (unpushed) params.push('scope=unpushed');
+            const query = params.length ? `?${params.join('&')}` : '';
             const [response] = await Promise.all([
                 this.app.apiCall(
-                    `/api/v1/code-analyzer${fullScan ? '?fullScan=true' : ''}`,
+                    `/api/v1/code-analyzer${query}`,
                     'POST', null, { showLoading: false }),
                 this.fetchAnalyzerIgnores()
             ]);
             this.codeAnalyzerConsole?.complete(response);
             this.renderCodeAnalyzerSummary(response);
+            this.codeAnalyzerCache = {
+                repositoryPath,
+                response,
+                ignoredFiles: this.analyzerIgnores || [],
+                unpushed: this.lastAnalyzerUnpushed
+            };
         } catch (error) {
             this.codeAnalyzerConsole?.fail(error);
             this.renderCodeAnalyzerSummary(null);
+            // A failed automatic scan should not repeat every time this view remounts. The user
+            // can retry it with the refresh button after addressing the reported problem.
+            this.codeAnalyzerCache = {
+                repositoryPath,
+                response: null,
+                ignoredFiles: this.analyzerIgnores || [],
+                unpushed: this.lastAnalyzerUnpushed
+            };
         } finally {
+            if (this.codeAnalyzerScanInProgress
+                && this.codeAnalyzerScanInProgress.repositoryPath === repositoryPath) {
+                this.codeAnalyzerScanInProgress = null;
+            }
             this.setButtonBusy(button, false);
             this.setCodeAnalyzerUtilityButtonsDisabled(false);
         }
@@ -715,17 +780,26 @@ export class RuleController {
                 // The source pane shows whole files from the working tree; the report
                 // itself only carries short snippets.
                 fetchSource: path => this.app.apiCall(
-                    `/api/v1/code-analyzer/source?path=${encodeURIComponent(path)}`,
+                    `/api/v1/code-analyzer/source?path=${encodeURIComponent(path)}${this.lastAnalyzerUnpushed ? '&scope=unpushed' : ''}`,
                     'GET',
                     null,
                     { showLoading: false }),
                 ignoredFiles: this.analyzerIgnores || [],
                 onIgnoreFile: file => this.promptIgnoreAnalyzerFile(file),
-                onRestoreFile: entry => this.restoreAnalyzerFile(entry)
+                onIgnoreFiles: paths => this.promptIgnoreAnalyzerFiles(paths),
+                onIgnoreDirectory: payload => this.promptIgnoreAnalyzerDirectory(payload),
+                onRestoreFile: entry => this.restoreAnalyzerFile(entry),
+                // Preserve the user's place across the re-render that follows an ignore.
+                preserveState: this.codeAnalyzerState || null,
+                onStateChange: state => { this.codeAnalyzerState = state; }
             });
-            reportContainer.hidden = fileCount === 0;
+            // Keep the report container visible whenever there are ignores to restore, even when the
+            // report itself is empty — otherwise ignoring every changed file would hide the only
+            // restore UI (which the dashboard now renders standalone in that case).
+            const hasIgnores = (this.analyzerIgnores || []).length > 0;
+            reportContainer.hidden = fileCount === 0 && !hasIgnores;
             if (empty) {
-                empty.hidden = fileCount > 0;
+                empty.hidden = fileCount > 0 || hasIgnores;
                 const title = empty.querySelector('strong');
                 const message = empty.querySelector('p');
                 if (title) title.textContent = fileCount > 0 ? '' : 'No changed source files to analyze';
@@ -756,12 +830,84 @@ export class RuleController {
         const path = String(file?.path || '');
         if (!path) return;
         const safePath = this.app.escapeHtml(path);
-        this.app.showModal('Ignore this file?', `
-            <div class="analyzer-ignore-modal">
-                <p class="analyzer-ignore-intro">
+        this.showAnalyzerIgnoreModal({
+            title: 'Ignore this file?',
+            intro: `<p class="analyzer-ignore-intro">
                     <code>${safePath}</code> will be removed from Code quality results until you
                     restore it from the Ignored files list.
-                </p>
+                </p>`,
+            confirmLabel: 'Ignore file',
+            confirmIcon: 'fa-eye-slash',
+            onConfirm: (reasonKind, reasonText) =>
+                this.ignoreAnalyzerFile(path, reasonKind, reasonText)
+        });
+    }
+
+    /**
+     * Multi-file ignore flow. Same modal as the single-file case but the intro
+     * shows the count and the confirm hits the /bulk endpoint so N selections
+     * cost one round-trip and produce one toast.
+     */
+    promptIgnoreAnalyzerFiles(paths) {
+        const list = Array.isArray(paths) ? paths.filter(Boolean) : [];
+        if (list.length === 0) return;
+        if (list.length === 1) {
+            // Same UX as the single-file flow; no point showing "1 of 1 selected" copy.
+            this.promptIgnoreAnalyzerFile({ path: list[0] });
+            return;
+        }
+        const safeCount = this.app.escapeHtml(String(list.length));
+        this.showAnalyzerIgnoreModal({
+            title: `Ignore ${list.length} files?`,
+            intro: `<p class="analyzer-ignore-intro">
+                    <strong>${safeCount}</strong> files will be removed from Code quality results
+                    until you restore them from the Ignored files list.
+                </p>`,
+            confirmLabel: `Ignore ${list.length} files`,
+            confirmIcon: 'fa-eye-slash',
+            onConfirm: (reasonKind, reasonText) =>
+                this.ignoreAnalyzerFiles(list, reasonKind, reasonText)
+        });
+    }
+
+    /**
+     * Directory ignore flow. Accepts either a single file (ignore its folder) or a
+     * pre-deduplicated list of directory paths (bulk "ignore folders"). The modal
+     * copy makes it clear this is a directory rule that catches everything under
+     * the folder, not just the file the user clicked.
+     */
+    promptIgnoreAnalyzerDirectory(payload) {
+        const directoryPaths = Array.isArray(payload?.directoryPaths) && payload.directoryPaths.length
+            ? payload.directoryPaths.filter(Boolean)
+            : (payload?.file ? [directoryOf(payload.file.path)] : []);
+        const valid = directoryPaths.filter(p => p && p !== 'repository root');
+        if (valid.length === 0) return;
+
+        const label = valid.length === 1
+            ? this.app.escapeHtml(valid[0])
+            : `<strong>${this.app.escapeHtml(String(valid.length))}</strong> directories`;
+        this.showAnalyzerIgnoreModal({
+            title: valid.length === 1 ? 'Ignore this directory?' : `Ignore ${valid.length} directories?`,
+            intro: `<p class="analyzer-ignore-intro">
+                    <code>${label}</code> ${valid.length === 1 ? 'and everything underneath it' : 'and everything underneath them'}
+                    will be removed from Code quality results until restored from the Ignored files list.
+                </p>`,
+            confirmLabel: valid.length === 1 ? 'Ignore directory' : `Ignore ${valid.length} directories`,
+            confirmIcon: 'fa-folder-tree',
+            onConfirm: (reasonKind, reasonText) =>
+                this.ignoreAnalyzerDirectories(valid, reasonKind, reasonText)
+        });
+    }
+
+    /**
+     * Shared reason-modal builder for the ignore flows. Renders the same reason
+     * radiogroup + free-text field and calls onConfirm(reasonKind, reasonText)
+     * when the user confirms. reasonKind is null for "no reason".
+     */
+    showAnalyzerIgnoreModal({ title, intro, confirmLabel, confirmIcon, onConfirm }) {
+        this.app.showModal(title, `
+            <div class="analyzer-ignore-modal">
+                ${intro || ''}
                 <div class="form-label mb-2">Reason <span class="text-muted">(optional)</span></div>
                 <div class="analyzer-ignore-reasons" role="radiogroup" aria-label="Reason for ignoring">
                     <label><input type="radio" name="analyzer-ignore-reason" value="" checked><span>No reason</span></label>
@@ -770,12 +916,12 @@ export class RuleController {
                     <label><input type="radio" name="analyzer-ignore-reason" value="other"><span>Other</span></label>
                 </div>
                 <input type="text" class="form-control form-control-sm analyzer-ignore-text mt-2"
-                    data-analyzer-ignore-text placeholder="Why is this file ignored?" maxlength="200" disabled>
+                    data-analyzer-ignore-text placeholder="Why is this ignored?" maxlength="200" disabled>
                 <div class="d-flex justify-content-end gap-2 mt-4">
                     <button type="button" class="btn btn-outline-secondary" data-action="close-modal">Cancel</button>
                     <button type="button" class="btn btn-primary" data-analyzer-ignore-confirm>
-                        <i class="fa-solid fa-eye-slash me-1" aria-hidden="true"></i>
-                        Ignore file
+                        <i class="fa-solid ${confirmIcon || 'fa-eye-slash'} me-1" aria-hidden="true"></i>
+                        ${this.app.escapeHtml(confirmLabel || 'Ignore')}
                     </button>
                 </div>
             </div>
@@ -794,20 +940,52 @@ export class RuleController {
             const reasonKind = modal.querySelector('input[name="analyzer-ignore-reason"]:checked')?.value || '';
             const reasonText = reasonKind === 'other' ? String(textInput?.value || '').trim() : '';
             this.app.closeModal();
-            await this.ignoreAnalyzerFile(path, reasonKind || null, reasonText || null);
+            await onConfirm(reasonKind || null, reasonText || null);
         }, { once: true });
     }
 
     async ignoreAnalyzerFile(path, reasonKind, reasonText) {
         try {
             await this.app.apiCall('/api/v1/code-analyzer/ignores', 'POST',
-                { path, reasonKind, reasonText }, { showLoading: false });
+                { path, matchKind: 'file', reasonKind, reasonText }, { showLoading: false });
             this.app.showToast('File Ignored', `${path} is now excluded from Code quality scans.`, 'success');
             // Re-run so the report (scores, overview, roster) is honestly recomputed
             // without the file, not client-side filtered.
-            await this.runCodeAnalyzer();
+            await this.runCodeAnalyzer({ unpushed: this.lastAnalyzerUnpushed === true });
         } catch (error) {
             this.app.showError(`Could not ignore ${path}: ${error.message}`);
+        }
+    }
+
+    /** Bulk file-ignore: one POST to /ignores/bulk with matchKind=file. */
+    async ignoreAnalyzerFiles(paths, reasonKind, reasonText) {
+        if (!Array.isArray(paths) || paths.length === 0) return;
+        try {
+            await this.app.apiCall('/api/v1/code-analyzer/ignores/bulk', 'POST',
+                { paths, matchKind: 'file', reasonKind, reasonText }, { showLoading: false });
+            const label = paths.length === 1 ? 'file' : 'files';
+            this.app.showToast(`${paths.length} ${label} ignored`,
+                `${paths.length} ${label} ${paths.length === 1 ? 'is' : 'are'} now excluded from Code quality scans.`,
+                'success');
+            await this.runCodeAnalyzer({ unpushed: this.lastAnalyzerUnpushed === true });
+        } catch (error) {
+            this.app.showError(`Could not ignore ${paths.length} file${paths.length === 1 ? '' : 's'}: ${error.message}`);
+        }
+    }
+
+    /** Bulk directory-ignore: one POST to /ignores/bulk with matchKind=directory. */
+    async ignoreAnalyzerDirectories(directoryPaths, reasonKind, reasonText) {
+        if (!Array.isArray(directoryPaths) || directoryPaths.length === 0) return;
+        try {
+            await this.app.apiCall('/api/v1/code-analyzer/ignores/bulk', 'POST',
+                { paths: directoryPaths, matchKind: 'directory', reasonKind, reasonText }, { showLoading: false });
+            const label = directoryPaths.length === 1 ? 'directory' : 'directories';
+            this.app.showToast(`${directoryPaths.length} ${label} ignored`,
+                `${directoryPaths.length} ${label} ${directoryPaths.length === 1 ? 'is' : 'are'} now excluded from Code quality scans.`,
+                'success');
+            await this.runCodeAnalyzer({ unpushed: this.lastAnalyzerUnpushed === true });
+        } catch (error) {
+            this.app.showError(`Could not ignore ${directoryPaths.length} director${directoryPaths.length === 1 ? 'y' : 'ies'}: ${error.message}`);
         }
     }
 
@@ -819,7 +997,7 @@ export class RuleController {
                 `/api/v1/code-analyzer/ignores?path=${encodeURIComponent(path)}`,
                 'DELETE', null, { showLoading: false });
             this.app.showToast('File Restored', `${path} will be scanned again.`, 'info');
-            await this.runCodeAnalyzer();
+            await this.runCodeAnalyzer({ unpushed: this.lastAnalyzerUnpushed === true });
         } catch (error) {
             this.app.showError(`Could not restore ${path}: ${error.message}`);
         }

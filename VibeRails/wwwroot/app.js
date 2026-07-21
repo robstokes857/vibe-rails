@@ -17,7 +17,7 @@ import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js'
 import { McpController } from './js/modules/mcp-controller.js';
 import { JobController } from './js/modules/jobs-controller.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
-import { TerminalTokenCompressionMeter } from './js/modules/terminal-token-compression.js';
+import { TerminalTokenCompressionMeter, getTokenSaverEnabledSources } from './js/modules/terminal-token-compression.js';
 import { showAppToast } from './js/modules/toast-service.js';
 import { getLlmName, getProjectNameFromPath, formatRelativeTime, getCliBrand, escapeHtml } from './js/modules/utils.js';
 
@@ -77,9 +77,7 @@ export class VibeControlApp {
         // detached and TerminalManager.initialize() re-parents it each time that bar renders.
         this.terminalTokenCompression = new TerminalTokenCompressionMeter({
             title: 'Token saver',
-            enabled: this.appSettings.codexLlmProxyEnabled === true
-                || this.appSettings.claudeLlmProxyEnabled === true
-                || this.appSettings.openCodeLlmProxyEnabled === true
+            enabledSources: getTokenSaverEnabledSources(this.appSettings)
         }).connect(this);
         // If the terminal view mounted before this ran, drop the meter into its slot now.
         this.terminalTokenCompression.relocate(document.getElementById('terminal-proxy-activity-slot'));
@@ -413,10 +411,7 @@ export class VibeControlApp {
             ...settings
         });
         this.applyVsCodeThemePreference();
-        this.terminalTokenCompression?.setEnabled(
-            this.appSettings.codexLlmProxyEnabled === true
-            || this.appSettings.claudeLlmProxyEnabled === true
-        );
+        this.terminalTokenCompression?.setEnabledSources(getTokenSaverEnabledSources(this.appSettings));
     }
 
     _normalizeAppSettings(settings = {}) {
@@ -429,6 +424,10 @@ export class VibeControlApp {
             codexLlmProxyEnabled: false,
             codexLlmProxyMode: 'subscription',
             claudeLlmProxyEnabled: false,
+            openCodeLlmProxyEnabled: false,
+            claudeTokenSaverEnabled: true,
+            codexTokenSaverEnabled: true,
+            openCodeTokenSaverEnabled: true,
             machineName: '',
             ...settings
         };

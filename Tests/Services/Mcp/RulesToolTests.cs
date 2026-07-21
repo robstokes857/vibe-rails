@@ -110,10 +110,57 @@ public class RulesToolTests
         Assert.Contains(finding.Acknowledgment!, report.RequiredAcknowledgments);
     }
 
+    [Fact]
+    public async Task ValidateVcaReportAsync_CountsSpacedBooleanOperatorsInComplexity()
+    {
+        var snapshot = CreateSnapshot(
+            "AGENTS.md",
+            """
+            # Agent Instructions
+            ## Vibe Rails Rules
+            - [STOP] Cyclomatic complexity < 2
+            """,
+            "src/app.cs",
+            "bool IsReady(bool a, bool b, bool c) => a && b || c;");
+
+        var report = await RulesTool.ValidateVcaReportAsync(
+            cancellationToken: TestContext.Current.CancellationToken,
+            stagedSnapshot: snapshot);
+
+        Assert.True(report.HasStopViolation);
+        Assert.Contains(
+            report.Findings,
+            finding => finding.Rule.Contains("Cyclomatic complexity", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ValidateVcaReportAsync_DoesNotCountNullableAndNullConditionalSyntaxAsComplexity()
+    {
+        var snapshot = CreateSnapshot(
+            "AGENTS.md",
+            """
+            # Agent Instructions
+            ## Vibe Rails Rules
+            - [STOP] Cyclomatic complexity < 2
+            """,
+            "src/app.cs",
+            "string? Select(Input? input) => input?.Value ?? string.Empty;");
+
+        var report = await RulesTool.ValidateVcaReportAsync(
+            cancellationToken: TestContext.Current.CancellationToken,
+            stagedSnapshot: snapshot);
+
+        Assert.False(report.HasStopViolation);
+        Assert.DoesNotContain(
+            report.Findings,
+            finding => finding.Rule.Contains("Cyclomatic complexity", StringComparison.Ordinal));
+    }
+
     private static GitStagedSnapshot CreateSnapshot(
         string agentPath,
         string agentContent,
-        string changedPath)
+        string changedPath,
+        string changedContent = "staged content")
     {
         var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "vca-structured-tests"));
         return new GitStagedSnapshot(
@@ -134,7 +181,7 @@ public class RulesToolTests
                     ExistsInIndex: true,
                     IsBinary: false,
                     ChangedLineCount: 3,
-                    Content: "staged content")
+                    Content: changedContent)
             ],
             [new GitIndexTextFile(agentPath, agentContent)]);
     }

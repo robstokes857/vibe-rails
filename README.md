@@ -22,6 +22,13 @@
 
 ---
 
+## Jobs safety
+
+> [!WARNING]
+> Jobs are not sandboxed. They run unattended with the same operating-system permissions as VibeRails. “Review only” requests read-only behavior, and “Isolated write” uses a throwaway Git clone, but neither mode is a security boundary. An agent can access or modify files outside the selected repository or clone through CLI arguments, configuration, MCP servers, tools, or scripts. Review every environment and use a disposable account or machine for untrusted prompts, tools, or repositories.
+
+---
+
 ## Status
 - This repo is a lightweight, local-focused version of my personal setup. I'm stripping out multi-GPU/cluster support, heavy eval tooling, and other framework dependencies so it runs fast with Claude, Codex, and Antigravity CLIs. I'm rebuilding it around the features I think most people will actually want for local workflows.
 

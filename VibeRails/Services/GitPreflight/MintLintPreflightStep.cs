@@ -36,12 +36,12 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
         // The user's ignore list removes files from Code quality results entirely — both
         // here and in the Rules-page scan, which share this step. Never let a store failure
         // break the (non-blocking) analysis; a missing list just means nothing is ignored.
-        HashSet<string> ignoredPaths = [];
+        IReadOnlyList<CodeAnalyzerIgnoredFile> ignoreRules = [];
         if (ignoreStore is not null)
         {
             try
             {
-                ignoredPaths = await ignoreStore.GetIgnoredPathsAsync(
+                ignoreRules = await ignoreStore.GetIgnoreRulesAsync(
                     context.Snapshot.RepositoryPath,
                     cancellationToken);
             }
@@ -57,13 +57,20 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
                 && file.Content != null
                 && MintLintAnalyzer.SupportsFile(file.RelativePath))
             .ToList();
-        var ignoredCount = supported.Count(file => ignoredPaths.Contains(file.RelativePath));
+        var ignoredCount = supported.Count(file => CodeAnalyzerIgnoreStore.IsIgnored(file.RelativePath, ignoreRules));
         var candidates = supported
-            .Where(file => !ignoredPaths.Contains(file.RelativePath))
+            .Where(file => !CodeAnalyzerIgnoreStore.IsIgnored(file.RelativePath, ignoreRules))
             .Select(file => new SourceInput(file.RelativePath, file.Content!))
             .ToList();
         var skippedCount = context.Snapshot.Files.Count - supported.Count;
-        var sourceScope = context.Request.WorkingTreeChanges ? "changed" : "staged";
+        // The scope label distinguishes the three scan modes in step output: "staged" for
+        // commit preflight, "changed" for the working-tree Rules scan, "unpushed" for the
+        // committed-but-not-pushed scan. Same pipeline, different framing for the user.
+        var sourceScope = context.Request.UnpushedChanges
+            ? "unpushed"
+            : context.Request.WorkingTreeChanges
+                ? "changed"
+                : "staged";
 
         if (candidates.Count == 0)
         {
@@ -97,10 +104,16 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
         IReadOnlyDictionary<string, int> referencedBy;
         try
         {
-            referencedBy = ImpactAnalyzer.CountReferencingFiles(
-                context.Snapshot.RepositoryPath,
-                analyzed,
-                context.Request.FullImpactScan ? null : context.Snapshot.TrackedFiles);
+            referencedBy = context.Request.UnpushedChanges && context.Snapshot.ImpactFiles is not null
+                ? ImpactAnalyzer.CountReferencingSources(
+                    analyzed,
+                    context.Snapshot.ImpactFiles
+                        .Select(file => new SourceInput(file.RelativePath, file.Content))
+                        .ToList())
+                : ImpactAnalyzer.CountReferencingFiles(
+                    context.Snapshot.RepositoryPath,
+                    analyzed,
+                    context.Request.FullImpactScan ? null : context.Snapshot.TrackedFiles);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -111,7 +124,7 @@ public sealed class MintLintPreflightStep(ICodeAnalyzerIgnoreStore? ignoreStore 
         // concern this change introduced from debt the file already carried.
         var baselineInputs = context.Snapshot.Files
             .Where(file => file.PreviousContent != null
-                && !ignoredPaths.Contains(file.RelativePath)
+                && !CodeAnalyzerIgnoreStore.IsIgnored(file.RelativePath, ignoreRules)
                 && MintLintAnalyzer.SupportsFile(file.RelativePath))
             .Select(file => new SourceInput(file.RelativePath, file.PreviousContent!))
             .ToList();

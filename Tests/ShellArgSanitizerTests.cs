@@ -26,10 +26,10 @@ public class ShellArgSanitizerTests
     [Fact]
     public void Validate_AcceptsCommonPromptCharacters()
     {
-        // Shell metacharacters inside a quoted prompt are safe because EscapeArg
-        // always wraps args in single quotes (POSIX) or backtick-escaped double
-        // quotes (PowerShell) before they reach a shell. Rejecting them here would
-        // just block legitimate system prompts.
+        // Shell metacharacters inside a quoted prompt are safe because EscapeArg wraps
+        // non-inert args in single quotes (POSIX) or backtick-escaped double quotes
+        // (PowerShell) before they reach a shell. Rejecting them here would just block
+        // legitimate system prompts.
         Assert.Null(ShellArgSanitizer.Validate("--system-prompt \"Use $HOME and rm -rf /tmp/foo; echo done!\""));
         Assert.Null(ShellArgSanitizer.Validate("--system-prompt \"Backticks `like this` and pipes | & ; redirects > <\""));
         Assert.Null(ShellArgSanitizer.Validate("--system-prompt \"Braces {a,b} and parens (x)\""));

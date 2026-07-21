@@ -395,18 +395,26 @@ namespace VibeRails.DB
 
         public const string DeleteAllCompressionCaptures = "DELETE FROM CompressionCaptures;";
 
+        // Path collation follows host filesystem case semantics: case-insensitive on Windows/macOS,
+        // case-sensitive (BINARY) on Linux. Collation is fixed at DDL time, so it is chosen once per
+        // machine when the table is first created (which always matches that machine's OS).
+        private static readonly string CodeAnalyzerIgnorePathCollation =
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? "COLLATE NOCASE" : "COLLATE BINARY";
+
         /// <summary>
         /// Files the user excluded from Code quality scans, keyed per repository. ReasonKind is
         /// one of "test" / "config" / "other" (or NULL when no reason was given); ReasonText is
-        /// the optional free-text note. NOCASE on both keys because Windows paths compare
-        /// case-insensitively. Also created on demand by <c>CodeAnalyzerIgnoreStore</c>
-        /// (IF NOT EXISTS), since its writer can run before the first <c>Repository</c>
-        /// initializes the schema.
+        /// the optional free-text note. RepositoryPath stays NOCASE (a machine-local absolute path);
+        /// Path collation follows the host filesystem (<c>CodeAnalyzerIgnorePathCollation</c>) so a
+        /// case-sensitive Linux checkout can distinguish Foo.cs from foo.cs. Also created on demand
+        /// by <c>CodeAnalyzerIgnoreStore</c> (IF NOT EXISTS), since its writer can run before the
+        /// first <c>Repository</c> initializes the schema.
         /// </summary>
-        public const string CreateCodeAnalyzerIgnoresTable = """
+        public static readonly string CreateCodeAnalyzerIgnoresTable = $"""
             CREATE TABLE IF NOT EXISTS CodeAnalyzerIgnores (
                 RepositoryPath TEXT NOT NULL COLLATE NOCASE,
-                Path           TEXT NOT NULL COLLATE NOCASE,
+                Path           TEXT NOT NULL {CodeAnalyzerIgnorePathCollation},
+                MatchKind      TEXT NOT NULL DEFAULT 'file',
                 ReasonKind     TEXT,
                 ReasonText     TEXT,
                 CreatedUTC     TEXT NOT NULL,
@@ -414,16 +422,26 @@ namespace VibeRails.DB
             )
             """;
 
+        /// <summary>
+        /// Adds the MatchKind column to pre-existing CodeAnalyzerIgnores tables. Safe to
+        /// re-run: the benign "duplicate column" error is swallowed by Repository's
+        /// migration runner, and CodeAnalyzerIgnoreStore.OpenAsync creates the table
+        /// fresh (with the column) when it runs first.
+        /// </summary>
+        public const string MigrateCodeAnalyzerIgnoresAddMatchKind =
+            "ALTER TABLE CodeAnalyzerIgnores ADD COLUMN MatchKind TEXT NOT NULL DEFAULT 'file'";
+
         public const string UpsertCodeAnalyzerIgnore = """
-            INSERT INTO CodeAnalyzerIgnores (RepositoryPath, Path, ReasonKind, ReasonText, CreatedUTC)
-            VALUES ($repositoryPath, $path, $reasonKind, $reasonText, $createdUTC)
+            INSERT INTO CodeAnalyzerIgnores (RepositoryPath, Path, MatchKind, ReasonKind, ReasonText, CreatedUTC)
+            VALUES ($repositoryPath, $path, $matchKind, $reasonKind, $reasonText, $createdUTC)
             ON CONFLICT(RepositoryPath, Path) DO UPDATE SET
+                MatchKind = excluded.MatchKind,
                 ReasonKind = excluded.ReasonKind,
                 ReasonText = excluded.ReasonText
             """;
 
         public const string SelectCodeAnalyzerIgnores = """
-            SELECT Path, ReasonKind, ReasonText, CreatedUTC
+            SELECT Path, MatchKind, ReasonKind, ReasonText, CreatedUTC
             FROM CodeAnalyzerIgnores
             WHERE RepositoryPath = $repositoryPath
             ORDER BY Path
@@ -498,7 +516,8 @@ namespace VibeRails.DB
             CreateUserInputsFtsAfterDeleteTrigger,
             DropUserInputsFtsAfterInsertTrigger,
             DropUserInputsFtsAfterUpdateTrigger,
-            CreateEnvironmentsNameNoCaseUniqueIndex
+            CreateEnvironmentsNameNoCaseUniqueIndex,
+            MigrateCodeAnalyzerIgnoresAddMatchKind
         ];
 
         /// <summary>

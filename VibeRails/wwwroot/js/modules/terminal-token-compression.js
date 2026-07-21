@@ -3,12 +3,30 @@
 // The meter creates one host element and re-parents it (see relocate()) into the terminal
 // controls bar, so it keeps its accumulated per-provider history across the view re-renders that
 // rebuild that bar. Only `proxy_activity` app events are wired to report() (see app.js), and only
-// the authenticated Claude/Codex proxy routes publish those events. Hover, focus, or click to see
+// authenticated LLM proxy routes publish those events. Hover, focus, or click to see
 // recent query-free, payload-free request metadata grouped by provider.
 //
 // (The per-tab compression toggle that used to live here was removed 2026-07-19 — the saver is
 // per-LLM in Settings now, and the tab action strip was overcrowded.)
 let nextCompressionMeterId = 0;
+
+export function getTokenSaverEnabledSources(settings = {}) {
+    const sources = [];
+    if (settings.claudeLlmProxyEnabled === true && settings.claudeTokenSaverEnabled !== false) {
+        sources.push('Claude proxy');
+    }
+    if (settings.codexLlmProxyEnabled === true && settings.codexTokenSaverEnabled !== false) {
+        sources.push('Codex proxy');
+    }
+    if (settings.openCodeLlmProxyEnabled === true && settings.openCodeTokenSaverEnabled !== false) {
+        sources.push('OpenCode proxy');
+    }
+    return sources;
+}
+
+export function isTokenSaverEnabled(settings = {}) {
+    return getTokenSaverEnabledSources(settings).length > 0;
+}
 
 export class TerminalTokenCompressionMeter {
     constructor({
@@ -17,6 +35,7 @@ export class TerminalTokenCompressionMeter {
         maxSources = 12,
         title = 'Token saver',
         enabled = false,
+        enabledSources = null,
         tokensSaved = null
     } = {}) {
         this.sources = new Map();
@@ -24,7 +43,15 @@ export class TerminalTokenCompressionMeter {
         this._maxEntriesPerSource = maxEntriesPerSource;
         this._maxSources = maxSources;
         this._title = title;
-        this._enabled = Boolean(enabled);
+        // A null source set retains the generic boolean behavior used by standalone callers.
+        // The application supplies concrete proxy source names so a saver-disabled provider's
+        // traffic cannot animate a saver that is enabled only for another provider.
+        this._enabledSources = enabledSources == null
+            ? null
+            : new Set(Array.from(enabledSources, source => String(source)));
+        this._enabled = this._enabledSources == null
+            ? Boolean(enabled)
+            : this._enabledSources.size > 0;
         this._savings = this._normalizeSavings(tokensSaved);
         this._popoverId = `vb-activity-blinker-popover-${++nextCompressionMeterId}`;
         this._pulseTimer = null;
@@ -83,8 +110,18 @@ export class TerminalTokenCompressionMeter {
     setEnabled(enabled) {
         this._enabled = Boolean(enabled);
         this._host.classList.toggle('is-enabled', this._enabled);
+        if (!this._enabled) {
+            if (this._pulseTimer != null) clearTimeout(this._pulseTimer);
+            this._pulseTimer = null;
+            this._host.classList.remove('is-active');
+        }
         this._syncAccessibleStatus();
         if (this._host.classList.contains('is-open')) this._renderPopover();
+    }
+
+    setEnabledSources(enabledSources = []) {
+        this._enabledSources = new Set(Array.from(enabledSources, source => String(source)));
+        this.setEnabled(this._enabledSources.size > 0);
     }
 
     // Accepts a { session, month, allTime } breakdown (or a bare number, treated as all time).
@@ -115,10 +152,13 @@ export class TerminalTokenCompressionMeter {
         if (this.sources.size > this._maxSources) this._evictOldestSource();
         this.totalCount += 1;
 
-        // A proxy event is stronger evidence than a possibly stale settings snapshot.
-        this._enabled = true;
-        this._host.classList.add('is-enabled');
-        this._pulse();
+        // Proxy traffic is not proof that this provider's saver is enabled. Keep the request
+        // history, but animate only when the matching provider is armed. A null source set is
+        // the backwards-compatible generic mode in which the aggregate boolean controls pulses.
+        const sourceEnabled = this._enabledSources == null
+            ? this._enabled
+            : this._enabled && this._enabledSources.has(source);
+        if (sourceEnabled) this._pulse();
         this._syncAccessibleStatus();
         if (this._host.classList.contains('is-open')) this._renderPopover();
     }

@@ -143,7 +143,7 @@ public sealed class TokenSavingsStoreTests : IDisposable
         // queue means waiting until the row shows all 20.
         var deadline = DateTime.UtcNow.AddSeconds(10);
         while (DateTime.UtcNow < deadline && ReadDayRow("anthropic").Requests < 20)
-            await Task.Delay(50);
+            await Task.Delay(50, TestContext.Current.CancellationToken);
 
         var (requests, rewritten, before, after) = ReadDayRow("anthropic");
         Assert.Equal(20, requests);

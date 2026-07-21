@@ -3,6 +3,12 @@ const EXECUTION = Object.freeze({ REVIEW: 0, ISOLATED: 1, LIVE: 2 });
 const TRIGGER = Object.freeze({ SCHEDULE: 0, VCA: 1, COMMIT: 2, MANUAL: 3 });
 const SCHEDULE = Object.freeze({ INTERVAL: 0, DAILY: 1, WEEKLY: 2 });
 
+const EXECUTION_MODE_WARNINGS = Object.freeze({
+    [EXECUTION.REVIEW]: 'Requests read-only behavior from the CLI, but the process still has your operating-system account\'s permissions. Configuration, tools, MCP servers, or scripts may read or modify files outside this repository.',
+    [EXECUTION.ISOLATED]: 'Uses a throwaway Git clone to reduce accidental changes to the selected working tree. This is not an operating-system or process sandbox; the agent may access or modify files outside the clone.',
+    [EXECUTION.LIVE]: 'Can modify this working tree and anything else your operating-system account can access. Use only with trusted prompts, environments, tools, and repositories.'
+});
+
 const RUN_STATUS = Object.freeze({
     0: { label: 'Queued', tone: 'neutral' },
     1: { label: 'Running', tone: 'info' },
@@ -25,6 +31,7 @@ export class JobController {
         this.workerStatus = null;
         this.pollTimer = null;
         this.logTimer = null;
+        this.runModalGeneration = 0;
     }
 
     async loadView(data = {}) {
@@ -45,6 +52,7 @@ export class JobController {
     }
 
     unload() {
+        this.runModalGeneration += 1;
         if (this.pollTimer) window.clearInterval(this.pollTimer);
         if (this.logTimer) window.clearInterval(this.logTimer);
         this.pollTimer = null;
@@ -57,8 +65,7 @@ export class JobController {
             <div class="view jobs-view" data-view="jobs">
                 <header class="jobs-page-header">
                     <div>
-                        <span class="jobs-eyebrow">Durable local automation</span>
-                        <h1>Jobs</h1>
+                        <h4 class="jobs-page-title text-uppercase fw-bold mb-0"><span class="text-gradient">Jobs</span></h4>
                         <p>Run Codex or Claude on a schedule, after VCA checks, after successful commits, or whenever you click Run now.</p>
                     </div>
                     <button class="btn btn-primary" type="button" data-job-action="new">
@@ -66,7 +73,15 @@ export class JobController {
                     </button>
                 </header>
 
-                <section class="jobs-worker-card" data-jobs-worker aria-live="polite">
+                <section class="jobs-security-notice" role="alert" aria-labelledby="jobs-security-title">
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    <div>
+                        <strong id="jobs-security-title">Jobs are not sandboxed</strong>
+                        <p>Jobs run unattended with your operating-system account's permissions. Execution modes reduce accidental working-tree changes; they are not security boundaries. Agents, custom arguments, CLI configuration, MCP servers, tools, and scripts can access or modify files outside the selected repository or clone. Review every environment, and use a disposable account or machine for untrusted work.</p>
+                    </div>
+                </section>
+
+                <section class="jobs-worker-card" data-jobs-worker aria-live="polite" hidden>
                     <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
                     <span>Checking the always-on worker…</span>
                 </section>
@@ -150,6 +165,11 @@ export class JobController {
     renderWorker() {
         const target = this.root?.querySelector('[data-jobs-worker]');
         if (!target) return;
+        // The worker is created on demand when a job needs it. With no jobs there is
+        // nothing to repair, so avoid presenting an alarming inactive-worker prompt.
+        target.hidden = this.jobs.length === 0;
+        if (target.hidden) return;
+
         const status = this.workerStatus || {};
         const healthy = status.running && !status.needsRepair;
         const tone = healthy ? 'success' : status.installed ? 'warning' : 'neutral';
@@ -185,8 +205,9 @@ export class JobController {
 
         target.innerHTML = this.jobs.map(job => {
             const triggers = (job.triggers || []).map(trigger => `<span class="jobs-trigger-chip">${this.escape(this.formatTrigger(trigger))}</span>`).join('');
-            const mode = ['Review only', 'Isolated write', 'Live repository write'][Number(job.executionMode)] || 'Unknown mode';
+            const mode = ['Review requested', 'Throwaway clone (not sandboxed)', 'Live repository write'][Number(job.executionMode)] || 'Unknown mode';
             const llm = Number(job.llm) === LLM.CODEX ? 'Codex' : 'Claude';
+            const jobId = this.escape(job.id);
             return `
                 <article class="job-card" data-enabled="${job.enabled === true}">
                     <div class="job-card-topline">
@@ -201,10 +222,10 @@ export class JobController {
                     <div class="job-path" title="${this.escape(job.projectPath)}"><i class="fa-solid fa-code-branch"></i>${this.escape(job.projectPath)}</div>
                     <div class="job-triggers">${triggers || '<span class="jobs-trigger-chip">Manual only</span>'}</div>
                     <div class="job-card-actions">
-                        <button class="btn btn-sm btn-primary" type="button" data-job-action="run" data-job-id="${job.id}"><i class="fa-solid fa-play me-1"></i>Run now</button>
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="edit" data-job-id="${job.id}">Edit</button>
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="toggle" data-job-id="${job.id}">${job.enabled ? 'Disable' : 'Enable'}</button>
-                        <button class="btn btn-sm btn-outline-danger ms-auto" type="button" data-job-action="delete" data-job-id="${job.id}" aria-label="Delete ${this.escape(job.name)}"><i class="fa-solid fa-trash"></i></button>
+                        <button class="btn btn-sm btn-primary" type="button" data-job-action="run" data-job-id="${jobId}"><i class="fa-solid fa-play me-1"></i>Run now</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="edit" data-job-id="${jobId}">Edit</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="toggle" data-job-id="${jobId}">${job.enabled ? 'Disable' : 'Enable'}</button>
+                        <button class="btn btn-sm btn-outline-danger ms-auto" type="button" data-job-action="delete" data-job-id="${jobId}" aria-label="Delete ${this.escape(job.name)}"><i class="fa-solid fa-trash"></i></button>
                     </div>
                 </article>`;
         }).join('');
@@ -262,7 +283,7 @@ export class JobController {
                     <div class="col-md-7"><label class="form-label" for="job-environment">Environment</label><select class="form-select" id="job-environment"></select><small class="form-text text-muted">Uses that environment's saved authentication and CLI settings.</small></div>
                     <div class="col-md-5"><label class="form-label" for="job-timeout">Timeout</label><div class="input-group"><input class="form-control" type="number" id="job-timeout" min="1" max="120" required value="${job?.timeoutMinutes || 30}"><span class="input-group-text">minutes</span></div></div>
                     <div class="col-12"><label class="form-label" for="job-prompt">Initial message</label><textarea class="form-control" id="job-prompt" rows="5" maxlength="50000" required placeholder="Please review the changed code for security issues.">${this.escape(job?.prompt || '')}</textarea></div>
-                    <div class="col-12"><label class="form-label" for="job-mode">Execution mode</label><select class="form-select" id="job-mode"><option value="0" ${Number(job?.executionMode ?? 0) === 0 ? 'selected' : ''}>Review only — cannot edit files</option><option value="1" ${Number(job?.executionMode) === 1 ? 'selected' : ''}>Isolated write — edits a private clone</option><option value="2" ${Number(job?.executionMode) === 2 ? 'selected' : ''}>Live repository write — edits this working tree</option></select><div class="job-live-warning" data-live-warning hidden><i class="fa-solid fa-triangle-exclamation"></i><span>This agent can modify your live working tree. Use it only when that is intentional.</span></div></div>
+                    <div class="col-12"><label class="form-label" for="job-mode">Execution mode</label><select class="form-select" id="job-mode"><option value="0" ${Number(job?.executionMode ?? 0) === 0 ? 'selected' : ''}>Review only — requests read-only behavior; not a sandbox</option><option value="1" ${Number(job?.executionMode) === 1 ? 'selected' : ''}>Isolated write — throwaway clone only; not a sandbox</option><option value="2" ${Number(job?.executionMode) === 2 ? 'selected' : ''}>Live repository write — edits this working tree</option></select><div class="job-mode-warning" data-mode-warning><i class="fa-solid fa-triangle-exclamation"></i><span data-mode-warning-copy></span></div></div>
                 </div>
 
                 <fieldset class="job-trigger-fieldset mt-4"><legend>Triggers</legend>
@@ -290,7 +311,7 @@ export class JobController {
         const populateEnvironments = () => {
             const selectedLlm = Number(llmSelect?.value || llm);
             const options = this.environments.filter(environment => String(environment.cli || '').toLowerCase() === (selectedLlm === 1 ? 'codex' : 'claude'));
-            environmentSelect.innerHTML = `<option value="">Base ${selectedLlm === 1 ? 'Codex' : 'Claude'} configuration</option>${options.map(environment => `<option value="${environment.id}" ${Number(job?.environmentId) === Number(environment.id) ? 'selected' : ''}>${this.escape(environment.name)}</option>`).join('')}`;
+            environmentSelect.innerHTML = `<option value="">Base ${selectedLlm === 1 ? 'Codex' : 'Claude'} configuration</option>${options.map(environment => `<option value="${this.escape(environment.id)}" ${Number(job?.environmentId) === Number(environment.id) ? 'selected' : ''}>${this.escape(environment.name)}</option>`).join('')}`;
         };
         const updateScheduleFields = () => {
             const enabled = modal.querySelector('#job-trigger-schedule').checked;
@@ -301,7 +322,10 @@ export class JobController {
             modal.querySelector('[data-timezone-field]').hidden = kind === SCHEDULE.INTERVAL;
             modal.querySelector('[data-weekdays-field]').hidden = kind !== SCHEDULE.WEEKLY;
         };
-        const updateModeWarning = () => modal.querySelector('[data-live-warning]').hidden = Number(modal.querySelector('#job-mode').value) !== EXECUTION.LIVE;
+        const updateModeWarning = () => {
+            const mode = Number(modal.querySelector('#job-mode').value);
+            modal.querySelector('[data-mode-warning-copy]').textContent = EXECUTION_MODE_WARNINGS[mode] || EXECUTION_MODE_WARNINGS[EXECUTION.REVIEW];
+        };
         populateEnvironments();
         updateScheduleFields();
         updateModeWarning();
@@ -430,7 +454,9 @@ export class JobController {
     }
 
     async openRun(runId) {
+        const generation = ++this.runModalGeneration;
         if (this.logTimer) window.clearInterval(this.logTimer);
+        this.logTimer = null;
         this.app.showModal('Job run', `
             <div class="job-run-detail" data-job-run-detail>
                 <div class="job-run-detail-summary" data-run-summary>Loading run…</div>
@@ -438,18 +464,27 @@ export class JobController {
                 <div class="d-flex justify-content-end gap-2 mt-3" data-run-modal-actions></div>
             </div>`);
         let cursor = 0;
+        // In-flight guard: a scheduled tick must not start while the previous refresh is still
+        // awaiting — both would read the same `cursor` before either advances it and append the same
+        // log slice twice whenever a round trip exceeds the 1.5s interval.
+        let refreshing = false;
         const refresh = async () => {
+            if (refreshing || generation !== this.runModalGeneration) return;
             const detail = document.querySelector('[data-job-run-detail]');
             if (!detail) {
-                if (this.logTimer) window.clearInterval(this.logTimer);
-                this.logTimer = null;
+                if (generation === this.runModalGeneration && this.logTimer) {
+                    window.clearInterval(this.logTimer);
+                    this.logTimer = null;
+                }
                 return;
             }
+            refreshing = true;
             try {
                 const [run, logs] = await Promise.all([
                     this.app.apiCall(`/api/v1/jobs/runs/${encodeURIComponent(runId)}`, 'GET', null, { showLoading: false }),
                     this.app.apiCall(`/api/v1/jobs/runs/${encodeURIComponent(runId)}/logs?afterSequence=${cursor}&limit=2000`, 'GET', null, { showLoading: false })
                 ]);
+                if (generation !== this.runModalGeneration) return;
                 const status = RUN_STATUS[Number(run.status)] || { label: 'Unknown', tone: 'neutral' };
                 detail.querySelector('[data-run-summary]').innerHTML = `<div><strong>${this.escape(run.jobName)}</strong><span class="job-run-status" data-tone="${status.tone}">${status.label}</span></div><small>${this.escape(run.workspacePath || run.projectPath)}</small>${run.errorMessage ? `<p class="text-danger mb-0 mt-2">${this.escape(run.errorMessage)}</p>` : ''}${run.resultText ? `<details class="mt-2"><summary>Final response</summary><pre class="job-run-result"></pre></details>` : ''}`;
                 const resultTarget = detail.querySelector('.job-run-result');
@@ -465,11 +500,17 @@ export class JobController {
                 actions.querySelector('[data-modal-retry]')?.addEventListener('click', event => this.retryRun(runId, event.currentTarget));
                 if (!active && this.logTimer) { window.clearInterval(this.logTimer); this.logTimer = null; }
             } catch (error) {
-                detail.querySelector('[data-run-summary]').textContent = error?.message || 'Could not load this run.';
+                if (generation === this.runModalGeneration) {
+                    detail.querySelector('[data-run-summary]').textContent = error?.message || 'Could not load this run.';
+                }
+            } finally {
+                refreshing = false;
             }
         };
         await refresh();
-        if (!this.logTimer) this.logTimer = window.setInterval(refresh, 1500);
+        if (generation === this.runModalGeneration && !this.logTimer) {
+            this.logTimer = window.setInterval(refresh, 1500);
+        }
     }
 
     async attachRulesAutomation(root) {
@@ -486,7 +527,7 @@ export class JobController {
             const jobs = (response?.jobs || []).filter(job => (job.triggers || []).some(trigger => [TRIGGER.VCA, TRIGGER.COMMIT].includes(Number(trigger.kind))));
             host.innerHTML = jobs.length === 0
                 ? `<div class="jobs-automation-empty"><strong>No Git-triggered Jobs yet</strong><span>Attach Codex or Claude to every real VCA check or successful commit.</span></div>`
-                : `<div class="jobs-automation-list">${jobs.map(job => `<article><div><strong>${this.escape(job.name)}</strong><small>${Number(job.llm) === 1 ? 'Codex' : 'Claude'} · ${(job.triggers || []).filter(trigger => [1, 2].includes(Number(trigger.kind))).map(trigger => Number(trigger.kind) === 1 ? 'VCA' : 'Commit').join(' + ')}</small></div><span class="job-state" data-tone="${job.enabled ? 'success' : 'neutral'}">${job.enabled ? 'On' : 'Off'}</span><button class="btn btn-sm btn-outline-secondary" type="button" data-rules-job-run="${job.id}">Run now</button></article>`).join('')}</div>`;
+                : `<div class="jobs-automation-list">${jobs.map(job => `<article><div><strong>${this.escape(job.name)}</strong><small>${Number(job.llm) === 1 ? 'Codex' : 'Claude'} · ${(job.triggers || []).filter(trigger => [1, 2].includes(Number(trigger.kind))).map(trigger => Number(trigger.kind) === 1 ? 'VCA' : 'Commit').join(' + ')}</small></div><span class="job-state" data-tone="${job.enabled ? 'success' : 'neutral'}">${job.enabled ? 'On' : 'Off'}</span><button class="btn btn-sm btn-outline-secondary" type="button" data-rules-job-run="${this.escape(job.id)}">Run now</button></article>`).join('')}</div>`;
             host.querySelectorAll('[data-rules-job-run]').forEach(button => button.addEventListener('click', () => this.runNow(Number(button.dataset.rulesJobRun), button)));
         } catch (error) {
             host.innerHTML = `<div class="jobs-automation-empty text-danger">${this.escape(error?.message || 'Could not load project Jobs.')}</div>`;

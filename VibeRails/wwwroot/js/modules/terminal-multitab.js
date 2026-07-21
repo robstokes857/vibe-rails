@@ -115,6 +115,7 @@ class TerminalManager {
         this.focusLayoutHandler = null;
         this.focusLayoutRaf = null;
         this.downloadMenu = null;
+        this.historySidebar = null;
         this._themeSwatches = [];
 
         this.settings = null;
@@ -245,6 +246,8 @@ class TerminalManager {
         this.disableLockedLayout(this.lockedPanel);
         this.downloadMenu?.destroy();
         this.downloadMenu = null;
+        this.historySidebar?.destroy();
+        this.historySidebar = null;
         this.toast?.dispose();
         document.body.classList.remove('vb-terminal-active-session');
 
@@ -2861,9 +2864,16 @@ export class TerminalController {
     }
 
     _initChatHistorySidebar(root) {
-        new ChatHistorySidebar(this.app).mount(root, {
+        const historySidebar = new ChatHistorySidebar(this.app);
+        historySidebar.mount(root, {
             onToggle: (open) => this.manager?.syncHistoryPanelState(open)
         });
+        if (this.manager) {
+            this.manager.historySidebar?.destroy();
+            this.manager.historySidebar = historySidebar;
+        } else {
+            historySidebar.destroy();
+        }
     }
 
     renderTerminalPanel(options = {}) {

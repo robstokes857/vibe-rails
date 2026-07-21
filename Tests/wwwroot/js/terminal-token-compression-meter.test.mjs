@@ -121,11 +121,78 @@ globalThis.document = {
 };
 
 const sourceModule = path.resolve('VibeRails/wwwroot/js/modules/terminal-token-compression.js');
-const { TerminalTokenCompressionMeter } = await import(pathToFileURL(sourceModule).href);
+const {
+    TerminalTokenCompressionMeter,
+    getTokenSaverEnabledSources,
+    isTokenSaverEnabled
+} = await import(pathToFileURL(sourceModule).href);
 
 function renderedText(element) {
     return [element.textContent, ...element.children.map(renderedText)].join(' ');
 }
+
+test('Token saver enabled state requires a proxy and saver toggle for the same provider', () => {
+    assert.equal(isTokenSaverEnabled({
+        claudeLlmProxyEnabled: true,
+        claudeTokenSaverEnabled: false,
+        codexLlmProxyEnabled: false,
+        codexTokenSaverEnabled: true,
+        openCodeLlmProxyEnabled: false,
+        openCodeTokenSaverEnabled: true
+    }), false);
+    assert.equal(isTokenSaverEnabled({
+        openCodeLlmProxyEnabled: true,
+        openCodeTokenSaverEnabled: true
+    }), true, 'OpenCode participates in the same state calculation');
+    assert.equal(isTokenSaverEnabled({
+        codexLlmProxyEnabled: true
+    }), true, 'missing legacy saver settings retain the server default-on behavior');
+    assert.deepEqual(getTokenSaverEnabledSources({
+        claudeLlmProxyEnabled: true,
+        claudeTokenSaverEnabled: false,
+        codexLlmProxyEnabled: true,
+        codexTokenSaverEnabled: true,
+        openCodeLlmProxyEnabled: true,
+        openCodeTokenSaverEnabled: true
+    }), ['Codex proxy', 'OpenCode proxy']);
+});
+
+test('Mixed-provider settings pulse only traffic for the provider whose saver is enabled', () => {
+    const mount = new FakeElement('div');
+    const meter = new TerminalTokenCompressionMeter({
+        mount,
+        enabledSources: ['Codex proxy']
+    });
+    const host = mount.querySelector('.vb-activity-blinker');
+
+    assert.equal(host.classList.contains('is-enabled'), true, 'aggregate styling stays enabled');
+
+    meter.report({ source: 'Claude proxy', label: 'POST', status: 200 });
+    assert.equal(host.classList.contains('is-active'), false, 'Claude saver is disabled');
+    assert.equal(meter.sources.get('Claude proxy').count, 1, 'proxy diagnostics are still retained');
+
+    meter.report({ source: 'Codex proxy', label: 'POST', status: 200 });
+    assert.equal(host.classList.contains('is-active'), true, 'Codex saver is enabled');
+    assert.equal(
+        host.classMutations.filter(mutation =>
+            mutation.operation === 'add' && mutation.name === 'is-active'
+        ).length,
+        1
+    );
+});
+
+test('Proxy activity does not enable or pulse a disabled token saver meter', () => {
+    const mount = new FakeElement('div');
+    const meter = new TerminalTokenCompressionMeter({ mount, enabled: false });
+    const host = mount.querySelector('.vb-activity-blinker');
+
+    meter.report({ source: 'Claude proxy', label: 'POST', status: 200 });
+
+    assert.equal(meter.totalCount, 1, 'request history remains available for diagnostics');
+    assert.equal(host.classList.contains('is-enabled'), false);
+    assert.equal(host.classList.contains('is-active'), false);
+    assert.match(host.querySelector('.vb-activity-blinker-trigger').getAttribute('aria-label'), /disabled/i);
+});
 
 test('TerminalTokenCompressionMeter stays visibly mounted while idle and exposes enabled state', () => {
     const mount = new FakeElement('div');
@@ -136,8 +203,7 @@ test('TerminalTokenCompressionMeter stays visibly mounted while idle and exposes
     assert.notEqual(host.style.display, 'none', 'idle state must remain visible');
     assert.ok(host.querySelector('.vb-activity-blinker-trigger'));
     assert.ok(host.querySelector('.vb-activity-blinker-popover'));
-    assert.ok(host.querySelector('.vb-activity-blinker-zip-outline'));
-    assert.ok(host.querySelector('.vb-activity-blinker-zip-solid'));
+    assert.ok(host.querySelector('.fa-piggy-bank'));
     assert.match(renderedText(host.querySelector('.vb-activity-blinker-trigger')), /Token saver/);
     assert.match(renderedText(host.querySelector('.vb-activity-blinker-metric')), /— tokens saved/);
     assert.equal(

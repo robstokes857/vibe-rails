@@ -25,7 +25,8 @@ public sealed class JobService(
     IJobStore store,
     IRepository repository,
     IJobExecutableResolver executableResolver,
-    IJobWorkerSupervisor workerSupervisor) : IJobService
+    IJobWorkerSupervisor workerSupervisor,
+    JobWorkspaceService workspaceService) : IJobService
 {
     private const int MaximumNameLength = 100;
     private const int MaximumPromptLength = 50_000;
@@ -133,13 +134,66 @@ public sealed class JobService(
     {
         var source = await store.GetRunAsync(runId, cancellationToken)
             ?? throw JobServiceException.NotFound("Job run not found.");
+        if (source.Status is not (JobRunStatus.Succeeded
+            or JobRunStatus.Failed
+            or JobRunStatus.Cancelled
+            or JobRunStatus.TimedOut
+            or JobRunStatus.Interrupted))
+        {
+            throw JobServiceException.Conflict("Only completed runs for active jobs can be retried.");
+        }
         if (executableResolver.Resolve(source.Llm) is null && string.IsNullOrWhiteSpace(source.ExecutablePath))
             throw JobServiceException.BadRequest($"The {source.Llm} CLI is not available on PATH.");
 
         await EnsureWorkerAvailableAsync(cancellationToken);
-        var retryId = await store.EnqueueRetryAsync(runId, cancellationToken)
-            ?? throw JobServiceException.Conflict("Only completed runs for active jobs can be retried.");
-        return new JobActionResponse(true, "Job retry queued.", retryId);
+        JobWorkspaceService.CapturedStagedSnapshot? capturedSnapshot = null;
+        var queuePublicationStarted = false;
+        try
+        {
+            try
+            {
+                capturedSnapshot = await workspaceService.CaptureRetrySnapshotAsync(source, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw JobServiceException.Conflict(
+                    $"The staged snapshot can no longer be recreated; no retry was queued. {ex.Message}");
+            }
+
+            var contextOverride = capturedSnapshot is null
+                ? null
+                : JobWorkspaceService.CreateRetryContextJson(source.TriggerContextJson, capturedSnapshot);
+            queuePublicationStarted = true;
+            var retryId = await store.EnqueueRetryAsync(runId, contextOverride, cancellationToken);
+            if (retryId is null)
+            {
+                if (capturedSnapshot is not null)
+                    workspaceService.DiscardCapturedSnapshot(capturedSnapshot);
+                throw JobServiceException.Conflict("Only completed runs for active jobs can be retried.");
+            }
+
+            if (capturedSnapshot is not null)
+            {
+                await workspaceService.MaterializeRunSnapshotsAsync(
+                    capturedSnapshot,
+                    [retryId],
+                    cancellationToken);
+            }
+            return new JobActionResponse(true, "Job retry queued.", retryId);
+        }
+        finally
+        {
+            if (capturedSnapshot is not null)
+            {
+                if (!queuePublicationStarted)
+                    workspaceService.DiscardCapturedSnapshot(capturedSnapshot);
+                capturedSnapshot.Dispose();
+            }
+        }
     }
 
     public async Task<JobWorkerStatusResponse> GetWorkerStatusAsync(CancellationToken cancellationToken = default)
