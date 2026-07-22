@@ -461,19 +461,6 @@ CODEX_HOME=~/.vibe_rails/envs/myenv/codex
 Launch-flag-only — VibeRails injects no per-environment config env vars for agy
 (sandbox/permissions are launch flags).
 
-### VS Code Extension Settings
-
-```json
-{
-  "viberails.executablePath": "/path/to/vb.exe"
-}
-```
-
-If empty, extension searches:
-1. Workspace `VibeRails/bin/Debug/net10.0/vb.exe`
-2. Development paths
-3. System PATH
-
 ---
 
 ## Development
@@ -766,10 +753,6 @@ dotnet run
 **Issue: MCP tools not available / Explorer can't connect**
 - **Cause**: `/mcp` is auth-gated (needs the `viberails_session` token) and hosted only by the root backend.
 - **Solution**: Use it from the dashboard (the Explorer forwards the session token). See [Services/Mcp/AGENTS.md](Services/Mcp/AGENTS.md).
-
-**Issue: VS Code extension not finding backend**
-- **Cause**: Incorrect `viberails.executablePath` setting
-- **Solution**: Set absolute path in VS Code settings or add to PATH
 
 ### Debug Logging
 

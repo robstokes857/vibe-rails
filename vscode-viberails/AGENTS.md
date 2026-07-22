@@ -20,10 +20,6 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 
 - `VibeRails: Open Dashboard` - Opens the VibeRails dashboard
 
-## Configuration
-
-- `viberails.executablePath` - Path to the VibeRails executable (optional, auto-detected by default)
-
 ## Architecture
 
 The extension consists of three main components:

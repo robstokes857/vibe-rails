@@ -50,6 +50,48 @@ public class VcaHookProcessHostTests
         Assert.Contains("auto-closes in 2 minutes", output.ToString());
     }
 
+    [Fact]
+    public async Task PauseForEnterAsync_AnsiStyle_ShowsCountdownAndClosesOnEnter()
+    {
+        using var output = new StringWriter();
+        using var input = new StringReader(Environment.NewLine);
+
+        await VcaHookProcessHost.PauseForEnterAsync(
+            output,
+            input,
+            exitCode: 0,
+            timeout: TimeSpan.FromMinutes(2),
+            TestContext.Current.CancellationToken,
+            VcaConsoleStyle.Ansi);
+
+        var text = AnsiText.Strip(output.ToString());
+        Assert.Contains("VCA check complete.", text);
+        Assert.Contains("auto-closes in 2:00", text);
+        Assert.Contains("\x1b[", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PauseForEnterAsync_AnsiStyle_ReturnsWhenTimeoutElapses()
+    {
+        using var output = new StringWriter();
+        using var input = new NeverCompletingTextReader();
+
+        var pauseTask = VcaHookProcessHost.PauseForEnterAsync(
+            output,
+            input,
+            exitCode: 1,
+            timeout: TimeSpan.FromMilliseconds(10),
+            TestContext.Current.CancellationToken,
+            VcaConsoleStyle.Ansi);
+        var completed = await Task.WhenAny(
+            pauseTask,
+            Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
+
+        Assert.Same(pauseTask, completed);
+        await pauseTask;
+        Assert.Contains("VCA check blocked the commit (exit code 1).", output.ToString());
+    }
+
     private sealed class NeverCompletingTextReader : TextReader
     {
         private readonly TaskCompletionSource<string?> _completion = new(
