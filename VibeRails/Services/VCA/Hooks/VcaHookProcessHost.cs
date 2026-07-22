@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using VibeRails.Services.GitPreflight;
 using VibeRails.DB;
@@ -64,14 +65,33 @@ public static class VcaHookProcessHost
             }
         }
 
+        var enableSpinner = invocation.ConsoleWindowAttached ||
+            (usesDefaultOutput && !Console.IsOutputRedirected);
+
+        // Styled (ANSI + UTF-8) output is only ever sent to a real console we prepared
+        // ourselves; redirected transcripts (tests, the Rules page validator, VS Code's
+        // SCM log) always get the historical plain text.
+        var style = usesDefaultOutput && enableSpinner && VcaConsoleStyle.TryEnableForCurrentConsole()
+            ? VcaConsoleStyle.Ansi
+            : VcaConsoleStyle.Plain;
+
+        if (style.Enabled)
+        {
+            // Switching Console.OutputEncoding to UTF-8 recreates Console.Out/Error;
+            // the writers captured above still encode with the original OEM codepage,
+            // which the now-UTF-8 console would render as mojibake. Re-capture them.
+            output = Console.Out;
+            error = Console.Error;
+        }
+
         var services = new ServiceCollection();
         ConfigureServices(
             services,
             output,
             error,
             input,
-            enableSpinner: invocation.ConsoleWindowAttached ||
-                (usesDefaultOutput && !Console.IsOutputRedirected));
+            enableSpinner,
+            style);
 
         await using var provider = services.BuildServiceProvider();
         var runner = provider.GetRequiredService<IVcaHookRunner>();
@@ -88,7 +108,8 @@ public static class VcaHookProcessHost
                 input,
                 exitCode,
                 ConsolePauseTimeout,
-                cancellationToken);
+                cancellationToken,
+                style);
         }
 
         return exitCode;
@@ -99,23 +120,39 @@ public static class VcaHookProcessHost
         TextReader input,
         int exitCode,
         TimeSpan timeout,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        VcaConsoleStyle? style = null)
     {
+        style ??= VcaConsoleStyle.Plain;
         try
         {
-            var message = exitCode == 0
-                ? "VCA check complete. Press Enter to close this window (auto-closes in 2 minutes)..."
-                : $"VCA check blocked the commit (exit code {exitCode}). "
-                    + "Press Enter to close this window (auto-closes in 2 minutes)...";
             await output.WriteLineAsync();
-            await output.WriteAsync(message);
-            await output.FlushAsync();
 
-            var readTask = input.ReadLineAsync();
-            var completed = await Task.WhenAny(
-                readTask,
-                Task.Delay(timeout, cancellationToken));
-            if (completed == readTask)
+            Task<string?> readTask;
+            bool closedByUser;
+            if (style.Enabled)
+            {
+                readTask = input.ReadLineAsync();
+                closedByUser = await CountdownForEnterAsync(
+                    output, readTask, exitCode, timeout, style, cancellationToken);
+                await output.WriteLineAsync();
+            }
+            else
+            {
+                var message = exitCode == 0
+                    ? "VCA check complete. Press Enter to close this window (auto-closes in 2 minutes)..."
+                    : $"VCA check blocked the commit (exit code {exitCode}). "
+                        + "Press Enter to close this window (auto-closes in 2 minutes)...";
+                await output.WriteAsync(message);
+                await output.FlushAsync();
+
+                readTask = input.ReadLineAsync();
+                closedByUser = await Task.WhenAny(
+                    readTask,
+                    Task.Delay(timeout, cancellationToken)) == readTask;
+            }
+
+            if (closedByUser)
             {
                 await readTask;
             }
@@ -136,6 +173,72 @@ public static class VcaHookProcessHost
         }
     }
 
+    /// <summary>
+    /// Styled pause line with a live once-per-second countdown, so the popup visibly
+    /// ticks toward auto-close instead of sitting on two minutes of static text.
+    /// Returns true when the user pressed Enter, false when the timeout elapsed.
+    /// </summary>
+    private static async Task<bool> CountdownForEnterAsync(
+        TextWriter output,
+        Task<string?> readTask,
+        int exitCode,
+        TimeSpan timeout,
+        VcaConsoleStyle style,
+        CancellationToken cancellationToken)
+    {
+        var verdict = exitCode == 0
+            ? $"{style.Green}✓ VCA check complete.{style.Reset}"
+            : $"{style.Red}✕ VCA check blocked the commit (exit code {exitCode}).{style.Reset}";
+        var tickInterval = TimeSpan.FromSeconds(1);
+        var clock = Stopwatch.StartNew();
+
+        while (true)
+        {
+            var remaining = timeout - clock.Elapsed;
+            if (remaining <= TimeSpan.Zero)
+            {
+                return false;
+            }
+
+            await output.WriteAsync(
+                $"\r{style.ClearLine}{verdict}  " +
+                $"{CountdownBar(remaining, timeout, style)} " +
+                $"{style.Dim}auto-closes in{style.Reset} {style.Bold}{FormatCountdown(remaining)}{style.Reset}  " +
+                $"{style.Dim}Press{style.Reset} {style.Bold}Enter{style.Reset} " +
+                $"{style.Dim}to close now{style.Reset} ");
+            await output.FlushAsync();
+
+            var tick = Task.Delay(remaining < tickInterval ? remaining : tickInterval, cancellationToken);
+            if (await Task.WhenAny(readTask, tick) == readTask)
+            {
+                return true;
+            }
+        }
+    }
+
+    private static string FormatCountdown(TimeSpan remaining)
+    {
+        var rounded = TimeSpan.FromSeconds(Math.Ceiling(remaining.TotalSeconds));
+        return $"{(int)rounded.TotalMinutes}:{rounded.Seconds:00}";
+    }
+
+    /// <summary>
+    /// Draining time bar for the auto-close countdown; shifts green → yellow → red
+    /// as the deadline approaches.
+    /// </summary>
+    private static string CountdownBar(TimeSpan remaining, TimeSpan timeout, VcaConsoleStyle style)
+    {
+        const int cells = 20;
+        var fraction = timeout > TimeSpan.Zero
+            ? Math.Clamp(remaining.TotalMilliseconds / timeout.TotalMilliseconds, 0, 1)
+            : 0;
+        var filled = (int)Math.Ceiling(fraction * cells);
+        var color = fraction > 0.5 ? style.Green : fraction > 0.25 ? style.Yellow : style.Red;
+        return $"{style.Dim}[{style.Reset}" +
+            $"{color}{new string('█', filled)}{style.Reset}" +
+            $"{style.Dim}{new string('░', cells - filled)}]{style.Reset}";
+    }
+
     private static string FormatTitle(VcaHookKind kind) => kind switch
     {
         VcaHookKind.CommitMessage => "Commit Message",
@@ -149,7 +252,8 @@ public static class VcaHookProcessHost
         TextWriter output,
         TextWriter error,
         TextReader input,
-        bool enableSpinner)
+        bool enableSpinner,
+        VcaConsoleStyle? style = null)
     {
         services.AddSingleton<IVcaHookCommandParser, VcaHookCommandParser>();
         services.AddSingleton<IVcaHookRunner, VcaHookRunner>();
@@ -163,6 +267,6 @@ public static class VcaHookProcessHost
         });
         services.AddGitPreflight();
         services.AddSingleton<IVcaHookPresenter>(_ =>
-            new VcaConsoleHookPresenter(new VcaHookConsoleOptions(output, error, input, enableSpinner)));
+            new VcaConsoleHookPresenter(new VcaHookConsoleOptions(output, error, input, enableSpinner, style)));
     }
 }
