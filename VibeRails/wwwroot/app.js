@@ -85,6 +85,7 @@ export class VibeControlApp {
         // race the activity subscription during startup.
         this.appEventClient.start();
 
+        this.initSidebarToggle();
         this.applyNavbarsCollapsedState(false);
         // Git is optional. When not in a git repo, show a small non-blocking helper bar
         // but let the app load and run normally against the launch directory.
@@ -380,7 +381,7 @@ export class VibeControlApp {
                 this.navigate('settings', {}, { resetStack: true });
             }
 
-            const goNav = e.target.closest('.app-subnav [data-action="navigate"]');
+            const goNav = e.target.closest('.app-sidebar [data-action="navigate"], .app-subnav [data-action="navigate"]');
             if (goNav) {
                 e.preventDefault();
                 const view = goNav.dataset.view;
@@ -389,12 +390,51 @@ export class VibeControlApp {
         });
     }
 
-    applyNavbarsCollapsedState(collapsed) {
-        // Method kept for compatibility but simplified as toggle is gone
-        this.navbarsCollapsed = false;
-        document.body.classList.remove('navbars-collapsed');
+    initSidebarToggle() {
+        const sidebar = document.getElementById('app-sidebar');
+        const toggleBtn = document.getElementById('sidebar-toggle-btn');
 
-        // Focused terminal layout listens to resize events to recalc available height.
+        // Restore initial collapse state from localStorage
+        const savedCollapsed = localStorage.getItem('viberails_sidebar_collapsed') === 'true';
+        if (sidebar) {
+            if (savedCollapsed) {
+                sidebar.classList.add('collapsed');
+                sidebar.classList.remove('expanded');
+                document.body.classList.add('sidebar-collapsed');
+                document.body.classList.remove('sidebar-expanded');
+            } else {
+                sidebar.classList.remove('collapsed');
+                sidebar.classList.add('expanded');
+                document.body.classList.remove('sidebar-collapsed');
+                document.body.classList.add('sidebar-expanded');
+            }
+        }
+
+        const toggleSidebar = () => {
+            const sidebar = document.getElementById('app-sidebar');
+            if (!sidebar) return;
+            const isCollapsed = sidebar.classList.toggle('collapsed');
+            sidebar.classList.toggle('expanded', !isCollapsed);
+            document.body.classList.toggle('sidebar-collapsed', isCollapsed);
+            document.body.classList.toggle('sidebar-expanded', !isCollapsed);
+            localStorage.setItem('viberails_sidebar_collapsed', String(isCollapsed));
+
+            // Notify terminal and responsive components of size change
+            window.dispatchEvent(new Event('resize'));
+            this.terminalController?.refreshLayout?.();
+
+            setTimeout(() => {
+                window.dispatchEvent(new Event('resize'));
+                this.terminalController?.refreshLayout?.();
+            }, 260);
+        };
+
+        toggleBtn?.addEventListener('click', toggleSidebar);
+        this.toggleSidebar = toggleSidebar;
+    }
+
+    applyNavbarsCollapsedState(collapsed) {
+        // Method kept for compatibility, sync with sidebar state
         window.dispatchEvent(new Event('resize'));
         this.terminalController?.refreshLayout?.();
     }
@@ -1326,6 +1366,13 @@ export class VibeControlApp {
                 if (!hadOpenModal && this.navigationStack.length > 1) {
                     this.goBack();
                 }
+            } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+                const active = document.activeElement;
+                if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable || active.classList.contains('inputarea'))) {
+                    return;
+                }
+                e.preventDefault();
+                this.toggleSidebar?.();
             }
         });
     }
