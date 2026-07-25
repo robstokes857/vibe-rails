@@ -353,6 +353,45 @@ test('TerminalTokenCompressionMeter owns app event wiring and the initial saving
     assert.match(renderedText(mount.querySelector('.vb-activity-blinker-metric')), /1\.1K tokens saved/);
 });
 
+test('TerminalTokenCompressionMeter does not let a delayed startup seed overwrite a live tally', async () => {
+    const mount = new FakeElement('div');
+    let proxyActivityHandler;
+    let resolveInitialSavings;
+    const initialSavings = new Promise(resolve => {
+        resolveInitialSavings = resolve;
+    });
+    const meter = new TerminalTokenCompressionMeter({ mount }).connect({
+        appEventClient: {
+            on: (_eventName, handler) => {
+                proxyActivityHandler = handler;
+            }
+        },
+        apiCall: async () => initialSavings
+    });
+
+    proxyActivityHandler({
+        source: 'Claude proxy',
+        label: 'POST',
+        status: 200,
+        tokensSavedSession: 858,
+        tokensSavedMonth: 858,
+        tokensSavedTotal: 858
+    });
+    assert.match(renderedText(mount.querySelector('.vb-activity-blinker-metric')), /858 tokens saved/);
+
+    // Reproduce the startup race: the request began before the event, then its stale zero
+    // response completed afterward. The live tally must remain authoritative.
+    resolveInitialSavings({
+        tokensSavedSession: 0,
+        tokensSavedMonth: 0,
+        tokensSaved: 0
+    });
+    await meter.initialSavingsReady;
+
+    assert.match(renderedText(mount.querySelector('.vb-activity-blinker-metric')), /858 tokens saved/);
+    assert.deepEqual(meter._savings, { session: 858, month: 858, allTime: 858 });
+});
+
 test('TerminalTokenCompressionMeter constructs detached and relocate() re-homes it without losing state', () => {
     // No mount → the host starts detached so app.js / TerminalManager.initialize() can drop it into
     // the terminal controls bar once that bar renders.

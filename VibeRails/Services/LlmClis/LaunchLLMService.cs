@@ -5,7 +5,7 @@ namespace VibeRails.Services.LlmClis
 {
     public interface ILaunchLLMService
     {
-        LaunchResult LaunchInTerminal(LLM llm, string? envName, string workingDirectory, string[] args);
+        LaunchResult LaunchInTerminal(LLM llm, string? envName, string workingDirectory, string[] args, string[]? vbArgs = null, bool keepTerminalOpen = true);
         Dictionary<string, string> GetEnvironmentVariables(LLM llm, string envName);
         IBaseLlmCliLauncher GetLauncher(LLM llm);
     }
@@ -51,10 +51,12 @@ namespace VibeRails.Services.LlmClis
             LLM llm,
             string? envName,
             string workingDirectory,
-            string[] args)
+            string[] args,
+            string[]? vbArgs = null,
+            bool keepTerminalOpen = true)
         {
             var launcher = GetLauncher(llm);
-            return launcher.LaunchInTerminal(envName, workingDirectory, args);
+            return launcher.LaunchInTerminal(envName, workingDirectory, args, vbArgs, keepTerminalOpen);
         }
 
         public Dictionary<string, string> GetEnvironmentVariables(LLM llm, string envName)

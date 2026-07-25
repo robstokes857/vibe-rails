@@ -42,7 +42,7 @@ test('Jobs page separates shared Environment / Workers from Automation rules', (
     assert.match(html, /text-gradient">Jobs/);
     assert.doesNotMatch(html, /Durable local automation/);
     assert.match(html, /Environment \/ Workers/);
-    assert.match(html, /same workers shown on the Workers screen/);
+    assert.match(html, /The same workers from the Workers screen/);
     assert.match(html, /Automation rules/);
     assert.match(html, /When workers run/);
     assert.match(html, /Recent runs/);
@@ -55,17 +55,6 @@ test('Jobs inline automation editor has no duplicate repository or prompt contro
     assert.doesNotMatch(source, /id=["']job-prompt["']/);
     assert.match(source, /Runs in the current VibeRails repository/);
     assert.match(source, /includeBase:\s*false/);
-});
-
-test('Jobs page warns that execution modes are not security boundaries', () => {
-    const controller = new JobController(createApp());
-    const html = controller.renderPage();
-
-    assert.match(html, /Jobs are not sandboxed/);
-    assert.match(html, /operating-system account's permissions/);
-    assert.match(html, /not security boundaries/);
-    assert.match(html, /outside the selected repository or clone/);
-    assert.match(html, /disposable account or machine/);
 });
 
 test('Jobs maps every non-shell picker CLI to the shared LLM enum values', () => {
@@ -88,36 +77,19 @@ test('Jobs maps every non-shell picker CLI to the shared LLM enum values', () =>
 });
 
 test('Jobs editor does not promise read-only or clone isolation', () => {
+    // Execution modes (read-only / throwaway-clone) were removed: a Job now runs the worker's CLI
+    // directly with the user's own permissions. The editor must never claim otherwise, so this
+    // guards the absence of every isolation promise rather than any particular wording.
     const source = readFileSync(modulePath, 'utf8');
 
     assert.doesNotMatch(source, /cannot edit files/);
     assert.doesNotMatch(source, /edits a private clone/);
-    assert.match(source, /Review only — requests read-only behavior; not a sandbox/);
-    assert.match(source, /Isolated write — throwaway clone only; not a sandbox/);
-    assert.match(source, /not an operating-system or process sandbox/);
-    assert.match(source, /outside the clone/);
-});
-
-test('Jobs worker status stays hidden until at least one job exists', () => {
-    const controller = new JobController(createApp());
-    const worker = { hidden: false, dataset: {}, innerHTML: '' };
-    controller.root = {
-        querySelector(selector) {
-            return selector === '[data-jobs-worker]' ? worker : null;
-        }
-    };
-    controller.jobs = [];
-    controller.renderWorker();
-
-    assert.equal(worker.hidden, true);
-    assert.equal(worker.innerHTML, '');
-
-    controller.jobs = [{ id: 1 }];
-    controller.workerStatus = { running: false, installed: false };
-    controller.renderWorker();
-
-    assert.equal(worker.hidden, false);
-    assert.match(worker.innerHTML, /Jobs worker is off/);
+    assert.doesNotMatch(source, /read-only behavior/i);
+    assert.doesNotMatch(source, /throwaway clone/i);
+    assert.doesNotMatch(source, /isolated write/i);
+    // The execution-mode picker went with them; nothing may re-offer one.
+    assert.doesNotMatch(source, /id=["']job-mode["']/);
+    assert.doesNotMatch(source, /executionMode/);
 });
 
 test('Jobs renderer escapes job data and shows configured triggers', () => {
@@ -143,8 +115,8 @@ test('Jobs renderer escapes job data and shows configured triggers', () => {
         enabled: true,
         triggers: [
             { kind: 0, scheduleKind: 0, intervalMinutes: 15 },
-            { kind: 1 },
-            { kind: 2 }
+            { kind: 2 },
+            { kind: 3 }
         ]
     }];
 
@@ -155,8 +127,8 @@ test('Jobs renderer escapes job data and shows configured triggers', () => {
     assert.match(list.innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
     assert.doesNotMatch(list.innerHTML, /<script>/);
     assert.match(list.innerHTML, /Every 15 min/);
-    assert.match(list.innerHTML, /Pre-commit VCA · non-blocking Job/);
     assert.match(list.innerHTML, /After successful commit/);
+    assert.match(list.innerHTML, /Manual/);
     assert.match(list.innerHTML, /Run now/);
 });
 
@@ -227,7 +199,8 @@ test('Rules automation escapes job ids used in data attributes', async () => {
             name: 'Review',
             llm: 1,
             enabled: true,
-            triggers: [{ kind: 1 }]
+            // Only commit-triggered Jobs surface in the Rules page's automation host.
+            triggers: [{ kind: 2 }]
         }]
     });
     const host = { innerHTML: '', querySelectorAll: () => [] };
@@ -262,10 +235,8 @@ test('New Jobs derive repository, LLM, and prompt from the current worker contex
         ['[type="submit"]', submit],
         ['#job-llm-selection', { value: 'env:42:opencode' }],
         ['#job-trigger-schedule', { checked: false }],
-        ['#job-trigger-vca', { checked: true }],
-        ['#job-trigger-commit', { checked: false }],
+        ['#job-trigger-commit', { checked: true }],
         ['#job-name', { value: 'OpenCode review' }],
-        ['#job-mode', { value: '0' }],
         ['#job-timeout', { value: '30' }],
         ['#job-enabled', { checked: false }]
     ]);
@@ -283,7 +254,7 @@ test('New Jobs derive repository, LLM, and prompt from the current worker contex
     assert.equal(app.calls[0].body.llm, 6);
     assert.equal(app.calls[0].body.environmentId, 42);
     assert.equal(app.calls[0].body.prompt, 'Perform the worker-owned security review.');
-    assert.deepEqual(app.calls[0].body.triggers, [{ kind: 1 }]);
+    assert.deepEqual(app.calls[0].body.triggers, [{ kind: 2 }]);
 });
 
 test('New rules reject base CLIs while an existing legacy base Job retains cached worker fields', () => {
@@ -293,10 +264,8 @@ test('New rules reject base CLIs while an existing legacy base Job retains cache
     const controls = new Map([
         ['#job-llm-selection', { value: 'base:kimi-k3' }],
         ['#job-trigger-schedule', { checked: false }],
-        ['#job-trigger-vca', { checked: false }],
         ['#job-trigger-commit', { checked: false }],
         ['#job-name', { value: 'Kimi review' }],
-        ['#job-mode', { value: '0' }],
         ['#job-timeout', { value: '30' }],
         ['#job-enabled', { checked: true }]
     ]);
@@ -332,11 +301,21 @@ test('New rules reject base CLIs while an existing legacy base Job retains cache
     assert.equal(payload.projectPath, '/derived/current-repo');
 });
 
-test('Jobs trigger labels distinguish non-blocking pre-commit VCA from post-successful-commit', () => {
+test('Jobs trigger labels cover every live kind and degrade the retired VCA kind to Manual', () => {
     const controller = new JobController(createApp());
 
-    assert.equal(controller.formatTrigger({ kind: 1 }), 'Pre-commit VCA · non-blocking Job');
     assert.equal(controller.formatTrigger({ kind: 2 }), 'After successful commit');
+    assert.equal(controller.formatTrigger({ kind: 3 }), 'Manual');
+    assert.equal(
+        controller.formatTrigger({ kind: 0, scheduleKind: 0, intervalMinutes: 15 }),
+        'Every 15 min');
+    assert.equal(
+        controller.formatTrigger({ kind: 0, scheduleKind: 1, localTime: '09:00' }),
+        'Daily 09:00');
+
+    // Kind 1 was the pre-commit VCA trigger. The value is retired but rows persisted before its
+    // removal must still render as something sane instead of throwing or printing "undefined".
+    assert.equal(controller.formatTrigger({ kind: 1 }), 'Manual');
 });
 
 test('environmentChanged rerenders the shared worker table, automation cards, and active picker', async () => {
@@ -671,154 +650,207 @@ test('Run history exposes cancel only while active and retry after completion', 
     assert.doesNotMatch(failed, /run<&>/);
 });
 
-test('Opening another run invalidates callbacks queued by the previous modal', async (t) => {
-    const intervalCallbacks = [];
-    const originalWindow = globalThis.window;
+// A Job run IS a recorded terminal session, so opening one hands off to the shared xterm replay
+// player. The ad-hoc polling modal it replaced is gone; these two tests pin that split, which is
+// also what makes the old "stale poll callback writes into the replacement modal" bug unreachable.
+test('Opening a run that has a recorded session replays it instead of building a modal', async (t) => {
     const originalDocument = globalThis.document;
-    t.after(() => {
-        globalThis.window = originalWindow;
-        globalThis.document = originalDocument;
-    });
-
-    globalThis.window = {
-        setInterval(callback) {
-            intervalCallbacks.push(callback);
-            return intervalCallbacks.length;
-        },
-        clearInterval() {}
-    };
-
-    let currentDetail = null;
-    globalThis.document = {
-        querySelector(selector) {
-            return selector === '[data-job-run-detail]' ? currentDetail : null;
-        }
-    };
+    t.after(() => { globalThis.document = originalDocument; });
+    globalThis.document = { querySelector: () => null };
 
     const app = createApp();
-    app.showModal = () => {
-        const summary = { innerHTML: '', textContent: '' };
-        const log = { textContent: '', scrollTop: 0, scrollHeight: 0 };
-        const actions = { innerHTML: '', querySelector: () => null };
-        currentDetail = {
-            querySelector(selector) {
-                if (selector === '[data-run-summary]') return summary;
-                if (selector === '[data-run-log]') return log;
-                if (selector === '[data-run-modal-actions]') return actions;
-                if (selector === '.job-run-result') return null;
-                return null;
-            }
-        };
-    };
-    app.closeModal = () => {};
-    app.apiCall = async (url) => {
-        app.calls.push({ url });
-        if (url.includes('/logs?')) return { logs: [] };
-        const runId = url.includes('/run-a') ? 'run-a' : 'run-b';
-        return {
-            id: runId,
-            jobName: runId,
-            status: 1,
-            workspacePath: '/repo',
-            projectPath: '/repo'
-        };
-    };
-
-    const controller = new JobController(app);
-    await controller.openRun('run-a');
-    const staleCallback = intervalCallbacks[0];
-    await controller.openRun('run-b');
-    const callsBeforeStaleTick = app.calls.length;
-
-    await staleCallback();
-
-    assert.equal(app.calls.length, callsBeforeStaleTick, 'the stale callback must not fetch or mutate the new modal');
-});
-
-test('An in-flight refresh cannot render after another run replaces its modal', async (t) => {
-    const originalWindow = globalThis.window;
-    const originalDocument = globalThis.document;
-    t.after(() => {
-        globalThis.window = originalWindow;
-        globalThis.document = originalDocument;
-    });
-
-    globalThis.window = {
-        setInterval() { return 1; },
-        clearInterval() {}
-    };
-
-    const modalDetails = [];
-    let currentDetail = null;
-    globalThis.document = {
-        querySelector(selector) {
-            return selector === '[data-job-run-detail]' ? currentDetail : null;
-        }
-    };
-
-    const app = createApp();
-    app.showModal = () => {
-        const summary = { innerHTML: 'Loading run…', textContent: '' };
-        const log = { textContent: '', scrollTop: 0, scrollHeight: 0 };
-        const actions = { innerHTML: '', querySelector: () => null };
-        currentDetail = {
-            summary,
-            log,
-            actions,
-            querySelector(selector) {
-                if (selector === '[data-run-summary]') return summary;
-                if (selector === '[data-run-log]') return log;
-                if (selector === '[data-run-modal-actions]') return actions;
-                if (selector === '.job-run-result') return null;
-                return null;
-            }
-        };
-        modalDetails.push(currentDetail);
-    };
-    app.closeModal = () => {};
-
-    let resolveRunA;
-    let resolveLogsA;
-    const runAResponse = new Promise(resolve => { resolveRunA = resolve; });
-    const runALogs = new Promise(resolve => { resolveLogsA = resolve; });
-    app.apiCall = (url) => {
-        if (url.includes('/run-a/logs?')) return runALogs;
-        if (url.includes('/run-a')) return runAResponse;
-        if (url.includes('/run-b/logs?')) {
-            return Promise.resolve({ logs: [{ sequence: 1, content: 'run B log' }] });
-        }
-        return Promise.resolve({
-            id: 'run-b',
-            jobName: 'run-b',
-            status: 1,
-            workspacePath: '/repo',
-            projectPath: '/repo'
-        });
-    };
-
-    const controller = new JobController(app);
-    const openingRunA = controller.openRun('run-a');
-    const runADetail = modalDetails[0];
-
-    await controller.openRun('run-b');
-    const runBDetail = modalDetails[1];
-    const runBSummary = runBDetail.summary.innerHTML;
-    const runBLog = runBDetail.log.textContent;
-
-    resolveRunA({
+    const errors = [];
+    app.showError = message => errors.push(message);
+    app.showModal = () => assert.fail('a run with a session must replay, not open the fallback modal');
+    app.apiCall = async () => ({
         id: 'run-a',
-        jobName: 'run-a',
-        status: 1,
-        workspacePath: '/repo',
+        jobName: 'Nightly review',
+        status: 2,
+        sessionId: 'session-123',
         projectPath: '/repo'
     });
-    resolveLogsA({ logs: [{ sequence: 1, content: 'stale run A log' }] });
-    await openingRunA;
 
-    assert.equal(runADetail.summary.innerHTML, 'Loading run…', 'stale data must stop before rendering');
-    assert.equal(runADetail.log.textContent, '');
-    assert.equal(runBDetail.summary.innerHTML, runBSummary);
-    assert.equal(runBDetail.log.textContent, runBLog);
-    assert.match(runBDetail.summary.innerHTML, /run-b/);
-    assert.equal(runBDetail.log.textContent, 'run B log');
+    await new JobController(app).openRun('run-a');
+
+    // showReplayModal needs a real DOM, so it fails here — reaching its error path is itself the
+    // proof that openRun took the replay branch rather than rendering the fallback modal.
+    assert.equal(errors.length, 1);
+});
+
+test('Opening a session-less run shows a static modal that arms no timers', async (t) => {
+    const originalWindow = globalThis.window;
+    const originalDocument = globalThis.document;
+    t.after(() => {
+        globalThis.window = originalWindow;
+        globalThis.document = originalDocument;
+    });
+
+    const timers = [];
+    globalThis.window = {
+        setInterval(callback) { timers.push(callback); return timers.length; },
+        clearInterval() {}
+    };
+    globalThis.document = { querySelector: () => null };
+
+    const app = createApp();
+    const modals = [];
+    app.showModal = (title, html) => modals.push({ title, html });
+    app.apiCall = async () => ({
+        id: 'run<&>',
+        jobName: 'Security <review>',
+        status: 0,
+        sessionId: null,
+        projectPath: 'C:\\repo&one'
+    });
+
+    await new JobController(app).openRun('run<&>');
+
+    assert.equal(modals.length, 1);
+    const { html } = modals[0];
+    assert.match(html, /Security &lt;review&gt;/);
+    assert.doesNotMatch(html, /<review>/);
+    assert.match(html, /Queued/);
+    // Queued counts as active: cancellable, not yet retryable.
+    assert.match(html, /data-run-cancel/);
+    assert.doesNotMatch(html, /data-run-retry/);
+    assert.equal(timers.length, 0, 'the modal is static — no unmanaged polling');
+});
+
+test('A finished session-less run offers retry instead of cancel', async (t) => {
+    const originalWindow = globalThis.window;
+    const originalDocument = globalThis.document;
+    t.after(() => {
+        globalThis.window = originalWindow;
+        globalThis.document = originalDocument;
+    });
+    globalThis.window = { setInterval() { return 1; }, clearInterval() {} };
+    globalThis.document = { querySelector: () => null };
+
+    const app = createApp();
+    const modals = [];
+    app.showModal = (title, html) => modals.push({ title, html });
+    app.apiCall = async () => ({
+        id: 'run-b',
+        jobName: 'Nightly review',
+        status: 3,
+        sessionId: null,
+        errorMessage: 'Claude exited with code 1.',
+        projectPath: '/repo'
+    });
+
+    await new JobController(app).openRun('run-b');
+
+    const { html } = modals[0];
+    assert.match(html, /Failed/);
+    assert.match(html, /Claude exited with code 1\./);
+    assert.match(html, /data-run-retry/);
+    assert.doesNotMatch(html, /data-run-cancel/);
+});
+
+test('A time limit is opt-in: unchecked sends null, checked sends the number', () => {
+    // The default is no limit — the run lives until its CLI exits or the user closes its window.
+    const app = createApp();
+    app.data = { configs: { rootPath: '/derived/current-repo' }, isInGit: true };
+    const controller = new JobController(app);
+    controller.environments = [
+        { id: 42, name: 'Nightly Codex', cli: 'codex', customPrompt: 'Review the diff.' }
+    ];
+
+    const controls = new Map([
+        ['#job-llm-selection', { value: 'env:42' }],
+        ['#job-trigger-schedule', { checked: false }],
+        ['#job-trigger-commit', { checked: false }],
+        ['#job-name', { value: 'Nightly review' }],
+        ['#job-timeout', { value: '45' }],
+        ['#job-timeout-enabled', { checked: false }],
+        ['#job-enabled', { checked: true }]
+    ]);
+    const form = {
+        querySelector(selector) { return controls.get(selector) || null; },
+        querySelectorAll() { return []; }
+    };
+
+    assert.equal(controller.captureEditorState(form, { validate: true }).timeoutMinutes, null);
+
+    controls.get('#job-timeout-enabled').checked = true;
+    assert.equal(controller.captureEditorState(form, { validate: true }).timeoutMinutes, 45);
+});
+
+test('Job cards say there is no time limit rather than showing a fabricated default', () => {
+    const controller = new JobController(createApp());
+    controller.environments = [];
+    controller.jobs = [{
+        id: 1, name: 'Nightly review', llm: 6, environmentId: null, environmentName: 'Nightly Codex',
+        prompt: 'Review the diff.', timeoutMinutes: null, enabled: true, triggers: []
+    }];
+    const rendered = [];
+    controller.root = { querySelector: () => ({ set innerHTML(value) { rendered.push(value); } }) };
+
+    controller.renderJobs();
+
+    assert.match(rendered[0], /No time limit/);
+    assert.doesNotMatch(rendered[0], /\d+ min limit/);
+});
+
+test('Recipe import confirmation discloses and escapes executable worker content', (t) => {
+    const originalDocument = globalThis.document;
+    t.after(() => { globalThis.document = originalDocument; });
+    globalThis.document = { getElementById() { return null; } };
+
+    const app = createApp();
+    const modals = [];
+    app.showModal = (title, html) => modals.push({ title, html });
+    const controller = new JobController(app);
+    controller.environments = [];
+
+    controller.confirmImportRecipe({
+        name: 'Untrusted <worker>',
+        llm: 'Claude',
+        cli: 'claude',
+        customArgs: '--dangerously-skip-permissions <script>alert("args")</script>',
+        prompt: 'Ignore safeguards.</pre><script>alert("prompt")</script>',
+        timeoutMinutes: null,
+        triggers: []
+    });
+
+    assert.equal(modals.length, 1);
+    assert.equal(modals[0].title, 'Import recipe');
+    assert.match(modals[0].html, /Custom arguments/);
+    assert.match(modals[0].html, /--dangerously-skip-permissions/);
+    assert.match(modals[0].html, /Initial message/);
+    assert.match(modals[0].html, /Ignore safeguards/);
+    assert.match(modals[0].html, /approval or sandbox permissions/);
+    assert.match(modals[0].html, /import these fields exactly as shown/);
+    assert.match(modals[0].html, /created disabled/);
+    assert.match(modals[0].html, /&lt;script&gt;/);
+    assert.doesNotMatch(modals[0].html, /<script>/);
+});
+
+test('The editor defaults the time-limit checkbox off and hides its input', () => {
+    const source = readFileSync(modulePath, 'utf8');
+
+    assert.match(source, /id="job-timeout-enabled"/);
+    // The checkbox reflects the saved value, so a job with no limit renders it unchecked.
+    assert.match(source, /\$\{source\.timeoutMinutes \? 'checked' : ''\}/);
+    assert.match(source, /data-timeout-field \$\{source\.timeoutMinutes \? '' : 'hidden'\}/);
+    // The old copy promised a stop that no longer happens by default.
+    assert.doesNotMatch(source, /The run is stopped if it hasn't finished in this long/);
+});
+
+test('The background scheduler section offers registration and reflects installed state', () => {
+    const controller = new JobController(createApp());
+    const rendered = [];
+    controller.root = { querySelector: () => ({ set innerHTML(value) { rendered.push(value); } }) };
+
+    controller.renderSchedulerStatus({ installed: false, supported: true, platform: 'Task Scheduler' });
+    assert.match(rendered[0], /Not registered/);
+    assert.match(rendered[0], /data-job-action="install-scheduler"/);
+    assert.match(rendered[0], /Task Scheduler/);
+
+    controller.renderSchedulerStatus({ installed: true, supported: true, platform: 'Task Scheduler' });
+    assert.match(rendered[1], /Registered/);
+    assert.match(rendered[1], /data-job-action="uninstall-scheduler"/);
+
+    controller.renderSchedulerStatus({ installed: false, supported: false, platform: 'unsupported' });
+    assert.match(rendered[2], /Not supported/);
 });

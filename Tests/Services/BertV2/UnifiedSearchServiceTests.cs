@@ -282,6 +282,8 @@ public class UnifiedSearchServiceTests : IDisposable
             insert.Parameters.AddWithValue("$projectDisplayName", "Test");
             insert.Parameters.AddWithValue("$startedUTC", startedUtc);
             insert.Parameters.AddWithValue("$ownerPid", 1234);
+            // Not a Job run: these sessions must stay visible to search / Chat History.
+            insert.Parameters.AddWithValue("$jobRunId", DBNull.Value);
             insert.ExecuteNonQuery();
         }
         using (var end = connection.CreateCommand())
@@ -344,6 +346,7 @@ public class UnifiedSearchServiceTests : IDisposable
         insert.Parameters.AddWithValue("$projectDisplayName", "Test");
         insert.Parameters.AddWithValue("$startedUTC", DateTime.UtcNow.AddSeconds(-120).ToString("O"));
         insert.Parameters.AddWithValue("$ownerPid", 1234);
+        insert.Parameters.AddWithValue("$jobRunId", DBNull.Value);
         insert.ExecuteNonQuery();
     }
 

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
@@ -67,21 +66,24 @@ public static class JobTriggerProcessHost
                 var statePath = Path.Combine(installDirectory, PathConstants.STATE_FILENAME);
                 jobStore = new JobStore($"Data Source={statePath};Mode=ReadWriteCreate;Cache=Shared");
             }
-            var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["commit"] = commit,
-                ["repositoryPath"] = repositoryPath,
-                ["trigger"] = "post-commit"
-            };
-            var contextJson = JsonSerializer.Serialize(
-                metadata,
-                AppJsonSerializerContext.Default.DictionaryStringString);
-            await jobStore.EnqueueEventRunsAsync(
+
+            // Enqueue only — deliberately. Spawning terminals from here used to be unbounded: this
+            // loop called the launcher once per returned run with no cap, so a rebase or an amend
+            // loop producing six commits in two minutes spawned six job processes at once. Handing
+            // the queued runs to the tick (or the dashboard scheduler, whichever comes first) means
+            // they inherit both the per-job overlap guard and the machine-wide launch cap.
+            //
+            // Cost is latency: a commit-triggered run starts within a minute rather than instantly.
+            // For an automated review that is not a meaningful difference.
+            var runIds = await jobStore.EnqueueEventRunsAsync(
                 repositoryPath,
                 JobTriggerKind.Commit,
                 commit.ToLowerInvariant(),
-                contextJson,
                 cancellationToken);
+            if (runIds.Count > 0)
+            {
+                Log.Information("[Jobs] Queued {Count} commit-triggered run(s) for {Repository}", runIds.Count, repositoryPath);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

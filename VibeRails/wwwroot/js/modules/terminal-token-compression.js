@@ -53,6 +53,7 @@ export class TerminalTokenCompressionMeter {
             ? Boolean(enabled)
             : this._enabledSources.size > 0;
         this._savings = this._normalizeSavings(tokensSaved);
+        this._savingsRevision = 0;
         this._popoverId = `vb-activity-blinker-popover-${++nextCompressionMeterId}`;
         this._pulseTimer = null;
         this._build(mount);
@@ -85,6 +86,7 @@ export class TerminalTokenCompressionMeter {
             }
         });
 
+        const savingsRevisionAtRequestStart = this._savingsRevision;
         this.initialSavingsReady = (async () => {
             try {
                 const savings = await app.apiCall(
@@ -92,7 +94,11 @@ export class TerminalTokenCompressionMeter {
                     'GET',
                     null,
                     { showLoading: false });
-                if (typeof savings?.tokensSaved === 'number') {
+                // The request is only a startup seed. A proxy event can arrive while it is in
+                // flight with a newer session tally, so never let the older response replace a
+                // value already supplied by the live stream.
+                if (this._savingsRevision === savingsRevisionAtRequestStart
+                    && typeof savings?.tokensSaved === 'number') {
                     this.setTokensSaved({
                         session: savings.tokensSavedSession,
                         month: savings.tokensSavedMonth,
@@ -129,6 +135,7 @@ export class TerminalTokenCompressionMeter {
     // zero savings.
     setTokensSaved(tokensSaved) {
         this._savings = this._normalizeSavings(tokensSaved);
+        this._savingsRevision += 1;
         this._syncSavingsDisplay();
         this._syncAccessibleStatus();
         if (this._host.classList.contains('is-open')) this._renderPopover();

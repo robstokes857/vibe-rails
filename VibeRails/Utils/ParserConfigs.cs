@@ -11,6 +11,17 @@ namespace VibeRails.Utils
         public string? WorkDir { get; set; }
         public string[] ExtraArgs { get; set; } = [];
 
+        // Automated Job run: vb --env <worker> --workdir <repo> --job-run <runId> [--max-runtime <min>].
+        // Runs the worker's env exactly as configured, interactively, in whatever terminal window
+        // spawned this process, while reporting the run's lifecycle back to the JobRuns table.
+        public string? JobRunId { get; set; }
+
+        // Opt-in absolute deadline in minutes for a --job-run process. Absent (null) means the run
+        // lives until the CLI exits or the user closes the window — that is the default.
+        // (--job-tick is not parsed here: like the other lightweight hosts it is detected straight
+        // off argv by JobTickProcessHost.IsRequested before the web host is ever built.)
+        public int? MaxRuntimeMinutes { get; set; }
+
         // VS Code extension / parent->child terminal-tab spawn (vb --vs-code-v1 [--parent-pid <pid>])
         public bool IsVsCodeMode { get; set; }
 

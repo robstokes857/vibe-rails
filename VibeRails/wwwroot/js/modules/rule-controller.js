@@ -243,6 +243,14 @@ export function buildVcaExplanationViewModel(response = {}) {
     const findings = Array.isArray(validation.findings)
         ? validation.findings.map(normalizeVcaFinding)
         : [];
+    const findingPriority = {
+        blocked: 0,
+        acknowledgment_required: 1,
+        warning: 2,
+        deferred: 3
+    };
+    findings.sort((left, right) =>
+        (findingPriority[left.status] ?? 4) - (findingPriority[right.status] ?? 4));
     const count = (key, status) => {
         const supplied = Number(validation[key]);
         return Number.isFinite(supplied)
@@ -408,6 +416,9 @@ export class RuleController {
         this.app.bindAction(root, '[data-action="clear-code-analyzer-output"]', () => this.clearCodeAnalyzerOutput());
         this.app.bindAction(root, '[data-action="open-fix-terminal"]', () => this.openFixTerminal());
         this.app.bindAction(root, '[data-action="copy-fix-brief"]', () => this.copyVcaFixBrief());
+        root.querySelectorAll('.rules-action-menu [data-action]').forEach(button => {
+            button.addEventListener('click', () => button.closest('details')?.removeAttribute('open'));
+        });
         this.vcaConsole = new VcaConsole(root.querySelector('[data-vca-console]'));
         this.codeAnalyzerConsole = new VcaConsole(root.querySelector('[data-code-analyzer-console]'), {
             defaultMessage: 'Code quality scan ready.\nChange a supported source file, then run the scan.',
@@ -1235,6 +1246,8 @@ export class RuleController {
         this.setVcaExplanationIcon('fa-spinner fa-spin');
         this.query('[data-vca-explanation-stats]')?.replaceChildren();
         this.query('[data-vca-finding-list]')?.replaceChildren();
+        const queue = this.query('[data-vca-action-queue]');
+        if (queue) queue.hidden = true;
         const actions = this.query('[data-vca-explanation-actions]');
         if (actions) actions.hidden = true;
     }
@@ -1268,8 +1281,17 @@ export class RuleController {
 
         const list = this.query('[data-vca-finding-list]');
         if (list) {
-            list.replaceChildren(...model.findings.map(finding => this.createVcaFindingElement(finding)));
+            list.replaceChildren(...model.findings.map(
+                (finding, index) => this.createVcaFindingElement(finding, { expanded: index === 0 })));
         }
+        const queue = this.query('[data-vca-action-queue]');
+        if (queue) {
+            queue.hidden = model.findings.length === 0;
+            queue.dataset.tone = model.tone;
+        }
+        this.setText(
+            '[data-vca-action-queue-count]',
+            `${model.findings.length} ${model.findings.length === 1 ? 'item' : 'items'}`);
 
         const actions = this.query('[data-vca-explanation-actions]');
         if (actions) actions.hidden = !model.actionable;
@@ -1278,36 +1300,48 @@ export class RuleController {
         return model;
     }
 
-    createVcaFindingElement(finding) {
-        const article = document.createElement('article');
-        article.className = 'vca-finding';
-        article.dataset.tone = finding.tone;
+    createVcaFindingElement(finding, { expanded = false } = {}) {
+        const item = document.createElement('details');
+        item.className = 'vca-finding';
+        item.dataset.tone = finding.tone;
+        item.open = Boolean(expanded);
+
+        const summary = document.createElement('summary');
+        summary.className = 'vca-finding-summary';
 
         const badge = document.createElement('span');
         badge.className = 'vca-finding-badge';
         badge.textContent = finding.label;
 
-        const content = document.createElement('div');
-        const title = document.createElement('h4');
+        const summaryCopy = document.createElement('span');
+        summaryCopy.className = 'vca-finding-summary-copy';
+        const title = document.createElement('strong');
+        title.className = 'vca-finding-title';
         title.textContent = finding.rule;
-        content.appendChild(title);
+        summaryCopy.appendChild(title);
         if (finding.sourcePath) {
             const source = document.createElement('span');
             source.className = 'vca-finding-source';
             source.textContent = `Rule defined in ${finding.sourcePath}`;
-            content.appendChild(source);
+            summaryCopy.appendChild(source);
         }
+        const reason = document.createElement('span');
+        reason.className = 'vca-finding-reason';
+        reason.textContent = finding.reason;
+        summaryCopy.appendChild(reason);
 
-        const details = document.createElement('dl');
-        details.className = 'vca-finding-detail';
-        [['Why it failed', finding.reason], ['What to do next', finding.guidance]].forEach(([label, value]) => {
-            const term = document.createElement('dt');
-            term.textContent = label;
-            const description = document.createElement('dd');
-            description.textContent = value;
-            details.append(term, description);
-        });
-        content.appendChild(details);
+        const chevron = document.createElement('i');
+        chevron.className = 'fa-solid fa-chevron-down vca-finding-chevron';
+        chevron.setAttribute('aria-hidden', 'true');
+        summary.append(badge, summaryCopy, chevron);
+
+        const content = document.createElement('div');
+        content.className = 'vca-finding-expanded';
+        const guidanceLabel = document.createElement('strong');
+        guidanceLabel.textContent = 'Next step';
+        const guidance = document.createElement('p');
+        guidance.textContent = finding.guidance;
+        content.append(guidanceLabel, guidance);
 
         if (finding.acknowledgment) {
             const token = document.createElement('code');
@@ -1316,8 +1350,8 @@ export class RuleController {
             content.appendChild(token);
         }
 
-        article.append(badge, content);
-        return article;
+        item.append(summary, content);
+        return item;
     }
 
     setVcaExplanationIcon(iconClass) {
@@ -1333,10 +1367,36 @@ export class RuleController {
             || null;
     }
 
+    // Paste the complete fix brief without submitting it. The user can review or edit the
+    // prompt in the bottom console before pressing Enter; if no session is active, guide
+    // them to the terminal start control instead.
     openFixTerminal() {
         const terminal = this.findRulesTerminal();
         if (!terminal) return;
-        terminal.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const manager = this.app.terminalController?.manager;
+        const active = manager?.getActiveTab?.();
+        const brief = String(this.lastVcaFixBrief || '').trim();
+        const prompt = brief
+            ? `Fix the following VCA validation findings. Respect the repository's AGENTS.md instructions and run the relevant tests when finished.\n\n${brief}`
+            : '';
+        if (prompt && active?.instance?.injectText?.(prompt)) {
+            active.instance.focusInput?.();
+            active.instance.focus?.();
+            this.app.showToast(
+                'Fix Prompt Ready',
+                'Review the prompt in the agent console, then press Enter to send it.',
+                'info');
+            return;
+        }
+
+        active?.instance?.focusInput?.();
+        active?.instance?.focus?.();
+        terminal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        terminal.querySelector('#terminal-header-select, #terminal-start-btn')?.focus();
+        this.app.showToast?.(
+            'Start an Agent Console',
+            'Start a terminal session, then choose “Send all to agent” again.',
+            'info');
     }
 
     async copyVcaFixBrief() {

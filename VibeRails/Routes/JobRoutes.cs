@@ -80,15 +80,6 @@ public static class JobRoutes
             ExecuteAsync(() => service.GetRunAsync(runId, cancellationToken)))
             .WithName("GetJobRun");
 
-        app.MapGet("/api/v1/jobs/runs/{runId}/logs", (
-            IJobService service,
-            string runId,
-            long? afterSequence,
-            int? limit,
-            CancellationToken cancellationToken) =>
-            ExecuteAsync(() => service.GetRunLogsAsync(runId, afterSequence ?? 0, limit ?? 1000, cancellationToken)))
-            .WithName("GetJobRunLogs");
-
         app.MapPost("/api/v1/jobs/runs/{runId}/cancel", (
             IJobService service,
             string runId,
@@ -103,24 +94,47 @@ public static class JobRoutes
             ExecuteAsync(() => service.RetryRunAsync(runId, cancellationToken)))
             .WithName("RetryJobRun");
 
-        app.MapGet("/api/v1/jobs/worker", (
-            IJobService service,
+        // The OS scheduled task that ticks every minute. Installing it is what makes scheduled Jobs
+        // fire while the dashboard is closed; without it the in-app scheduler is the only driver.
+        app.MapGet("/api/v1/jobs/scheduler", (
+            IJobScheduleTaskInstaller installer,
             CancellationToken cancellationToken) =>
-            ExecuteAsync(() => service.GetWorkerStatusAsync(cancellationToken)))
-            .WithName("GetJobsWorkerStatus");
+            ExecuteAsync(async () => new JobSchedulerStatusResponse(
+                await installer.IsInstalledAsync(cancellationToken),
+                IsSchedulerSupported,
+                PlatformName)))
+            .WithName("GetJobsSchedulerStatus");
 
-        app.MapPost("/api/v1/jobs/worker/repair", (
-            IJobService service,
+        app.MapPost("/api/v1/jobs/scheduler", (
+            IJobScheduleTaskInstaller installer,
             CancellationToken cancellationToken) =>
-            ExecuteAsync(() => service.RepairWorkerAsync(cancellationToken)))
-            .WithName("RepairJobsWorker");
+            ExecuteAsync(async () =>
+            {
+                await installer.InstallAsync(cancellationToken);
+                return new JobSchedulerStatusResponse(
+                    await installer.IsInstalledAsync(cancellationToken), IsSchedulerSupported, PlatformName);
+            }))
+            .WithName("InstallJobsScheduler");
 
-        app.MapDelete("/api/v1/jobs/worker", (
-            IJobService service,
+        app.MapDelete("/api/v1/jobs/scheduler", (
+            IJobScheduleTaskInstaller installer,
             CancellationToken cancellationToken) =>
-            ExecuteAsync(() => service.DisableWorkerAsync(cancellationToken)))
-            .WithName("DisableJobsWorker");
+            ExecuteAsync(async () =>
+            {
+                await installer.UninstallAsync(cancellationToken);
+                return new JobSchedulerStatusResponse(
+                    await installer.IsInstalledAsync(cancellationToken), IsSchedulerSupported, PlatformName);
+            }))
+            .WithName("UninstallJobsScheduler");
     }
+
+    private static bool IsSchedulerSupported =>
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() || OperatingSystem.IsLinux();
+
+    private static string PlatformName =>
+        OperatingSystem.IsWindows() ? "Task Scheduler"
+        : OperatingSystem.IsMacOS() ? "launchd"
+        : OperatingSystem.IsLinux() ? "systemd" : "unsupported";
 
     private static async Task<IResult> ExecuteAsync<T>(Func<Task<T>> operation)
     {

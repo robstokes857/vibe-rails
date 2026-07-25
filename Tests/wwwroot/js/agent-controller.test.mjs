@@ -24,6 +24,25 @@ function createApp() {
     };
 }
 
+// The inline rule editor writes into [data-agent-rule-editor] and then binds handlers by
+// selector. These stubs capture the HTML without pulling in a DOM implementation, matching
+// how the rest of this file exercises the string renderers.
+function createRuleEditorHost() {
+    return {
+        innerHTML: '',
+        querySelector() { return null; },
+        querySelectorAll() { return []; }
+    };
+}
+
+function createWorkspaceRoot(host) {
+    return {
+        querySelector(selector) {
+            return selector === '[data-agent-rule-editor]' ? host : null;
+        }
+    };
+}
+
 test('Agent rule cards escape rule text and enforcement values', () => {
     const controller = new AgentController(createApp());
     const html = controller.renderAgentRules({
@@ -78,6 +97,68 @@ test('Agent wizard review normalizes enforcement before using it in badge markup
     assert.doesNotMatch(container.innerHTML, /onmouseover/);
     assert.match(container.innerHTML, /class="badge badge-warn"/);
     assert.match(container.innerHTML, /⚠️ WARN/);
+});
+
+test('Inline rule editor escapes rule text and drives the row tone from a normalized level', () => {
+    const app = createApp();
+    app.getAgentFileViewModel = () => ({ displayName: 'repo/Agent', relativePath: 'AGENTS.md' });
+    app.data.agents = [{
+        path: 'C:\\repo\\AGENTS.md',
+        rules: [
+            { text: '<img src=x onerror="alert(1)">', enforcement: 'STOP' },
+            { text: 'Tests accompany behavior changes', enforcement: 'bogus" data-owned="yes' }
+        ]
+    }];
+
+    const controller = new AgentController(app);
+    controller.selectedAgentPath = 'C:\\repo\\AGENTS.md';
+    const host = createRuleEditorHost();
+    controller.renderInlineRuleEditor(createWorkspaceRoot(host));
+
+    assert.doesNotMatch(host.innerHTML, /<img src=x/);
+    assert.match(host.innerHTML, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
+    // An unrecognized enforcement falls back to WARN rather than reaching the attribute.
+    assert.doesNotMatch(host.innerHTML, /data-owned=/);
+    assert.match(host.innerHTML, /data-level="STOP"/);
+    assert.match(host.innerHTML, /data-level="WARN"/);
+    assert.match(host.innerHTML, /data-rule-remove="1"/);
+});
+
+test('Inline rule editor shows an empty state for a rule file that enforces nothing', () => {
+    const app = createApp();
+    app.getAgentFileViewModel = () => ({ displayName: 'repo/Agent', relativePath: 'Tests/AGENTS.md' });
+    app.data.agents = [{ path: 'C:\\repo\\Tests\\AGENTS.md', rules: [] }];
+
+    const controller = new AgentController(app);
+    controller.selectedAgentPath = 'C:\\repo\\Tests\\AGENTS.md';
+    const host = createRuleEditorHost();
+    controller.renderInlineRuleEditor(createWorkspaceRoot(host));
+
+    assert.match(host.innerHTML, /No rules yet/);
+    assert.doesNotMatch(host.innerHTML, /rules-rule-list/);
+    // Add rule stays reachable — the empty state is the main path to a first rule.
+    assert.match(host.innerHTML, /data-rule-editor-add/);
+});
+
+test('Inline add-rule modal escapes rule names and the target path', (t) => {
+    const originalDocument = globalThis.document;
+    t.after(() => { globalThis.document = originalDocument; });
+    globalThis.document = { getElementById: () => null };
+
+    const app = createApp();
+    let modalHtml = '';
+    app.showModal = (_title, html) => { modalHtml = html; };
+    app.data.availableRulesWithDescriptions = [
+        { name: '<svg onload="alert(1)">', description: '<b>desc</b>' }
+    ];
+
+    const controller = new AgentController(app);
+    controller.showInlineAddRule({ path: 'C:\\repo\\"><script>', rules: [] }, null);
+
+    assert.doesNotMatch(modalHtml, /<svg onload=/);
+    assert.doesNotMatch(modalHtml, /<script>/);
+    assert.match(modalHtml, /&lt;svg onload=&quot;alert\(1\)&quot;&gt;/);
+    assert.match(modalHtml, /&lt;b&gt;desc&lt;\/b&gt;/);
 });
 
 test('Validate Agent renders successful API responses without a missing renderer call', async (t) => {

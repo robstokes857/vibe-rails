@@ -12,7 +12,14 @@ namespace VibeRails.Services.VCA.Hooks;
 /// </summary>
 public static class VcaHookProcessHost
 {
-    private static readonly TimeSpan ConsolePauseTimeout = TimeSpan.FromMinutes(2);
+    /// <summary>
+    /// How long the popup stays up before closing itself. The window exists so the user can read
+    /// the outcome — most importantly a list of STOP violations — so this has to be long enough to
+    /// actually read that, while still short enough that an abandoned window cannot hold Git open
+    /// indefinitely. Shared with <see cref="VcaHookRunner"/> so the two pauses cannot drift apart,
+    /// and every user-facing "auto-closes in …" string is formatted from it rather than restated.
+    /// </summary>
+    internal static readonly TimeSpan ConsolePauseTimeout = TimeSpan.FromSeconds(30);
 
     public static bool IsRequested(string[] args) => VcaHookCommandParser.IsRequested(args);
 
@@ -139,10 +146,11 @@ public static class VcaHookProcessHost
             }
             else
             {
+                var autoClose = DescribeAutoClose(timeout);
                 var message = exitCode == 0
-                    ? "VCA check complete. Press Enter to close this window (auto-closes in 2 minutes)..."
+                    ? $"VCA check complete. Press Enter to close this window ({autoClose})..."
                     : $"VCA check blocked the commit (exit code {exitCode}). "
-                        + "Press Enter to close this window (auto-closes in 2 minutes)...";
+                        + $"Press Enter to close this window ({autoClose})...";
                 await output.WriteAsync(message);
                 await output.FlushAsync();
 
@@ -175,7 +183,7 @@ public static class VcaHookProcessHost
 
     /// <summary>
     /// Styled pause line with a live once-per-second countdown, so the popup visibly
-    /// ticks toward auto-close instead of sitting on two minutes of static text.
+    /// ticks toward auto-close instead of sitting on the timeout of static text.
     /// Returns true when the user pressed Enter, false when the timeout elapsed.
     /// </summary>
     private static async Task<bool> CountdownForEnterAsync(
@@ -214,6 +222,20 @@ public static class VcaHookProcessHost
                 return true;
             }
         }
+    }
+
+    /// <summary>
+    /// Renders a pause timeout for the unstyled prompt, so the wording tracks
+    /// <see cref="ConsolePauseTimeout"/> instead of being restated as a literal that can go stale.
+    /// </summary>
+    internal static string DescribeAutoClose(TimeSpan timeout)
+    {
+        var seconds = (int)Math.Ceiling(timeout.TotalSeconds);
+        if (seconds < 60)
+            return $"auto-closes in {seconds} second{(seconds == 1 ? string.Empty : "s")}";
+
+        var minutes = timeout.TotalMinutes;
+        return $"auto-closes in {minutes:0.#} minute{(minutes == 1 ? string.Empty : "s")}";
     }
 
     private static string FormatCountdown(TimeSpan remaining)

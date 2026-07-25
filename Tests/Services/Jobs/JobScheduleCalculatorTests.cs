@@ -80,7 +80,7 @@ public sealed class JobScheduleCalculatorTests
     public void Validate_RejectsScheduleFieldsOnGitTrigger()
     {
         var trigger = new JobTriggerRequest(
-            JobTriggerKind.Vca,
+            JobTriggerKind.Commit,
             TimeZoneId: "UTC");
 
         Assert.Equal("Only schedule triggers may include schedule fields.",

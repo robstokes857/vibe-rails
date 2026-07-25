@@ -9,7 +9,7 @@ namespace VibeRails.DB
         void InitializeDatabase();
 
         // Session lifecycle
-        Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir, int ownerPid);
+        Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir, int ownerPid, string? jobRunId = null);
         Task LogSessionOutputAsync(string sessionId, byte[] content, bool isError = false);
         Task CompleteSessionAsync(string sessionId, int exitCode);
         Task<string> GetProjectDisplayNameAsync(string path, CancellationToken cancellationToken = default);
@@ -60,6 +60,7 @@ namespace VibeRails.DB
         Task<string> GetFirstInputTextForSessionOrRawAsync(string sessionId, int? maxChars = null, CancellationToken cancellationToken = default);
 
         // Environment operations (global, not project-scoped)
+        Task<LLM_Environment?> GetEnvironmentByIdAsync(int id, CancellationToken cancellationToken = default);
         Task<LLM_Environment?> GetEnvironmentByNameAndLlmAsync(string name, LLM llm, CancellationToken cancellationToken = default);
         Task<LLM_Environment?> FindEnvironmentByNameAsync(string name, CancellationToken cancellationToken = default);
         Task<LLM_Environment?> FindEnvironmentByNameIgnoreCaseAsync(string name, CancellationToken cancellationToken = default);

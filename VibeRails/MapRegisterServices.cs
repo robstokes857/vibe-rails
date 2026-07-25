@@ -95,8 +95,15 @@ namespace VibeRails
             serviceCollection.AddSingleton<IJobStore>(_ => new JobStore(
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
             serviceCollection.AddSingleton<IJobExecutableResolver, JobExecutableResolver>();
-            serviceCollection.AddSingleton<IJobWorkerSupervisor, JobWorkerSupervisor>();
-            serviceCollection.AddSingleton<JobWorkspaceService>();
+            // Spawns a real OS terminal per queued run. Scoped because it resolves environments
+            // through IRepository; JobRunner is static (it runs inside the spawned process, not here).
+            serviceCollection.AddScoped<IJobLaunchService, JobLaunchService>();
+            serviceCollection.AddSingleton<IJobScheduleTaskInstaller, JobScheduleTaskInstaller>();
+            // The scheduler launches due runs in the dashboard process (it no-ops elsewhere).
+            // Registered once and exposed both as the hosted service and via IJobScheduler.Kick().
+            serviceCollection.AddSingleton<JobSchedulerHostedService>();
+            serviceCollection.AddSingleton<IJobScheduler>(sp => sp.GetRequiredService<JobSchedulerHostedService>());
+            serviceCollection.AddHostedService(sp => sp.GetRequiredService<JobSchedulerHostedService>());
             serviceCollection.AddScoped<IJobService, JobService>();
             // Singleton for the same reason as the savings tally: one ordered writer, so concurrent
             // relays serialize capture inserts, re-sight counts, and clears before reaching SQLite.

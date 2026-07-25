@@ -6,12 +6,28 @@ using static VibeRails.Utils.ShellArgSanitizer;
 
 namespace VibeRails.Services.Terminal;
 
+/// <param name="Command">
+/// The full shell program (setup commands + launch) to type into an interactive PTY shell.
+/// </param>
+/// <param name="Executable">
+/// The CLI's bare executable name, for callers that spawn it as the PTY's own process instead of
+/// typing <paramref name="Command"/> into a shell. Null when there is no CLI to spawn — a plain
+/// Shell session, or the fake-CLI test harness, both of which are shell programs rather than a
+/// program plus arguments. Callers must fall back to the shell path when this is null.
+/// </param>
+/// <param name="Argv">
+/// <paramref name="Executable"/>'s arguments as real argv, with the initial prompt appended by the
+/// same per-CLI convention every other launch path uses. Unlike <paramref name="Command"/> this
+/// carries no shell quoting, so it survives prompts containing quotes and metacharacters.
+/// </param>
 public sealed record PreparedTerminalSession(
     string Command,
     string LaunchCommand,
     IReadOnlyList<string> SetupCommands,
     Dictionary<string, string> Environment,
-    bool OpenCodeProxyActive = false);
+    bool OpenCodeProxyActive = false,
+    string? Executable = null,
+    IReadOnlyList<string>? Argv = null);
 
 public class CommandService : ICommandService
 {
@@ -78,16 +94,7 @@ public class CommandService : ICommandService
             return Task.FromResult(new PreparedTerminalSession(string.Empty, string.Empty, Array.Empty<string>(), shellEnv));
         }
 
-        // Every CLI's enum name lowercased is its executable — except Antigravity (binary `agy`)
-        // and the OpenCode-backed pseudo-CLIs Glm52/KimiK3 (binary `opencode`). Map explicitly so
-        // the in-app PTY launches the right command.
-        var cli = llm switch
-        {
-            LLM.Antigravity => "agy",
-            LLM.Glm52 => "opencode",
-            LLM.KimiK3 => "opencode",
-            _ => llm.ToString().ToLower()
-        };
+        var cli = ResolveCliExecutable(llm);
         // Pseudo-CLIs (Glm52/KimiK3) are OpenCode with a pinned --model flag. For base CLI
         // launches (no envName) inject it here so every base launch pins the right model.
         // Custom environments already carry --model in their CustomArgs (built by the env
@@ -218,13 +225,36 @@ public class CommandService : ICommandService
 
         LogMcpSetup(llm, envName, setupCommands);
 
+        // The same launch expressed as argv rather than a shell string. Built unconditionally
+        // because it is cheap and side-effect free; whether it gets used is the caller's call.
+        var directArgv = new List<string>(launchArgs);
+        LlmPromptArgvBuilder.AppendInitialPrompt(directArgv, llm, prompt);
+
         return Task.FromResult(new PreparedTerminalSession(
             builder.Build(),
             cliCommand,
             setupCommands.AsReadOnly(),
             environment,
-            OpenCodeProxyActive: openCodeProxyActive));
+            OpenCodeProxyActive: openCodeProxyActive,
+            Executable: cli,
+            Argv: directArgv));
     }
+
+    /// <summary>
+    /// Every CLI's enum name lowercased is its executable — except Antigravity (binary <c>agy</c>)
+    /// and the OpenCode-backed pseudo-CLIs Glm52/KimiK3 (binary <c>opencode</c>).
+    ///
+    /// Must stay in step with <c>IBaseLlmCliLauncher.CliExecutable</c>, which is the same mapping
+    /// expressed per-launcher for the native-terminal path. The two agree today; Antigravity is the
+    /// one that bites, because its enum, its env name, and its binary are all different.
+    /// </summary>
+    public static string ResolveCliExecutable(LLM llm) => llm switch
+    {
+        LLM.Antigravity => "agy",
+        LLM.Glm52 => "opencode",
+        LLM.KimiK3 => "opencode",
+        _ => llm.ToString().ToLower()
+    };
 
     private string[] BuildLaunchArgs(LLM llm, string[]? extraArgs, LlmProxySettings proxySettings)
     {

@@ -82,6 +82,21 @@ namespace VibeRails.Utils
                         }
                         break;
 
+                    case "--job-run":
+                        if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                        {
+                            parsed.JobRunId = args[++i];
+                        }
+                        break;
+
+                    case "--max-runtime":
+                        if (i + 1 < args.Length && int.TryParse(args[i + 1], out var maxRuntime) && maxRuntime > 0)
+                        {
+                            parsed.MaxRuntimeMinutes = maxRuntime;
+                            i++;
+                        }
+                        break;
+
                     case "--":
                         // Everything after `--` is passthrough to the underlying LLM CLI.
                         parsed.ExtraArgs = args.Skip(i + 1).ToArray();

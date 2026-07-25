@@ -430,3 +430,9 @@ bin_check/
 /TerminalEmulator.Tests/TerminalEmulator.Tests.csproj.lscache
 /Tests/Tests.csproj.lscache
 /VibeRails/VibeRails.csproj.lscache
+
+# Working notes from review/design sessions. They are point-in-time scratch that cites code by
+# file:line, so they go stale the moment the code moves and are actively misleading once tracked.
+# Anything worth keeping belongs in an AGENTS.md or a runbook, where it gets updated with the code.
+/kill-job.md
+/vscode-viberails/CLAUDE_VS_CODE_IMPROVE.md

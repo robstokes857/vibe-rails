@@ -110,24 +110,43 @@ test('has title', async ({ page }) => {
 
 test('opens the terminal workspace by default', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('[data-view="terminal-focus"]')).toBeVisible();
+  await expect(page.locator('.view[data-view="terminal-focus"]')).toBeVisible();
   await expect(page.locator('#vb-terminal-panel')).toHaveCount(1);
   await expect(page.locator('[data-rules-overview-host]')).toHaveCount(0);
 });
 
+// The Rules page is a local-nav workspace: one section is mounted in the top pane at a
+// time, the terminal permanently owns the bottom pane. Every section stays in the DOM —
+// switching only toggles `hidden` — so a tab click can never kill a running terminal.
 test('can navigate to Agent Files', async ({ page }) => {
   await page.goto('/');
 
-  const rulesNav = page.locator('.app-subnav-link[data-action="navigate-home"]');
+  const rulesNav = page.locator('.app-subnav-link[data-action="navigate-home"]:visible');
   await expect(rulesNav).toBeVisible();
   await expect(rulesNav).toHaveText(/rules/i);
   await expect(page.getByRole('button', { name: 'Dashboard' })).toHaveCount(0);
   await rulesNav.click();
 
+  const localNav = page.getByRole('tablist', { name: 'Rules sections' });
+  await expect(localNav.getByRole('tab')).toHaveCount(4);
+  await expect(localNav.locator('xpath=..')).toHaveClass(/rules-topbar/);
+
+  const headerCenterlines = await page.locator('.rules-topbar').evaluate((header) => {
+    const gitGuard = header.querySelector('.rules-git-setting').getBoundingClientRect();
+    const navigation = header.querySelector('.rules-localnav').getBoundingClientRect();
+    return [gitGuard.top + gitGuard.height / 2, navigation.top + navigation.height / 2];
+  });
+  expect(Math.abs(headerCenterlines[0] - headerCenterlines[1])).toBeLessThanOrEqual(1);
+
+  // Validation is the default section; Code quality is mounted but hidden.
   await expect(page.getByRole('heading', { name: 'Validation results' })).toBeVisible();
-  await expect(page.locator('[data-vca-console]').getByRole('button', { name: 'Run again' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Code quality' })).toBeVisible();
-  await expect(page.locator('[data-code-analyzer-console]').getByRole('button', { name: 'Run again' })).toBeVisible();
+  const validationPanel = page.locator('[data-vca-console]');
+  await expect(validationPanel.getByRole('button', { name: 'Check changes' })).toBeVisible();
+  await expect(validationPanel.getByRole('button', { name: 'Copy transcript' })).not.toBeVisible();
+  await validationPanel.locator('summary[aria-label="More validation actions"]').click();
+  await expect(validationPanel.getByRole('button', { name: 'Copy transcript' })).toBeVisible();
+  await validationPanel.locator('summary[aria-label="More validation actions"]').click();
+  await expect(page.getByRole('heading', { name: 'Code quality' })).not.toBeVisible();
   await expect(page.locator('#vb-terminal-panel')).toHaveCount(1);
 
   const rulesPrecedeTerminal = await page.evaluate(() => {
@@ -137,6 +156,17 @@ test('can navigate to Agent Files', async ({ page }) => {
   });
   expect(rulesPrecedeTerminal).toBe(true);
 
+  await localNav.getByRole('tab', { name: /Code quality/ }).click();
+  await expect(page.getByRole('heading', { name: 'Code quality' })).toBeVisible();
+  const qualityPanel = page.locator('[data-code-analyzer-console]');
+  await expect(qualityPanel.getByRole('button', { name: 'Scan changes' })).toBeVisible();
+  await qualityPanel.locator('summary[aria-label="More code quality actions"]').click();
+  await expect(qualityPanel.getByRole('button', { name: 'Scan unpushed commits' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Validation results' })).not.toBeVisible();
+  // The terminal survived the switch.
+  await expect(page.locator('#vb-terminal-panel')).toHaveCount(1);
+
+  await localNav.getByRole('tab', { name: /Rule files/ }).click();
   const container = page.locator('[data-agent-file-tree]');
   await expect(container).toBeVisible();
 
@@ -148,6 +178,38 @@ test('can navigate to Agent Files', async ({ page }) => {
   const filesWithoutRules = container.locator('[data-agent-empty-group]');
   await expect(filesWithoutRules).not.toHaveAttribute('open', '');
   await expect(filesWithoutRules.locator('summary')).toContainText('Without rules');
+
+  // Selecting a rule file opens the inline editor beside the list — no navigation away
+  // from the workspace, so the terminal below is still there.
+  await configuredFiles.first().locator('.agent-file-tree-open').click();
+  const editor = page.locator('[data-agent-rule-editor]');
+  await expect(editor.getByRole('button', { name: 'Add rule' })).toBeVisible();
+  await expect(page.locator('[data-view="agent-edit"]')).toHaveCount(0);
+  await expect(page.locator('#vb-terminal-panel')).toHaveCount(1);
+});
+
+test('the rules workspace docks a compact console at the bottom', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.app-subnav-link[data-action="navigate-home"]:visible').click();
+
+  await expect(page.locator('[data-rules-splitter]')).toHaveCount(0);
+
+  const layout = await page.locator('[data-rules-panes]').evaluate((panes) => {
+    const [sections, terminal] = panes.querySelectorAll(':scope > .rules-pane');
+    const panesRect = panes.getBoundingClientRect();
+    const sectionsRect = sections.getBoundingClientRect();
+    const terminalRect = terminal.getBoundingClientRect();
+    return {
+      rulesHeight: sectionsRect.height,
+      terminalHeight: terminalRect.height,
+      terminalBottom: terminalRect.bottom,
+      workspaceBottom: panesRect.bottom
+    };
+  });
+  expect(layout.rulesHeight).toBeGreaterThan(layout.terminalHeight);
+  expect(layout.terminalHeight).toBeGreaterThanOrEqual(219);
+  expect(layout.terminalHeight).toBeLessThanOrEqual(321);
+  expect(Math.abs(layout.terminalBottom - layout.workspaceBottom)).toBeLessThanOrEqual(1);
 });
 
 test('organizes code quality output into accessible tabs', async ({ page }) => {
@@ -169,7 +231,9 @@ test('organizes code quality output into accessible tabs', async ({ page }) => {
     });
   });
   await page.goto('/');
-  await page.locator('.app-subnav-link[data-action="navigate-home"]').click();
+  await page.locator('.app-subnav-link[data-action="navigate-home"]:visible').click();
+  await page.getByRole('tablist', { name: 'Rules sections' })
+    .getByRole('tab', { name: /Code quality/ }).click();
 
   const card = page.locator('[data-code-analyzer-console]');
   const tabs = card.getByRole('tablist', { name: 'Code quality report sections' });

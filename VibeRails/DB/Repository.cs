@@ -242,6 +242,24 @@ namespace VibeRails.DB
 
         #region LLM_Environment CRUD (Global)
 
+        public async Task<LLM_Environment?> GetEnvironmentByIdAsync(int id, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectEnvironmentById;
+            cmd.Parameters.AddWithValue("$id", id);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                return ReadEnvironment(reader);
+            }
+
+            return null;
+        }
+
         public async Task<LLM_Environment?> GetEnvironmentByNameAndLlmAsync(string name, LLM llm, CancellationToken cancellationToken = default)
         {
             await using var connection = new SqliteConnection(_connectionString);
@@ -808,7 +826,7 @@ namespace VibeRails.DB
 
         #region Session Lifecycle
 
-        public async Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir, int ownerPid)
+        public async Task CreateSessionAsync(string sessionId, string cli, string? envName, string workDir, int ownerPid, string? jobRunId = null)
         {
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
@@ -827,6 +845,9 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$projectDisplayName", projectDisplayName);
             cmd.Parameters.AddWithValue("$startedUTC", DateTime.UtcNow.ToString("O"));
             cmd.Parameters.AddWithValue("$ownerPid", ownerPid);
+            // A non-null JobRunId marks this as an automated Job session: hidden from Chat History
+            // (SelectChatHistoryBase filters JobRunId IS NULL) and linked back to its JobRun.
+            cmd.Parameters.AddWithValue("$jobRunId", jobRunId ?? (object)DBNull.Value);
 
             await cmd.ExecuteNonQueryAsync();
         }

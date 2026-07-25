@@ -445,6 +445,30 @@ code {
     transform: translateY(-1px);
 }
 
+.top-layout-switch-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    margin-left: 0.35rem;
+    padding: 0;
+    color: var(--color-text-muted);
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    font-size: 0.68rem;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    flex-shrink: 0;
+}
+
+.top-layout-switch-btn:hover {
+    color: #ffffff;
+    background: rgba(6, 182, 212, 0.12);
+    border-color: rgba(6, 182, 212, 0.4);
+}
+
 .brand-text-sm {
     background: linear-gradient(135deg, #a77bf3 0%, var(--color-accent) 100%, #a77bf3 200%);
     -webkit-background-clip: text;
@@ -8901,7 +8925,7 @@ kbd:not(.ch-search-kbd) {
     border-bottom-color: transparent;
 }
 
-.app-subnav-link.active::after {
+.app-subnav .app-subnav-link.active::after {
     content: '';
     position: absolute;
     left: 3px;
@@ -9746,11 +9770,54 @@ button.git-guard-menu-button:focus-visible {
     }
 }
 
-/* ─── Rules workspace: the guard rail ────────────────────────────────────
-   The Rules page is one column of stations hung on a literal rail — validate,
-   fix, measure, govern. Each station's node reads the live tone of the panel
-   it fronts (data-tone / aria-busy set by the controllers), so commit status
-   travels down the rail with no extra JS. */
+/* ─── Rules workspace: local nav over a two-pane split ───────────────────
+   The Rules page used to stack every panel in one 2000px scroll, which buried
+   the agent terminal. It is now a fixed-height workspace: a local navigation
+   bar swaps ONE section into the top pane, and the terminal permanently owns
+   the bottom pane so a fix is always one keystroke away from a finding. */
+
+/* Full-height shell. app.js adds .vb-rules-workspace-active while the Rules
+   view is mounted; it reclaims the page padding and the footer so the two
+   panes can own the viewport and the terminal keeps a stable height. */
+body.vb-rules-workspace-active {
+    overflow: hidden;
+}
+
+body.vb-rules-workspace-active .app-main {
+    height: 100dvh;
+    min-height: 0;
+}
+
+html.nav-layout-top body.vb-rules-workspace-active .app-main {
+    height: calc(100dvh - var(--navbar-height));
+}
+
+body.vb-rules-workspace-active .app-footer {
+    display: none;
+}
+
+body.vb-rules-workspace-active .main-container {
+    display: flex;
+    max-width: none;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    padding: 0.7rem 1rem 0.6rem;
+}
+
+html[data-viberails-host="vscode"] body.vb-rules-workspace-active .main-container {
+    padding: 0.4rem 0.5rem 0.5rem;
+}
+
+body.vb-rules-workspace-active #app-content,
+body.vb-rules-workspace-active .dashboard,
+body.vb-rules-workspace-active .rules-dashboard-host {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+}
+
 .rules-dashboard-host {
     min-width: 0;
 }
@@ -9759,170 +9826,271 @@ button.git-guard-menu-button:focus-visible {
     animation: none;
 }
 
-.rules-page-header {
+.rules-workspace {
+    display: grid;
+    min-height: 0;
+    flex: 1 1 auto;
+    grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* ── Top bar ─────────────────────────────────────────────────────────── */
+.rules-topbar {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.9rem 1.5rem;
-    margin: 0.35rem 0 1.4rem;
+    gap: 0.5rem 1.25rem;
+    margin-bottom: 0.7rem;
 }
 
-.rules-page-heading {
+.rules-topbar-identity {
+    display: flex;
     min-width: 0;
-    max-width: 640px;
+    align-items: center;
+    gap: 0.7rem;
 }
 
-.rules-page-title {
-    letter-spacing: 0.05em;
+.rules-topbar-copy {
+    min-width: 0;
 }
 
-.rules-page-title + p {
-    margin-top: 0.55rem;
-}
-
-.rules-page-heading p {
+.rules-topbar-title {
     margin: 0;
+    color: var(--color-text);
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+}
+
+.rules-topbar-copy p {
+    margin: 0.1rem 0 0;
     color: var(--color-text-muted);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
+/* ── Local navigation: a floating segmented control ─────────────────────
+   Deliberately detached from the section card — its own raised surface,
+   sized to its contents, with air underneath. Each item is a distinct pill
+   so the whole bar reads as a control rather than as a page heading. */
+.rules-localnav {
+    display: flex;
+    width: fit-content;
+    max-width: 100%;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.22rem;
+    margin: 0;
+    padding: 0.28rem;
+    border: 1px solid color-mix(in srgb, var(--color-border) 92%, var(--color-text));
+    border-radius: 11px;
+    /* A shade lighter than the card below, so it reads as sitting on top of the page. */
+    background: color-mix(in srgb, var(--color-text) 5%, var(--color-bg-surface));
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+
+.rules-localnav-item {
+    --nav-tone: var(--color-text-muted);
+    position: relative;
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.42rem 0.75rem;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: 0.83rem;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.rules-localnav-item[data-tone="success"] { --nav-tone: var(--color-success); }
+.rules-localnav-item[data-tone="warning"] { --nav-tone: var(--color-warning); }
+.rules-localnav-item[data-tone="danger"] { --nav-tone: var(--color-danger); }
+
+/* Hover draws the tab's own outline, so the whole strip reads as clickable the
+   moment the pointer crosses it. */
+.rules-localnav-item:hover:not(.is-active) {
+    border-color: color-mix(in srgb, var(--color-border) 75%, transparent);
+    background: color-mix(in srgb, var(--color-text) 9%, transparent);
+    color: var(--color-text);
+}
+
+.rules-localnav-item:hover .rules-localnav-icon {
+    color: var(--color-text);
+}
+
+/* Selected pill: recessed into the bar, the usual segmented-control read. */
+.rules-localnav-item.is-active {
+    border-color: color-mix(in srgb, var(--color-border) 85%, var(--color-text));
+    background: var(--color-bg-base);
+    color: var(--color-text);
+    font-weight: 600;
+}
+
+.rules-localnav-item:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 70%, transparent);
+    outline-offset: -2px;
+}
+
+.rules-localnav-icon {
+    flex: 0 0 auto;
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+}
+
+.rules-localnav-item.is-active .rules-localnav-icon {
+    color: var(--color-text);
+}
+
+.rules-localnav-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The count/status each section publishes — a quiet notification pill. */
+.rules-localnav-badge {
+    padding: 0.1rem 0.42rem;
+    border: 1px solid color-mix(in srgb, var(--nav-tone) 32%, var(--color-border));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--nav-tone) 12%, transparent);
+    color: color-mix(in srgb, var(--nav-tone) 80%, var(--color-text));
+    font-size: 0.68rem;
+    font-weight: 600;
     line-height: 1.5;
 }
 
-.rules-rail {
-    position: relative;
-    display: grid;
-    gap: 1.35rem;
-    margin-bottom: 1rem;
-    padding-left: 34px;
+.rules-localnav-item[data-tone="neutral"] .rules-localnav-badge {
+    background: color-mix(in srgb, var(--color-text) 5%, transparent);
+    color: var(--color-text-muted);
 }
 
-.rules-rail::before {
-    content: '';
-    position: absolute;
-    top: 10px;
-    bottom: 14px;
-    left: 11px;
-    width: 2px;
-    border-radius: 999px;
-    background: linear-gradient(180deg,
-        color-mix(in srgb, var(--color-accent) 40%, var(--color-border)),
-        color-mix(in srgb, var(--color-border) 85%, transparent) 26%,
-        color-mix(in srgb, var(--color-border) 85%, transparent) 82%,
-        transparent);
+/* A check is running: fade the badge rather than flash or pulse it. */
+.rules-localnav-item.is-busy .rules-localnav-badge {
+    animation: rules-badge-breathe 1.6s ease-in-out infinite;
 }
 
-.rules-station {
-    --station-tone: var(--color-text-muted);
-    position: relative;
-    min-width: 0;
+@keyframes rules-badge-breathe {
+    50% { opacity: 0.45; }
 }
 
-.rules-station[data-station="fix"] {
-    --station-tone: var(--color-accent);
-}
-
-.rules-station:has(> [data-tone="success"]) { --station-tone: var(--color-success); }
-.rules-station:has(> [data-tone="warning"]) { --station-tone: var(--color-warning); }
-.rules-station:has(> [data-tone="danger"]) { --station-tone: var(--color-danger); }
-
-.rules-station-node {
-    position: absolute;
-    top: 26px;
-    left: -28px;
-    width: 12px;
-    height: 12px;
-    border: 2px solid var(--station-tone);
-    border-radius: 50%;
-    background: var(--color-bg-base);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--station-tone) 14%, var(--color-bg-base));
-    transition: border-color 200ms ease, box-shadow 200ms ease;
-}
-
-.rules-station[data-station="fix"] .rules-station-node {
-    top: 13px;
-}
-
-.rules-station:has(> [aria-busy="true"]) .rules-station-node,
-.rules-station:has(> .is-running) .rules-station-node {
-    animation: rules-node-pulse 1.3s ease-in-out infinite;
-}
-
-@keyframes rules-node-pulse {
-    50% {
-        box-shadow: 0 0 0 7px color-mix(in srgb, var(--station-tone) 4%, transparent);
+@media (prefers-reduced-motion: reduce) {
+    .rules-localnav-item.is-busy .rules-localnav-badge {
+        animation: none;
     }
 }
 
-.rules-station > .card {
-    margin: 0;
-    overflow: hidden;
-    border-radius: 12px;
-    background: var(--color-bg-surface);
+/* ── The split: sections above, terminal below ───────────────────────── */
+.rules-panes {
+    display: grid;
+    min-height: 0;
+    gap: 0.75rem;
+    /* Rules own the workspace; the agent console is a compact dock at the bottom. */
+    grid-template-rows: minmax(0, 1fr) clamp(220px, 30dvh, 320px);
 }
 
-/* One header component for every station. */
-.rules-station-header {
+.rules-pane {
+    display: grid;
+    min-width: 0;
+    min-height: 0;
+}
+
+/* ── Section cards ───────────────────────────────────────────────────── */
+/* A self-contained panel — the nav above it floats free, so this keeps all
+   four corners and its own top border. */
+.rules-section {
+    display: grid;
+    min-height: 0;
+    margin: 0;
+    border-radius: 10px;
+    background: var(--color-bg-surface);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+}
+
+.rules-section[hidden] {
+    display: none !important;
+}
+
+.rules-section-header {
+    position: relative;
+    z-index: 2;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.7rem 1.1rem;
-    padding: 0.85rem 1.1rem;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
-    background: color-mix(in srgb, var(--color-bg-base) 30%, transparent);
+    gap: 0.5rem 1rem;
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
 }
 
-.rules-station-header-bare {
-    padding: 0 0 0.6rem;
-    border-bottom: 0;
-    background: none;
-}
-
-.rules-station-heading {
-    display: grid;
-    min-width: 0;
-    gap: 0.3rem;
-}
-
-.rules-station-eyebrow {
-    color: color-mix(in srgb, var(--color-accent) 52%, var(--color-text-muted));
-    font: 800 0.6rem/1 var(--vb-font-mono, ui-monospace, monospace);
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-}
-
-.rules-station-title-row {
+.rules-section-heading {
     display: flex;
+    min-width: 0;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 0.6rem;
+    align-items: baseline;
+    gap: 0.55rem;
 }
 
-.rules-station-title-row h2 {
+.rules-section-heading h2 {
     margin: 0;
     color: var(--color-text);
-    font-size: 1.04rem;
-    font-weight: 700;
-    letter-spacing: -0.015em;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
 }
 
-.rules-station-note {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    color: color-mix(in srgb, var(--color-text-muted) 82%, transparent);
-    font: 500 0.66rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
+.rules-section-note {
+    color: var(--color-text-muted);
+    font-size: 0.74rem;
+    font-weight: 400;
+    line-height: 1.35;
 }
 
-.rules-station-actions {
+/* The tab badge already carries the run state, so the in-header chip is noise. */
+.rules-section-actions .vca-console-state {
+    display: none;
+}
+
+/* Calmer findings inside the workspace. The Git Guard focus view keeps the louder
+   treatment on purpose — that page IS the commit gate; this one is a working surface. */
+.rules-workspace .vca-explanation-eyebrow {
+    color: var(--color-text-muted);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.rules-workspace .vca-explanation-verdict {
+    background: color-mix(in srgb, var(--vca-verdict-tone) 4%, var(--color-bg-surface));
+}
+
+.rules-workspace .vca-explanation-copy h3 {
+    font-size: 0.98rem;
+    font-weight: 600;
+}
+
+.rules-workspace .vca-explanation-stat span {
+    letter-spacing: 0;
+    text-transform: none;
+    font-size: 0.66rem;
+}
+
+.rules-section-actions {
     display: flex;
     flex: 0 1 auto;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.45rem;
+    gap: 0.4rem;
 }
 
-.rules-station-actions .btn {
+.rules-section-actions .btn {
     min-height: 30px;
 }
 
@@ -9934,26 +10102,475 @@ button.git-guard-menu-button:focus-visible {
     place-items: center;
 }
 
-.rules-station-hint {
-    max-width: 400px;
-    margin: 0;
+.rules-action-menu {
+    position: relative;
+}
+
+.rules-action-menu > summary {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent);
+    border-radius: 7px;
+    background: transparent;
     color: var(--color-text-muted);
-    font-size: 0.75rem;
-    line-height: 1.45;
-    text-align: right;
+    cursor: pointer;
+    list-style: none;
 }
 
-.rules-station-body {
-    padding: 1rem 1.1rem;
+.rules-action-menu > summary::-webkit-details-marker {
+    display: none;
 }
 
-/* The fix station has no card of its own — the terminal panel is the surface. */
-.rules-terminal-station .rules-station-body {
+.rules-action-menu > summary:hover,
+.rules-action-menu > summary:focus-visible,
+.rules-action-menu[open] > summary {
+    border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
+    background: color-mix(in srgb, var(--color-primary) 9%, transparent);
+    color: var(--color-text);
+}
+
+.rules-action-menu > summary:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 70%, transparent);
+    outline-offset: 2px;
+}
+
+.rules-action-menu-popover {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 0.4rem);
+    right: 0;
+    display: grid;
+    width: max-content;
+    min-width: 210px;
+    max-width: min(300px, 80vw);
+    gap: 0.18rem;
+    padding: 0.35rem;
+    border: 1px solid var(--color-border);
+    border-radius: 9px;
+    background: var(--color-bg-elevated, var(--color-bg-surface));
+    box-shadow: 0 14px 35px rgba(0, 0, 0, 0.5);
+}
+
+.rules-action-menu-popover button,
+.rules-action-menu-toggle {
+    display: flex;
+    width: 100%;
+    min-height: 34px;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.6rem;
+    padding: 0.45rem 0.55rem;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: 0.76rem;
+    text-align: left;
+}
+
+.rules-action-menu-popover button {
+    cursor: pointer;
+}
+
+.rules-action-menu-popover button:hover:not(:disabled),
+.rules-action-menu-popover button:focus-visible,
+.rules-action-menu-toggle:hover {
+    background: color-mix(in srgb, var(--color-text) 7%, transparent);
+    color: var(--color-text);
+}
+
+.rules-action-menu-popover button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 60%, transparent);
+    outline-offset: -2px;
+}
+
+.rules-action-menu-popover button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+.rules-action-menu-popover i {
+    width: 16px;
+    flex: 0 0 16px;
+    text-align: center;
+}
+
+.rules-action-menu-toggle {
+    justify-content: space-between;
+    cursor: pointer;
+}
+
+.rules-action-menu-toggle > span {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.rules-action-menu-toggle input {
+    margin: 0;
+    accent-color: var(--color-primary);
+}
+
+.rules-section-body {
+    min-height: 0;
+    padding: 0.85rem 0.9rem;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+}
+
+/* Sections whose content brings its own padding (or manages its own scrolling). */
+.rules-section-body-flush {
     padding: 0;
 }
 
-.rules-terminal-station [data-terminal-content] > .card {
+.rules-section[data-rules-section="files"] .rules-section-body {
+    display: grid;
+    overflow: hidden;
+}
+
+/* ── Terminal pane ───────────────────────────────────────────────────── */
+.rules-terminal-host {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+}
+
+.rules-terminal-host > #vb-terminal-panel {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    border-radius: 12px;
+    margin-bottom: 0 !important;
+    overflow: hidden;
+}
+
+.rules-terminal-host #vb-terminal-panel .card-header {
+    padding-block: 0.4rem;
+}
+
+/* One line of prose is not worth 28px when the pane is half a screen. */
+.rules-terminal-host #vb-terminal-panel .vb-terminal-window-title-bar {
+    display: none;
+}
+
+.rules-terminal-host #vb-terminal-panel .vb-terminal-window-shell {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+}
+
+/* The pane already has a definite height — let the terminal fill whatever is
+   left instead of the viewport-derived default, which would overflow it. */
+.rules-terminal-host #vb-terminal-panel #terminal-container {
+    min-height: 0 !important;
+    height: auto !important;
+    flex: 1 1 auto;
     margin-bottom: 0;
+}
+
+/* The manager toggles this with an inline `display: block`, so centre it with padding
+   rather than a layout mode a stylesheet cannot win. */
+.rules-terminal-host #vb-terminal-panel #terminal-placeholder {
+    min-height: 0;
+    flex: 1 1 auto;
+    padding: 2.25rem 1rem;
+}
+
+/* ── Code quality inside a bounded pane ──────────────────────────────── */
+/* The analyzer's own heights are viewport-derived (it used to scroll with the
+   page). Inside the top pane the section body is the scroller, so retune the
+   sticky rail and the editor to the pane instead of the window. */
+.rules-section .code-analyzer-findings-panel {
+    --code-analyzer-findings-height: none;
+    max-height: none;
+    overflow: visible;
+}
+
+.rules-section .code-analyzer-file-rail {
+    top: 0;
+    max-height: min(38vh, 340px);
+}
+
+.rules-section .code-analyzer-monaco-shell {
+    height: clamp(180px, 26vh, 320px);
+    min-height: 180px;
+}
+
+.rules-section .code-analyzer-tab-panel {
+    padding: 0.85rem 0.9rem;
+}
+
+/* Every row of chrome costs the report a row of content in a half-screen pane. */
+.rules-section .code-analyzer-tab {
+    min-height: 38px;
+}
+
+.rules-section .code-analyzer-note {
+    padding-block: 0.4rem;
+}
+
+.rules-section .code-analyzer-note {
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+}
+
+/* ── Rule files: list + inline editor ────────────────────────────────── */
+.rules-files-split {
+    display: grid;
+    min-height: 0;
+    grid-template-columns: minmax(210px, 340px) minmax(0, 1fr);
+}
+
+.rules-files-rail {
+    min-width: 0;
+    padding: 0.8rem;
+    border-right: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+    overflow-y: auto;
+}
+
+.rules-files-rail-empty {
+    margin: 0;
+    padding: 1.5rem 0.75rem;
+    color: var(--color-text-muted);
+    font-size: 0.78rem;
+    text-align: center;
+}
+
+.rules-files-rail .agent-files-tree {
+    gap: 0.75rem;
+}
+
+.rules-files-rail .agent-files-group-heading h3 {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.rules-files-rail .agent-file-tree-item {
+    padding: 0.5rem 0.6rem;
+    gap: 0.55rem;
+}
+
+.rules-files-rail .agent-file-tree-item.is-selected {
+    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+    border-left-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg-surface));
+}
+
+.rules-files-rail .agent-file-tree-icon {
+    width: 28px;
+    height: 28px;
+    font-size: 0.78rem;
+}
+
+/* In a 260px rail the scope name ("project/dir/Agent") truncates to nothing
+   useful, so the repo-relative path leads and the scope name rides under it. */
+.rules-files-rail .agent-file-tree-path {
+    order: 1;
+    color: var(--color-text);
+    font-size: 0.76rem;
+    font-weight: 600;
+}
+
+.rules-files-rail .agent-file-tree-name {
+    order: 2;
+    color: var(--color-text-muted);
+    font-size: 0.68rem;
+    font-weight: 500;
+}
+
+.rules-files-detail {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.8rem;
+    padding: 0.85rem 0.95rem;
+    overflow-y: auto;
+}
+
+.rules-files-detail-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+}
+
+.rules-files-detail-title {
+    min-width: 0;
+}
+
+.rules-files-detail-title h3 {
+    margin: 0;
+    overflow: hidden;
+    color: var(--color-text);
+    font-size: 0.92rem;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rules-files-detail-title code {
+    color: var(--color-text-muted);
+    font-size: 0.7rem;
+}
+
+.rules-files-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.rules-files-detail-foot {
+    margin: auto 0 0;
+    padding-top: 0.6rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
+    color: var(--color-text-muted);
+    font-size: 0.7rem;
+    line-height: 1.5;
+}
+
+.rules-files-detail-empty {
+    display: grid;
+    padding: 2rem 1rem;
+    justify-items: center;
+    gap: 0.3rem;
+    border: 1px dashed color-mix(in srgb, var(--color-border) 70%, transparent);
+    border-radius: 10px;
+    color: var(--color-text-muted);
+    text-align: center;
+}
+
+.rules-files-detail-empty > span {
+    color: color-mix(in srgb, var(--color-accent) 60%, var(--color-text-muted));
+    font-size: 1.4rem;
+}
+
+.rules-files-detail-empty strong {
+    color: var(--color-text);
+    font-size: 0.86rem;
+}
+
+.rules-files-detail-empty p {
+    margin: 0;
+    max-width: 44ch;
+    font-size: 0.75rem;
+}
+
+.rules-rule-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.rules-rule-row {
+    --rule-tone: var(--color-warning);
+    display: grid;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+    border-left: 3px solid var(--rule-tone);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--color-bg-base) 42%, transparent);
+    grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.rules-rule-row[data-level="COMMIT"] { --rule-tone: var(--color-primary); }
+.rules-rule-row[data-level="STOP"] { --rule-tone: var(--color-danger); }
+
+.rules-rule-text {
+    min-width: 0;
+    color: var(--color-text);
+    font-size: 0.81rem;
+    line-height: 1.4;
+}
+
+.rules-rule-enforcement {
+    width: auto;
+    min-width: 116px;
+    border-color: color-mix(in srgb, var(--rule-tone) 40%, var(--color-border));
+    background-color: color-mix(in srgb, var(--rule-tone) 12%, transparent);
+    color: var(--rule-tone);
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+/* Destructive action stays quiet until you reach for it. */
+.rules-rule-row .btn-outline-danger {
+    border-color: transparent;
+    color: color-mix(in srgb, var(--color-text-muted) 80%, transparent);
+}
+
+.rules-rule-row:hover .btn-outline-danger,
+.rules-rule-row .btn-outline-danger:focus-visible {
+    border-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
+    color: var(--color-danger);
+}
+
+/* Add-rule modal */
+.rules-add-rule-list {
+    display: flex;
+    max-height: 260px;
+    flex-direction: column;
+    gap: 0.35rem;
+    overflow-y: auto;
+}
+
+.rules-add-rule-option,
+.rules-add-rule-level {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.rules-add-rule-option:hover,
+.rules-add-rule-level:hover {
+    background: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+.rules-add-rule-option:has(input:checked),
+.rules-add-rule-level:has(input:checked) {
+    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+    background: color-mix(in srgb, var(--color-accent) 9%, transparent);
+}
+
+.rules-add-rule-option span,
+.rules-add-rule-level span {
+    display: grid;
+    min-width: 0;
+    gap: 0.15rem;
+}
+
+.rules-add-rule-option strong,
+.rules-add-rule-level strong {
+    color: var(--color-text);
+    font-size: 0.82rem;
+}
+
+.rules-add-rule-option small,
+.rules-add-rule-level small {
+    color: var(--color-text-muted);
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.rules-add-rule-levels {
+    display: grid;
+    gap: 0.35rem;
 }
 
 /* Collapsible raw console shared by the validate and measure stations. */
@@ -10067,40 +10684,74 @@ button.git-guard-menu-button:focus-visible {
     line-height: 1.5;
 }
 
-@media (max-width: 900px) {
-    .rules-rail {
-        padding-left: 0;
-    }
-
-    .rules-rail::before,
-    .rules-station-node {
+@media (max-width: 1100px) {
+    .rules-topbar-copy p {
         display: none;
     }
+}
 
-    .rules-station-hint {
-        max-width: none;
-        text-align: left;
+/* The side rail reduces the Rules workspace width before the viewport itself is
+   narrow. Drop secondary status copy first so Git Guard and the section menu
+   remain one clean row on standard laptop screens. */
+@media (max-width: 1400px) {
+    html.nav-layout-side .rules-localnav-badge {
+        display: none;
+    }
+}
+
+@media (max-width: 820px) {
+    /* Labels before badges: the tab has to stay identifiable. */
+    .rules-localnav-badge {
+        display: none;
+    }
+}
+
+@media (max-width: 900px) {
+    .rules-files-split {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    }
+
+    .rules-files-rail {
+        border-right: 0;
+        border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
     }
 }
 
 @media (max-width: 600px) {
-    .rules-station-header {
-        padding: 0.75rem 0.85rem;
+    .rules-topbar {
+        flex-wrap: wrap;
     }
 
-    .rules-station-body {
-        padding: 0.85rem;
-    }
-
-    .rules-terminal-station .rules-station-body {
-        padding: 0;
-    }
-
-    .rules-station-actions {
+    .rules-localnav {
         width: 100%;
     }
 
-    .rules-station-actions .btn:not(.rules-icon-btn) {
+    /* Icon-only tabs: four labels do not fit, but four targets do. */
+    .rules-localnav-label {
+        display: none;
+    }
+
+    .rules-localnav-item {
+        min-width: 0;
+        flex: 1 1 0;
+        justify-content: center;
+        padding-inline: 0.5rem;
+    }
+
+    .rules-section-header {
+        padding: 0.6rem 0.7rem;
+    }
+
+    .rules-section-body {
+        padding: 0.75rem 0.7rem;
+    }
+
+    .rules-section-actions {
+        width: 100%;
+    }
+
+    .rules-section-actions .btn:not(.rules-icon-btn) {
         flex: 1 1 auto;
         justify-content: center;
     }
@@ -10323,27 +10974,90 @@ button.git-guard-menu-button:focus-visible {
     text-transform: uppercase;
 }
 
+.rules-action-queue {
+    --action-queue-tone: var(--color-text-muted);
+    margin-top: 0.75rem;
+    padding-top: 0.7rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+}
+
+.rules-action-queue[data-tone="success"] { --action-queue-tone: var(--color-success); }
+.rules-action-queue[data-tone="warning"] { --action-queue-tone: var(--color-warning); }
+.rules-action-queue[data-tone="danger"] { --action-queue-tone: var(--color-danger); }
+.rules-action-queue[data-tone="info"] { --action-queue-tone: var(--color-primary); }
+
+.rules-action-queue-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.rules-action-queue-header h3 {
+    margin: 0;
+    color: var(--color-text);
+    font-size: 0.85rem;
+    font-weight: 650;
+}
+
+.rules-action-queue-header p {
+    margin: 0.12rem 0 0;
+    color: var(--color-text-muted);
+    font-size: 0.7rem;
+}
+
+.rules-action-queue-count {
+    flex: 0 0 auto;
+    padding: 0.18rem 0.5rem;
+    border: 1px solid color-mix(in srgb, var(--action-queue-tone) 30%, var(--color-border));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--action-queue-tone) 9%, transparent);
+    color: var(--action-queue-tone);
+    font: 650 0.66rem/1.35 var(--vb-font-mono, ui-monospace, monospace);
+}
+
 .vca-finding-list {
     display: grid;
-    gap: 0.55rem;
-    margin-top: 0.6rem;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
 }
 
 .vca-finding {
     --vca-finding-tone: var(--color-text-muted);
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 0.7rem;
-    padding: 0.75rem 0.8rem;
+    overflow: hidden;
     border: 1px solid color-mix(in srgb, var(--vca-finding-tone) 24%, var(--color-border));
     border-left-width: 3px;
     border-radius: 8px;
-    background: color-mix(in srgb, var(--color-bg-surface) 80%, transparent);
+    background: color-mix(in srgb, var(--color-bg-base) 32%, var(--color-bg-surface));
 }
 
 .vca-finding[data-tone="danger"] { --vca-finding-tone: var(--color-danger); }
 .vca-finding[data-tone="warning"] { --vca-finding-tone: var(--color-warning); }
 .vca-finding[data-tone="info"] { --vca-finding-tone: var(--color-primary); }
+
+.vca-finding-summary {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.62rem 0.7rem;
+    cursor: pointer;
+    list-style: none;
+}
+
+.vca-finding-summary::-webkit-details-marker {
+    display: none;
+}
+
+.vca-finding-summary:hover {
+    background: color-mix(in srgb, var(--vca-finding-tone) 5%, transparent);
+}
+
+.vca-finding-summary:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--vca-finding-tone) 65%, transparent);
+    outline-offset: -2px;
+}
 
 .vca-finding-badge {
     height: fit-content;
@@ -10354,36 +11068,61 @@ button.git-guard-menu-button:focus-visible {
     font: 800 0.62rem/1 var(--vb-font-mono, ui-monospace, monospace);
 }
 
-.vca-finding h4 {
-    margin: 0;
+.vca-finding-summary-copy {
+    display: grid;
+    min-width: 0;
+    gap: 0.12rem;
+}
+
+.vca-finding-title {
     color: var(--color-text);
-    font-size: 0.9rem;
+    font-size: 0.82rem;
+    font-weight: 650;
+    line-height: 1.3;
 }
 
 .vca-finding-source {
     display: block;
-    margin-top: 0.2rem;
     color: var(--color-text-muted);
-    font: 500 0.68rem/1.35 var(--vb-font-mono, ui-monospace, monospace);
+    font: 500 0.63rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
 }
 
-.vca-finding-detail {
-    display: grid;
-    grid-template-columns: 140px minmax(0, 1fr);
-    gap: 0.45rem 0.9rem;
-    margin-top: 0.55rem;
-    font-size: 0.78rem;
-    line-height: 1.5;
+.vca-finding-reason {
+    overflow: hidden;
+    color: color-mix(in srgb, var(--color-text-muted) 75%, var(--color-text) 25%);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.vca-finding-detail dt {
+.vca-finding-chevron {
     color: var(--color-text-muted);
-    font-weight: 700;
+    font-size: 0.65rem;
+    transition: transform 140ms ease;
 }
 
-.vca-finding-detail dd {
-    margin: 0;
+.vca-finding[open] .vca-finding-chevron {
+    transform: rotate(180deg);
+}
+
+.vca-finding-expanded {
+    padding: 0.65rem 0.75rem 0.75rem;
+    border-top: 1px solid color-mix(in srgb, var(--vca-finding-tone) 18%, var(--color-border));
+    background: color-mix(in srgb, var(--vca-finding-tone) 3%, transparent);
+}
+
+.vca-finding-expanded > strong {
+    color: var(--color-text-muted);
+    font-size: 0.68rem;
+    font-weight: 650;
+}
+
+.vca-finding-expanded > p {
+    margin: 0.2rem 0 0;
     color: var(--color-text);
+    font-size: 0.76rem;
+    line-height: 1.45;
 }
 
 .vca-finding-token {
@@ -10479,10 +11218,6 @@ button.git-guard-menu-button:focus-visible {
         width: 100%;
     }
 
-    .vca-finding-detail {
-        grid-template-columns: 1fr;
-        gap: 0.12rem;
-    }
 }
 
 /* ─── Code Quality dashboard (MintLint analysis engine) ─────────────────
@@ -10887,12 +11622,16 @@ button.git-guard-menu-button:focus-visible {
     text-transform: uppercase;
 }
 
+/* Section kickers ("Change quality", "Scan overview"). Sentence case and muted —
+   an accented, wide-tracked all-caps label reads as decoration, not structure. */
 .code-analyzer-eyebrow {
-    color: color-mix(in srgb, var(--color-accent) 52%, var(--color-text-muted));
-    font-size: 0.6rem;
-    font-weight: 800;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    color: var(--color-text-muted);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    /* The renderer already writes these sentence-cased ("Change quality"), and one of
+       them carries a folder path — never re-case it here. */
+    text-transform: none;
 }
 
 .code-analyzer-score-copy h3 {
@@ -12317,10 +13056,6 @@ button.git-guard-menu-button:focus-visible {
 }
 
 @media (max-width: 620px) {
-    .rules-station-actions .mintlint-scan-toggle {
-        display: none;
-    }
-
     .code-analyzer-scan-banner,
     .code-analyzer-score-card {
         grid-template-columns: 1fr;
@@ -12879,22 +13614,6 @@ body.git-guard-focus-active #app-content {
     font: 500 0.7rem/1.4 var(--vb-font-mono, ui-monospace, monospace);
 }
 
-.mintlint-scan-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    margin-right: auto;
-    cursor: pointer;
-    color: var(--color-text-muted);
-    font-size: 0.74rem;
-    user-select: none;
-}
-
-.mintlint-scan-toggle input {
-    margin: 0;
-    accent-color: var(--color-primary);
-}
-
 @media (max-width: 640px) {
     .mintlint-worst-row > summary {
         grid-template-columns: minmax(0, 1fr) auto;
@@ -13152,6 +13871,13 @@ body.git-guard-focus-active #app-content {
     justify-content: space-between;
     gap: 2rem;
     margin-bottom: 1.25rem;
+}
+
+.jobs-page-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
 }
 
 .jobs-page-title {
@@ -13518,7 +14244,14 @@ body.git-guard-focus-active #app-content {
 .job-run-status[data-tone="success"] { background: color-mix(in srgb, var(--color-success) 13%, transparent); color: var(--color-success); }
 .job-run-status[data-tone="danger"] { background: color-mix(in srgb, var(--color-danger) 13%, transparent); color: var(--color-danger); }
 
-/* App Layout & Collapsible Side Navigation Bar */
+/* ── App layout & navigation (side bar / top bar) ────────────────────────────
+   Two nav surfaces live in the DOM: .app-sidebar (side) and .app-subnav (top).
+   The <html> element carries exactly one of .nav-layout-side (default) or
+   .nav-layout-top; the other nav is display:none. The sidebar rail collapse is
+   signalled by <html>.sidebar-collapsed. Both classes are applied before first
+   paint by an inline <head> script and managed at runtime by VibeRailsNavLayout
+   / VibeControlApp.initSidebarToggle. */
+
 .app-layout {
     display: flex;
     min-height: 100vh;
@@ -13532,17 +14265,62 @@ body.git-guard-focus-active #app-content {
     min-width: 0;
     flex: 1;
     min-height: 100vh;
+    /* The sidebar is fixed and side navigation is the default. Keep content
+       clear of it even before the runtime nav-layout class is applied. */
     margin-left: 240px;
     width: calc(100% - 240px);
     transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.app-sidebar.collapsed ~ .app-main,
-body.sidebar-collapsed .app-main {
+/* Side layout: main content offsets for the fixed sidebar. */
+html.nav-layout-side .app-main {
+    margin-left: 240px;
+    width: calc(100% - 240px);
+}
+/* Keep the main workspace in sync with the fixed rail even if the nav-layout
+   preference has not been restored yet. The top-layout rule below overrides
+   this and remains full-width. */
+html.sidebar-collapsed .app-main {
     margin-left: 64px;
     width: calc(100% - 64px);
 }
 
+/* Top layout: the top bar is a sticky sibling; main flows full-width beneath it. */
+html.nav-layout-top .app-layout {
+    min-height: calc(100vh - var(--navbar-height));
+}
+html.nav-layout-top .app-main {
+    margin-left: 0;
+    width: 100%;
+    min-height: calc(100vh - var(--navbar-height));
+}
+html.nav-layout-top .app-sidebar { display: none; }
+html.nav-layout-side .app-subnav { display: none; }
+
+/* In top layout, the terminal-focus workspace sits below the top bar. */
+html.nav-layout-top body.vb-terminal-focus-active .main-container {
+    height: calc(100dvh - var(--navbar-height));
+    min-height: calc(100dvh - var(--navbar-height));
+}
+
+/* Compact the top bar in terminal-focus mode (logo would otherwise overflow
+   the reduced navbar height). Scoped to top layout so the sidebar is unaffected. */
+html.nav-layout-top body.vb-terminal-focus-active .app-subnav {
+    padding: 0 0.65rem;
+    gap: 0.65rem;
+}
+html.nav-layout-top body.vb-terminal-focus-active .app-subnav .app-subnav-link {
+    padding: 0.3rem 0.6rem;
+}
+html.nav-layout-top body.vb-terminal-focus-active .app-subnav .brand-logo-sm {
+    height: 42px;
+}
+html.nav-layout-top body.vb-terminal-focus-active .app-subnav .nav-exit-btn-sm {
+    height: 30px;
+    padding: 0 0.65rem;
+}
+
+/* ── Side navigation bar ─────────────────────────────────────────────────── */
 .app-sidebar {
     width: 240px;
     min-width: 240px;
@@ -13565,55 +14343,13 @@ body.sidebar-collapsed .app-main {
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.25);
 }
 
-/* Sidebar Collapsed State */
-.app-sidebar.collapsed,
-body.sidebar-collapsed .app-sidebar {
+html.sidebar-collapsed .app-sidebar {
     width: 64px;
     min-width: 64px;
     padding: 1rem 0.4rem;
 }
 
-/* Responsive Auto-Collapse on Smaller Screen Sizes */
-@media (max-width: 992px) {
-    .app-sidebar:not(.expanded) {
-        width: 64px;
-        min-width: 64px;
-        padding: 1rem 0.4rem;
-    }
-
-    .app-sidebar:not(.expanded) ~ .app-main,
-    body:not(.sidebar-expanded) .app-main {
-        margin-left: 64px;
-        width: calc(100% - 64px);
-    }
-
-    .app-sidebar:not(.expanded) .nav-label,
-    .app-sidebar:not(.expanded) .brand-text-sm {
-        display: none !important;
-        opacity: 0;
-    }
-
-    .app-sidebar:not(.expanded) .sidebar-header {
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 0.25rem 0 0.75rem 0;
-        gap: 0.5rem;
-    }
-
-    .app-sidebar:not(.expanded) .app-subnav-link,
-    .app-sidebar:not(.expanded) .nav-exit-btn-sm {
-        justify-content: center;
-        padding: 0.65rem 0;
-        gap: 0;
-    }
-
-    .app-sidebar:not(.expanded) .sidebar-toggle-icon {
-        transform: rotate(180deg);
-    }
-}
-
-/* Sidebar Header */
+/* Sidebar header */
 .sidebar-header {
     display: flex;
     align-items: center;
@@ -13623,12 +14359,11 @@ body.sidebar-collapsed .app-sidebar {
     gap: 0.5rem;
 }
 
-.app-sidebar.collapsed .sidebar-header {
+html.sidebar-collapsed .sidebar-header {
     flex-direction: column;
     align-items: center;
     justify-content: center;
     padding: 0.25rem 0 0.75rem 0;
-    gap: 0.5rem;
 }
 
 .sidebar-header .navbar-brand-sm {
@@ -13655,14 +14390,13 @@ body.sidebar-collapsed .app-sidebar {
     margin: 0;
 }
 
-.app-sidebar.collapsed .sidebar-header .navbar-brand-sm {
+html.sidebar-collapsed .sidebar-header .navbar-brand-sm {
     justify-content: center;
     width: 100%;
 }
 
-.app-sidebar.collapsed .sidebar-header .brand-text-sm {
+html.sidebar-collapsed .sidebar-header .brand-text-sm {
     display: none;
-    opacity: 0;
 }
 
 .sidebar-toggle-btn {
@@ -13692,11 +14426,11 @@ body.sidebar-collapsed .app-sidebar {
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.app-sidebar.collapsed .sidebar-toggle-icon {
+html.sidebar-collapsed .sidebar-toggle-icon {
     transform: rotate(180deg);
 }
 
-/* Sidebar Nav Links Container */
+/* Sidebar nav links container */
 .sidebar-nav {
     display: flex;
     flex-direction: column;
@@ -13716,8 +14450,9 @@ body.sidebar-collapsed .app-sidebar {
     border-radius: 4px;
 }
 
-/* Sidebar Links */
-.app-subnav-link {
+/* Sidebar links — scoped to .app-sidebar so the top nav's .app-subnav-link
+   rules (defined earlier in this file) are not clobbered. */
+.app-sidebar .app-subnav-link {
     display: flex;
     align-items: center;
     gap: 0.75rem;
@@ -13741,13 +14476,13 @@ body.sidebar-collapsed .app-sidebar {
     overflow: hidden;
 }
 
-.app-sidebar.collapsed .app-subnav-link {
+html.sidebar-collapsed .app-sidebar .app-subnav-link {
     justify-content: center;
     padding: 0.65rem 0;
     gap: 0;
 }
 
-.app-subnav-link .nav-icon {
+.app-sidebar .app-subnav-link .nav-icon {
     width: 20px;
     height: 20px;
     display: inline-flex;
@@ -13760,31 +14495,31 @@ body.sidebar-collapsed .app-sidebar {
     transition: opacity 0.2s ease, transform 0.2s ease, color 0.2s ease, filter 0.2s ease;
 }
 
-.app-subnav-link .nav-label {
+.app-sidebar .app-subnav-link .nav-label {
     transition: opacity 0.2s ease;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.app-sidebar.collapsed .app-subnav-link .nav-label {
+html.sidebar-collapsed .app-sidebar .app-subnav-link .nav-label {
     display: none;
     opacity: 0;
 }
 
-.app-subnav-link:hover {
+.app-sidebar .app-subnav-link:hover {
     color: #ffffff;
     background: rgba(255, 255, 255, 0.07);
     border-left-color: rgba(6, 182, 212, 0.5);
 }
 
-.app-subnav-link:hover .nav-icon {
+.app-sidebar .app-subnav-link:hover .nav-icon {
     opacity: 1;
     color: #38bdf8;
     transform: scale(1.1);
 }
 
-.app-subnav-link.active {
+.app-sidebar .app-subnav-link.active {
     color: #ffffff;
     background: linear-gradient(135deg, rgba(167, 123, 243, 0.16) 0%, rgba(6, 182, 212, 0.14) 100%);
     border: 1px solid rgba(167, 123, 243, 0.25);
@@ -13793,19 +14528,61 @@ body.sidebar-collapsed .app-sidebar {
     font-weight: 700;
 }
 
-.app-subnav-link.active .nav-icon {
+.app-sidebar .app-subnav-link.active .nav-icon {
     opacity: 1;
     color: #38bdf8;
     filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.4));
 }
 
-/* Sidebar Footer & Exit Button */
+/* Sidebar footer controls */
 .sidebar-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
     padding-top: 0.75rem;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.nav-exit-btn-sm {
+.sidebar-layout-switch-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.38rem 0.7rem;
+    width: 100%;
+    color: var(--color-text-muted);
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.sidebar-layout-switch-btn .nav-icon {
+    width: 16px;
+    flex-shrink: 0;
+    text-align: center;
+}
+
+html.sidebar-collapsed .sidebar-layout-switch-btn {
+    justify-content: center;
+    padding: 0.38rem 0;
+}
+
+html.sidebar-collapsed .sidebar-layout-switch-btn .nav-label {
+    display: none;
+}
+
+.sidebar-layout-switch-btn:hover {
+    color: #ffffff;
+    background: rgba(6, 182, 212, 0.12);
+    border-color: rgba(6, 182, 212, 0.4);
+}
+
+.app-sidebar .nav-exit-btn-sm {
     display: flex;
     align-items: center;
     gap: 0.75rem;
@@ -13823,20 +14600,64 @@ body.sidebar-collapsed .app-sidebar {
     overflow: hidden;
 }
 
-.app-sidebar.collapsed .nav-exit-btn-sm {
+html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm {
     justify-content: center;
     padding: 0.6rem 0;
 }
 
-.app-sidebar.collapsed .nav-exit-btn-sm .nav-label {
+html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     display: none;
 }
 
-.nav-exit-btn-sm:hover {
+.app-sidebar .nav-exit-btn-sm:hover {
     background: rgba(239, 68, 68, 0.2);
     border-color: rgba(239, 68, 68, 0.4);
     color: #ff8888;
 }
+
+/* Responsive: narrow the sidebar to a rail on small screens (side layout only). */
+@media (max-width: 992px) {
+    html.nav-layout-side .app-sidebar {
+        width: 64px;
+        min-width: 64px;
+        padding: 1rem 0.4rem;
+    }
+
+    html.nav-layout-side .app-main {
+        margin-left: 64px;
+        width: calc(100% - 64px);
+    }
+
+    html.nav-layout-side .app-sidebar .nav-label,
+    html.nav-layout-side .app-sidebar .brand-text-sm {
+        display: none;
+    }
+
+    html.nav-layout-side .app-sidebar .sidebar-header {
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 0.25rem 0 0.75rem 0;
+        gap: 0.5rem;
+    }
+
+    html.nav-layout-side .app-sidebar .app-subnav-link,
+    html.nav-layout-side .app-sidebar .sidebar-layout-switch-btn,
+    html.nav-layout-side .app-sidebar .nav-exit-btn-sm {
+        justify-content: center;
+        padding: 0.65rem 0;
+        gap: 0;
+    }
+
+    html.nav-layout-side .app-sidebar .sidebar-layout-switch-btn {
+        padding: 0.38rem 0;
+    }
+
+    html.nav-layout-side .app-sidebar .sidebar-toggle-icon {
+        transform: rotate(180deg);
+    }
+}
+
 
 .job-run-status[data-tone="warning"] { background: color-mix(in srgb, var(--color-warning) 14%, transparent); color: var(--color-warning); }
 .job-run-status[data-tone="info"] { background: color-mix(in srgb, var(--color-accent) 13%, transparent); color: var(--color-accent); }
@@ -13925,6 +14746,25 @@ body.sidebar-collapsed .app-sidebar {
 .jobs-empty-large { grid-column: 1 / -1; flex-direction: column; min-height: 250px; text-align: center; }
 .jobs-empty-large > i { color: var(--color-accent); font-size: 2rem; }
 .jobs-empty-large strong { color: var(--color-text); font-size: 1rem; }
+
+.job-recipe-review {
+    display: grid;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.job-recipe-review-value {
+    max-height: 12rem;
+    margin: 0;
+    padding: 0.75rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--color-text);
+    background: color-mix(in srgb, var(--color-bg-base) 72%, transparent);
+    border: 1px solid var(--color-border);
+    border-radius: 0.5rem;
+}
 
 .jobs-runs {
     overflow: hidden;

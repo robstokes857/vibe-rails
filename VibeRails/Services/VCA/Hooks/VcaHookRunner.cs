@@ -171,14 +171,14 @@ public sealed class VcaHookRunner : IVcaHookRunner
         if (summary.HasError || summary.HasStopViolation)
         {
             await _presenter.WriteFailureAsync("Blocking VCA validation still fails. Fix STOP-level violations before committing.");
-            await PauseIfInteractiveAsync();
+            await PauseIfInteractiveAsync(invocation);
             return 1;
         }
 
         if (!summary.HasCommitViolations)
         {
             await _presenter.WriteSuccessAsync("No VCA commit acknowledgments were required.");
-            await PauseIfInteractiveAsync();
+            await PauseIfInteractiveAsync(invocation);
             return 0;
         }
 
@@ -186,7 +186,7 @@ public sealed class VcaHookRunner : IVcaHookRunner
             !File.Exists(invocation.CommitMessagePath))
         {
             await _presenter.WriteErrorAsync($"Commit message file not found: {invocation.CommitMessagePath ?? "(missing)"}");
-            await PauseIfInteractiveAsync();
+            await PauseIfInteractiveAsync(invocation);
             return 1;
         }
 
@@ -204,7 +204,7 @@ public sealed class VcaHookRunner : IVcaHookRunner
         if (missingAcknowledgments.Count == 0)
         {
             await _presenter.WriteSuccessAsync("VCA commit acknowledgments already found.");
-            await PauseIfInteractiveAsync();
+            await PauseIfInteractiveAsync(invocation);
             return 0;
         }
 
@@ -214,7 +214,7 @@ public sealed class VcaHookRunner : IVcaHookRunner
             missingAcknowledgments,
             cancellationToken);
 
-        await PauseIfInteractiveAsync();
+        await PauseIfInteractiveAsync(invocation);
         return accepted ? 0 : 1;
     }
 
@@ -322,12 +322,38 @@ public sealed class VcaHookRunner : IVcaHookRunner
         return true;
     }
 
-    private async Task PauseIfInteractiveAsync()
+    private async Task PauseIfInteractiveAsync(VcaHookInvocation invocation)
     {
-        if (VcaHookProcessLaunch.CanPromptInCurrentConsole())
+        if (invocation.ConsoleWindowAttached ||
+            !VcaHookProcessLaunch.CanPromptInCurrentConsole())
         {
-            await _presenter.ReadLineAsync("Press Enter to close this VCA prompt.");
+            return;
         }
+
+        var timeout = VcaHookProcessHost.ConsolePauseTimeout;
+        var readTask = _presenter.ReadLineAsync(
+            $"Press Enter to close this VCA prompt ({VcaHookProcessHost.DescribeAutoClose(timeout)})...");
+
+        using var timer = new CancellationTokenSource();
+        if (await Task.WhenAny(readTask, Task.Delay(timeout, timer.Token)) == readTask)
+        {
+            await readTask;
+            return;
+        }
+
+        // Timed out with the read still outstanding. It cannot be cancelled: IVcaHookPresenter's
+        // ReadLineAsync takes no token, and it bottoms out in Console.In.ReadLineAsync, which has
+        // no cancellable form — a pending console read only ends when a line arrives or the handle
+        // closes. That is survivable here and nowhere else in this file: this is the last thing the
+        // hook does before returning its exit code, the read is sitting on a thread-pool thread
+        // (background, so it cannot hold the process open), and the presenter released its write
+        // lock before reading, so nothing else can block behind it. Observe a fault so it can never
+        // surface as an unobserved task exception.
+        _ = readTask.ContinueWith(
+            static task => _ = task.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private static string NormalizeReason(string? reason) =>

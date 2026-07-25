@@ -1,3 +1,5 @@
+using Moq;
+using VibeRails.DB;
 using VibeRails.Services.GitPreflight;
 using VibeRails.Services.VCA.Hooks;
 using Xunit;
@@ -76,10 +78,14 @@ public sealed class GitPreflightPipelineTests
     }
 
     [Fact]
-    public async Task AutomatedWorkflowStep_PreviewDoesNotQueueJobs()
+    public async Task AutomatedWorkflowStep_NeverQueuesJobs_AndCannotBlockTheCommit()
     {
         var output = new List<string>();
-        var result = await new AutomatedWorkflowsPreflightStep().ExecuteAsync(
+        // The pre-commit VCA trigger is gone: Jobs run on a schedule, after a successful commit, or
+        // on demand. The step no longer takes a job store at all, so it cannot reach one.
+        var step = new AutomatedWorkflowsPreflightStep();
+
+        var result = await step.ExecuteAsync(
             new GitPreflightStepContext(
                 "run",
                 Request(),
@@ -91,8 +97,14 @@ public sealed class GitPreflightPipelineTests
                 }),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal("Automated Jobs are not queued from preview checks.", Assert.Single(output));
         Assert.Equal(GitPreflightStepStatus.Skipped, result.Status);
+        Assert.False(result.Blocking);
+        Assert.False(step.CanBlock);
+
+        var message = Assert.Single(output);
+        Assert.DoesNotContain("Queued", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(message, result.Summary);
+        Assert.Equal([message], result.Output);
     }
 
     [Fact]

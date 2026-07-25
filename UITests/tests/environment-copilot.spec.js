@@ -10,7 +10,7 @@ async function openCopilotEnvironmentForm(page) {
     await page.goto('/');
 
     // Navigate to Environments view
-    const environmentsNav = page.locator('.app-subnav-link[data-view="environments"]');
+    const environmentsNav = page.locator('.app-subnav-link[data-view="environments"]:visible');
     await expect(environmentsNav).toBeVisible({ timeout: 15_000 });
     await environmentsNav.click();
     await expect(page.getByRole('heading', { name: /environments/i })).toBeVisible({ timeout: 10_000 });

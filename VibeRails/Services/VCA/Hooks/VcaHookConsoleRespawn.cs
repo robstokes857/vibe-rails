@@ -19,8 +19,8 @@ namespace VibeRails.Services.VCA.Hooks;
 /// This class instead re-spawns the current executable with the Win32
 /// <c>CREATE_NEW_CONSOLE</c> creation flag. The child process gets a fresh, independent
 /// console window in every scenario — terminal, VS Code SCM panel, GUI Git client —
-/// and stays open until the user presses Enter or the two-minute timeout elapses (see
-/// <see cref="VcaHookProcessHost"/>). The parent process writes a short status line to
+/// and stays open until the user presses Enter or
+/// <see cref="VcaHookProcessHost.ConsolePauseTimeout"/> elapses. The parent process writes a short status line to
 /// its own stdout/stderr so the original caller (e.g. VS Code's logs) still sees that
 /// the hook ran and what the outcome was.
 /// </para>
