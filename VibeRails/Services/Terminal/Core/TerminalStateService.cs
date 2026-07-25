@@ -35,10 +35,10 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         _ioObserverService = ioObserverService;
     }
 
-    public async Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default, string? initialUserInput = null)
+    public async Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default, string? initialUserInput = null, string? jobRunId = null)
     {
         var sessionId = Guid.NewGuid().ToString();
-        await _repository.CreateSessionAsync(sessionId, cli, envName, workDir, Environment.ProcessId);
+        await _repository.CreateSessionAsync(sessionId, cli, envName, workDir, Environment.ProcessId, jobRunId);
 
         // Record the env's initial message (if any) as the session's first user input,
         // so it shows up in UserInputs at sequence=1 alongside subsequent typed inputs
@@ -65,7 +65,9 @@ public class TerminalStateService : ITerminalStateService, IDisposable
 
         // For now, any configured instance defaults to remote-enabled sessions.
         // Keep makeRemote in the signature so explicit per-session controls can be reintroduced later.
-        if (ShouldRegisterRemoteSession(makeRemote))
+        // Automated Job sessions (jobRunId set) are NEVER exposed to the viberails.ai relay,
+        // regardless of RemoteConfig — an unattended job must not be remotely attachable.
+        if (ShouldRegisterRemoteSession(makeRemote, jobRunId))
         {
             _ = _remoteStateService.RegisterTerminalAsync(sessionId, cli, workDir, envName);
         }
@@ -288,9 +290,12 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         // Shared state is session-managed via CompleteSessionAsync.
     }
 
-    private static bool ShouldRegisterRemoteSession(bool makeRemoteRequested)
+    private static bool ShouldRegisterRemoteSession(bool makeRemoteRequested, string? jobRunId = null)
     {
         _ = makeRemoteRequested;
+        // Automated Job sessions are never remotely attachable, even when remote is fully configured.
+        if (jobRunId is not null)
+            return false;
         // Must match TerminalRunner.ShouldEnableRemote: only register a session remotely when
         // remote access is fully configured INCLUDING a PIN. (Deregistration below stays on the
         // broad check so cleanup still runs if the PIN was cleared mid-session.)

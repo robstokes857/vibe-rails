@@ -1,7 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
+using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.Jobs;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 
@@ -35,8 +37,15 @@ public static class CliLoop
     /// <summary>
     /// Runs an LLM CLI in the foreground while the web server runs in the background.
     /// Invoked from Program.cs after the host has started when --env was passed.
+    ///
+    /// Returns the CLI's exit code, and also assigns it to <see cref="Environment.ExitCode"/> for
+    /// the plain <c>vb --env</c> path, which has no caller to hand it to.
     /// </summary>
-    public static async Task RunTerminalWithWebAsync(ParsedArgs parsedArgs, IServiceProvider services)
+    public static async Task<int> RunTerminalWithWebAsync(
+        ParsedArgs parsedArgs,
+        IServiceProvider services,
+        string? jobRunId = null,
+        Action<string>? onSessionCreated = null)
     {
         using var scope = services.CreateScope();
         var scopedServices = scope.ServiceProvider;
@@ -96,8 +105,11 @@ public static class CliLoop
             sessionService,
             makeRemote: false,
             CancellationToken.None,
-            environmentInitialMessage);
+            environmentInitialMessage,
+            jobRunId,
+            onSessionCreated);
         Environment.ExitCode = exitCode;
+        return exitCode;
     }
 
     private static void ShowVersion()

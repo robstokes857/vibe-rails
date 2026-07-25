@@ -26,6 +26,21 @@
             document.documentElement.classList.add('git-guard-focus-active');
         }
 
+        // Apply saved nav layout + sidebar collapse before first paint to avoid FOUC.
+        // The VibeRailsNavLayout module re-applies this at runtime; this just sets
+        // the initial class so the correct nav renders on the very first paint.
+        (function () {
+            try {
+                var root = document.documentElement;
+                var navLayout = localStorage.getItem('viberails_nav_layout');
+                root.classList.toggle('nav-layout-top', navLayout === 'top');
+                root.classList.toggle('nav-layout-side', navLayout !== 'top');
+                if (localStorage.getItem('viberails_sidebar_collapsed') === 'true') {
+                    root.classList.add('sidebar-collapsed');
+                }
+            } catch (_) { /* ignore storage errors */ }
+        })();
+
         const _assetBase = (window.__viberails_VSCODE__ && window.__viberails_ASSETS_BASE__)
             ? window.__viberails_ASSETS_BASE__.replace(/\/$/, '') + '/'
             : document.baseURI;
@@ -46,8 +61,71 @@
 </head>
 
 <body>
+    <!-- Top Navigation Bar (shown when nav layout = top) -->
+    <nav class="app-subnav sticky-top">
+        <div class="d-flex align-items-center">
+            <button type="button" class="navbar-brand-sm animate-fade-up d-flex align-items-center gap-2">
+                <img src="assets/img/logo.png" alt="Vibe Rails logo" class="brand-logo-sm" width="48" height="48">
+                <span class="brand-text-sm">Vibe Rails</span>
+            </button>
+            <button type="button" class="top-layout-switch-btn" data-action="switch-nav-layout"
+                data-nav-layout-target="side" title="Switch to side navigation"
+                aria-label="Switch to side navigation">
+                <i class="fa-solid fa-table-columns" aria-hidden="true"></i>
+            </button>
+        </div>
+
+        <div class="d-flex align-items-center justify-content-center flex-grow-1 gap-1">
+            <button class="app-subnav-link" data-action="navigate" data-view="terminal-focus"
+                title="Full-screen Terminal Workspace">
+                <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="me-1 icon-light">
+                <span>Terminals</span>
+            </button>
+            <button class="app-subnav-link" data-action="navigate-home" title="Rules and project safeguards">
+                <i class="fa-solid fa-list-check me-1"></i>
+                <span>RULES</span>
+            </button>
+            <button class="app-subnav-link" data-action="navigate" data-view="environments"
+                title="Manage Environment / Workers & Sandboxes">
+                <img src="assets/img/icons/layer-group-solid-full.svg" alt="" class="me-1 icon-light">
+                <span>ENVIRONMENTS</span>
+            </button>
+            <button class="app-subnav-link" data-action="navigate" data-view="vibe-rails-ai"
+                title="Vibe Rails AI — query and inspect captures">
+                <i class="fa-solid fa-brain me-1"></i>
+                <span>Vibe AI</span>
+            </button>
+            <button class="app-subnav-link" data-action="navigate" data-view="mcp"
+                title="MCP Explorer — inspect and call tools on the local MCP server">
+                <i class="fa-solid fa-plug me-1"></i>
+                <span>MCP</span>
+            </button>
+            <button class="app-subnav-link" data-action="navigate" data-view="jobs"
+                title="Durable scheduled and Git-triggered LLM Jobs">
+                <i class="fa-solid fa-clock-rotate-left me-1"></i>
+                <span>Automation</span>
+            </button>
+            <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
+                <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="me-1 icon-light settings-card-cog">
+                <span>Settings</span>
+            </button>
+        </div>
+
+        <div class="d-flex align-items-center ms-auto">
+            <button class="nav-exit-btn-sm" title="Close VibeRails and stop backend">
+                <svg class="nav-exit-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                <span>Exit</span>
+            </button>
+        </div>
+    </nav>
+
     <div class="app-layout">
-        <!-- Collapsible Side Navigation Bar -->
+        <!-- Collapsible Side Navigation Bar (shown when nav layout = side) -->
         <aside class="app-sidebar" id="app-sidebar">
             <div class="sidebar-header">
                 <button type="button" class="navbar-brand-sm animate-fade-up d-flex align-items-center gap-2" title="Vibe Rails Dashboard">
@@ -72,7 +150,7 @@
                 <button class="app-subnav-link" data-action="navigate" data-view="environments"
                     title="Manage Environment / Workers & Sandboxes">
                     <img src="assets/img/icons/layer-group-solid-full.svg" alt="" class="nav-icon icon-light">
-                    <span class="nav-label">WORKERS</span>
+                    <span class="nav-label">ENVIRONMENTS</span>
                 </button>
                 <button class="app-subnav-link" data-action="navigate" data-view="vibe-rails-ai"
                     title="Vibe Rails AI — query and inspect captures">
@@ -87,7 +165,7 @@
                 <button class="app-subnav-link" data-action="navigate" data-view="jobs"
                     title="Durable scheduled and Git-triggered LLM Jobs">
                     <i class="fa-solid fa-clock-rotate-left nav-icon"></i>
-                    <span class="nav-label">Jobs</span>
+                    <span class="nav-label">Automation</span>
                 </button>
                 <button class="app-subnav-link" data-action="navigate-settings" title="Application Settings">
                     <img src="assets/img/icons/sliders-solid-full.svg" alt="" class="nav-icon icon-light settings-card-cog">
@@ -96,6 +174,12 @@
             </nav>
 
             <div class="sidebar-footer">
+                <button type="button" class="sidebar-layout-switch-btn" data-action="switch-nav-layout"
+                    data-nav-layout-target="top"
+                    title="Switch to top navigation" aria-label="Switch to top navigation">
+                    <i class="fa-solid fa-window-maximize nav-icon" aria-hidden="true"></i>
+                    <span class="nav-label">Top nav</span>
+                </button>
                 <button id="exit-btn" class="nav-exit-btn-sm" title="Close VibeRails and stop backend">
                     <svg class="nav-exit-icon nav-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -131,10 +215,9 @@
     <template id="dashboard-template">
         <div class="dashboard" data-dashboard="unified">
             <!-- Rules workspace. DashboardController mounts the Rules view here; the terminal
-                 panel mounts into the [data-terminal-content] slot at the end of that view. -->
-            <div class="row mb-3">
-                <div class="col-12 rules-dashboard-host" data-rules-overview-host></div>
-            </div>
+                 panel mounts into the [data-terminal-content] slot in that view's bottom pane.
+                 No row/col wrapper — the workspace is a full-height flex column. -->
+            <div class="rules-dashboard-host" data-rules-overview-host></div>
         </div>
     </template>
 
@@ -223,15 +306,15 @@
         </div>
     </template>
 
+    <!-- Rules workspace.
+         Local navigation swaps ONE section into the top pane; the agent terminal owns the
+         bottom pane and is never unmounted by a section switch (or by a rule-file save).
+         Every data-* hook below is bound by RuleController / JobController / AgentController —
+         keep the attributes even when the surrounding markup moves. -->
     <template id="agents-template">
-        <div class="view rules-workspace" data-view="agents">
+        <div class="view rules-workspace" data-view="agents" data-rules-workspace>
 
-            <header class="rules-page-header">
-                <div class="rules-page-heading">
-                    <h4 class="rules-page-title text-uppercase fw-bold mb-0"><span class="text-gradient">Rules</span></h4>
-                    <p>Validate every uncommitted change, hand fixes to an agent, and watch code health — before
-                        anything reaches a commit.</p>
-                </div>
+            <header class="rules-topbar">
                 <section class="rules-git-setting" data-hook-health data-tone="neutral" aria-busy="true"
                     aria-label="Git Guard setting">
                     <span class="rules-git-setting-icon" aria-hidden="true">
@@ -254,48 +337,85 @@
                         <span class="visually-hidden" data-button-label>Turn Git Guard on</span>
                     </button>
                 </section>
+
+                <!-- Local navigation: applies to this page only. One section is visible at a time. -->
+                <div class="rules-localnav" role="tablist" aria-label="Rules sections" data-rules-nav>
+                    <button class="rules-localnav-item" type="button" role="tab" id="rules-tab-validate"
+                        data-rules-tab="validate" aria-controls="rules-section-validate" aria-selected="true"
+                        data-tone="neutral">
+                        <i class="fa-regular fa-circle-check rules-localnav-icon" aria-hidden="true"></i>
+                        <span class="rules-localnav-label">Validation</span>
+                        <span class="rules-localnav-badge" data-rules-tab-meta>Checking</span>
+                    </button>
+                    <button class="rules-localnav-item" type="button" role="tab" id="rules-tab-quality"
+                        data-rules-tab="quality" aria-controls="rules-section-quality" aria-selected="false"
+                        tabindex="-1" data-tone="neutral">
+                        <i class="fa-solid fa-chart-simple rules-localnav-icon" aria-hidden="true"></i>
+                        <span class="rules-localnav-label">Code quality</span>
+                        <span class="rules-localnav-badge" data-rules-tab-meta>Waiting</span>
+                    </button>
+                    <button class="rules-localnav-item" type="button" role="tab" id="rules-tab-files"
+                        data-rules-tab="files" aria-controls="rules-section-files" aria-selected="false" tabindex="-1"
+                        data-tone="neutral">
+                        <i class="fa-regular fa-file-lines rules-localnav-icon" aria-hidden="true"></i>
+                        <span class="rules-localnav-label">Rule files</span>
+                        <span class="rules-localnav-badge" data-rules-tab-meta>AGENTS.md</span>
+                    </button>
+                    <button class="rules-localnav-item" type="button" role="tab" id="rules-tab-automate"
+                        data-rules-tab="automate" aria-controls="rules-section-automate" aria-selected="false"
+                        tabindex="-1" data-tone="neutral">
+                        <i class="fa-regular fa-clock rules-localnav-icon" aria-hidden="true"></i>
+                        <span class="rules-localnav-label">Automation</span>
+                        <span class="rules-localnav-badge" data-rules-tab-meta>Jobs</span>
+                    </button>
+                </div>
             </header>
 
-            <div class="rules-rail">
+            <div class="rules-panes" data-rules-panes>
 
-                <!-- Validate: what blocks the commit right now -->
-                <div class="rules-station" data-station="validate">
-                    <span class="rules-station-node" aria-hidden="true"></span>
-                    <section class="card rules-vca-panel vca-console-card" data-vca-console data-tone="neutral"
-                        aria-busy="false" aria-labelledby="rules-vca-results-title">
-                        <header class="rules-station-header">
-                            <div class="rules-station-heading">
-                                <span class="rules-station-eyebrow">Validate</span>
-                                <div class="rules-station-title-row">
-                                    <h2 id="rules-vca-results-title">Validation results</h2>
-                                    <span class="rules-check-running" data-vca-console-spinner hidden
-                                        aria-hidden="true">
-                                        <span class="spinner-border spinner-border-sm"></span>
-                                    </span>
-                                    <span class="vca-console-state" data-vca-console-state>Ready</span>
-                                </div>
+                <div class="rules-pane rules-pane-sections" data-rules-sections>
+
+                    <!-- Validate: what blocks the commit right now -->
+                    <section class="rules-section card vca-console-card rules-vca-panel" id="rules-section-validate"
+                        role="tabpanel" aria-labelledby="rules-tab-validate" tabindex="-1" data-rules-section="validate"
+                        data-vca-console data-tone="neutral" aria-busy="false">
+                        <header class="rules-section-header">
+                            <div class="rules-section-heading">
+                                <h2>Validation results</h2>
+                                <span class="rules-section-note">Your uncommitted changes, checked against
+                                    your AGENTS.md rules</span>
                             </div>
-                            <div class="rules-station-actions" aria-label="Validation result actions">
-                                <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
-                                    data-action="copy-hook-output" aria-label="Copy validation results"
-                                    title="Copy results">
-                                    <i class="fa-regular fa-copy" aria-hidden="true"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
-                                    data-action="clear-hook-output" aria-label="Clear validation results"
-                                    title="Clear results">
-                                    <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                                </button>
+                            <div class="rules-section-actions" aria-label="Validation result actions">
+                                <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
+                                    <span class="spinner-border spinner-border-sm"></span>
+                                </span>
+                                <span class="vca-console-state" data-vca-console-state>Ready</span>
+                                <details class="rules-action-menu">
+                                    <summary aria-label="More validation actions" title="More actions">
+                                        <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+                                    </summary>
+                                    <div class="rules-action-menu-popover" role="group"
+                                        aria-label="Validation utilities">
+                                        <button type="button" data-action="copy-hook-output">
+                                            <i class="fa-regular fa-copy" aria-hidden="true"></i>
+                                            Copy transcript
+                                        </button>
+                                        <button type="button" data-action="clear-hook-output">
+                                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                                            Clear results
+                                        </button>
+                                    </div>
+                                </details>
                                 <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
-                                    type="button" data-action="run-hook-preview" data-idle-label="Run again" disabled>
+                                    type="button" data-action="run-hook-preview" data-idle-label="Check changes" disabled>
                                     <span class="spinner-border spinner-border-sm" data-button-spinner hidden
                                         aria-hidden="true"></span>
                                     <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
-                                    <span data-button-label>Run again</span>
+                                    <span data-button-label>Check changes</span>
                                 </button>
                             </div>
                         </header>
-                        <div class="rules-station-body rules-vca-results">
+                        <div class="rules-section-body rules-vca-results">
                             <section class="vca-explanation" data-vca-explanation hidden aria-live="polite">
                                 <div class="vca-explanation-verdict" data-vca-explanation-verdict data-tone="neutral">
                                     <span class="vca-explanation-icon" aria-hidden="true">
@@ -309,17 +429,28 @@
                                     </div>
                                     <div class="vca-explanation-stats" data-vca-explanation-stats></div>
                                 </div>
-                                <div class="vca-finding-list" data-vca-finding-list></div>
+                                <section class="rules-action-queue" data-vca-action-queue
+                                    aria-labelledby="rules-action-queue-title" hidden>
+                                    <header class="rules-action-queue-header">
+                                        <div>
+                                            <h3 id="rules-action-queue-title">Action queue</h3>
+                                            <p>Start with the first blocker, then recheck your changes.</p>
+                                        </div>
+                                        <span class="rules-action-queue-count" data-vca-action-queue-count></span>
+                                    </header>
+                                    <div class="vca-finding-list" data-vca-finding-list></div>
+                                </section>
                                 <div class="vca-explanation-actions" data-vca-explanation-actions hidden>
                                     <button class="btn btn-sm btn-primary" type="button"
-                                        data-action="open-fix-terminal">
+                                        data-action="open-fix-terminal"
+                                        title="Paste a reviewable fix prompt into the active agent console">
                                         <i class="fa-solid fa-terminal me-1" aria-hidden="true"></i>
-                                        Fix with an agent
+                                        Send all to agent
                                     </button>
                                     <button class="btn btn-sm btn-outline-secondary" type="button"
                                         data-action="copy-fix-brief">
                                         <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>
-                                        Copy fix brief
+                                        Copy brief
                                     </button>
                                 </div>
                             </section>
@@ -336,88 +467,88 @@
                             </details>
                         </div>
                     </section>
-                </div>
 
-                <!-- Measure: working-tree code quality analysis -->
-                <div class="rules-station" data-station="measure">
-                    <span class="rules-station-node" aria-hidden="true"></span>
-                    <section class="card code-analyzer-panel vca-console-card" data-code-analyzer-console
-                        data-tone="neutral" aria-busy="false" aria-labelledby="code-analyzer-title">
-                        <header class="rules-station-header">
-                            <div class="rules-station-heading">
-                                <span class="rules-station-eyebrow">Measure</span>
-                                <div class="rules-station-title-row">
-                                    <h2 id="code-analyzer-title">Code quality</h2>
-                                    <span class="rules-station-note">
-                                        <i class="fa-solid fa-code-commit" aria-hidden="true"></i>
-                                        Working tree analysis
-                                    </span>
-                                    <span class="rules-check-running" data-vca-console-spinner hidden
-                                        aria-hidden="true">
-                                        <span class="spinner-border spinner-border-sm"></span>
-                                    </span>
-                                    <span class="vca-console-state" data-vca-console-state>Ready</span>
-                                </div>
+                    <!-- Measure: working-tree code quality analysis -->
+                    <section class="rules-section card code-analyzer-panel vca-console-card" id="rules-section-quality"
+                        role="tabpanel" aria-labelledby="rules-tab-quality" tabindex="-1" data-rules-section="quality"
+                        data-code-analyzer-console data-tone="neutral" aria-busy="false" hidden>
+                        <header class="rules-section-header">
+                            <div class="rules-section-heading">
+                                <h2 id="code-analyzer-title">Code quality</h2>
+                                <span class="rules-section-note">Working tree analysis</span>
                             </div>
-                            <div class="rules-station-actions" aria-label="Code quality actions">
-                                <label class="mintlint-scan-toggle"
-                                    title="Usage counts normally consider tracked files only. Check to scan every source file under the repository, including untracked ones.">
-                                    <input type="checkbox" data-code-analyzer-full-scan>
-                                    <span>Full repo scan</span>
-                                </label>
-                                <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
-                                    data-action="copy-code-analyzer-output" aria-label="Copy scan summary"
-                                    title="Copy scan summary">
-                                    <i class="fa-regular fa-copy" aria-hidden="true"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
-                                    data-action="clear-code-analyzer-output" aria-label="Clear code quality results"
-                                    title="Clear results">
-                                    <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-2"
-                                    type="button" data-action="run-code-analyzer-unpushed"
-                                    title="Scan committed-but-not-pushed changes (diff @{upstream}..HEAD)"
-                                    data-idle-label="Scan unpushed">
-                                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                                        aria-hidden="true"></span>
-                                    <i class="fa-solid fa-cloud-arrow-up" data-button-icon aria-hidden="true"></i>
-                                    <span data-button-label>Scan unpushed</span>
-                                </button>
+                            <div class="rules-section-actions" aria-label="Code quality actions">
+                                <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
+                                    <span class="spinner-border spinner-border-sm"></span>
+                                </span>
+                                <span class="vca-console-state" data-vca-console-state>Ready</span>
+                                <details class="rules-action-menu">
+                                    <summary aria-label="More code quality actions" title="More actions">
+                                        <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+                                    </summary>
+                                    <div class="rules-action-menu-popover" role="group"
+                                        aria-label="Code quality utilities">
+                                        <label class="rules-action-menu-toggle"
+                                            title="Include every source file under the repository">
+                                            <span>
+                                                <i class="fa-solid fa-folder-tree" aria-hidden="true"></i>
+                                                Scan full repository
+                                            </span>
+                                            <input type="checkbox" data-code-analyzer-full-scan>
+                                        </label>
+                                        <button type="button" data-action="run-code-analyzer-unpushed"
+                                            data-idle-label="Scan unpushed commits">
+                                            <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                                aria-hidden="true"></span>
+                                            <i class="fa-solid fa-cloud-arrow-up" data-button-icon aria-hidden="true"></i>
+                                            <span data-button-label>Scan unpushed commits</span>
+                                        </button>
+                                        <button type="button" data-action="copy-code-analyzer-output">
+                                            <i class="fa-regular fa-copy" aria-hidden="true"></i>
+                                            Copy scan summary
+                                        </button>
+                                        <button type="button" data-action="clear-code-analyzer-output">
+                                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                                            Clear results
+                                        </button>
+                                    </div>
+                                </details>
                                 <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
-                                    type="button" data-action="run-code-analyzer" data-idle-label="Run again">
+                                    type="button" data-action="run-code-analyzer" data-idle-label="Scan changes">
                                     <span class="spinner-border spinner-border-sm" data-button-spinner hidden
                                         aria-hidden="true"></span>
                                     <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
-                                    <span data-button-label>Run again</span>
+                                    <span data-button-label>Scan changes</span>
                                 </button>
                             </div>
                         </header>
 
-                        <div class="code-analyzer-empty" data-code-analyzer-empty>
-                            <span class="code-analyzer-empty-icon" aria-hidden="true">
-                                <i class="fa-solid fa-chart-line"></i>
-                            </span>
-                            <div>
-                                <strong>Preparing code quality</strong>
-                                <p>Your staged, unstaged, and untracked changes will be organized into an overview,
-                                    file metrics, and source evidence.</p>
+                        <div class="rules-section-body rules-section-body-flush">
+                            <div class="code-analyzer-empty" data-code-analyzer-empty>
+                                <span class="code-analyzer-empty-icon" aria-hidden="true">
+                                    <i class="fa-solid fa-chart-line"></i>
+                                </span>
+                                <div>
+                                    <strong>Preparing code quality</strong>
+                                    <p>Your staged, unstaged, and untracked changes will be organized into an overview,
+                                        file metrics, and source evidence.</p>
+                                </div>
                             </div>
+
+                            <div class="code-analyzer-dashboard" data-code-analyzer-report hidden></div>
+
+                            <details class="rules-console-transcript code-analyzer-transcript">
+                                <summary>
+                                    <span class="vca-console-pulse" aria-hidden="true"></span>
+                                    <span class="rules-console-transcript-label">Scan transcript</span>
+                                    <small data-vca-console-meta>Waiting for analysis</small>
+                                </summary>
+                                <div class="vca-console-shell">
+                                    <pre class="vca-console-output" data-vca-console-output role="log"
+                                        aria-live="polite" aria-atomic="false" tabindex="0"></pre>
+                                </div>
+                            </details>
                         </div>
-
-                        <div class="code-analyzer-dashboard" data-code-analyzer-report hidden></div>
-
-                        <details class="rules-console-transcript code-analyzer-transcript">
-                            <summary>
-                                <span class="vca-console-pulse" aria-hidden="true"></span>
-                                <span class="rules-console-transcript-label">Scan transcript</span>
-                                <small data-vca-console-meta>Waiting for analysis</small>
-                            </summary>
-                            <div class="vca-console-shell">
-                                <pre class="vca-console-output" data-vca-console-output role="log" aria-live="polite"
-                                    aria-atomic="false" tabindex="0"></pre>
-                            </div>
-                        </details>
 
                         <footer class="code-analyzer-note">
                             <span>Risk scores are normalized so higher always means more risk.</span>
@@ -428,79 +559,65 @@
                             </span>
                         </footer>
                     </section>
-                </div>
 
-                <!-- Govern: the AGENTS.md files every check above enforces -->
-                <div class="rules-station" data-station="automate">
-                    <span class="rules-station-node" aria-hidden="true"></span>
-                    <section class="card jobs-automation-station" aria-labelledby="rules-automation-title">
-                        <header class="rules-station-header">
-                            <div class="rules-station-heading">
-                                <span class="rules-station-eyebrow">Automate</span>
-                                <div class="rules-station-title-row">
-                                    <h2 id="rules-automation-title">Automation rules</h2>
-                                    <span class="rules-station-note">Real hooks only — previews never queue jobs</span>
-                                </div>
+                    <!-- Govern: the AGENTS.md files every check above enforces -->
+                    <section class="rules-section card rules-files-card" id="rules-section-files" role="tabpanel"
+                        aria-labelledby="rules-tab-files" tabindex="-1" data-rules-section="files" hidden>
+                        <header class="rules-section-header">
+                            <div class="rules-section-heading">
+                                <h2 id="rules-files-title">Rule files</h2>
+                                <span class="rules-section-note">The AGENTS.md policies every check here enforces</span>
                             </div>
-                            <div class="rules-station-actions">
-                                <button class="btn btn-sm btn-outline-secondary" type="button" data-action="new-vca-job">+ Pre-commit VCA</button>
-                                <button class="btn btn-sm btn-outline-secondary" type="button" data-action="new-commit-job">+ After commit</button>
-                                <button class="btn btn-sm btn-primary" type="button" data-action="open-jobs">Open Jobs</button>
-                            </div>
-                        </header>
-                        <div class="rules-station-body" data-jobs-automation-host></div>
-                    </section>
-                </div>
-
-                <!-- Govern: the AGENTS.md files every check above enforces -->
-                <div class="rules-station" data-station="govern">
-                    <span class="rules-station-node" aria-hidden="true"></span>
-                    <section class="card rules-files-card" aria-labelledby="rules-files-title">
-                        <header class="rules-station-header">
-                            <div class="rules-station-heading">
-                                <span class="rules-station-eyebrow">Govern</span>
-                                <div class="rules-station-title-row">
-                                    <h2 id="rules-files-title">Rule files</h2>
-                                    <span class="rules-station-note">AGENTS.md policies these checks enforce</span>
-                                </div>
-                            </div>
-                            <div class="rules-station-actions">
-                                <button class="btn btn-sm btn-primary d-flex align-items-center gap-2" type="button"
-                                    data-action="create-agent-file" title="Create a new AGENTS.md file">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
-                                        viewBox="0 0 16 16">
-                                        <path
-                                            d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4" />
-                                    </svg>
+                            <div class="rules-section-actions">
+                                <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
+                                    data-action="refresh-agent-files" title="Reload rule files"
+                                    aria-label="Reload rule files">
+                                    <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                                </button>
+                                <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
+                                    type="button" data-action="create-agent-file" title="Create a new AGENTS.md file">
+                                    <i class="fa-solid fa-plus" aria-hidden="true"></i>
                                     New AGENTS.md
                                 </button>
                             </div>
                         </header>
-                        <div class="rules-station-body">
-                            <div data-agent-file-tree></div>
+                        <div class="rules-section-body rules-section-body-flush">
+                            <div class="rules-files-split">
+                                <div class="rules-files-rail" data-agent-file-tree></div>
+                                <div class="rules-files-detail" data-agent-rule-editor></div>
+                            </div>
                         </div>
                     </section>
+
+                    <!-- Automate: jobs wired to VCA and commit events -->
+                    <section class="rules-section card jobs-automation-station" id="rules-section-automate"
+                        role="tabpanel" aria-labelledby="rules-tab-automate" tabindex="-1"
+                        data-rules-section="automate" hidden>
+                        <header class="rules-section-header">
+                            <div class="rules-section-heading">
+                                <h2 id="rules-automation-title">Automation</h2>
+                                <span class="rules-section-note">Real hooks only — previews never queue jobs</span>
+                            </div>
+                            <div class="rules-section-actions">
+                                <button class="btn btn-sm btn-outline-secondary" type="button"
+                                    data-action="new-commit-job">
+                                    <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>After commit
+                                </button>
+                                <button class="btn btn-sm btn-primary" type="button" data-action="open-jobs">
+                                    Open Jobs
+                                </button>
+                            </div>
+                        </header>
+                        <div class="rules-section-body" data-jobs-automation-host></div>
+                    </section>
+
                 </div>
 
-                <!-- Fix: keep the terminal at the end of the Rules workflow. -->
-                <div class="rules-station" data-station="fix">
-                    <span class="rules-station-node" aria-hidden="true"></span>
-                    <section class="rules-terminal-station" data-terminal-section
-                        aria-label="Agent terminal">
-                        <header class="rules-station-header rules-station-header-bare">
-                            <div class="rules-station-heading">
-                                <span class="rules-station-eyebrow">Fix</span>
-                                <div class="rules-station-title-row">
-                                    <h2>Agent terminal</h2>
-                                </div>
-                            </div>
-                            <p class="rules-station-hint">Start an agent here and hand it the fix brief from the
-                                results above.</p>
-                        </header>
-                        <div class="rules-station-body" data-terminal-content>
-                            <!-- Terminal panel rendered here -->
-                        </div>
-                    </section>
+                <!-- Fix: the agent terminal owns the bottom pane and survives every section switch. -->
+                <div class="rules-pane rules-pane-terminal" data-terminal-section aria-label="Agent terminal">
+                    <div class="rules-terminal-host" data-terminal-content>
+                        <!-- Terminal panel rendered here -->
+                    </div>
                 </div>
 
             </div>
@@ -3341,6 +3458,7 @@
 
         (async () => {
             await loadVibeRailsScript('js/performance-mode.js');
+            await loadVibeRailsScript('js/nav-layout.js');
             await loadVibeRailsScript('js/background-effect.js');
             await loadVibeRailsScript('app.js', 'module');
         })().catch((error) => {

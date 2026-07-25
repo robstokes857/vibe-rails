@@ -81,7 +81,8 @@ namespace VibeRails.DB
                 ParentSessionId TEXT DEFAULT '',
                 SessionDisplayName TEXT DEFAULT '',
                 OwnerPid INTEGER,
-                OwnershipTracked INTEGER NOT NULL DEFAULT 1
+                OwnershipTracked INTEGER NOT NULL DEFAULT 1,
+                JobRunId TEXT
             )
             """;
         public const string CreateSessionsIndex = "CREATE INDEX IF NOT EXISTS idx_sessions_started ON Sessions(StartedUTC DESC)";
@@ -496,6 +497,9 @@ namespace VibeRails.DB
             "ALTER TABLE Sessions ADD COLUMN ProjectDisplayName TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE Sessions ADD COLUMN OwnerPid INTEGER",
             "ALTER TABLE Sessions ADD COLUMN OwnershipTracked INTEGER",
+            // Automated Jobs record a real terminal session tagged with the JobRun id. NULL = an
+            // ordinary human session; NOT NULL hides it from Chat History and links it to its run.
+            "ALTER TABLE Sessions ADD COLUMN JobRunId TEXT",
             // Drop orphaned table from a previous build.
             "DROP TABLE IF EXISTS TUI_Event",
             // CompressionCaptures shipped for a few days without dedupe. On a fresh DB the CREATE
@@ -659,8 +663,8 @@ namespace VibeRails.DB
 
         // Session CRUD
         public const string InsertSession = """
-            INSERT INTO Sessions (Id, Cli, EnvironmentName, WorkingDirectory, ProjectDisplayName, StartedUTC, OwnerPid, OwnershipTracked)
-            VALUES ($id, $cli, $envName, $workDir, $projectDisplayName, $startedUTC, $ownerPid, 1);
+            INSERT INTO Sessions (Id, Cli, EnvironmentName, WorkingDirectory, ProjectDisplayName, StartedUTC, OwnerPid, OwnershipTracked, JobRunId)
+            VALUES ($id, $cli, $envName, $workDir, $projectDisplayName, $startedUTC, $ownerPid, 1, $jobRunId);
             """;
         public const string SelectLatestProjectDisplayNameByWorkingDirectory = """
             SELECT ProjectDisplayName
@@ -808,6 +812,7 @@ namespace VibeRails.DB
                 SELECT Id FROM UserInputs WHERE SessionId = s.Id ORDER BY Sequence ASC LIMIT 1
             )
             LEFT JOIN Sessions p ON p.Id = NULLIF(s.ParentSessionId, '')
+            WHERE s.JobRunId IS NULL
             """;
         public const string SelectChatHistoryBySessionId = """
             SELECT s.Id,

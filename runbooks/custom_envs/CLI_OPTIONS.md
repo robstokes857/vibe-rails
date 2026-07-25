@@ -80,14 +80,19 @@ Where they live in code
 - Copilot: `renderCopilotModelOptions()`.
 - OpenCode: `renderOpencodeModelOptions()`.
 
-Current pinned values (Codex refreshed 2026-07-10; all others 2026-07-02):
+Current pinned values (Claude refreshed 2026-07-24; Codex 2026-07-10; all others
+2026-07-02):
 
-- Claude (full model IDs): `claude-fable-5`, `claude-opus-4-8`,
+- Claude (full model IDs): `claude-fable-5`, `claude-opus-5`, `claude-opus-4-8`,
   `claude-opus-4-7`, `claude-sonnet-5`, `claude-sonnet-4-6`,
   `claude-haiku-4-5`, plus an empty "Default (Claude recommended)" entry.
   (Fable — `claude-fable-5` — was previously left unpinned as a product choice;
   Rob asked to add it on 2026-07-02. It needs Claude Code ≥ 2.1.170 and is not
   the upstream default; safety-flagged requests auto-fall-back to Opus.)
+  `claude-opus-5` added 2026-07-24 — the current Opus, sitting between Fable and
+  Opus 4.8 in the list. Fixed ID with no date suffix (same scheme as
+  `claude-opus-4-8`); the `[1m]` suffix seen in Claude Code session banners is a
+  context-window variant marker, NOT part of the `--model` value.
 - Codex: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, plus an
   empty "Default (Codex recommended)" entry. This is intentionally narrower
   than the live catalog: at the app owner's request, all choices below 5.5 were

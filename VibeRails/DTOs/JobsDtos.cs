@@ -2,17 +2,11 @@ using VibeRails.Services;
 
 namespace VibeRails.DTOs;
 
-public enum JobExecutionMode
-{
-    Review = 0,
-    IsolatedWrite = 1,
-    LiveWrite = 2
-}
-
 public enum JobTriggerKind
 {
     Schedule = 0,
-    Vca = 1,
+    // 1 was the removed pre-commit VCA trigger; the value is intentionally skipped so existing
+    // Commit/Manual numeric values stay stable.
     Commit = 2,
     Manual = 3
 }
@@ -35,6 +29,9 @@ public enum JobRunStatus
     Interrupted = 6
 }
 
+// TimeoutMinutes is opt-in throughout: null means the run lives until its CLI exits or the user
+// closes its terminal window, which is the default. It is stored as 0 in SQLite (the column is NOT
+// NULL) and mapped back to null on read, so no migration was needed to make it optional.
 public sealed record JobTriggerDto(
     long Id,
     JobTriggerKind Kind,
@@ -54,10 +51,8 @@ public sealed record JobResponse(
     int? EnvironmentId,
     string? EnvironmentName,
     string Prompt,
-    JobExecutionMode ExecutionMode,
-    int TimeoutMinutes,
+    int? TimeoutMinutes,
     bool Enabled,
-    string? ExecutablePath,
     DateTime CreatedUtc,
     DateTime UpdatedUtc,
     DateTime? DeletedUtc,
@@ -79,8 +74,7 @@ public sealed record CreateJobRequest(
     LLM Llm,
     int? EnvironmentId,
     string Prompt,
-    JobExecutionMode ExecutionMode,
-    int TimeoutMinutes,
+    int? TimeoutMinutes,
     bool Enabled,
     List<JobTriggerRequest> Triggers);
 
@@ -90,11 +84,13 @@ public sealed record UpdateJobRequest(
     LLM Llm,
     int? EnvironmentId,
     string Prompt,
-    JobExecutionMode ExecutionMode,
-    int TimeoutMinutes,
+    int? TimeoutMinutes,
     bool Enabled,
     List<JobTriggerRequest> Triggers);
 
+// A Job run is a recorded native terminal session. SessionId links to the Sessions row (and its
+// SessionLogs / TerminalSessionLogs) so the Jobs UI can replay it with the same xterm player the
+// Chat History sidebar uses. The session is tagged with this run's id and hidden from Chat History.
 public sealed record JobRunResponse(
     string Id,
     long JobId,
@@ -104,36 +100,24 @@ public sealed record JobRunResponse(
     string ProjectPath,
     LLM Llm,
     string? EnvironmentName,
-    JobExecutionMode ExecutionMode,
+    string? SessionId,
+    int? TimeoutMinutes,
     DateTime QueuedUtc,
     DateTime? StartedUtc,
     DateTime? EndedUtc,
     int? ExitCode,
-    string? ResultText,
     string? ErrorMessage,
-    string? WorkspacePath,
     bool CancelRequested);
 
 public sealed record JobRunListResponse(List<JobRunResponse> Runs);
 
-public sealed record JobRunLogResponse(
-    long Sequence,
-    DateTime TimestampUtc,
-    string Stream,
-    string Content);
-
-public sealed record JobRunLogsResponse(string RunId, List<JobRunLogResponse> Logs, long LastSequence);
-
-public sealed record JobWorkerStatusResponse(
-    string State,
-    bool Installed,
-    bool Running,
-    bool NeedsRepair,
-    string? Version,
-    DateTime? HeartbeatUtc,
-    string Message);
-
 public sealed record JobActionResponse(bool Success, string Message, string? RunId = null);
+
+/// <summary>
+/// State of the OS scheduled task that runs `vb --job-tick` every minute. Without it, Jobs only
+/// fire while the dashboard is open; with it they fire whenever the user is logged in.
+/// </summary>
+public sealed record JobSchedulerStatusResponse(bool Installed, bool Supported, string Platform);
 
 public sealed record JobDefinitionRecord(
     long Id,
@@ -142,13 +126,9 @@ public sealed record JobDefinitionRecord(
     LLM Llm,
     int? EnvironmentId,
     string? EnvironmentName,
-    string? EnvironmentPath,
-    string EnvironmentArgs,
     string Prompt,
-    JobExecutionMode ExecutionMode,
-    int TimeoutMinutes,
+    int? TimeoutMinutes,
     bool Enabled,
-    string? ExecutablePath,
     DateTime CreatedUtc,
     DateTime UpdatedUtc,
     DateTime? DeletedUtc,
@@ -157,7 +137,6 @@ public sealed record JobDefinitionRecord(
 public sealed record JobRunRecord(
     string Id,
     long JobId,
-    long? TriggerId,
     JobTriggerKind TriggerKind,
     string TriggerKey,
     JobRunStatus Status,
@@ -166,27 +145,12 @@ public sealed record JobRunRecord(
     LLM Llm,
     int? EnvironmentId,
     string? EnvironmentName,
-    string? EnvironmentPath,
-    string EnvironmentArgs,
-    string Prompt,
-    JobExecutionMode ExecutionMode,
-    int TimeoutMinutes,
-    string? ExecutablePath,
-    string? TriggerContextJson,
+    int? TimeoutMinutes,
+    string? SessionId,
     DateTime QueuedUtc,
     DateTime? StartedUtc,
     DateTime? EndedUtc,
     int? ExitCode,
-    string? ResultText,
     string? ErrorMessage,
-    string? WorkspacePath,
     bool CancelRequested,
-    string? OwnerInstanceId,
     int? OwnerProcessId);
-
-public sealed record JobWorkerLeaseRecord(
-    string InstanceId,
-    int ProcessId,
-    string Version,
-    DateTime StartedUtc,
-    DateTime HeartbeatUtc);

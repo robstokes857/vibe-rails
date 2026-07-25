@@ -156,13 +156,13 @@ async function openApp(page) {
     // readiness signal. Start directly on Jobs so the asynchronous terminal-focus bootstrap
     // cannot race a test navigation and replace the Jobs DOM after it has rendered.
     await page.goto('/?view=jobs', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('.app-subnav-link[data-view="jobs"]')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.app-subnav-link[data-view="jobs"]:visible')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.jobs-view[data-view="jobs"]')).toBeVisible({ timeout: 10_000 });
 }
 
 async function openJobs(page) {
     if (!await page.locator('.jobs-view[data-view="jobs"]').isVisible()) {
-        await page.locator('.app-subnav-link[data-view="jobs"]').click();
+        await page.locator('.app-subnav-link[data-view="jobs"]:visible').click();
     }
     await expect(page.locator('.jobs-view[data-view="jobs"]')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole('heading', { name: 'Environment / Workers', exact: true })).toBeVisible();
@@ -171,8 +171,10 @@ async function openJobs(page) {
 }
 
 async function openWorkers(page) {
-    await page.locator('.app-subnav-link[data-view="environments"]').click();
-    await expect(page.locator('[data-view="environments"]')).toBeVisible({ timeout: 10_000 });
+    await page.locator('.app-subnav-link[data-view="environments"]:visible').click();
+    // Scope to the view container: [data-view="environments"] now also matches the top subnav link
+    // and the sidebar link, and an unscoped locator is a Playwright strict-mode violation.
+    await expect(page.locator('.view[data-view="environments"]')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-environments-table]')).toContainText('Nightly Codex');
 }
 
@@ -295,7 +297,6 @@ test.describe('Jobs Environment / Workers integration', () => {
         await expect(page.locator('#job-prompt')).toHaveCount(0);
         await expect(page.locator('[data-job-form]')).toContainText('Runs in the current VibeRails repository');
         await expect(page.locator('[data-job-form]')).toContainText(CURRENT_REPOSITORY);
-        await expect(page.locator('[data-job-form]')).toContainText('whether VCA passes or blocks');
         await expect(page.locator('[data-job-form]')).toContainText('After every successful commit');
 
         const picker = page.locator('#job-llm-selection');

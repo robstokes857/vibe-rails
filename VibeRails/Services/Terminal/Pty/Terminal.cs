@@ -66,6 +66,11 @@ public sealed class Terminal : IAsyncDisposable
 
     /// <summary>
     /// Spawn a PTY and return a Terminal ready for subscribers and StartReadLoop().
+    ///
+    /// By default the PTY runs the user's interactive shell with no arguments, and the caller types
+    /// what it wants into it. Pass <paramref name="app"/>/<paramref name="argv"/> to run a specific
+    /// program instead — the Job path does this so the PTY terminates when the program does, rather
+    /// than sitting at a shell prompt forever.
     /// </summary>
     public static async Task<Terminal> CreateAsync(
         string workingDirectory,
@@ -73,17 +78,19 @@ public sealed class Terminal : IAsyncDisposable
         int cols = DefaultCols,
         int rows = DefaultRows,
         string? title = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? app = null,
+        IReadOnlyList<string>? argv = null)
     {
-        var shell = GetDefaultShellPath();
+        var executable = string.IsNullOrWhiteSpace(app) ? GetDefaultShellPath() : app;
         var options = new PtyOptions
         {
             Name = string.IsNullOrWhiteSpace(title) ? GetFallbackTerminalName(workingDirectory) : title,
             Cols = cols,
             Rows = rows,
             Cwd = workingDirectory,
-            App = shell,
-            CommandLine = [],
+            App = executable,
+            CommandLine = argv is { Count: > 0 } ? [.. argv] : [],
             Environment = environment
         };
 

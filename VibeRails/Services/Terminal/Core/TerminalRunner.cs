@@ -1,6 +1,7 @@
 using Serilog;
 using VibeRails.Services.Terminal.Consumers;
 using VibeRails.Services.AgentTools;
+using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmProxy;
 
 using VibeRails.Utils;
@@ -46,7 +47,8 @@ public class TerminalRunner
         string summary = "",
         Func<string, Task>? onRemoteTakeoverAuthorized = null,
         bool isNativeCli = false,
-        string? initialUserInput = null)
+        string? initialUserInput = null,
+        string? jobRunId = null)
     {
         // Plain shell sessions are shared remotely like any other session when remote is
         // enabled. A remote viewer of an agent session can already Ctrl+C out of the prompt
@@ -57,7 +59,7 @@ public class TerminalRunner
         // null; that path passes initialUserInput explicitly to record without
         // double-encoding the prompt into the launch command.
         var userInputToRecord = initialUserInput ?? initialPrompt;
-        var sessionId = await _stateService.CreateSessionAsync(LlmParser.ToWireName(llm), workDir, envName, shouldEnableRemote, ct, initialUserInput: userInputToRecord);
+        var sessionId = await _stateService.CreateSessionAsync(LlmParser.ToWireName(llm), workDir, envName, shouldEnableRemote, ct, initialUserInput: userInputToRecord, jobRunId: jobRunId);
         Terminal? terminal = null;
         IRemoteTerminalConnection? activeRemoteConn = null;
         IDisposable? openCodeProxyLease = null;
@@ -72,7 +74,25 @@ public class TerminalRunner
             }
             _stateService.PublishSessionStart(sessionId, LlmParser.ToWireName(llm), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
 
-            terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: sessionTitle, ct: ct);
+            // A Job's PTY runs the CLI itself rather than an interactive shell we type into. The run
+            // is over when the CLI exits, and a shell would simply return to its prompt — keeping
+            // the PTY, and therefore the run, alive with nothing left to end it. Falls back to the
+            // shell path when there is no program to spawn (a plain Shell session, or the fake-CLI
+            // test harness, both of which are shell programs rather than program + argv).
+            var spawnCliDirectly = jobRunId is not null && preparedSession.Executable is not null;
+            if (spawnCliDirectly)
+            {
+                var (app, argv) = CliSpawnCommandBuilder.Build(
+                    preparedSession.Executable!,
+                    preparedSession.Argv ?? [],
+                    preparedSession.SetupCommands);
+                terminal = await Terminal.CreateAsync(
+                    workDir, preparedSession.Environment, title: sessionTitle, ct: ct, app: app, argv: argv);
+            }
+            else
+            {
+                terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: sessionTitle, ct: ct);
+            }
             if (preparedSession.OpenCodeProxyActive)
             {
                 var lease = _llmProxySessionState.ActivateOpenCodeProxy();
@@ -403,7 +423,8 @@ public class TerminalRunner
 
             // Send the CLI command to the shell. Plain shell sessions have no command,
             // so we leave the shell at its prompt rather than typing a stray newline.
-            if (!string.IsNullOrWhiteSpace(preparedSession.Command))
+            // Direct-spawn sessions already ARE the CLI — there is no shell to type into.
+            if (!spawnCliDirectly && !string.IsNullOrWhiteSpace(preparedSession.Command))
                 await terminal.SendCommandAsync(preparedSession.Command, ct);
 
             if (activeRemoteConn != null)
@@ -444,6 +465,19 @@ public class TerminalRunner
             await _stateService.CompleteSessionAsync(sessionId, -1);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Finalizes a session created by <see cref="CreateSessionAsync"/> when the caller owns the
+    /// terminal's lifetime (the CLI and Job paths, which never register with
+    /// <c>TerminalSessionService</c>). Drains and disposes the session's output writer and input
+    /// accumulator, stamps EndedUTC / exit code, drops the shared per-session state, and tears down
+    /// remote bookkeeping. Skipping this leaks process-lifetime state for every session created.
+    /// </summary>
+    public async Task CompleteSessionAsync(string sessionId, int exitCode)
+    {
+        TerminalResizeCoordinator.ClearSession(sessionId);
+        await _stateService.CompleteSessionAsync(sessionId, exitCode);
     }
 
     // TODO: re-enable once the interactive alerting layer is in place to notify
@@ -542,8 +576,7 @@ public class TerminalRunner
             try { exitCode = terminal.ExitCode; } catch { }
         }
 
-        TerminalResizeCoordinator.ClearSession(sessionId);
-        await _stateService.CompleteSessionAsync(sessionId, exitCode);
+        await CompleteSessionAsync(sessionId, exitCode);
         return exitCode;
     }
 
@@ -554,7 +587,7 @@ public class TerminalRunner
     public async Task<int> RunCliWithWebAsync(
         LLM llm, string workDir, string? envName, string[]? extraArgs,
         ITerminalSessionService sessionService, bool makeRemote = false, CancellationToken ct = default,
-        string? initialUserInput = null)
+        string? initialUserInput = null, string? jobRunId = null, Action<string>? onSessionCreated = null)
     {
         var (terminal, sessionId, remoteConn) = await CreateSessionAsync(
             llm,
@@ -565,6 +598,7 @@ public class TerminalRunner
             makeRemote: makeRemote,
             isNativeCli: true,
             initialUserInput: initialUserInput,
+            jobRunId: jobRunId,
             onRemoteTakeoverAuthorized: trigger =>
             {
                 // Native CLI coexists with remote viewer — both can run concurrently.
@@ -578,6 +612,9 @@ public class TerminalRunner
                 return sessionService.DisconnectLocalViewerAsync("Session taken over by remote viewer");
             });
         var exitCode = 0;
+        // Job runs need the session id to link the run to its recording; surfaced here rather than
+        // via a return value so the CLI path's signature stays unchanged for every other caller.
+        onSessionCreated?.Invoke(sessionId);
 
         await using (terminal)
         {
@@ -615,8 +652,7 @@ public class TerminalRunner
             try { exitCode = terminal.ExitCode; } catch { }
         }
 
-        TerminalResizeCoordinator.ClearSession(sessionId);
-        await _stateService.CompleteSessionAsync(sessionId, exitCode);
+        await CompleteSessionAsync(sessionId, exitCode);
         return exitCode;
     }
 

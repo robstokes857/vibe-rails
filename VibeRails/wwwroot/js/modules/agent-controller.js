@@ -1,10 +1,20 @@
 import { getFileTypeVisual } from './file-type-icons.js';
+import { RulesWorkspace } from './rules-workspace.js';
+
+const ENFORCEMENT_LEVELS = [
+    { value: 'WARN', icon: '⚠️', blurb: 'Warn, but let the commit through.' },
+    { value: 'COMMIT', icon: '💬', blurb: 'Require an explanation in the commit message.' },
+    { value: 'STOP', icon: '🛑', blurb: 'Block the commit until it is fixed.' }
+];
 
 export class AgentController {
     constructor(app) {
         this.app = app;
         this.currentAgent = null;
         this.selectedRuleIndex = null;
+        this.rulesWorkspace = null;
+        // Path of the AGENTS.md open in the Rule files section's inline editor.
+        this.selectedAgentPath = null;
 
         // Wizard state for agent creation
         this.wizardState = {
@@ -32,6 +42,9 @@ export class AgentController {
     mountAgentsOverview(container) {
         if (!container) return null;
 
+        this.rulesWorkspace?.destroy();
+        this.rulesWorkspace = null;
+
         container.innerHTML = '';
         const fragment = this.app.cloneTemplate('agents-template');
         const root = fragment.querySelector('[data-view="agents"]');
@@ -45,46 +58,73 @@ export class AgentController {
                 }
             });
             this.app.bindAction(root, '[data-action="create-agent-file"]', () => this.app.navigate('agent-create'));
+            this.app.bindAction(root, '[data-action="refresh-agent-files"]', async () => {
+                await this.app.refreshDashboardData();
+                this.renderAgentFileTree(root);
+            });
             this.renderAgentFileTree(root);
         }
 
         container.appendChild(fragment);
         if (root) {
+            this.rulesWorkspace = new RulesWorkspace(root, {
+                onLayoutChange: () => this.app.terminalController?.refreshLayout?.()
+            }).mount();
             this.app.ruleController.attachRulesOverview(root);
             this.app.jobController.attachRulesAutomation(root);
         }
         return root;
     }
 
-    // Paints (or repaints) just the Rule files list. A rename must not remount the whole
-    // overview: the live agent terminal now sits inside this view, and rebuilding the view
-    // would destroy the running terminal and re-trigger the validation and metrics runs.
-    renderAgentFileTree(root) {
-        const fileTree = root?.querySelector('[data-agent-file-tree]');
-        if (!fileTree) return;
-
-        if (this.app.data.agents && this.app.data.agents.length > 0) {
-            fileTree.innerHTML = this.app.renderLocalFileTree();
-            this.bindAgentListItems(fileTree, {
-                onSaved: () => this.renderAgentFileTree(root)
-            });
-        } else if (this.app.data.isInGit) {
-            fileTree.innerHTML = '<p class="text-muted text-center">No agent files found in this project.</p>';
-        } else {
-            fileTree.innerHTML = '<p class="text-muted text-center">Agent files are only available in local project context.</p>';
-        }
+    // Navigating away from the Rules workspace: drop the observers and listeners the
+    // local navigation installed. Idempotent — app.loadView calls it for every view.
+    unload() {
+        this.rulesWorkspace?.destroy();
+        this.rulesWorkspace = null;
     }
 
-    // Wire up the agent-file list rendered by app.renderLocalFileTree():
-    // clicking a row opens the editor; clicking the inline rename button opens
-    // the custom-name modal without leaving the list.
-    bindAgentListItems(container, { onSaved = null } = {}) {
+    // Paints (or repaints) just the Rule files list plus its inline editor. A rename or a
+    // rule edit must not remount the whole overview: the live agent terminal sits in this
+    // view, and rebuilding it would kill the running terminal and re-trigger both scans.
+    renderAgentFileTree(root) {
+        const view = root || document.querySelector('[data-rules-workspace]');
+        const fileTree = view?.querySelector('[data-agent-file-tree]');
+        if (!fileTree) return;
+
+        const agents = this.app.data.agents || [];
+        if (agents.length > 0) {
+            fileTree.innerHTML = this.app.renderLocalFileTree();
+            this.bindAgentListItems(fileTree, {
+                onSaved: () => this.renderAgentFileTree(view),
+                onSelect: (agent) => {
+                    this.selectedAgentPath = agent.path;
+                    this.renderAgentFileTree(view);
+                }
+            });
+        } else if (this.app.data.isInGit) {
+            fileTree.innerHTML = '<p class="rules-files-rail-empty">No AGENTS.md files in this project yet.</p>';
+        } else {
+            fileTree.innerHTML = '<p class="rules-files-rail-empty">Agent files are only available in local project context.</p>';
+        }
+
+        this.renderInlineRuleEditor(view);
+    }
+
+    // Wire up the agent-file list rendered by app.renderLocalFileTree(): clicking a row
+    // selects it for the inline editor beside the list (falling back to the full-page
+    // editor when this list is rendered outside the Rules workspace); the inline rename
+    // button opens the custom-name modal without changing the selection.
+    bindAgentListItems(container, { onSaved = null, onSelect = null } = {}) {
         container.querySelectorAll('[data-agent-tree-index]').forEach(el => {
             const idx = parseInt(el.dataset.agentTreeIndex);
             const agent = this.app.data.agents[idx];
-            if (agent) {
-                el.addEventListener('click', () => this.app.navigate('agent-edit', agent));
-            }
+            if (!agent) return;
+            el.closest('.agent-file-tree-item')?.classList.toggle(
+                'is-selected', Boolean(this.selectedAgentPath) && agent.path === this.selectedAgentPath);
+            el.addEventListener('click', () => {
+                if (onSelect) onSelect(agent);
+                else this.app.navigate('agent-edit', agent);
+            });
         });
 
         container.querySelectorAll('[data-agent-rename]').forEach(el => {
@@ -92,10 +132,226 @@ export class AgentController {
             const agent = this.app.data.agents[idx];
             if (agent) {
                 el.addEventListener('click', (e) => {
-                    // Don't let the click bubble to the row (which would navigate in).
+                    // Don't let the click bubble to the row (which would change selection).
                     e.stopPropagation();
                     this.showAgentCustomNameModal(agent, { onSaved: onSaved || (() => this.loadAgents()) });
                 });
+            }
+        });
+    }
+
+    // ============================================
+    // Inline AGENTS.md rule CRUD (Rules workspace)
+    // ============================================
+
+    // The detail half of the Rule files section. Everything happens in place so the user
+    // never leaves the workspace — and therefore never loses the terminal below it.
+    renderInlineRuleEditor(root) {
+        const view = root || document.querySelector('[data-rules-workspace]');
+        const host = view?.querySelector('[data-agent-rule-editor]');
+        if (!host) return;
+
+        const agents = this.app.data.agents || [];
+        const agent = agents.find(candidate => candidate.path === this.selectedAgentPath)
+            || agents.find(candidate => (candidate.rules?.length || 0) > 0)
+            || agents[0]
+            || null;
+
+        if (!agent) {
+            host.innerHTML = `
+                <div class="rules-files-detail-empty">
+                    <span aria-hidden="true"><i class="fa-solid fa-scale-balanced"></i></span>
+                    <strong>No rule file selected</strong>
+                    <p>Create an AGENTS.md to start enforcing rules on every commit.</p>
+                </div>`;
+            return;
+        }
+
+        this.selectedAgentPath = agent.path;
+        const index = Math.max(agents.findIndex(candidate => candidate.path === agent.path), 0);
+        const viewModel = this.app.getAgentFileViewModel(agent, index);
+        const rules = agent.rules || [];
+        const escape = value => this.app.escapeHtml(value);
+
+        const ruleRows = rules.map((rule, ruleIndex) => {
+            const level = ['WARN', 'COMMIT', 'STOP'].includes(String(rule.enforcement || '').toUpperCase())
+                ? String(rule.enforcement).toUpperCase()
+                : 'WARN';
+            const options = ENFORCEMENT_LEVELS.map(option => `
+                <option value="${option.value}" ${option.value === level ? 'selected' : ''}>
+                    ${option.icon} ${option.value}
+                </option>`).join('');
+            return `
+                <li class="rules-rule-row" data-rule-row="${ruleIndex}" data-level="${level}">
+                    <span class="rules-rule-text">${escape(rule.text)}</span>
+                    <select class="form-select form-select-sm rules-rule-enforcement"
+                        data-rule-enforcement="${ruleIndex}" aria-label="Enforcement for ${escape(rule.text)}">
+                        ${options}
+                    </select>
+                    <button class="btn btn-sm btn-outline-danger rules-icon-btn" type="button"
+                        data-rule-remove="${ruleIndex}" title="Remove this rule"
+                        aria-label="Remove ${escape(rule.text)}">
+                        <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                    </button>
+                </li>`;
+        }).join('');
+
+        host.innerHTML = `
+            <header class="rules-files-detail-header">
+                <div class="rules-files-detail-title">
+                    <h3>${escape(viewModel.displayName)}</h3>
+                    <code>${escape(viewModel.relativePath)}</code>
+                </div>
+                <div class="rules-files-detail-actions">
+                    <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
+                        data-rule-editor-rename title="Rename this rule file" aria-label="Rename this rule file">
+                        <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" data-rule-editor-open
+                        title="Open the full editor with the files this agent covers">
+                        Full editor
+                    </button>
+                    <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2" type="button"
+                        data-rule-editor-add>
+                        <i class="fa-solid fa-plus" aria-hidden="true"></i>Add rule
+                    </button>
+                </div>
+            </header>
+            ${rules.length === 0
+                ? `<div class="rules-files-detail-empty">
+                        <span aria-hidden="true"><i class="fa-regular fa-circle-check"></i></span>
+                        <strong>No rules yet</strong>
+                        <p>This file exists but enforces nothing. Add a rule to make validation act on it.</p>
+                   </div>`
+                : `<ul class="rules-rule-list">${ruleRows}</ul>`}
+            <p class="rules-files-detail-foot">
+                Enforcement: <strong>WARN</strong> reports it · <strong>COMMIT</strong> needs a reason in the
+                commit message · <strong>STOP</strong> blocks the commit.
+            </p>`;
+
+        host.querySelector('[data-rule-editor-rename]')?.addEventListener('click',
+            () => this.showAgentCustomNameModal(agent, { onSaved: () => this.renderAgentFileTree(view) }));
+        host.querySelector('[data-rule-editor-open]')?.addEventListener('click',
+            () => this.app.navigate('agent-edit', agent));
+        host.querySelector('[data-rule-editor-add]')?.addEventListener('click',
+            () => this.showInlineAddRule(agent, view));
+
+        host.querySelectorAll('[data-rule-enforcement]').forEach(select => {
+            select.addEventListener('change', async (event) => {
+                const rule = rules[Number(event.target.dataset.ruleEnforcement)];
+                if (!rule) return;
+                await this.updateRuleEnforcement(agent, rule.text, event.target.value, view);
+            });
+        });
+
+        host.querySelectorAll('[data-rule-remove]').forEach(button => {
+            button.addEventListener('click', () => {
+                const rule = rules[Number(button.dataset.ruleRemove)];
+                if (rule) this.confirmInlineRemoveRule(agent, rule, view);
+            });
+        });
+    }
+
+    async updateRuleEnforcement(agent, ruleText, enforcement, root) {
+        try {
+            await this.app.apiCall('/api/v1/agents/rules/enforcement', 'PUT', {
+                path: agent.path,
+                ruleText,
+                enforcement
+            });
+            this.app.showToast('Rule updated', `Enforcement set to ${enforcement}.`, 'success');
+            await this.app.refreshDashboardData();
+            this.renderAgentFileTree(root);
+        } catch {
+            this.app.showError('Failed to update enforcement');
+            this.renderAgentFileTree(root);
+        }
+    }
+
+    showInlineAddRule(agent, root) {
+        const available = this.app.data.availableRulesWithDescriptions || [];
+        const existing = new Set((agent.rules || []).map(rule => rule.text));
+        const unused = available.filter(rule => !existing.has(rule.name));
+
+        if (unused.length === 0) {
+            this.app.showToast('Add rule', 'Every available rule is already in this file.', 'info');
+            return;
+        }
+
+        const options = unused.map(rule => `
+            <label class="rules-add-rule-option">
+                <input type="radio" name="inline-rule-pick" value="${this.app.escapeHtml(rule.name)}">
+                <span>
+                    <strong>${this.app.escapeHtml(rule.name)}</strong>
+                    <small>${this.app.escapeHtml(rule.description)}</small>
+                </span>
+            </label>`).join('');
+
+        const levels = ENFORCEMENT_LEVELS.map((option, index) => `
+            <label class="rules-add-rule-level">
+                <input type="radio" name="inline-rule-level" value="${option.value}" ${index === 0 ? 'checked' : ''}>
+                <span><strong>${option.icon} ${option.value}</strong><small>${option.blurb}</small></span>
+            </label>`).join('');
+
+        this.app.showModal('Add a rule', `
+            <form id="inline-add-rule-form" class="rules-add-rule">
+                <p class="text-muted mb-2">Adding to <code>${this.app.escapeHtml(agent.path)}</code></p>
+                <div class="rules-add-rule-list">${options}</div>
+                <div class="form-label mt-3 mb-2">Enforcement</div>
+                <div class="rules-add-rule-levels">${levels}</div>
+                <div class="d-flex justify-content-end gap-2 mt-4">
+                    <button type="button" class="btn btn-outline-secondary" data-action="close-modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add rule</button>
+                </div>
+            </form>`);
+
+        document.getElementById('inline-add-rule-form')?.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const ruleText = form.querySelector('input[name="inline-rule-pick"]:checked')?.value;
+            const enforcement = form.querySelector('input[name="inline-rule-level"]:checked')?.value || 'WARN';
+            if (!ruleText) {
+                this.app.showToast('Add rule', 'Pick a rule first.', 'warning');
+                return;
+            }
+            try {
+                await this.app.apiCall('/api/v1/agents/rules', 'POST', {
+                    path: agent.path,
+                    ruleText,
+                    enforcement
+                });
+                this.app.closeModal();
+                this.app.showToast('Rule added', `${ruleText} is now enforced at ${enforcement}.`, 'success');
+                await this.app.refreshDashboardData();
+                this.renderAgentFileTree(root);
+            } catch {
+                this.app.showError('Failed to add rule');
+            }
+        });
+    }
+
+    confirmInlineRemoveRule(agent, rule, root) {
+        this.app.showModal('Remove rule', `
+            <p>Remove <strong>"${this.app.escapeHtml(rule.text)}"</strong> from
+                <code>${this.app.escapeHtml(agent.path)}</code>?</p>
+            <p class="text-muted small">You can add it back at any time.</p>
+            <div class="d-flex gap-2 justify-content-end mt-4">
+                <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="inline-remove-rule-confirm">Remove rule</button>
+            </div>`);
+
+        document.getElementById('inline-remove-rule-confirm')?.addEventListener('click', async () => {
+            this.app.closeModal();
+            try {
+                await this.app.apiCall('/api/v1/agents/rules', 'DELETE', {
+                    path: agent.path,
+                    rules: [rule.text]
+                });
+                this.app.showToast('Rule removed', `${rule.text} no longer applies here.`, 'success');
+                await this.app.refreshDashboardData();
+                this.renderAgentFileTree(root);
+            } catch {
+                this.app.showError('Failed to remove rule');
             }
         });
     }

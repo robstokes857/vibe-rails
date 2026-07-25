@@ -17,9 +17,16 @@ internal static class MacTerminalCommandBuilder
         return startInfo;
     }
 
-    public static string BuildZshLaunchCommand(string commandLine)
+    /// <param name="keepShellOpen">
+    /// True leaves an interactive zsh behind once the launched command exits, so the window stays
+    /// usable. Job launches pass false: the window exists to show one run, and lingering shells
+    /// would accumulate one per run.
+    /// </param>
+    public static string BuildZshLaunchCommand(string commandLine, bool keepShellOpen = true)
     {
-        var zshScript = commandLine + "; exec " + QuotePosixSingleQuoted(ShellDefaults.MacOSShell) + " -l";
+        var zshScript = keepShellOpen
+            ? commandLine + "; exec " + QuotePosixSingleQuoted(ShellDefaults.MacOSShell) + " -l"
+            : commandLine;
         return "exec "
             + QuotePosixSingleQuoted(ShellDefaults.MacOSShell)
             + " -lic "

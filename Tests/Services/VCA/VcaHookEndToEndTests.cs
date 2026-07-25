@@ -61,7 +61,7 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
         Assert.Contains("[STOP] Log all file changes", result.Output);
         Assert.Contains("[block] Commit blocked", result.Output);
         Assert.Contains("MintLint code health", result.Output);
-        Assert.Contains("VCA Jobs", result.Output);
+        Assert.Contains("Automated workflows", result.Output);
     }
 
     [Fact]

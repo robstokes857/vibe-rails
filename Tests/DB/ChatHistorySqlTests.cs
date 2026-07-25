@@ -77,6 +77,8 @@ public class ChatHistorySqlTests
         cmd.Parameters.AddWithValue("$projectDisplayName", "VibeControl2");
         cmd.Parameters.AddWithValue("$startedUTC", startedUtc);
         cmd.Parameters.AddWithValue("$ownerPid", 1234);
+        // Not a Job run: these sessions must stay visible to Chat History.
+        cmd.Parameters.AddWithValue("$jobRunId", DBNull.Value);
         await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 

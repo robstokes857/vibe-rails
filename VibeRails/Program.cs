@@ -137,19 +137,20 @@ if (VcaHookProcessHost.IsRequested(args))
     return;
 }
 
-// Durable Jobs worker mode: no Kestrel, browser, auth session, PTY, or normal session logging.
-// User-level OS supervision launches this process independently of the dashboard process.
-if (JobWorkerProcessHost.IsRequested(args))
-{
-    Environment.ExitCode = await JobWorkerProcessHost.RunAsync();
-    return;
-}
-
 // Lightweight post-commit enqueue mode used by the managed Git hook. This process never
 // starts the dashboard and never changes the already-completed commit's result.
 if (JobTriggerProcessHost.IsRequested(args))
 {
     Environment.ExitCode = await JobTriggerProcessHost.RunAsync(args);
+    return;
+}
+
+// Per-minute Jobs tick from the OS scheduled task: enqueue what's due, spawn a terminal per
+// queued run, exit. No Kestrel, no hosted services — this must stay cheap enough to run every
+// minute forever.
+if (JobTickProcessHost.IsRequested(args))
+{
+    Environment.ExitCode = await JobTickProcessHost.RunAsync();
     return;
 }
 
@@ -415,9 +416,19 @@ string serverUrl = $"http://localhost:{port}";
 
 if (parsedArgs.IsLMBootstrap)
 {
-    // CLI + Web concurrent mode: terminal runs in foreground, web server in background
-    Console.WriteLine($"[VibeRails] Web viewer: {serverUrl}");
-    await CliLoop.RunTerminalWithWebAsync(parsedArgs, app.Services);
+    if (parsedArgs.JobRunId is not null)
+    {
+        // Automated Job run. Same interactive CLI the user would get from the Environment screen,
+        // in this real terminal window — JobRunner only wraps it with run bookkeeping and the
+        // opt-in deadline, and reports the outcome through the process exit code.
+        Environment.ExitCode = await JobRunner.RunAsync(parsedArgs, app.Services);
+    }
+    else
+    {
+        // CLI + Web concurrent mode: terminal runs in foreground, web server in background
+        Console.WriteLine($"[VibeRails] Web viewer: {serverUrl}");
+        await CliLoop.RunTerminalWithWebAsync(parsedArgs, app.Services);
+    }
     await app.StopAsync();
     return;
 }

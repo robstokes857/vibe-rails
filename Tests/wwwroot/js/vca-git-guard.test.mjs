@@ -253,6 +253,61 @@ test('VCA STOP findings explain why the commit is blocked and how to fix it', ()
     assert.deepEqual(model.stats.map(stat => stat.value), [2, 3, 1]);
 });
 
+test('VCA action queue puts blockers before acknowledgments and warnings', () => {
+    const model = buildVcaExplanationViewModel({
+        success: false,
+        validation: {
+            outcome: 'blocked',
+            findings: [
+                { status: 'warning', enforcement: 'WARN', rule: 'Warning' },
+                { status: 'acknowledgment_required', enforcement: 'COMMIT', rule: 'Acknowledge' },
+                { status: 'blocked', enforcement: 'STOP', rule: 'Blocker' }
+            ]
+        }
+    });
+
+    assert.deepEqual(model.findings.map(finding => finding.rule), ['Blocker', 'Acknowledge', 'Warning']);
+});
+
+test('sending VCA findings pastes a reviewable prompt without submitting it', () => {
+    const pasted = [];
+    let focused = 0;
+    const terminal = {
+        scrollIntoView() {},
+        querySelector() { return null; }
+    };
+    const controller = new RuleController({
+        terminalController: {
+            manager: {
+                getActiveTab: () => ({
+                    instance: {
+                        injectText(text) {
+                            pasted.push(text);
+                            return true;
+                        },
+                        focusInput() { focused += 1; }
+                    }
+                })
+            }
+        },
+        showToast() {}
+    });
+    controller.viewRoot = {
+        querySelector(selector) {
+            return selector === '[data-terminal-section]' ? terminal : null;
+        },
+        closest() { return null; }
+    };
+    controller.lastVcaFixBrief = 'VCA VALIDATION: Commit blocked\n1. [STOP] Add tests';
+
+    controller.openFixTerminal();
+
+    assert.equal(pasted.length, 1);
+    assert.match(pasted[0], /Fix the following VCA validation findings/);
+    assert.match(pasted[0], /Add tests/);
+    assert.equal(focused, 1);
+});
+
 test('VCA COMMIT and WARN findings clearly distinguish acknowledgement from advice', () => {
     const model = buildVcaExplanationViewModel({
         success: true,

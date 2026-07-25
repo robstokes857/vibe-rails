@@ -25,7 +25,10 @@ public class VcaHookProcessHostTests
         Assert.Contains("[1/3]", text);
         Assert.Contains("PASS: VCA hook preview completed.", text);
         Assert.Contains("MintLint code health", text);
-        Assert.Contains("Automated Jobs are not queued from preview checks.", text);
+        // The pre-commit VCA trigger is gone; the step is a no-op that still reports itself so the
+        // hook's [n/3] progress stays accurate.
+        Assert.Contains("Automated workflows", text);
+        Assert.DoesNotContain("Queued", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[pass] Commit allowed", text);
     }
 
@@ -47,7 +50,24 @@ public class VcaHookProcessHostTests
 
         Assert.Same(pauseTask, completed);
         await pauseTask;
-        Assert.Contains("auto-closes in 2 minutes", output.ToString());
+        // The prompt has to describe the timeout it was actually given. This previously read
+        // "auto-closes in 5 seconds" no matter what was passed, so the window's promise and its
+        // behaviour could drift apart silently — which is exactly what happened.
+        Assert.Contains("auto-closes in 1 second", output.ToString());
+    }
+
+    [Fact]
+    public void ConsolePauseTimeout_IsLongEnoughToReadStopViolations()
+    {
+        // The popup's whole purpose is letting the user read why a commit was blocked. Pinned
+        // because it was once cut to 5 seconds, which is not enough time to read a violation list.
+        Assert.True(
+            VcaHookProcessHost.ConsolePauseTimeout >= TimeSpan.FromSeconds(15),
+            $"Pause timeout is {VcaHookProcessHost.ConsolePauseTimeout.TotalSeconds:0}s.");
+
+        Assert.Equal(
+            "auto-closes in 30 seconds",
+            VcaHookProcessHost.DescribeAutoClose(VcaHookProcessHost.ConsolePauseTimeout));
     }
 
     [Fact]

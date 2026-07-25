@@ -80,7 +80,7 @@ export class EnvironmentController {
 
                 // Populate selects
                 sandboxesTableSlot.querySelectorAll('[data-sb-cli-select]').forEach(select => {
-                    this.app.dashboardController.populateSandboxCliSelect(select);
+                    this.app.sandboxController.populateSandboxCliSelect(select);
                 });
 
                 // Bind actions
@@ -103,7 +103,7 @@ export class EnvironmentController {
                 const resolveCli = (el) => {
                     const row = el.closest('tr');
                     const select = row.querySelector('[data-sb-cli-select]');
-                    const selection = this.app.dashboardController.parseSandboxCliSelection(select);
+                    const selection = this.app.sandboxController.parseSandboxCliSelection(select);
                     
                     if (!selection) {
                         const ts = select.tomselect;
@@ -1011,6 +1011,7 @@ export class EnvironmentController {
         const options = [
             ['', 'Default (Claude recommended)'],
             ['claude-fable-5', 'claude-fable-5'],
+            ['claude-opus-5', 'claude-opus-5'],
             ['claude-opus-4-8', 'claude-opus-4-8'],
             ['claude-opus-4-7', 'claude-opus-4-7'],
             ['claude-sonnet-5', 'claude-sonnet-5'],

@@ -240,8 +240,9 @@ export class VibeControlApp {
     }
 
     setupVSCodeIntegration() {
-        const exitBtn = document.getElementById('exit-btn');
-        if (exitBtn) {
+        // Both the top nav and the sidebar render an exit button; wire them all.
+        const exitBtns = document.querySelectorAll('.nav-exit-btn-sm');
+        exitBtns.forEach((exitBtn) => {
             exitBtn.addEventListener('click', () => {
                 if (window.__viberails_VSCODE__ && window.__viberails_close__) {
                     window.__viberails_close__();
@@ -250,7 +251,7 @@ export class VibeControlApp {
                     window.close();
                 }
             });
-        }
+        });
 
         // Apply VS Code-specific UI adjustments when in webview
         if (window.__viberails_VSCODE__) {
@@ -381,6 +382,23 @@ export class VibeControlApp {
                 this.navigate('settings', {}, { resetStack: true });
             }
 
+            const navLayoutSwitch = e.target.closest('[data-action="switch-nav-layout"]');
+            if (navLayoutSwitch) {
+                e.preventDefault();
+                const navLayout = window.VibeRailsNavLayout;
+                const nextLayout = navLayoutSwitch.dataset.navLayoutTarget === 'side'
+                    ? navLayout?.SIDE
+                    : navLayout?.TOP;
+                navLayout?.setLayout?.(nextLayout);
+
+                window.dispatchEvent(new Event('resize'));
+                this.terminalController?.refreshLayout?.();
+                setTimeout(() => {
+                    window.dispatchEvent(new Event('resize'));
+                    this.terminalController?.refreshLayout?.();
+                }, 260);
+            }
+
             const goNav = e.target.closest('.app-sidebar [data-action="navigate"], .app-subnav [data-action="navigate"]');
             if (goNav) {
                 e.preventDefault();
@@ -391,35 +409,41 @@ export class VibeControlApp {
     }
 
     initSidebarToggle() {
-        const sidebar = document.getElementById('app-sidebar');
         const toggleBtn = document.getElementById('sidebar-toggle-btn');
 
-        // Restore initial collapse state from localStorage
-        const savedCollapsed = localStorage.getItem('viberails_sidebar_collapsed') === 'true';
-        if (sidebar) {
-            if (savedCollapsed) {
-                sidebar.classList.add('collapsed');
-                sidebar.classList.remove('expanded');
-                document.body.classList.add('sidebar-collapsed');
-                document.body.classList.remove('sidebar-expanded');
-            } else {
-                sidebar.classList.remove('collapsed');
-                sidebar.classList.add('expanded');
-                document.body.classList.remove('sidebar-collapsed');
-                document.body.classList.add('sidebar-expanded');
+        // The sidebar collapse signal is the <html>.sidebar-collapsed class; the
+        // inline <head> script already applies it before first paint. Re-sync here
+        // in case storage changed elsewhere, then keep it in sync on toggle.
+        //
+        // The read is guarded like the write below and like nav-layout.js: a webview or
+        // browser with storage denied throws SecurityError on getItem, and this runs during
+        // init, so an unguarded throw would abort app startup. Fall back to whatever the
+        // pre-paint <head> script already put on <html>.
+        const readCollapsed = () => {
+            try {
+                return localStorage.getItem('viberails_sidebar_collapsed') === 'true';
+            } catch (_) {
+                return document.documentElement.classList.contains('sidebar-collapsed');
             }
-        }
+        };
+
+        const syncFromStorage = () => {
+            const collapsed = readCollapsed();
+            document.documentElement.classList.toggle('sidebar-collapsed', collapsed);
+            return collapsed;
+        };
 
         const toggleSidebar = () => {
-            const sidebar = document.getElementById('app-sidebar');
-            if (!sidebar) return;
-            const isCollapsed = sidebar.classList.toggle('collapsed');
-            sidebar.classList.toggle('expanded', !isCollapsed);
-            document.body.classList.toggle('sidebar-collapsed', isCollapsed);
-            document.body.classList.toggle('sidebar-expanded', !isCollapsed);
-            localStorage.setItem('viberails_sidebar_collapsed', String(isCollapsed));
+            if (!document.getElementById('app-sidebar')) return;
+            const collapsed = syncFromStorage();
+            const next = !collapsed;
+            document.documentElement.classList.toggle('sidebar-collapsed', next);
+            try {
+                localStorage.setItem('viberails_sidebar_collapsed', String(next));
+            } catch (_) { /* ignore storage errors */ }
 
-            // Notify terminal and responsive components of size change
+            // Notify terminal and responsive components of the size change, both
+            // immediately and after the CSS transition settles.
             window.dispatchEvent(new Event('resize'));
             this.terminalController?.refreshLayout?.();
 
@@ -429,12 +453,13 @@ export class VibeControlApp {
             }, 260);
         };
 
+        syncFromStorage();
         toggleBtn?.addEventListener('click', toggleSidebar);
         this.toggleSidebar = toggleSidebar;
     }
 
-    applyNavbarsCollapsedState(collapsed) {
-        // Method kept for compatibility, sync with sidebar state
+    applyNavbarsCollapsedState() {
+        // Kept for compatibility; the sidebar collapse signal is now <html>.sidebar-collapsed.
         window.dispatchEvent(new Event('resize'));
         this.terminalController?.refreshLayout?.();
     }
@@ -789,6 +814,9 @@ export class VibeControlApp {
         this.ruleController?.unload?.();
         this.jobController?.unload?.();
         this.environmentController?.unload?.();
+        // Tears down the Rules workspace's local-nav observers and listeners.
+        // mountAgentsOverview re-creates them, so this is safe when re-entering Rules.
+        this.agentController?.unload?.();
         this.updateActiveSubNav(view);
         this.terminalController?.resetLayoutStateForNavigation();
         // Tear down the MCP Explorer's global listener / xterm instances when navigating away
@@ -829,12 +857,17 @@ export class VibeControlApp {
     applyViewLayoutState(view) {
         const isTerminalFocus = view === 'terminal-focus';
         const isGitGuardFocus = view === 'git-guard';
+        // The Rules workspace is a fixed two-pane split (sections over terminal), so it
+        // owns the viewport the same way the terminal focus view does: no page scroll,
+        // no footer, tight gutters. 'dashboard' and 'agents' both render it.
+        const isRulesWorkspace = view === 'dashboard' || view === 'agents';
         const layoutRoots = [document.documentElement, document.body];
 
         layoutRoots.forEach((element) => {
             element.classList.toggle('terminal-focus-active', isTerminalFocus);
             element.classList.toggle('vb-terminal-focus-active', isTerminalFocus);
             element.classList.toggle('git-guard-focus-active', isGitGuardFocus);
+            element.classList.toggle('vb-rules-workspace-active', isRulesWorkspace);
         });
 
         // Removed automatic collapsing of navbars in terminal focus mode
