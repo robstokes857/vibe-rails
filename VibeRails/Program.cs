@@ -145,9 +145,9 @@ if (JobTriggerProcessHost.IsRequested(args))
     return;
 }
 
-// Per-minute Jobs tick from the OS scheduled task: enqueue what's due, spawn a terminal per
-// queued run, exit. No Kestrel, no hosted services — this must stay cheap enough to run every
-// minute forever.
+// Compatibility tombstone for the removed OS Jobs scheduler. A legacy scheduled task may still
+// invoke this argument; exit before building the web host so it can never launch work or strand a
+// hidden VibeRails instance.
 if (JobTickProcessHost.IsRequested(args))
 {
     Environment.ExitCode = await JobTickProcessHost.RunAsync();

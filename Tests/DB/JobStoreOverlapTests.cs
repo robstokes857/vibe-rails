@@ -92,7 +92,7 @@ public sealed class JobStoreOverlapTests : IDisposable
     [Fact]
     public async Task TryMarkLaunchedAsync_LetsExactlyOneCallerSpawnTheTerminal()
     {
-        // The dashboard scheduler and the OS tick can both be looking at the same queued run.
+        // A scheduler lease handoff can briefly leave two callers looking at the same queued run.
         var (store, jobId) = await SeedJobAsync();
         var cancellationToken = TestContext.Current.CancellationToken;
         var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
@@ -120,7 +120,7 @@ public sealed class JobStoreOverlapTests : IDisposable
     public async Task FailStalledLaunchesAsync_SurfacesALaunchThatNeverStarted()
     {
         // This is the detector for a terminal that was spawned but never appeared — most importantly
-        // a scheduled task running without an interactive desktop, where nothing else would report
+        // a native terminal launch failing without starting its run, where nothing else would report
         // a problem and the job would just silently never happen.
         var (store, jobId) = await SeedJobAsync();
         var cancellationToken = TestContext.Current.CancellationToken;

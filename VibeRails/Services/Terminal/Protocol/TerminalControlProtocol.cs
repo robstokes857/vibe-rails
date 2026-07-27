@@ -32,6 +32,91 @@ internal static class TerminalControlProtocol
         return $"{DisconnectBrowserCommand}:{safeReason}";
     }
 
+    // Every reserved frame the viewer protocol defines. A message starting with any
+    // of these is protocol traffic, never keystrokes — see IsReservedControlFrame.
+    private static readonly string[] s_reservedPrefixes =
+    [
+        ResizePrefix,
+        CommandPrefix,
+        ReplayCommand,
+        BrowserDisconnectedCommand,
+        DisconnectBrowserCommand,
+        PinResponse,
+        Locked,
+        Unlocked
+    ];
+
+    /// <summary>
+    /// True when the message starts with any reserved control prefix. Such a frame
+    /// must NEVER be routed to the PTY, even when its payload fails to validate —
+    /// writing it types the literal text into whatever TUI is running. Session
+    /// 71dee36a: a 4-row fit produced <c>__resize__:171,4</c>, which fails the
+    /// rows &gt;= 5 bound in <see cref="TryParseResizeCommand"/> and was typed into
+    /// OpenCode's composer.
+    /// <para>
+    /// Callers must check this AFTER attempting to parse, and drop rather than route,
+    /// so well-formed frames still reach their handlers. Covers the exact-match frames
+    /// too (<c>__replay__</c>, <c>__PIN__:</c>, …) because a malformed variant of one —
+    /// <c>__replay__x</c>, or a <c>__PIN__:</c> arriving after the handshake — would
+    /// otherwise fall through and be typed into the TUI. No current client emits those,
+    /// but a stray PIN reaching a terminal is not a failure mode worth leaving open.
+    /// </para>
+    /// <para>
+    /// EXCEPTION — the remote receive loop must forward <c>__PIN__:</c> frames to
+    /// <c>OnInputReceived</c> BEFORE consulting this method: on that path the PIN
+    /// handshake rides the input channel and is consumed by TerminalRunner's verifier
+    /// downstream (which drops strays after authorization). Treating it as reserved
+    /// there makes PIN-protected remote sessions impossible to unlock.
+    /// </para>
+    /// </summary>
+    public static bool IsReservedControlFrame(string input)
+    {
+        foreach (var prefix in s_reservedPrefixes)
+        {
+            if (input.StartsWith(prefix, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when the raw frame bytes start with the <c>__PIN__:</c> prefix. Byte-level so
+    /// callers on the input hot path can check without decoding every keystroke; the
+    /// prefix is pure ASCII, so a byte compare is exact.
+    /// </summary>
+    public static bool IsPinResponseFrame(ReadOnlySpan<byte> frame)
+    {
+        if (frame.Length < PinResponse.Length) return false;
+        for (var i = 0; i < PinResponse.Length; i++)
+        {
+            if (frame[i] != (byte)PinResponse[i]) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Renders a rejected frame safe to log: redacts PIN payloads (the digits are a
+    /// secret and must never be persisted), strips control characters (a malformed
+    /// frame can carry ANSI escapes, which must not land unescaped in the log) and
+    /// truncates. Same concern and filter as <see cref="SanitizeReason"/>.
+    /// </summary>
+    public static string SanitizeFrameForLog(string frame, int maxLength = 64)
+    {
+        if (frame.StartsWith(PinResponse, StringComparison.Ordinal))
+            return PinResponse + "<redacted>";
+
+        var sb = new StringBuilder(Math.Min(frame.Length, maxLength));
+        foreach (var ch in frame)
+        {
+            if (sb.Length >= maxLength) break;
+            if (!char.IsControl(ch)) sb.Append(ch);
+        }
+
+        return sb.ToString();
+    }
+
     public static bool TryParseResizeCommand(string input, out int cols, out int rows)
     {
         cols = 0;

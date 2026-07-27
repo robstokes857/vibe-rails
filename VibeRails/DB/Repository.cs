@@ -387,6 +387,19 @@ namespace VibeRails.DB
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        public async Task TouchEnvironmentLastUsedAsync(int environmentId, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.TouchEnvironmentLastUsed;
+            cmd.Parameters.AddWithValue("$id", environmentId);
+            cmd.Parameters.AddWithValue("$lastUsedUTC", DateTime.UtcNow.ToString("O"));
+
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         public async Task DeleteEnvironmentAsync(int id, CancellationToken cancellationToken = default)
         {
             await using var connection = new SqliteConnection(_connectionString);

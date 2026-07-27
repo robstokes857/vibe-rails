@@ -352,7 +352,7 @@ test('VCA pass and empty states are calm, explicit results', () => {
     assert.match(passed.title, /satisfy your VCA rules/i);
     assert.equal(passed.actionable, false);
     assert.equal(empty.tone, 'info');
-    assert.match(empty.title, /nothing staged/i);
+    assert.match(empty.title, /no uncommitted changes/i);
     assert.equal(empty.actionable, false);
 });
 

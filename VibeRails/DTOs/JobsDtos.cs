@@ -113,12 +113,6 @@ public sealed record JobRunListResponse(List<JobRunResponse> Runs);
 
 public sealed record JobActionResponse(bool Success, string Message, string? RunId = null);
 
-/// <summary>
-/// State of the OS scheduled task that runs `vb --job-tick` every minute. Without it, Jobs only
-/// fire while the dashboard is open; with it they fire whenever the user is logged in.
-/// </summary>
-public sealed record JobSchedulerStatusResponse(bool Installed, bool Supported, string Platform);
-
 public sealed record JobDefinitionRecord(
     long Id,
     string Name,

@@ -590,6 +590,14 @@ namespace VibeRails.DB
                 LastUsedUTC = $lastUsedUTC
             WHERE Id = $id;
             """;
+        // Recency-only bookkeeping. Launches must never use UpdateEnvironment for this:
+        // that statement writes every column from an earlier read, so it silently reverts
+        // any edit that landed between the read and the launch.
+        public const string TouchEnvironmentLastUsed = """
+            UPDATE Environments
+            SET LastUsedUTC = $lastUsedUTC
+            WHERE Id = $id;
+            """;
         public const string DeleteEnvironment = "DELETE FROM Environments WHERE Id = $id;";
 
         // Sandbox CRUD (project-scoped)

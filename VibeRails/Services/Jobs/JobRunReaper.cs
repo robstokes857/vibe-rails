@@ -10,11 +10,9 @@ namespace VibeRails.Services.Jobs;
 /// was rebooted mid-run, or the process was killed. <c>OwnerProcessId</c> is the run's own spawned
 /// process, so "is it still alive" is a meaningful question here.
 ///
-/// Shared by both schedulers on purpose. A Running row that nothing ever closes out is not merely
+/// Called by the active root scheduler. A Running row that nothing ever closes out is not merely
 /// untidy: it fails the per-job overlap guard and counts against the machine-wide launch cap for
-/// good, so a handful of them silently stops every Job on the box from launching again. Leaving
-/// this to the dashboard alone would mean that never gets repaired while the dashboard is closed —
-/// which is exactly when unattended runs are happening.
+/// good. The next active VibeRails root repairs those rows before it considers new work.
 /// </summary>
 internal static class JobRunReaper
 {
@@ -33,7 +31,7 @@ internal static class JobRunReaper
             // themselves, and CompleteRunAsync will not overwrite a row that is already terminal,
             // so this cannot relabel a run that reported a real outcome.
             await store.CompleteRunAsync(run.Id, JobRunStatus.Interrupted, null,
-                "The terminal running this Job is no longer open.", cancellationToken);
+                "The terminal running this Automation is no longer open.", cancellationToken);
             reaped++;
         }
 

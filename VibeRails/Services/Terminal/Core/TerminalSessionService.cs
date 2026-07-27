@@ -490,6 +490,20 @@ public class TerminalSessionService : ITerminalSessionService
                     continue;
                 }
 
+                // A reserved control frame that reached this point failed to parse —
+                // a bug on the sending side, not something the user typed. Dropping
+                // it is the only safe move: routing would write the literal frame to
+                // PTY stdin as keystrokes. See runbooks/terminal/TERMINAL.md
+                // "## 2026-07-26 __resize__:171,4 typed into the OpenCode composer".
+                if (result.MessageType == WebSocketMessageType.Text &&
+                    TerminalControlProtocol.IsReservedControlFrame(input))
+                {
+                    Log.Warning(
+                        "[Terminal] Dropped malformed control frame from viewer: {Frame}",
+                        TerminalControlProtocol.SanitizeFrameForLog(input));
+                    continue;
+                }
+
                 await TerminalIoRouter.RouteInputAsync(
                     stateService,
                     terminal,

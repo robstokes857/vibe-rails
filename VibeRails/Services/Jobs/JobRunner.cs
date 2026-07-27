@@ -66,8 +66,8 @@ public static class JobRunner
             return CouldNotStartExitCode;
         }
 
-        // Atomic claim. A second launcher of the same run (or a stale retry of the OS tick) loses
-        // here and exits quietly rather than opening a duplicate session.
+        // Atomic claim. A second launcher of the same run during a stale lease handoff loses here
+        // and exits quietly rather than opening a duplicate session.
         if (!await store.StartRunAsync(runId, Environment.ProcessId))
         {
             Log.Information("[Jobs] Run {RunId} was already claimed by another process; exiting", runId);
@@ -122,7 +122,7 @@ public static class JobRunner
         if (await WasCancelledAsync(store, runId))
         {
             status = JobRunStatus.Cancelled;
-            error = "Job was cancelled.";
+            error = "Automation was cancelled.";
         }
 
         await store.CompleteRunAsync(runId, status, exitCode, error, CancellationToken.None);
@@ -172,7 +172,7 @@ public static class JobRunner
                 store,
                 runId,
                 JobRunStatus.TimedOut,
-                $"Job exceeded its {maxRuntimeMinutes.Value}-minute limit.");
+                $"Automation exceeded its {maxRuntimeMinutes.Value}-minute limit.");
 
             try { Log.CloseAndFlush(); } catch { }
 
@@ -210,7 +210,7 @@ public static class JobRunner
 
                 // Same ordering rule as the deadline: record the outcome first, or the reaper will
                 // later see a dead process against a Running row and call it Interrupted.
-                RecordTerminalStatus(store, runId, JobRunStatus.Cancelled, "Job was cancelled.");
+                RecordTerminalStatus(store, runId, JobRunStatus.Cancelled, "Automation was cancelled.");
 
                 try { Log.CloseAndFlush(); } catch { }
                 try { Process.GetCurrentProcess().Kill(entireProcessTree: true); }

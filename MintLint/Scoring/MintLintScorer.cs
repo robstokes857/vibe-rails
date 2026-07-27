@@ -38,7 +38,7 @@ public static class MintLintScorer
             categories.Add(ScoreCategory(definition, metrics, origins, profile));
         }
 
-        OverallScore overall = RollUp(categories);
+        OverallScore overall = RollUp(categories, profile);
         return new FileScore(file.File, metrics, categories, overall);
     }
 
@@ -307,18 +307,31 @@ public static class MintLintScorer
         return Math.Clamp(score, 0.0, 100.0);
     }
 
-    private static OverallScore RollUp(IReadOnlyList<CategoryScore> categories)
+    private static OverallScore RollUp(IReadOnlyList<CategoryScore> categories, ScoringProfile profile)
     {
-        // The overall reflects the file's worst (weight-adjusted) category, so a file that is
-        // severe on a single dimension still surfaces for review rather than being averaged out.
-        // Weights below 1.0 de-emphasize less critical smells.
-        double worst = 0;
+        // Breadth-gated roll-up: the overall is the BreadthRank-th worst (weight-adjusted)
+        // category, so a file only rates badly when several independent smell dimensions are
+        // severe at once. Categories individually saturate easily (worst metric wins inside
+        // each one), so "worst category wins" here made nearly every real file AtRisk — and
+        // when everything is bad, nothing is. The DepthFloor keeps a single catastrophic
+        // category from vanishing entirely: it caps how far breadth gating can discount the
+        // worst dimension. Weights below 1.0 de-emphasize less critical smells.
+        List<double> weighted = new(categories.Count);
         foreach (CategoryScore category in categories)
         {
-            worst = Math.Max(worst, category.Score * category.Weight);
+            weighted.Add(category.Score * category.Weight);
         }
 
-        double score = Math.Round(Math.Clamp(worst, 0, 100), 1);
+        weighted.Sort(static (left, right) => right.CompareTo(left));
+
+        double score = 0;
+        if (weighted.Count > 0)
+        {
+            int rank = Math.Clamp(profile.BreadthRank, 1, weighted.Count);
+            score = Math.Max(weighted[rank - 1], weighted[0] * profile.DepthFloor);
+        }
+
+        score = Math.Round(Math.Clamp(score, 0, 100), 1);
         return new OverallScore(score, RatingFor(score));
     }
 

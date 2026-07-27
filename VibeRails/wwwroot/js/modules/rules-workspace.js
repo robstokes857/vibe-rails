@@ -145,7 +145,6 @@ export class RulesWorkspace {
         const validate = this.sections.get('validate');
         const quality = this.sections.get('quality');
         const files = this.sections.get('files');
-        const automate = this.sections.get('automate');
 
         const onValidate = () => this.syncValidate(validate);
         this.observeTone(validate, onValidate);
@@ -159,13 +158,10 @@ export class RulesWorkspace {
 
         this.observeContent(files?.querySelector('[data-agent-file-tree]'),
             () => this.syncFiles(files), false);
-        this.observeContent(automate?.querySelector('[data-jobs-automation-host]'),
-            () => this.syncAutomate(automate), false);
 
         this.syncValidate(validate);
         this.syncQuality(quality);
         this.syncFiles(files);
-        this.syncAutomate(automate);
     }
 
     /** Coalesces bursts of mutations into one handler call per frame. */
@@ -227,7 +223,10 @@ export class RulesWorkspace {
         if (!section) return;
         const busy = section.getAttribute('aria-busy') === 'true';
         const tone = section.dataset.tone || 'neutral';
-        const score = section.querySelector('.code-analyzer-score-value')?.textContent?.trim();
+        // The controller stamps the last scan's health score on the report container;
+        // the section itself no longer renders a score card (the brief lives on the
+        // Validation screen).
+        const score = section.querySelector('[data-code-analyzer-report]')?.dataset.analyzerScore || '';
         const state = section.querySelector('[data-vca-console-state]')?.textContent?.trim() || 'Ready';
         const meta = busy ? 'Scanning' : (score ? `Score ${score}` : state);
         this.setTabStatus('quality', { tone, meta, busy });
@@ -240,15 +239,5 @@ export class RulesWorkspace {
             '[data-agent-file-tree] .agent-files-configured .agent-file-tree-item').length;
         const meta = files === 0 ? 'None' : `${files} ${files === 1 ? 'file' : 'files'}`;
         this.setTabStatus('files', { tone: withRules > 0 ? 'success' : 'neutral', meta });
-    }
-
-    syncAutomate(section) {
-        if (!section) return;
-        const host = section.querySelector('[data-jobs-automation-host]');
-        const jobs = host?.querySelectorAll('.jobs-automation-list article').length || 0;
-        const enabled = Array.from(host?.querySelectorAll('.jobs-automation-list .job-state') || [])
-            .filter(state => state.dataset.tone === 'success').length;
-        const meta = jobs === 0 ? 'None' : `${jobs} ${jobs === 1 ? 'job' : 'jobs'}`;
-        this.setTabStatus('automate', { tone: enabled > 0 ? 'success' : 'neutral', meta });
     }
 }

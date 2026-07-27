@@ -6,6 +6,9 @@ import { pathToFileURL } from 'node:url';
 
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/jobs-controller.js');
 const environmentModulePath = path.resolve('VibeRails/wwwroot/js/modules/environment-controller.js');
+const indexPath = path.resolve('VibeRails/wwwroot/index.html');
+const rulesWorkspacePath = path.resolve('VibeRails/wwwroot/js/modules/rules-workspace.js');
+const ruleControllerPath = path.resolve('VibeRails/wwwroot/js/modules/rule-controller.js');
 const {
     JobController,
     getJobCliForLlm,
@@ -35,29 +38,48 @@ function createApp() {
     };
 }
 
-test('Jobs page separates shared Environment / Workers from Automation rules', () => {
+test('Automation page makes automations primary and explains its active-instance runtime', () => {
     const controller = new JobController(createApp());
     const html = controller.renderPage();
 
-    assert.match(html, /text-gradient">Jobs/);
-    assert.doesNotMatch(html, /Durable local automation/);
-    assert.match(html, /Environment \/ Workers/);
-    assert.match(html, /The same workers from the Workers screen/);
-    assert.match(html, /Automation rules/);
-    assert.match(html, /When workers run/);
+    assert.match(html, /text-gradient">Automation/);
+    assert.match(html, /Automations run only while VibeRails is open/);
+    assert.match(html, /single active instance claims each run/);
+    assert.match(html, /id="jobs-list-title">Automations/);
     assert.match(html, /Recent runs/);
+    assert.doesNotMatch(html, /Run jobs while VibeRails is closed/);
+    assert.doesNotMatch(html, /data-jobs-scheduler-status/);
+    assert.doesNotMatch(html, /data-job-environments-table/);
 });
 
-test('Jobs inline automation editor has no duplicate repository or prompt controls', () => {
+test('Navigation calls the feature Automation and the Rules page stays out of it', () => {
+    const index = readFileSync(indexPath, 'utf8');
+    const rulesWorkspace = readFileSync(rulesWorkspacePath, 'utf8');
+    const ruleController = readFileSync(ruleControllerPath, 'utf8');
+    const jobsController = readFileSync(modulePath, 'utf8');
+
+    assert.match(index, /title="Scheduled and Git-triggered Automations"/);
+    assert.doesNotMatch(index, />Open Jobs<|previews never queue jobs|>Jobs<\/span>/i);
+    // The Rules page no longer hosts an Automation section — the standalone
+    // Automation page owns the whole feature.
+    assert.doesNotMatch(index, /data-rules-section="automate"|data-jobs-automation-host/);
+    assert.doesNotMatch(rulesWorkspace, /syncAutomate|automation-host/);
+    assert.doesNotMatch(jobsController, /attachRulesAutomation/);
+    assert.doesNotMatch(ruleController, /post-commit Jobs/);
+});
+
+test('Automation inline editor derives repository and prompt from its Environment', () => {
     const source = readFileSync(modulePath, 'utf8');
 
     assert.doesNotMatch(source, /id=["']job-project["']/);
     assert.doesNotMatch(source, /id=["']job-prompt["']/);
     assert.match(source, /Runs in the current VibeRails repository/);
     assert.match(source, /includeBase:\s*false/);
+    assert.match(source, />Environment<\/label>/);
+    assert.doesNotMatch(source, /Environment \/ Worker/);
 });
 
-test('Jobs maps every non-shell picker CLI to the shared LLM enum values', () => {
+test('Automation maps every non-shell Environment CLI to the shared LLM enum values', () => {
     const expected = [
         ['codex', 1],
         ['claude', 2],
@@ -76,8 +98,8 @@ test('Jobs maps every non-shell picker CLI to the shared LLM enum values', () =>
     assert.equal(getJobCliForLlm(5), null);
 });
 
-test('Jobs editor does not promise read-only or clone isolation', () => {
-    // Execution modes (read-only / throwaway-clone) were removed: a Job now runs the worker's CLI
+test('Automation editor does not promise read-only or clone isolation', () => {
+    // Execution modes (read-only / throwaway-clone) were removed: an Automation runs its Environment
     // directly with the user's own permissions. The editor must never claim otherwise, so this
     // guards the absence of every isolation promise rather than any particular wording.
     const source = readFileSync(modulePath, 'utf8');
@@ -92,7 +114,7 @@ test('Jobs editor does not promise read-only or clone isolation', () => {
     assert.doesNotMatch(source, /executionMode/);
 });
 
-test('Jobs renderer escapes job data and shows configured triggers', () => {
+test('Automation renderer escapes data and shows Environment, triggers, and next run', () => {
     const app = createApp();
     const controller = new JobController(app);
     const list = { innerHTML: '' };
@@ -104,17 +126,24 @@ test('Jobs renderer escapes job data and shows configured triggers', () => {
             return null;
         }
     };
+    controller.environments = [{
+        id: 42,
+        name: '<script>alert(1)</script>',
+        cli: 'codex',
+        customPrompt: 'Review changes.'
+    }];
+    const nextRunUtc = new Date(Date.now() + (12 * 60_000)).toISOString();
     controller.jobs = [{
         id: 7,
         name: '<Security review>',
         projectPath: 'C:\\repo&one',
         llm: 1,
-        prompt: '<script>alert(1)</script>',
-        executionMode: 0,
+        environmentId: 42,
+        environmentName: 'Review Environment',
         timeoutMinutes: 30,
         enabled: true,
         triggers: [
-            { kind: 0, scheduleKind: 0, intervalMinutes: 15 },
+            { kind: 0, scheduleKind: 0, intervalMinutes: 15, nextRunUtc },
             { kind: 2 },
             { kind: 3 }
         ]
@@ -122,17 +151,20 @@ test('Jobs renderer escapes job data and shows configured triggers', () => {
 
     controller.renderJobs();
 
-    assert.equal(count.textContent, '1 rule');
+    assert.equal(count.textContent, '1 automation');
     assert.match(list.innerHTML, /&lt;Security review&gt;/);
     assert.match(list.innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
     assert.doesNotMatch(list.innerHTML, /<script>/);
+    assert.match(list.innerHTML, />Environment</);
     assert.match(list.innerHTML, /Every 15 min/);
     assert.match(list.innerHTML, /After successful commit/);
     assert.match(list.innerHTML, /Manual/);
+    assert.match(list.innerHTML, /Next run/);
+    assert.match(list.innerHTML, /in 12 min/);
     assert.match(list.innerHTML, /Run now/);
 });
 
-test('Jobs renderer escapes job ids used in data attributes', () => {
+test('Automation renderer escapes ids used in data attributes', () => {
     const controller = new JobController(createApp());
     const list = { innerHTML: '' };
     controller.root = {
@@ -159,7 +191,7 @@ test('Jobs renderer escapes job ids used in data attributes', () => {
     assert.match(list.innerHTML, /data-job-id="7&quot; data-owned=&quot;yes"/);
 });
 
-test('Jobs cards display every supported provider instead of falling back to Claude', () => {
+test('Automation rows display every supported Environment provider', () => {
     const controller = new JobController(createApp());
     const list = { innerHTML: '' };
     controller.root = {
@@ -168,16 +200,22 @@ test('Jobs cards display every supported provider instead of falling back to Cla
             return null;
         }
     };
-    controller.jobs = [
+    const providers = [
         [1, 'Codex'], [2, 'Claude'], [3, 'Antigravity'], [4, 'Copilot'],
         [6, 'OpenCode'], [7, 'GLM 5.2'], [8, 'Kimi K3']
-    ].map(([llm, name], index) => ({
+    ];
+    controller.environments = providers.map(([llm, name], index) => ({
+        id: index + 1,
+        name: `${name} Environment`,
+        cli: getJobCliForLlm(llm),
+        customPrompt: 'Review.'
+    }));
+    controller.jobs = providers.map(([llm, name], index) => ({
         id: index + 1,
         name: `${name} review`,
         projectPath: '/repo',
         llm,
-        prompt: 'Review.',
-        executionMode: 0,
+        environmentId: index + 1,
         timeoutMinutes: 30,
         enabled: true,
         triggers: []
@@ -190,34 +228,7 @@ test('Jobs cards display every supported provider instead of falling back to Cla
     }
 });
 
-test('Rules automation escapes job ids used in data attributes', async () => {
-    const app = createApp();
-    app.data = { configs: { rootPath: '/repo' }, isInGit: true };
-    app.apiCall = async () => ({
-        jobs: [{
-            id: '9" data-owned="yes',
-            name: 'Review',
-            llm: 1,
-            enabled: true,
-            // Only commit-triggered Jobs surface in the Rules page's automation host.
-            triggers: [{ kind: 2 }]
-        }]
-    });
-    const host = { innerHTML: '', querySelectorAll: () => [] };
-    const root = {
-        querySelector(selector) {
-            return selector === '[data-jobs-automation-host]' ? host : null;
-        }
-    };
-    const controller = new JobController(app);
-
-    await controller.attachRulesAutomation(root);
-
-    assert.doesNotMatch(host.innerHTML, /data-rules-job-run="9" data-owned=/);
-    assert.match(host.innerHTML, /data-rules-job-run="9&quot; data-owned=&quot;yes"/);
-});
-
-test('New Jobs derive repository, LLM, and prompt from the current worker context', async () => {
+test('New Automations derive repository, LLM, and prompt from the current Environment', async () => {
     const app = createApp();
     app.data = { configs: { rootPath: '/derived/current-repo' }, isInGit: true };
     app.closeModal = () => {};
@@ -226,7 +237,7 @@ test('New Jobs derive repository, LLM, and prompt from the current worker contex
         id: 42,
         name: 'OpenCode review',
         cli: 'opencode',
-        customPrompt: 'Perform the worker-owned security review.'
+        customPrompt: 'Perform the Environment-owned security review.'
     }];
     controller.refreshAll = async () => {};
 
@@ -253,11 +264,11 @@ test('New Jobs derive repository, LLM, and prompt from the current worker contex
     assert.equal(app.calls[0].body.projectPath, '/derived/current-repo');
     assert.equal(app.calls[0].body.llm, 6);
     assert.equal(app.calls[0].body.environmentId, 42);
-    assert.equal(app.calls[0].body.prompt, 'Perform the worker-owned security review.');
+    assert.equal(app.calls[0].body.prompt, 'Perform the Environment-owned security review.');
     assert.deepEqual(app.calls[0].body.triggers, [{ kind: 2 }]);
 });
 
-test('New rules reject base CLIs while an existing legacy base Job retains cached worker fields', () => {
+test('Automations require a saved Environment and do not retain legacy base-CLI support', () => {
     const app = createApp();
     app.data = { configs: { rootPath: '/derived/current-repo' }, isInGit: true };
     const controller = new JobController(app);
@@ -276,7 +287,7 @@ test('New rules reject base CLIs while an existing legacy base Job retains cache
 
     assert.throws(
         () => controller.captureEditorState(form, { validate: true }),
-        /Choose a custom Environment \/ Worker/
+        /Choose an Environment/
     );
 
     const legacyJob = {
@@ -293,15 +304,17 @@ test('New rules reject base CLIs while an existing legacy base Job retains cache
     };
     controller.activeEditorJob = legacyJob;
     controller.activeEditorSource = legacyJob;
-    const payload = controller.captureEditorState(form, { validate: true });
+    assert.throws(
+        () => controller.captureEditorState(form, { validate: true }),
+        /Choose an Environment/
+    );
 
-    assert.equal(payload.llm, 8);
-    assert.equal(payload.environmentId, null);
-    assert.equal(payload.prompt, legacyJob.prompt);
-    assert.equal(payload.projectPath, '/derived/current-repo');
+    const source = readFileSync(modulePath, 'utf8');
+    assert.doesNotMatch(source, /default \(legacy\)/);
+    assert.doesNotMatch(source, /isLegacyBase/);
 });
 
-test('Jobs trigger labels cover every live kind and degrade the retired VCA kind to Manual', () => {
+test('Automation trigger labels cover every live kind and degrade the retired VCA kind to Manual', () => {
     const controller = new JobController(createApp());
 
     assert.equal(controller.formatTrigger({ kind: 2 }), 'After successful commit');
@@ -318,23 +331,96 @@ test('Jobs trigger labels cover every live kind and degrade the retired VCA kind
     assert.equal(controller.formatTrigger({ kind: 1 }), 'Manual');
 });
 
-test('environmentChanged rerenders the shared worker table, automation cards, and active picker', async () => {
+test('Automation formats future runs as minutes, hours, tomorrow, or a locale date', () => {
+    const controller = new JobController(createApp());
+    const now = new Date(2026, 6, 26, 10, 0, 0);
+
+    assert.equal(
+        controller.formatFutureTime(new Date(now.getTime() + (12 * 60_000)), now.getTime()),
+        'in 12 min');
+    assert.equal(
+        controller.formatFutureTime(new Date(now.getTime() + (3 * 3_600_000)), now.getTime()),
+        'in 3 hr');
+    // Floor, not ceil: 1h05m must read "in 1 hr", never the overstated "in 2 hr".
+    assert.equal(
+        controller.formatFutureTime(new Date(now.getTime() + (65 * 60_000)), now.getTime()),
+        'in 1 hr');
+    // Ceil crosses to 60 minutes just before the hour; the hour formatter must never emit zero.
+    assert.equal(
+        controller.formatFutureTime(new Date(now.getTime() + (59 * 60_000) + 1), now.getTime()),
+        'in 1 hr');
+
+    const tomorrow = new Date(2026, 6, 27, 9, 30, 0);
+    assert.match(controller.formatFutureTime(tomorrow, now.getTime()), /^Tomorrow /);
+
+    const later = new Date(2026, 7, 4, 9, 30, 0);
+    assert.equal(
+        controller.formatFutureTime(later, now.getTime()),
+        later.toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit'
+        }));
+});
+
+test('The poll keeps Next run honest: it refetches jobs, and identical markup skips the DOM', async () => {
     const app = createApp();
-    const nextEnvironments = [{ id: 73, name: 'Updated worker', cli: 'codex', customPrompt: 'Review security.' }];
+    app.data = { configs: { rootPath: '/repo' }, isInGit: true };
+    const served = [];
+    app.apiCall = async (url) => {
+        served.push(url);
+        return { jobs: [{ id: 1, name: 'Nightly', llm: 1, environmentId: 42, timeoutMinutes: null, enabled: true, triggers: [] }] };
+    };
+    const controller = new JobController(app);
+    controller.environments = [{ id: 42, name: 'Env', cli: 'codex', customPrompt: 'Go.' }];
+    let assignments = 0;
+    const list = {
+        _html: '',
+        get innerHTML() { return this._html; },
+        set innerHTML(value) { this._html = value; assignments += 1; }
+    };
+    controller.root = {
+        querySelector(selector) {
+            return selector === '[data-jobs-list]' ? list : null;
+        }
+    };
+
+    await controller.refreshJobs({ quiet: true });
+    assert.equal(served.length, 1);
+    assert.match(served[0], /\/api\/v1\/jobs\?projectPath=/);
+    assert.equal(assignments, 1);
+    assert.match(list.innerHTML, /Nightly/);
+
+    // Same data → same markup → the DOM must not be touched again (a 5s poll that
+    // rewrites innerHTML wipes hover/focus and any busy Run-now button).
+    await controller.refreshJobs({ quiet: true });
+    assert.equal(served.length, 2);
+    assert.equal(assignments, 1);
+
+    // A stale cache must never survive a page rebuild: after the reset, the same
+    // markup renders again over the loading placeholder.
+    controller._lastJobsListHtml = null;
+    controller.renderJobs();
+    assert.equal(assignments, 2);
+});
+
+test('environmentChanged rerenders automations and the active Environment picker', async () => {
+    const app = createApp();
+    const nextEnvironments = [{ id: 73, name: 'Updated Environment', cli: 'codex', customPrompt: 'Review security.' }];
     app.data.environments = nextEnvironments;
     const controller = new JobController(app);
     const calls = [];
-    controller.renderEnvironments = () => calls.push('workers');
-    controller.renderJobs = () => calls.push('rules');
-    controller.refreshEditorWorkerPicker = environmentId => calls.push(`picker:${environmentId}`);
+    controller.renderJobs = () => calls.push('automations');
+    controller.refreshEditorEnvironmentPicker = environmentId => calls.push(`picker:${environmentId}`);
 
     await controller.environmentChanged({ selectedEnvironmentId: 73 });
 
     assert.equal(controller.environments, nextEnvironments);
-    assert.deepEqual(calls, ['workers', 'rules', 'picker:73']);
+    assert.deepEqual(calls, ['automations', 'picker:73']);
 });
 
-test('Jobs destroys its Tom Select picker on Escape and navigation unload', (t) => {
+test('Automation destroys its Tom Select picker on Escape and navigation unload', (t) => {
     const originalDocument = globalThis.document;
     const originalWindow = globalThis.window;
     t.after(() => {
@@ -434,7 +520,7 @@ function createEnvironmentControllerForForm(appOverrides = {}) {
     return controller;
 }
 
-test('Escape from environment settings restores the unsaved Jobs draft without navigating away', (t) => {
+test('Escape from Environment settings restores the unsaved Automation draft without navigating away', (t) => {
     const originalDocument = globalThis.document;
     const originalWindow = globalThis.window;
     t.after(() => {
@@ -473,7 +559,7 @@ test('Escape from environment settings restores the unsaved Jobs draft without n
     assert.equal(dom.keydownListeners.size, 0);
 });
 
-test('Navigation cleanup cannot reopen a stale Jobs draft', (t) => {
+test('Navigation cleanup cannot reopen a stale Automation draft', (t) => {
     const originalDocument = globalThis.document;
     const originalWindow = globalThis.window;
     t.after(() => {
@@ -578,19 +664,23 @@ test('Creating an environment uses one trimmed name for both the record and CLI 
     assert.deepEqual(settingsNames, ['Nightly review']);
 });
 
-test('Run now and enable actions call the durable Jobs API with stable trigger fields', async () => {
+test('Run now and enable actions call the durable Automation API with Environment-owned fields', async () => {
     const app = createApp();
     const controller = new JobController(app);
     controller.refreshRuns = async () => {};
     controller.refreshAll = async () => {};
+    controller.environments = [{
+        id: 42,
+        name: 'Review Environment',
+        cli: 'codex',
+        customPrompt: 'Review changes.'
+    }];
     controller.jobs = [{
         id: 12,
         name: 'Review',
         projectPath: '/repo',
         llm: 1,
-        environmentId: null,
-        prompt: 'Review changes.',
-        executionMode: 0,
+        environmentId: 42,
         timeoutMinutes: 30,
         enabled: false,
         triggers: [{
@@ -617,6 +707,8 @@ test('Run now and enable actions call the durable Jobs API with stable trigger f
     assert.equal(app.calls[1].url, '/api/v1/jobs/12');
     assert.equal(app.calls[1].method, 'PUT');
     assert.equal(app.calls[1].body.enabled, true);
+    assert.equal(app.calls[1].body.environmentId, 42);
+    assert.equal(app.calls[1].body.prompt, 'Review changes.');
     assert.deepEqual(app.calls[1].body.triggers, [{
         kind: 0,
         scheduleKind: 1,
@@ -650,7 +742,7 @@ test('Run history exposes cancel only while active and retry after completion', 
     assert.doesNotMatch(failed, /run<&>/);
 });
 
-// A Job run IS a recorded terminal session, so opening one hands off to the shared xterm replay
+// An Automation run IS a recorded terminal session, so opening one hands off to the shared xterm replay
 // player. The ad-hoc polling modal it replaced is gone; these two tests pin that split, which is
 // also what makes the old "stale poll callback writes into the replacement modal" bug unreachable.
 test('Opening a run that has a recorded session replays it instead of building a modal', async (t) => {
@@ -776,23 +868,40 @@ test('A time limit is opt-in: unchecked sends null, checked sends the number', (
     assert.equal(controller.captureEditorState(form, { validate: true }).timeoutMinutes, 45);
 });
 
-test('Job cards say there is no time limit rather than showing a fabricated default', () => {
+test('Automation rows show the next scheduled run and disabled state', () => {
     const controller = new JobController(createApp());
-    controller.environments = [];
-    controller.jobs = [{
-        id: 1, name: 'Nightly review', llm: 6, environmentId: null, environmentName: 'Nightly Codex',
-        prompt: 'Review the diff.', timeoutMinutes: null, enabled: true, triggers: []
-    }];
-    const rendered = [];
-    controller.root = { querySelector: () => ({ set innerHTML(value) { rendered.push(value); } }) };
+    const nextRunUtc = new Date(Date.now() + (12 * 60_000)).toISOString();
+    controller.environments = [
+        { id: 42, name: 'Nightly Codex', cli: 'codex', customPrompt: 'Review the diff.' }
+    ];
+    controller.jobs = [
+        {
+            id: 1, name: 'Nightly review', llm: 1, environmentId: 42,
+            timeoutMinutes: null, enabled: true,
+            triggers: [{ kind: 0, scheduleKind: 1, localTime: '09:00', nextRunUtc }]
+        },
+        {
+            id: 2, name: 'Paused review', llm: 1, environmentId: 42,
+            timeoutMinutes: null, enabled: false,
+            triggers: [{ kind: 0, scheduleKind: 0, intervalMinutes: 30, nextRunUtc: '2026-07-20T14:30:00Z' }]
+        }
+    ];
+    const list = { innerHTML: '' };
+    controller.root = {
+        querySelector(selector) {
+            return selector === '[data-jobs-list]' ? list : null;
+        }
+    };
 
     controller.renderJobs();
 
-    assert.match(rendered[0], /No time limit/);
-    assert.doesNotMatch(rendered[0], /\d+ min limit/);
+    assert.match(list.innerHTML, /Next run/);
+    assert.match(list.innerHTML, /in 12 min/);
+    assert.match(list.innerHTML, /Paused/);
+    assert.doesNotMatch(list.innerHTML, /No time limit/);
 });
 
-test('Recipe import confirmation discloses and escapes executable worker content', (t) => {
+test('Recipe import confirmation discloses and escapes executable Environment content', (t) => {
     const originalDocument = globalThis.document;
     t.after(() => { globalThis.document = originalDocument; });
     globalThis.document = { getElementById() { return null; } };
@@ -804,7 +913,7 @@ test('Recipe import confirmation discloses and escapes executable worker content
     controller.environments = [];
 
     controller.confirmImportRecipe({
-        name: 'Untrusted <worker>',
+        name: 'Untrusted <Environment>',
         llm: 'Claude',
         cli: 'claude',
         customArgs: '--dangerously-skip-permissions <script>alert("args")</script>',
@@ -820,6 +929,7 @@ test('Recipe import confirmation discloses and escapes executable worker content
     assert.match(modals[0].html, /Initial message/);
     assert.match(modals[0].html, /Ignore safeguards/);
     assert.match(modals[0].html, /approval or sandbox permissions/);
+    assert.match(modals[0].html, /Review the Environment content/);
     assert.match(modals[0].html, /import these fields exactly as shown/);
     assert.match(modals[0].html, /created disabled/);
     assert.match(modals[0].html, /&lt;script&gt;/);
@@ -830,27 +940,20 @@ test('The editor defaults the time-limit checkbox off and hides its input', () =
     const source = readFileSync(modulePath, 'utf8');
 
     assert.match(source, /id="job-timeout-enabled"/);
-    // The checkbox reflects the saved value, so a job with no limit renders it unchecked.
+    // The checkbox reflects the saved value, so an Automation with no limit renders it unchecked.
     assert.match(source, /\$\{source\.timeoutMinutes \? 'checked' : ''\}/);
     assert.match(source, /data-timeout-field \$\{source\.timeoutMinutes \? '' : 'hidden'\}/);
     // The old copy promised a stop that no longer happens by default.
     assert.doesNotMatch(source, /The run is stopped if it hasn't finished in this long/);
 });
 
-test('The background scheduler section offers registration and reflects installed state', () => {
+test('Automation frontend has no OS scheduler controls or API calls', () => {
     const controller = new JobController(createApp());
-    const rendered = [];
-    controller.root = { querySelector: () => ({ set innerHTML(value) { rendered.push(value); } }) };
+    const html = controller.renderPage();
+    const source = readFileSync(modulePath, 'utf8');
 
-    controller.renderSchedulerStatus({ installed: false, supported: true, platform: 'Task Scheduler' });
-    assert.match(rendered[0], /Not registered/);
-    assert.match(rendered[0], /data-job-action="install-scheduler"/);
-    assert.match(rendered[0], /Task Scheduler/);
-
-    controller.renderSchedulerStatus({ installed: true, supported: true, platform: 'Task Scheduler' });
-    assert.match(rendered[1], /Registered/);
-    assert.match(rendered[1], /data-job-action="uninstall-scheduler"/);
-
-    controller.renderSchedulerStatus({ installed: false, supported: false, platform: 'unsupported' });
-    assert.match(rendered[2], /Not supported/);
+    assert.match(html, /Automations run only while VibeRails is open/);
+    assert.doesNotMatch(html, /install-scheduler|uninstall-scheduler|Task Scheduler|background task/i);
+    assert.doesNotMatch(source, /\/api\/v1\/jobs\/scheduler/);
+    assert.doesNotMatch(source, /renderSchedulerStatus|setSchedulerInstalled|refreshSchedulerStatus/);
 });

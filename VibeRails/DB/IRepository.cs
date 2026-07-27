@@ -69,6 +69,8 @@ namespace VibeRails.DB
         Task<List<LLM_Environment>> GetCustomEnvironmentsAsync(CancellationToken cancellationToken = default);
         Task<LLM_Environment> SaveEnvironmentAsync(LLM_Environment environment, CancellationToken cancellationToken = default);
         Task UpdateEnvironmentAsync(LLM_Environment environment, CancellationToken cancellationToken = default);
+        /// <summary>Atomically stamps LastUsedUTC without touching any other column.</summary>
+        Task TouchEnvironmentLastUsedAsync(int environmentId, CancellationToken cancellationToken = default);
         Task DeleteEnvironmentAsync(int id, CancellationToken cancellationToken = default);
 
         // Sandbox operations (project-scoped)

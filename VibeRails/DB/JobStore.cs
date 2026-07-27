@@ -16,6 +16,12 @@ public interface IJobStore
     Task<int> CountEnabledJobsAsync(CancellationToken cancellationToken = default);
     Task<int> CountJobsForEnvironmentAsync(int environmentId, CancellationToken cancellationToken = default);
     Task<bool> TryDeleteEnvironmentIfUnusedAsync(int environmentId, Action stageFilesystemDeletion, CancellationToken cancellationToken = default);
+    Task<bool> TryAcquireOrRenewSchedulerLeaseAsync(
+        string ownerId,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken = default);
+    Task<bool> ReleaseSchedulerLeaseAsync(string ownerId, CancellationToken cancellationToken = default);
     Task<string?> EnqueueManualRunAsync(long jobId, CancellationToken cancellationToken = default);
     Task<string?> EnqueueRetryAsync(string runId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> EnqueueEventRunsAsync(string projectPath, JobTriggerKind kind, string eventKey, CancellationToken cancellationToken = default);
@@ -131,7 +137,7 @@ public sealed class JobStore : IJobStore
 
         await ReplaceTriggersAsync(connection, transaction, id, request.Triggers, now, cancellationToken);
         if (!request.Enabled)
-            await CancelQueuedRunsAsync(connection, transaction, id, "Job disabled before the run started.", now, cancellationToken);
+            await CancelQueuedRunsAsync(connection, transaction, id, "Automation disabled before the run started.", now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return await GetJobAsync(id, cancellationToken);
     }
@@ -151,7 +157,7 @@ public sealed class JobStore : IJobStore
             changed = await command.ExecuteNonQueryAsync(cancellationToken);
         }
         if (changed > 0)
-            await CancelQueuedRunsAsync(connection, transaction, id, "Job deleted before the run started.", now, cancellationToken);
+            await CancelQueuedRunsAsync(connection, transaction, id, "Automation deleted before the run started.", now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return changed > 0;
     }
@@ -230,6 +236,66 @@ public sealed class JobStore : IJobStore
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM Jobs WHERE Enabled = 1 AND DeletedUTC IS NULL;";
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Atomically acquires the single scheduler lease, or renews it when this instance already owns
+    /// it. A different owner may take over only after the stored UTC expiry has passed.
+    /// </summary>
+    public async Task<bool> TryAcquireOrRenewSchedulerLeaseAsync(
+        string ownerId,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerId))
+            throw new ArgumentException("A scheduler lease owner is required.", nameof(ownerId));
+        if (leaseDuration <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(leaseDuration), "The scheduler lease duration must be positive.");
+
+        nowUtc = nowUtc.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(nowUtc, DateTimeKind.Utc)
+            : nowUtc.ToUniversalTime();
+        var expiresUtc = nowUtc.Add(leaseDuration);
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO JobSchedulerLease (LeaseName, OwnerId, ExpiresUTC)
+            VALUES ($leaseName, $ownerId, $expiresUtc)
+            ON CONFLICT(LeaseName) DO UPDATE SET
+                OwnerId = excluded.OwnerId,
+                ExpiresUTC = excluded.ExpiresUTC
+            WHERE JobSchedulerLease.OwnerId = excluded.OwnerId
+               OR JobSchedulerLease.ExpiresUTC <= $nowUtc;
+            """;
+        command.Parameters.AddWithValue("$leaseName", SchedulerLeaseName);
+        command.Parameters.AddWithValue("$ownerId", ownerId);
+        command.Parameters.AddWithValue("$nowUtc", ToDb(nowUtc));
+        command.Parameters.AddWithValue("$expiresUtc", ToDb(expiresUtc));
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    /// <summary>
+    /// Releases the scheduler lease only when it is still owned by the caller. A stale owner cannot
+    /// delete a lease that another VibeRails instance acquired after expiry.
+    /// </summary>
+    public async Task<bool> ReleaseSchedulerLeaseAsync(
+        string ownerId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerId))
+            throw new ArgumentException("A scheduler lease owner is required.", nameof(ownerId));
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM JobSchedulerLease
+            WHERE LeaseName = $leaseName AND OwnerId = $ownerId;
+            """;
+        command.Parameters.AddWithValue("$leaseName", SchedulerLeaseName);
+        command.Parameters.AddWithValue("$ownerId", ownerId);
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
     public Task<string?> EnqueueManualRunAsync(long jobId, CancellationToken cancellationToken = default) =>
@@ -423,8 +489,8 @@ public sealed class JobStore : IJobStore
     }
 
     /// <summary>
-    /// Atomically claims the right to spawn this run's terminal. Only one caller wins, so the
-    /// dashboard scheduler and the OS tick can both be running without double-launching.
+    /// Atomically claims the right to spawn this run's terminal. The shared scheduler lease avoids
+    /// normal contention; this remains the final duplicate barrier during a stale lease handoff.
     /// </summary>
     public async Task<bool> TryMarkLaunchedAsync(string runId, CancellationToken cancellationToken = default)
     {
@@ -442,9 +508,8 @@ public sealed class JobStore : IJobStore
 
     /// <summary>
     /// Fails runs whose terminal was spawned but never claimed the run. This is the detector for a
-    /// launch that silently went nowhere — most importantly a scheduled task that ran without an
-    /// interactive desktop, where the process starts, the window is invisible, and nothing else
-    /// would ever report a problem. Surfacing it as a failed run with a message beats silence.
+    /// launch that silently went nowhere — for example, when the native terminal launcher cannot
+    /// reach an interactive desktop. Surfacing it as a failed run with a message beats silence.
     /// </summary>
     public async Task<int> FailStalledLaunchesAsync(TimeSpan grace, CancellationToken cancellationToken = default)
     {
@@ -453,7 +518,7 @@ public sealed class JobStore : IJobStore
         command.CommandText = """
             UPDATE JobRuns
             SET Status = $failed, EndedUTC = $now,
-                ErrorMessage = 'The terminal was launched but never started the run. If this keeps happening the scheduled task may not have access to an interactive desktop.'
+                ErrorMessage = 'The terminal was launched but never started the run. If this keeps happening, the native terminal launcher may not have access to an interactive desktop.'
             WHERE Status = $queued AND LaunchedUTC IS NOT NULL AND LaunchedUTC <= $cutoff;
             """;
         command.Parameters.AddWithValue("$failed", (int)JobRunStatus.Failed);
@@ -880,6 +945,7 @@ public sealed class JobStore : IJobStore
     // Windows filesystems compare paths case-insensitively; Linux does not. Project paths keep their
     // original casing; case-insensitive matching on Windows is applied at the comparison sites.
     private static readonly string ProjectPathCollation = OperatingSystem.IsWindows() ? " COLLATE NOCASE" : string.Empty;
+    private const string SchedulerLeaseName = "automation-scheduler";
 
     public static string NormalizeProjectPath(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim()));
 
@@ -960,6 +1026,12 @@ public sealed class JobStore : IJobStore
             OwnerProcessId INTEGER,
             LaunchedUTC TEXT,
             FOREIGN KEY (JobId) REFERENCES Jobs(Id)
+        );
+
+        CREATE TABLE IF NOT EXISTS JobSchedulerLease (
+            LeaseName TEXT PRIMARY KEY,
+            OwnerId TEXT NOT NULL,
+            ExpiresUTC TEXT NOT NULL
         );
 
         CREATE INDEX IF NOT EXISTS idx_jobs_project ON Jobs(ProjectPath, Enabled, DeletedUTC);

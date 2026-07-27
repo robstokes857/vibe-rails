@@ -44,7 +44,7 @@ tab button (e.g. `Connected`, `Thinking`, `Ready`, `Disconnected`).
            ┌──────────────┐
            │  CONNECTED   │
            └──────┬───────┘
-                  │ Enter (\r)
+                  │ Enter (\r / \n / \r\n)
                   ▼
            ┌──────────────┐
            │   THINKING   │
@@ -56,7 +56,7 @@ tab button (e.g. `Connected`, `Thinking`, `Ready`, `Disconnected`).
               │   ┌──────────────┐
               │   │    READY     │
               │   └──────┬───────┘
-              │          │ Enter (\r)
+              │          │ Enter (\r / \n / \r\n)
               │          ▼
               │   ┌──────────────┐
               └──▶│  CONNECTED   │
@@ -69,7 +69,7 @@ And on socket close from *any* state: → `DISCONNECTED`.
 `DISCONNECTED` **and except while the user is composing** (`_userComposing` —
 see below). From `WAITING`:
 
-- Enter (`\r`) → `THINKING`.
+- Enter (`\r`, `\n`, or `\r\n`) → `THINKING`.
 - A single printable byte (0x20–0x7E) → `CONNECTED` — the user has started
   typing a response, so the "Codex is waiting for you" signal is stale.
 - Anything else (CSI sequences, multi-byte chunks, backend pings) leaves
@@ -92,7 +92,8 @@ submit has reached the PTY.
 
 ### `onTerminalData(data)`
 
-1. `data === '\r'` (bare Enter) while in `CONNECTED` / `READY` / `WAITING`
+1. A newline-only submit (`'\r'`, `'\n'`, or `'\r\n'`) while in
+   `CONNECTED` / `READY` / `WAITING`
    → `THINKING`.
 2. `data === '\x1b'` (bare Escape) while in `THINKING` → `CONNECTED`
    (treated as abort).
@@ -126,6 +127,12 @@ published without raw input:
    events today so ordinary typing does not become app-event WebSocket traffic;
    CSI sequences, bracketed-paste payloads, DSR auto-replies, and raw text are
    never published.
+
+On that same submit boundary, `WaitingForUserInputObserver` clears Codex's
+pre-submit rolling output window. Without that reset, idle repaint frames from
+the prompt the user just answered could be classified again and overwrite the
+tab's `THINKING` transition, making the UI appear to require a second Enter.
+The next genuine prompt is still detected after a fresh observation window.
 
 ### `onSessionIdle()` / `onSessionCompleted()`
 
@@ -199,9 +206,10 @@ shell. `_isShellTab()` reads the CLI key from `options.getCliKey()`.
 Fired when the backend detects an interactive selection prompt in PTY output
 (Claude-style `•`/`◦` menus or Codex-style "enter to submit / esc to cancel"
 footers — see `WaitingForUserInputObserver`). The backend debounces this to
-at most once per 30 seconds per session so a redrawing menu doesn't spam
-events. Moves the tab into `WAITING` unless the tab is `DISCONNECTED` **or
-`_userComposing`** (see below).
+once per detected idle cycle so a redrawing menu doesn't spam events. A submit
+starts a fresh detector window, preventing the answered prompt's old repaint
+frames from reasserting `WAITING`. Moves the tab into `WAITING` unless the tab
+is `DISCONNECTED` **or `_userComposing`** (see below).
 
 ## The `_userComposing` flag
 

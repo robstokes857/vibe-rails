@@ -455,10 +455,12 @@ export class TerminalTokenCompressionMeter {
 
     _syncSavingsDisplay() {
         if (!this._savingsMetric || !this._savingsValue) return;
-        // The trigger has room for one number: this session's savings, the tally that visibly
-        // ticks with the pulse (all time as a fallback for a bare-number legacy update). The
-        // popover carries the full session/month/all-time breakdown.
-        const shown = this._savings.session ?? this._savings.allTime;
+        // The trigger shows all-time savings — the monotonically-increasing tally that survives
+        // server restarts and never flashes to zero when a fresh session's counter resets. It
+        // still ticks visibly with each pulse because Record() adds every measured saving into
+        // the all-time counters alongside the session ones. The popover carries the full
+        // session/month/all-time breakdown.
+        const shown = this._savings.allTime;
         const isPlaceholder = shown == null;
         this._savingsMetric.classList.toggle('is-placeholder', isPlaceholder);
         this._savingsValue.textContent = isPlaceholder

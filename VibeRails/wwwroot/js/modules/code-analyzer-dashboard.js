@@ -5,7 +5,6 @@ import {
 import { ensureMonaco } from './monaco-loader.js';
 
 const CODE_ANALYZER_SESSIONS = new WeakMap();
-let codeAnalyzerDashboardInstance = 0;
 
 const MONACO_LANGUAGE_BY_EXTENSION = Object.freeze({
     '.bash': 'shell',
@@ -271,21 +270,14 @@ function splitPath(path) {
 }
 
 /**
- * Shortens a folder path for the file rail so the parent directory is visible even
- * when the full path is long. Keeps the last two segments (the most relevant for
- * spotting "this is in Tests/" or "this is in src/Payments"); the full path stays
- * available in the row's title attribute for hover.
- *
- *   'Tests/Services/Jobs'        -> 'Services/Jobs'
- *   'src/Payments'               -> 'src/Payments'
- *   'Tests'                      -> 'Tests'
- *   ''                           -> 'repository root'
+ * True when a directory path contains a segment that names it a test tree —
+ * lets the file rail badge "Tests/…" groups so test churn reads apart from
+ * production churn at a glance.
  */
-function shortFolderLabel(folderPath) {
-    if (!folderPath) return 'repository root';
-    const segments = folderPath.split(/[\\/]/).filter(Boolean);
-    if (segments.length <= 2) return folderPath;
-    return `…/${segments.slice(-2).join('/')}`;
+function isTestPath(folderPath) {
+    return String(folderPath || '')
+        .split(/[\\/]/)
+        .some(segment => /^(tests?|testing|uitests|__tests__|specs?)$/i.test(segment));
 }
 
 /**
@@ -463,161 +455,99 @@ function appendChip(documentRef, host, label, value) {
     host.append(chip);
 }
 
-function renderScanBanner(documentRef, model) {
-    const banner = element(documentRef, 'section', 'code-analyzer-scan-banner');
+/**
+ * Renders the compact Code quality summary shown on the Validation screen — the
+ * survivor of the old Overview tab. One row: score ring, grade, verdict, counts,
+ * and the top risk categories. Pass a null response to clear and hide the host.
+ */
+export function renderCodeAnalyzerBrief(host, response, documentRef = globalThis.document, options = {}) {
+    if (!host || !documentRef?.createElement) return false;
+    if (!response) {
+        host.replaceChildren?.();
+        host.hidden = true;
+        return false;
+    }
 
-    const scoreCard = element(documentRef, 'article', 'code-analyzer-panel-surface code-analyzer-score-card');
-    setTone(scoreCard, model.tone);
-    const ring = element(documentRef, 'div', 'code-analyzer-score-ring');
-    setTone(ring, model.tone);
+    const model = buildCodeAnalyzerDashboardModel(response);
+    const onOpenDetails = typeof options.onOpenDetails === 'function' ? options.onOpenDetails : null;
+
+    const brief = element(documentRef, 'article', 'code-analyzer-brief');
+    setTone(brief, model.tone);
+
+    const ring = element(documentRef, 'div', 'code-analyzer-brief-ring');
     setStyleProperty(ring, '--score', String(model.health || 0));
-    const center = element(documentRef, 'div', 'code-analyzer-score-center');
-    center.append(
-        element(documentRef, 'strong', 'code-analyzer-score-value', formatScore(model.health)),
-        element(documentRef, 'span', 'code-analyzer-score-label', 'quality score'));
-    ring.append(center);
+    const ringCenter = element(documentRef, 'div', 'code-analyzer-brief-ring-center');
+    ringCenter.append(element(documentRef, 'strong', '', formatScore(model.health)));
+    ringCenter.title = 'Quality score out of 100 — higher is healthier';
+    ring.append(ringCenter);
+    brief.append(ring);
 
-    const copy = element(documentRef, 'div', 'code-analyzer-score-copy');
-    copy.append(
-        element(documentRef, 'span', 'code-analyzer-eyebrow', 'Change quality'),
-        element(documentRef, 'h3', '', model.healthLabel),
-        element(documentRef, 'p', '', `${model.analyzedFileCount} changed source file${model.analyzedFileCount === 1 ? '' : 's'} analyzed. Focus the review on the highest-risk hotspots.`));
-    const gradeLine = element(documentRef, 'div', 'code-analyzer-grade-line');
+    const copy = element(documentRef, 'div', 'code-analyzer-brief-copy');
+    const headline = element(documentRef, 'div', 'code-analyzer-brief-headline');
     const grade = element(documentRef, 'span', 'code-analyzer-rating-badge', model.qualityGrade);
     setTone(grade, model.tone);
-    const gradeCopy = element(documentRef, 'span', 'code-analyzer-grade-copy');
-    gradeCopy.append(
-        element(documentRef, 'strong', '', model.rating),
-        element(documentRef, 'small', '', model.criticalCount
-            ? `${model.criticalCount} critical metric${model.criticalCount === 1 ? '' : 's'} need attention`
-            : 'No critical metrics in this scan'));
-    gradeLine.append(grade, gradeCopy);
-    copy.append(gradeLine);
-    scoreCard.append(ring, copy);
+    headline.append(element(documentRef, 'span', 'code-analyzer-eyebrow', 'Code quality'), grade);
+    const summaryBits = [
+        `${model.analyzedFileCount} file${model.analyzedFileCount === 1 ? '' : 's'} analyzed`,
+        model.scannedAt ? `scanned ${model.scannedAt}` : ''
+    ].filter(Boolean);
+    copy.append(
+        headline,
+        element(documentRef, 'h3', '', model.healthLabel),
+        element(documentRef, 'p', '', summaryBits.join(' · ')));
+    brief.append(copy);
 
-    // Under the grade: a one-row-per-category digest of where the changeset's risk sits.
-    // (The fixed metric roster lives in the main Scan overview box to the right.)
-    if (model.categories.length) {
-        const digest = element(documentRef, 'div', 'code-analyzer-scorecard is-categories');
-        const head = element(documentRef, 'div', 'code-analyzer-scorecard-row code-analyzer-scorecard-head');
-        head.append(
-            element(documentRef, 'i'),
-            element(documentRef, 'span', '', 'Category'),
-            element(documentRef, 'span', '', 'Risk'));
-        digest.append(head);
-
-        for (const category of model.categories) {
-            const row = element(documentRef, 'div', 'code-analyzer-scorecard-row');
-            setTone(row, mintLintConcernTone(category.concern));
-
-            const dot = element(documentRef, 'i', 'code-analyzer-scorecard-dot');
-            const label = element(documentRef, 'span', 'code-analyzer-scorecard-label');
-            label.append(element(documentRef, 'strong', '', category.name));
-            if (category.worstLabel) {
-                label.title = `Worst signal: ${category.worstLabel}${category.worstFile ? ` in ${category.worstFile}` : ''}`;
-            }
-
-            const risk = element(documentRef, 'span', 'code-analyzer-scorecard-concern', formatScore(category.concern));
-            row.append(dot, label, risk);
-            digest.append(row);
-        }
-        scoreCard.append(digest);
-    }
-
-    const overview = element(documentRef, 'article', 'code-analyzer-panel-surface code-analyzer-overview-card');
-    const overviewHead = element(documentRef, 'div', 'code-analyzer-overview-head');
-    const overviewCopy = element(documentRef, 'div');
-    overviewCopy.append(
-        element(documentRef, 'span', 'code-analyzer-eyebrow', 'Scan overview'),
-        element(documentRef, 'h3', '', 'What changed, and where risk is concentrated'));
-    const scanTime = element(documentRef, 'span', 'code-analyzer-scan-time');
-    scanTime.textContent = [model.scannedAt ? `Scanned ${model.scannedAt}` : '', model.duration ? `Completed in ${model.duration}` : '']
-        .filter(Boolean).join(' · ');
-    overviewHead.append(overviewCopy, scanTime);
-    overview.append(overviewHead);
-
-    const stats = [
-        [model.analyzedFileCount, 'Analyzed', 'neutral'],
-        [model.skippedFileCount, 'Skipped', 'neutral'],
-        [model.criticalCount, 'Critical', 'danger'],
-        [model.warningCount, 'Warnings', 'warning'],
-        [model.healthyFileCount, 'Healthy files', 'success']
+    const stats = element(documentRef, 'div', 'code-analyzer-brief-stats');
+    const statDefinitions = [
+        [model.criticalCount, 'critical', 'danger'],
+        [model.warningCount, model.warningCount === 1 ? 'warning' : 'warnings', 'warning'],
+        [model.healthyFileCount, 'healthy', 'success']
     ];
-    if (model.ignoredFileCount > 0) {
-        stats.splice(2, 0, [model.ignoredFileCount, 'Ignored', 'neutral']);
+    if (model.ignoredFileCount > 0) statDefinitions.push([model.ignoredFileCount, 'ignored', 'neutral']);
+    for (const [value, label, tone] of statDefinitions) {
+        const stat = element(documentRef, 'span', 'code-analyzer-brief-stat');
+        setTone(stat, value > 0 ? tone : 'neutral');
+        stat.append(element(documentRef, 'strong', '', value), element(documentRef, 'span', '', label));
+        stats.append(stat);
     }
-    const statStrip = element(documentRef, 'div', 'code-analyzer-stat-strip');
-    for (const [value, label, tone] of stats) {
-        const card = element(documentRef, 'div', 'code-analyzer-stat-card');
-        setTone(card, tone);
-        card.append(element(documentRef, 'strong', '', value), element(documentRef, 'span', '', label));
-        statStrip.append(card);
-    }
-    overview.append(statStrip);
+    brief.append(stats);
 
-    // The main grid: the fixed metric roster, always all eight in this order, showing
-    // changeset AVERAGES. Cards lead with a severity WORD so "Testability · 100" can
-    // never read like a compliment; the direction tag explains the raw measurement.
-    const scorecardGrid = element(documentRef, 'div', 'code-analyzer-category-grid');
-    for (const entry of model.scorecard) {
-        const tone = entry.measured ? mintLintConcernTone(entry.averageConcern) : 'neutral';
-        const card = element(documentRef, 'div', 'code-analyzer-category-card');
-        setTone(card, tone);
-        if (!entry.measured) card.classList.add('is-unmeasured');
-        if (entry.measured && entry.file) {
-            card.title = `Worst in ${entry.file}${entry.line ? ` · line ${entry.line}` : ''}`;
-        }
-
-        const head = element(documentRef, 'div', 'code-analyzer-category-head');
-        head.append(element(documentRef, 'span', 'code-analyzer-category-name', entry.label));
-        const badge = element(documentRef, 'span', 'code-analyzer-category-severity',
-            entry.measured ? concernSeverity(entry.averageConcern) : 'not measured');
-        setTone(badge, tone);
-        head.append(badge);
-        card.append(head);
-
-        const valueLine = element(documentRef, 'div', 'code-analyzer-category-worst');
-        if (entry.measured) {
-            // A combined card (Coupling, Testability) names the member metric that won.
-            valueLine.append(element(documentRef, 'strong', '',
-                entry.metricLabel && entry.metricLabel !== entry.label ? `via ${entry.metricLabel}` : 'Average'));
-            valueLine.append(element(documentRef, 'span', '',
-                formatMetricValue({ name: entry.metricName, value: entry.averageValue })));
-            const hint = directionHint(entry.direction);
-            if (hint) {
-                const tag = element(documentRef, 'span', 'code-analyzer-direction-tag', `${hint.arrow} ${hint.text}`);
-                tag.title = `The raw value reads "${hint.text}"; the risk score is always higher-is-worse.`;
-                valueLine.append(tag);
+    // The three riskiest categories stand in for the old category grid.
+    const topCategories = [...model.categories]
+        .filter(category => Number.isFinite(category.concern))
+        .sort((left, right) => right.concern - left.concern)
+        .slice(0, 3);
+    if (topCategories.length) {
+        const categories = element(documentRef, 'div', 'code-analyzer-brief-categories');
+        for (const category of topCategories) {
+            const chip = element(documentRef, 'span', 'code-analyzer-brief-category');
+            setTone(chip, mintLintConcernTone(category.concern));
+            if (category.worstLabel) {
+                chip.title = `Worst signal: ${category.worstLabel}${category.worstFile ? ` in ${category.worstFile}` : ''}`;
             }
-        } else {
-            valueLine.append(element(documentRef, 'span', '', 'Not measured in this changeset'));
+            chip.append(
+                element(documentRef, 'i'),
+                element(documentRef, 'span', '', category.name),
+                element(documentRef, 'strong', '', formatScore(category.concern)));
+            categories.append(chip);
         }
-        card.append(valueLine);
-
-        const meter = element(documentRef, 'span', 'code-analyzer-mini-track');
-        const fill = element(documentRef, 'span');
-        setStyleProperty(fill, '--fill', `${entry.measured ? (clampScore(entry.averageConcern) || 0) : 0}%`);
-        meter.append(fill);
-        card.append(meter);
-
-        const scoreRow = element(documentRef, 'div', 'code-analyzer-category-score-row');
-        scoreRow.append(element(documentRef, 'small', '', 'avg risk'));
-        const numbers = element(documentRef, 'span', 'code-analyzer-category-numbers');
-        if (entry.measured) {
-            numbers.append(element(documentRef, 'strong', '', formatScore(entry.averageConcern)));
-            if (entry.worstConcern !== null && entry.worstConcern > entry.averageConcern + 0.05) {
-                numbers.append(element(documentRef, 'small', '', `worst ${formatScore(entry.worstConcern)}`));
-            }
-        } else {
-            numbers.append(element(documentRef, 'strong', '', '—'));
-        }
-        scoreRow.append(numbers);
-        card.append(scoreRow);
-        scorecardGrid.append(card);
+        brief.append(categories);
     }
-    overview.append(scorecardGrid);
-    banner.append(scoreCard, overview);
-    return banner;
+
+    if (onOpenDetails) {
+        const open = element(documentRef, 'button', 'code-analyzer-brief-open');
+        open.type = 'button';
+        open.title = 'Open the Code quality section for the file-by-file report';
+        open.append(
+            element(documentRef, 'span', '', 'Open Code quality'),
+            icon(documentRef, 'fa-solid fa-arrow-right'));
+        open.addEventListener?.('click', () => onOpenDetails());
+        brief.append(open);
+    }
+
+    host.replaceChildren?.(brief);
+    host.hidden = false;
+    return true;
 }
 
 /** Human label for an ignore reason ({reasonKind, reasonText}). */
@@ -800,6 +730,8 @@ export function disposeCodeAnalyzerDashboard(container) {
     if (!session) return false;
     session.disposed = true;
     disposeEvidenceEditor(session);
+    try { session.disposeRail?.(); } catch (_) { /* no-op */ }
+    session.disposeRail = null;
     CODE_ANALYZER_SESSIONS.delete(container);
     return true;
 }
@@ -1038,7 +970,7 @@ function renderIgnoredFilesBox(documentRef, ignoredFiles, onRestoreFile) {
 function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles = [], options = {}) {
     const {
         onRestoreFile = null,
-        onIgnoreFiles = null,
+        onIgnoreFile = null,
         onIgnoreDirectories = null
     } = options || {};
 
@@ -1077,103 +1009,85 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
     const list = element(documentRef, 'div', 'code-analyzer-file-list');
     rail.append(list);
 
-    // Multi-select state. Selection lives OUTSIDE the row click handler so the user
-    // can check several files and apply one bulk ignore without losing their place.
-    const selectedPaths = new Set();
     let activeFilter = 'all';
     // `selectedFile` is a parameter bound once at call time; the dashboard's selectFile reassigns a
     // DIFFERENT outer binding paintList never sees. Track the open file in a local the rail owns so
     // the active-row highlight follows the selection on refresh.
     let activeFile = selectedFile;
+    // Directories the user collapsed, keyed by folderPath. Lives in the rail's
+    // closure so it survives filter/search repaints.
+    const collapsedDirs = new Set();
 
-    // The bulk action bar sits between the head and the list. It's always rendered
-    // (so layout doesn't shift when selection changes) but visually dormant until
-    // the user selects something.
-    const bulkBar = element(documentRef, 'div', 'code-analyzer-bulk-bar');
-    bulkBar.setAttribute('role', 'toolbar');
-    bulkBar.setAttribute('aria-label', 'Bulk actions for selected files');
-    const selectAllWrap = element(documentRef, 'label', 'code-analyzer-select-all');
-    const selectAll = element(documentRef, 'input', 'code-analyzer-bulk-checkbox');
-    selectAll.type = 'checkbox';
-    selectAll.setAttribute('aria-label', 'Select all visible files');
-    selectAllWrap.append(selectAll, element(documentRef, 'span', '', 'Select all'));
-    const bulkSummary = element(documentRef, 'span', 'code-analyzer-bulk-summary');
-    const bulkActions = element(documentRef, 'span', 'code-analyzer-bulk-actions');
-    const ignoreFilesBtn = element(documentRef, 'button', 'code-analyzer-bulk-button');
-    ignoreFilesBtn.type = 'button';
-    ignoreFilesBtn.append(icon(documentRef, 'fa-solid fa-eye-slash'), element(documentRef, 'span', '', 'Ignore files'));
-    ignoreFilesBtn.title = 'Ignore each selected file — removes them from Code quality results';
-    const ignoreDirsBtn = element(documentRef, 'button', 'code-analyzer-bulk-button');
-    ignoreDirsBtn.type = 'button';
-    ignoreDirsBtn.append(icon(documentRef, 'fa-solid fa-folder-tree'), element(documentRef, 'span', '', 'Ignore folders'));
-    ignoreDirsBtn.title = 'Ignore the directories that contain the selected files (and everything underneath)';
-    const clearBtn = element(documentRef, 'button', 'code-analyzer-bulk-clear');
-    clearBtn.type = 'button';
-    clearBtn.textContent = 'Clear';
-    clearBtn.title = 'Clear the selection';
-    bulkActions.append(ignoreFilesBtn, ignoreDirsBtn, clearBtn);
-    bulkBar.append(selectAllWrap, bulkSummary, bulkActions);
-    rail.append(bulkBar);
+    // One floating context menu for the whole rail (same pattern as the chat
+    // history sidebar): each row's kebab opens it anchored to that row. It hangs
+    // off the rail — not the row — so the list's scroll clipping cannot cut it off.
+    const contextMenu = element(documentRef, 'div', 'code-analyzer-context-menu');
+    contextMenu.setAttribute('role', 'menu');
+    let contextMenuAnchor = null;
 
-    const bulkEnabled = typeof onIgnoreFiles === 'function' || typeof onIgnoreDirectories === 'function';
-    if (!bulkEnabled) {
-        bulkBar.classList.add('is-hidden');
-    }
-
-    const paintBulkBar = (visibleCount) => {
-        if (!bulkEnabled) return;
-        const count = selectedPaths.size;
-        bulkBar.classList.toggle('is-active', count > 0);
-        bulkSummary.textContent = count > 0
-            ? `${count} of ${visibleCount} selected`
-            : `${visibleCount} file${visibleCount === 1 ? '' : 's'}`;
-        // Indeterminate when some (but not all) visible files are selected.
-        const allVisibleSelected = visibleCount > 0 && visibleCount === count;
-        selectAll.checked = allVisibleSelected;
-        selectAll.indeterminate = count > 0 && !allVisibleSelected;
-        ignoreFilesBtn.disabled = count === 0 || typeof onIgnoreFiles !== 'function';
-        ignoreDirsBtn.disabled = count === 0 || typeof onIgnoreDirectories !== 'function';
-        clearBtn.disabled = count === 0;
+    const closeContextMenu = () => {
+        contextMenuAnchor = null;
+        contextMenu.classList.remove?.('show');
+        contextMenu.replaceChildren?.();
     };
 
-    selectAll.addEventListener?.('change', () => {
-        const query = String(input.value || '').trim().toLowerCase();
-        const visible = model.files.filter(file =>
-            (activeFilter === 'all' || file.severity === activeFilter) &&
-            (!query || file.path.toLowerCase().includes(query)));
-        if (selectAll.checked) {
-            for (const file of visible) selectedPaths.add(file.path);
-        } else {
-            for (const file of visible) selectedPaths.delete(file.path);
+    const positionContextMenu = (anchor) => {
+        // Real DOM only — layout math is meaningless under the test fakes.
+        if (!anchor.getBoundingClientRect || !rail.getBoundingClientRect) return;
+        const anchorRect = anchor.getBoundingClientRect();
+        const railRect = rail.getBoundingClientRect();
+        const menuRect = contextMenu.getBoundingClientRect();
+        // Below the anchor by default; flip above when that would leave the rail.
+        let top = anchorRect.bottom - railRect.top + 4;
+        if (top + menuRect.height > railRect.height - 6) {
+            top = Math.max(6, anchorRect.top - railRect.top - menuRect.height - 4);
         }
-        paintList();
-    });
+        contextMenu.style.top = `${top}px`;
+        contextMenu.style.right = `${Math.max(6, railRect.right - anchorRect.right)}px`;
+    };
 
-    clearBtn.addEventListener?.('click', () => {
-        selectedPaths.clear();
-        paintList();
-    });
-
-    ignoreFilesBtn.addEventListener?.('click', () => {
-        if (typeof onIgnoreFiles !== 'function' || selectedPaths.size === 0) return;
-        onIgnoreFiles([...selectedPaths]);
-    });
-
-    ignoreDirsBtn.addEventListener?.('click', () => {
-        if (typeof onIgnoreDirectories !== 'function' || selectedPaths.size === 0) return;
-        // Dedupe directories — multiple files in the same folder produce one rule.
-        const dirs = new Set();
-        for (const path of selectedPaths) {
-            const dir = directoryOf(path);
-            // Empty dir means the file lives at the repo root; ignoring "the root
-            // directory" would nuke the entire scan, so skip those.
-            if (dir) dirs.add(dir);
+    const openContextMenu = (anchor, entries) => {
+        contextMenuAnchor = anchor;
+        contextMenu.replaceChildren?.();
+        for (const entry of entries) {
+            const menuItem = element(documentRef, 'button', 'code-analyzer-context-menu-item');
+            menuItem.type = 'button';
+            menuItem.setAttribute('role', 'menuitem');
+            menuItem.append(icon(documentRef, entry.icon), element(documentRef, 'span', '', entry.label));
+            menuItem.addEventListener?.('click', () => {
+                closeContextMenu();
+                entry.onPick();
+            });
+            contextMenu.append(menuItem);
         }
-        if (dirs.size === 0) return;
-        onIgnoreDirectories([...dirs]);
-    });
+        contextMenu.classList.add('show');
+        positionContextMenu(anchor);
+    };
+
+    const buildKebab = (label, entries) => {
+        const kebab = element(documentRef, 'button', 'code-analyzer-kebab');
+        kebab.type = 'button';
+        kebab.title = label;
+        kebab.setAttribute('aria-label', label);
+        kebab.setAttribute('aria-haspopup', 'menu');
+        kebab.append(icon(documentRef, 'fa-solid fa-ellipsis-vertical'));
+        kebab.addEventListener?.('click', event => {
+            event.stopPropagation?.();
+            if (contextMenuAnchor === kebab) closeContextMenu();
+            else openContextMenu(kebab, entries);
+        });
+        return kebab;
+    };
+
+    const onDocumentClick = (event) => {
+        if (event.target?.closest?.('.code-analyzer-kebab, .code-analyzer-context-menu')) return;
+        closeContextMenu();
+    };
+    documentRef.addEventListener?.('click', onDocumentClick);
+    list.addEventListener?.('scroll', closeContextMenu);
 
     const paintList = () => {
+        closeContextMenu();
         const query = String(input.value || '').trim().toLowerCase();
         const visible = model.files.filter(file =>
             (activeFilter === 'all' || file.severity === activeFilter) &&
@@ -1181,66 +1095,118 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
         list.replaceChildren();
         if (!visible.length) {
             list.append(element(documentRef, 'p', 'code-analyzer-file-list-empty', 'No files match this filter.'));
-            paintBulkBar(0);
             return;
         }
+
+        // Group the visible files by directory, in first-appearance order, so the
+        // backend's risk-first ordering still decides what surfaces first and the
+        // group header itself answers "which of these are test files?".
+        const groups = new Map();
         for (const file of visible) {
-            // The rail item is a div (not a button) so we can nest a real checkbox
-            // inside it — interactive content inside a <button> is invalid HTML and
-            // swallow clicks inconsistently across browsers. role=button + keyboard
-            // handler preserves the a11y behaviour.
-            const item = element(documentRef, 'div', 'code-analyzer-file-item');
-            item.setAttribute('role', 'button');
-            item.tabIndex = 0;
-            item.classList.toggle('active', file === activeFile);
-            item.classList.toggle('selected', selectedPaths.has(file.path));
-            item.title = file.path;
-            setTone(item, file.tone);
+            const key = file.folderPath || '';
+            const group = groups.get(key);
+            if (group) group.push(file);
+            else groups.set(key, [file]);
+        }
 
-            const checkbox = element(documentRef, 'input', 'code-analyzer-file-checkbox');
-            checkbox.type = 'checkbox';
-            checkbox.checked = selectedPaths.has(file.path);
-            checkbox.setAttribute('aria-label', `Select ${file.path}`);
-            checkbox.title = 'Toggle selection (does not open the file)';
-            checkbox.addEventListener?.('click', event => event.stopPropagation());
-            checkbox.addEventListener?.('change', () => {
-                if (checkbox.checked) selectedPaths.add(file.path);
-                else selectedPaths.delete(file.path);
-                item.classList.toggle('selected', selectedPaths.has(file.path));
-                paintBulkBar(visible.length);
+        for (const [folderPath, groupFiles] of groups) {
+            const collapsed = collapsedDirs.has(folderPath);
+            const header = element(documentRef, 'div', 'code-analyzer-dir-head');
+            header.title = folderPath || 'repository root';
+            header.setAttribute('role', 'button');
+            header.setAttribute('aria-expanded', String(!collapsed));
+            header.tabIndex = 0;
+
+            header.append(icon(documentRef,
+                `fa-solid ${collapsed ? 'fa-chevron-right' : 'fa-chevron-down'} code-analyzer-dir-chevron`));
+            const pathLabel = element(documentRef, 'span', 'code-analyzer-dir-path');
+            pathLabel.append(
+                icon(documentRef, 'fa-regular fa-folder-open'),
+                element(documentRef, 'span', '', folderPath || 'repository root'));
+            header.append(pathLabel);
+            if (isTestPath(folderPath)) {
+                header.append(element(documentRef, 'span', 'code-analyzer-dir-tag', 'tests'));
+            }
+            header.append(element(documentRef, 'span', 'code-analyzer-dir-count', groupFiles.length));
+            // No "Ignore directory" for the repository root — that would nuke the scan.
+            if (folderPath && typeof onIgnoreDirectories === 'function') {
+                header.append(buildKebab(`Actions for ${folderPath}`, [{
+                    icon: 'fa-solid fa-folder-tree',
+                    label: 'Ignore directory',
+                    onPick: () => onIgnoreDirectories([folderPath])
+                }]));
+            }
+
+            const toggleGroup = () => {
+                if (collapsedDirs.has(folderPath)) collapsedDirs.delete(folderPath);
+                else collapsedDirs.add(folderPath);
+                paintList();
+            };
+            header.addEventListener?.('click', event => {
+                // The kebab (and the menu it opens) must not toggle the group.
+                if (event.target?.closest?.('.code-analyzer-kebab, .code-analyzer-context-menu')) return;
+                toggleGroup();
             });
-
-            const railMark = element(documentRef, 'span', 'code-analyzer-severity-rail');
-            const fileCopy = element(documentRef, 'span', 'code-analyzer-file-main');
-            const folderLabel = shortFolderLabel(file.folderPath);
-            fileCopy.append(
-                element(documentRef, 'strong', '', file.name),
-                element(documentRef, 'small', '', folderLabel));
-            fileCopy.title = file.path;
-            const issues = element(documentRef, 'span', 'code-analyzer-file-issues');
-            const critical = file.metrics.filter(metric => concernSeverity(metric.score) === 'critical').length;
-            const warnings = file.metrics.filter(metric => concernSeverity(metric.score) === 'warning').length;
-            issues.textContent = `${critical} critical · ${warnings} warning${warnings === 1 ? '' : 's'}`;
-            fileCopy.append(issues);
-            const score = element(documentRef, 'span', 'code-analyzer-file-score');
-            score.append(element(documentRef, 'strong', '', formatScore(file.health)), element(documentRef, 'small', '', 'quality'));
-            item.append(checkbox, railMark, fileCopy, score);
-
-            const openFile = () => onSelect(file);
-            item.addEventListener?.('click', event => {
-                // Clicks on the checkbox are stopped above; anything else opens the file.
-                if (event.target === checkbox) return;
-                openFile();
-            });
-            item.addEventListener?.('keydown', event => {
+            header.addEventListener?.('keydown', event => {
+                if (event.target !== event.currentTarget) return;
                 if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault?.();
-                    openFile();
+                    toggleGroup();
                 }
             });
-            list.append(item);
+            list.append(header);
+
+            if (collapsed) continue;
+
+            for (const file of groupFiles) {
+                // The rail item is a div (not a button) so we can nest the real kebab
+                // button inside it — interactive content inside a <button> is invalid
+                // HTML and swallows clicks inconsistently across browsers. role=button
+                // + keyboard handler preserves the a11y behaviour.
+                const item = element(documentRef, 'div', 'code-analyzer-file-item');
+                item.setAttribute('role', 'button');
+                item.tabIndex = 0;
+                item.classList.toggle('active', file === activeFile);
+                item.title = file.path;
+                setTone(item, file.tone);
+
+                const railMark = element(documentRef, 'span', 'code-analyzer-severity-rail');
+                const fileCopy = element(documentRef, 'span', 'code-analyzer-file-main');
+                fileCopy.append(element(documentRef, 'strong', '', file.name));
+                fileCopy.title = file.path;
+                const issues = element(documentRef, 'span', 'code-analyzer-file-issues');
+                const critical = file.metrics.filter(metric => concernSeverity(metric.score) === 'critical').length;
+                const warnings = file.metrics.filter(metric => concernSeverity(metric.score) === 'warning').length;
+                issues.textContent = `${critical} critical · ${warnings} warning${warnings === 1 ? '' : 's'}`;
+                fileCopy.append(issues);
+                const score = element(documentRef, 'span', 'code-analyzer-file-score');
+                score.append(element(documentRef, 'strong', '', formatScore(file.health)), element(documentRef, 'small', '', 'quality'));
+                item.append(railMark, fileCopy, score);
+                if (typeof onIgnoreFile === 'function') {
+                    item.append(buildKebab(`Actions for ${file.path}`, [{
+                        icon: 'fa-solid fa-eye-slash',
+                        label: 'Ignore file',
+                        onPick: () => onIgnoreFile(file)
+                    }]));
+                }
+
+                const openFile = () => onSelect(file);
+                item.addEventListener?.('click', event => {
+                    // Kebab clicks stop their own propagation; the guard covers hosts
+                    // where synthetic events still bubble.
+                    if (event.target?.closest?.('.code-analyzer-kebab')) return;
+                    openFile();
+                });
+                item.addEventListener?.('keydown', event => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault?.();
+                        openFile();
+                    }
+                });
+                list.append(item);
+            }
         }
-        paintBulkBar(visible.length);
     };
     input.addEventListener?.('input', paintList);
     for (const button of filterButtons) {
@@ -1259,21 +1225,24 @@ function renderFileRail(documentRef, model, selectedFile, onSelect, ignoredFiles
     // Files the user removed from results — always discoverable and restorable.
     const ignoredBox = renderIgnoredFilesBox(documentRef, ignoredFiles, onRestoreFile);
     if (ignoredBox) rail.append(ignoredBox);
+    rail.append(contextMenu);
 
     rail.refresh = paintList;
     rail.setSelectedFile = (file) => {
         activeFile = file;
         paintList();
     };
-    rail.clearSelection = () => {
-        selectedPaths.clear();
-        paintList();
+    rail.destroy = () => {
+        closeContextMenu();
+        documentRef.removeEventListener?.('click', onDocumentClick);
     };
     return rail;
 }
 
 /**
- * Renders the tabbed Code Quality dashboard and returns the number of files shown.
+ * Renders the Code Quality workspace (changed files | metrics | source) and returns
+ * the number of files shown. The compact scan summary lives on the Validation screen
+ * (renderCodeAnalyzerBrief) — this surface is all detail.
  * options.fetchSource(path) → Promise of /api/v1/code-analyzer/source's response; when
  * provided, the source pane shows the WHOLE file and metric clicks jump to their line.
  * Without it the pane falls back to the report's snippet.
@@ -1297,13 +1266,12 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
     const fetchSource = typeof options.fetchSource === 'function' ? options.fetchSource : null;
     const ignoredFiles = Array.isArray(options.ignoredFiles) ? options.ignoredFiles : [];
     const onIgnoreFile = typeof options.onIgnoreFile === 'function' ? options.onIgnoreFile : null;
-    const onIgnoreFiles = typeof options.onIgnoreFiles === 'function' ? options.onIgnoreFiles : null;
     const onIgnoreDirectory = typeof options.onIgnoreDirectory === 'function' ? options.onIgnoreDirectory : null;
     const onRestoreFile = typeof options.onRestoreFile === 'function' ? options.onRestoreFile : null;
     // preserveState lets the controller keep the user's place across re-renders
-    // (e.g. after an ignore + rescan). Without it the dashboard always boots to
-    // the Overview tab with the first file selected, which the user reads as
-    // being "kicked out" after every ignore action.
+    // (e.g. after an ignore + rescan). Without it the dashboard always boots with
+    // the first file selected, which the user reads as being "kicked out" after
+    // every ignore action.
     const preserveState = options.preserveState && typeof options.preserveState === 'object'
         ? options.preserveState
         : null;
@@ -1318,59 +1286,19 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
         decorations: null,
         editorFilePath: null,
         editorHasFullSource: false,
+        // Unhooks the rail's document-level click-away listener on dispose.
+        disposeRail: null,
         generation: 0,
         disposed: false
     };
     CODE_ANALYZER_SESSIONS.set(container, session);
     const canMountMonaco = documentRef === globalThis.document && typeof globalThis.window !== 'undefined';
 
-    const instanceId = ++codeAnalyzerDashboardInstance;
-    const tabDefinitions = [
-        { id: 'overview', label: 'Overview', icon: 'fa-solid fa-chart-pie' },
-        { id: 'findings', label: 'Files & metrics', icon: 'fa-solid fa-list-check', count: model.files.length }
-    ];
-    const tabList = element(documentRef, 'div', 'code-analyzer-tabs');
-    tabList.setAttribute('role', 'tablist');
-    tabList.setAttribute('aria-label', 'Code quality report sections');
-    const tabButtons = [];
-    const tabPanels = new Map();
-    const panelStack = element(documentRef, 'div', 'code-analyzer-tab-panels');
-
-    for (const definition of tabDefinitions) {
-        const tabId = `code-quality-tab-${instanceId}-${definition.id}`;
-        const panelId = `code-quality-panel-${instanceId}-${definition.id}`;
-        const button = element(documentRef, 'button', 'code-analyzer-tab');
-        button.type = 'button';
-        button.id = tabId;
-        button.dataset.codeAnalyzerTab = definition.id;
-        button.setAttribute('role', 'tab');
-        button.setAttribute('aria-controls', panelId);
-        button.setAttribute('aria-selected', 'false');
-        button.tabIndex = -1;
-        button.append(icon(documentRef, definition.icon), element(documentRef, 'span', '', definition.label));
-        if (Number.isFinite(definition.count)) {
-            button.append(element(documentRef, 'span', 'code-analyzer-tab-count', definition.count));
-        }
-        tabList.append(button);
-        tabButtons.push(button);
-
-        const panel = element(documentRef, 'section', `code-analyzer-tab-panel code-analyzer-${definition.id}-panel`);
-        panel.id = panelId;
-        panel.dataset.codeAnalyzerTabPanel = definition.id;
-        panel.setAttribute('role', 'tabpanel');
-        panel.setAttribute('aria-labelledby', tabId);
-        panel.tabIndex = 0;
-        panel.hidden = true;
-        panelStack.append(panel);
-        tabPanels.set(definition.id, panel);
-    }
-
-    container.append(tabList, panelStack);
-    const overviewPanel = tabPanels.get('overview');
-    const findingsPanel = tabPanels.get('findings');
-    overviewPanel.append(renderScanBanner(documentRef, model));
-
     const workspace = element(documentRef, 'div', 'code-analyzer-workspace');
+    // The rail is absolutely positioned inside this cell so its (potentially very
+    // long) file list can never drive the workspace row height — the detail columns
+    // set the height and the rail scrolls inside it.
+    const railCell = element(documentRef, 'div', 'code-analyzer-rail-cell');
     const review = element(documentRef, 'section', 'code-analyzer-review-column');
     const sourceColumn = element(documentRef, 'aside', 'code-analyzer-source-column');
 
@@ -1403,10 +1331,6 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
     let selectedFile = initialFile;
     let selectedMetric = initialMetric;
     let rail;
-    const initialTab = preserveState?.tab === 'findings' || preserveState?.tab === 'overview'
-        ? preserveState.tab
-        : 'overview';
-    let activeTab = initialTab;
     let evidenceView = null;
     // Full file contents by path; null marks "asked, not available" so a metric click
     // never refetches a file that already failed.
@@ -1415,7 +1339,6 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
     const emitState = () => {
         if (typeof onStateChange !== 'function') return;
         onStateChange({
-            tab: activeTab,
             selectedFilePath: selectedFile?.path || null,
             selectedMetricName: selectedMetric?.name || null,
             selectedIndex: selectedFile ? model.files.indexOf(selectedFile) : -1
@@ -1437,7 +1360,7 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
         return content;
     }
 
-    function mountEvidenceWhenVisible() {
+    function mountEvidence() {
         if (!evidenceView) return;
         if (!canMountMonaco) {
             showEvidenceFallback(evidenceView);
@@ -1460,42 +1383,12 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
         await mountCodeEvidenceEditor(view, file, metric, session, fullSource);
     }
 
-    function activateTab(tabId, { focus = false } = {}) {
-        if (!tabPanels.has(tabId)) return;
-        activeTab = tabId;
-        for (const button of tabButtons) {
-            const isActive = button.dataset.codeAnalyzerTab === tabId;
-            button.classList.toggle('active', isActive);
-            button.setAttribute('aria-selected', String(isActive));
-            button.tabIndex = isActive ? 0 : -1;
-            if (isActive && focus) button.focus?.();
-        }
-        for (const [id, panel] of tabPanels) panel.hidden = id !== tabId;
-        if (tabId === 'findings') mountEvidenceWhenVisible();
-        emitState();
-    }
-
-    for (const button of tabButtons) {
-        button.addEventListener?.('click', () => activateTab(button.dataset.codeAnalyzerTab));
-        button.addEventListener?.('keydown', event => {
-            const currentIndex = tabButtons.indexOf(button);
-            let nextIndex = null;
-            if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabButtons.length;
-            if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabButtons.length) % tabButtons.length;
-            if (event.key === 'Home') nextIndex = 0;
-            if (event.key === 'End') nextIndex = tabButtons.length - 1;
-            if (nextIndex === null) return;
-            event.preventDefault?.();
-            activateTab(tabButtons[nextIndex].dataset.codeAnalyzerTab, { focus: true });
-        });
-    }
-
     const paintEvidence = () => {
         disposeEvidenceEditor(session);
         sourceColumn.replaceChildren();
         evidenceView = renderSourcePane(documentRef, selectedFile, selectedMetric);
         sourceColumn.append(evidenceView.panel);
-        if (activeTab === 'findings') mountEvidenceWhenVisible();
+        mountEvidence();
     };
 
     // A metric click inside the already-loaded file just moves the highlight and scrolls;
@@ -1566,13 +1459,14 @@ export function renderCodeAnalyzerDashboard(container, response, documentRef = g
     };
     rail = renderFileRail(documentRef, model, selectedFile, selectFile, ignoredFiles, {
         onRestoreFile,
-        onIgnoreFiles,
+        onIgnoreFile,
         onIgnoreDirectories: onIgnoreDirectory ? (paths => onIgnoreDirectory({ directoryPaths: paths })) : null
     });
-    workspace.append(rail, review, sourceColumn);
-    findingsPanel.append(workspace);
+    session.disposeRail = typeof rail.destroy === 'function' ? rail.destroy : null;
+    railCell.append(rail);
+    workspace.append(railCell, review, sourceColumn);
+    container.append(workspace);
     paintReview();
     paintEvidence();
-    activateTab(initialTab);
     return model.files.length;
 }

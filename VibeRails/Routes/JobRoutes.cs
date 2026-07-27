@@ -54,7 +54,7 @@ public static class JobRoutes
             return await ExecuteAsync(async () =>
             {
                 await service.DeleteJobAsync(id, cancellationToken);
-                return new JobActionResponse(true, "Job deleted.");
+                return new JobActionResponse(true, "Automation deleted.");
             });
         }).WithName("DeleteJob");
 
@@ -93,48 +93,7 @@ public static class JobRoutes
             CancellationToken cancellationToken) =>
             ExecuteAsync(() => service.RetryRunAsync(runId, cancellationToken)))
             .WithName("RetryJobRun");
-
-        // The OS scheduled task that ticks every minute. Installing it is what makes scheduled Jobs
-        // fire while the dashboard is closed; without it the in-app scheduler is the only driver.
-        app.MapGet("/api/v1/jobs/scheduler", (
-            IJobScheduleTaskInstaller installer,
-            CancellationToken cancellationToken) =>
-            ExecuteAsync(async () => new JobSchedulerStatusResponse(
-                await installer.IsInstalledAsync(cancellationToken),
-                IsSchedulerSupported,
-                PlatformName)))
-            .WithName("GetJobsSchedulerStatus");
-
-        app.MapPost("/api/v1/jobs/scheduler", (
-            IJobScheduleTaskInstaller installer,
-            CancellationToken cancellationToken) =>
-            ExecuteAsync(async () =>
-            {
-                await installer.InstallAsync(cancellationToken);
-                return new JobSchedulerStatusResponse(
-                    await installer.IsInstalledAsync(cancellationToken), IsSchedulerSupported, PlatformName);
-            }))
-            .WithName("InstallJobsScheduler");
-
-        app.MapDelete("/api/v1/jobs/scheduler", (
-            IJobScheduleTaskInstaller installer,
-            CancellationToken cancellationToken) =>
-            ExecuteAsync(async () =>
-            {
-                await installer.UninstallAsync(cancellationToken);
-                return new JobSchedulerStatusResponse(
-                    await installer.IsInstalledAsync(cancellationToken), IsSchedulerSupported, PlatformName);
-            }))
-            .WithName("UninstallJobsScheduler");
     }
-
-    private static bool IsSchedulerSupported =>
-        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() || OperatingSystem.IsLinux();
-
-    private static string PlatformName =>
-        OperatingSystem.IsWindows() ? "Task Scheduler"
-        : OperatingSystem.IsMacOS() ? "launchd"
-        : OperatingSystem.IsLinux() ? "systemd" : "unsupported";
 
     private static async Task<IResult> ExecuteAsync<T>(Func<Task<T>> operation)
     {
@@ -166,7 +125,7 @@ public static class JobRoutes
             TimeSpan.FromSeconds(5),
             cancellationToken);
         if (result.TimedOut || result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StdOut))
-            throw JobServiceException.BadRequest("Jobs require VibeRails to be opened in a Git repository.");
+            throw JobServiceException.BadRequest("Automations require VibeRails to be opened in a Git repository.");
 
         return Path.TrimEndingDirectorySeparator(Path.GetFullPath(result.StdOut.Trim()));
     }

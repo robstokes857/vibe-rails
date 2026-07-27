@@ -1,5 +1,23 @@
 # TERMINAL.md
 
+> ## 🟡 Open — awaiting Rob's test (2026-07-26)
+>
+> Two bugs found in session `71dee36a-caf6-42e1-b245-1625b39a9221` (GLM 5.2).
+> Both are **root-caused with byte evidence, fixed, and unit-tested — but not
+> verified in Rob's env.** Both fixes are server-side (`vb.exe`), so they need a
+> rebuilt/reinstalled VS Code extension. **Rob tests, Rob marks them closed.**
+>
+> | Bug | Cause in one line | Entry |
+> |---|---|---|
+> | GLM 5.2 wheel acts like a held up-arrow; composer stuck cycling old prompts | Our reconnect snapshot prologue disables mouse tracking and never restores it → xterm.js falls back to alt-scroll and emits cursor-up/down | "## 2026-07-26 GLM 5.2 wheel…" |
+> | `__resize__:171,4` typed into the TUI input | A 4-row fit fails the `rows >= 5` bound, and a control frame that fails to parse falls through to PTY stdin as keystrokes | "## 2026-07-26 `__resize__:171,4`…" |
+>
+> They are unrelated in cause but showed up together because both need a squashed
+> panel / a reconnect — i.e. the same afternoon of dragging things around.
+> Neither is a regression from recent terminal work: the resize fall-through has
+> been there since `6d028c3`, and the mouse-mode hole since the prologue was
+> written (its `?2004` twin was fixed 2026-06-15, the mouse half was missed).
+
 > **Rob's note (2026-06-09): the long-running cursor flicker is FIXED — and the
 > cause was OURS, not the CLI and not the env var.** Shipped in 1.7.3 (`d1d273d`).
 > This is the sneaky one that plagued **Codex for months** and recently started
@@ -123,7 +141,303 @@
 > wrapping is fixed upstream), but it's belt-only — not the
 > suspenders. Full triage below.
 
+## 2026-07-26 `__resize__:171,4` typed into the OpenCode composer — reserved control frame falls through to the PTY when rows < 5
+
+**Status:** 🟡 **FIX WRITTEN — AWAITING ROB'S TEST. Do not mark closed until Rob
+confirms** (needs a rebuilt `vb.exe` / VS Code extension; the server half ships in
+`vb.exe`). Test steps at the bottom of this entry. Latent since the file was
+created (`6d028c3`) — **not** a recent regression, which is why nothing in the
+recent terminal work explains it.
+
+**Symptom (Rob, 2026-07-26, GLM 5.2 tab):** while resizing, the literal text
+`__resize__:171,4` appears typed into the TUI's input box.
+
+**Root cause.** *(All line numbers in this section are **pre-fix** coordinates —
+they describe the broken state. The fix added ~50 lines, so current lines sit
+below these.)* `TerminalControlProtocol.TryParseResizeCommand`
+(`TerminalControlProtocol.cs:54`) validates the payload:
+
+```csharp
+return cols is >= 10 and <= 1000 && rows is >= 5 and <= 500;
+```
+
+`rows = 4` fails `rows >= 5`, so the method returns **false**. The caller
+(`TerminalSessionService.cs:456-474`) treats "didn't parse" as "not a control
+message" and falls through to `TerminalIoRouter.RouteInputAsync(...)`
+(`TerminalSessionService.cs:493`), which does
+`terminal.WriteBytesAsync(inputBytes)` (`TerminalIoRouter.cs:129`) — the literal
+string is written to **PTY stdin as keystrokes**. OpenCode's composer echoes it.
+
+The client has no guard either: `sendResizeToPty` (`terminal-tab.js:468-490`)
+sends whatever `vibeTerminal.cols/rows` says, unclamped.
+
+**Byte evidence — session `71dee36a-caf6-42e1-b245-1625b39a9221`:**
+
+```
+CHUNK 26179346 @ 2026-07-26T13:24:37.2988921Z (len=54)
+  \e[m\e[38;2;201;209;217m\e[48;2;22;27;34m__resize__:171,4
+CHUNK 26181373 @ 2026-07-26T13:25:44.5500371Z (len=51)
+  \e[38;2;201;209;217m\e[48;2;22;27;34m__resize__:171,4
+```
+
+Corroboration: `TerminalSessionLogs` geometry for that session is
+`163x26 → 133x26 → 163x26 → 133x26 …` — **`171x4` never appears**, because
+`ApplyResize` was never reached. The PTY stayed at 163x26 while the client's
+`lastResizeSignature` was set to `171x4` (it is assigned *before* `socket.send`,
+`terminal-tab.js:488`), so the local xterm and the PTY were also genuinely
+desynced until the next fit.
+
+**How you get 171x4:** VS Code panel dragged down to a sliver while the sidebar is
+collapsed (wide + very short). 4 rows is a real fit result, not a transient
+measurement artifact — it was sent twice, a minute apart.
+
+**Same bug on the remote path:** `RemoteTerminalConnection.cs:271-283` uses the
+same parser and the same fall-through (`OnInputReceived?.Invoke(inputBytes)`).
+
+### What we're trying (applied 2026-07-26) — both halves; neither alone is enough
+
+1. **Server, the safety net — a reserved prefix never reaches the PTY.**
+   New `TerminalControlProtocol.IsReservedControlFrame(input)` → true for
+   `__resize__:` and `__cmd__:` (the two prefixes that carry a payload and can
+   therefore *fail validation*; `__cmd__:` with an invalid command name falls
+   through today too). Checked **after** the parse attempts and **before**
+   routing, in both input loops — `TerminalSessionService.WebSocketInputLoopAsync`
+   and `RemoteTerminalConnection`'s receive loop — which log a sanitized,
+   truncated warning (`SanitizeFrameForLog` strips control chars; a malformed
+   frame can carry ANSI escapes, which must not land raw in the log) and
+   `continue`. Extended after review to **all** reserved frames, not just the two
+   payload-carrying prefixes: a malformed variant of an exact-match frame
+   (`__replay__x`, or a `__PIN__:` arriving after the handshake) would otherwise
+   still fall through — and that last one would type the PIN into the TUI. No
+   current client emits any of those; it's belt-and-suspenders on a failure mode
+   not worth leaving open.
+2. **Client, so the resize still happens — don't send what will be refused.**
+   `sendResizeToPty` (`terminal-tab.js`) now returns early on geometry outside the
+   protocol's `cols 10..1000 / rows 5..500`. It returns **before**
+   `lastResizeSignature` is assigned, so the signature stays at the last good
+   geometry and the real size still sends once the panel is a usable height
+   again. Mirrors the existing `preConnectDimsLookSane` guard on the WS-URL hint
+   path.
+
+**Deliberately NOT done: widening the bounds to `rows >= 1`.** Refusing a 4-row
+PTY is reasonable; the bug is the fall-through, not the validation. Widening would
+hide this instance and leave every other malformed-frame path leaking.
+
+**Tests:** new `Tests/Services/Terminal/TerminalControlProtocolTests.cs` (24 cases)
+— in-range accept, out-of-range/malformed reject (including the literal
+`__resize__:171,4`), `IsReservedControlFrame` claiming every reserved prefix even
+with an invalid payload while leaving real input (`ls -la`, `\e[A`,
+`echo __resize__:171,4`) alone, and the exact broken pairing: parse fails **and**
+frame is reserved. `Tests.Services.Terminal` 94/94 (covers both 2026-07-26 fixes).
+The client-side guard has **no unit coverage** (there's no `terminal-tab.js` test
+harness — only `terminal-tab-status`); it's verified by Rob's manual test below.
+
+### Rob's test → then mark this entry closed
+
+1. Rebuild + reinstall the extension (server half lives in `vb.exe`).
+2. Open an OpenCode or GLM 5.2 tab.
+3. Drag the VS Code panel divider **down to a sliver** (a few rows tall), pause,
+   drag it back up. Repeat a few times, including with the sidebar collapsed —
+   that's the 171-col-wide × 4-row fit that triggered it.
+4. **Pass:** nothing appears in the composer, and the TUI ends up correctly sized
+   after the panel is restored.
+5. **Fail:** `__resize__:<cols>,<rows>` still shows up in the input box → the
+   client guard didn't fire; check whether the server logged
+   `Dropped malformed control frame` (server half working, client half not).
+
+---
+
+## 2026-07-26 GLM 5.2 wheel acts like a held up-arrow — the snapshot prologue turns mouse tracking OFF and never turns it back on
+
+> **Supersedes the root cause in the 2026-07-21 entry below.** That entry says
+> *"mouse tracking stays on the whole session, so this is a routing/state issue,
+> not a mode toggle."* That is true for the session it was written from
+> (`8d181d25`) and **false in general.** There is a second, VibeRails-caused
+> variant where mouse tracking is genuinely off, and the 2026-07-21 fix cannot
+> reach it. The shipped translation is still correct — keep it.
+
+**Status:** 🟡 **FIX WRITTEN — AWAITING ROB'S TEST. Do not mark closed until Rob
+confirms** (server-side, so it needs a rebuilt `vb.exe` / VS Code extension).
+Test steps at the bottom of this entry. Same bug class as the Shift+Enter
+bracketed-paste-on-reconnect bug (2026-06-15) — *same prologue line*, different
+mode. That fix restored `?2004` and left the mouse modes behind.
+
+**Symptom (Rob, 2026-07-26, GLM 5.2):** "sometimes when I scroll up on the mouse
+wheel it acts like an up arrow and scrolls really fast through my old messages…
+like the cursor gets stuck in the input box and I can not scroll up in the text
+area of the TUI."
+
+**Why the 2026-07-21 fix doesn't cover it.** `_translateOpenCodeMouseWheel`
+(`terminal-tab.js:141-165`) rewrites `\e[<64;…M` / `\e[<65;…M` → PageUp/PageDown.
+In this variant **xterm.js never emits an SGR mouse event at all**, so the
+pre-filter `data.indexOf('\x1b[<6') === -1` returns early and the translation is
+a no-op. What reaches the socket is a literal cursor-key sequence.
+
+### The chain
+
+*(Line numbers below are **pre-fix** coordinates describing the broken state;
+the fix shifted them.)*
+
+1. **Every** WebSocket attach — page reload, VS Code webview re-init, socket
+   reconnect, tab re-attach — calls `terminal.SubscribeWithSnapshot(wsConsumer)`
+   (`TerminalSessionService.cs:209`). No CLI gating, no reconnect-only gating.
+2. That serializes a snapshot whose prologue
+   (`TerminalGridSerializer.AppendSnapshotResetPrologue`, **`TerminalGridSerializer.cs:117`**)
+   emits:
+   ```
+   \e[?1;6;1000;1002;1003;1004;1005;1006;1007;1015;2004;2026l
+   ```
+   → mouse tracking **OFF** in xterm.js.
+3. The serializer then restores exactly two of those modes — `?2004h`
+   (`:42-45`, the 2026-06-15 fix) and `?1049h` (`:51`, alt screen). **Mouse
+   tracking is never restored.** `AnsiParser.cs:418-419` only tracks `2004` and
+   `2026`, so the emulator doesn't even know the mouse modes were on.
+4. opentui enables them **once at TUI startup** and does not re-assert on
+   SIGWINCH (proof below), so nothing brings them back.
+5. xterm.js now has: alt buffer (no scrollback) + no active mouse protocol →
+   its **alt-scroll fallback** fires. From the bundled `xterm.min.js`:
+   ```js
+   addDisposableListener(t,"wheel",t=>{ if(!s.wheel){                      // no mouse protocol
+     if(this._customWheelEventHandler&&!1===this._customWheelEventHandler(t))return!1;
+     if(!this.buffer.hasScrollback){                                       // alt screen
+       if(0===t.deltaY)return!1;
+       if(0===e.coreMouseService.consumeWheelEvent(...))return this.cancel(t,!0);
+       const i=ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(t.deltaY<0?"A":"B");
+       return this.coreService.triggerDataEvent(i,!0),this.cancel(t,!0)}}},{passive:!1})
+   ```
+   One wheel notch → `\e[A` / `\eOA`. `consumeWheelEvent` accumulates deltas, so
+   a fast spin emits a burst — Rob's *"scrolls really fast."*
+6. Those arrows hit OpenCode's focused textarea → `prompt.history.previous` →
+   old prompts cycling, composer stuck. **Sticky for the rest of the session.**
+   `?1007` (alternate scroll mode) is in the prologue's reset list but
+   **xterm.js does not implement 1007 at all** — resetting it is a no-op and does
+   not disarm the fallback.
+
+### Byte evidence — session `71dee36a-caf6-42e1-b245-1625b39a9221` (glm-5.2, 17 min)
+
+Whole-session DEC private mode tally: `?1000/1002/1003/1006` **SET = 2,
+RESET = 0** (nothing in the PTY stream ever disables them — the disable comes
+from *us*, and it is not in `SessionLogs` because the snapshot is generated
+server-side, not read from the PTY).
+
+```
+CHUNK 26179241 @ 13:16:41.9905910Z   \e[?1000h\e[?1002h\e[?1003h\e[?1006h   ← TUI startup, once
+CHUNK 26179330 @ 13:24:12.5652921Z   \e[?1000h\e[?1002h\e[?1003h\e[?1006h\e[?1004h\e[?2004h\e[>4;1m
+```
+
+**The decisive fact:** `TerminalSessionLogs` records **10 geometry changes after
+13:24:12** (13:24:24, 13:24:27, 13:24:48, 13:24:51, 13:25:58, 13:26:01,
+13:33:39 ×2, 13:33:49, 13:33:52) and **zero** further mouse-mode emissions.
+**opentui does not re-assert mouse tracking on SIGWINCH.** So resizing does not
+heal it, and there is no natural recovery path — exactly matching "I can not
+scroll up in the text area."
+
+### What we're trying (applied 2026-07-26) — track and restore, exactly the 2026-06-15 `?2004` recipe
+
+> **⚠️ Model the effective state, not the enables.** The first cut of this fix
+> kept a `SortedSet<int>` of every mode ever enabled and replayed it ascending.
+> **That is wrong, and the "1000/1002/1003 are cumulative levels" claim that
+> justified it is false.** In xterm.js `CoreMouseService.activeProtocol` is a
+> *single* value — `case 9/1000/1002/1003` each **overwrite** it, and DECRST of
+> **any** of them sets `NONE` (verified in the bundled `xterm.min.js`). Two real
+> failures followed: an app that went `?1003h` then `?1002h` (drag) got replayed
+> as `1002;1003h` and came back on **any-event**; and `?1000l` removed one member
+> of the set while leaving the others, resurrecting tracking the app had turned
+> off. Encoding (`?1006`) is a second independent single value; `?1005`/`?1015`
+> are **not implemented by xterm.js at all** (it logs and ignores them), so
+> tracking them buys nothing. `?1004` (focus) is genuinely independent.
+
+5 files. Our mode state now mirrors xterm.js's model exactly — that is the whole
+design rule, since the only consumer of this state is the snapshot we replay
+*into* xterm.js:
+
+1. **`TerminalBuffer.cs`** — `_mouseProtocolMode` (0 = off, else 9/1000/1002/1003,
+   last-wins), `_mouseEncodingMode` (0 = default, else 1006), `_focusReportingActive`.
+   `GetInputReportingModes()` returns the *effective* modes in emit order
+   (protocol, encoding, focus) as a fresh array, so it's safe to read outside the
+   emulator lock.
+2. **`AnsiParser.cs`** — `case 9/1000/1002/1003` → `SetMouseProtocol(enable ? mode : 0)`
+   (so a reset of any one clears tracking); `case 1004` → `SetFocusReporting`;
+   `case 1006` → `SetMouseEncoding`; `1005`/`1015` stay deliberate no-ops.
+3. **`TerminalEmulator/Terminal.cs`** — `GetInputReportingModes()` passthrough, and
+   `Reset()` now clears these modes (plus `?2004`/`?2026`).
+4. **`Pty/Terminal.cs` `CaptureSnapshotLocked`** — read inside `_emulatorLock`,
+   pass to `Serialize`.
+5. **`TerminalGridSerializer.Serialize`** — new optional
+   `IReadOnlyList<int>? inputReportingModes`; re-emits them as one DECSET
+   (for opentui: `\e[?1003;1006h`) right after the `?2004h` restore, so it lands
+   **after** the prologue reset.
+
+**Also fixed while in here — RIS/`Reset()` didn't clear any of this.**
+`AnsiParser.FullReset` (RIS, `ESC c`) and `Terminal.Reset()` now clear the mouse
+modes *and* `?2004`/`?2026`, which they never did. Real terminals drop all of
+these on RIS; without it, a `reset` after a TUI crash left the emulator claiming
+modes the app no longer had, and the next snapshot re-enabled mouse reporting
+into a plain shell — wheel ticks would type SGR reports into its stdin. Not a
+regression from this work (the `?2004`/`?2026` half was always missing), but the
+same one-line class of bug.
+
+**Tests** (`Tests/Services/Terminal/TerminalGridSerializerTests.cs`, 8 new):
+round-trip restore through a second emulator; the one-DECSET byte shape *and* its
+ordering vs the prologue; **last-wins protocol** (`?1003h ?1002h` must replay as
+`1002`, never `1003`); **any single protocol DECRST kills tracking**; no spurious
+restore for a plain shell; set/reset tracking including the prologue's own reset
+string; RIS clears; `Reset()` clears.
+
+Suite status: `TerminalEmulator.Tests` 164 passed / 9 skipped,
+`Tests.Services.Terminal` 94/94 (covers both 2026-07-26 fixes).
+
+### Rob's test → then mark this entry closed
+
+1. Rebuild + reinstall the extension (the fix lives in `vb.exe`).
+2. Open a GLM 5.2 tab, send a few prompts so there's chat history to scroll.
+3. **Force a re-snapshot** — this is the step that used to break it. Reload the
+   webview, or switch to another tab and back, or let the tab idle past the ~2 min
+   WS timeout. (Before the fix, *this* is the moment mouse tracking died.)
+4. Wheel-scroll over the chat.
+5. **Pass:** the chat scrolls, and the composer does not cycle old prompts.
+6. **Fail:** old prompts still cycle → DevTools breakpoint on `onData` in
+   `terminal-tab.js` and read what the wheel produces:
+   - `\e[<64;…M` → mouse tracking IS restored; you're hitting the *other* variant
+     (2026-07-21 upstream hit-test) and the PageUp translation should be handling
+     it — check `state.cli` is one of `opencode`/`glm-5.2`/`kimi-k3`.
+   - `\e[A` / `\eOA` → mouse tracking still lost; this fix didn't take.
+7. Worth also re-checking Shift+Enter → newline in the same reconnected tab, since
+   it rides the adjacent `?2004` restore in the same serializer block.
+
+**Do NOT "fix" it by deleting the mouse modes from the prologue's reset list.**
+The prologue's job is to make the snapshot self-contained — a viewer holding
+stale modes from a previous state must be reset. Track-and-restore is the correct
+shape; unconditional-leave-on is not.
+
+**The general rule this leaves behind:** every DEC private mode in the prologue's
+reset list must either be tracked+restored or be one a CLI re-asserts on its own.
+`?1` (DECCKM) and `?6` (DECOM) are still reset-without-restore and still untracked
+— if a "works on a fresh tab, breaks after reconnect, never recovers" bug shows up
+around arrow-key encoding or origin mode, that's where to look first.
+
+**Guardrails:** no byte-stream stripping (this is snapshot *generation*, not
+filtering a live stream); keep `_translateOpenCodeMouseWheel` (it covers the
+upstream hit-test variant, which is a different failure); `?2027`/`?2031`
+(opentui grapheme/color-scheme modes) are not in the reset list and are unaffected.
+
+**Discriminating the two variants when Rob reports "wheel scrolls history":**
+did it start right after a page reload / webview re-init / reconnect, and does it
+never recover? → **this bug** (mouse tracking off, no SGR bytes on the wire).
+Did it come and go mid-session with no reconnect? → the 2026-07-21 upstream
+hit-test variant. A DevTools breakpoint on `onData` settles it instantly:
+`\e[<64;…M` = upstream variant, `\e[A`/`\eOA` = this one.
+
+---
+
 ## 2026-07-21 OpenCode mouse wheel cycles input history instead of scrolling chat — FIXED
+
+> **⚠️ Partly superseded 2026-07-26.** The fix below is correct and stays, but the
+> root-cause claim *"mouse tracking stays on the whole session"* holds only for
+> session `8d181d25`. A second variant — **VibeRails' own snapshot prologue
+> disabling mouse tracking on reconnect** — produces the same symptom with no SGR
+> mouse bytes at all, so this translation never fires. See the 2026-07-26 entry
+> above.
 
 **Status:** FIXED. VibeRails-side translation in `terminal-tab.js`; upstream bug
 remains open at [anomalyco/opencode#35295](https://github.com/anomalyco/opencode/issues/35295).

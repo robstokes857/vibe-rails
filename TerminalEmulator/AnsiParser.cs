@@ -406,11 +406,17 @@ public sealed class AnsiParser
             case 47:   // alternate screen (old)
             case 1047: // alternate screen with clear (xterm)
                 if (enable) _buffer.EnterAlternateScreen(); else _buffer.ExitAlternateScreen(); break;
-            case 1000: break; // mouse tracking
-            case 1002: break;
-            case 1003: break;
-            case 1004: break; // focus events
-            case 1006: break; // SGR mouse
+            case 9:    // X10 mouse
+            case 1000: // VT200 mouse (button press/release)
+            case 1002: // button-event tracking (drag)
+            case 1003: // any-event tracking
+                // Mutually exclusive, last-wins; a DECRST of ANY of them turns
+                // tracking off entirely. Mirrors xterm.js CoreMouseService.
+                _buffer.SetMouseProtocol(enable ? mode : 0); break;
+            case 1004: _buffer.SetFocusReporting(enable); break; // focus in/out events
+            case 1005: break; // legacy UTF-8 mouse encoding — xterm.js doesn't implement it
+            case 1006: _buffer.SetMouseEncoding(enable ? mode : 0); break; // SGR mouse encoding
+            case 1015: break; // legacy urxvt mouse encoding — xterm.js doesn't implement it
             case 1049: // alternate screen + save/restore cursor
                 if (enable) { _buffer.SaveCursor(); _buffer.EnterAlternateScreen(); }
                 else         { _buffer.ExitAlternateScreen(); _buffer.RestoreCursor(); }
@@ -563,6 +569,16 @@ public sealed class AnsiParser
         _buffer.ExitAlternateScreen();
         _buffer.SetCursorVisible(true);
         _buffer.SetScrollRegion(0, _buffer.Rows - 1);
+
+        // RIS returns every DEC private mode to its power-on state. These are the
+        // modes we track for the reconnect snapshot, so leaving them set here would
+        // make the snapshot re-enable modes the app no longer has on — e.g. after a
+        // TUI crash + `reset`, xterm.js would resume sending SGR mouse reports into
+        // a plain shell's stdin on every wheel tick. Unlike DECSTR above there is no
+        // carve-out: RIS genuinely clears all of these.
+        _buffer.ClearInputReportingModes();
+        _buffer.SetBracketedPaste(false);
+        _buffer.SetSyncOutput(false);
     }
 
     // ------------------------------------------------------------------

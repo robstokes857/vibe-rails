@@ -406,7 +406,7 @@ FodyWeavers.xsd
 /vscode-viberails/.claude/settings.local.json
 /TerminalEmulator.Tests/snapshots
 /fixtures
-UITests/test-results/.last-run.json
+/UITests/test-results/
 
 # Local-only investigative copies of build outputs (e.g., bin_check/ next to a
 # project) used to sanity-check that native DLLs landed where expected.

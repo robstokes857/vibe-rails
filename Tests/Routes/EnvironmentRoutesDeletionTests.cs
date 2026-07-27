@@ -68,7 +68,7 @@ public sealed class EnvironmentRoutesDeletionTests
 
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             Assert.NotNull(error);
-            Assert.Contains("used by a Job", error.Error, StringComparison.Ordinal);
+            Assert.Contains("used by an Automation", error.Error, StringComparison.Ordinal);
             Assert.Equal("Review every commit for security issues.", environment.CustomPrompt);
             repository.Verify(
                 item => item.UpdateEnvironmentAsync(

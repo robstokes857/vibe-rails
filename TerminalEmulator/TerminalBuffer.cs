@@ -44,6 +44,27 @@ public sealed class TerminalBuffer
     // webview gates Shift+Enter→newline and paste-wrapping on this being on.
     private bool _bracketedPasteActive;
 
+    // Mouse reporting state, modelled exactly as xterm.js models it in
+    // CoreMouseService — because the only consumer of this state is the reconnect
+    // snapshot we replay INTO xterm.js, so any divergence is a bug:
+    //   * protocol (?9 X10 / ?1000 VT200 / ?1002 drag / ?1003 any) is ONE value.
+    //     They are mutually exclusive and last-wins, and a DECRST of ANY of them
+    //     turns tracking off entirely. Do not model these as a set that accumulates
+    //     — replaying "1002;1003h" when the app last asked for 1002 silently
+    //     upgrades the session to any-event tracking, and dropping one member of a
+    //     set on reset leaves stale modes that resurrect tracking the app disabled.
+    //   * encoding (?1006 SGR) is a separate single value. ?1005 and ?1015 are
+    //     legacy encodings xterm.js does not implement at all, so they are not
+    //     tracked — replaying them would be a no-op that only invites confusion.
+    //   * focus reporting (?1004) is genuinely independent of both.
+    // Tracked for the same reason as ?2004 above: CLIs enable these once at startup
+    // and never re-assert them (opentui does not re-assert even on SIGWINCH), so a
+    // reconnect snapshot that resets them without restoring them silently kills
+    // wheel and click reporting for the rest of the session.
+    private int _mouseProtocolMode;   // 0 = tracking off, else 9 | 1000 | 1002 | 1003
+    private int _mouseEncodingMode;   // 0 = default encoding, else 1006
+    private bool _focusReportingActive;
+
     // Tab stops — true at columns where a tab stop is set
     private bool[] _tabStops;
 
@@ -408,6 +429,55 @@ public sealed class TerminalBuffer
     public void SetCursorShape(int shape) => _cursorShape = shape;
     public void SetSyncOutput(bool active) => _syncOutputActive = active;
     public void SetBracketedPaste(bool active) => _bracketedPasteActive = active;
+
+    /// <summary>Sets the mouse tracking protocol; <paramref name="mode"/> 0 turns it off.</summary>
+    public void SetMouseProtocol(int mode)
+    {
+        // Whatever lands here is later re-emitted verbatim into the reconnect snapshot's
+        // DECSET, so reject anything that isn't a protocol xterm.js models. AnsiParser's
+        // switch can never pass a bad value; this guards any future caller.
+        if (mode is not (0 or 9 or 1000 or 1002 or 1003))
+            throw new ArgumentOutOfRangeException(nameof(mode), mode, "Not a mouse tracking protocol mode.");
+        _mouseProtocolMode = mode;
+    }
+
+    /// <summary>Sets the mouse report encoding; <paramref name="mode"/> 0 restores the default.</summary>
+    public void SetMouseEncoding(int mode)
+    {
+        if (mode is not (0 or 1006))
+            throw new ArgumentOutOfRangeException(nameof(mode), mode, "Not a mouse report encoding mode.");
+        _mouseEncodingMode = mode;
+    }
+
+    public void SetFocusReporting(bool active) => _focusReportingActive = active;
+
+    public void ClearInputReportingModes()
+    {
+        _mouseProtocolMode = 0;
+        _mouseEncodingMode = 0;
+        _focusReportingActive = false;
+    }
+
+    /// <summary>
+    /// The modes a reconnecting viewer must be given to reproduce the app's current
+    /// mouse/focus reporting state, in the order they should be emitted (protocol,
+    /// encoding, focus). Empty when nothing is enabled. Returns a fresh array, so it
+    /// is safe to hold onto outside the emulator lock.
+    /// </summary>
+    public int[] GetInputReportingModes()
+    {
+        int count = (_mouseProtocolMode != 0 ? 1 : 0)
+                  + (_mouseEncodingMode != 0 ? 1 : 0)
+                  + (_focusReportingActive ? 1 : 0);
+        if (count == 0) return [];
+
+        var modes = new int[count];
+        int i = 0;
+        if (_mouseProtocolMode != 0) modes[i++] = _mouseProtocolMode;
+        if (_mouseEncodingMode != 0) modes[i++] = _mouseEncodingMode;
+        if (_focusReportingActive)   modes[i] = 1004;
+        return modes;
+    }
 
     // Resize — preserve as much content as possible
     public void Resize(int newCols, int newRows)

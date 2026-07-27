@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 using VibeRails.DB;
 using Xunit;
@@ -83,6 +84,82 @@ public sealed class TokenSavingsStoreTests : IDisposable
         Assert.Equal(260, totals.TokensSaved);
         Assert.Equal(10, totals.SessionTokensSaved);
         Assert.Equal(10, totals.MonthTokensSaved);
+    }
+
+    [Fact]
+    public void GetTotals_OnSynchronizationContext_DoesNotWaitForHistoryLoad()
+    {
+        var returned = false;
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                // Task.Yield posts the constructor's warm-up continuation here, but this context
+                // deliberately never pumps it. A sync-over-async GetTotals would deadlock.
+                SynchronizationContext.SetSynchronizationContext(new NonPumpingSynchronizationContext());
+                var store = new TokenSavingsStore(ConnectionString);
+
+                var stopwatch = Stopwatch.StartNew();
+                _ = store.GetTotals();
+                stopwatch.Stop();
+
+                returned = stopwatch.Elapsed < TimeSpan.FromSeconds(1);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+
+        thread.IsBackground = true;
+        thread.Start();
+
+        Assert.True(thread.Join(TimeSpan.FromSeconds(2)), "GetTotals blocked on background initialization.");
+        Assert.Null(failure);
+        Assert.True(returned);
+    }
+
+    [Fact]
+    public async Task HistoryLoad_FailedAfterTotalsQuery_RetriesWithoutDoubleCounting()
+    {
+        // The all-time query can read this legacy/broken shape, but the following month query fails
+        // because Day is missing. This pins that partial reads stay staged until the whole load wins.
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE TokenSavings (BytesBefore INTEGER NOT NULL, BytesAfter INTEGER NOT NULL);
+                INSERT INTO TokenSavings (BytesBefore, BytesAfter) VALUES (4000, 3000);
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var store = new TokenSavingsStore(ConnectionString);
+        await store.LastPersist;
+        Assert.False(store.HistoryLoaded);
+
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE TokenSavings;";
+            command.ExecuteNonQuery();
+        }
+        InsertDayRow(DateTime.UtcNow.ToString("yyyy-MM") + "-15", "anthropic", 4000, 3000);
+
+        // Move the test clock beyond the failure backoff. GetTotals schedules the retry but returns
+        // immediately; LastPersist lets the test observe that background attempt settling.
+        store.UtcNow = () => DateTime.UtcNow.AddMinutes(1);
+        _ = store.GetTotals();
+        await store.LastPersist;
+
+        Assert.True(store.HistoryLoaded);
+        var totals = store.GetTotals();
+        Assert.Equal(4000, totals.BytesBefore);
+        Assert.Equal(3000, totals.BytesAfter);
+        Assert.Equal(1000, totals.BytesSaved);
     }
 
     [Fact]
@@ -199,6 +276,14 @@ public sealed class TokenSavingsStoreTests : IDisposable
         catch (IOException)
         {
             // Best-effort temp cleanup; the OS temp dir owns the leftovers.
+        }
+    }
+
+    private sealed class NonPumpingSynchronizationContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            // Deliberately do not run queued continuations.
         }
     }
 }

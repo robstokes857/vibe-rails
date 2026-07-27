@@ -101,7 +101,7 @@
                 <span>MCP</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="jobs"
-                title="Durable scheduled and Git-triggered LLM Jobs">
+                title="Scheduled and Git-triggered Automations">
                 <i class="fa-solid fa-clock-rotate-left me-1"></i>
                 <span>Automation</span>
             </button>
@@ -163,7 +163,7 @@
                     <span class="nav-label">MCP</span>
                 </button>
                 <button class="app-subnav-link" data-action="navigate" data-view="jobs"
-                    title="Durable scheduled and Git-triggered LLM Jobs">
+                    title="Scheduled and Git-triggered Automations">
                     <i class="fa-solid fa-clock-rotate-left nav-icon"></i>
                     <span class="nav-label">Automation</span>
                 </button>
@@ -315,29 +315,6 @@
         <div class="view rules-workspace" data-view="agents" data-rules-workspace>
 
             <header class="rules-topbar">
-                <section class="rules-git-setting" data-hook-health data-tone="neutral" aria-busy="true"
-                    aria-label="Git Guard setting">
-                    <span class="rules-git-setting-icon" aria-hidden="true">
-                        <i class="fa-solid fa-code-commit"></i>
-                    </span>
-                    <span class="rules-git-setting-copy">
-                        <strong>Git Guard</strong>
-                        <small data-hook-status-message>Checking repository hooks…</small>
-                        <span class="visually-hidden" data-hook-status-title>Checking Git Guard</span>
-                    </span>
-                    <span class="hook-health-badge" data-hook-status-badge data-tone="neutral"
-                        aria-live="polite">Checking</span>
-                    <button class="rules-git-toggle" type="button" role="switch" aria-checked="false"
-                        data-action="toggle-hooks" data-idle-label="Turn Git Guard on" disabled>
-                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                            aria-hidden="true"></span>
-                        <span class="rules-git-toggle-track" data-button-icon aria-hidden="true">
-                            <span></span>
-                        </span>
-                        <span class="visually-hidden" data-button-label>Turn Git Guard on</span>
-                    </button>
-                </section>
-
                 <!-- Local navigation: applies to this page only. One section is visible at a time. -->
                 <div class="rules-localnav" role="tablist" aria-label="Rules sections" data-rules-nav>
                     <button class="rules-localnav-item" type="button" role="tab" id="rules-tab-validate"
@@ -361,14 +338,30 @@
                         <span class="rules-localnav-label">Rule files</span>
                         <span class="rules-localnav-badge" data-rules-tab-meta>AGENTS.md</span>
                     </button>
-                    <button class="rules-localnav-item" type="button" role="tab" id="rules-tab-automate"
-                        data-rules-tab="automate" aria-controls="rules-section-automate" aria-selected="false"
-                        tabindex="-1" data-tone="neutral">
-                        <i class="fa-regular fa-clock rules-localnav-icon" aria-hidden="true"></i>
-                        <span class="rules-localnav-label">Automation</span>
-                        <span class="rules-localnav-badge" data-rules-tab-meta>Jobs</span>
-                    </button>
                 </div>
+
+                <section class="rules-git-setting" data-hook-health data-tone="neutral" aria-busy="true"
+                    aria-label="Git Guard setting">
+                    <span class="rules-git-setting-icon" aria-hidden="true">
+                        <i class="fa-solid fa-code-commit"></i>
+                    </span>
+                    <span class="rules-git-setting-copy">
+                        <strong>Git Guard</strong>
+                        <small data-hook-status-message>Checking repository hooks…</small>
+                        <span class="visually-hidden" data-hook-status-title>Checking Git Guard</span>
+                    </span>
+                    <span class="hook-health-badge" data-hook-status-badge data-tone="neutral"
+                        aria-live="polite">Checking</span>
+                    <button class="rules-git-toggle" type="button" role="switch" aria-checked="false"
+                        data-action="toggle-hooks" data-idle-label="Turn Git Guard on" disabled>
+                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                            aria-hidden="true"></span>
+                        <span class="rules-git-toggle-track" data-button-icon aria-hidden="true">
+                            <span></span>
+                        </span>
+                        <span class="visually-hidden" data-button-label>Turn Git Guard on</span>
+                    </button>
+                </section>
             </header>
 
             <div class="rules-panes" data-rules-panes>
@@ -454,6 +447,10 @@
                                     </button>
                                 </div>
                             </section>
+                            <!-- Compact Code quality summary — filled by RuleController after each
+                                 scan; the full report lives in the Code quality section. -->
+                            <section class="code-analyzer-brief-host" data-vca-quality-brief hidden
+                                aria-label="Code quality summary" aria-live="polite"></section>
                             <details class="rules-console-transcript">
                                 <summary>
                                     <span class="vca-console-pulse" aria-hidden="true"></span>
@@ -530,8 +527,8 @@
                                 </span>
                                 <div>
                                     <strong>Preparing code quality</strong>
-                                    <p>Your staged, unstaged, and untracked changes will be organized into an overview,
-                                        file metrics, and source evidence.</p>
+                                    <p>Your staged, unstaged, and untracked changes will be organized into file
+                                        metrics and source evidence, with a summary on the Validation screen.</p>
                                 </div>
                             </div>
 
@@ -587,28 +584,6 @@
                                 <div class="rules-files-detail" data-agent-rule-editor></div>
                             </div>
                         </div>
-                    </section>
-
-                    <!-- Automate: jobs wired to VCA and commit events -->
-                    <section class="rules-section card jobs-automation-station" id="rules-section-automate"
-                        role="tabpanel" aria-labelledby="rules-tab-automate" tabindex="-1"
-                        data-rules-section="automate" hidden>
-                        <header class="rules-section-header">
-                            <div class="rules-section-heading">
-                                <h2 id="rules-automation-title">Automation</h2>
-                                <span class="rules-section-note">Real hooks only — previews never queue jobs</span>
-                            </div>
-                            <div class="rules-section-actions">
-                                <button class="btn btn-sm btn-outline-secondary" type="button"
-                                    data-action="new-commit-job">
-                                    <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>After commit
-                                </button>
-                                <button class="btn btn-sm btn-primary" type="button" data-action="open-jobs">
-                                    Open Jobs
-                                </button>
-                            </div>
-                        </header>
-                        <div class="rules-section-body" data-jobs-automation-host></div>
                     </section>
 
                 </div>

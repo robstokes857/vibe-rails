@@ -70,11 +70,11 @@ public static class JobTriggerProcessHost
             // Enqueue only — deliberately. Spawning terminals from here used to be unbounded: this
             // loop called the launcher once per returned run with no cap, so a rebase or an amend
             // loop producing six commits in two minutes spawned six job processes at once. Handing
-            // the queued runs to the tick (or the dashboard scheduler, whichever comes first) means
-            // they inherit both the per-job overlap guard and the machine-wide launch cap.
+            // queued runs to the next active root scheduler means they inherit both the per-job
+            // overlap guard and the machine-wide launch cap.
             //
-            // Cost is latency: a commit-triggered run starts within a minute rather than instantly.
-            // For an automated review that is not a meaningful difference.
+            // Cost is a small amount of latency: an active root picks it up on its next scheduler
+            // poll (normally within ten seconds) rather than launching directly from the Git hook.
             var runIds = await jobStore.EnqueueEventRunsAsync(
                 repositoryPath,
                 JobTriggerKind.Commit,
