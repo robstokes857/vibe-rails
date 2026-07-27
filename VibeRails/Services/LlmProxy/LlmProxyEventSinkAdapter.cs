@@ -21,7 +21,8 @@ public sealed class LlmProxyEventSinkAdapter(IAppEventBus eventBus, ITokenSaving
         string? status,
         long? bytesSaved = null)
     {
-        // The running totals are an in-memory read — the ping never waits on SQLite.
+        // The running totals are an in-memory snapshot. Persisted history warms in the background,
+        // so the ping never waits on SQLite even during the store's first load or a retry.
         var totals = savingsStore.GetTotals();
         eventBus.PublishProxyActivity(
             source, label, target, status, bytesSaved,

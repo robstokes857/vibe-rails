@@ -215,7 +215,11 @@ export class TabStatusController {
     }
 
     onTerminalData(data) {
-        if (data === '\r' &&
+        // xterm normally emits CR for Enter, but attached/remote input paths
+        // can surface LF or CRLF. Treat all newline-only variants as the same
+        // submit boundary so WAITING clears on the first Enter everywhere.
+        const isSubmit = data === '\r' || data === '\n' || data === '\r\n';
+        if (isSubmit &&
             (this._status === TAB_STATUS.CONNECTED ||
              this._status === TAB_STATUS.READY ||
              this._status === TAB_STATUS.WAITING)) {

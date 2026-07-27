@@ -27,6 +27,13 @@ public sealed class Terminal
     public int CursorShape => _buffer.CursorShape;
     public bool SyncOutputActive => _buffer.SyncOutputActive;
     public bool BracketedPasteActive => _buffer.BracketedPasteActive;
+
+    /// <summary>
+    /// Enabled mouse-tracking / focus-reporting modes in emit order — protocol
+    /// (?9/1000/1002/1003), then encoding (?1006), then focus (?1004), e.g.
+    /// [1003, 1006, 1004]. Returns a copy — safe to read after Write completes.
+    /// </summary>
+    public int[] GetInputReportingModes() => _buffer.GetInputReportingModes();
     public bool IsAlternateScreen => _buffer.IsAlternateScreen;
     public CellAttributes CurrentAttributes => _buffer.CurrentAttributes;
     public CellColor CurrentFg => _buffer.CurrentFg;
@@ -126,5 +133,13 @@ public sealed class Terminal
         _buffer.CurrentBg = CellColor.Default;
         _buffer.CurrentAttributes = CellAttributes.None;
         _buffer.ClearDirty();
+
+        // Modes the reconnect snapshot restores must be cleared here too, or a
+        // reset terminal replays stale state — e.g. re-enabling mouse reporting
+        // into a plain shell, which then gets SGR reports typed into its stdin on
+        // every wheel tick. Same reasoning as AnsiParser.FullReset (RIS).
+        _buffer.ClearInputReportingModes();
+        _buffer.SetBracketedPaste(false);
+        _buffer.SetSyncOutput(false);
     }
 }

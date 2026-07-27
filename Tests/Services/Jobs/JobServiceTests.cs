@@ -41,7 +41,7 @@ public sealed class JobServiceTests : IDisposable
             Service().CreateJobAsync(Request(environmentId: null), TestContext.Current.CancellationToken));
 
         Assert.Equal(400, error.StatusCode);
-        Assert.Contains("Environment / Worker", error.Message);
+        Assert.Contains("Environment", error.Message);
     }
 
     [Theory]
@@ -55,7 +55,7 @@ public sealed class JobServiceTests : IDisposable
             Service().CreateJobAsync(Request(name: name), TestContext.Current.CancellationToken));
 
         Assert.Equal(400, error.StatusCode);
-        Assert.Contains("Job name is required", error.Message);
+        Assert.Contains("Automation name is required", error.Message);
     }
 
     [Fact]
@@ -218,7 +218,7 @@ public sealed class JobServiceTests : IDisposable
             Service().CreateJobAsync(Request(), TestContext.Current.CancellationToken));
 
         Assert.Equal(400, error.StatusCode);
-        Assert.Contains("cannot run as an automated Job", error.Message);
+        Assert.Contains("cannot run as an Automation", error.Message);
     }
 
     [Fact]

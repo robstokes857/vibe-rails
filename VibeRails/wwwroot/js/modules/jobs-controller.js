@@ -60,7 +60,6 @@ export class JobController {
         this.jobs = [];
         this.runs = [];
         this.environments = [];
-        this.workerStatus = null;
         this.pollTimer = null;
         this.logTimer = null;
         this.runModalGeneration = 0;
@@ -68,6 +67,7 @@ export class JobController {
         this.activeEditorJob = null;
         this.activeEditorSource = null;
         this.activeEditorPreferredTrigger = null;
+        this._lastJobsListHtml = null;
     }
 
     async loadView(data = {}) {
@@ -77,13 +77,20 @@ export class JobController {
         content.innerHTML = this.renderPage();
         this.root = content.querySelector('[data-view="jobs"]');
         this.bindPageActions();
+        // The list now holds the loading placeholder; a stale render cache from a previous
+        // visit would make the first renderJobs() skip and leave the spinner forever.
+        this._lastJobsListHtml = null;
         await this.refreshAll();
 
         if (data?.newJob) {
             this.openEditor(null, Number(data.triggerKind));
         }
         this.pollTimer = window.setInterval(() => {
-            if (this.app.currentView === 'jobs') this.refreshRuns({ quiet: true });
+            if (this.app.currentView !== 'jobs') return;
+            this.refreshRuns({ quiet: true });
+            // Jobs too, not just run history: the scheduler advances nextRunUtc server-side,
+            // so a "Next run" rendered once at load drifts into "Due now" and stays there.
+            this.refreshJobs({ quiet: true });
         }, 5000);
     }
 
@@ -139,8 +146,8 @@ export class JobController {
             <div class="view jobs-view" data-view="jobs">
                 <header class="jobs-page-header">
                     <div>
-                        <h4 class="jobs-page-title text-uppercase fw-bold mb-0"><span class="text-gradient">Jobs</span></h4>
-                        <p>Run a Custom Env on a schedule, after every commit, or on demand. Each run is a real recorded terminal you can replay right here.</p>
+                        <h4 class="jobs-page-title text-uppercase fw-bold mb-0"><span class="text-gradient">Automation</span></h4>
+                        <p>Run a saved Environment on a schedule, after every commit, or on demand. Each run is a recorded terminal you can replay here.</p>
                     </div>
                     <div class="jobs-page-actions">
                         <button class="btn btn-outline-secondary" type="button" data-job-action="import-recipe">
@@ -152,35 +159,22 @@ export class JobController {
                     </div>
                 </header>
 
-                <section class="jobs-section" aria-labelledby="jobs-scheduler-title">
-                    <div class="jobs-section-heading">
-                        <div><span class="jobs-eyebrow">Background scheduling</span><h2 id="jobs-scheduler-title">Run jobs while VibeRails is closed</h2></div>
-                        <div data-jobs-scheduler-status></div>
-                    </div>
-                    <p class="jobs-section-intro">Scheduled jobs normally only fire while this dashboard is open. Register a background task and they fire whenever you're logged in — each one still opens a terminal window you can watch.</p>
-                </section>
-
-                <section class="jobs-section" aria-labelledby="job-environments-title" data-job-environments>
-                    <div class="jobs-section-heading">
-                        <div><span class="jobs-eyebrow">Shared configuration</span><h2 id="job-environments-title">Environment / Workers</h2></div>
-                        <button class="btn btn-sm btn-outline-primary" type="button" data-job-action="new-environment">
-                            <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add worker
-                        </button>
-                    </div>
-                    <p class="jobs-section-intro">The same workers from the Workers screen — their CLI, model, arguments, and initial message stay in sync everywhere. A Job just decides when one runs.</p>
-                    <div data-job-environments-table>
-                        <div class="jobs-empty"><span class="spinner-border spinner-border-sm"></span> Loading workers…</div>
+                <section class="jobs-runtime-strip" aria-label="Automation runtime">
+                    <span class="jobs-runtime-icon" aria-hidden="true"><i class="fa-solid fa-bolt"></i></span>
+                    <div class="jobs-runtime-copy">
+                        <strong>Automations run only while VibeRails is open</strong>
+                        <span>Queued work is shared, and a single active instance claims each run.</span>
                     </div>
                 </section>
 
                 <section class="jobs-section" aria-labelledby="jobs-list-title">
                     <div class="jobs-section-heading">
-                        <div><span class="jobs-eyebrow">When workers run</span><h2 id="jobs-list-title">Automation rules</h2></div>
-                        <span class="jobs-count" data-jobs-count>0 rules</span>
+                        <div><span class="jobs-eyebrow">Saved schedules and triggers</span><h2 id="jobs-list-title">Automations</h2></div>
+                        <span class="jobs-count" data-jobs-count>0 automations</span>
                     </div>
                     <div class="job-inline-editor" data-job-editor hidden></div>
                     <div class="jobs-grid" data-jobs-list>
-                        <div class="jobs-empty"><span class="spinner-border spinner-border-sm"></span> Loading automation rules…</div>
+                        <div class="jobs-empty"><span class="spinner-border spinner-border-sm"></span> Loading automations…</div>
                     </div>
                 </section>
 
@@ -205,14 +199,7 @@ export class JobController {
             const runId = actionElement.dataset.runId;
 
             if (action === 'new') return this.openEditor();
-            if (action === 'new-environment') {
-                return this.app.environmentController?.createEnvironment({
-                    onChanged: () => this.environmentChanged()
-                });
-            }
             if (action === 'refresh') return this.refreshAll();
-            if (action === 'install-scheduler') return this.setSchedulerInstalled(true);
-            if (action === 'uninstall-scheduler') return this.setSchedulerInstalled(false);
             if (action === 'edit') return this.openEditor(this.jobs.find(job => job.id === jobId));
             if (action === 'run') return this.runNow(jobId, actionElement);
             if (action === 'toggle') return this.toggleJob(jobId, actionElement);
@@ -245,53 +232,8 @@ export class JobController {
             this.app.data.environments = this.environments;
             this.renderJobs();
             this.renderRuns();
-            this.renderEnvironments();
-            void this.refreshSchedulerStatus();
         } catch (error) {
-            if (!quiet) this.app.showError(error?.message || 'Could not load Jobs.');
-        }
-    }
-
-    async refreshSchedulerStatus() {
-        const target = this.root?.querySelector('[data-jobs-scheduler-status]');
-        if (!target) return;
-        try {
-            const status = await this.app.apiCall('/api/v1/jobs/scheduler', 'GET', null, { showLoading: false });
-            this.renderSchedulerStatus(status);
-        } catch (error) {
-            target.innerHTML = `<span class="jobs-count">Unavailable</span>`;
-        }
-    }
-
-    renderSchedulerStatus(status) {
-        const target = this.root?.querySelector('[data-jobs-scheduler-status]');
-        if (!target) return;
-        if (!status?.supported) {
-            target.innerHTML = `<span class="jobs-count">Not supported on this OS</span>`;
-            return;
-        }
-        const installed = status.installed === true;
-        target.innerHTML = `
-            <div class="d-flex align-items-center gap-2">
-                <span class="job-state" data-tone="${installed ? 'success' : 'neutral'}">${installed ? 'Registered' : 'Not registered'}</span>
-                <button class="btn btn-sm ${installed ? 'btn-outline-secondary' : 'btn-outline-primary'}" type="button" data-job-action="${installed ? 'uninstall-scheduler' : 'install-scheduler'}">
-                    ${installed ? 'Remove background task' : `Register with ${this.escape(status.platform || 'the OS')}`}
-                </button>
-            </div>`;
-    }
-
-    async setSchedulerInstalled(install) {
-        try {
-            const status = await this.app.apiCall('/api/v1/jobs/scheduler', install ? 'POST' : 'DELETE');
-            this.renderSchedulerStatus(status);
-            this.app.showToast(
-                'Jobs',
-                install
-                    ? 'Background task registered. Scheduled jobs will now run whenever you are logged in.'
-                    : 'Background task removed. Scheduled jobs only run while this dashboard is open.',
-                'success');
-        } catch (error) {
-            this.app.showError(error?.message || 'Could not update the background task.');
+            if (!quiet) this.app.showError(error?.message || 'Could not load Automation.');
         }
     }
 
@@ -300,89 +242,137 @@ export class JobController {
             const response = await this.app.apiCall('/api/v1/jobs/runs?limit=100', 'GET', null, { showLoading: false });
             this.runs = response?.runs || [];
             this.renderRuns();
-            if (!quiet) this.app.showToast('Jobs', 'Run history refreshed.', 'info');
+            if (!quiet) this.app.showToast('Automation', 'Run history refreshed.', 'info');
         } catch (error) {
-            if (!quiet) this.app.showError(error?.message || 'Could not refresh job runs.');
+            if (!quiet) this.app.showError(error?.message || 'Could not refresh automation runs.');
         }
     }
 
-    renderEnvironments() {
-        const target = this.root?.querySelector('[data-job-environments-table]');
-        const controller = this.app.environmentController;
-        if (!target || !controller) return;
-
-        target.innerHTML = controller.renderEnvironmentsTable();
-        controller.bindEnvironmentTableActions(target, {
-            onChanged: () => this.environmentChanged()
-        });
+    async refreshJobs({ quiet = false } = {}) {
+        try {
+            const projectPath = this.currentProjectPath();
+            if (projectPath) {
+                const response = await this.app.apiCall(
+                    `/api/v1/jobs?projectPath=${encodeURIComponent(projectPath)}`,
+                    'GET', null, { showLoading: false });
+                this.jobs = response?.jobs || [];
+            }
+        } catch (error) {
+            if (!quiet) this.app.showError(error?.message || 'Could not refresh automations.');
+        }
+        // Render even when the fetch failed or was skipped: the countdown labels
+        // ("in 12 min") age out of the cached data on their own.
+        this.renderJobs();
     }
 
     async environmentChanged({ selectedEnvironmentId = null } = {}) {
         this.environments = this.app.data.environments || [];
-        this.renderEnvironments();
         this.renderJobs();
-        this.refreshEditorWorkerPicker(selectedEnvironmentId);
+        this.refreshEditorEnvironmentPicker(selectedEnvironmentId);
     }
 
     renderJobs() {
         const target = this.root?.querySelector('[data-jobs-list]');
         const count = this.root?.querySelector('[data-jobs-count]');
-        if (count) count.textContent = `${this.jobs.length} ${this.jobs.length === 1 ? 'rule' : 'rules'}`;
+        if (count) count.textContent = `${this.jobs.length} ${this.jobs.length === 1 ? 'automation' : 'automations'}`;
         if (!target) return;
+        const html = this.renderJobsListHtml();
+        // The 5s poll calls this constantly. Only touch the DOM when the markup actually
+        // changed (data or a countdown label), so hover/focus and a busy "Run now" button
+        // aren't wiped by an identical re-render.
+        if (html === this._lastJobsListHtml) return;
+        this._lastJobsListHtml = html;
+        target.innerHTML = html;
+    }
+
+    renderJobsListHtml() {
         if (this.jobs.length === 0) {
-            target.innerHTML = `
+            return `
                 <div class="jobs-empty jobs-empty-large">
                     <i class="fa-regular fa-clock" aria-hidden="true"></i>
-                    <strong>No automation rules yet</strong>
-                    <span>Choose a worker and run it on a timer, around commits, or manually.</span>
+                    <strong>No automations yet</strong>
+                    <span>Choose an Environment and run it on a timer, after commits, or on demand.</span>
                     <button class="btn btn-primary" type="button" data-job-action="new">Create your first automation</button>
                 </div>`;
-            return;
         }
 
-        target.innerHTML = this.jobs.map(job => {
+        return this.jobs.map(job => {
             const triggers = (job.triggers || []).map(trigger => `<span class="jobs-trigger-chip">${this.escape(this.formatTrigger(trigger))}</span>`).join('');
-            const llm = getLlmName(Number(job.llm));
-            const cli = getJobCliForLlm(job.llm) || 'unknown';
             const environment = this.findEnvironment(job.environmentId);
-            const workerName = environment?.name || job.environmentName || `${llm} default (legacy)`;
-            const workerPrompt = environment?.customPrompt || job.prompt || '';
-            const isLegacy = !job.environmentId;
+            const cli = environment?.cli || getJobCliForLlm(job.llm) || 'unknown';
+            const llm = getLlmName(Number(getJobLlmForCli(cli) ?? job.llm));
+            const environmentName = environment?.name
+                || (job.environmentName ? `${job.environmentName} (missing)` : 'Missing environment');
+            const nextRun = this.nextRunSummary(job);
+            const nextRunTitle = nextRun.utc
+                ? ` title="${this.escape(new Date(nextRun.utc).toLocaleString())}"`
+                : '';
             const jobId = this.escape(job.id);
+            const safeName = this.escape(job.name);
             return `
                 <article class="job-card" data-enabled="${job.enabled === true}">
-                    <div class="job-card-topline">
-                        <div class="job-card-title">
-                            <span class="job-provider" data-provider="${cli}">${this.escape(llm)}</span>
-                            <h3>${this.escape(job.name)}</h3>
+                    <div class="job-card-main">
+                        <div class="job-card-topline">
+                            <div class="job-card-title">
+                                <h3>${safeName}</h3>
+                                <span class="job-provider" data-provider="${this.escape(cli)}">${this.escape(llm)}</span>
+                            </div>
+                            <span class="job-state" data-tone="${job.enabled ? 'success' : 'neutral'}">${job.enabled ? 'Enabled' : 'Disabled'}</span>
                         </div>
-                        <span class="job-state" data-tone="${job.enabled ? 'success' : 'neutral'}">${job.enabled ? 'Enabled' : 'Disabled'}</span>
+                        <div class="job-card-facts">
+                            <div class="job-card-fact" ${environment ? '' : 'data-tone="warning"'}>
+                                <span><i class="fa-solid fa-layer-group" aria-hidden="true"></i>Environment</span>
+                                <strong>${this.escape(environmentName)}</strong>
+                            </div>
+                            <div class="job-card-fact job-card-trigger">
+                                <span><i class="fa-regular fa-clock" aria-hidden="true"></i>Trigger</span>
+                                <div class="job-triggers">${triggers || '<span class="jobs-trigger-chip">On demand</span>'}</div>
+                            </div>
+                            <div class="job-card-fact">
+                                <span><i class="fa-solid fa-forward" aria-hidden="true"></i>Next run</span>
+                                <strong${nextRunTitle}>${this.escape(nextRun.label)}</strong>
+                            </div>
+                        </div>
                     </div>
-                    <div class="job-worker-summary"><i class="fa-solid fa-robot" aria-hidden="true"></i><span><small>Environment / Worker</small><strong>${this.escape(workerName)}</strong></span></div>
-                    ${workerPrompt ? `<details class="job-prompt-details"><summary>Worker initial message</summary><p class="job-prompt">${this.escape(workerPrompt)}</p></details>` : '<p class="job-prompt job-prompt-missing">This worker has no initial message.</p>'}
-                    <div class="job-when"><span>When</span><div class="job-triggers">${triggers || '<span class="jobs-trigger-chip">Manual only</span>'}</div></div>
-                    <div class="job-meta"><span><i class="fa-regular fa-hourglass-half"></i>${job.timeoutMinutes ? `${job.timeoutMinutes} min limit` : 'No time limit'}</span><span><i class="fa-solid fa-terminal"></i>Opens a terminal window</span></div>
                     <div class="job-card-actions">
                         <button class="btn btn-sm btn-primary" type="button" data-job-action="run" data-job-id="${jobId}"><i class="fa-solid fa-play me-1"></i>Run now</button>
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="edit" data-job-id="${jobId}">Edit</button>
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="toggle" data-job-id="${jobId}">${job.enabled ? 'Disable' : 'Enable'}</button>
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="export-recipe" data-job-id="${jobId}" title="Export as recipe" aria-label="Export ${this.escape(job.name)} as recipe"><i class="fa-solid fa-file-export"></i></button>
-                        <button class="btn btn-sm btn-outline-danger ms-auto" type="button" data-job-action="delete" data-job-id="${jobId}" aria-label="Delete ${this.escape(job.name)}"><i class="fa-solid fa-trash"></i></button>
+                        <button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="edit" data-job-id="${jobId}" title="Edit automation" aria-label="Edit ${safeName}"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
+                        <button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="toggle" data-job-id="${jobId}" title="${job.enabled ? 'Disable' : 'Enable'} automation" aria-label="${job.enabled ? 'Disable' : 'Enable'} ${safeName}"><i class="fa-solid ${job.enabled ? 'fa-pause' : 'fa-play'}" aria-hidden="true"></i></button>
+                        <button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="export-recipe" data-job-id="${jobId}" title="Export as recipe" aria-label="Export ${safeName} as recipe"><i class="fa-solid fa-file-export" aria-hidden="true"></i></button>
+                        <button class="btn btn-sm btn-outline-danger job-icon-action" type="button" data-job-action="delete" data-job-id="${jobId}" title="Delete automation" aria-label="Delete ${safeName}"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
                     </div>
                 </article>`;
         }).join('');
+    }
+
+    nextRunSummary(job) {
+        if (job.enabled !== true) return { label: 'Paused', utc: null };
+
+        const triggers = job.triggers || [];
+        const scheduled = triggers.filter(trigger => Number(trigger.kind) === TRIGGER.SCHEDULE);
+        const next = scheduled
+            .map(trigger => trigger.nextRunUtc)
+            .filter(value => value && Number.isFinite(new Date(value).getTime()))
+            .sort((left, right) => new Date(left).getTime() - new Date(right).getTime())[0];
+
+        if (next) return { label: this.formatFutureTime(next), utc: next };
+        if (scheduled.length > 0) return { label: 'Waiting for schedule', utc: null };
+        if (triggers.some(trigger => Number(trigger.kind) === TRIGGER.COMMIT)) {
+            return { label: 'After next commit', utc: null };
+        }
+        return { label: 'On demand', utc: null };
     }
 
     renderRuns() {
         const target = this.root?.querySelector('[data-job-runs]');
         if (!target) return;
         if (this.runs.length === 0) {
-            target.innerHTML = '<div class="jobs-empty">No job runs yet.</div>';
+            target.innerHTML = '<div class="jobs-empty">No automation runs yet.</div>';
             return;
         }
         target.innerHTML = `
             <div class="table-responsive"><table class="table jobs-runs-table align-middle">
-                <thead><tr><th>Job</th><th>Trigger</th><th>Status</th><th>Queued</th><th>Duration</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+                <thead><tr><th>Automation</th><th>Trigger</th><th>Status</th><th>Queued</th><th>Duration</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
                 <tbody>${this.runs.map(run => this.renderRunRow(run)).join('')}</tbody>
             </table></div>`;
     }
@@ -425,34 +415,30 @@ export class JobController {
         const selectedCli = environment?.cli || getJobCliForLlm(source.llm) || 'codex';
         const selectedValue = environment
             ? buildLlmSelectionValue(selectedCli, environment.id)
-            : isEdit && !source.environmentId
-                ? buildLlmSelectionValue(selectedCli)
+            : source.environmentId
+                ? buildLlmSelectionValue(selectedCli, source.environmentId)
                 : '';
         const projectPath = this.currentProjectPath();
-        const legacyNotice = isEdit && !source.environmentId
-            ? `<div class="job-legacy-notice" role="status"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>This older rule uses the ${this.escape(getLlmName(source.llm))} default configuration. You can keep it as-is or move it to a shared Environment / Worker.</span></div>`
-            : '';
 
         editor.hidden = false;
         editor.innerHTML = `
             <form data-job-form class="job-inline-form">
                 <div class="job-inline-form-header">
-                    <div><span class="jobs-eyebrow">${isEdit ? 'Edit rule' : 'New rule'}</span><h3>${isEdit ? this.escape(source.name) : 'Create an automation rule'}</h3><p>The worker owns the CLI, model, arguments, and initial message. This rule just controls when it runs and its timeout.</p></div>
+                    <div><span class="jobs-eyebrow">${isEdit ? 'Edit automation' : 'New automation'}</span><h3>${isEdit ? this.escape(source.name) : 'Create an automation'}</h3><p>The Environment owns the CLI, model, arguments, and initial message. This automation controls when it runs and its timeout.</p></div>
                     <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="cancel-editor" aria-label="Close automation editor"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
                 </div>
-                ${legacyNotice}
                 <div class="row g-3">
                     <div class="col-lg-5"><label class="form-label" for="job-name">Automation name</label><input class="form-control" id="job-name" maxlength="100" required value="${this.escape(source.name || '')}" placeholder="Security review after commit"></div>
                     <div class="col-lg-7">
-                        <label class="form-label" for="job-llm-selection">Environment / Worker</label>
-                        <div class="job-worker-picker-row">
-                            <div class="job-worker-picker"><select class="form-select" id="job-llm-selection" required></select></div>
-                            <button class="btn btn-outline-primary text-nowrap" type="button" data-job-action="add-worker-from-editor"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add worker</button>
-                            <button class="btn btn-outline-secondary text-nowrap" type="button" data-job-action="edit-selected-environment" hidden disabled>Edit worker</button>
+                        <label class="form-label" for="job-llm-selection">Environment</label>
+                        <div class="job-environment-picker-row">
+                            <div class="job-environment-picker"><select class="form-select" id="job-llm-selection" required></select></div>
+                            <button class="btn btn-outline-primary text-nowrap" type="button" data-job-action="add-environment-from-editor"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add Environment</button>
+                            <button class="btn btn-outline-secondary text-nowrap" type="button" data-job-action="edit-selected-environment" hidden disabled>Edit Environment</button>
                         </div>
-                        <small class="form-text text-muted">New automation rules use a custom worker so its saved model, arguments, CLI settings, and initial message stay synchronized.</small>
+                        <small class="form-text text-muted">The saved model, arguments, CLI settings, and initial message stay synchronized with this Environment.</small>
                     </div>
-                    <div class="col-12"><div class="job-worker-preview" data-job-worker-preview aria-live="polite"></div></div>
+                    <div class="col-12"><div class="job-environment-preview" data-job-environment-preview aria-live="polite"></div></div>
                 </div>
 
                 <fieldset class="job-trigger-fieldset mt-4"><legend>When should it run?</legend>
@@ -466,12 +452,12 @@ export class JobController {
                             <div class="col-12" data-timezone-field><label class="form-label" for="job-timezone">Time zone</label><input class="form-control" id="job-timezone" value="${this.escape(timezone)}"></div>
                         </div>
                     </div>
-                    <label class="job-trigger-option"><input class="form-check-input" type="checkbox" id="job-trigger-commit" ${hasCommit ? 'checked' : ''}><span><strong>After every successful commit</strong><small>Queued by the native post-commit hook, then started by the scheduler within a minute.</small></span></label>
+                    <label class="job-trigger-option"><input class="form-check-input" type="checkbox" id="job-trigger-commit" ${hasCommit ? 'checked' : ''}><span><strong>After every successful commit</strong><small>Queued by the native post-commit hook and picked up by an active VibeRails instance.</small></span></label>
                     <div class="job-manual-note"><i class="fa-solid fa-play" aria-hidden="true"></i>Run now is always available, even when no automatic trigger is selected.</div>
                 </fieldset>
 
                 <details class="job-advanced-settings mt-3">
-                    <summary>Advanced job settings</summary>
+                    <summary>Advanced automation settings</summary>
                     <div class="row g-3 mt-0">
                         <div class="col-md-5">
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="job-timeout-enabled" ${source.timeoutMinutes ? 'checked' : ''}><label class="form-check-label" for="job-timeout-enabled">Stop the run after a time limit</label></div>
@@ -488,7 +474,7 @@ export class JobController {
 
         const form = editor.querySelector('[data-job-form]');
         const selection = form?.querySelector('#job-llm-selection');
-        this.refreshEditorWorkerPicker(null, selectedValue);
+        this.refreshEditorEnvironmentPicker(null, selectedValue);
 
         const updateScheduleFields = () => {
             const enabled = form.querySelector('#job-trigger-schedule').checked;
@@ -509,21 +495,21 @@ export class JobController {
         };
         form?.querySelector('#job-timeout-enabled')?.addEventListener('change', updateTimeoutField);
         updateTimeoutField();
-        selection?.addEventListener('change', () => this.updateEditorWorkerPreview());
-        form?.querySelector('[data-job-action="add-worker-from-editor"]')?.addEventListener('click', () => this.createWorkerFromEditor());
-        form?.querySelector('[data-job-action="edit-selected-environment"]')?.addEventListener('click', () => this.editSelectedWorker());
+        selection?.addEventListener('change', () => this.updateEditorEnvironmentPreview());
+        form?.querySelector('[data-job-action="add-environment-from-editor"]')?.addEventListener('click', () => this.createEnvironmentFromEditor());
+        form?.querySelector('[data-job-action="edit-selected-environment"]')?.addEventListener('click', () => this.editSelectedEnvironment());
         form?.querySelectorAll('[data-job-action="cancel-editor"]')?.forEach(button => button.addEventListener('click', () => this.closeEditor()));
         form?.querySelector('#job-trigger-schedule')?.addEventListener('change', updateScheduleFields);
         form?.querySelector('#job-schedule-kind')?.addEventListener('change', updateScheduleFields);
         form?.addEventListener('submit', event => this.saveJob(event, job));
         updateScheduleFields();
-        this.updateEditorWorkerPreview();
+        this.updateEditorEnvironmentPreview();
 
         editor.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
         form?.querySelector('#job-name')?.focus?.();
     }
 
-    refreshEditorWorkerPicker(selectedEnvironmentId = null, selectedValue = null) {
+    refreshEditorEnvironmentPicker(selectedEnvironmentId = null, selectedValue = null) {
         const selection = this.root?.querySelector('[data-job-editor] #job-llm-selection');
         if (!selection) return;
 
@@ -536,43 +522,35 @@ export class JobController {
 
         this.disposeEditorModal();
         populateLlmSelectionSelect(selection, this.environments, {
-            placeholder: this.environments.length > 0 ? 'Select a custom worker...' : 'Add a worker to continue...',
+            placeholder: this.environments.length > 0 ? 'Select an Environment...' : 'Add an Environment to continue...',
             selectedValue: valueToRestore,
             includeBase: false,
             enhance: false
         });
 
-        if (valueToRestore.startsWith('base:') && this.activeEditorJob && !this.activeEditorJob.environmentId) {
-            const cli = parseLlmSelection(valueToRestore, this.environments).cli || getJobCliForLlm(this.activeEditorJob.llm) || 'unknown';
-            const option = document.createElement('option');
-            option.value = valueToRestore;
-            option.textContent = `${getLlmName(this.activeEditorJob.llm)} default (legacy)`;
-            option.dataset.cli = cli;
-            selection.appendChild(option);
-            selection.value = valueToRestore;
-        } else if (valueToRestore.startsWith('env:') && !this.findEnvironment(parseLlmSelection(valueToRestore, this.environments).envId)) {
+        if (valueToRestore.startsWith('env:') && !this.findEnvironment(parseLlmSelection(valueToRestore, this.environments).envId)) {
             const parsed = parseLlmSelection(valueToRestore, this.environments);
             const option = document.createElement('option');
             option.value = valueToRestore;
-            option.textContent = `${this.activeEditorJob?.environmentName || 'Deleted worker'} (missing)`;
+            option.textContent = `${this.activeEditorJob?.environmentName || 'Deleted Environment'} (missing)`;
             option.dataset.cli = parsed.cli || '';
             selection.appendChild(option);
             selection.value = valueToRestore;
         }
 
         enhanceLlmSelectWithTomSelect(selection, {
-            placeholder: this.environments.length > 0 ? 'Select a custom worker...' : 'Add a worker to continue...',
-            searchPlaceholder: 'Search workers...'
+            placeholder: this.environments.length > 0 ? 'Select an Environment...' : 'Add an Environment to continue...',
+            searchPlaceholder: 'Search Environments...'
         });
         this.registerEditorModalCleanup(selection);
-        this.updateEditorWorkerPreview();
+        this.updateEditorEnvironmentPreview();
     }
 
-    updateEditorWorkerPreview() {
+    updateEditorEnvironmentPreview() {
         const form = this.root?.querySelector('[data-job-editor] [data-job-form]');
         if (!form) return;
         const selection = form.querySelector('#job-llm-selection');
-        const preview = form.querySelector('[data-job-worker-preview]');
+        const preview = form.querySelector('[data-job-environment-preview]');
         const editButton = form.querySelector('[data-job-action="edit-selected-environment"]');
         const parsed = parseLlmSelection(selection?.tomselect?.getValue?.() || selection?.value, this.environments);
         const environment = parsed.kind === 'environment' ? this.findEnvironment(parsed.envId) : null;
@@ -587,25 +565,19 @@ export class JobController {
             const prompt = (environment.customPrompt || '').trim();
             preview.dataset.tone = prompt ? 'ready' : 'warning';
             preview.innerHTML = prompt
-                ? `<div><span><i class="fa-solid fa-robot" aria-hidden="true"></i><strong>${this.escape(environment.name)}</strong> owns this initial message</span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-worker">Edit worker settings</button></div><pre></pre>`
-                : `<div><span><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><strong>${this.escape(environment.name)}</strong> needs an Initial Message before it can run as a Job.</span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-worker">Add initial message</button></div>`;
+                ? `<div><span><i class="fa-solid fa-layer-group" aria-hidden="true"></i><strong>${this.escape(environment.name)}</strong> owns this initial message</span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-environment">Edit Environment</button></div><pre></pre>`
+                : `<div><span><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><strong>${this.escape(environment.name)}</strong> needs an Initial Message before it can run as an Automation.</span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-environment">Add initial message</button></div>`;
             const promptTarget = preview.querySelector('pre');
             if (promptTarget) promptTarget.textContent = prompt;
-            preview.querySelector('[data-job-action="edit-preview-worker"]')?.addEventListener('click', () => this.editSelectedWorker());
-            return;
-        }
-
-        if (parsed.kind === 'base' && this.activeEditorJob && !this.activeEditorJob.environmentId) {
-            preview.dataset.tone = 'legacy';
-            preview.innerHTML = `<div><span><i class="fa-solid fa-circle-info" aria-hidden="true"></i><strong>Legacy base worker</strong> — its existing message is kept read-only until you choose a shared worker.</span></div>${this.activeEditorSource?.prompt ? `<pre>${this.escape(this.activeEditorSource.prompt)}</pre>` : ''}`;
+            preview.querySelector('[data-job-action="edit-preview-environment"]')?.addEventListener('click', () => this.editSelectedEnvironment());
             return;
         }
 
         preview.dataset.tone = 'empty';
-        preview.innerHTML = '<span>Select a custom Environment / Worker, or add one with the full Environment settings form.</span>';
+        preview.innerHTML = '<span>Select an Environment, or add one without leaving this editor.</span>';
     }
 
-    async createWorkerFromEditor() {
+    async createEnvironmentFromEditor() {
         const controller = this.app.environmentController;
         if (!controller) return;
         const knownIds = new Set(this.environments.map(environment => Number(environment.id)));
@@ -620,7 +592,7 @@ export class JobController {
         });
     }
 
-    async editSelectedWorker() {
+    async editSelectedEnvironment() {
         const controller = this.app.environmentController;
         const selection = this.root?.querySelector('[data-job-editor] #job-llm-selection');
         const parsed = parseLlmSelection(selection?.tomselect?.getValue?.() || selection?.value, this.environments);
@@ -642,8 +614,7 @@ export class JobController {
         editor.hidden = true;
     }
 
-    captureEditorState(form, { validate = false, source = null } = {}) {
-        const editorSource = source || this.activeEditorSource || this.activeEditorJob || {};
+    captureEditorState(form, { validate = false } = {}) {
         const parsedSelection = parseLlmSelection(
             form.querySelector('#job-llm-selection')?.tomselect?.getValue?.() || form.querySelector('#job-llm-selection')?.value,
             this.environments
@@ -651,29 +622,24 @@ export class JobController {
         const selectedEnvironment = parsedSelection.kind === 'environment'
             ? this.findEnvironment(parsedSelection.envId)
             : null;
-        const isLegacyBase = parsedSelection.kind === 'base'
-            && Boolean(this.activeEditorJob)
-            && !this.activeEditorJob.environmentId;
 
         if (parsedSelection.kind === 'environment' && !selectedEnvironment) {
-            if (validate) this.app.showError('The selected Environment / Worker no longer exists. Choose another worker.');
+            if (validate) this.app.showError('The selected Environment no longer exists. Choose another Environment.');
             return null;
         }
-        if (!selectedEnvironment && !isLegacyBase) {
-            if (validate) this.app.showError('Choose a custom Environment / Worker.');
+        if (!selectedEnvironment) {
+            if (validate) this.app.showError('Choose an Environment.');
             return null;
         }
 
-        const llm = getJobLlmForCli(selectedEnvironment?.cli || parsedSelection.cli);
-        const prompt = selectedEnvironment
-            ? (selectedEnvironment.customPrompt || '').trim()
-            : (editorSource.prompt || '').trim();
+        const llm = getJobLlmForCli(selectedEnvironment.cli);
+        const prompt = (selectedEnvironment.customPrompt || '').trim();
         if (llm === null) {
-            if (validate) this.app.showError('The selected worker uses an unsupported CLI.');
+            if (validate) this.app.showError('The selected Environment uses an unsupported CLI.');
             return null;
         }
         if (!prompt) {
-            if (validate) this.app.showError('Edit this Environment / Worker and add an Initial Message before creating the automation.');
+            if (validate) this.app.showError('Edit this Environment and add an Initial Message before creating the automation.');
             return null;
         }
 
@@ -707,7 +673,7 @@ export class JobController {
             name: form.querySelector('#job-name').value.trim(),
             projectPath,
             llm,
-            environmentId: selectedEnvironment ? Number(selectedEnvironment.id) : null,
+            environmentId: Number(selectedEnvironment.id),
             prompt,
             // null = no time limit, which is the default. Only send a number when the user opted in.
             timeoutMinutes: form.querySelector('#job-timeout-enabled')?.checked
@@ -730,7 +696,7 @@ export class JobController {
         try {
             await this.app.apiCall(existingJob ? `/api/v1/jobs/${existingJob.id}` : '/api/v1/jobs', existingJob ? 'PUT' : 'POST', payload);
             this.closeEditor();
-            this.app.showToast('Jobs', existingJob ? 'Automation updated.' : 'Automation created.', 'success');
+            this.app.showToast('Automation', existingJob ? 'Automation updated.' : 'Automation created.', 'success');
             await this.refreshAll({ quiet: true });
         } catch (error) {
             this.app.showError(error?.message || 'Could not save the automation.');
@@ -742,7 +708,7 @@ export class JobController {
     async runNow(jobId, button) {
         return this.withBusy(button, 'Queueing…', async () => {
             const response = await this.app.apiCall(`/api/v1/jobs/${jobId}/run`, 'POST');
-            this.app.showToast('Job queued', response?.message || 'The job will start shortly.', 'success');
+            this.app.showToast('Automation queued', response?.message || 'The automation will start shortly.', 'success');
             await this.refreshRuns({ quiet: true });
         });
     }
@@ -751,9 +717,18 @@ export class JobController {
         const job = this.jobs.find(item => item.id === jobId);
         if (!job) return;
         const environment = this.findEnvironment(job.environmentId);
+        if (!environment) {
+            this.app.showError('This automation needs a valid Environment before it can be enabled or disabled.');
+            return;
+        }
+        const llm = getJobLlmForCli(environment.cli);
+        if (llm === null) {
+            this.app.showError('This automation uses an Environment with an unsupported CLI.');
+            return;
+        }
         const payload = {
-            name: job.name, projectPath: this.currentProjectPath(), llm: environment ? getJobLlmForCli(environment.cli) : job.llm,
-            environmentId: job.environmentId, prompt: environment ? (environment.customPrompt || '') : job.prompt,
+            name: job.name, projectPath: this.currentProjectPath(), llm,
+            environmentId: Number(environment.id), prompt: environment.customPrompt || '',
             timeoutMinutes: job.timeoutMinutes,
             enabled: !job.enabled,
             triggers: (job.triggers || []).map(({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }) => ({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }))
@@ -766,12 +741,12 @@ export class JobController {
 
     async deleteJob(jobId) {
         const job = this.jobs.find(item => item.id === jobId);
-        if (!job || !window.confirm(`Delete the job “${job.name}”? Its run history will be kept.`)) return;
+        if (!job || !window.confirm(`Delete the automation “${job.name}”? Its run history will be kept.`)) return;
         try {
             await this.app.apiCall(`/api/v1/jobs/${jobId}`, 'DELETE');
-            this.app.showToast('Jobs', 'Job deleted.', 'info');
+            this.app.showToast('Automation', 'Automation deleted.', 'info');
             await this.refreshAll({ quiet: true });
-        } catch (error) { this.app.showError(error?.message || 'Could not delete the job.'); }
+        } catch (error) { this.app.showError(error?.message || 'Could not delete the automation.'); }
     }
 
     async cancelRun(runId, button) {
@@ -813,10 +788,10 @@ export class JobController {
         // No session yet (run still queued, or it failed before launching a terminal).
         const status = RUN_STATUS[Number(run?.status)] || { label: 'Unknown', tone: 'neutral' };
         const active = Number(run?.status) <= 1;
-        this.app.showModal('Job run', `
+        this.app.showModal('Automation run', `
             <div class="job-run-detail">
                 <div class="job-run-detail-summary">
-                    <div><strong>${this.escape(run?.jobName || 'Job run')}</strong><span class="job-run-status" data-tone="${status.tone}">${status.label}</span></div>
+                    <div><strong>${this.escape(run?.jobName || 'Automation run')}</strong><span class="job-run-status" data-tone="${status.tone}">${status.label}</span></div>
                     <small>${this.escape(run?.projectPath || '')}</small>
                     ${run?.errorMessage ? `<p class="text-danger mb-0 mt-2">${this.escape(run.errorMessage)}</p>` : ''}
                     <p class="text-muted mb-0 mt-2">${active ? 'This run is starting — its recorded terminal will be replayable here shortly.' : 'This run has no recorded terminal to replay.'}</p>
@@ -833,30 +808,6 @@ export class JobController {
             await this.refreshRuns({ quiet: true });
         });
         detail?.querySelector('[data-run-retry]')?.addEventListener('click', event => this.retryRun(runId, event.currentTarget));
-    }
-
-    async attachRulesAutomation(root) {
-        const host = root?.querySelector('[data-jobs-automation-host]');
-        if (!host) return;
-        const projectPath = this.app.data.configs?.rootPath;
-        if (!projectPath || !this.app.data.isInGit) {
-            host.innerHTML = '<div class="jobs-automation-empty">Open a Git repository to attach Jobs to VCA and commit events.</div>';
-            return;
-        }
-        host.innerHTML = '<div class="jobs-automation-empty"><span class="spinner-border spinner-border-sm"></span> Loading project automations…</div>';
-        try {
-            const response = await this.app.apiCall(`/api/v1/jobs?projectPath=${encodeURIComponent(projectPath)}`, 'GET', null, { showLoading: false });
-            const jobs = (response?.jobs || []).filter(job => (job.triggers || []).some(trigger => Number(trigger.kind) === TRIGGER.COMMIT));
-            host.innerHTML = jobs.length === 0
-                ? `<div class="jobs-automation-empty"><strong>No commit-triggered automation yet</strong><span>Run a Worker automatically after every successful commit.</span></div>`
-                : `<div class="jobs-automation-list">${jobs.map(job => `<article><div><strong>${this.escape(job.name)}</strong><small>${this.escape(job.environmentName || getLlmName(Number(job.llm)))} · After successful commit</small></div><span class="job-state" data-tone="${job.enabled ? 'success' : 'neutral'}">${job.enabled ? 'On' : 'Off'}</span><button class="btn btn-sm btn-outline-secondary" type="button" data-rules-job-run="${this.escape(job.id)}">Run now</button></article>`).join('')}</div>`;
-            host.querySelectorAll('[data-rules-job-run]').forEach(button => button.addEventListener('click', () => this.runNow(Number(button.dataset.rulesJobRun), button)));
-        } catch (error) {
-            host.innerHTML = `<div class="jobs-automation-empty text-danger">${this.escape(error?.message || 'Could not load project Jobs.')}</div>`;
-        }
-
-        root.querySelector('[data-action="open-jobs"]')?.addEventListener('click', () => this.app.navigate('jobs', {}, { resetStack: true }));
-        root.querySelector('[data-action="new-commit-job"]')?.addEventListener('click', () => this.app.navigate('jobs', { newJob: true, triggerKind: TRIGGER.COMMIT }, { resetStack: true }));
     }
 
     formatTrigger(trigger) {
@@ -884,6 +835,48 @@ export class JobController {
         try { return this.app.formatRelativeTime(value); } catch { return new Date(value).toLocaleString(); }
     }
 
+    formatFutureTime(value, nowMilliseconds = Date.now()) {
+        const scheduled = new Date(value);
+        const scheduledMilliseconds = scheduled.getTime();
+        if (!Number.isFinite(scheduledMilliseconds)) return 'Waiting for schedule';
+
+        const remainingMilliseconds = scheduledMilliseconds - nowMilliseconds;
+        if (remainingMilliseconds <= 0) return 'Due now';
+
+        const minutes = Math.ceil(remainingMilliseconds / 60_000);
+        if (minutes < 60) return `in ${minutes} min`;
+
+        const now = new Date(nowMilliseconds);
+        // Hour countdowns only while the run is still today, floored: ceil showed 1h05m
+        // as "in 2 hr", overstating by nearly an hour. Once it crosses midnight an
+        // absolute time ("Tomorrow 9:30 AM") reads better than a large hour count.
+        if (scheduled.getFullYear() === now.getFullYear()
+            && scheduled.getMonth() === now.getMonth()
+            && scheduled.getDate() === now.getDate()) {
+            return `in ${Math.max(1, Math.floor(remainingMilliseconds / 3_600_000))} hr`;
+        }
+
+        const tomorrow = new Date(now);
+        tomorrow.setDate(now.getDate() + 1);
+        if (scheduled.getFullYear() === tomorrow.getFullYear()
+            && scheduled.getMonth() === tomorrow.getMonth()
+            && scheduled.getDate() === tomorrow.getDate()) {
+            return `Tomorrow ${scheduled.toLocaleTimeString(undefined, {
+                hour: 'numeric',
+                minute: '2-digit'
+            })}`;
+        }
+
+        const options = {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit'
+        };
+        if (scheduled.getFullYear() !== now.getFullYear()) options.year = 'numeric';
+        return scheduled.toLocaleString(undefined, options);
+    }
+
     formatDuration(start, end) {
         if (!start) return '—';
         const milliseconds = Math.max(0, new Date(end || Date.now()).getTime() - new Date(start).getTime());
@@ -897,11 +890,11 @@ export class JobController {
         const original = button?.innerHTML;
         if (button) { button.disabled = true; button.textContent = label; }
         try { await operation(); }
-        catch (error) { this.app.showError(error?.message || 'The Jobs action failed.'); }
+        catch (error) { this.app.showError(error?.message || 'The Automation action failed.'); }
         finally { if (button?.isConnected) { button.disabled = false; button.innerHTML = original; } }
     }
 
-    // ----- Recipes: export/import a Custom Env + Job as a shareable {name}.recipe.md file -----
+    // ----- Recipes: export/import an Environment + Automation as a shareable recipe file -----
     // The human-readable Markdown renders on GitHub; a machine block (JSON inside an HTML comment)
     // is the source of truth for import. Only the env DEFINITION travels — never its config dir,
     // which holds the exporter's credentials; import rebuilds the dir locally.
@@ -910,9 +903,13 @@ export class JobController {
         const job = this.jobs.find(item => item.id === jobId);
         if (!job) return;
         const environment = this.findEnvironment(job.environmentId);
-        const cli = environment?.cli || getJobCliForLlm(job.llm) || 'claude';
-        const customArgs = environment?.customArgs || '';
-        const prompt = (environment?.customPrompt || job.prompt || '').trim();
+        if (!environment) {
+            this.app.showError('This automation needs a valid Environment before it can be exported.');
+            return;
+        }
+        const cli = environment.cli;
+        const customArgs = environment.customArgs || '';
+        const prompt = (environment.customPrompt || '').trim();
         const model = this.extractArg(customArgs, ['--model', '-m']) || '';
         const effort = this.extractArg(customArgs, ['--effort']) || this.extractConfig(customArgs, 'model_reasoning_effort') || '';
         const triggers = (job.triggers || []).map(({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }) =>
@@ -921,7 +918,7 @@ export class JobController {
         const recipe = {
             recipeVersion: 'V1',
             name: job.name,
-            llm: getLlmName(Number(job.llm)),
+            llm: getLlmName(Number(getJobLlmForCli(cli) ?? job.llm)),
             cli,
             model,
             effort,
@@ -945,7 +942,7 @@ export class JobController {
 
 ${prompt ? prompt.split('\n').map(line => `> ${line}`).join('\n') : '> _(none)_'}
 
-Import this file from the **Jobs** screen in VibeRails to add the worker and this automation.
+Import this file from the **Automation** screen in VibeRails to add the Environment and this automation.
 
 <!-- viberails-recipe
 ${JSON.stringify(recipe, null, 2)}
@@ -1013,15 +1010,15 @@ viberails-recipe -->
             <div class="job-recipe-import">
                 <p>Import <strong>${this.escape(recipe.name)}</strong> (${this.escape(recipe.llm || cli)}) into this repository?</p>
                 <ul class="text-muted small">
-                    <li>Worker: <strong>${this.escape(recipe.name)}</strong>${recipe.model ? ` · ${this.escape(recipe.model)}` : ''}${existingEnv ? ' <em>(already exists — will be reused)</em>' : ''}</li>
+                    <li>Environment: <strong>${this.escape(recipe.name)}</strong>${recipe.model ? ` · ${this.escape(recipe.model)}` : ''}${existingEnv ? ' <em>(already exists — will be reused)</em>' : ''}</li>
                     <li>Runs: ${this.escape(whenText)} · ${recipe.timeoutMinutes ? `${this.escape(String(recipe.timeoutMinutes))} min limit` : 'no time limit'}</li>
                 </ul>
                 <div class="alert alert-warning small" role="alert">
-                    <strong>Review the worker content before importing.</strong>
+                    <strong>Review the Environment content before importing.</strong>
                     Custom arguments can change approval or sandbox permissions, and the initial message becomes instructions to the agent.
                     ${existingEnv
-                        ? 'The matching worker already exists, so the recipe content below will not overwrite its settings.'
-                        : 'The new worker will import these fields exactly as shown.'}
+                        ? 'The matching Environment already exists, so the recipe content below will not overwrite its settings.'
+                        : 'The new Environment will import these fields exactly as shown.'}
                 </div>
                 <div class="job-recipe-review">
                     <div>
@@ -1033,8 +1030,8 @@ viberails-recipe -->
                         <pre class="job-recipe-review-value" data-recipe-prompt>${this.escape(prompt || '(none)')}</pre>
                     </div>
                 </div>
-                <label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-env" ${existingEnv ? '' : 'checked'} ${existingEnv ? 'disabled' : ''}><span class="form-check-label">Add the Environment / Worker</span></label>
-                <label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-job" checked><span class="form-check-label">Add the automation Job (created disabled)</span></label>
+                <label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-env" ${existingEnv ? '' : 'checked'} ${existingEnv ? 'disabled' : ''}><span class="form-check-label">Add the Environment</span></label>
+                <label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-job" checked><span class="form-check-label">Add the automation (created disabled)</span></label>
                 ${hasReviewableContent
                     ? '<label class="form-check mt-2"><input class="form-check-input" type="checkbox" id="recipe-reviewed"><span class="form-check-label">I have read the custom arguments and initial message above</span></label>'
                     : ''}
@@ -1077,7 +1074,7 @@ viberails-recipe -->
             if (addJob) {
                 const environment = (this.environments || []).find(env => (env.name || '').toLowerCase() === String(recipe.name).toLowerCase() && (env.cli || '').toLowerCase() === cli)
                     || existingEnv;
-                if (!environment) throw new Error('The recipe worker could not be created.');
+                if (!environment) throw new Error('The recipe Environment could not be created.');
                 const llm = getJobLlmForCli(cli);
                 await this.app.apiCall('/api/v1/jobs', 'POST', {
                     name: recipe.name,
@@ -1091,7 +1088,7 @@ viberails-recipe -->
                 });
             }
             this.app.closeModal();
-            this.app.showToast('Recipe imported', 'The worker and automation were added.', 'success');
+            this.app.showToast('Recipe imported', 'The Environment and automation were added.', 'success');
             await this.refreshAll({ quiet: true });
         });
     }

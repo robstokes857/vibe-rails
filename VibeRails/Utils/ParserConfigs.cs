@@ -18,8 +18,8 @@ namespace VibeRails.Utils
 
         // Opt-in absolute deadline in minutes for a --job-run process. Absent (null) means the run
         // lives until the CLI exits or the user closes the window — that is the default.
-        // (--job-tick is not parsed here: like the other lightweight hosts it is detected straight
-        // off argv by JobTickProcessHost.IsRequested before the web host is ever built.)
+        // `--job-tick` is not parsed here. It is a retired scheduler argument retained only as an
+        // inert compatibility tombstone and exits before the web host is built.
         public int? MaxRuntimeMinutes { get; set; }
 
         // VS Code extension / parent->child terminal-tab spawn (vb --vs-code-v1 [--parent-pid <pid>])

@@ -2,6 +2,7 @@ import { VcaConsole, copyVcaConsoleText } from './vca-console.js';
 import {
     directoryOf,
     disposeCodeAnalyzerDashboard,
+    renderCodeAnalyzerBrief,
     renderCodeAnalyzerDashboard
 } from './code-analyzer-dashboard.js';
 import {
@@ -146,7 +147,7 @@ export function normalizeHookStatus(status = {}, { isError = false } = {}) {
     let tone = 'neutral';
     let badge = 'Not installed';
     let title = 'Git Guard is off';
-    let fallbackMessage = 'Install all three hooks to run VCA checks and post-commit Jobs whenever git commit runs.';
+    let fallbackMessage = 'Install all three hooks to run VCA checks and post-commit Automations whenever git commit runs.';
 
     if (!inGitRepo) {
         tone = 'warning';
@@ -351,9 +352,9 @@ export class RuleController {
         this.preflightState = createGitPreflightState();
         this.preflightRunner = null;
         this.focusedMode = false;
-        // The dashboard's last-known UI state (tab + selected file/metric) so a re-render
+        // The dashboard's last-known UI state (selected file/metric) so a re-render
         // after an ignore action can drop the user back where they were instead of
-        // bouncing them to the Overview tab with file #1 selected.
+        // bouncing them to file #1.
         this.codeAnalyzerState = null;
         // A Rules overview is remounted each time the user navigates away and back. Keep the
         // most recent MintLint response so remounting can restore it without starting another
@@ -779,12 +780,24 @@ export class RuleController {
     renderCodeAnalyzerSummary(response) {
         const empty = this.query('[data-code-analyzer-empty]');
         const reportContainer = this.query('[data-code-analyzer-report]');
+        const briefHost = this.query('[data-vca-quality-brief]');
         if (!response) {
             disposeCodeAnalyzerDashboard(reportContainer);
-            if (reportContainer) reportContainer.hidden = true;
+            if (reportContainer) {
+                reportContainer.hidden = true;
+                delete reportContainer.dataset.analyzerScore;
+            }
             if (empty) empty.hidden = false;
+            renderCodeAnalyzerBrief(briefHost, null);
             return;
         }
+
+        // The Validation screen carries the compact scan summary; the Code quality
+        // section's nav badge reads the score from the report container's dataset.
+        const summary = buildCodeAnalyzerSummary(response);
+        renderCodeAnalyzerBrief(briefHost, response, undefined, {
+            onOpenDetails: () => this.query('[data-rules-tab="quality"]')?.click()
+        });
 
         if (reportContainer) {
             const fileCount = renderCodeAnalyzerDashboard(reportContainer, response, undefined, {
@@ -797,13 +810,14 @@ export class RuleController {
                     { showLoading: false }),
                 ignoredFiles: this.analyzerIgnores || [],
                 onIgnoreFile: file => this.promptIgnoreAnalyzerFile(file),
-                onIgnoreFiles: paths => this.promptIgnoreAnalyzerFiles(paths),
                 onIgnoreDirectory: payload => this.promptIgnoreAnalyzerDirectory(payload),
                 onRestoreFile: entry => this.restoreAnalyzerFile(entry),
                 // Preserve the user's place across the re-render that follows an ignore.
                 preserveState: this.codeAnalyzerState || null,
                 onStateChange: state => { this.codeAnalyzerState = state; }
             });
+            if (summary.score === null) delete reportContainer.dataset.analyzerScore;
+            else reportContainer.dataset.analyzerScore = summary.scoreLabel;
             // Keep the report container visible whenever there are ignores to restore, even when the
             // report itself is empty — otherwise ignoring every changed file would hide the only
             // restore UI (which the dashboard now renders standalone in that case).
@@ -855,37 +869,10 @@ export class RuleController {
     }
 
     /**
-     * Multi-file ignore flow. Same modal as the single-file case but the intro
-     * shows the count and the confirm hits the /bulk endpoint so N selections
-     * cost one round-trip and produce one toast.
-     */
-    promptIgnoreAnalyzerFiles(paths) {
-        const list = Array.isArray(paths) ? paths.filter(Boolean) : [];
-        if (list.length === 0) return;
-        if (list.length === 1) {
-            // Same UX as the single-file flow; no point showing "1 of 1 selected" copy.
-            this.promptIgnoreAnalyzerFile({ path: list[0] });
-            return;
-        }
-        const safeCount = this.app.escapeHtml(String(list.length));
-        this.showAnalyzerIgnoreModal({
-            title: `Ignore ${list.length} files?`,
-            intro: `<p class="analyzer-ignore-intro">
-                    <strong>${safeCount}</strong> files will be removed from Code quality results
-                    until you restore them from the Ignored files list.
-                </p>`,
-            confirmLabel: `Ignore ${list.length} files`,
-            confirmIcon: 'fa-eye-slash',
-            onConfirm: (reasonKind, reasonText) =>
-                this.ignoreAnalyzerFiles(list, reasonKind, reasonText)
-        });
-    }
-
-    /**
      * Directory ignore flow. Accepts either a single file (ignore its folder) or a
-     * pre-deduplicated list of directory paths (bulk "ignore folders"). The modal
-     * copy makes it clear this is a directory rule that catches everything under
-     * the folder, not just the file the user clicked.
+     * pre-deduplicated list of directory paths. The modal copy makes it clear this
+     * is a directory rule that catches everything under the folder, not just the
+     * file the user clicked.
      */
     promptIgnoreAnalyzerDirectory(payload) {
         const directoryPaths = Array.isArray(payload?.directoryPaths) && payload.directoryPaths.length
@@ -965,22 +952,6 @@ export class RuleController {
             await this.runCodeAnalyzer({ unpushed: this.lastAnalyzerUnpushed === true });
         } catch (error) {
             this.app.showError(`Could not ignore ${path}: ${error.message}`);
-        }
-    }
-
-    /** Bulk file-ignore: one POST to /ignores/bulk with matchKind=file. */
-    async ignoreAnalyzerFiles(paths, reasonKind, reasonText) {
-        if (!Array.isArray(paths) || paths.length === 0) return;
-        try {
-            await this.app.apiCall('/api/v1/code-analyzer/ignores/bulk', 'POST',
-                { paths, matchKind: 'file', reasonKind, reasonText }, { showLoading: false });
-            const label = paths.length === 1 ? 'file' : 'files';
-            this.app.showToast(`${paths.length} ${label} ignored`,
-                `${paths.length} ${label} ${paths.length === 1 ? 'is' : 'are'} now excluded from Code quality scans.`,
-                'success');
-            await this.runCodeAnalyzer({ unpushed: this.lastAnalyzerUnpushed === true });
-        } catch (error) {
-            this.app.showError(`Could not ignore ${paths.length} file${paths.length === 1 ? '' : 's'}: ${error.message}`);
         }
     }
 

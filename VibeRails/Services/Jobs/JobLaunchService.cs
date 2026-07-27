@@ -27,8 +27,7 @@ public interface IJobLaunchService
 /// </summary>
 public sealed class JobLaunchService(
     IJobStore store,
-    IRepository repository,
-    ILaunchLLMService launchService) : IJobLaunchService
+    IEnvironmentLaunchService environmentLaunchService) : IJobLaunchService
 {
     /// <summary>
     /// Ceiling on simultaneously open job terminals across the whole machine. The per-job overlap
@@ -62,8 +61,8 @@ public sealed class JobLaunchService(
                 break;
             }
 
-            // Claim the right to spawn before doing anything observable, so a concurrent tick or
-            // the dashboard scheduler can't open a second window for the same run.
+            // Claim before doing anything observable. The shared scheduler lease prevents normal
+            // contention; this row claim is the handoff/crash safety net.
             if (!await store.TryMarkLaunchedAsync(run.Id, cancellationToken))
                 continue;
 
@@ -76,30 +75,9 @@ public sealed class JobLaunchService(
 
     private async Task<bool> LaunchOneAsync(JobRunRecord run, CancellationToken cancellationToken)
     {
-        var environment = await ResolveEnvironmentAsync(run, cancellationToken);
-        if (environment is null)
-        {
-            var label = string.IsNullOrWhiteSpace(run.EnvironmentName) ? string.Empty : $" '{run.EnvironmentName}'";
-            await FailAsync(run, $"This Job's Environment / Worker{label} no longer exists.");
-            return false;
-        }
-
         if (!Directory.Exists(run.ProjectPath))
         {
             await FailAsync(run, $"The project directory no longer exists: {run.ProjectPath}");
-            return false;
-        }
-
-        string[] cliArgs;
-        try
-        {
-            cliArgs = BuildCliArgs(environment);
-        }
-        catch (Exception ex)
-        {
-            // A malformed CustomArgs string is the user's to fix; report it against the run rather
-            // than letting it take down the tick for every other job.
-            await FailAsync(run, $"The worker's custom arguments could not be parsed: {ex.Message}");
             return false;
         }
 
@@ -108,21 +86,22 @@ public sealed class JobLaunchService(
         LaunchResultSnapshot result;
         try
         {
-            // keepTerminalOpen: false — the window exists to show this one run. The CLI now runs as
-            // the PTY's own process, so it exits when the CLI does; leaving a shell behind would
-            // strand one idle terminal window per run for the user to close by hand.
-            var launch = launchService.LaunchInTerminal(
-                environment.LLM,
-                environment.CustomName,
+            // This is the exact application pipeline behind POST /api/v1/cli/launch/{cli}. The
+            // empty Args array is the same request the Environments screen sends; only vb's private
+            // run-bookkeeping flags differ.
+            var launch = await environmentLaunchService.LaunchAsync(
+                run.Llm,
+                new LaunchCliRequest(run.ProjectPath, run.EnvironmentName, []),
                 run.ProjectPath,
-                cliArgs,
                 vbArgs,
-                keepTerminalOpen: false);
+                keepTerminalOpen: false,
+                environmentId: run.EnvironmentId,
+                cancellationToken: cancellationToken);
             result = new LaunchResultSnapshot(launch.Success, launch.Message);
         }
         catch (Exception ex)
         {
-            await FailAsync(run, $"Could not open a terminal for this Job: {ex.Message}");
+            await FailAsync(run, $"Could not open a terminal for this Automation: {ex.Message}");
             return false;
         }
 
@@ -134,25 +113,8 @@ public sealed class JobLaunchService(
 
         Log.Information(
             "[Jobs] Launched run {RunId} for job '{JobName}' using worker '{Worker}' in {ProjectPath}",
-            run.Id, run.JobName, environment.CustomName, run.ProjectPath);
+            run.Id, run.JobName, run.EnvironmentName, run.ProjectPath);
         return true;
-    }
-
-    /// <summary>
-    /// The env's saved arguments, verbatim, plus its initial message using the same per-CLI
-    /// interactive convention every other launch path uses
-    /// (<see cref="LlmPromptArgvBuilder.AppendInitialPrompt"/>). Nothing is added, removed, or
-    /// reordered — this is the whole point of the Jobs redesign.
-    /// </summary>
-    public static string[] BuildCliArgs(LLM_Environment environment)
-    {
-        var args = new List<string>();
-        if (!string.IsNullOrWhiteSpace(environment.CustomArgs))
-        {
-            args.AddRange(ShellArgSanitizer.ParseAndValidate(environment.CustomArgs));
-        }
-        LlmPromptArgvBuilder.AppendInitialPrompt(args, environment.LLM, environment.CustomPrompt);
-        return args.ToArray();
     }
 
     /// <summary>
@@ -170,26 +132,6 @@ public sealed class JobLaunchService(
             args.Add(run.TimeoutMinutes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
         return args.ToArray();
-    }
-
-    /// <summary>
-    /// Resolves by stable EnvironmentId first: EnvironmentName on the run is only a snapshot taken
-    /// at enqueue time, so renaming a worker between enqueue and launch must not make the run fail
-    /// as nonexistent. Runs queued before the id was recorded fall back to name + LLM.
-    /// </summary>
-    private async Task<LLM_Environment?> ResolveEnvironmentAsync(JobRunRecord run, CancellationToken cancellationToken)
-    {
-        if (run.EnvironmentId is int environmentId)
-        {
-            var byId = await repository.GetEnvironmentByIdAsync(environmentId, cancellationToken);
-            if (byId is not null)
-                return byId;
-        }
-
-        if (string.IsNullOrWhiteSpace(run.EnvironmentName))
-            return null;
-
-        return await repository.GetEnvironmentByNameAndLlmAsync(run.EnvironmentName, run.Llm, cancellationToken);
     }
 
     private async Task FailAsync(JobRunRecord run, string message)

@@ -152,7 +152,10 @@ public sealed class MintLintSourceInputTests
             profile: profile);
 
         Assert.Equal(["alpha.cs", "zeta.cs"], result.Files.Select(file => file.File));
-        Assert.All(result.Files, file => Assert.Equal("AtRisk", file.Overall.Rating));
+        // The tightened profile saturates Complexity, but only that one category — the
+        // breadth-gated overall lands on the depth floor (0.3 × 100 = 30, "Okay").
+        Assert.All(result.Files, file => Assert.Equal("Okay", file.Overall.Rating));
+        Assert.All(result.Files, file => Assert.Equal(30.0, file.Overall.Score));
     }
 
     [Fact]

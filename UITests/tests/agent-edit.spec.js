@@ -128,7 +128,7 @@ test('can navigate to Agent Files', async ({ page }) => {
   await rulesNav.click();
 
   const localNav = page.getByRole('tablist', { name: 'Rules sections' });
-  await expect(localNav.getByRole('tab')).toHaveCount(4);
+  await expect(localNav.getByRole('tab')).toHaveCount(3);
   await expect(localNav.locator('xpath=..')).toHaveClass(/rules-topbar/);
 
   const headerCenterlines = await page.locator('.rules-topbar').evaluate((header) => {
@@ -188,7 +188,7 @@ test('can navigate to Agent Files', async ({ page }) => {
   await expect(page.locator('#vb-terminal-panel')).toHaveCount(1);
 });
 
-test('the rules workspace docks a compact console at the bottom', async ({ page }) => {
+test('the rules workspace docks a substantial console at the bottom and lets the page scroll', async ({ page }) => {
   await page.goto('/');
   await page.locator('.app-subnav-link[data-action="navigate-home"]:visible').click();
 
@@ -197,22 +197,24 @@ test('the rules workspace docks a compact console at the bottom', async ({ page 
   const layout = await page.locator('[data-rules-panes]').evaluate((panes) => {
     const [sections, terminal] = panes.querySelectorAll(':scope > .rules-pane');
     const panesRect = panes.getBoundingClientRect();
-    const sectionsRect = sections.getBoundingClientRect();
     const terminalRect = terminal.getBoundingClientRect();
     return {
-      rulesHeight: sectionsRect.height,
       terminalHeight: terminalRect.height,
       terminalBottom: terminalRect.bottom,
-      workspaceBottom: panesRect.bottom
+      workspaceBottom: panesRect.bottom,
+      bodyOverflowY: getComputedStyle(document.body).overflowY
     };
   });
-  expect(layout.rulesHeight).toBeGreaterThan(layout.terminalHeight);
-  expect(layout.terminalHeight).toBeGreaterThanOrEqual(219);
-  expect(layout.terminalHeight).toBeLessThanOrEqual(321);
+  // The console is a real working surface now, not the old ~30dvh sliver.
+  expect(layout.terminalHeight).toBeGreaterThanOrEqual(339);
+  expect(layout.terminalHeight).toBeLessThanOrEqual(621);
+  // It still rides at the bottom of the workspace.
   expect(Math.abs(layout.terminalBottom - layout.workspaceBottom)).toBeLessThanOrEqual(1);
+  // The page is no longer viewport-locked — long sections can scroll.
+  expect(layout.bodyOverflowY).not.toBe('hidden');
 });
 
-test('organizes code quality output into accessible tabs', async ({ page }) => {
+test('renders code quality as one workspace with a compact brief on the Validation screen', async ({ page }) => {
   await page.route('**/api/v1/code-analyzer**', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CODE_QUALITY_RESPONSE) });
   });
@@ -232,32 +234,40 @@ test('organizes code quality output into accessible tabs', async ({ page }) => {
   });
   await page.goto('/');
   await page.locator('.app-subnav-link[data-action="navigate-home"]:visible').click();
-  await page.getByRole('tablist', { name: 'Rules sections' })
-    .getByRole('tab', { name: /Code quality/ }).click();
+
+  // The scan summary lands on the default Validation section as a compact brief.
+  const brief = page.locator('[data-vca-quality-brief]');
+  await expect(brief).toBeVisible();
+  await expect(brief.getByRole('heading', { name: 'Change required' })).toBeVisible();
+  await expect(brief.locator('.code-analyzer-brief-ring')).toBeVisible();
+
+  const localNav = page.getByRole('tablist', { name: 'Rules sections' });
+  await localNav.getByRole('tab', { name: /Code quality/ }).click();
 
   const card = page.locator('[data-code-analyzer-console]');
-  const tabs = card.getByRole('tablist', { name: 'Code quality report sections' });
-  const overviewTab = tabs.getByRole('tab', { name: 'Overview' });
-  const findingsTab = tabs.getByRole('tab', { name: /Files & metrics/ });
-
-  await expect(tabs).toBeVisible();
-  await expect(tabs.getByRole('tab')).toHaveCount(2);
-  await expect(overviewTab).toHaveAttribute('aria-selected', 'true');
-  await expect(card.getByRole('heading', { name: 'Change required' })).toBeVisible();
-  await expect(card.getByRole('heading', { name: 'Changed files' })).not.toBeVisible();
-
-  await findingsTab.click();
-  await expect(findingsTab).toHaveAttribute('aria-selected', 'true');
+  // No internal tabs any more — the files workspace is the only surface.
+  await expect(card.getByRole('tablist', { name: 'Code quality report sections' })).toHaveCount(0);
   await expect(card.getByRole('heading', { name: 'Changed files' })).toBeVisible();
   await expect(card.getByRole('heading', { name: 'Health metrics' })).toBeVisible();
-  // The code rides in the third pane of the same tab, headed by the selected metric.
+  // Changed files are grouped under full directory headers in the rail.
+  await expect(card.locator('.code-analyzer-dir-head').first()).toContainText('VibeRails/Services');
+  // The code rides in the third pane, headed by the selected metric.
   await expect(card.getByRole('heading', { name: 'Cyclomatic complexity', exact: true })).toBeVisible();
   await expect(card.locator('.code-analyzer-source-column .code-analyzer-editor-readonly')).toBeVisible();
-  await expect(card.getByRole('heading', { name: 'Change required' })).not.toBeVisible();
 
-  await findingsTab.press('ArrowLeft');
-  await expect(overviewTab).toHaveAttribute('aria-selected', 'true');
-  await expect(card.getByRole('heading', { name: 'Change required' })).toBeVisible();
+  // Directory groups collapse and reopen on header click.
+  const serviceRow = card.locator('.code-analyzer-file-item', { hasText: 'ExampleService.cs' });
+  await expect(serviceRow).toHaveCount(1);
+  await card.locator('.code-analyzer-dir-head').first().click();
+  await expect(serviceRow).toHaveCount(0);
+  await card.locator('.code-analyzer-dir-head').first().click();
+  await expect(serviceRow).toHaveCount(1);
+
+  // The brief deep-links back into the full report.
+  await localNav.getByRole('tab', { name: /Validation/ }).click();
+  await brief.getByRole('button', { name: /Open Code quality/ }).click();
+  await expect(page.getByRole('heading', { name: 'Code quality' })).toBeVisible();
+  await expect(card.getByRole('heading', { name: 'Changed files' })).toBeVisible();
 });
 
 test('project naming is available from Settings', async ({ page }) => {

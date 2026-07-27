@@ -27,6 +27,23 @@ public sealed record ScoringProfile
     /// <summary>Relative weight of each category when computing the overall score.</summary>
     public IReadOnlyDictionary<string, double> CategoryWeights { get; init; } = DefaultCategoryWeights();
 
+    /// <summary>
+    /// How many independently concerning categories it takes before a file's overall score
+    /// reflects them: the overall is the <see cref="BreadthRank"/>-th worst weight-adjusted
+    /// category. With the default of 4, a file only rates AtRisk when at least four separate
+    /// smell dimensions are severe at the same time; one or two hot categories no longer
+    /// condemn the whole file. 1 restores the old "worst category wins" behavior.
+    /// </summary>
+    public int BreadthRank { get; init; } = 4;
+
+    /// <summary>
+    /// Fraction of the single worst weight-adjusted category kept as a floor under the
+    /// breadth-gated overall, so one catastrophic dimension is dampened rather than erased.
+    /// The default 0.3 pins a fully saturated lone category at 30 — the bottom of the Okay
+    /// band — instead of letting it read as Clean.
+    /// </summary>
+    public double DepthFloor { get; init; } = 0.3;
+
     private static Dictionary<string, MetricThreshold> DefaultThresholds()
     {
         return new Dictionary<string, MetricThreshold>(StringComparer.Ordinal)

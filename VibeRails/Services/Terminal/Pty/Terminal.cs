@@ -191,6 +191,7 @@ public sealed class Terminal : IAsyncDisposable
         TerminalEmulator.TerminalCell[,] snap;
         int rows, cols, cursorRow, cursorCol, cursorShape;
         bool cursorVisible, isAlternateScreen, bracketedPaste;
+        int[] inputReportingModes;
         lock (_emulatorLock)
         {
             scrollback = _emulator.GetScrollback();
@@ -203,10 +204,12 @@ public sealed class Terminal : IAsyncDisposable
             cursorShape = _emulator.CursorShape;
             isAlternateScreen = _emulator.IsAlternateScreen;
             bracketedPaste = _emulator.BracketedPasteActive;
+            inputReportingModes = _emulator.GetInputReportingModes();
         }
         return TerminalGridSerializer.Serialize(
             scrollback, snap, rows, cols,
-            cursorRow, cursorCol, cursorVisible, cursorShape, isAlternateScreen, bracketedPaste);
+            cursorRow, cursorCol, cursorVisible, cursorShape, isAlternateScreen, bracketedPaste,
+            inputReportingModes);
     }
 
     private static void DeliverSnapshot(ITerminalConsumer consumer, byte[] snapshot)

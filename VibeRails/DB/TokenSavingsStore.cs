@@ -42,8 +42,9 @@ public interface ITokenSavingsStore
     void Record(string provider, int bytesBefore, int bytesAfter);
 
     /// <summary>
-    /// Current running totals (persisted history + this session's records), broken out into
-    /// all-time, current-UTC-month, and this-process windows.
+    /// Current in-memory totals, broken out into all-time, current-UTC-month, and this-process
+    /// windows. Persisted history is loaded in the background; an early read may temporarily
+    /// contain only this process's records, but this method never waits on SQLite.
     /// </summary>
     TokenSavingsTotals GetTotals();
 }
@@ -54,9 +55,13 @@ public interface ITokenSavingsStore
 /// plus <c>busy_timeout</c> (which <see cref="Repository"/> famously lacks) because this writer
 /// races background embedding jobs for the same database file.
 /// </summary>
-public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsStore
+public sealed class TokenSavingsStore : ITokenSavingsStore
 {
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly Lock _historyLoadScheduleLock = new();
+    private readonly string _connectionString;
+    private Task _historyLoadTask = Task.CompletedTask;
+    private long _nextHistoryLoadAttemptUtcTicks;
     private long _bytesBefore;
     private long _bytesAfter;
     private long _sessionBytesBefore;
@@ -76,6 +81,21 @@ public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsSt
     /// <summary>Testable clock; month-rollover behavior is unreachable under the real one.</summary>
     internal Func<DateTime> UtcNow { get; set; } = () => DateTime.UtcNow;
 
+    /// <summary>Backoff after an initial history-load failure.</summary>
+    internal TimeSpan HistoryLoadRetryDelay { get; set; } = TimeSpan.FromSeconds(30);
+
+    internal bool HistoryLoaded => _loaded;
+
+    public TokenSavingsStore(string connectionString)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        _connectionString = connectionString;
+
+        // Start warming the persisted totals as soon as DI creates the singleton. The first API
+        // read or proxy activity ping must never become the thread that pays this SQLite cost.
+        EnsureHistoryLoadScheduled();
+    }
+
     public void Record(string provider, int bytesBefore, int bytesAfter)
     {
         Interlocked.Add(ref _bytesBefore, bytesBefore);
@@ -88,8 +108,10 @@ public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsSt
 
     public TokenSavingsTotals GetTotals()
     {
-        if (!_loaded)
-            _ = PersistAsync(null, 0, 0); // kick the lazy history load; this call returns what's in memory
+        // A failed warm-up is retried after a backoff, but never by blocking this caller. Returning
+        // a temporarily incomplete display tally is preferable to delaying an SSE response or
+        // tying this API to the caller's synchronization context.
+        EnsureHistoryLoadScheduled();
 
         var (monthBefore, monthAfter) = ReadMonth(CurrentMonthKey());
         return new TokenSavingsTotals(
@@ -99,6 +121,24 @@ public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsSt
             Interlocked.Read(ref _sessionBytesAfter),
             monthBefore,
             monthAfter);
+    }
+
+    private void EnsureHistoryLoadScheduled()
+    {
+        if (_loaded || UtcNow().Ticks < Interlocked.Read(ref _nextHistoryLoadAttemptUtcTicks))
+            return;
+
+        lock (_historyLoadScheduleLock)
+        {
+            if (_loaded || !_historyLoadTask.IsCompleted ||
+                UtcNow().Ticks < Interlocked.Read(ref _nextHistoryLoadAttemptUtcTicks))
+            {
+                return;
+            }
+
+            _historyLoadTask = PersistAsync(null, 0, 0);
+            LastPersist = _historyLoadTask;
+        }
     }
 
     private string CurrentMonthKey() => UtcNow().ToString("yyyy-MM");
@@ -148,7 +188,13 @@ public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsSt
         await _writeLock.WaitAsync();
         try
         {
-            using var connection = new SqliteConnection(connectionString);
+            // When the initial history load is backing off, drop this telemetry write instead of
+            // persisting it first. Otherwise a later history query would read the row while the
+            // same request is already present in the in-memory session counters and double-count it.
+            if (!_loaded && UtcNow().Ticks < Interlocked.Read(ref _nextHistoryLoadAttemptUtcTicks))
+                return;
+
+            using var connection = new SqliteConnection(_connectionString);
             connection.Open();
             using (var pragma = connection.CreateCommand())
             {
@@ -165,14 +211,16 @@ public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsSt
 
             if (!_loaded)
             {
+                long historyBytesBefore = 0;
+                long historyBytesAfter = 0;
                 using (var totals = connection.CreateCommand())
                 {
                     totals.CommandText = SqlStrings.SelectTokenSavingsTotals;
                     using var reader = totals.ExecuteReader();
                     if (reader.Read())
                     {
-                        Interlocked.Add(ref _bytesBefore, reader.GetInt64(0));
-                        Interlocked.Add(ref _bytesAfter, reader.GetInt64(1));
+                        historyBytesBefore = reader.GetInt64(0);
+                        historyBytesAfter = reader.GetInt64(1);
                     }
                 }
 
@@ -180,16 +228,27 @@ public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsSt
                 // Record() time and are still queued behind this semaphore, so the history sum
                 // cannot double-count them (same ordering argument as the all-time load above).
                 var monthKey = CurrentMonthKey();
+                long historyMonthBytesBefore = 0;
+                long historyMonthBytesAfter = 0;
                 using (var month = connection.CreateCommand())
                 {
                     month.CommandText = SqlStrings.SelectTokenSavingsMonthTotals;
                     month.Parameters.AddWithValue("$month", monthKey);
                     using var reader = month.ExecuteReader();
                     if (reader.Read())
-                        AddToMonth(monthKey, reader.GetInt64(0), reader.GetInt64(1));
+                    {
+                        historyMonthBytesBefore = reader.GetInt64(0);
+                        historyMonthBytesAfter = reader.GetInt64(1);
+                    }
                 }
 
+                // Publish the staged history only after every query succeeded. A partial read must
+                // not mutate the totals, because the retry would otherwise add the first query twice.
+                Interlocked.Add(ref _bytesBefore, historyBytesBefore);
+                Interlocked.Add(ref _bytesAfter, historyBytesAfter);
+                AddToMonth(monthKey, historyMonthBytesBefore, historyMonthBytesAfter);
                 _loaded = true;
+                Interlocked.Exchange(ref _nextHistoryLoadAttemptUtcTicks, 0);
             }
 
             if (provider is null)
@@ -211,7 +270,19 @@ public sealed class TokenSavingsStore(string connectionString) : ITokenSavingsSt
         {
             // Deliberate swallow (user decision): a lost tally increment is acceptable, a relay
             // slowed or failed by telemetry is not. This catch gates nothing but the tally itself.
-            Log.Debug(ex, "Token-savings tally write failed; increment dropped.");
+            if (!_loaded)
+            {
+                var retryAtUtc = UtcNow().Add(HistoryLoadRetryDelay);
+                Interlocked.Exchange(ref _nextHistoryLoadAttemptUtcTicks, retryAtUtc.Ticks);
+                Log.Warning(
+                    ex,
+                    "Token-savings history load failed; serving in-memory totals and retrying after {RetryAtUtc}.",
+                    retryAtUtc);
+            }
+            else
+            {
+                Log.Debug(ex, "Token-savings tally write failed; increment dropped.");
+            }
         }
         finally
         {

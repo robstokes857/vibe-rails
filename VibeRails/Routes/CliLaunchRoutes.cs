@@ -25,9 +25,8 @@ public static class CliLaunchRoutes
         }).WithName("GetLaunchEnvironment");
 
         app.MapPost("/api/v1/cli/launch/{cli}", async (
-            ILaunchLLMService launchService,
+            IEnvironmentLaunchService environmentLaunchService,
             ILlmParser llmParser,
-            IRepository repository,
             string cli,
             LaunchCliRequest? request,
             CancellationToken cancellationToken) =>
@@ -46,30 +45,11 @@ public static class CliLaunchRoutes
                 return Results.BadRequest(new ErrorResponse("The plain shell terminal is not a launchable agent CLI."));
             }
 
-            var workingDirectory = request?.WorkingDirectory ?? launchDirectory;
-            var args = request?.Args?.ToList() ?? new List<string>();
-            var envName = request?.EnvironmentName;
-
-            // If using a custom environment, look up its custom args and update last used
-            if (!string.IsNullOrEmpty(envName))
-            {
-                var environment = await repository.GetEnvironmentByNameAndLlmAsync(envName, llm, cancellationToken);
-
-                if (environment != null)
-                {
-                    if (!string.IsNullOrEmpty(environment.CustomArgs))
-                    {
-                        args.InsertRange(0, ShellArgSanitizer.ParseAndValidate(environment.CustomArgs));
-                    }
-                    LlmPromptArgvBuilder.AppendInitialPrompt(args, llm, environment.CustomPrompt);
-
-                    // Update last used timestamp
-                    environment.LastUsedUTC = DateTime.UtcNow;
-                    await repository.UpdateEnvironmentAsync(environment, cancellationToken);
-                }
-            }
-
-            var result = launchService.LaunchInTerminal(llm, envName, workingDirectory, args.ToArray());
+            var result = await environmentLaunchService.LaunchAsync(
+                llm,
+                request ?? new LaunchCliRequest(),
+                launchDirectory,
+                cancellationToken: cancellationToken);
 
             return Results.Ok(new LaunchCliResponse(
                 Success: result.Success,

@@ -7,10 +7,15 @@ namespace Tests.MintLintTests;
 /// End-to-end grading tests for the MintLint analyzer: feed it real C#, TypeScript,
 /// JavaScript, and Python files and verify both the raw metrics and the interpreted
 /// scores. Each language has a deliberately clean fixture (expected rating "Clean")
-/// and a deliberately awful one (expected rating "AtRisk"). The messy fixtures share
-/// one shape so the expected numbers are hand-checkable: a function with 16 `if`,
-/// 5 `&amp;&amp;`, and 5 `||` (cyclomatic 27), an 8-parameter signature, and a 6-deep
-/// nested block.
+/// and a deliberately awful one. The messy fixtures share one shape so the expected
+/// numbers are hand-checkable: a function with 16 `if`, 5 `&amp;&amp;`, and 5 `||`
+/// (cyclomatic 27), an 8-parameter signature, and a 6-deep nested block.
+///
+/// Overall file ratings are breadth-gated (see MintLint/MintLintAlgo.md): the overall
+/// score is the 4th-worst weight-adjusted category, floored at 0.3 × the single worst.
+/// The messy fixtures saturate Complexity but only carry one or two supporting smells,
+/// so alone they grade "Okay" — their per-category scores still light up, and it takes
+/// four independently hot categories to reach "AtRisk".
 /// </summary>
 public sealed class MintLintGradingTests : IDisposable
 {
@@ -305,7 +310,7 @@ public sealed class MintLintGradingTests : IDisposable
     }
 
     [Fact]
-    public void CSharpMessyFile_GradesAtRisk()
+    public void CSharpMessyFile_SaturatesComplexity_ButGradesOkayOverall()
     {
         string path = WriteFixture("messy.cs", MessyCSharp);
 
@@ -324,7 +329,9 @@ public sealed class MintLintGradingTests : IDisposable
         Assert.Equal(2, processor.MethodCount);
 
         FileScore score = MintLintScorer.Score(metrics);
-        AssertGradedAtRisk(score);
+        // Weighted categories, worst first: Complexity 100, Size 70, Testability 57.1,
+        // Maintainability 61.4 × 0.8 = 49.1, Coupling 40 — the 4th-worst carries.
+        AssertGraded(score, 49.1, "Okay");
         Assert.Equal(27.0, score.Metrics["cyclomatic_complexity"]);
         Assert.Equal(8.0, score.Metrics["parameter_count"]);
         Assert.Equal(100.0, CategoryScoreOf(score, "Complexity"));
@@ -390,7 +397,7 @@ public sealed class MintLintGradingTests : IDisposable
     }
 
     [Fact]
-    public void TypeScriptMessyFile_GradesAtRisk()
+    public void TypeScriptMessyFile_SaturatesComplexity_ButGradesOkayOverall()
     {
         string path = WriteFixture("messy.ts", MessyTypeScript);
 
@@ -412,7 +419,9 @@ public sealed class MintLintGradingTests : IDisposable
         Assert.Equal(2, keeper.Lcom4);      // evaluate touches history, upload touches nothing
 
         FileScore score = MintLintScorer.Score(metrics);
-        AssertGradedAtRisk(score);
+        // Worst first: Complexity 100, Size 70, Testability 57.1, Cohesion 50 — the
+        // 4th-worst weighted category (Cohesion, LCOM4 2 → 50 × 1.0) carries.
+        AssertGraded(score, 50.0, "Okay");
         Assert.Equal(27.0, score.Metrics["cyclomatic_complexity"]);
     }
 
@@ -435,7 +444,7 @@ public sealed class MintLintGradingTests : IDisposable
     }
 
     [Fact]
-    public void JavaScriptMessyFile_GradesAtRisk()
+    public void JavaScriptMessyFile_SaturatesComplexity_ButGradesOkayOverall()
     {
         string path = WriteFixture("messy.js", MessyJavaScript);
 
@@ -451,7 +460,9 @@ public sealed class MintLintGradingTests : IDisposable
         Assert.Equal(4, metrics.AmbientDependencies);   // console, Date, fetch, setTimeout
         Assert.Equal(1, metrics.FanOut);                // ./limits
 
-        AssertGradedAtRisk(MintLintScorer.Score(metrics));
+        // Worst first: Complexity 100, Size 70, Testability 57.1, Maintainability
+        // 60.0 × 0.8 = 48.0 — the 4th-worst weighted category carries.
+        AssertGraded(MintLintScorer.Score(metrics), 48.0, "Okay");
     }
 
     // --------------------------------------------------------------- Python
@@ -475,7 +486,7 @@ public sealed class MintLintGradingTests : IDisposable
     }
 
     [Fact]
-    public void PythonMessyFile_GradesAtRisk()
+    public void PythonMessyFile_SaturatesComplexity_ButGradesOkayOverall()
     {
         string path = WriteFixture("messy.py", MessyPython);
 
@@ -489,7 +500,9 @@ public sealed class MintLintGradingTests : IDisposable
         Assert.Equal(3, metrics.AmbientDependencies); // print, os, open
         Assert.Equal(1, metrics.FanOut);              // os
 
-        AssertGradedAtRisk(MintLintScorer.Score(metrics));
+        // Worst first: Complexity 100, Size 70, Testability 50, Maintainability
+        // 54.4 × 0.8 = 43.5 — the 4th-worst weighted category carries.
+        AssertGraded(MintLintScorer.Score(metrics), 43.5, "Okay");
     }
 
     // ------------------------------------------------- cross-file behavior
@@ -520,7 +533,11 @@ public sealed class MintLintGradingTests : IDisposable
 
         string[] worstFour = [.. result.Files.Take(4).Select(f => f.File).OrderBy(f => f, StringComparer.Ordinal)];
         Assert.Equal(new[] { "messy.cs", "messy.js", "messy.py", "messy.ts" }, worstFour);
-        Assert.All(result.Files.Take(4), f => Assert.Equal("AtRisk", f.Overall.Rating));
+        // In a joint scan the near-identical messy files also saturate Duplication, which
+        // pushes their 4th-worst weighted category up to Testability 57.1 → NeedsWork.
+        // messy.py duplicates nothing (different token shape) and stays Okay at 43.5.
+        Assert.All(result.Files.Take(3), f => Assert.Equal("NeedsWork", f.Overall.Rating));
+        Assert.Equal("Okay", result.Files[3].Overall.Rating);
         Assert.All(result.Files.Skip(4), f => Assert.Equal("Clean", f.Overall.Rating));
 
         double expectedMean = Math.Round(result.Files.Sum(f => f.Overall.Score) / result.Files.Count, 1);
@@ -630,17 +647,49 @@ public sealed class MintLintGradingTests : IDisposable
 
     // ------------------------------------------------------- scorer behavior
 
+    // A lone hot category no longer sets the file's grade: with everything else clean the
+    // 4th-worst weighted category is ~0, so the overall is the depth floor — 0.3 × the
+    // Complexity score. Even a fully saturated single category tops out at 30 (Okay).
     [Theory]
-    [InlineData(4, 20.0, "Clean")]
-    [InlineData(10, 50.0, "Okay")]
-    [InlineData(13, 65.0, "NeedsWork")]
-    [InlineData(20, 100.0, "AtRisk")]
-    public void Scorer_MapsCyclomaticComplexityToRatingBands(int cyclomatic, double expectedScore, string expectedRating)
+    [InlineData(4, 6.0, "Clean")]    // cyclomatic 4  → Complexity 20  → floor 6
+    [InlineData(10, 15.0, "Clean")]  // cyclomatic 10 → Complexity 50  → floor 15
+    [InlineData(13, 19.5, "Clean")]  // cyclomatic 13 → Complexity 65  → floor 19.5
+    [InlineData(20, 30.0, "Okay")]   // cyclomatic 20 → Complexity 100 → floor 30
+    public void Scorer_DampensALoneHotCategory_ToTheDepthFloor(int cyclomatic, double expectedScore, string expectedRating)
     {
         FileScore score = MintLintScorer.Score(MetricsWithCyclomatic(cyclomatic));
 
         Assert.Equal(expectedScore, score.Overall.Score);
         Assert.Equal(expectedRating, score.Overall.Rating);
+    }
+
+    [Fact]
+    public void Scorer_RequiresFourHotCategories_ForAtRisk()
+    {
+        // Four saturated dimensions — Complexity (cyclomatic 20 → 100 × 1.0), Cohesion
+        // (LCOM4 4 → 100 × 1.0), Testability (8 hard-coded deps → 100 × 1.0), and Coupling
+        // (same deps → 100 × 0.8) — put the 4th-worst weighted category at 80: AtRisk.
+        FileScore four = MintLintScorer.Score(MetricsWithHotCategories(hardCoded: 8, ambient: 0));
+        Assert.Equal(80.0, four.Overall.Score);
+        Assert.Equal("AtRisk", four.Overall.Rating);
+
+        // Only three saturated dimensions — Complexity, Cohesion, Testability (10 ambient
+        // deps → 100) with nothing hard-coded, so Coupling stays 0. The 4th-worst weighted
+        // category is negligible and the depth floor carries: 30 → Okay.
+        FileScore three = MintLintScorer.Score(MetricsWithHotCategories(hardCoded: 0, ambient: 10));
+        Assert.Equal(30.0, three.Overall.Score);
+        Assert.Equal("Okay", three.Overall.Rating);
+    }
+
+    [Fact]
+    public void Scorer_BreadthRankOne_RestoresWorstCategoryWins()
+    {
+        ScoringProfile worstWins = ScoringProfile.Default with { BreadthRank = 1 };
+
+        FileScore score = MintLintScorer.Score(MetricsWithCyclomatic(20), worstWins);
+
+        Assert.Equal(100.0, score.Overall.Score);
+        Assert.Equal("AtRisk", score.Overall.Rating);
     }
 
     [Fact]
@@ -695,10 +744,10 @@ public sealed class MintLintGradingTests : IDisposable
         Assert.True(score.Overall.Score < 30, $"Expected a clean score (< 30) but got {score.Overall.Score}.");
     }
 
-    private static void AssertGradedAtRisk(FileScore score)
+    private static void AssertGraded(FileScore score, double expectedScore, string expectedRating)
     {
-        Assert.Equal("AtRisk", score.Overall.Rating);
-        Assert.Equal(100.0, score.Overall.Score);
+        Assert.Equal(expectedRating, score.Overall.Rating);
+        Assert.Equal(expectedScore, score.Overall.Score);
     }
 
     private static FileMetrics MetricsWithCyclomatic(int cyclomatic)
@@ -720,5 +769,31 @@ public sealed class MintLintGradingTests : IDisposable
             MaxParameterCount: 0,
             HardCodedDependencies: 0,
             AmbientDependencies: 0);
+    }
+
+    /// <summary>
+    /// A file whose Complexity (cyclomatic 20) and Cohesion (LCOM4 4 on a class with a
+    /// field) both saturate, with Coupling/Testability controlled by the two dependency
+    /// counts — everything else stays negligible so the roll-up inputs are hand-checkable.
+    /// </summary>
+    private static FileMetrics MetricsWithHotCategories(int hardCoded, int ambient)
+    {
+        return new FileMetrics(
+            File: "sample.cs",
+            Loc: 10,
+            Functions: [new FunctionMetrics("f", 1, 5, 20, 0, 1, 0.0, 0.0)],
+            Classes: [new ClassMetrics("C", 1, MethodCount: 1, FieldCount: 1, Lcom4: 4, Wmc: 20)],
+            FanOut: 0,
+            DuplicationRatio: 0.0,
+            CyclomaticSum: 20,
+            CognitiveSum: 0,
+            NPathMax: 1,
+            HalsteadVolume: 0.0,
+            MaintainabilityIndex: 100.0,
+            ComplexityLevel: "error",
+            MaxNestingDepth: 0,
+            MaxParameterCount: 0,
+            HardCodedDependencies: hardCoded,
+            AmbientDependencies: ambient);
     }
 }

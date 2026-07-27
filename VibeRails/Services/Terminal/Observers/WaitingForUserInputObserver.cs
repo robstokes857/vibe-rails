@@ -106,20 +106,39 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
 
     public ValueTask OnTerminalIoAsync(TerminalIoEvent ioEvent, CancellationToken cancellationToken = default)
     {
-        if (ioEvent.Direction != TerminalIoDirection.Output)
+        if (!_codexSessions.ContainsKey(ioEvent.SessionId))
             return ValueTask.CompletedTask;
 
-        if (!_codexSessions.ContainsKey(ioEvent.SessionId))
+        // A submit is a hard boundary between two possible waiting periods.
+        // Discard the pre-submit rolling window so Codex's old idle repaint
+        // frames cannot immediately produce another waiting event and visually
+        // undo the tab's first Enter. The next genuine wait is still detected
+        // after a fresh observation window has accumulated.
+        if (ioEvent.Direction == TerminalIoDirection.Input)
+        {
+            if (ioEvent.Text is "\r" or "\n" or "\r\n" &&
+                _buffers.TryGetValue(ioEvent.SessionId, out var existingBuffer))
+            {
+                existingBuffer.ResetAfterSubmit();
+            }
+            return ValueTask.CompletedTask;
+        }
+
+        if (ioEvent.Direction != TerminalIoDirection.Output)
             return ValueTask.CompletedTask;
 
         var buffer = _buffers.GetOrAdd(ioEvent.SessionId, _ => new SessionBuffer(_timeProvider));
 
-        if (buffer.AppendAndCheck(ioEvent.Text))
+        // Input and output can arrive on different threads. Keep the generation check and publish
+        // inside one buffer-lock boundary so ResetAfterSubmit cannot invalidate the decision in
+        // the gap between them and let a stale WAITING event land after Enter.
+        if (buffer.AppendAndCheck(ioEvent.Text, out var generation))
         {
-            _eventBus.Publish(
-                "session_waiting_for_user",
-                new SessionWaitingForUserPayload(ioEvent.SessionId),
-                AppJsonSerializerContext.Default.SessionWaitingForUserPayload);
+            buffer.PublishIfCurrentGeneration(generation, () =>
+                _eventBus.Publish(
+                    "session_waiting_for_user",
+                    new SessionWaitingForUserPayload(ioEvent.SessionId),
+                    AppJsonSerializerContext.Default.SessionWaitingForUserPayload));
         }
         return ValueTask.CompletedTask;
     }
@@ -137,19 +156,24 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
         private readonly Lock _lock = new();
         private readonly Queue<TimedChunk> _chunks = new();
         private bool _hasFired;
+        // Bumped by ResetAfterSubmit. A fire decision carries the generation it was made under;
+        // PublishIfCurrentGeneration validates and publishes while still excluding a submit.
+        private long _generation;
 
         public SessionBuffer(TimeProvider timeProvider)
         {
             _timeProvider = timeProvider;
         }
 
-        public bool AppendAndCheck(string rawText)
+        public bool AppendAndCheck(string rawText, out long generation)
         {
+            generation = 0;
             if (string.IsNullOrEmpty(rawText))
                 return false;
 
             lock (_lock)
             {
+                generation = _generation;
                 var now = _timeProvider.GetUtcNow();
                 _chunks.Enqueue(new TimedChunk(now, rawText));
 
@@ -191,6 +215,25 @@ public sealed class WaitingForUserInputObserver : ITerminalIoObserver
                         // fire when traffic resumes.
                         return false;
                 }
+            }
+        }
+
+        public void ResetAfterSubmit()
+        {
+            lock (_lock)
+            {
+                _chunks.Clear();
+                _hasFired = false;
+                _generation++;
+            }
+        }
+
+        public void PublishIfCurrentGeneration(long generation, Action publish)
+        {
+            lock (_lock)
+            {
+                if (_generation == generation)
+                    publish();
             }
         }
 

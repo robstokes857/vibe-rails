@@ -1,4 +1,6 @@
+using System.Text.Json.Serialization.Metadata;
 using VibeRails.DTOs;
+using VibeRails.Interfaces;
 using VibeRails.Services;
 using VibeRails.Services.Terminal;
 using Xunit;
@@ -137,6 +139,101 @@ public sealed class WaitingForUserInputObserverTests
         Assert.All(events, e => Assert.Equal("session_waiting_for_user", e.Type));
     }
 
+    [Fact]
+    public async Task Submit_ClearsPreSubmitWindowBeforeAnotherWaitCanFire()
+    {
+        var clock = new ManualTimeProvider();
+        var (observer, events) = CreateObserver(clock);
+        await StartSessionAsync(observer, "session-1", "codex", clock);
+
+        // Reach the first genuine wait.
+        for (var i = 0; i < 45; i++)
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(50));
+            await SendOutputAsync(observer, "session-1", CodexIdleChunk);
+        }
+        Assert.Single(events);
+
+        // A brief diverse small-chunk repaint releases the old once-per-idle
+        // gate while the rolling window still contains the pre-submit idle
+        // frames. This is the shape that used to let stale frames reassert
+        // WAITING immediately after Enter.
+        for (var i = 0; i < 7; i++)
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(10));
+            await SendOutputAsync(observer, "session-1", $"\x1b[{i + 1}H");
+        }
+
+        await SendInputAsync(observer, "session-1", "\r");
+
+        // Repetition immediately after Enter must not be combined with the old
+        // idle samples to create a second event.
+        for (var i = 0; i < 12; i++)
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(10));
+            await SendOutputAsync(observer, "session-1", "\x1b[1H");
+        }
+        Assert.Single(events);
+
+        // The reset is not a permanent suppression: a fresh, fully observed
+        // idle period can still announce the next real prompt.
+        for (var i = 0; i < 55; i++)
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(50));
+            await SendOutputAsync(observer, "session-1", CodexIdleChunk);
+        }
+        Assert.Equal(2, events.Count);
+    }
+
+    [Fact]
+    public async Task Submit_CannotResetGenerationBetweenWaitCheckAndPublish()
+    {
+        var clock = new ManualTimeProvider();
+        var bus = new BlockingAppEventBus();
+        var observer = new WaitingForUserInputObserver(bus, clock);
+        await StartSessionAsync(observer, "session-1", "codex", clock);
+
+        // Stop immediately before the first eligible classification (oldest span is 1.95s).
+        for (var i = 0; i < 40; i++)
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(50));
+            await SendOutputAsync(observer, "session-1", CodexIdleChunk);
+        }
+
+        clock.Advance(TimeSpan.FromMilliseconds(50));
+        var publishing = Task.Run(
+            async () => await SendOutputAsync(observer, "session-1", CodexIdleChunk),
+            TestContext.Current.CancellationToken);
+        await bus.PublishEntered.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        var submitStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var submit = Task.Run(async () =>
+        {
+            submitStarted.TrySetResult();
+            await SendInputAsync(observer, "session-1", "\r");
+        }, TestContext.Current.CancellationToken);
+        await submitStarted.Task;
+
+        // Publication holds the same session-buffer lock as ResetAfterSubmit, so Enter cannot
+        // invalidate the generation and complete before this already-approved event is delivered.
+        try
+        {
+            var earlyCompletion = await Task.WhenAny(
+                submit,
+                Task.Delay(TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken));
+            Assert.NotSame(submit, earlyCompletion);
+        }
+        finally
+        {
+            bus.AllowPublish.Set();
+        }
+
+        await Task.WhenAll(publishing, submit);
+        Assert.Equal(1, bus.PublishCount);
+    }
+
     private static (WaitingForUserInputObserver Observer, List<AppEvent> Events) CreateObserver(TimeProvider clock)
     {
         var bus = new AppEventBus();
@@ -175,4 +272,37 @@ public sealed class WaitingForUserInputObserverTests
             TimestampUtc: DateTimeOffset.UtcNow));
     }
 
+    private static async Task SendInputAsync(
+        WaitingForUserInputObserver observer,
+        string sessionId,
+        string input)
+    {
+        await observer.OnTerminalIoAsync(new TerminalIoEvent(
+            SessionId: sessionId,
+            Direction: TerminalIoDirection.Input,
+            Source: TerminalIoSource.LocalWebUi,
+            Text: input,
+            TimestampUtc: DateTimeOffset.UtcNow));
+    }
+
+    private sealed class BlockingAppEventBus : IAppEventBus
+    {
+        public TaskCompletionSource PublishEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ManualResetEventSlim AllowPublish { get; } = new(initialState: false);
+        public int PublishCount { get; private set; }
+
+        public void Publish<T>(string type, T payload, JsonTypeInfo<T> typeInfo)
+        {
+            PublishEntered.TrySetResult();
+            AllowPublish.Wait();
+            PublishCount++;
+        }
+
+        public void Publish(AppEvent appEvent) =>
+            throw new NotSupportedException();
+
+        public IDisposable Subscribe(Action<AppEvent> listener) =>
+            throw new NotSupportedException();
+    }
 }

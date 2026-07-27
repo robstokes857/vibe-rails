@@ -71,7 +71,6 @@ export class AgentController {
                 onLayoutChange: () => this.app.terminalController?.refreshLayout?.()
             }).mount();
             this.app.ruleController.attachRulesOverview(root);
-            this.app.jobController.attachRulesAutomation(root);
         }
         return root;
     }

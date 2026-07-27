@@ -235,6 +235,16 @@ public class TerminalRunner
                                     return;
                                 }
 
+                                // The receive loop forwards __PIN__: frames so the verifier
+                                // above can consume them while locked. Once authorized, a
+                                // stray one must be dropped here — routing it would type the
+                                // user's PIN into the TUI as keystrokes.
+                                if (TerminalControlProtocol.IsPinResponseFrame(bytes))
+                                {
+                                    Log.Warning("[PIN] Dropped stray PIN frame after authorization");
+                                    return;
+                                }
+
                                 await NotifyRemoteTakeoverAsync("input");
                                 await TerminalIoRouter.RouteInputAsync(
                                     _stateService,

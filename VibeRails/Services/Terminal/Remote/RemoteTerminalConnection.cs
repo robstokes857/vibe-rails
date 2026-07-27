@@ -278,6 +278,26 @@ public sealed class RemoteTerminalConnection : IRemoteTerminalConnection
                             OnCommandReceived?.Invoke(command, payload);
                             continue;
                         }
+                        // The PIN handshake rides the input channel on this path: the
+                        // verifier in TerminalRunner consumes __PIN__: frames downstream
+                        // of OnInputReceived (and drops strays after authorization), so
+                        // they must be forwarded, not treated as malformed — and never
+                        // logged, because the payload is the user's PIN.
+                        if (text.StartsWith(TerminalControlProtocol.PinResponse, StringComparison.Ordinal))
+                        {
+                            OnInputReceived?.Invoke(inputBytes);
+                            continue;
+                        }
+                        // Reserved prefix that failed to parse: drop, never route.
+                        // Routing types the literal frame into the TUI — same bug as
+                        // the local path (TERMINAL.md "## 2026-07-26 __resize__:171,4").
+                        if (TerminalControlProtocol.IsReservedControlFrame(text))
+                        {
+                            Log.Warning(
+                                "[Remote] Dropped malformed control frame: {Frame}",
+                                TerminalControlProtocol.SanitizeFrameForLog(text));
+                            continue;
+                        }
                     }
 
                     OnInputReceived?.Invoke(inputBytes);

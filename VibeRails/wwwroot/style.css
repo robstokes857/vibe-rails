@@ -9776,20 +9776,17 @@ button.git-guard-menu-button:focus-visible {
    bar swaps ONE section into the top pane, and the terminal permanently owns
    the bottom pane so a fix is always one keystroke away from a finding. */
 
-/* Full-height shell. app.js adds .vb-rules-workspace-active while the Rules
-   view is mounted; it reclaims the page padding and the footer so the two
-   panes can own the viewport and the terminal keeps a stable height. */
-body.vb-rules-workspace-active {
-    overflow: hidden;
-}
-
+/* Flowing shell. app.js adds .vb-rules-workspace-active while the Rules view
+   is mounted. The page scrolls naturally — the active section expands to fit
+   its content and a substantial agent terminal dock sits at the bottom. No
+   viewport lock, so long reports breathe instead of being crammed into a
+   half-screen pane. */
 body.vb-rules-workspace-active .app-main {
-    height: 100dvh;
-    min-height: 0;
+    min-height: 100dvh;
 }
 
 html.nav-layout-top body.vb-rules-workspace-active .app-main {
-    height: calc(100dvh - var(--navbar-height));
+    min-height: calc(100dvh - var(--navbar-height));
 }
 
 body.vb-rules-workspace-active .app-footer {
@@ -9799,21 +9796,19 @@ body.vb-rules-workspace-active .app-footer {
 body.vb-rules-workspace-active .main-container {
     display: flex;
     max-width: none;
-    min-height: 0;
     flex: 1 1 auto;
     flex-direction: column;
-    padding: 0.7rem 1rem 0.6rem;
+    padding: 0.8rem 1rem 1.2rem;
 }
 
 html[data-viberails-host="vscode"] body.vb-rules-workspace-active .main-container {
-    padding: 0.4rem 0.5rem 0.5rem;
+    padding: 0.5rem 0.5rem 0.9rem;
 }
 
 body.vb-rules-workspace-active #app-content,
 body.vb-rules-workspace-active .dashboard,
 body.vb-rules-workspace-active .rules-dashboard-host {
     display: flex;
-    min-height: 0;
     flex: 1 1 auto;
     flex-direction: column;
 }
@@ -9827,10 +9822,9 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .rules-workspace {
-    display: grid;
-    min-height: 0;
+    display: flex;
     flex: 1 1 auto;
-    grid-template-rows: auto minmax(0, 1fr);
+    flex-direction: column;
 }
 
 /* ── Top bar ─────────────────────────────────────────────────────────── */
@@ -9839,8 +9833,8 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     flex-wrap: nowrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem 1.25rem;
-    margin-bottom: 0.7rem;
+    gap: 0.6rem 1.25rem;
+    margin-bottom: 0.9rem;
 }
 
 .rules-topbar-identity {
@@ -9985,31 +9979,44 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     }
 }
 
-/* ── The split: sections above, terminal below ───────────────────────── */
+/* ── The split: sections above, terminal below ─────────────────────────
+   The page scrolls, so the sections pane flows to fit its content and the
+   agent terminal owns a solid dock at the bottom — tall enough to actually
+   work in, not a cramped strip. */
 .rules-panes {
-    display: grid;
-    min-height: 0;
-    gap: 0.75rem;
-    /* Rules own the workspace; the agent console is a compact dock at the bottom. */
-    grid-template-rows: minmax(0, 1fr) clamp(220px, 30dvh, 320px);
+    display: flex;
+    flex-direction: column;
+    gap: 0.95rem;
 }
 
 .rules-pane {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     min-width: 0;
+}
+
+/* The active section flows naturally; its content expands and the page
+   scrolls instead of an inner viewport. */
+.rules-pane-sections {
+    flex: 1 1 auto;
+}
+
+/* A real working surface, not a 30dvh sliver. */
+.rules-pane-terminal {
+    flex: 0 0 clamp(340px, 50dvh, 620px);
     min-height: 0;
 }
 
 /* ── Section cards ───────────────────────────────────────────────────── */
 /* A self-contained panel — the nav above it floats free, so this keeps all
-   four corners and its own top border. */
+   four corners and its own top border. The card flows to fit its content;
+   the page (not the card body) is the scroller. */
 .rules-section {
-    display: grid;
-    min-height: 0;
+    display: flex;
+    flex-direction: column;
     margin: 0;
     border-radius: 10px;
     background: var(--color-bg-surface);
-    grid-template-rows: auto minmax(0, 1fr) auto;
     overflow: hidden;
 }
 
@@ -10024,8 +10031,8 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem 1rem;
-    padding: 0.65rem 0.9rem;
+    gap: 0.55rem 1rem;
+    padding: 0.78rem 1.05rem;
     border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
 }
 
@@ -10034,13 +10041,13 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     min-width: 0;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 0.55rem;
+    gap: 0.6rem;
 }
 
 .rules-section-heading h2 {
     margin: 0;
     color: var(--color-text);
-    font-size: 0.95rem;
+    font-size: 1.02rem;
     font-weight: 600;
     letter-spacing: -0.01em;
 }
@@ -10214,11 +10221,8 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .rules-section-body {
-    min-height: 0;
-    padding: 0.85rem 0.9rem;
+    padding: 0.95rem 1rem;
     overflow-x: hidden;
-    overflow-y: auto;
-    scrollbar-gutter: stable;
 }
 
 /* Sections whose content brings its own padding (or manages its own scrolling). */
@@ -10226,15 +10230,24 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     padding: 0;
 }
 
+/* The rule-files split keeps a bounded two-pane layout (file rail + editor)
+   with its own scroll — browsing files is better as an independent surface
+   than a section that grows to match the tallest column. */
 .rules-section[data-rules-section="files"] .rules-section-body {
     display: grid;
+    min-height: 420px;
+    height: clamp(420px, 62dvh, 680px);
     overflow: hidden;
 }
 
 /* ── Terminal pane ───────────────────────────────────────────────────── */
+/* A distinct, raised dock at the bottom of the workspace. The card already
+   carries its own header/controls; here we just make sure it reads as a
+   deliberate surface and fills the tall pane. */
 .rules-terminal-host {
     display: flex;
     min-height: 0;
+    flex: 1 1 auto;
     flex-direction: column;
 }
 
@@ -10246,10 +10259,11 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     border-radius: 12px;
     margin-bottom: 0 !important;
     overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
 .rules-terminal-host #vb-terminal-panel .card-header {
-    padding-block: 0.4rem;
+    padding-block: 0.45rem;
 }
 
 /* One line of prose is not worth 28px when the pane is half a screen. */
@@ -10281,35 +10295,7 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     padding: 2.25rem 1rem;
 }
 
-/* ── Code quality inside a bounded pane ──────────────────────────────── */
-/* The analyzer's own heights are viewport-derived (it used to scroll with the
-   page). Inside the top pane the section body is the scroller, so retune the
-   sticky rail and the editor to the pane instead of the window. */
-.rules-section .code-analyzer-findings-panel {
-    --code-analyzer-findings-height: none;
-    max-height: none;
-    overflow: visible;
-}
-
-.rules-section .code-analyzer-file-rail {
-    top: 0;
-    max-height: min(38vh, 340px);
-}
-
-.rules-section .code-analyzer-monaco-shell {
-    height: clamp(180px, 26vh, 320px);
-    min-height: 180px;
-}
-
-.rules-section .code-analyzer-tab-panel {
-    padding: 0.85rem 0.9rem;
-}
-
-/* Every row of chrome costs the report a row of content in a half-screen pane. */
-.rules-section .code-analyzer-tab {
-    min-height: 38px;
-}
-
+/* ── Code quality inside the Rules workspace ─────────────────────────── */
 .rules-section .code-analyzer-note {
     padding-block: 0.4rem;
 }
@@ -10628,7 +10614,8 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     border-radius: 0;
 }
 
-.vca-explanation + .rules-console-transcript {
+.vca-explanation + .rules-console-transcript,
+.code-analyzer-brief-host + .rules-console-transcript {
     margin-top: 0.9rem;
 }
 
@@ -10755,6 +10742,17 @@ body.vb-rules-workspace-active .rules-dashboard-host {
         flex: 1 1 auto;
         justify-content: center;
     }
+
+    /* On a phone the dock shouldn't eat half the screen — keep it usable
+       while leaving room to read the section above it. */
+    .rules-pane-terminal {
+        flex-basis: clamp(260px, 42dvh, 420px);
+    }
+
+    .rules-section[data-rules-section="files"] .rules-section-body {
+        height: auto;
+        min-height: 320px;
+    }
 }
 
 /* Git Guard is a setting in the Rules page header, not a second workspace. */
@@ -10880,8 +10878,8 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .rules-vca-panel .vca-console-output {
-    min-height: 200px;
-    max-height: 380px;
+    min-height: 220px;
+    max-height: min(58dvh, 540px);
     padding: 1rem 1.1rem;
     font-size: 0.8rem;
     line-height: 1.6;
@@ -11249,9 +11247,6 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 .code-analyzer-panel[data-tone="neutral"],
 .code-analyzer-panel [data-tone="neutral"] { --analyzer-tone: var(--analyzer-muted); }
 
-.code-analyzer-grade-line,
-.code-analyzer-overview-head,
-.code-analyzer-category-score-row,
 .code-analyzer-file-title-row,
 .code-analyzer-inline-meta,
 .code-analyzer-file-grade-block,
@@ -11305,124 +11300,22 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .code-analyzer-dashboard {
-    padding: 0;
+    padding: 0.85rem 0.9rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 52%, transparent);
 }
 
-.code-analyzer-tabs {
+/* The source pane stretches with the workspace row, so the code gets every pixel
+   the metrics column already forced the row to have. */
+.code-analyzer-source-column {
     display: flex;
     min-width: 0;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0 1.1rem;
-    overflow-x: auto;
-    border-top: 1px solid color-mix(in srgb, var(--color-border) 52%, transparent);
-    border-bottom: 1px solid var(--analyzer-line);
-    background: color-mix(in srgb, var(--color-bg-base) 34%, transparent);
-    scrollbar-width: thin;
-}
-
-.code-analyzer-tab {
-    position: relative;
-    display: inline-flex;
-    min-height: 46px;
-    flex: 0 0 auto;
-    align-items: center;
-    gap: 0.45rem;
-    padding: 0.15rem 0.72rem;
-    border: 0;
-    outline: 0;
-    background: transparent;
-    color: var(--analyzer-muted);
-    font-size: 0.7rem;
-    font-weight: 750;
-    white-space: nowrap;
-}
-
-.code-analyzer-tab::after {
-    position: absolute;
-    right: 0.6rem;
-    bottom: -1px;
-    left: 0.6rem;
-    height: 2px;
-    border-radius: 999px 999px 0 0;
-    background: transparent;
-    content: '';
-}
-
-.code-analyzer-tab:hover {
-    color: color-mix(in srgb, var(--color-text) 88%, var(--color-text-muted));
-}
-
-.code-analyzer-tab.active {
-    color: var(--color-text);
-}
-
-.code-analyzer-tab.active > i {
-    color: var(--color-accent);
-}
-
-.code-analyzer-tab.active::after {
-    background: var(--color-accent);
-    box-shadow: 0 -3px 12px color-mix(in srgb, var(--color-accent) 34%, transparent);
-}
-
-.code-analyzer-tab:focus-visible {
-    border-radius: 7px;
-    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-primary) 62%, transparent);
-}
-
-.code-analyzer-tab-count {
-    display: grid;
-    min-width: 20px;
-    height: 20px;
-    padding: 0 0.35rem;
-    place-items: center;
-    border: 1px solid var(--analyzer-line);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--color-text) 3%, transparent);
-    color: var(--analyzer-muted);
-    font-size: 0.58rem;
-}
-
-.code-analyzer-tab.active .code-analyzer-tab-count {
-    border-color: color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
-    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-    color: color-mix(in srgb, var(--color-accent) 70%, var(--color-text));
-}
-
-.code-analyzer-tab-panels {
-    min-width: 0;
-}
-
-.code-analyzer-tab-panel {
-    min-width: 0;
-    padding: 1rem 1.1rem;
-    outline: 0;
-}
-
-.code-analyzer-tab-panel:focus-visible {
-    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-primary) 48%, transparent);
-}
-
-.code-analyzer-findings-panel {
-    --code-analyzer-findings-height: min(720px, calc(100vh - 190px));
-    max-height: var(--code-analyzer-findings-height);
-    overflow: auto;
-    scrollbar-gutter: stable;
-}
-
-.code-analyzer-findings-panel .code-analyzer-file-rail {
-    top: 0;
-    max-height: calc(var(--code-analyzer-findings-height) - 2rem);
-}
-
-.code-analyzer-source-column {
-    min-width: 0;
+    flex-direction: column;
 }
 
 .code-analyzer-source-column .code-analyzer-code-panel {
-    position: sticky;
-    top: 0;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
 }
 
 .code-analyzer-panel-surface {
@@ -11432,194 +11325,178 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     background: color-mix(in srgb, var(--color-bg-base) 42%, transparent);
 }
 
-.code-analyzer-scan-banner {
-    display: grid;
-    grid-template-columns: minmax(320px, 0.72fr) minmax(0, 1.65fr);
-    gap: 0.85rem;
-    margin-bottom: 0;
+/* ── Code quality brief (Validation screen) ──────────────────────────────
+   The survivor of the old Overview tab: score ring, grade, verdict, counts,
+   and the top risk categories in one compact wrapping row. It renders OUTSIDE
+   .code-analyzer-panel, so it defines its own --analyzer-tone locally (which
+   also feeds the reused .code-analyzer-rating-badge). */
+.code-analyzer-brief-host {
+    margin-top: 0.9rem;
 }
 
-.code-analyzer-score-card {
-    position: relative;
-    display: grid;
-    min-height: 205px;
-    grid-template-columns: 128px minmax(0, 1fr);
-    align-items: center;
-    gap: 1rem;
-    padding: 1.15rem;
-    overflow: hidden;
-}
-
-.code-analyzer-score-card::after {
-    position: absolute;
-    right: -50px;
-    bottom: -70px;
-    width: 160px;
-    height: 160px;
-    border-radius: 50%;
-    background: radial-gradient(circle, color-mix(in srgb, var(--analyzer-tone) 16%, transparent), transparent 68%);
-    content: '';
-    pointer-events: none;
-}
-
-/* The fixed metric roster on the score card: always the same rows, in the same order,
-   each keyed by its own tone via data-tone (the card's tone stays the headline's). */
-.code-analyzer-scorecard {
-    position: relative;
-    z-index: 1;
-    display: grid;
-    grid-column: 1 / -1;
-    gap: 0.16rem;
-    margin-top: 0.35rem;
-    padding-top: 0.65rem;
-    border-top: 1px solid var(--analyzer-line-soft);
-}
-
-.code-analyzer-scorecard-row {
-    --analyzer-tone: var(--analyzer-muted);
-    display: grid;
-    grid-template-columns: 8px minmax(0, 1fr) auto auto max-content;
-    align-items: center;
-    gap: 0.55rem;
-    padding: 0.26rem 0.4rem;
-    border-radius: 6px;
-}
-
-.code-analyzer-scorecard-row:not(.code-analyzer-scorecard-head):hover {
-    background: color-mix(in srgb, var(--color-text) 2.2%, transparent);
-}
-
-.code-analyzer-scorecard-head {
-    padding-bottom: 0.1rem;
-    color: var(--analyzer-muted-2);
-    font-size: 0.5rem;
-    font-weight: 800;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-}
-
-.code-analyzer-scorecard-head span:nth-child(3),
-.code-analyzer-scorecard-head span:nth-child(4),
-.code-analyzer-scorecard-head span:nth-child(5) {
-    text-align: right;
-}
-
-.code-analyzer-scorecard-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--analyzer-tone);
-}
-
-.code-analyzer-scorecard-row[data-tone="neutral"] .code-analyzer-scorecard-dot {
-    background: color-mix(in srgb, var(--color-text-muted) 38%, transparent);
-}
-
-.code-analyzer-scorecard-label {
+.code-analyzer-brief {
+    --analyzer-tone: var(--color-text-muted);
     display: flex;
-    overflow: hidden;
-    align-items: baseline;
-    gap: 0.4rem;
-    white-space: nowrap;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem 0.95rem;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid color-mix(in srgb, var(--color-border) 62%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-bg-base) 42%, transparent);
 }
 
-.code-analyzer-scorecard-label strong {
-    overflow: hidden;
-    color: color-mix(in srgb, var(--color-text) 88%, var(--color-text-muted));
-    font-size: 0.66rem;
-    font-weight: 650;
-    text-overflow: ellipsis;
-}
+.code-analyzer-brief[data-tone="success"] { --analyzer-tone: var(--color-success); }
+.code-analyzer-brief[data-tone="warning"] { --analyzer-tone: var(--color-warning); }
+.code-analyzer-brief[data-tone="danger"] { --analyzer-tone: var(--color-danger); }
 
-.code-analyzer-scorecard-label small {
-    overflow: hidden;
-    color: var(--analyzer-muted-2);
-    font-size: 0.56rem;
-    text-overflow: ellipsis;
-}
-
-.code-analyzer-scorecard-value {
-    color: color-mix(in srgb, var(--color-text) 90%, var(--color-text-muted));
-    font: 700 0.66rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
-    text-align: right;
-    white-space: nowrap;
-}
-
-/* The category digest under the grade uses the same row component, one value column less. */
-.code-analyzer-scorecard.is-categories .code-analyzer-scorecard-row {
-    grid-template-columns: 8px minmax(0, 1fr) max-content;
-}
-
-.code-analyzer-category-card.is-unmeasured {
-    opacity: 0.6;
-}
-
-.code-analyzer-category-card.is-unmeasured .code-analyzer-mini-track {
-    visibility: hidden;
-}
-
-.code-analyzer-scorecard-concern {
-    min-width: 34px;
-    color: var(--analyzer-tone);
-    font: 750 0.66rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-    white-space: nowrap;
-}
-
-.code-analyzer-scorecard-row.is-unmeasured .code-analyzer-scorecard-label strong,
-.code-analyzer-scorecard-row.is-unmeasured .code-analyzer-scorecard-value {
-    color: color-mix(in srgb, var(--color-text-muted) 65%, transparent);
-}
-
-.code-analyzer-scorecard-row.is-unmeasured .code-analyzer-scorecard-concern {
-    color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
-    font-size: 0.52rem;
-    font-weight: 650;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-}
-
-.code-analyzer-score-ring {
+.code-analyzer-brief-ring {
     position: relative;
     display: grid;
-    width: 122px;
-    height: 122px;
+    width: 54px;
+    height: 54px;
+    flex: 0 0 auto;
     place-items: center;
     border-radius: 50%;
     background: conic-gradient(var(--analyzer-tone) calc(var(--score) * 1%), color-mix(in srgb, var(--color-border) 45%, transparent) 0);
-    box-shadow: inset 0 0 20px rgb(0 0 0 / 18%);
 }
 
-.code-analyzer-score-ring::before {
+.code-analyzer-brief-ring::before {
     position: absolute;
-    inset: 9px;
+    inset: 5px;
     border: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
     border-radius: inherit;
     background: color-mix(in srgb, var(--color-bg-base) 82%, var(--color-bg-surface));
     content: '';
 }
 
-.code-analyzer-score-center {
+.code-analyzer-brief-ring-center {
     position: relative;
-    display: grid;
-    text-align: center;
-}
-
-.code-analyzer-score-value {
     color: var(--color-text);
-    font-size: 2.15rem;
+    font-size: 0.92rem;
     font-weight: 850;
-    letter-spacing: -0.07em;
-    line-height: 1;
+    letter-spacing: -0.05em;
 }
 
-.code-analyzer-score-label {
-    margin-top: 0.35rem;
-    color: var(--analyzer-muted);
+.code-analyzer-brief-copy {
+    display: grid;
+    min-width: 150px;
+    flex: 1 1 170px;
+    gap: 0.12rem;
+}
+
+.code-analyzer-brief-headline {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.code-analyzer-brief-headline .code-analyzer-rating-badge {
+    width: 22px;
+    height: 22px;
+    font-size: 0.7rem;
+}
+
+.code-analyzer-brief-copy h3 {
+    margin: 0;
+    color: var(--color-text);
+    font-size: 0.92rem;
+    letter-spacing: -0.02em;
+}
+
+.code-analyzer-brief-copy p {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 0.64rem;
+}
+
+.code-analyzer-brief-stats {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.code-analyzer-brief-stat {
+    --analyzer-tone: var(--color-text-muted);
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.28rem;
+    padding: 0.28rem 0.45rem;
+    border: 1px solid color-mix(in srgb, var(--analyzer-tone) 32%, var(--color-border));
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--analyzer-tone) 7%, transparent);
+    color: var(--color-text-muted);
     font-size: 0.6rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+}
+
+.code-analyzer-brief-stat[data-tone="danger"] { --analyzer-tone: var(--color-danger); }
+.code-analyzer-brief-stat[data-tone="warning"] { --analyzer-tone: var(--color-warning); }
+.code-analyzer-brief-stat[data-tone="success"] { --analyzer-tone: var(--color-success); }
+
+.code-analyzer-brief-stat strong {
+    color: var(--analyzer-tone);
+    font-size: 0.74rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.code-analyzer-brief-categories {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.code-analyzer-brief-category {
+    --analyzer-tone: var(--color-text-muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.32rem;
+    padding: 0.28rem 0.5rem;
+    border: 1px solid color-mix(in srgb, var(--color-border) 62%, transparent);
+    border-radius: 999px;
+    color: var(--color-text-muted);
+    font-size: 0.6rem;
+}
+
+.code-analyzer-brief-category[data-tone="success"] { --analyzer-tone: var(--color-success); }
+.code-analyzer-brief-category[data-tone="warning"] { --analyzer-tone: var(--color-warning); }
+.code-analyzer-brief-category[data-tone="danger"] { --analyzer-tone: var(--color-danger); }
+
+.code-analyzer-brief-category i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--analyzer-tone);
+}
+
+.code-analyzer-brief-category strong {
+    color: var(--analyzer-tone);
+    font-variant-numeric: tabular-nums;
+}
+
+.code-analyzer-brief-open {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: auto;
+    padding: 0.42rem 0.62rem;
+    border: 1px solid color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+    color: var(--color-text);
+    font-size: 0.64rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.code-analyzer-brief-open:hover {
+    background: color-mix(in srgb, var(--color-primary) 20%, transparent);
+}
+
+.code-analyzer-brief-open:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
+    outline-offset: 2px;
 }
 
 /* Section kickers ("Change quality", "Scan overview"). Sentence case and muted —
@@ -11632,26 +11509,6 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     /* The renderer already writes these sentence-cased ("Change quality"), and one of
        them carries a folder path — never re-case it here. */
     text-transform: none;
-}
-
-.code-analyzer-score-copy h3 {
-    margin: 0.42rem 0 0.32rem;
-    color: var(--color-text);
-    font-size: 1.25rem;
-    letter-spacing: -0.035em;
-    line-height: 1.1;
-}
-
-.code-analyzer-score-copy > p {
-    margin: 0;
-    color: var(--analyzer-muted);
-    font-size: 0.74rem;
-    line-height: 1.45;
-}
-
-.code-analyzer-grade-line {
-    gap: 0.55rem;
-    margin-top: 0.8rem;
 }
 
 .code-analyzer-rating-badge,
@@ -11671,150 +11528,12 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     font-size: 0.85rem;
 }
 
-.code-analyzer-grade-copy {
-    display: grid;
-    min-width: 0;
-}
-
-.code-analyzer-grade-copy strong {
-    color: var(--color-text);
-    font-size: 0.74rem;
-}
-
-.code-analyzer-grade-copy small {
-    margin-top: 0.12rem;
-    color: var(--analyzer-muted);
-    font-size: 0.64rem;
-}
-
-.code-analyzer-overview-card {
-    padding: 1rem;
-}
-
-.code-analyzer-overview-head {
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
-}
-
-.code-analyzer-overview-head h3,
 .code-analyzer-metrics-head h3,
 .code-analyzer-code-head h3 {
     margin: 0.2rem 0 0;
     color: var(--color-text);
     font-size: 0.88rem;
     letter-spacing: -0.02em;
-}
-
-.code-analyzer-scan-time {
-    max-width: 250px;
-    color: var(--analyzer-muted);
-    font-size: 0.64rem;
-    line-height: 1.45;
-    text-align: right;
-}
-
-.code-analyzer-stat-strip {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0.45rem;
-    margin-bottom: 0.75rem;
-}
-
-.code-analyzer-stat-card {
-    display: grid;
-    min-width: 0;
-    padding: 0.65rem;
-    border: 1px solid var(--analyzer-line-soft);
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--color-text) 2%, transparent);
-}
-
-.code-analyzer-stat-card strong {
-    color: var(--analyzer-tone);
-    font-size: 1rem;
-    letter-spacing: -0.04em;
-}
-
-.code-analyzer-stat-card[data-tone="neutral"] strong {
-    color: var(--color-text);
-}
-
-.code-analyzer-stat-card span {
-    margin-top: 0.12rem;
-    overflow: hidden;
-    color: var(--analyzer-muted);
-    font-size: 0.62rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.code-analyzer-category-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
-    gap: 0.45rem;
-}
-
-.code-analyzer-category-card {
-    min-width: 0;
-    padding: 0.62rem;
-    border: 1px solid var(--analyzer-line-soft);
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--color-text) 1.6%, transparent);
-}
-
-.code-analyzer-category-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.4rem;
-}
-
-.code-analyzer-category-name {
-    display: block;
-    overflow: hidden;
-    color: color-mix(in srgb, var(--color-text) 88%, var(--color-text-muted));
-    font-size: 0.66rem;
-    font-weight: 700;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* The verdict is a word, not a number — "Testability · critical" cannot be misread
-   the way "Testability · 100" could. */
-.code-analyzer-category-severity {
-    flex: 0 0 auto;
-    padding: 0.16rem 0.4rem;
-    border: 1px solid color-mix(in srgb, var(--analyzer-tone) 32%, transparent);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--analyzer-tone) 12%, transparent);
-    color: var(--analyzer-tone);
-    font-size: 0.54rem;
-    font-weight: 850;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-}
-
-.code-analyzer-category-worst {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.2rem 0.35rem;
-    min-height: 1.9em;
-    margin-top: 0.4rem;
-    color: var(--analyzer-muted);
-    font-size: 0.6rem;
-    line-height: 1.35;
-}
-
-.code-analyzer-category-worst strong {
-    color: color-mix(in srgb, var(--color-text) 82%, var(--color-text-muted));
-    font-weight: 650;
-}
-
-.code-analyzer-category-worst > span {
-    font-family: var(--vb-font-mono, ui-monospace, monospace);
 }
 
 /* "↑ higher is better" / "↓ lower is better" — explains the RAW value next to it. */
@@ -11839,37 +11558,6 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     font-style: normal;
 }
 
-.code-analyzer-category-score-row {
-    justify-content: space-between;
-    margin-top: 0.35rem;
-}
-
-.code-analyzer-category-score-row strong {
-    color: var(--analyzer-tone);
-    font-size: 0.78rem;
-    font-variant-numeric: tabular-nums;
-}
-
-.code-analyzer-category-score-row small {
-    color: var(--analyzer-muted-2);
-    font-size: 0.56rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-}
-
-.code-analyzer-category-numbers {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 0.35rem;
-}
-
-.code-analyzer-category-numbers small {
-    text-transform: none;
-    letter-spacing: normal;
-    font-variant-numeric: tabular-nums;
-}
-
-.code-analyzer-mini-track,
 .code-analyzer-risk-track {
     display: block;
     overflow: hidden;
@@ -11877,37 +11565,33 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     background: color-mix(in srgb, var(--color-border) 40%, transparent);
 }
 
-.code-analyzer-mini-track {
-    height: 4px;
-    margin: 0.4rem 0 0.32rem;
-}
-
-.code-analyzer-mini-track > span {
-    display: block;
-    width: var(--fill);
-    height: 100%;
-    border-radius: inherit;
-    background: var(--analyzer-tone);
-}
-
-/* Classic three panes: changed files | metrics | the code itself. */
+/* Classic three panes: changed files | metrics | the code itself. The detail
+   columns set the row height; the rail never contributes to it. */
 .code-analyzer-workspace {
     display: grid;
-    grid-template-columns: 240px minmax(280px, 0.92fr) minmax(0, 1.08fr);
-    align-items: start;
+    grid-template-columns: 250px minmax(300px, 0.85fr) minmax(0, 1.3fr);
     gap: 0.85rem;
 }
 
+/* The rail is absolutely positioned inside this cell, so a long file list can
+   never stretch the page — it caps at the detail columns' height and scrolls
+   inside its own box (the min-height keeps it usable beside short reports). */
+.code-analyzer-rail-cell {
+    position: relative;
+    min-width: 0;
+    min-height: 380px;
+}
+
 .code-analyzer-file-rail {
-    position: sticky;
-    top: 78px;
+    position: absolute;
     display: flex;
-    max-height: calc(100vh - 96px);
+    inset: 0;
     overflow: hidden;
     flex-direction: column;
 }
 
 .code-analyzer-rail-head {
+    flex: 0 0 auto;
     padding: 0.85rem;
     border-bottom: 1px solid var(--analyzer-line);
 }
@@ -11985,14 +11669,102 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .code-analyzer-file-list {
+    flex: 1 1 0;
+    min-height: 0;
     padding: 0.42rem;
-    overflow: auto;
+    overflow-y: auto;
+}
+
+/* Directory group header: chevron (collapse toggle), the full path, a tests badge
+   where it applies, a count, and a kebab menu with the directory actions. Sticky
+   so the answer to "what folder am I looking at?" survives scrolling; clicking it
+   collapses/expands the group. */
+.code-analyzer-dir-head {
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0.35rem 0 0.2rem;
+    padding: 0.3rem 0.4rem;
+    border: 1px solid var(--analyzer-line-soft);
+    border-radius: 7px;
+    background: var(--color-bg-surface);
+    cursor: pointer;
+    user-select: none;
+}
+
+.code-analyzer-dir-head:hover {
+    border-color: color-mix(in srgb, var(--color-border) 90%, var(--color-text));
+}
+
+.code-analyzer-dir-head:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
+    outline-offset: 1px;
+}
+
+.code-analyzer-dir-chevron {
+    width: 10px;
+    flex: 0 0 auto;
+    color: var(--analyzer-muted-2);
+    font-size: 0.55rem;
+    text-align: center;
+}
+
+.code-analyzer-dir-head:first-child {
+    margin-top: 0;
+}
+
+.code-analyzer-dir-path {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    align-items: baseline;
+    gap: 0.35rem;
+    color: var(--analyzer-muted);
+    font: 600 0.6rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
+}
+
+.code-analyzer-dir-path i {
+    flex: 0 0 auto;
+    color: var(--analyzer-muted-2);
+    font-size: 0.58rem;
+}
+
+/* The full path is the point — let long ones wrap instead of ellipsizing away
+   the segment that says "this is in Tests/". */
+.code-analyzer-dir-path > span {
+    overflow-wrap: anywhere;
+    min-width: 0;
+}
+
+.code-analyzer-dir-tag {
+    flex: 0 0 auto;
+    padding: 0.1rem 0.35rem;
+    border: 1px solid color-mix(in srgb, var(--color-accent) 32%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: color-mix(in srgb, var(--color-accent) 72%, var(--color-text));
+    font-size: 0.52rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.code-analyzer-dir-count {
+    flex: 0 0 auto;
+    padding: 0.1rem 0.4rem;
+    border: 1px solid var(--analyzer-line);
+    border-radius: 999px;
+    color: var(--analyzer-muted);
+    font-size: 0.56rem;
 }
 
 .code-analyzer-file-item {
     display: grid;
     width: 100%;
-    grid-template-columns: auto 5px minmax(0, 1fr) auto;
+    grid-template-columns: 5px minmax(0, 1fr) auto auto;
     align-items: start;
     gap: 0.55rem;
     margin-bottom: 0.22rem;
@@ -12014,55 +11786,91 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     background: color-mix(in srgb, var(--color-primary) 11%, transparent);
 }
 
-/* Selected (multi-select) gets a soft tint to read as "checked for bulk action"
-   on top of whatever active/tone state the row already has. */
-.code-analyzer-file-item.selected {
-    border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
-    background: color-mix(in srgb, var(--color-primary) 7%, transparent);
-}
-
 .code-analyzer-file-item:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
     outline-offset: 1px;
 }
 
-.code-analyzer-file-checkbox {
-    appearance: none;
-    -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
-    margin: 1px 0 0;
-    border: 1.5px solid color-mix(in srgb, var(--color-text-muted) 60%, var(--color-border));
-    border-radius: 3px;
-    background: transparent;
-    cursor: pointer;
+/* Per-row 3-dot menu button (same reveal-on-hover language as the chat history
+   sidebar's item menu). */
+.code-analyzer-kebab {
+    display: grid;
+    width: 26px;
+    height: 26px;
     flex: 0 0 auto;
-    transition: background 0.12s ease, border-color 0.12s ease;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--analyzer-muted);
+    font-size: 0.72rem;
+    opacity: 0.4;
+    transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
 
-.code-analyzer-file-checkbox:hover {
-    border-color: color-mix(in srgb, var(--color-primary) 65%, var(--color-border));
+.code-analyzer-file-item:hover .code-analyzer-kebab,
+.code-analyzer-dir-head:hover .code-analyzer-kebab,
+.code-analyzer-kebab:focus-visible {
+    opacity: 1;
 }
 
-.code-analyzer-file-checkbox:checked {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
+.code-analyzer-kebab:hover {
+    background: color-mix(in srgb, var(--color-text) 8%, transparent);
+    color: var(--color-text);
+    opacity: 1;
 }
 
-.code-analyzer-file-checkbox:checked::after {
-    content: '';
-    display: block;
-    width: 4px;
-    height: 8px;
-    margin: 1px auto 0;
-    border: solid #fff;
-    border-width: 0 2px 2px 0;
-    transform: rotate(45deg);
-}
-
-.code-analyzer-file-checkbox:focus-visible {
+.code-analyzer-kebab:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
-    outline-offset: 2px;
+    outline-offset: 1px;
+}
+
+/* The rail's floating context menu — one per rail, positioned by the kebab that
+   opened it. Mirrors .ch-context-menu but on theme tokens. */
+.code-analyzer-context-menu {
+    position: absolute;
+    z-index: 30;
+    display: none;
+    min-width: 150px;
+    padding: 6px;
+    border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+    border-radius: 8px;
+    background: var(--color-bg-surface);
+    box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
+}
+
+.code-analyzer-context-menu.show {
+    display: block;
+}
+
+.code-analyzer-context-menu-item {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--analyzer-muted, var(--color-text-muted));
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.code-analyzer-context-menu-item:hover {
+    background: color-mix(in srgb, var(--color-text) 7%, transparent);
+    color: var(--color-text);
+}
+
+.code-analyzer-context-menu-item i {
+    width: 14px;
+    color: var(--analyzer-muted-2, var(--color-text-muted));
+    text-align: center;
 }
 
 .code-analyzer-severity-rail {
@@ -12127,158 +11935,6 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     text-align: center;
 }
 
-/* ── Bulk action bar (multi-select) ───────────────────────────────────────
-   Sits between the rail head and the file list. Dormant (low-contrast, no
-   actions enabled) when nothing is selected; promoted to a visible toolbar
-   with a primary-tinted background as soon as the user checks something. */
-.code-analyzer-bulk-bar {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.55rem;
-    border-bottom: 1px solid var(--analyzer-line-soft);
-    background: transparent;
-    color: var(--analyzer-muted);
-    font-size: 0.6rem;
-    transition: background 0.15s ease, color 0.15s ease;
-}
-
-.code-analyzer-bulk-bar.is-hidden {
-    display: none;
-}
-
-.code-analyzer-bulk-bar.is-active {
-    background: color-mix(in srgb, var(--color-primary) 9%, transparent);
-    color: var(--color-text);
-}
-
-.code-analyzer-select-all {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    cursor: pointer;
-    color: var(--analyzer-muted);
-    font-weight: 600;
-    user-select: none;
-}
-
-.code-analyzer-select-all:hover {
-    color: var(--color-text);
-}
-
-.code-analyzer-bulk-checkbox {
-    appearance: none;
-    -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
-    border: 1.5px solid color-mix(in srgb, var(--color-text-muted) 60%, var(--color-border));
-    border-radius: 3px;
-    background: transparent;
-    cursor: pointer;
-    flex: 0 0 auto;
-}
-
-.code-analyzer-bulk-checkbox:hover {
-    border-color: color-mix(in srgb, var(--color-primary) 65%, var(--color-border));
-}
-
-.code-analyzer-bulk-checkbox:checked {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
-}
-
-.code-analyzer-bulk-checkbox:checked::after {
-    content: '';
-    display: block;
-    width: 4px;
-    height: 8px;
-    margin: 1px auto 0;
-    border: solid #fff;
-    border-width: 0 2px 2px 0;
-    transform: rotate(45deg);
-}
-
-.code-analyzer-bulk-checkbox:indeterminate {
-    border-color: var(--color-primary);
-    background: color-mix(in srgb, var(--color-primary) 18%, transparent);
-}
-
-.code-analyzer-bulk-checkbox:indeterminate::after {
-    content: '';
-    display: block;
-    width: 8px;
-    height: 2px;
-    margin: 5px auto 0;
-    background: var(--color-primary);
-}
-
-.code-analyzer-bulk-summary {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 600;
-}
-
-.code-analyzer-bulk-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    flex: 0 0 auto;
-}
-
-.code-analyzer-bulk-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.3rem 0.5rem;
-    border: 1px solid var(--analyzer-line);
-    border-radius: 6px;
-    background: transparent;
-    color: var(--analyzer-muted);
-    font-size: 0.58rem;
-    font-weight: 700;
-    white-space: nowrap;
-    transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
-}
-
-.code-analyzer-bulk-button:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--color-warning) 45%, var(--color-border));
-    background: color-mix(in srgb, var(--color-warning) 9%, transparent);
-    color: color-mix(in srgb, var(--color-warning) 70%, var(--color-text));
-}
-
-.code-analyzer-bulk-button:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
-    outline-offset: 2px;
-}
-
-.code-analyzer-bulk-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.code-analyzer-bulk-clear {
-    padding: 0.3rem 0.45rem;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--analyzer-muted-2);
-    font-size: 0.58rem;
-    font-weight: 700;
-}
-
-.code-analyzer-bulk-clear:hover:not(:disabled) {
-    color: var(--color-text);
-    background: color-mix(in srgb, var(--color-text) 5%, transparent);
-}
-
-.code-analyzer-bulk-clear:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
 /* "Ignore folder" variant on the file overview — visually distinct from the
    per-file Ignore button so the directory-level action doesn't read as the
    same thing. */
@@ -12321,6 +11977,7 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .code-analyzer-ignored-box {
+    flex: 0 0 auto;
     margin: 0.3rem 0.42rem 0.5rem;
     border: 1px solid var(--analyzer-line-soft);
     border-radius: 8px;
@@ -12453,30 +12110,39 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .code-analyzer-file-overview {
-    padding: 1rem;
+    padding: 0.85rem 1rem;
 }
 
 .code-analyzer-file-title-row {
     align-items: flex-start;
+    flex-wrap: wrap;
     justify-content: space-between;
     gap: 1rem;
 }
 
 .code-analyzer-file-title-wrap {
+    flex: 1 1 220px;
     min-width: 0;
 }
 
+/* The kicker is the full directory path — wrapping it is fine; ellipsizing it
+   would hide exactly the segments the reviewer needs. */
 .code-analyzer-file-kicker {
     color: var(--analyzer-muted);
     font: 0.62rem/1.3 var(--vb-font-mono, ui-monospace, monospace);
+    overflow-wrap: anywhere;
 }
 
+/* The file NAME never wraps mid-word — it ellipsizes, with the full path in the
+   row's title attribute. */
 .code-analyzer-file-title {
     margin: 0.25rem 0 0;
-    overflow-wrap: anywhere;
+    overflow: hidden;
     color: var(--color-text);
     font: 700 1.05rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
     letter-spacing: -0.035em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .code-analyzer-inline-meta {
@@ -12822,10 +12488,13 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     font: 0.6rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
 }
 
+/* Fills whatever height the code panel's flex column has left over — beside a
+   long metrics list that is a LOT of code; the floor keeps it usable beside a
+   short one. */
 .code-analyzer-monaco-shell {
     position: relative;
-    height: clamp(280px, 38vh, 480px);
-    min-height: 280px;
+    flex: 1 1 auto;
+    min-height: 320px;
     overflow: hidden;
     background: color-mix(in srgb, var(--color-bg-base) 78%, #000);
 }
@@ -12963,8 +12632,8 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .code-analyzer-panel .vca-console-output {
-    min-height: 160px;
-    max-height: 320px;
+    min-height: 180px;
+    max-height: min(48dvh, 460px);
     padding: 0.85rem 1rem;
     font-size: 0.74rem;
 }
@@ -12992,25 +12661,13 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 @media (max-width: 1250px) {
-    .code-analyzer-scan-banner {
-        grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.4fr);
-    }
-
-    .code-analyzer-category-grid {
-        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    }
-
     /* Not enough width for three panes: the code drops below files + metrics. */
     .code-analyzer-workspace {
-        grid-template-columns: 240px minmax(0, 1fr);
+        grid-template-columns: 250px minmax(0, 1fr);
     }
 
     .code-analyzer-source-column {
         grid-column: 1 / -1;
-    }
-
-    .code-analyzer-source-column .code-analyzer-code-panel {
-        position: static;
     }
 
     .code-analyzer-metric-row {
@@ -13018,31 +12675,9 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     }
 }
 
-@media (max-width: 1050px) {
-    .code-analyzer-scan-banner {
-        grid-template-columns: 1fr;
-    }
-}
-
 @media (max-width: 820px) {
-    .code-analyzer-tab-panel {
-        padding: 0.75rem;
-    }
-
     .code-analyzer-workspace {
         grid-template-columns: 1fr;
-    }
-
-    .code-analyzer-file-rail {
-        position: static;
-        max-height: none;
-    }
-
-    .code-analyzer-file-list {
-        display: grid;
-        max-height: 310px;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 0.25rem;
     }
 
     .code-analyzer-metrics-head {
@@ -13056,21 +12691,6 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 @media (max-width: 620px) {
-    .code-analyzer-scan-banner,
-    .code-analyzer-score-card {
-        grid-template-columns: 1fr;
-    }
-
-    .code-analyzer-score-card {
-        justify-items: center;
-        text-align: center;
-    }
-
-    .code-analyzer-grade-line {
-        justify-content: center;
-    }
-
-    .code-analyzer-overview-head,
     .code-analyzer-file-title-row,
     .code-analyzer-code-head,
     .code-analyzer-note {
@@ -13078,20 +12698,10 @@ body.vb-rules-workspace-active .rules-dashboard-host {
         flex-direction: column;
     }
 
-    .code-analyzer-scan-time,
     .code-analyzer-file-grade-copy,
     .code-analyzer-priority-location {
         max-width: none;
         text-align: left;
-    }
-
-    .code-analyzer-stat-strip {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .code-analyzer-category-grid,
-    .code-analyzer-file-list {
-        grid-template-columns: 1fr;
     }
 
     .code-analyzer-priority-finding {
@@ -13117,11 +12727,6 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 
     .code-analyzer-legend {
         flex-wrap: wrap;
-    }
-
-    .code-analyzer-monaco-shell {
-        height: 300px;
-        min-height: 300px;
     }
 
     .code-analyzer-editor-status {
@@ -13847,7 +13452,7 @@ body.git-guard-focus-active #app-content {
 }
 
 /* ============================================================
-   Jobs — durable scheduled and Git-triggered LLM automation
+   Automation — active-instance scheduled and Git-triggered runs
    ============================================================ */
 
 .jobs-view {
@@ -13858,11 +13463,8 @@ body.git-guard-focus-active #app-content {
 
 .jobs-page-header,
 .jobs-section-heading,
-.jobs-worker-card,
 .job-card-topline,
-.job-card-actions,
-.job-meta,
-.jobs-worker-actions {
+.job-card-actions {
     display: flex;
     align-items: center;
 }
@@ -13895,25 +13497,43 @@ body.git-guard-focus-active #app-content {
     line-height: 1.55;
 }
 
-.jobs-security-notice {
+.jobs-runtime-strip {
     display: flex;
-    align-items: flex-start;
-    gap: 0.85rem;
-    margin-bottom: 1rem;
-    padding: 1rem 1.1rem;
-    border: 1px solid color-mix(in srgb, var(--color-warning) 52%, var(--color-border));
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--color-warning) 10%, var(--color-bg-elevated));
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.78rem 0.9rem;
+    border: 1px solid color-mix(in srgb, var(--color-success) 32%, var(--color-border));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-success) 6%, var(--color-bg-elevated));
 }
 
-.jobs-security-notice > i {
-    margin-top: 0.16rem;
-    color: var(--color-warning);
-    font-size: 1.1rem;
+.jobs-runtime-icon {
+    display: grid;
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--color-success) 14%, transparent);
+    color: var(--color-success);
 }
 
-.jobs-security-notice strong { color: var(--color-warning); }
-.jobs-security-notice p { margin: 0.25rem 0 0; color: var(--color-text); font-size: 0.78rem; line-height: 1.55; }
+.jobs-runtime-copy {
+    display: grid;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.jobs-runtime-copy strong {
+    color: var(--color-text);
+    font-size: 0.82rem;
+}
+
+.jobs-runtime-copy span {
+    color: var(--color-text-muted);
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
 
 .jobs-eyebrow {
     color: var(--color-accent);
@@ -13924,57 +13544,7 @@ body.git-guard-focus-active #app-content {
     text-transform: uppercase;
 }
 
-.jobs-worker-card {
-    gap: 0.9rem;
-    min-height: 78px;
-    padding: 1rem 1.1rem;
-    border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--color-bg-elevated) 88%, transparent);
-    box-shadow: 0 18px 42px rgb(0 0 0 / 9%);
-}
-
-.jobs-worker-card[hidden] { display: none; }
-
-.jobs-worker-card[data-tone="success"] {
-    border-color: color-mix(in srgb, var(--color-success) 42%, var(--color-border));
-    background: color-mix(in srgb, var(--color-success) 7%, var(--color-bg-elevated));
-}
-
-.jobs-worker-card[data-tone="warning"] {
-    border-color: color-mix(in srgb, var(--color-warning) 44%, var(--color-border));
-}
-
-.jobs-worker-icon {
-    display: grid;
-    flex: 0 0 42px;
-    width: 42px;
-    height: 42px;
-    place-items: center;
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-    color: var(--color-accent);
-}
-
-.jobs-worker-card[data-tone="success"] .jobs-worker-icon {
-    background: color-mix(in srgb, var(--color-success) 14%, transparent);
-    color: var(--color-success);
-}
-
-.jobs-worker-copy {
-    display: grid;
-    flex: 1 1 auto;
-    gap: 0.12rem;
-    min-width: 0;
-}
-
-.jobs-worker-copy strong { color: var(--color-text); }
-.jobs-worker-copy span,
-.jobs-worker-copy small { color: var(--color-text-muted); }
-.jobs-worker-copy small { font-family: var(--vb-font-mono, ui-monospace, monospace); font-size: 0.68rem; }
-.jobs-worker-actions { flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; }
-
-.jobs-section { margin-top: 2rem; }
+.jobs-section { margin-top: 1.55rem; }
 
 .jobs-section-heading {
     justify-content: space-between;
@@ -13988,14 +13558,6 @@ body.git-guard-focus-active #app-content {
     font-size: 1.2rem;
 }
 
-.jobs-section-intro {
-    max-width: 880px;
-    margin: -0.35rem 0 0.85rem;
-    color: var(--color-text-muted);
-    font-size: 0.76rem;
-    line-height: 1.5;
-}
-
 .jobs-count {
     color: var(--color-text-muted);
     font-family: var(--vb-font-mono, ui-monospace, monospace);
@@ -14004,8 +13566,8 @@ body.git-guard-focus-active #app-content {
 
 .jobs-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1rem;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.65rem;
 }
 
 .job-inline-editor {
@@ -14027,11 +13589,9 @@ body.git-guard-focus-active #app-content {
 
 .job-inline-form-header,
 .job-inline-form-actions,
-.job-worker-picker-row,
-.job-worker-preview > div,
-.job-repository-context,
-.job-worker-summary,
-.job-when {
+.job-environment-picker-row,
+.job-environment-preview > div,
+.job-repository-context {
     display: flex;
     align-items: center;
 }
@@ -14057,17 +13617,17 @@ body.git-guard-focus-active #app-content {
     line-height: 1.5;
 }
 
-.job-worker-picker-row {
+.job-environment-picker-row {
     align-items: flex-start;
     gap: 0.5rem;
 }
 
-.job-worker-picker {
+.job-environment-picker {
     flex: 1 1 320px;
     min-width: 0;
 }
 
-.job-worker-preview {
+.job-environment-preview {
     min-height: 52px;
     padding: 0.7rem 0.8rem;
     border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
@@ -14077,27 +13637,27 @@ body.git-guard-focus-active #app-content {
     font-size: 0.74rem;
 }
 
-.job-worker-preview[data-tone="ready"] {
+.job-environment-preview[data-tone="ready"] {
     border-color: color-mix(in srgb, var(--color-success) 34%, var(--color-border));
 }
 
-.job-worker-preview[data-tone="warning"] {
+.job-environment-preview[data-tone="warning"] {
     border-color: color-mix(in srgb, var(--color-warning) 48%, var(--color-border));
     color: var(--color-warning);
 }
 
-.job-worker-preview > div {
+.job-environment-preview > div {
     justify-content: space-between;
     gap: 0.75rem;
 }
 
-.job-worker-preview > div > span {
+.job-environment-preview > div > span {
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
 }
 
-.job-worker-preview pre {
+.job-environment-preview pre {
     max-height: 145px;
     margin: 0.55rem 0 0;
     overflow: auto;
@@ -14105,20 +13665,6 @@ body.git-guard-focus-active #app-content {
     font: inherit;
     line-height: 1.5;
     white-space: pre-wrap;
-}
-
-.job-legacy-notice {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.55rem;
-    margin-bottom: 1rem;
-    padding: 0.65rem 0.75rem;
-    border: 1px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--color-accent) 6%, transparent);
-    color: var(--color-text-muted);
-    font-size: 0.74rem;
-    line-height: 1.45;
 }
 
 .job-manual-note {
@@ -14167,59 +13713,87 @@ body.git-guard-focus-active #app-content {
 }
 
 .job-card {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 1rem;
     min-width: 0;
-    padding: 1.05rem;
+    padding: 0.82rem 0.9rem;
     border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
-    border-radius: 12px;
+    border-radius: 10px;
     background:
-        linear-gradient(150deg, color-mix(in srgb, var(--color-accent) 4%, transparent), transparent 45%),
+        linear-gradient(150deg, color-mix(in srgb, var(--color-accent) 3%, transparent), transparent 45%),
         var(--color-bg-elevated);
-    box-shadow: 0 15px 38px rgb(0 0 0 / 8%);
+    box-shadow: 0 10px 28px rgb(0 0 0 / 6%);
 }
 
 .job-card[data-enabled="false"] { opacity: 0.72; }
+.job-card-main { min-width: 0; }
 .job-card-topline { justify-content: space-between; gap: 0.75rem; }
-.job-card-title { min-width: 0; }
+.job-card-title {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 0;
+}
 
 .job-card-title h3 {
-    margin: 0.28rem 0 0;
+    margin: 0;
     overflow: hidden;
     color: var(--color-text);
-    font-size: 1.05rem;
+    font-size: 0.94rem;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.job-worker-summary {
-    gap: 0.6rem;
-    margin-top: 0.9rem;
-    padding: 0.65rem 0.7rem;
-    border: 1px solid color-mix(in srgb, var(--color-accent) 20%, var(--color-border));
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--color-accent) 5%, transparent);
-    color: var(--color-accent);
+.job-card-facts {
+    display: grid;
+    grid-template-columns: minmax(150px, 0.9fr) minmax(220px, 1.4fr) minmax(135px, 0.7fr);
+    gap: 0.65rem;
+    margin-top: 0.6rem;
 }
 
-.job-worker-summary > span {
+.job-card-fact {
     display: grid;
+    gap: 0.14rem;
     min-width: 0;
 }
 
-.job-worker-summary small {
+.job-card-fact > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
     color: var(--color-text-muted);
     font-size: 0.6rem;
     letter-spacing: 0.07em;
     text-transform: uppercase;
 }
 
-.job-worker-summary strong {
+.job-card-fact strong {
     overflow: hidden;
     color: var(--color-text);
-    font-size: 0.78rem;
+    font-size: 0.74rem;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.job-card-fact[data-tone="warning"] strong { color: var(--color-warning); }
+
+.job-card-trigger .job-triggers {
+    margin: 0;
+}
+
+.job-card-actions {
+    flex-wrap: nowrap;
+    gap: 0.36rem;
+}
+
+.job-icon-action {
+    display: inline-grid;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    place-items: center;
 }
 
 .job-provider,
@@ -14662,74 +14236,8 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 .job-run-status[data-tone="warning"] { background: color-mix(in srgb, var(--color-warning) 14%, transparent); color: var(--color-warning); }
 .job-run-status[data-tone="info"] { background: color-mix(in srgb, var(--color-accent) 13%, transparent); color: var(--color-accent); }
 
-.job-prompt {
-    display: -webkit-box;
-    min-height: 3.8em;
-    margin: 0.9rem 0;
-    overflow: hidden;
-    color: color-mix(in srgb, var(--color-text) 86%, transparent);
-    font-size: 0.82rem;
-    line-height: 1.55;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
-}
-
-.job-prompt-details {
-    margin-top: 0.75rem;
-    color: var(--color-text-muted);
-    font-size: 0.7rem;
-}
-
-.job-prompt-details summary { cursor: pointer; }
-
-.job-prompt-details .job-prompt {
-    min-height: 0;
-    margin: 0.45rem 0 0;
-    font-size: 0.74rem;
-    -webkit-line-clamp: 4;
-}
-
-.job-prompt-missing {
-    min-height: 0;
-    color: var(--color-warning);
-    font-style: italic;
-}
-
-.job-when {
-    align-items: flex-start;
-    gap: 0.65rem;
-    margin-top: 0.9rem;
-}
-
-.job-when > span {
-    padding-top: 0.3rem;
-    color: var(--color-text-muted);
-    font-family: var(--vb-font-mono, ui-monospace, monospace);
-    font-size: 0.6rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-}
-
-.job-when .job-triggers { margin: 0; }
-
-.job-meta { flex-wrap: wrap; gap: 0.75rem; color: var(--color-text-muted); font-size: 0.72rem; }
-.job-meta span { display: inline-flex; align-items: center; gap: 0.35rem; }
-
-.job-path {
-    margin-top: 0.75rem;
-    overflow: hidden;
-    color: var(--color-text-muted);
-    font-family: var(--vb-font-mono, ui-monospace, monospace);
-    font-size: 0.65rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.job-path i { margin-right: 0.38rem; }
-
 .job-triggers { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.9rem 0; }
 .jobs-trigger-chip { padding: 0.3rem 0.48rem; border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border)); border-radius: 6px; color: color-mix(in srgb, var(--color-accent) 82%, var(--color-text)); background: color-mix(in srgb, var(--color-accent) 7%, transparent); font-size: 0.67rem; }
-.job-card-actions { flex-wrap: wrap; gap: 0.42rem; margin-top: auto; padding-top: 0.2rem; }
 
 .jobs-empty {
     display: flex;
@@ -14792,52 +14300,46 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 .job-schedule-editor { margin: 0.3rem 0 0.65rem 1.5rem; padding: 0.85rem; border-left: 2px solid color-mix(in srgb, var(--color-accent) 45%, transparent); background: color-mix(in srgb, var(--color-accent) 4%, transparent); }
 .job-weekdays { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .job-weekdays label { display: flex; align-items: center; gap: 0.28rem; padding: 0.28rem 0.45rem; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-text-muted); font-size: 0.7rem; }
-.job-mode-warning { display: flex; align-items: flex-start; gap: 0.6rem; margin-top: 0.55rem; padding: 0.65rem; border: 1px solid color-mix(in srgb, var(--color-warning) 42%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--color-warning) 8%, transparent); color: var(--color-warning); font-size: 0.74rem; line-height: 1.45; }
-.job-mode-warning i { margin-top: 0.12rem; }
 
 .job-run-detail-summary { display: grid; gap: 0.35rem; margin-bottom: 0.75rem; }
 .job-run-detail-summary > div { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .job-run-detail-summary small { overflow-wrap: anywhere; color: var(--color-text-muted); font-family: var(--vb-font-mono, ui-monospace, monospace); }
-.job-run-log,
-.job-run-result { margin: 0; padding: 0.85rem; border: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--color-bg-base) 78%, #000); color: color-mix(in srgb, var(--color-text) 90%, transparent); font-family: var(--vb-font-mono, ui-monospace, monospace); font-size: 0.7rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-.job-run-log { min-height: 260px; max-height: 48vh; overflow: auto; }
-.job-run-result { margin-top: 0.5rem; max-height: 260px; overflow: auto; }
-
-.jobs-automation-station { overflow: hidden; }
-.jobs-automation-list { display: grid; gap: 0.55rem; }
-.jobs-automation-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0.75rem; padding: 0.72rem 0.8rem; border: 1px solid color-mix(in srgb, var(--color-border) 62%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--color-bg-base) 32%, transparent); }
-.jobs-automation-list article > div { display: grid; min-width: 0; }
-.jobs-automation-list strong { overflow: hidden; color: var(--color-text); font-size: 0.82rem; text-overflow: ellipsis; white-space: nowrap; }
-.jobs-automation-list small { color: var(--color-text-muted); font-size: 0.68rem; }
-.jobs-automation-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.28rem; min-height: 110px; color: var(--color-text-muted); text-align: center; }
-.jobs-automation-empty strong { color: var(--color-text); }
 
 @media (max-width: 1120px) {
-    .jobs-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .git-guard-hook-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+@media (max-width: 960px) {
+    .job-card {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .job-card-actions {
+        padding-top: 0.7rem;
+        border-top: 1px solid color-mix(in srgb, var(--color-border) 52%, transparent);
+    }
+}
+
 @media (max-width: 720px) {
-    .jobs-page-header,
-    .jobs-worker-card { align-items: stretch; flex-direction: column; }
+    .jobs-page-header { align-items: stretch; flex-direction: column; }
     .jobs-page-header .btn { width: 100%; }
-    .jobs-worker-actions { justify-content: stretch; }
-    .jobs-worker-actions .btn { flex: 1 1 auto; }
+    .jobs-runtime-strip { align-items: flex-start; }
     .jobs-section-heading { align-items: flex-start; }
     .job-inline-form { padding: 1rem; }
     .job-inline-form-header { align-items: stretch; }
-    .job-worker-picker-row { align-items: stretch; flex-direction: column; }
-    .job-worker-picker,
-    .job-worker-picker-row .btn { width: 100%; }
-    .job-worker-preview > div { align-items: flex-start; flex-direction: column; }
+    .job-environment-picker-row { align-items: stretch; flex-direction: column; }
+    .job-environment-picker,
+    .job-environment-picker-row .btn { width: 100%; }
+    .job-environment-preview > div { align-items: flex-start; flex-direction: column; }
     .job-repository-context code { flex-basis: 100%; }
     .job-inline-form-actions .btn { flex: 1 1 0; }
-    .jobs-grid { grid-template-columns: 1fr; }
+    .job-card-facts { grid-template-columns: minmax(0, 1fr); }
+    .job-card-topline { align-items: flex-start; }
+    .job-card-title { align-items: flex-start; flex-direction: column; gap: 0.25rem; }
+    .job-card-actions .btn-primary { flex: 1 1 auto; }
     .jobs-runs-table th:nth-child(2),
     .jobs-runs-table td:nth-child(2),
     .jobs-runs-table th:nth-child(5),
     .jobs-runs-table td:nth-child(5) { display: none; }
     .job-schedule-editor { margin-left: 0; }
-    .jobs-automation-list article { grid-template-columns: minmax(0, 1fr) auto; }
-    .jobs-automation-list article .btn { grid-column: 1 / -1; }
 }

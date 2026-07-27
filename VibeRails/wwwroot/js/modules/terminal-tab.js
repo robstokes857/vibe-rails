@@ -144,9 +144,18 @@ export class TerminalTab {
         // (cycling previous prompts) instead of the chat viewport. Once the
         // textarea grabs the events, the focus sticks and the user can't
         // scroll the chat at all. Root cause is opentui's hit-test routing
-        // (upstream bug: anomalyco/opencode#35295); mouse tracking stays on
-        // the whole session, so this is a routing/state issue, not a mode
-        // toggle. Translate wheel events to PageUp/PageDown, which OpenCode
+        // (upstream bug: anomalyco/opencode#35295), with mouse tracking still
+        // on — a routing/state issue, not a mode toggle.
+        //
+        // NOTE (2026-07-26): that "mouse tracking stays on" premise holds for
+        // THIS variant only. There is a second one with identical symptoms where
+        // tracking is genuinely off (our reconnect snapshot used to disable it),
+        // so xterm.js emits cursor-up/down instead of SGR and this function is a
+        // no-op on them. Fixed server-side in TerminalGridSerializer; do not
+        // widen this translation to cover arrow keys. See TERMINAL.md
+        // "## 2026-07-26 GLM 5.2 wheel acts like a held up-arrow".
+        //
+        // Translate wheel events to PageUp/PageDown, which OpenCode
         // binds to messages_page_up/messages_page_down — works regardless of
         // where opentui's hit-test routes the mouse event. Only SGR wheel
         // events (button 64/65, mode 1006) are translated; clicks/drags pass
@@ -472,6 +481,21 @@ export class TerminalTab {
 
         const cols = this.vibeTerminal.cols;
         const rows = this.vibeTerminal.rows;
+
+        // Never send geometry the protocol will refuse. TerminalControlProtocol
+        // accepts cols 10..1000 and rows 5..500; anything outside that fails to
+        // parse server-side, and a rejected `__resize__:` frame used to be routed
+        // straight to PTY stdin — typing the literal text into the TUI. A VS Code
+        // panel dragged to a sliver really does fit to 4 rows (session 71dee36a
+        // sent `__resize__:171,4` twice). Returning BEFORE lastResizeSignature is
+        // assigned matters: it keeps the signature at the last good geometry, so
+        // the real size still sends once the panel is usable again. Mirrors the
+        // preConnectDimsLookSane guard on the WS-URL hint path below.
+        if (!Number.isFinite(cols) || !Number.isFinite(rows)
+            || cols < 10 || cols > 1000 || rows < 5 || rows > 500) {
+            return;
+        }
+
         const signature = `${cols}x${rows}`;
         const signatureChanged = this.lastResizeSignature !== signature;
         if (!force && !signatureChanged) {

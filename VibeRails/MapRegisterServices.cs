@@ -32,7 +32,13 @@ namespace VibeRails
     {
         public static void Register(IServiceCollection serviceCollection, string[]? args = null, string? localApiBaseUrl = null)
         {
-            var isTerminalTabChildProcess = IsTerminalTabChildProcess(args ?? Environment.GetCommandLineArgs());
+            var processArgs = args ?? Environment.GetCommandLineArgs();
+            var isTerminalTabChildProcess = IsTerminalTabChildProcess(processArgs);
+            var isActiveRootBackendProcess = IsActiveRootBackendProcess(processArgs);
+            var isFakeCliTestProcess = string.Equals(
+                Environment.GetEnvironmentVariable("VIBERAILS_TEST_FAKE_CLI"),
+                "1",
+                StringComparison.Ordinal);
             localApiBaseUrl ??= "http://127.0.0.1:0";
 
             serviceCollection.AddHttpClient<ISummaryService, SummaryService>(
@@ -95,15 +101,27 @@ namespace VibeRails
             serviceCollection.AddSingleton<IJobStore>(_ => new JobStore(
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
             serviceCollection.AddSingleton<IJobExecutableResolver, JobExecutableResolver>();
-            // Spawns a real OS terminal per queued run. Scoped because it resolves environments
-            // through IRepository; JobRunner is static (it runs inside the spawned process, not here).
+            // Spawns a real OS terminal per queued run through the same scoped Environment launch
+            // pipeline as the CLI launch API. JobRunner itself lives in the spawned process.
             serviceCollection.AddScoped<IJobLaunchService, JobLaunchService>();
-            serviceCollection.AddSingleton<IJobScheduleTaskInstaller, JobScheduleTaskInstaller>();
-            // The scheduler launches due runs in the dashboard process (it no-ops elsewhere).
-            // Registered once and exposed both as the hosted service and via IJobScheduler.Kick().
+            // Keep the scheduler signal resolvable everywhere JobService can be resolved, but only
+            // an active root backend hosts the polling loop. Terminal-tab children and `vb --env`
+            // processes share state.db but must never compete for scheduled work.
             serviceCollection.AddSingleton<JobSchedulerHostedService>();
             serviceCollection.AddSingleton<IJobScheduler>(sp => sp.GetRequiredService<JobSchedulerHostedService>());
-            serviceCollection.AddHostedService(sp => sp.GetRequiredService<JobSchedulerHostedService>());
+            // Playwright's real backend uses a fake CLI but shares the developer account's state
+            // directory. Never let that test host dispatch persisted Automation work.
+            if (isActiveRootBackendProcess && !isFakeCliTestProcess)
+            {
+                serviceCollection.AddHostedService(sp => sp.GetRequiredService<JobSchedulerHostedService>());
+            }
+            else if (isActiveRootBackendProcess)
+            {
+                // An env var silently disabling the scheduler in a real environment would look
+                // exactly like "Automations never fire". Make the suppression loud and findable.
+                Serilog.Log.Warning(
+                    "[Jobs] Automation scheduler NOT registered: VIBERAILS_TEST_FAKE_CLI=1 marks this as a UI-test host");
+            }
             serviceCollection.AddScoped<IJobService, JobService>();
             // Singleton for the same reason as the savings tally: one ordered writer, so concurrent
             // relays serialize capture inserts, re-sight counts, and clears before reaching SQLite.
@@ -170,6 +188,7 @@ namespace VibeRails
             serviceCollection.AddScoped<ICopilotLlmCliLauncher, CopilotLlmCliLauncher>();
             serviceCollection.AddScoped<IOpencodeLlmCliLauncher, OpencodeLlmCliLauncher>();
             serviceCollection.AddScoped<ILaunchLLMService, LaunchLLMService>();
+            serviceCollection.AddScoped<IEnvironmentLaunchService, EnvironmentLaunchService>();
 
             // In-process MCP server, exposed over HTTP at /mcp (see app.MapMcp in Program.cs).
             // Only the root backend hosts it — terminal-tab child processes skip it so we don't
@@ -284,6 +303,17 @@ namespace VibeRails
             return args.Any(static arg =>
                 arg.Equals("--parent-pid", StringComparison.OrdinalIgnoreCase) ||
                 arg.StartsWith("--parent-pid=", StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// True only for a long-lived root backend that may coordinate global Automation work.
+        /// Kept pure so process-role behavior can be pinned without starting DI or Kestrel.
+        /// </summary>
+        internal static bool IsActiveRootBackendProcess(IEnumerable<string> args)
+        {
+            var arguments = args as string[] ?? args.ToArray();
+            return !IsTerminalTabChildProcess(arguments)
+                   && !ArgumentParser.Parse(arguments).IsLMBootstrap;
         }
 
     }

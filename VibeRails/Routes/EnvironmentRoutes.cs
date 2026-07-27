@@ -185,7 +185,7 @@ public static class EnvironmentRoutes
                     && await jobStore.CountJobsForEnvironmentAsync(environment.Id, cancellationToken) > 0)
                 {
                     return Results.BadRequest(new ErrorResponse(
-                        "This environment / worker is used by a Job, so its Initial Message cannot be empty."));
+                        "This Environment is used by an Automation, so its Initial Message cannot be empty."));
                 }
                 environment.CustomPrompt = request.CustomPrompt;
             }
@@ -232,8 +232,7 @@ public static class EnvironmentRoutes
             var referencingJobCount = await jobStore.CountJobsForEnvironmentAsync(environment.Id, cancellationToken);
             if (referencingJobCount > 0)
             {
-                return Results.Conflict(new ErrorResponse(
-                    $"Cannot delete this environment because {referencingJobCount} job(s) use it. Delete or reassign those jobs first."));
+                return Results.Conflict(new ErrorResponse(EnvironmentInUseMessage(referencingJobCount)));
             }
 
             try
@@ -246,8 +245,7 @@ public static class EnvironmentRoutes
                 {
                     referencingJobCount = await jobStore.CountJobsForEnvironmentAsync(environment.Id, cancellationToken);
                     return referencingJobCount > 0
-                        ? Results.Conflict(new ErrorResponse(
-                            $"Cannot delete this environment because {referencingJobCount} job(s) use it. Delete or reassign those jobs first."))
+                        ? Results.Conflict(new ErrorResponse(EnvironmentInUseMessage(referencingJobCount)))
                         : Results.Conflict(new ErrorResponse(
                             "The environment changed while it was being deleted. Refresh and try again."));
                 }
@@ -261,6 +259,11 @@ public static class EnvironmentRoutes
             return Results.Ok(new OK("Environment deleted"));
         }).WithName("DeleteEnvironment");
     }
+
+    private static string EnvironmentInUseMessage(int automationCount) =>
+        automationCount == 1
+            ? "Cannot delete this Environment because 1 Automation uses it. Delete or reassign that Automation first."
+            : $"Cannot delete this Environment because {automationCount} Automations use it. Delete or reassign those Automations first.";
 
     /// <summary>
     /// Coordinates the filesystem rename with the guarded database deletion. The database result
