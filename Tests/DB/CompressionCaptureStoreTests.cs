@@ -84,12 +84,12 @@ public sealed class CompressionCaptureStoreTests : IDisposable
         Assert.True(detail.RewriteAccepted);
         Assert.Equal(DateTimeKind.Utc, detail.CreatedUtc.Kind);
 
-        // The trace is the debugging contract: every stage's verdict survives, including the ones
-        // that did nothing. A capture that can't state what each stage decided can't be judged.
-        Assert.Equal(3, detail.Trace.Count);
-        Assert.Equal(new StageTrace(CompressionCatalog.CrCollapse, StageOutcome.Disabled), detail.Trace[0]);
-        Assert.Equal(new StageTrace(CompressionCatalog.GrepGroup, StageOutcome.NotApplicable), detail.Trace[1]);
-        Assert.Equal(new StageTrace(CompressionCatalog.DedupeLines, StageOutcome.Applied, 4), detail.Trace[2]);
+        // Stage traces are deliberately NOT persisted (2026-07-28): they describe the pipeline on
+        // the day they were written, and the pipeline changes with every compression change, so a
+        // stored trace cannot be re-judged against today's stages. The raw before/after above is
+        // stage-independent and is what a what-if actually replays. EnabledIds still survives —
+        // that is configuration, not attribution, and a capture must state what it ran under.
+        Assert.Empty(detail.Trace);
         Assert.Equal([CompressionCatalog.DedupeLines, CompressionCatalog.BlankEdges], detail.EnabledIds);
         Assert.True(Assert.Single(await store.ListAsync(10, 0, CancellationToken.None)).RewriteAccepted);
     }

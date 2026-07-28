@@ -284,9 +284,9 @@ test('TerminalTokenCompressionMeter shows an honest savings placeholder and a se
     assert.match(trigger.getAttribute('aria-label'), /token savings not yet measured/i);
 
     blinker.setTokensSaved({ session: 12400, month: 90200, allTime: 1500000 });
-    // The compact trigger shows all-time savings (the monotonically-increasing tally that
-    // survives restarts); the popover carries the full session/month/all-time breakdown.
-    assert.match(renderedText(metric), /1\.5M tokens saved/);
+    // The compact trigger shows this app run's savings — the window that shows the saver working
+    // now; the popover carries the full session/month/all-time breakdown.
+    assert.match(renderedText(metric), /12\.4K tokens saved/);
     assert.equal(metric.classList.contains('is-placeholder'), false);
     assert.match(trigger.getAttribute('aria-label'), /12,400 this session/i);
     assert.match(trigger.getAttribute('aria-label'), /90,200 this month/i);
@@ -340,8 +340,8 @@ test('TerminalTokenCompressionMeter owns app event wiring and the initial saving
         null,
         { showLoading: false }
     ]]);
-    // The trigger shows all-time savings (tokensSaved), not the session tally.
-    assert.match(renderedText(mount.querySelector('.vb-activity-blinker-metric')), /8\.1K tokens saved/);
+    // The trigger shows the session tally (tokensSavedSession), not the all-time one.
+    assert.match(renderedText(mount.querySelector('.vb-activity-blinker-metric')), /900 tokens saved/);
 
     proxyActivityHandler({
         source: 'Codex proxy',
@@ -352,7 +352,7 @@ test('TerminalTokenCompressionMeter owns app event wiring and the initial saving
         tokensSavedTotal: 8400
     });
     assert.equal(meter.totalCount, 1);
-    assert.match(renderedText(mount.querySelector('.vb-activity-blinker-metric')), /8\.4K tokens saved/);
+    assert.match(renderedText(mount.querySelector('.vb-activity-blinker-metric')), /1\.1K tokens saved/);
 });
 
 test('TerminalTokenCompressionMeter does not let a delayed startup seed overwrite a live tally', async () => {

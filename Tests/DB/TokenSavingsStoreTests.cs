@@ -59,11 +59,57 @@ public sealed class TokenSavingsStoreTests : IDisposable
         var totals = second.GetTotals();
         Assert.Equal(2100, totals.BytesBefore);
         Assert.Equal(1050, totals.BytesAfter);
-        // The session window covers only this process; both writes are (normally) this month.
-        Assert.Equal(100, totals.SessionBytesBefore);
-        Assert.Equal(50, totals.SessionBytesAfter);
+        // The session window covers only what the table gained after this store started; both
+        // writes are (normally) this month.
+        Assert.Equal(50, totals.SessionBytesSaved);
         Assert.Equal(2100, totals.MonthBytesBefore);
         Assert.Equal(1050, totals.MonthBytesAfter);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_SeesSavingsRecordedByAnotherProcess()
+    {
+        // The shape that broke the meter: the process serving the dashboard proxies nothing,
+        // because every terminal tab relays through its own child process. Its own counters would
+        // report a session of zero forever, so the displayed tally has to come from the table.
+        InsertDayRow(DateTime.UtcNow.ToString("yyyy-MM") + "-01", "anthropic", 5000, 4000);
+        var dashboard = new TokenSavingsStore(ConnectionString);
+        await dashboard.LastPersist;
+        Assert.Equal(0, dashboard.GetTotals().SessionBytesSaved);
+
+        var tabChild = new TokenSavingsStore(ConnectionString);
+        tabChild.Record("anthropic", 900, 100);
+        await tabChild.LastPersist;
+
+        // Nothing reaches the dashboard process on its own: only a re-read does.
+        Assert.Equal(0, dashboard.GetTotals().SessionBytesSaved);
+        await dashboard.RefreshAsync();
+
+        var totals = dashboard.GetTotals();
+        Assert.Equal(5900, totals.BytesBefore);
+        Assert.Equal(4100, totals.BytesAfter);
+        Assert.Equal(1800, totals.BytesSaved);
+        // Session counts the tab's 800 bytes and none of the 1000 that predate this run.
+        Assert.Equal(800, totals.SessionBytesSaved);
+        Assert.Equal(200, totals.SessionTokensSaved);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_RepeatedReads_DoNotDoubleCountOwnRecords()
+    {
+        var store = new TokenSavingsStore(ConnectionString);
+        store.Record("anthropic", 1000, 400);
+        await store.LastPersist;
+
+        // A record is either in the table or in the unpersisted tally, never both, however many
+        // times the table is re-read.
+        for (var i = 0; i < 3; i++)
+            await store.RefreshAsync();
+
+        var totals = store.GetTotals();
+        Assert.Equal(1000, totals.BytesBefore);
+        Assert.Equal(400, totals.BytesAfter);
+        Assert.Equal(600, totals.SessionBytesSaved);
     }
 
     [Fact]
@@ -202,9 +248,9 @@ public sealed class TokenSavingsStoreTests : IDisposable
         var totals = store.GetTotals();
         Assert.Equal(500, totals.BytesBefore);
         Assert.Equal(200, totals.BytesAfter);
-        // Session and month tallies are pure in-memory bookkeeping: still intact with no DB.
-        Assert.Equal(500, totals.SessionBytesBefore);
-        Assert.Equal(200, totals.SessionBytesAfter);
+        // Records that never reached a row are still the tally: with no database, the unpersisted
+        // side is all there is, and every window must still add up.
+        Assert.Equal(300, totals.SessionBytesSaved);
         Assert.Equal(500, totals.MonthBytesBefore);
         Assert.Equal(200, totals.MonthBytesAfter);
     }

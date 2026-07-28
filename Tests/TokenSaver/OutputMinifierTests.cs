@@ -93,10 +93,22 @@ public class OutputMinifierTests
     [Fact]
     public void T1_Crlf_PreservedByteVerbatim_WhenOff()
     {
+        // Both line-ending owners off: T1 (as a side effect) and crlf-normalize (as its job). Either
+        // one alone still rewrites the pair, which is what makes them independently killable.
         var input = "a\r\nb";
-        var flags = MinifyFlags.Default with { CollapseCrRedraws = false };
+        var flags = MinifyFlags.Default with { CollapseCrRedraws = false, NormalizeCrLf = false };
         var result = OutputMinifier.Minify(input, flags);
         Assert.Same(input, result); // no other transform applies → original instance back
+    }
+
+    [Fact]
+    public void CrlfNormalize_RewritesPair_WithT1Off()
+    {
+        // The reason the stage was split out: bisecting redraw collapse must not silently disable
+        // line-ending normalization, because every shape and condense stage downstream fails open on
+        // a surviving \r.
+        var flags = MinifyFlags.Default with { CollapseCrRedraws = false };
+        Assert.Equal("a\nb", OutputMinifier.Minify("a\r\nb", flags));
     }
 
     [Fact]
@@ -255,7 +267,9 @@ public class OutputMinifierTests
     public void T1Off_CrlfOnlyStrings_StillMinify()
     {
         // The bare-CR abort must not disable the other transforms for well-formed CRLF text.
-        var flags = MinifyFlags.Default with { CollapseCrRedraws = false };
+        // crlf-normalize is off too so this stays a test of the abort rule rather than of line
+        // endings — the pair surviving verbatim is the evidence nothing bailed out early.
+        var flags = MinifyFlags.Default with { CollapseCrRedraws = false, NormalizeCrLf = false };
         Assert.Equal("a\r\nb", OutputMinifier.Minify("a  \r\nb\n", flags));
     }
 
@@ -455,7 +469,7 @@ public class OutputMinifierTests
     public static TheoryData<int> AllFlagCombos()
     {
         var data = new TheoryData<int>();
-        for (var bits = 0; bits < 32; bits++)
+        for (var bits = 0; bits < 64; bits++)
             data.Add(bits);
         return data;
     }
@@ -465,7 +479,8 @@ public class OutputMinifierTests
         StripAnsiStyling: (bits & 2) != 0,
         StripTrailingWhitespace: (bits & 4) != 0,
         TrimBlankLineEdges: (bits & 8) != 0,
-        CollapseBlankLineRuns: (bits & 16) != 0);
+        CollapseBlankLineRuns: (bits & 16) != 0,
+        NormalizeCrLf: (bits & 32) != 0);
 
     [Theory]
     [MemberData(nameof(AllFlagCombos))]
@@ -495,11 +510,11 @@ public class OutputMinifierTests
                 $"{input.Length} → {once.Length}");
 
             // (4) conservation: every output char comes from the input, in order.
-            //     With T1 on, the only rewrite is CRLF→LF, so the output is a subsequence
-            //     of the CRLF-normalized input. With T1 off (or on the abort fail-open
-            //     path, which returns the RAW input — possibly containing \r\n — verbatim)
-            //     the reference is the raw input itself.
-            var reference = flags.CollapseCrRedraws && !aborted
+            //     With T1 or crlf-normalize on, the only rewrite is CRLF→LF, so the output is a
+            //     subsequence of the CRLF-normalized input. With both off (or on the abort
+            //     fail-open path, which returns the RAW input — possibly containing \r\n —
+            //     verbatim) the reference is the raw input itself.
+            var reference = (flags.CollapseCrRedraws || flags.NormalizeCrLf) && !aborted
                 ? input.Replace("\r\n", "\n")
                 : input;
             Assert.True(IsSubsequence(once, reference),

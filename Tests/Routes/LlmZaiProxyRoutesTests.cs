@@ -81,10 +81,27 @@ public sealed class LlmZaiProxyRoutesTests
         Assert.DoesNotContain("api-version", activity.Target, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task TokenSaverDisabled_StillRecordsTheExchange()
+    {
+        var result = await SendAsync(
+            enabled: true,
+            authenticated: true,
+            TestContext.Current.CancellationToken,
+            tokenSaverEnabled: false);
+
+        var exchange = Assert.Single(result.Exchanges);
+        Assert.Equal("zai", exchange.Provider);
+        Assert.Equal("/llm/zai/api/paas/v4/chat/completions", exchange.Path);
+        Assert.Equal(200, exchange.StatusCode);
+        Assert.Equal("{\"ok\":true}", exchange.Response);
+    }
+
     private static async Task<ProxyResult> SendAsync(
         bool enabled,
         bool authenticated,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool tokenSaverEnabled = true)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
@@ -93,6 +110,7 @@ public sealed class LlmZaiProxyRoutesTests
         var upstream = new RecordingUpstreamHandler();
         using var clientFactory = new StubHttpClientFactory(upstream);
         var events = new RecordingEventSink();
+        var exchanges = new RecordingExchangeSink();
         var plan = CompressionPlan.FromLegacy(
             MinifyFlags.Default,
             default,
@@ -100,13 +118,14 @@ public sealed class LlmZaiProxyRoutesTests
         builder.Services.AddSingleton<IHttpClientFactory>(clientFactory);
         builder.Services.AddSingleton<ILlmProxyAuthGate>(new StubAuthGate());
         builder.Services.AddSingleton<ILlmProxyEventSink>(events);
+        builder.Services.AddSingleton<ILlmProxyExchangeSink>(exchanges);
         builder.Services.AddSingleton<ILlmProxySettingsService>(new StubSettingsService(
             new LlmProxySettings(
                 CodexLlmProxyEnabled: false,
                 CodexLlmProxyMode: CodexLlmProxySettings.ModeSubscription,
                 ClaudeLlmProxyEnabled: false,
                 OpenCodeLlmProxyEnabled: enabled,
-                OpenCodeTokenSaverEnabled: enabled,
+                OpenCodeTokenSaverEnabled: enabled && tokenSaverEnabled,
                 TokenSaverPlan: plan)));
 
         await using var app = builder.Build();
@@ -135,7 +154,7 @@ public sealed class LlmZaiProxyRoutesTests
 
             using var response = await SharedClient.SendAsync(request, cancellationToken);
             await response.Content.ReadAsByteArrayAsync(cancellationToken);
-            return new ProxyResult(response.StatusCode, upstream, events);
+            return new ProxyResult(response.StatusCode, upstream, events, [.. exchanges.Records]);
         }
         finally
         {
@@ -146,7 +165,8 @@ public sealed class LlmZaiProxyRoutesTests
     private sealed record ProxyResult(
         HttpStatusCode StatusCode,
         RecordingUpstreamHandler Upstream,
-        RecordingEventSink Events);
+        RecordingEventSink Events,
+        List<LlmProxyExchange> Exchanges);
 
     private sealed class StubSettingsService(LlmProxySettings settings) : ILlmProxySettingsService
     {
@@ -158,6 +178,13 @@ public sealed class LlmZaiProxyRoutesTests
         public bool ValidateSessionToken(string? token) => token == SessionToken;
 
         public bool ValidateTabToken(string? token) => token == TabToken;
+    }
+
+    private sealed class RecordingExchangeSink : ILlmProxyExchangeSink
+    {
+        public List<LlmProxyExchange> Records { get; } = [];
+
+        public void Record(LlmProxyExchange exchange) => Records.Add(exchange);
     }
 
     private sealed class RecordingEventSink : ILlmProxyEventSink

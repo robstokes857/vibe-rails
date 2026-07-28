@@ -178,7 +178,6 @@ public sealed class VcaHookRunner : IVcaHookRunner
         if (!summary.HasCommitViolations)
         {
             await _presenter.WriteSuccessAsync("No VCA commit acknowledgments were required.");
-            await PauseIfInteractiveAsync(invocation);
             return 0;
         }
 
@@ -204,7 +203,6 @@ public sealed class VcaHookRunner : IVcaHookRunner
         if (missingAcknowledgments.Count == 0)
         {
             await _presenter.WriteSuccessAsync("VCA commit acknowledgments already found.");
-            await PauseIfInteractiveAsync(invocation);
             return 0;
         }
 
@@ -214,7 +212,10 @@ public sealed class VcaHookRunner : IVcaHookRunner
             missingAcknowledgments,
             cancellationToken);
 
-        await PauseIfInteractiveAsync(invocation);
+        if (!accepted)
+        {
+            await PauseIfInteractiveAsync(invocation);
+        }
         return accepted ? 0 : 1;
     }
 

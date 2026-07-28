@@ -28,8 +28,15 @@ internal interface ILlmProxyBodyTransform
 /// cap-overflow path where the body is forwarded without a rewrite attempt.
 /// <paramref name="BufferLease"/> owns the pooled buffers backing <paramref name="Content"/> and
 /// must stay alive until the upstream send completes; the relay disposes it.
+///
+/// <paramref name="OriginalBody"/> is the buffered body before any rewrite, for
+/// <see cref="ILlmProxyExchangeSink"/>. It points into the same pooled buffers as
+/// <paramref name="Content"/>, so it is only valid until the lease is disposed — a consumer that
+/// outlives the request must copy it. Empty on the cap-overflow path, where no complete original
+/// was ever held in memory.
 /// </summary>
 internal sealed record TransformedRequestBody(
     HttpContent Content,
     ToolOutputRewriteResult? Savings,
-    IDisposable? BufferLease);
+    IDisposable? BufferLease,
+    ReadOnlyMemory<byte> OriginalBody = default);

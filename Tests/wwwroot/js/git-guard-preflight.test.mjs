@@ -226,6 +226,27 @@ test('MintLint detail model prefers the full metric report over the legacy text 
     assert.match(viewModel.worstMetrics[0].snippet, /Evaluate/);
 });
 
+test('MintLint detail model preserves null baseline for change-scoped scores', () => {
+    const files = buildMintLintDetailModel({
+        report: {
+            files: [{
+                file: 'src/change.cs',
+                score: 30,
+                rating: 'Okay',
+                referencedByCount: 0,
+                priority: 30,
+                baselineScore: null,
+                introducedScore: null,
+                categories: []
+            }],
+            worstMetrics: []
+        }
+    });
+
+    assert.equal(files[0].baseline, null);
+    assert.equal(files[0].introduced, null);
+});
+
 test('MintLint renderer leads with worst offenders and keeps the file list collapsed', () => {
     const container = new FakeElement('div');
     const documentRef = { createElement: tagName => new FakeElement(tagName) };

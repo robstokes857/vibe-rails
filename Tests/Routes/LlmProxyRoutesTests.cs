@@ -70,6 +70,14 @@ public class LlmProxyRoutesTests
             "https://api.openai.com/v1/responses?api_key=query-secret",
             result.UpstreamUri?.AbsoluteUri);
 
+        // Exchange logging is a proxy invariant, including when the token saver is off (the
+        // helper's default). It has no settings gate.
+        var exchange = Assert.Single(result.Exchanges);
+        Assert.Equal("openai", exchange.Provider);
+        Assert.Equal("/llm/openai/v1/responses", exchange.Path);
+        Assert.Equal(200, exchange.StatusCode);
+        Assert.Equal("relay-ok", exchange.Response);
+
         var appEvent = Assert.Single(result.Events);
         Assert.Equal("proxy_activity", appEvent.Type);
         Assert.Equal("Codex proxy", appEvent.Payload.GetProperty("source").GetString());
@@ -216,8 +224,10 @@ public class LlmProxyRoutesTests
         // (including the payload sanitization asserted below).
         builder.Services.AddSingleton<ILlmProxyAuthGate>(new LlmProxyAuthGateAdapter(authService.Object));
         var savingsStore = new StubTokenSavingsStore();
+        var exchanges = new RecordingExchangeSink();
         builder.Services.AddSingleton<ILlmProxyEventSink>(
             new LlmProxyEventSinkAdapter(eventBus, savingsStore));
+        builder.Services.AddSingleton<ILlmProxyExchangeSink>(exchanges);
         builder.Services.AddSingleton<IHttpClientFactory>(clientFactory);
         builder.Services.AddSingleton<ILlmProxySettingsService>(
             new StubProxySettingsService(new LlmProxySettings(
@@ -255,6 +265,7 @@ public class LlmProxyRoutesTests
                 upstreamHandler.RequestUri,
                 upstreamHandler.RequestBody,
                 [.. savingsStore.Records],
+                [.. exchanges.Records],
                 [.. events]);
         }
         finally
@@ -270,12 +281,20 @@ public class LlmProxyRoutesTests
         Uri? UpstreamUri,
         byte[] UpstreamBody,
         List<(string Provider, int BytesBefore, int BytesAfter)> SavingsRecords,
+        List<LlmProxyExchange> Exchanges,
         List<AppEvent> Events);
 
     private sealed class StubProxySettingsService(LlmProxySettings settings)
         : ILlmProxySettingsService
     {
         public LlmProxySettings GetSettings() => settings;
+    }
+
+    private sealed class RecordingExchangeSink : ILlmProxyExchangeSink
+    {
+        public List<LlmProxyExchange> Records { get; } = [];
+
+        public void Record(LlmProxyExchange exchange) => Records.Add(exchange);
     }
 
     // Keeps the sink adapter off the real state.db: these tests assert relay/event behavior, not
@@ -296,9 +315,11 @@ public class LlmProxyRoutesTests
                 after += a;
             }
 
-            // Every window reports the same sums; these tests only assert the totals reach pings.
-            return new VibeRails.DB.TokenSavingsTotals(before, after, before, after, before, after);
+            // Every window reports the same savings; these tests only assert the totals reach pings.
+            return new VibeRails.DB.TokenSavingsTotals(before, after, before - after, before, after);
         }
+
+        public Task RefreshAsync() => Task.CompletedTask;
     }
 
     private sealed class StubHttpClientFactory : IHttpClientFactory, IDisposable

@@ -47,6 +47,8 @@ public static class LlmZaiProxyRoutes
             var transform = settings.OpenCodeTokenSaverEnabled && saverHasWork
                 ? new ZaiBodyTransform(plan, captureSink)
                 : null;
+            // Exchange logging is an invariant of using the proxy, not a setting.
+            var exchangeSink = context.RequestServices.GetRequiredService<ILlmProxyExchangeSink>();
 
             var target = LlmProxyRelay.BuildTarget(context.Request, UpstreamHost, PathPrefix);
             await LlmProxyRelay.HandleAsync(
@@ -55,9 +57,11 @@ public static class LlmZaiProxyRoutes
                 context.RequestServices.GetRequiredService<ILlmProxyAuthGate>(),
                 context.RequestServices.GetRequiredService<ILlmProxyEventSink>(),
                 target,
+                "zai",
                 "OpenCode proxy",
                 bodyTransform: transform,
-                context.RequestAborted);
+                context.RequestAborted,
+                exchangeSink);
         }).WithName("LlmZaiProxy");
     }
 }

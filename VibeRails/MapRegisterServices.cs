@@ -92,6 +92,12 @@ namespace VibeRails
             serviceCollection.AddSingleton<ILlmProxyAuthGate, LlmProxyAuthGateAdapter>();
             serviceCollection.AddSingleton<ILlmProxyEventSink, LlmProxyEventSinkAdapter>();
             serviceCollection.AddSingleton<ICompressionCaptureSink, CompressionCaptureSinkAdapter>();
+            // Required by every proxy route: exchange logging has no settings/UI gate.
+            serviceCollection.AddSingleton<ILlmProxyExchangeSink, LlmProxyExchangeSinkAdapter>();
+            // Its own database file, never state.db: one exchange is the whole conversation plus
+            // the response, and the CLI resends that history every turn. See LlmExchangeLogStore.
+            serviceCollection.AddSingleton<ILlmExchangeLogStore>(_ => new LlmExchangeLogStore(
+                $"Data Source={Path.Combine(Path.GetDirectoryName(ParserConfigs.GetStatePath()) ?? ".", "proxy_exchanges.db")};Mode=ReadWriteCreate"));
             serviceCollection.AddSingleton<ITokenSavingsStore>(_ => new TokenSavingsStore(
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
             // Files the user excluded from Code quality scans (Rules page). Singleton for the
@@ -128,7 +134,6 @@ namespace VibeRails
             serviceCollection.AddSingleton<ICompressionCaptureStore>(_ => new CompressionCaptureStore(
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
             serviceCollection.AddScoped<IAgentTerminalToolService, AgentTerminalToolService>();
-            serviceCollection.AddScoped<IAgentTerminalToolGateway, LocalAgentTerminalToolGateway>();
             serviceCollection.AddScoped<IRepository>(sp =>
             {
                 var connectionString = $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared";
@@ -200,7 +205,6 @@ namespace VibeRails
                 // so the MCP server can resolve it (and its IUnifiedSearchService dependency)
                 // from the per-request scope.
                 serviceCollection.AddScoped<SessionSearchTool>();
-                serviceCollection.AddScoped<TerminalTools>();
                 // run_shell_command (HostShellTools) and web_search/web_fetch (WebResearchTools) are
                 // intentionally not exposed for now (security review 2026-07-02). Classes kept in-tree;
                 // to restore, re-add AddScoped<...>() here, WithTools<...>() in the chain below, and the
@@ -213,8 +217,7 @@ namespace VibeRails
                     })
                     .WithHttpTransport()
                     .WithTools<RulesTool>()
-                    .WithTools<SessionSearchTool>()
-                    .WithTools<TerminalTools>();
+                    .WithTools<SessionSearchTool>();
             }
 
             // Claude Agent Sync Service (syncs CLAUDE.md to AGENTS.md on session lifecycle)
@@ -226,9 +229,6 @@ namespace VibeRails
             serviceCollection.AddScoped<ITerminalIoObserver, GitDiffIdleCaptureObserver>();
             serviceCollection.AddSingleton<ITerminalIoObserver, WaitingForUserInputObserver>();
 
-#if DEBUG
-            serviceCollection.AddScoped<ITerminalIoObserver, DebugWebSocketEventObserver>();
-#endif
             serviceCollection.AddScoped<ITerminalIoObserverService, TerminalIoObserverService>();
             serviceCollection.AddScoped<ITerminalStateService, TerminalStateService>();
             serviceCollection.AddScoped<ICommandService, CommandService>();
@@ -264,11 +264,6 @@ namespace VibeRails
             serviceCollection.AddScoped<ISessionTranscriptService, SessionTranscriptService>();
             serviceCollection.AddScoped<ISessionResumeService, SessionResumeService>();
 
-#if DEBUG
-            // Debug event bus — fire-and-forget publish to connected WebSocket viewers
-            serviceCollection.AddSingleton<DebugEventBus>();
-            serviceCollection.AddSingleton<DebugEventWebSocketHandler>();
-#endif
             serviceCollection.AddSingleton<IAppEventBus, AppEventBus>();
             serviceCollection.AddSingleton<AppEventWebSocketHandler>();
 

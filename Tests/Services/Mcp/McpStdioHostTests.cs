@@ -1,5 +1,4 @@
 using Microsoft.Extensions.DependencyInjection;
-using VibeRails.Services.AgentTools;
 using VibeRails.Services.BertV2;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Mcp.HostShell;
@@ -29,17 +28,15 @@ public class McpStdioHostTests
     }
 
     [Fact]
-    public void ConfigureServices_RegistersToolsAndSearchReadPath()
+    public void ConfigureServices_RegistersSearchToolAndReadPath()
     {
         var services = new ServiceCollection();
         McpStdioHost.ConfigureServices(services);
 
         // The search tool and its real BERT-backed dependency must be wired.
         Assert.Contains(services, d => d.ServiceType == typeof(SessionSearchTool));
-        Assert.Contains(services, d => d.ServiceType == typeof(TerminalTools));
         // HostShellTools/WebResearchTools + their backing services are intentionally not registered
         // now (see MapRegisterServices, security review 2026-07-02).
-        Assert.Contains(services, d => d.ServiceType == typeof(IAgentTerminalToolGateway));
         Assert.Contains(services, d => d.ServiceType == typeof(IUnifiedSearchService));
         Assert.Contains(services, d => d.ServiceType == typeof(IBertV2BgeEmbedder));
         Assert.Contains(services, d => d.ServiceType == typeof(IBertSearchDbService));

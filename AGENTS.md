@@ -282,7 +282,7 @@ CLI runs with full session tracking (same as CLI path)
 vb.exe (Main App)
   ├─ AddMcpServer().WithHttpTransport().WithTools<...>()   # in-process MCP server
   ├─ app.MapMcp("/mcp")                                    # Streamable HTTP endpoint (root backend only)
-  └─ Tools: validate_vca · search_history · terminal controls
+  └─ Tools: validate_vca · search_history
      (run_shell_command + web research kept in-tree but not currently exposed — security review 2026-07-02)
 
 McpClientService — thin client wrapper used by the dashboard MCP Explorer to inspect the local
@@ -410,15 +410,11 @@ separate process. Full design: [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Serv
 
 **Tools** (snake_case wire names): `validate_vca` (staged-file AGENTS.md rule validation),
 `search_history` (semantic + keyword search over captured agent history via the real
-`IUnifiedSearchService` — BGE/sqlite-vec/RRF), and terminal tab controls.
+`IUnifiedSearchService` — BGE/sqlite-vec/RRF).
 
 Host shell command jobs (`run_shell_command`, `get_shell_command_status`, `cancel_shell_command`) and
 web research (`web_search`, `web_fetch`) remain in the codebase but are **not currently exposed** as MCP
 tools (security review 2026-07-02).
-
-`get_terminal_snapshot` returns structured JSON text. Generic consumers can use `screenText`;
-UI consumers can detect reserved `xterm_ui_bytes` and `xterm_png_string` fields to render the
-snapshot with xterm.js and attach a browser-generated PNG data URL.
 
 ### Data Layer
 
@@ -993,7 +989,7 @@ VibeRails includes a sophisticated git hook installation system that automatical
 **Installation Behavior**:
 - **Auto-install on startup** - Hooks installed automatically when VibeRails starts (configurable)
 - **Preserves existing hooks** - Inserts VCA ahead of existing shell-hook exits and chains non-shell/binary/symlink hooks through a preserved sidecar
-- **Versioned health checks** - V3 detects missing, disabled, stale, partial, missing-launcher, or mismatched-launcher hooks and repairs them
+- **App-versioned health checks** - Installed hooks carry the running VibeRails version (for example `1.9.2`); startup detects missing, disabled, stale/older-version, partial, missing-launcher, or mismatched-launcher hooks and replaces them
 - **Git-aware path resolution** - Honors linked worktrees and `core.hooksPath`
 - **Safe hook chaining** - Runs before existing shell hooks and preserves non-shell hooks as executable sidecars
 - **Safe uninstallation** - Removes only VibeRails sections, keeps other hooks intact

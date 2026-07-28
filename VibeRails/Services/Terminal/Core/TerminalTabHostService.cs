@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Serilog;
+using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.AgentTools;
@@ -30,9 +31,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     private readonly ILocalClientTracker _localClientTracker;
     private readonly IAppEventBus _appEventBus;
     private readonly ILocalToolApiContext _toolApiContext;
-#if DEBUG
-    private readonly DebugEventBus _debugEventBus;
-#endif
+    private readonly ITokenSavingsStore _tokenSavings;
     private readonly SemaphoreSlim _createGate = new(1, 1);
     private readonly Lock _lock = new();
     private readonly Dictionary<string, TerminalChildProcess> _tabs = new(StringComparer.Ordinal);
@@ -47,19 +46,14 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         IHttpClientFactory httpClientFactory,
         ILocalClientTracker localClientTracker,
         IAppEventBus appEventBus,
-        ILocalToolApiContext toolApiContext
-#if DEBUG
-        , DebugEventBus debugEventBus
-#endif
-    )
+        ILocalToolApiContext toolApiContext,
+        ITokenSavingsStore tokenSavings)
     {
         _httpClientFactory = httpClientFactory;
         _localClientTracker = localClientTracker;
         _appEventBus = appEventBus;
         _toolApiContext = toolApiContext;
-#if DEBUG
-        _debugEventBus = debugEventBus;
-#endif
+        _tokenSavings = tokenSavings;
         _launchDirectory = Directory.GetCurrentDirectory();
         _tabsOwnerId = $"terminal-tabs:{Environment.ProcessId}";
     }
@@ -109,9 +103,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
             var relayToken = _tabRelayCts[child.TabId].Token;
             _ = RelayChildAppEventsAsync(child, relayToken);
-#if DEBUG
-            _ = RelayChildDebugEventsAsync(child, relayToken);
-#endif
             return await BuildTabStatusAsync(child, cancellationToken);
         }
         catch
@@ -312,7 +303,10 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                         var appEvent = JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.AppEvent);
                         if (appEvent != null)
                         {
-                            var enriched = EnrichPayloadWithTabId(appEvent, child.TabId);
+                            var savings = appEvent.Type == ActivityEventBusExtensions.ProxyActivityEventType
+                                ? await ReadAppWideSavingsAsync()
+                                : null;
+                            var enriched = EnrichPayload(appEvent, child.TabId, savings);
                             _appEventBus.Publish(enriched);
                         }
                     }
@@ -351,12 +345,51 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         try { return child.Process.Id; } catch { return -1; }
     }
 
-    private static AppEvent EnrichPayloadWithTabId(AppEvent appEvent, string tabId)
+    /// <summary>
+    /// Re-reads the shared savings table for the tally the browser should see. Each terminal tab
+    /// proxies through its own child process and therefore tallies only its own traffic — relaying
+    /// those numbers untouched is what made the meter jump between tabs and read zero for every
+    /// freshly spawned one. The wait is bounded because state.db is shared with background
+    /// embedding work, and a display counter must never be why this relay stops pumping events.
+    /// </summary>
+    private async Task<TokenSavingsTotals> ReadAppWideSavingsAsync()
+    {
+        // The timeout is cancelled rather than abandoned. WhenAny leaves the loser running, and the
+        // refresh wins nearly every time, so an uncancelled Task.Delay would park a live timer for
+        // the full 250 ms on every proxy event — one per LLM request per tab, forever.
+        using var timeout = new CancellationTokenSource();
+        var refresh = _tokenSavings.RefreshAsync();
+        var completed = await Task.WhenAny(
+            refresh, Task.Delay(TimeSpan.FromMilliseconds(250), timeout.Token));
+        timeout.Cancel();
+
+        // WhenAny does not observe the winner's exception. The refresh swallows its own failures
+        // today, so this only guards the day that changes — a faulted display refresh must not
+        // surface as an unobserved task exception in an unrelated part of the process.
+        if (completed == refresh && refresh.IsFaulted)
+        {
+            Log.Warning(
+                refresh.Exception,
+                "[TerminalTabs] Savings refresh faulted; reporting the last known tally.");
+        }
+
+        return _tokenSavings.GetTotals();
+    }
+
+    private static AppEvent EnrichPayload(AppEvent appEvent, string tabId, TokenSavingsTotals? savings)
     {
         var node = JsonNode.Parse(appEvent.Payload.GetRawText());
         if (node is JsonObject obj)
         {
             obj["tabId"] = tabId;
+            if (savings is not null)
+            {
+                // Names must match the camelCase wire form of ProxyActivityPingPayload.
+                obj["tokensSavedTotal"] = savings.TokensSaved;
+                obj["tokensSavedSession"] = savings.SessionTokensSaved;
+                obj["tokensSavedMonth"] = savings.MonthTokensSaved;
+            }
+
             var enrichedJson = obj.ToJsonString();
             using var doc = JsonDocument.Parse(enrichedJson);
             return new AppEvent(appEvent.Type, doc.RootElement.Clone());
@@ -364,80 +397,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
         return appEvent;
     }
-
-#if DEBUG
-    private async Task RelayChildDebugEventsAsync(TerminalChildProcess child, CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested && !child.Process.HasExited)
-        {
-            try
-            {
-                using var ws = new ClientWebSocket();
-                ws.Options.AddSubProtocol(child.SessionToken);
-                ws.Options.AddSubProtocol(child.TabToken);
-
-                await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{child.Port}/tooling/events/ws"), ct);
-
-                var buffer = new byte[8192];
-                using var frameAccumulator = new MemoryStream();
-                while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
-                {
-                    var result = await ws.ReceiveAsync(buffer, ct);
-                    if (result.MessageType == WebSocketMessageType.Close)
-                        break;
-                    if (result.MessageType != WebSocketMessageType.Text)
-                        continue;
-
-                    frameAccumulator.Write(buffer, 0, result.Count);
-
-                    if (!result.EndOfMessage)
-                        continue;
-
-                    var json = Encoding.UTF8.GetString(frameAccumulator.GetBuffer(), 0, (int)frameAccumulator.Length);
-                    frameAccumulator.SetLength(0);
-
-                    try
-                    {
-                        var msg = JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.EventMessage);
-                        if (msg != null)
-                            _debugEventBus.Publish(msg.Type, msg.Text, child.TabId);
-                    }
-                    catch (Exception) { /* skip malformed messages, keep relaying */ }
-                }
-            }
-            catch (OperationCanceledException) { return; }
-            catch
-            {
-                try { await Task.Delay(2000, ct); }
-                catch (OperationCanceledException) { return; }
-            }
-        }
-    }
-
-    public async Task HandleEventWebSocketProxyAsync(string tabId, WebSocket browserSocket, CancellationToken cancellationToken = default)
-    {
-        var child = GetChildOrThrow(tabId);
-        using var upstream = new ClientWebSocket();
-        upstream.Options.AddSubProtocol(child.SessionToken);
-        upstream.Options.AddSubProtocol(child.TabToken);
-
-        var upstreamUri = new Uri($"ws://127.0.0.1:{child.Port}/tooling/events/ws");
-        await upstream.ConnectAsync(upstreamUri, cancellationToken);
-
-        var childToBrowser = RelayWebSocketAsync(upstream, browserSocket, cancellationToken);
-        var browserToChild = RelayWebSocketAsync(browserSocket, upstream, cancellationToken);
-
-        await Task.WhenAny(childToBrowser, browserToChild);
-
-        await CloseWebSocketAsync(upstream, cancellationToken);
-        await CloseWebSocketAsync(browserSocket, cancellationToken);
-    }
-#else
-    public Task HandleEventWebSocketProxyAsync(string tabId, WebSocket browserSocket, CancellationToken cancellationToken = default)
-    {
-        throw new NotSupportedException("Event WebSocket proxying is only available in debug builds.");
-    }
-#endif
 
     public async Task StopAllAsync(CancellationToken cancellationToken = default)
     {

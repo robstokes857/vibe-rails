@@ -20,6 +20,21 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
     /// allocate all of them simultaneously.
     /// </summary>
     private const long MaximumSnapshotBytes = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// Ceiling on the single zero-context patch read for change-scoped scoring.
+    ///
+    /// <see cref="MaximumSnapshotBytes"/> bounds file *contents*, and the patch escapes that budget
+    /// entirely: it is one git invocation covering the whole scope, and a diff carries removed lines
+    /// as well as added ones, so deleting one large text file can put the whole file on stdout even
+    /// though nothing was added. The patch is then held twice over — as the raw bytes and as the
+    /// UTF-8 string decoded from them — which is what turns an ordinary large delete into an
+    /// out-of-memory kill of Git Guard or a working-tree scan.
+    ///
+    /// 32 MB of zero-context patch is far past any human-reviewable change, so hitting this is a
+    /// signal the scope is wrong (a vendored tree, a generated bundle), not a limit to raise.
+    /// </summary>
+    private const int MaximumPatchBytes = 32 * 1024 * 1024;
     private readonly long _maximumUnpushedSnapshotBytes;
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
@@ -85,6 +100,12 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             identity.BaseTree,
             identity.StagedTree,
             cancellationToken);
+        var addedCodeByPath = await TryReadAddedCodeAsync(
+            repositoryPath,
+            stagedEntries,
+            [identity.BaseTree, identity.StagedTree, "--"],
+            "read staged added lines",
+            cancellationToken);
         var files = new List<GitStagedFileSnapshot>(stagedEntries.Count);
         var contentBudget = new SnapshotMemoryBudget(long.MaxValue);
         var textByObject = new Dictionary<string, BlobTextResult>(StringComparer.Ordinal);
@@ -141,6 +162,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             }
 
             changedLines.TryGetValue(entry.RelativePath, out var lineCount);
+            var addedCode = ResolveAddedCode(entry, content, addedCodeByPath);
             files.Add(new GitStagedFileSnapshot(
                 entry.RelativePath,
                 ToFullPath(repositoryPath, entry.RelativePath),
@@ -150,7 +172,9 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 lineCount,
                 content,
                 entry.PreviousRelativePath,
-                previousContent));
+                previousContent,
+                addedCode?.Content,
+                addedCode?.SourceLineNumbers));
         }
 
         var agentFiles = new List<GitIndexTextFile>();
@@ -195,6 +219,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 path,
                 GitStagedChangeKind.Added,
                 PreviousRelativePath: null)).ToList();
+        var trackedChangedEntries = changedEntries.ToList();
         var changedLines = hasHead
             ? await ReadWorkingTreeChangedLineCountsAsync(repositoryPath, cancellationToken)
             : new Dictionary<string, int?>(PathComparer);
@@ -238,6 +263,15 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             }
         }
 
+        var addedCodeByPath = hasHead
+            ? await TryReadAddedCodeAsync(
+                repositoryPath,
+                trackedChangedEntries,
+                ["HEAD", "--"],
+                "read working-tree added lines",
+                cancellationToken)
+            : new Dictionary<string, AddedCodeSnapshot>(PathComparer);
+        var untrackedPathSet = untrackedPaths.ToHashSet(PathComparer);
         var files = new List<GitStagedFileSnapshot>(changedEntries.Count);
         var pathGuard = new WorkingTreePathGuard(repositoryPath);
         var contentBytesRead = 0L;
@@ -300,6 +334,11 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             // ExistsInIndex is the legacy snapshot field consumed by preflight steps. For
             // this working-tree snapshot it means a current, analyzable file exists; this
             // is intentionally true for untracked files and false for deleted paths.
+            var addedCode = ResolveAddedCode(
+                entry,
+                content,
+                addedCodeByPath,
+                forceAllContent: !hasHead || untrackedPathSet.Contains(entry.RelativePath));
             files.Add(new GitStagedFileSnapshot(
                 entry.RelativePath,
                 fullPath,
@@ -309,7 +348,9 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 lineCount,
                 content,
                 entry.PreviousRelativePath,
-                previousContent));
+                previousContent,
+                addedCode?.Content,
+                addedCode?.SourceLineNumbers));
         }
 
         if (skippedForBudget > 0)
@@ -418,6 +459,12 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             mergeBaseRef,
             headCommit,
             cancellationToken);
+        var addedCodeByPath = await TryReadAddedCodeAsync(
+            repositoryPath,
+            changedEntries,
+            [mergeBaseRef, headCommit, "--"],
+            "read unpushed added lines",
+            cancellationToken);
 
         var budget = new SnapshotMemoryBudget(_maximumUnpushedSnapshotBytes);
         var headTextByObject = new Dictionary<string, BlobTextResult>(StringComparer.Ordinal);
@@ -496,6 +543,7 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             }
 
             changedLines.TryGetValue(entry.RelativePath, out var lineCount);
+            var addedCode = ResolveAddedCode(entry, content, addedCodeByPath);
             files.Add(new GitStagedFileSnapshot(
                 entry.RelativePath,
                 ToFullPath(repositoryPath, entry.RelativePath),
@@ -505,7 +553,9 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
                 lineCount,
                 content,
                 entry.PreviousRelativePath,
-                previousContent));
+                previousContent,
+                addedCode?.Content,
+                addedCode?.SourceLineNumbers));
         }
 
         // Impact ranking also consumes immutable HEAD contents. Reuse blobs retained above and fill
@@ -946,6 +996,210 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToList();
 
+    /// <summary>
+    /// Reads one zero-context patch for the whole scope and assigns each patch section to
+    /// Git's already parsed name-status entry in the same diffcore order. Paths stay sourced
+    /// from the NUL-delimited name-status output, so quoted or newline-containing filenames
+    /// never need to be decoded from a textual patch header.
+    /// </summary>
+    private static async Task<Dictionary<string, AddedCodeSnapshot>> TryReadAddedCodeAsync(
+        string repositoryPath,
+        IReadOnlyList<StagedStatusEntry> entries,
+        IReadOnlyList<string> comparisonArguments,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        var empty = new Dictionary<string, AddedCodeSnapshot>(PathComparer);
+        if (entries.Count == 0)
+        {
+            return empty;
+        }
+
+        List<string> arguments =
+        [
+            "--no-pager",
+            "diff",
+            "--unified=0",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--find-renames"
+        ];
+        arguments.AddRange(comparisonArguments);
+
+        var result = await RunTextGitAsync(
+            repositoryPath, arguments, cancellationToken, maximumOutputBytes: MaximumPatchBytes);
+        // Checked before the exit code, not after: overflowing the cap kills git mid-write, so the
+        // exit code that follows is the kill, not a git failure. Reporting it as one would send
+        // anyone reading the log looking for a broken repository.
+        //
+        // A truncated patch must not be parsed either way. It stays syntactically plausible right up
+        // to the cut — whole hunks are simply absent, and the last one ends mid-line — so the parser
+        // would accept it and score a subset of the change as if it were the change. Omitting the
+        // files is the same degradation the timeout path chose, and it is at least honest.
+        if (result.OutputLimitExceeded)
+        {
+            Log.Warning(
+                "[GitPreflight] The patch produced while trying to {Operation} exceeded {LimitMB} MB "
+                + "and was truncated; modified files will be omitted from change-scoped MintLint "
+                + "scoring rather than scored from a partial diff.",
+                operation,
+                MaximumPatchBytes / (1024 * 1024));
+            return empty;
+        }
+
+        if (result.TimedOut || result.ExitCode != 0)
+        {
+            Log.Warning(
+                "[GitPreflight] Git could not {Operation}; modified files will be omitted from "
+                + "change-scoped MintLint scoring. {Error}",
+                operation,
+                result.TimedOut ? "The command timed out." : result.StdErr.Trim());
+            return empty;
+        }
+
+        if (!TryParseAddedCode(result.StdOut, entries, out var parsed))
+        {
+            Log.Warning(
+                "[GitPreflight] Git returned an unexpected patch shape while trying to "
+                + "{Operation}; modified files will be omitted from change-scoped MintLint scoring.",
+                operation);
+            return empty;
+        }
+
+        return parsed;
+    }
+
+    private static bool TryParseAddedCode(
+        string patch,
+        IReadOnlyList<StagedStatusEntry> entries,
+        out Dictionary<string, AddedCodeSnapshot> addedCode)
+    {
+        var builders = entries
+            .Select(_ => new AddedCodeBuilder())
+            .ToArray();
+        var sectionIndex = -1;
+        var inHunk = false;
+        var newLineNumber = 0;
+
+        using var reader = new StringReader(patch);
+        while (reader.ReadLine() is { } line)
+        {
+            if (line.StartsWith("diff --git ", StringComparison.Ordinal))
+            {
+                sectionIndex++;
+                inHunk = false;
+                continue;
+            }
+
+            if (sectionIndex < 0 || sectionIndex >= builders.Length)
+            {
+                continue;
+            }
+
+            if (TryParseNewHunkStart(line, out var parsedNewLine))
+            {
+                newLineNumber = parsedNewLine;
+                inHunk = true;
+                continue;
+            }
+
+            if (!inHunk || line.Length == 0)
+            {
+                continue;
+            }
+
+            switch (line[0])
+            {
+                case '+':
+                    builders[sectionIndex].Add(line[1..], newLineNumber);
+                    newLineNumber++;
+                    break;
+                case ' ':
+                    newLineNumber++;
+                    break;
+                case '-':
+                case '\\':
+                    break;
+                default:
+                    // Patch metadata between hunks is not source content.
+                    inHunk = false;
+                    break;
+            }
+        }
+
+        if (sectionIndex + 1 != entries.Count)
+        {
+            addedCode = new Dictionary<string, AddedCodeSnapshot>(PathComparer);
+            return false;
+        }
+
+        addedCode = new Dictionary<string, AddedCodeSnapshot>(PathComparer);
+        for (var i = 0; i < entries.Count; i++)
+        {
+            addedCode[entries[i].RelativePath] = builders[i].Build();
+        }
+
+        return true;
+    }
+
+    private static bool TryParseNewHunkStart(string line, out int newLineNumber)
+    {
+        newLineNumber = 0;
+        if (!line.StartsWith("@@ ", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var marker = line.IndexOf(" +", StringComparison.Ordinal);
+        if (marker < 0)
+        {
+            return false;
+        }
+
+        var start = marker + 2;
+        var end = start;
+        while (end < line.Length && char.IsAsciiDigit(line[end]))
+        {
+            end++;
+        }
+
+        return end > start
+            && int.TryParse(
+                line.AsSpan(start, end - start),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out newLineNumber);
+    }
+
+    private static AddedCodeSnapshot? ResolveAddedCode(
+        StagedStatusEntry entry,
+        string? content,
+        IReadOnlyDictionary<string, AddedCodeSnapshot> addedCodeByPath,
+        bool forceAllContent = false)
+    {
+        if (content is null || !MintLintAnalyzer.SupportsFile(entry.RelativePath))
+        {
+            return null;
+        }
+
+        if (forceAllContent)
+        {
+            return AddedCodeSnapshot.FromCompleteFile(content);
+        }
+
+        if (addedCodeByPath.TryGetValue(entry.RelativePath, out var addedCode))
+        {
+            return addedCode;
+        }
+
+        // New files are entirely added even if patch extraction was unavailable. For a
+        // modified/renamed file, an empty fragment is safer than grading inherited debt.
+        return entry.Kind is GitStagedChangeKind.Added or GitStagedChangeKind.Copied
+            ? AddedCodeSnapshot.FromCompleteFile(content)
+            : AddedCodeSnapshot.Empty;
+    }
+
     private static async Task<Dictionary<string, int?>> ReadChangedLineCountsAsync(
         string repositoryPath,
         string baseTree,
@@ -1111,22 +1365,32 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         }
     }
 
+    /// <summary>
+    /// Runs git and decodes stdout as UTF-8. <paramref name="maximumOutputBytes"/> is null for the
+    /// callers whose output is bounded by its own shape (a ref name, a tree listing, porcelain
+    /// status); pass a cap for anything whose size follows file *contents*, and check
+    /// <see cref="TextGitResult.OutputLimitExceeded"/> — a truncated result is still a well-formed
+    /// string and will otherwise be consumed as if it were complete.
+    /// </summary>
     private static async Task<TextGitResult> RunTextGitAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken,
-        ReadOnlyMemory<byte>? standardInput = null)
+        ReadOnlyMemory<byte>? standardInput = null,
+        int? maximumOutputBytes = null)
     {
         var binary = await RunBinaryGitAsync(
             workingDirectory,
             arguments,
             cancellationToken,
+            maximumOutputBytes: maximumOutputBytes,
             standardInput: standardInput);
         return new TextGitResult(
             binary.ExitCode,
             Encoding.UTF8.GetString(binary.Bytes),
             binary.StdErr,
-            binary.TimedOut);
+            binary.TimedOut,
+            binary.OutputLimitExceeded);
     }
 
     internal static async Task<(bool TimedOut, byte[] Bytes)> RunBinaryGitForTestAsync(
@@ -1366,11 +1630,57 @@ public sealed class GitStagedSnapshotProvider : IGitStagedSnapshotProvider, IGit
         public void Release(long bytes) => _reservedBytes -= bytes;
     }
 
-    private sealed record TextGitResult(int ExitCode, string StdOut, string StdErr, bool TimedOut);
+    private sealed record TextGitResult(
+        int ExitCode,
+        string StdOut,
+        string StdErr,
+        bool TimedOut,
+        bool OutputLimitExceeded = false);
     private sealed record BinaryGitResult(
         int ExitCode,
         byte[] Bytes,
         string StdErr,
         bool TimedOut,
         bool OutputLimitExceeded);
+
+    private sealed record AddedCodeSnapshot(string Content, IReadOnlyList<int> SourceLineNumbers)
+    {
+        public static AddedCodeSnapshot Empty { get; } = new(string.Empty, []);
+
+        public static AddedCodeSnapshot FromCompleteFile(string content)
+        {
+            var normalized = content.Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
+            var lines = normalized.Split('\n').ToList();
+            if (lines.Count > 0 && lines[^1].Length == 0)
+            {
+                lines.RemoveAt(lines.Count - 1);
+            }
+
+            return lines.Count == 0
+                ? Empty
+                : new AddedCodeSnapshot(
+                    string.Join('\n', lines),
+                    Enumerable.Range(1, lines.Count).ToArray());
+        }
+    }
+
+    private sealed class AddedCodeBuilder
+    {
+        private readonly List<string> _lines = [];
+        private readonly List<int> _sourceLineNumbers = [];
+
+        public void Add(string line, int sourceLineNumber)
+        {
+            _lines.Add(line);
+            _sourceLineNumbers.Add(sourceLineNumber);
+        }
+
+        public AddedCodeSnapshot Build() =>
+            _lines.Count == 0
+                ? AddedCodeSnapshot.Empty
+                : new AddedCodeSnapshot(
+                    string.Join('\n', _lines),
+                    _sourceLineNumbers.ToArray());
+    }
 }

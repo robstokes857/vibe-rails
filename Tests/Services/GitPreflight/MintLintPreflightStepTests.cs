@@ -1,3 +1,4 @@
+using MintLint;
 using VibeRails.Services.GitPreflight;
 using VibeRails.Services.VCA.Hooks;
 using Xunit;
@@ -89,7 +90,7 @@ public sealed class MintLintPreflightStepTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_ScoresTheCommittedBaseline_ForModifiedFiles()
+    public async Task ExecuteAsync_ScoresOnlyAddedContent_ForModifiedFiles()
     {
         var messy = """
             public class Demo
@@ -114,7 +115,9 @@ public sealed class MintLintPreflightStepTests
                     "src/demo.cs", "src/demo.cs", GitStagedChangeKind.Modified, true, false, 1,
                     Content: messy,
                     PreviousRelativePath: null,
-                    PreviousContent: "public class Demo { public void Run() { } }")
+                    PreviousContent: "public class Demo { public void Run() { } }",
+                    AddedContent: "return 0;",
+                    AddedLineNumbers: [13])
             ],
             []);
 
@@ -125,11 +128,90 @@ public sealed class MintLintPreflightStepTests
         var report = MintLintReportFactory.FromJson(result.Details![MintLintReportFactory.DetailsKey]);
         Assert.NotNull(report);
         var file = Assert.Single(report.Files);
-        Assert.NotNull(file.BaselineScore);
-        Assert.NotNull(file.IntroducedScore);
-        // The staged version is worse than the committed one, so the change owns the delta.
-        Assert.True(file.IntroducedScore > 0);
-        Assert.Equal(Math.Round(file.Score - file.BaselineScore.Value, 1), file.IntroducedScore);
+        var wholeFileScore = MintLintAnalyzer.ScanSources(
+            [new SourceInput("src/demo.cs", messy)]).Overall.Score;
+        Assert.True(file.Score < wholeFileScore);
+        Assert.Null(file.BaselineScore);
+        Assert.Null(file.IntroducedScore);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RemovalOnlyChange_ProducesNoMintLintScore()
+    {
+        var snapshot = new GitStagedSnapshot(
+            Directory.GetCurrentDirectory(),
+            [
+                new GitStagedFileSnapshot(
+                    "src/demo.cs",
+                    "src/demo.cs",
+                    GitStagedChangeKind.Modified,
+                    ExistsInIndex: true,
+                    IsBinary: false,
+                    ChangedLineCount: 3,
+                    Content: "public class Demo { }",
+                    PreviousContent: "public class Demo { public void Removed() { } }",
+                    AddedContent: string.Empty,
+                    AddedLineNumbers: [])
+            ],
+            []);
+
+        var result = await new MintLintPreflightStep().ExecuteAsync(
+            new GitPreflightStepContext(
+                "run",
+                Request(),
+                snapshot,
+                (_, _, _) => ValueTask.CompletedTask),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(GitPreflightStepStatus.Skipped, result.Status);
+        Assert.Equal("0", result.Details!["supportedFileCount"]);
+        Assert.Equal("1", result.Details["skippedFileCount"]);
+        Assert.Equal("1", result.Details["noAddedCodeFileCount"]);
+        Assert.Contains("no added lines", result.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.False(result.Details.ContainsKey(MintLintReportFactory.DetailsKey));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MapsFragmentLineBackToTheCompleteFile()
+    {
+        const string addedLine =
+            "public class Demo { public void Run() { if (true) { } } }";
+        var completeFile = string.Join(
+            '\n',
+            Enumerable.Repeat(string.Empty, 41).Append(addedLine));
+        var snapshot = new GitStagedSnapshot(
+            Directory.GetCurrentDirectory(),
+            [
+                new GitStagedFileSnapshot(
+                    "src/demo.cs",
+                    "src/demo.cs",
+                    GitStagedChangeKind.Modified,
+                    ExistsInIndex: true,
+                    IsBinary: false,
+                    ChangedLineCount: 1,
+                    Content: completeFile,
+                    PreviousContent: string.Join('\n', Enumerable.Repeat(string.Empty, 41)),
+                    AddedContent: addedLine,
+                    AddedLineNumbers: [42])
+            ],
+            []);
+
+        var result = await new MintLintPreflightStep().ExecuteAsync(
+            new GitPreflightStepContext(
+                "run",
+                Request(),
+                snapshot,
+                (_, _, _) => ValueTask.CompletedTask),
+            TestContext.Current.CancellationToken);
+
+        var report = MintLintReportFactory.FromJson(
+            result.Details![MintLintReportFactory.DetailsKey]);
+        Assert.NotNull(report);
+        var cyclomatic = Assert.Single(
+            report.WorstMetrics!,
+            metric => metric.Name == "cyclomatic_complexity");
+        Assert.Equal(42, cyclomatic.Line);
+        Assert.Contains("public class Demo", cyclomatic.Snippet);
     }
 
     [Fact]
@@ -167,7 +249,7 @@ public sealed class MintLintPreflightStepTests
                 (_, _, _) => ValueTask.CompletedTask),
             TestContext.Current.CancellationToken);
 
-        Assert.StartsWith("Scanned 1 supported changed source file(s)", result.Output[0]);
+        Assert.StartsWith("Scanned added code in 1 supported changed source file(s)", result.Output[0]);
     }
 
     [Fact]

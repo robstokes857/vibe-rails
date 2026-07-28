@@ -47,6 +47,9 @@ public static class LlmAnthropicProxyRoutes
             var transform = settings.ClaudeTokenSaverEnabled && saverHasWork
                 ? new AnthropicBodyTransform(plan, captureSink)
                 : null;
+            // Independent of the saver toggles on purpose: every authenticated request relayed
+            // through the proxy is recorded, including requests the saver declines.
+            var exchangeSink = context.RequestServices.GetRequiredService<ILlmProxyExchangeSink>();
 
             var target = LlmProxyRelay.BuildTarget(context.Request, UpstreamHost, PathPrefix);
             await LlmProxyRelay.HandleAsync(
@@ -55,9 +58,11 @@ public static class LlmAnthropicProxyRoutes
                 context.RequestServices.GetRequiredService<ILlmProxyAuthGate>(),
                 context.RequestServices.GetRequiredService<ILlmProxyEventSink>(),
                 target,
+                "anthropic",
                 "Claude proxy",
                 transform,
-                context.RequestAborted);
+                context.RequestAborted,
+                exchangeSink);
         }).WithName("LlmAnthropicProxy");
     }
 }

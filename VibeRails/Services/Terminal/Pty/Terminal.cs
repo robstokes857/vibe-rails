@@ -306,8 +306,8 @@ public sealed class Terminal : IAsyncDisposable
     }
 
     /// <summary>
-    /// Captures the CURRENT screen only (no scrollback) for out-of-band consumers
-    /// such as the MCP get_terminal_snapshot tool. Serializing the full scrollback
+    /// Captures the CURRENT screen only (no scrollback) for out-of-band snapshot consumers.
+    /// Serializing the full scrollback
     /// here can balloon a single tool response to megabytes of base64, and a caller
     /// that just wants the visible screen never needs the history. Only
     /// <see cref="_emulatorLock"/> is taken (a read-only grid copy), so snapshot
