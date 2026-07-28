@@ -33,6 +33,36 @@ public class VcaHookProcessHostTests
     }
 
     [Fact]
+    public async Task RunAsync_AttachedPopup_ClosesWithoutEnter_WhenCommitIsAllowed()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        using var input = new NeverCompletingTextReader();
+
+        var runTask = VcaHookProcessHost.RunAsync(
+            [
+                "--vca-hook",
+                "preview",
+                "--demo-duration-ms",
+                "1",
+                "--console-window-attached"
+            ],
+            output,
+            error,
+            input,
+            TestContext.Current.CancellationToken);
+        var completed = await Task.WhenAny(
+            runTask,
+            // The attached-console presenter animates all three preview stages. Ten seconds
+            // leaves room for that while still failing far before the 30-second Enter pause.
+            Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+
+        Assert.Same(runTask, completed);
+        Assert.Equal(0, await runTask);
+        Assert.DoesNotContain("Press Enter", output.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PauseForEnterAsync_ReturnsWhenTimeoutElapses()
     {
         using var output = new StringWriter();

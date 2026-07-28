@@ -69,10 +69,11 @@ internal sealed class AnthropicBodyTransform(
                 result = new ToolOutputRewriteResult(false, length, length, 0, 0, default);
             }
 
+            var original = lease.Buffered(length);
             var content = result.Rewritten
                 ? new ReadOnlyMemoryContent(lease.Output!.WrittenMemory)
-                : new ReadOnlyMemoryContent(lease.Buffered(length));
-            return new TransformedRequestBody(content, result, lease);
+                : new ReadOnlyMemoryContent(original);
+            return new TransformedRequestBody(content, result, lease, original);
         }
         catch
         {

@@ -93,6 +93,14 @@ public class LlmAnthropicProxyRoutesTests
 
         Assert.Equal(Encoding.UTF8.GetBytes(body), result.UpstreamBody);
         Assert.Empty(result.Savings.Records);
+
+        // Disabling compression does not disable the exchange log. Anything authenticated and
+        // relayed through the proxy is recorded.
+        var exchange = Assert.Single(result.Exchanges);
+        Assert.Equal("anthropic", exchange.Provider);
+        Assert.Equal("/llm/anthropic/v1/messages", exchange.Path);
+        Assert.Equal(200, exchange.StatusCode);
+        Assert.Equal("{\"type\":\"message\"}", exchange.Response);
     }
 
     [Fact]
@@ -181,6 +189,7 @@ public class LlmAnthropicProxyRoutesTests
         byte[] UpstreamBody,
         long? UpstreamContentLength,
         StubTokenSavingsStore Savings,
+        List<LlmProxyExchange> Exchanges,
         List<AppEvent> Events);
 
     private static async Task<ProxyResult> SendAsync(
@@ -202,11 +211,13 @@ public class LlmAnthropicProxyRoutesTests
         var events = new List<AppEvent>();
         using var subscription = eventBus.Subscribe(events.Add);
         var savingsStore = new StubTokenSavingsStore();
+        var exchanges = new RecordingExchangeSink();
         var upstreamHandler = new RecordingUpstreamHandler();
         using var clientFactory = new StubHttpClientFactory(upstreamHandler);
 
         builder.Services.AddSingleton<ILlmProxyAuthGate>(new LlmProxyAuthGateAdapter(authService.Object));
         builder.Services.AddSingleton<ILlmProxyEventSink>(new LlmProxyEventSinkAdapter(eventBus, savingsStore));
+        builder.Services.AddSingleton<ILlmProxyExchangeSink>(exchanges);
         builder.Services.AddSingleton<IHttpClientFactory>(clientFactory);
         builder.Services.AddSingleton<ILlmProxySettingsService>(new StubProxySettingsService(
             new LlmProxySettings(
@@ -239,6 +250,7 @@ public class LlmAnthropicProxyRoutesTests
                 upstreamHandler.RequestBody,
                 upstreamHandler.RequestContentLength,
                 savingsStore,
+                [.. exchanges.Records],
                 [.. events]);
         }
         finally
@@ -250,6 +262,13 @@ public class LlmAnthropicProxyRoutesTests
     private sealed class StubProxySettingsService(LlmProxySettings settings) : ILlmProxySettingsService
     {
         public LlmProxySettings GetSettings() => settings;
+    }
+
+    private sealed class RecordingExchangeSink : ILlmProxyExchangeSink
+    {
+        public List<LlmProxyExchange> Records { get; } = [];
+
+        public void Record(LlmProxyExchange exchange) => Records.Add(exchange);
     }
 
     internal sealed class StubTokenSavingsStore : VibeRails.DB.ITokenSavingsStore
@@ -268,9 +287,11 @@ public class LlmAnthropicProxyRoutesTests
                 after += a;
             }
 
-            // Every window reports the same sums so ping assertions can cover all three fields.
-            return new VibeRails.DB.TokenSavingsTotals(before, after, before, after, before, after);
+            // Every window reports the same savings so ping assertions cover all three fields.
+            return new VibeRails.DB.TokenSavingsTotals(before, after, before - after, before, after);
         }
+
+        public Task RefreshAsync() => Task.CompletedTask;
     }
 
     private sealed class StubHttpClientFactory : IHttpClientFactory, IDisposable

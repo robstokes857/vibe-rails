@@ -10,6 +10,15 @@ namespace TokenSaver.Minify;
 public struct MinifyStats
 {
     public int CrRedrawChars;
+
+    /// <summary>
+    /// CRs dropped purely as CRLF line-ending normalization. Kept apart from
+    /// <see cref="CrRedrawChars"/> because "stripped Windows line endings" and "collapsed a redraw
+    /// frame" are different events, and conflating them hides the case where the whole shape and
+    /// condense phases are no-opping on CRLF payloads.
+    /// </summary>
+    public int CrLfChars;
+
     public int AnsiChars;
     public int TrailingWhitespaceChars;
     public int BlankEdgeChars;

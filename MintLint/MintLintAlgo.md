@@ -7,10 +7,12 @@ this file, pick the right knob, and log what you changed at the bottom.
 
 ## The pipeline
 
-Raw numbers flow through five stages. Each stage lives in exactly one place:
+For full-file scans, raw numbers flow through five grading stages. VibeRails Git scans
+add a stage 0 scope gate before measurement:
 
 | Stage | What happens | Where |
 |---|---|---|
+| 0. Change scope (VibeRails Git scans only) | Build an in-memory source fragment from added (`+`) diff lines. Removed and unchanged lines do not enter grading; removal-only files are skipped. | `GitStagedSnapshotProvider`, `MintLintPreflightStep` |
 | 1. Measure | Raw metrics per function/class/file (cyclomatic, LCOM4, duplication, …) | `MintLintAnalyzer`, `MetricEngine`, `DuplicationAnalyzer`, `TestabilityAnalyzer`, `ImpactAnalyzer` |
 | 2. Normalize | Each raw value → 0–100 *concern* via warn/critical thresholds: 0→warn maps to 0–50, warn→critical maps to 50–100, ≥critical pegs at 100 | `MintLintScorer.Normalize`, thresholds in `ScoringProfile.Thresholds` |
 | 3. Category | Category concern = **worst metric** in the category (worst-signal-wins) | `MintLintScorer.ScoreCategory` |
@@ -18,9 +20,22 @@ Raw numbers flow through five stages. Each stage lives in exactly one place:
 | 5. Rating | <30 Clean · <55 Okay · <75 NeedsWork · ≥75 AtRisk; scan overall = mean of file concerns | `MintLintScorer.RatingFor`, `MintLintScorer.Score(files)` |
 
 On top of that, the VibeRails layer (not MintLint itself) computes **priority** =
-`EffectiveConcern × (1 + log10(1 + referencedBy))` and discounts pre-existing (baseline)
-concern to 50% so legacy debt doesn't outrank fresh damage — see
+`EffectiveConcern × (1 + log10(1 + referencedBy))`. Change-scoped Git scans pass no
+full-file baseline because every measured line is newly added; the report factory keeps
+optional baseline support for full-file callers — see
 `VibeRails/Services/GitPreflight/MintLintReportFactory.cs`.
+
+### Why stage 0 is change-scoped (2026-07-27)
+
+Git Guard previously sent the complete current version of every changed file into stage
+1. Removing a few lines could therefore report the health of hundreds of untouched lines,
+even though the change introduced no code. Baseline discounting reduced priority but did
+not fix the displayed score: MintLint was still grading inherited code.
+
+VibeRails now parses Git's zero-context patch and supplies only added lines as each
+in-memory `SourceInput`. New files are all additions; modified files contribute only
+their added hunk lines; removal-only edits contribute nothing. Original line mappings
+are retained for report links and snippets. Stages 1–5 are unchanged.
 
 ## Why the roll-up is breadth-gated (2026-07-26)
 
@@ -112,6 +127,10 @@ and which one is the 4th (or that the depth floor carried). If you touch any kno
 
 ## Change log
 
+- **2026-07-27** — Changed the VibeRails Git integration's input scope, not MintLint's
+  metric or grading formulas. Added a stage-0 Git patch gate so only added lines reach
+  measurement; removal-only edits now produce no MintLint score. Preserved original
+  source-line mappings for report navigation. Stages 1–5 are unchanged.
 - **2026-07-26** — Grading was flagging everything: 25+ of 39 changed files at exactly
   100/AtRisk (overall 90.1). Replaced worst-category-wins roll-up with breadth gating
   (`BreadthRank` 4, `DepthFloor` 0.3). Stages 1–3, thresholds, weights, and rating

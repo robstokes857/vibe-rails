@@ -100,7 +100,7 @@ Session orchestrator.
 `PrepareSession(...)`
 - Builds launch command and optional extra args.
 - Adds the VibeRails MCP stdio registration setup command for managed CLIs
-  (Claude, Codex, Antigravity, Copilot).
+  (Claude, Codex, Antigravity, Copilot, and OpenCode-backed CLIs).
 - Builds base env vars (`LANG`, `LC_ALL`, `PYTHONIOENCODING`).
 - Merges CLI-specific env vars via `LlmCliEnvironmentService` when environment name is provided.
 - Keeps agent-tool/MCP calls on the inherited root `ILocalToolApiContext`, while Claude/Codex use

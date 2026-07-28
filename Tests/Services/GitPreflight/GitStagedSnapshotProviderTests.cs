@@ -64,8 +64,10 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
         Assert.Equal("class Staged { }\n", staged.Content);
         Assert.DoesNotContain("Unstaged", staged.Content);
         Assert.Equal(GitStagedChangeKind.Modified, staged.ChangeKind);
-        // The committed version rides along so scoring can tell new concern from old debt.
+        // The committed version remains available for consumers that need complete context.
         Assert.Equal("class Original { }\n", staged.PreviousContent);
+        Assert.Equal("class Staged { }", staged.AddedContent);
+        Assert.Equal([1], staged.AddedLineNumbers);
     }
 
     [Fact]
@@ -93,6 +95,100 @@ public sealed class GitStagedSnapshotProviderTests : IAsyncLifetime
         var added = Assert.Single(snapshot.Files);
         Assert.Equal(GitStagedChangeKind.Added, added.ChangeKind);
         Assert.Null(added.PreviousContent);
+        Assert.Equal("class BrandNew { }", added.AddedContent);
+        Assert.Equal([1], added.AddedLineNumbers);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_RemovalOnlyEdit_HasNoAddedContent()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            """
+            class Original
+            {
+                int Keep;
+                int Remove;
+            }
+
+            """,
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", "tracked.cs");
+        await GitAsync("commit", "-m", "multiline baseline");
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            """
+            class Original
+            {
+                int Keep;
+            }
+
+            """,
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", "tracked.cs");
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        var staged = Assert.Single(snapshot.Files);
+        Assert.Equal(GitStagedChangeKind.Modified, staged.ChangeKind);
+        Assert.Equal(string.Empty, staged.AddedContent);
+        Assert.Empty(staged.AddedLineNumbers!);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_ContentIdenticalRename_HasNoAddedContent()
+    {
+        await GitAsync("mv", "tracked.cs", "renamed.cs");
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        var staged = Assert.Single(snapshot.Files);
+        Assert.Equal("renamed.cs", staged.RelativePath);
+        Assert.Equal("tracked.cs", staged.PreviousRelativePath);
+        Assert.Equal(GitStagedChangeKind.Renamed, staged.ChangeKind);
+        Assert.Equal(string.Empty, staged.AddedContent);
+        Assert.Empty(staged.AddedLineNumbers!);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_AddedContent_MapsBackToItsCurrentFileLine()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            """
+            class Original
+            {
+                void Keep() { }
+            }
+
+            """,
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", "tracked.cs");
+        await GitAsync("commit", "-m", "method baseline");
+        await File.WriteAllTextAsync(
+            Path.Combine(_repository, "tracked.cs"),
+            """
+            class Original
+            {
+                void Added() { if (true) { } }
+                void Keep() { }
+            }
+
+            """,
+            TestContext.Current.CancellationToken);
+        await GitAsync("add", "tracked.cs");
+
+        var snapshot = await new GitStagedSnapshotProvider().CaptureAsync(
+            _repository,
+            TestContext.Current.CancellationToken);
+
+        var staged = Assert.Single(snapshot.Files);
+        Assert.Equal("    void Added() { if (true) { } }", staged.AddedContent);
+        Assert.Equal([3], staged.AddedLineNumbers);
     }
 
     [Fact]

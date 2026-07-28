@@ -3,7 +3,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using VibeRails.Services.BertBaseClasses;
-using VibeRails.Services.AgentTools;
 using VibeRails.Services.BertV2;
 using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
@@ -17,9 +16,8 @@ namespace VibeRails.Services.Mcp;
 /// MCP server is a child process the CLI owns and talks to over pipes, so it is inherently scoped
 /// to the spawning process and needs no token.
 ///
-/// Exposes the SAME tools as the in-process HTTP server (<see cref="RulesTool"/>,
-/// <see cref="SessionSearchTool"/>, and terminal controls), so the two transports stay in
-/// lockstep.
+/// Exposes the SAME two tools as the in-process HTTP server (<see cref="RulesTool"/> and
+/// <see cref="SessionSearchTool"/>), so the two transports stay in lockstep.
 ///
 /// CRITICAL: nothing may be written to stdout except MCP protocol frames. Default host console
 /// logging is cleared; the static Serilog logger (configured in Program.cs) writes to file only,
@@ -82,8 +80,6 @@ public static class McpStdioHost
         services.AddSingleton<IBertDocumentResponseMapper, BertDocumentResponseMapper>();
         services.AddSingleton<IUnifiedSearchService, UnifiedSearchService>();
         services.AddScoped<SessionSearchTool>();
-        services.AddSingleton<IAgentTerminalToolGateway, HttpAgentTerminalToolGateway>();
-        services.AddScoped<TerminalTools>();
         // HostShellTools (run_shell_command) and WebResearchTools (web_search/web_fetch) are
         // intentionally not exposed for now (security review 2026-07-02); mirrors MapRegisterServices.
         // Classes kept in-tree for re-add.
@@ -95,7 +91,6 @@ public static class McpStdioHost
             })
             .WithStdioServerTransport()
             .WithTools<RulesTool>()
-            .WithTools<SessionSearchTool>()
-            .WithTools<TerminalTools>();
+            .WithTools<SessionSearchTool>();
     }
 }

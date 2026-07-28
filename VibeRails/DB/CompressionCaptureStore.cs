@@ -117,7 +117,10 @@ public sealed class CompressionCaptureStore : ICompressionCaptureStore, IDisposa
     internal const int SeenHashCap = 20_000;
     internal const int DefaultQueueCapacity = 64;
     internal const long DefaultMaxQueuedChars = 24L * 1024 * 1024;
-    private const string ContentHashVersion = "3";
+    // Bumped to 4 when stage traces stopped being persisted (and stopped feeding the hash): rows
+    // written under the old definition must not silently absorb newer ones.
+    private const string ContentHashVersion = "4";
+    private const string EmptyTraceJson = "[]";
 
     private readonly string _connectionString;
     private readonly Channel<WriterCommand> _commands;
@@ -251,9 +254,10 @@ public sealed class CompressionCaptureStore : ICompressionCaptureStore, IDisposa
     }
 
     /// <summary>
-    /// Dedupe includes both sides of the experiment and its trace. Stage ids are stable across
-    /// builds, but implementations are allowed to improve; two builds producing different output
-    /// or attribution from the same input must remain two independently judgeable captures.
+    /// Dedupe covers both sides of the experiment: same input, same config, same output is one
+    /// capture however many times it is seen. Stage attribution is deliberately NOT part of the
+    /// material any more — it is no longer persisted, and hashing a field the row does not carry
+    /// would split identical captures for reasons nobody could see in the table.
     /// Length-prefixing makes the material unambiguous even when tool output contains NULs.
     /// </summary>
     private static string ContentHash(CompressionCapture capture)
@@ -270,12 +274,6 @@ public sealed class CompressionCaptureStore : ICompressionCaptureStore, IDisposa
         Append(capture.RawText);
         Append(capture.CompressedText);
         Append(capture.RewriteAccepted ? "accepted" : "not-accepted");
-        foreach (var stage in capture.Trace)
-        {
-            Append(stage.StageId);
-            Append(stage.Outcome.ToString());
-            Append(stage.CharsRemoved.ToString(CultureInfo.InvariantCulture));
-        }
 
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(material.ToString())));
 
@@ -418,8 +416,12 @@ public sealed class CompressionCaptureStore : ICompressionCaptureStore, IDisposa
     private async Task PersistAsync(CaptureCommand queued, string contentHash)
     {
         var capture = queued.Capture;
-        var trace = JsonSerializer.Serialize(
-            [.. capture.Trace], CompressionCaptureJsonContext.Default.ListStageTrace);
+        // Stage traces are no longer persisted (2026-07-28). They describe the pipeline on the day
+        // they were written, and the pipeline changes every time the compression algorithm is
+        // touched — so a stored trace cannot be re-judged against today's stages and is worse than
+        // no data, because it looks authoritative. The raw before/after text is stage-independent
+        // and is what every future what-if actually needs. The column stays for existing rows.
+        var trace = EmptyTraceJson;
         var enabledIds = JsonSerializer.Serialize(
             [.. capture.EnabledIds], CompressionCaptureJsonContext.Default.ListString);
 

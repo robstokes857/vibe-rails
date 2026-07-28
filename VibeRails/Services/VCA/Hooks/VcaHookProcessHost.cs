@@ -13,11 +13,10 @@ namespace VibeRails.Services.VCA.Hooks;
 public static class VcaHookProcessHost
 {
     /// <summary>
-    /// How long the popup stays up before closing itself. The window exists so the user can read
-    /// the outcome — most importantly a list of STOP violations — so this has to be long enough to
-    /// actually read that, while still short enough that an abandoned window cannot hold Git open
-    /// indefinitely. Shared with <see cref="VcaHookRunner"/> so the two pauses cannot drift apart,
-    /// and every user-facing "auto-closes in …" string is formatted from it rather than restated.
+    /// How long a blocking popup stays up before closing itself. Successful/non-blocking
+    /// checks close immediately; only a failure needs reading time. Shared with
+    /// <see cref="VcaHookRunner"/> so blocking pauses cannot drift apart, and every user-facing
+    /// "auto-closes in …" string is formatted from it rather than restated.
     /// </summary>
     internal static readonly TimeSpan ConsolePauseTimeout = TimeSpan.FromSeconds(30);
 
@@ -105,10 +104,10 @@ public static class VcaHookProcessHost
 
         var exitCode = await runner.RunAsync(invocation, cancellationToken);
 
-        // The respawned child pauses so the user can read the result before the popup
-        // disappears, but auto-closes so an abandoned window cannot hold Git forever.
-        // The parent returns earlier and never reaches this branch.
-        if (invocation.ConsoleWindowAttached)
+        // A successful/non-blocking popup closes as soon as its transcript is complete, so
+        // Git never waits for an unnecessary Enter key. Blocking results remain visible long
+        // enough to read, with Enter/timeout escape hatches. The parent never reaches here.
+        if (invocation.ConsoleWindowAttached && exitCode != 0)
         {
             await PauseForEnterAsync(
                 output,

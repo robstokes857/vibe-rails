@@ -37,8 +37,8 @@ public sealed class LlmProxyEventSinkAdapter(IAppEventBus eventBus, ITokenSaving
         // is the user's file and command data — it goes to captures (opt-in, local) or nowhere.
         Log.Information(
             "Token saver: {Provider} minified {Minified}/{Seen} tool results, {BytesBefore}→{BytesAfter} bytes "
-            + "(saved {BytesSaved}; cr={CrChars} ansi={AnsiChars} ws={WsChars} blank={BlankChars} "
-            + "dedup={DedupRuns} elide={Elisions})",
+            + "(saved {BytesSaved}; cr={CrChars} crlf={CrLfChars} ansi={AnsiChars} ws={WsChars} "
+            + "blank={BlankChars} dedup={DedupRuns} elide={Elisions})",
             report.Provider,
             report.ToolResultsMinified,
             report.ToolResultsSeen,
@@ -46,6 +46,7 @@ public sealed class LlmProxyEventSinkAdapter(IAppEventBus eventBus, ITokenSaving
             report.BytesAfter,
             report.BytesSaved,
             report.Transforms.CrRedrawChars,
+            report.Transforms.CrLfChars,
             report.Transforms.AnsiChars,
             report.Transforms.TrailingWhitespaceChars,
             report.Transforms.BlankEdgeChars + report.Transforms.BlankRunChars,

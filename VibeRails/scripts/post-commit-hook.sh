@@ -1,6 +1,6 @@
 #!/bin/sh
 # Vibe Rails Post-Commit Hook
-# VibeRails Hook Version: 6
+# VibeRails Hook Version: __VIBERAILS_HOOK_VERSION__
 # Queues successful-commit Jobs after Git has created the commit.
 # Installed by VibeRails - use the dashboard to repair or remove this section.
 

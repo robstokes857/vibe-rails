@@ -84,6 +84,7 @@ public static class CompressionCatalog
 {
     // ---- Stage ids. Wire format: persisted in settings.json and in CompressionCaptures rows. ----
     public const string CrCollapse = "cr-collapse";
+    public const string CrLfNormalize = "crlf-normalize";
     public const string AnsiStrip = "ansi-strip";
     public const string TrailingWhitespace = "trailing-whitespace";
     public const string BlankEdges = "blank-edges";
@@ -109,6 +110,12 @@ public static class CompressionCatalog
     /// deliberate product decision (2026-07-15) — they reshape terminal-looking output and the
     /// owner wants to opt into that consciously, not inherit it. Do not "fix" this by flipping them
     /// on; flip them in the UI if you want them.
+    ///
+    /// <see cref="CrLfNormalize"/> exists because that decision had a cost nobody intended:
+    /// CRLF→LF normalization was bundled into <see cref="CrCollapse"/>, so with it off every stage
+    /// from <see cref="GitStatusGroup"/> down fails open on the surviving \r and no Windows payload
+    /// (rg, PowerShell, dotnet) was ever compressed by more than trailing whitespace. Splitting the
+    /// line-ending rewrite out restores those stages without touching a single redraw frame.
     /// </summary>
     public static readonly IReadOnlyList<CompressionStageInfo> Stages =
     [
@@ -117,37 +124,43 @@ public static class CompressionCatalog
             + "when that frame provably covers every earlier one. Also normalizes CRLF to LF.",
             StageKind.Lossless, OnByDefault: false, Order: 1),
 
+        new(CrLfNormalize, "Normalize CRLF line endings",
+            "Rewrites Windows \\r\\n line endings to \\n. Every later stage fails open on a "
+            + "surviving \\r, so without this the group, elide, dedupe and truncate stages all "
+            + "no-op on output from rg, PowerShell and dotnet.",
+            StageKind.Lossless, OnByDefault: true, Order: 2),
+
         new(AnsiStrip, "Strip ANSI styling",
             "Drops colour codes (SGR), window-title sequences (OSC) and bells. Cursor moves and "
             + "erases are left byte-verbatim.",
-            StageKind.Lossless, OnByDefault: false, Order: 2),
+            StageKind.Lossless, OnByDefault: false, Order: 3),
 
         new(TrailingWhitespace, "Strip trailing whitespace",
             "Spaces and tabs at end of line.",
-            StageKind.Lossless, OnByDefault: true, Order: 3),
+            StageKind.Lossless, OnByDefault: true, Order: 4),
 
         new(BlankEdges, "Trim blank edges",
             "Blank lines at the very start and end of the output.",
-            StageKind.Lossless, OnByDefault: true, Order: 4),
+            StageKind.Lossless, OnByDefault: true, Order: 5),
 
         new(BlankRuns, "Collapse blank runs",
             "Runs of 3 or more consecutive blank lines become 2.",
-            StageKind.Lossless, OnByDefault: true, Order: 5),
+            StageKind.Lossless, OnByDefault: true, Order: 6),
 
         new(GitStatusGroup, "Group git status",
             "Regroups porcelain `XY path` status lines under one header per status. Only fires "
             + "when the command was a recognised `git status --short`/`--porcelain=v1`.",
-            StageKind.Reshaping, OnByDefault: true, Order: 6),
+            StageKind.Reshaping, OnByDefault: true, Order: 7),
 
         new(GrepGroup, "Group grep matches",
             "Regroups `path:line:content` matches under one header per file. Only fires when the "
             + "command was a recognised `grep`/`rg` with an explicit -n.",
-            StageKind.Reshaping, OnByDefault: true, Order: 7),
+            StageKind.Reshaping, OnByDefault: true, Order: 8),
 
         new(FindGroup, "Group find results",
             "Regroups a flat path list under one header per directory. Only fires when the command "
             + "was a recognised `find`.",
-            StageKind.Reshaping, OnByDefault: true, Order: 8),
+            StageKind.Reshaping, OnByDefault: true, Order: 9),
 
         // The three lossy stages ship ON (2026-07-18/19, curated-set decision): they are the
         // largest wins on the exact payloads that burn tokens (log/build/test spew), and each
@@ -159,17 +172,17 @@ public static class CompressionCatalog
             + "errors, skips, logs and summaries are kept verbatim, in place. Only fires when the "
             + "command was a recognised test runner. Running before truncation also keeps failure "
             + "details out of truncate-long's elided middle.",
-            StageKind.Lossy, OnByDefault: true, Order: 9),
+            StageKind.Lossy, OnByDefault: true, Order: 10),
 
         new(DedupeLines, "Collapse repeated lines",
             "A run of 3+ identical lines becomes one instance tagged `[xN]`. Lossy: the repeat "
             + "count survives, the repeats do not.",
-            StageKind.Lossy, OnByDefault: true, Order: 10),
+            StageKind.Lossy, OnByDefault: true, Order: 11),
 
         new(TruncateLong, "Truncate very long output",
             "Keeps the first 150 and last 50 lines and replaces the middle with a "
             + "`[... N lines elided ...]` marker. Lossy: the middle is gone.",
-            StageKind.Lossy, OnByDefault: true, Order: 11),
+            StageKind.Lossy, OnByDefault: true, Order: 12),
     ];
 
     /// <summary>
@@ -252,7 +265,8 @@ public static class CompressionCatalog
             StripAnsiStyling: enabled.Contains(AnsiStrip),
             StripTrailingWhitespace: enabled.Contains(TrailingWhitespace),
             TrimBlankLineEdges: enabled.Contains(BlankEdges),
-            CollapseBlankLineRuns: enabled.Contains(BlankRuns));
+            CollapseBlankLineRuns: enabled.Contains(BlankRuns),
+            NormalizeCrLf: enabled.Contains(CrLfNormalize));
 
         var condense = new CondenseOptions(
             DedupeConsecutiveLines: enabled.Contains(DedupeLines),

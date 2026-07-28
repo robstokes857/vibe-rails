@@ -186,6 +186,8 @@ public static class CompressionPipeline
 
         Add(CompressionCatalog.CrCollapse, plan.Flags.CollapseCrRedraws,
             after.CrRedrawChars - before.CrRedrawChars);
+        Add(CompressionCatalog.CrLfNormalize, plan.Flags.NormalizeCrLf,
+            after.CrLfChars - before.CrLfChars);
         Add(CompressionCatalog.AnsiStrip, plan.Flags.StripAnsiStyling,
             after.AnsiChars - before.AnsiChars);
         Add(CompressionCatalog.TrailingWhitespace, plan.Flags.StripTrailingWhitespace,

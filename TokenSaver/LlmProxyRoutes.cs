@@ -46,6 +46,9 @@ public static class LlmProxyRoutes
             var transform = settings.CodexTokenSaverEnabled && saverHasWork
                 ? new CodexBodyTransform(plan, captureSink)
                 : null;
+            // Every authenticated request relayed through a proxy is an exchange. This is
+            // deliberately not configurable: if the proxy handles it, the exchange log records it.
+            var exchangeSink = context.RequestServices.GetRequiredService<ILlmProxyExchangeSink>();
 
             var target = BuildOpenAiUri(context.Request, settings.CodexLlmProxyMode);
             await LlmProxyRelay.HandleAsync(
@@ -54,9 +57,11 @@ public static class LlmProxyRoutes
                 context.RequestServices.GetRequiredService<ILlmProxyAuthGate>(),
                 context.RequestServices.GetRequiredService<ILlmProxyEventSink>(),
                 target,
+                "openai",
                 "Codex proxy",
                 bodyTransform: transform,
-                context.RequestAborted);
+                context.RequestAborted,
+                exchangeSink);
         }).WithName("LlmOpenAiProxy");
     }
 

@@ -19,10 +19,10 @@ namespace VibeRails.Services.VCA.Hooks;
 /// This class instead re-spawns the current executable with the Win32
 /// <c>CREATE_NEW_CONSOLE</c> creation flag. The child process gets a fresh, independent
 /// console window in every scenario — terminal, VS Code SCM panel, GUI Git client —
-/// and stays open until the user presses Enter or
-/// <see cref="VcaHookProcessHost.ConsolePauseTimeout"/> elapses. The parent process writes a short status line to
-/// its own stdout/stderr so the original caller (e.g. VS Code's logs) still sees that
-/// the hook ran and what the outcome was.
+/// and closes immediately when the check is non-blocking. A blocking result stays open
+/// until the user presses Enter or <see cref="VcaHookProcessHost.ConsolePauseTimeout"/>
+/// elapses. The parent process writes a short status line to its own stdout/stderr so the
+/// original caller (e.g. VS Code's logs) still sees that the hook ran and what the outcome was.
 /// </para>
 /// </remarks>
 internal static class VcaHookConsoleRespawn
@@ -88,8 +88,8 @@ internal static class VcaHookConsoleRespawn
         }
 
         // Swap --console-window for --console-window-attached so the child knows it already
-        // has its own console and should pause at the end. WithManagedEntry re-passes the
-        // entry DLL for framework-dependent (dotnet host) launches so the child runs this app.
+        // has its own console and should pause only for a blocking result. WithManagedEntry
+        // re-passes the entry DLL for framework-dependent (dotnet host) launches.
         var respawnArgs = VcaHookProcessLaunch.WithManagedEntry(
             processPath,
             args.Select(arg => arg.Equals("--console-window", StringComparison.OrdinalIgnoreCase)

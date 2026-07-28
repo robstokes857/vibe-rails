@@ -32,7 +32,7 @@ namespace Tests.Services
         {
             var preCommitScript = @"#!/bin/sh
 # Vibe Rails Pre-Commit Hook
-# VibeRails Hook Version: 6
+# VibeRails Hook Version: __VIBERAILS_HOOK_VERSION__
 VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
 VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
 VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
@@ -44,7 +44,7 @@ if [ -n ""$VIBERAILS_CHAINED_HOOK"" ]; then ""$VIBERAILS_CHAINED_HOOK"" ""$@""; 
 
             var commitMsgScript = @"#!/bin/sh
 # Vibe Rails Commit-Msg Hook
-# VibeRails Hook Version: 6
+# VibeRails Hook Version: __VIBERAILS_HOOK_VERSION__
 VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
 VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
 VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
@@ -56,7 +56,7 @@ vb --vca-hook commit-msg --commit-message ""$1""
 
             var postCommitScript = @"#!/bin/sh
 # Vibe Rails Post-Commit Hook
-# VibeRails Hook Version: 6
+# VibeRails Hook Version: __VIBERAILS_HOOK_VERSION__
 VIBERAILS_EXECUTABLE='__VIBERAILS_EXECUTABLE__'
 VIBERAILS_EXECUTABLE_ARGUMENT='__VIBERAILS_EXECUTABLE_ARGUMENT__'
 VIBERAILS_CHAINED_HOOK='__VIBERAILS_CHAINED_HOOK__'
@@ -109,6 +109,9 @@ if [ -n ""$VIBERAILS_CHAINED_HOOK"" ]; then ""$VIBERAILS_CHAINED_HOOK"" ""$@""; 
 
             var content = await File.ReadAllTextAsync(hookPath, TestContext.Current.CancellationToken);
             Assert.Contains("# Vibe Rails Pre-Commit Hook", content);
+            Assert.Contains(
+                $"# VibeRails Hook Version: {(global::VibeRails.VersionInfo.Version)}",
+                content);
             Assert.Contains("# End Vibe Rails Hook", content);
         }
 
@@ -172,6 +175,90 @@ echo ""Old hook""
             var content = await File.ReadAllTextAsync(hookPath, TestContext.Current.CancellationToken);
             Assert.Contains("# Vibe Rails Pre-Commit Hook", content);
             Assert.DoesNotContain("Old version", content);
+        }
+
+        [Fact]
+        public async Task InstallHooksAsync_ReplacesHooksFromPreviousAppVersion()
+        {
+            var launchCommand = HookInstallationService.ResolveLaunchCommand(
+                Environment.ProcessPath,
+                Environment.GetCommandLineArgs());
+            var version192 = new HookInstallationService(
+                _loggerMock.Object,
+                _scriptsDir,
+                launchCommand,
+                hookVersion: "1.9.2");
+
+            Assert.True((await version192.InstallHooksAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken)).Success);
+            Assert.True((await version192.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken)).IsInstalled);
+            foreach (var hookName in new[] { "pre-commit", "commit-msg", "post-commit" })
+            {
+                Assert.Contains(
+                    "# VibeRails Hook Version: 1.9.2",
+                    await File.ReadAllTextAsync(
+                        Path.Combine(_hooksDir, hookName),
+                        TestContext.Current.CancellationToken));
+            }
+
+            var version193 = new HookInstallationService(
+                _loggerMock.Object,
+                _scriptsDir,
+                launchCommand,
+                hookVersion: "1.9.3");
+            var stale = await version193.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+            Assert.Equal(GitHookFileState.Stale, stale.PreCommit.State);
+            Assert.Equal(GitHookFileState.Stale, stale.CommitMessage.State);
+            Assert.Equal(GitHookFileState.Stale, stale.PostCommit.State);
+
+            Assert.True((await version193.InstallHooksAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken)).Success);
+            Assert.True((await version193.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken)).IsInstalled);
+            foreach (var hookName in new[] { "pre-commit", "commit-msg", "post-commit" })
+            {
+                var content = await File.ReadAllTextAsync(
+                    Path.Combine(_hooksDir, hookName),
+                    TestContext.Current.CancellationToken);
+                Assert.Contains("# VibeRails Hook Version: 1.9.3", content);
+                Assert.DoesNotContain("# VibeRails Hook Version: 1.9.2", content);
+            }
+        }
+
+        [Fact]
+        public async Task GetStatusAsync_RequiresAnExactAppVersionMarker()
+        {
+            var launchCommand = HookInstallationService.ResolveLaunchCommand(
+                Environment.ProcessPath,
+                Environment.GetCommandLineArgs());
+            var laterPatch = new HookInstallationService(
+                _loggerMock.Object,
+                _scriptsDir,
+                launchCommand,
+                hookVersion: "1.9.20");
+            Assert.True((await laterPatch.InstallHooksAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken)).Success);
+
+            var currentPatch = new HookInstallationService(
+                _loggerMock.Object,
+                _scriptsDir,
+                launchCommand,
+                hookVersion: "1.9.2");
+            var status = await currentPatch.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(GitHookFileState.Stale, status.PreCommit.State);
+            Assert.Equal(GitHookFileState.Stale, status.CommitMessage.State);
+            Assert.Equal(GitHookFileState.Stale, status.PostCommit.State);
         }
 
         [Fact]

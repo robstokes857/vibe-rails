@@ -222,17 +222,34 @@ public class CommandServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task PrepareSession_Opencode_UsesOpencodeExecutableAndNoMcpSetup()
+    public async Task PrepareSession_Opencode_UsesOpencodeExecutable()
     {
         var service = CreateService();
 
-        // OpenCode's binary is `opencode` (== enum name lowercased, so no remap like agy), and
-        // it is launch-flag-only with no MCP auto-registration (`opencode mcp add` is
-        // interactive), so the launch command is bare `opencode` with no mcp setup prefix.
+        // OpenCode's binary is `opencode` (== enum name lowercased, so no remap like agy).
         var prepared = await service.PrepareSessionAsync(LLM.OpenCode, envName: null, extraArgs: null);
 
         Assert.Equal("opencode", prepared.LaunchCommand);
-        Assert.DoesNotContain("mcp", prepared.Command);
+    }
+
+    [Theory]
+    [InlineData(LLM.OpenCode)]
+    [InlineData(LLM.Glm52)]
+    [InlineData(LLM.KimiK3)]
+    public async Task PrepareSession_OpenCodeBackedClis_AddVibeRailsMcpBeforeLaunch(LLM llm)
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(llm, envName: null, extraArgs: null);
+
+        var setup = Assert.Single(prepared.SetupCommands);
+        var expectedExecutable = OperatingSystem.IsWindows() ? "opencode.cmd" : "opencode";
+        Assert.StartsWith(
+            $"{expectedExecutable} mcp add viberails-mcp -- ",
+            setup);
+        Assert.Contains(" mcp", setup);
+        Assert.StartsWith(setup + "; ", prepared.Command);
+        Assert.EndsWith(prepared.LaunchCommand, prepared.Command);
     }
 
     [Fact]
@@ -308,7 +325,6 @@ public class CommandServiceTests : IDisposable
         var prepared = await service.PrepareSessionAsync(LLM.Glm52, envName: null, extraArgs: null);
 
         Assert.Equal("opencode --model=zai/glm-5.2", prepared.LaunchCommand);
-        Assert.DoesNotContain("mcp", prepared.Command);
     }
 
     [Fact]
@@ -319,7 +335,6 @@ public class CommandServiceTests : IDisposable
         var prepared = await service.PrepareSessionAsync(LLM.KimiK3, envName: null, extraArgs: null);
 
         Assert.Equal("opencode --model=moonshotai/kimi-k3", prepared.LaunchCommand);
-        Assert.DoesNotContain("mcp", prepared.Command);
     }
 
     [Fact]

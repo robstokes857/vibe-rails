@@ -42,7 +42,13 @@ public class CommandService : ICommandService
     /// </summary>
     public static readonly IReadOnlyList<LLM> McpClis = new[]
     {
-        LLM.Claude, LLM.Codex, LLM.Antigravity, LLM.Copilot
+        LLM.Claude,
+        LLM.Codex,
+        LLM.Antigravity,
+        LLM.Copilot,
+        LLM.OpenCode,
+        LLM.Glm52,
+        LLM.KimiK3
     };
 
     public CommandService(
@@ -364,25 +370,29 @@ public class CommandService : ICommandService
 
     /// <summary>
     /// Returns the MCP setup commands for this launch. Registration is always on for supported
-    /// CLIs; remove-first repairs stale registrations and add restores the current stdio server.
+    /// CLIs. CLIs with a remove command use remove-first repair; OpenCode's idempotent add replaces
+    /// the named entry directly.
     /// </summary>
     private static IReadOnlyList<string> BuildMcpSetupCommands(LLM llm)
     {
         var (removeCommand, addCommand) = GetMcpCommands(llm);
-        if (removeCommand is null)
+        if (addCommand is null)
         {
             // This CLI doesn't support MCP registration — nothing to add or clean up.
             return [];
         }
 
-        return [removeCommand, addCommand!];
+        return removeCommand is null
+            ? [addCommand]
+            : [removeCommand, addCommand];
     }
 
-    // Returns the (remove, add) command pair for a CLI, or (null, null) if the CLI has no
-    // MCP registration support. Keep the supported set in sync with <see cref="McpClis"/>.
+    // Returns the optional remove command and required add command for a supported CLI, or
+    // (null, null) when unsupported. Keep the supported set in sync with <see cref="McpClis"/>.
     private static (string? remove, string? add) GetMcpCommands(LLM llm)
     {
         var serverCommand = BuildSafeArgString(ResolveMcpServerCommandParts());
+        var openCodeExecutable = ResolveOpenCodeMcpExecutable();
         return llm switch
         {
             LLM.Claude => (
@@ -397,8 +407,18 @@ public class CommandService : ICommandService
             LLM.Copilot => (
                 SuppressCommandOutput($"copilot mcp remove {VibeRailsMcpServerName}"),
                 $"copilot mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
+            LLM.OpenCode or LLM.Glm52 or LLM.KimiK3 => (
+                null,
+                $"{openCodeExecutable} mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
             _ => (null, null)
         };
+    }
+
+    private static string ResolveOpenCodeMcpExecutable()
+    {
+        // PowerShell consumes the `--` separator when it invokes npm's opencode.ps1 shim, so the
+        // local-command form silently falls back to help. The .cmd shim preserves argv exactly.
+        return OperatingSystem.IsWindows() ? "opencode.cmd" : "opencode";
     }
 
     private static string SuppressCommandOutput(string command)

@@ -8,10 +8,6 @@ const esc = escapeHtml;
 const MCP_ARG_EXAMPLES = {
     search_history: { query: 'websocket timeout' },
     validate_vca: {},
-    list_terminals: {},
-    open_terminal: { cli: 'Shell' },
-    send_terminal_input: { text: '', submit: false },
-    get_terminal_snapshot: {},
     run_shell_command: { command: 'dotnet --info', timeoutSeconds: 60, waitForCompletion: true },
     get_shell_command_status: { jobId: 'shell-...' },
     cancel_shell_command: { jobId: 'shell-...' },

@@ -369,8 +369,13 @@ TokenSaver/
 
 Host-side implementations live in `VibeRails/`:
 
-- `VibeRails/Services/LlmProxy/` — the settings, event-sink and capture-sink adapters.
-- `VibeRails/DB/CompressionCaptureStore.cs` — the capture writer.
+- `VibeRails/Services/LlmProxy/` — the settings, event-sink, capture-sink and exchange-sink adapters.
+- `VibeRails/DB/CompressionCaptureStore.cs` — the per-tool_result capture writer.
+- `VibeRails/DB/LlmExchangeLogStore.cs` — the whole-request/response log. Its own database file
+  (`~/.vibe_rails/proxy_exchanges.db`), never state.db. Every authenticated exchange handled by
+  any proxy route is logged; there is no settings flag or UI toggle. This is the artifact to reach
+  for when judging where compression could go next, because unlike a stage trace it stays valid
+  after the stages change.
 - `VibeRails/DB/TokenSavingsStore.cs` — the byte tally.
 - `VibeRails/Routes/CompressionCaptureRoutes.cs` — captures, catalog, preview.
 
@@ -411,12 +416,23 @@ smudge byte-exact fixtures on a fresh Windows checkout and you'll get failures w
 - **On Windows-native runners the shape stages silently no-op on `dotnet test`.**
   `ShapeFilters.Apply` fail-opens on *any* CR (`IndexOfAny('\x1b', '\a', '\r')`), and
   `cr-collapse` — the only stage that normalizes CRLF→LF — is **off** by default. So a
-  `dotnet test` (or any) payload with CRLF line endings reaches the shape stage still carrying
-  `\r`, and `elide-passed-tests` plus the three group stages return it untouched. The
-  `dotnet test` win advertised under "The stage catalog" assumes LF line endings; on a
-  Windows-native runner it does not fire unless `cr-collapse` is enabled. Fail-open is the
-  correct behavior (idempotency guard); the catalog copy just overpromises.
+  `dotnet test` (or any) payload with CRLF line endings used to reach the shape stage still
+  carrying `\r`, so `elide-passed-tests`, the three group stages, `dedupe-lines` and
+  `truncate-long` all returned it untouched — six of eleven stages dead on every Windows payload,
+  reporting `NoChange` rather than `Aborted` so it never looked like a failure. Fixed 2026-07-28
+  by splitting CRLF→LF out of `cr-collapse` into the on-by-default `crlf-normalize` stage. The
+  fail-open itself is unchanged and still correct: it now fires only on a genuine bare CR (a
+  redraw frame), which is what it was written for. `cr-collapse` remains off.
 - **The relay must never wait on SQLite.** `TokenSavingsStore` persists in the background and
   `CompressionCaptureStore` enqueues work to its single ordered consumer; both set `busy_timeout`
   and swallow write failures. `state.db` has known lock contention; a lost capture is a bad
   afternoon, a blocked relay is a broken product.
+- **No single process knows what the app has saved.** The proxy runs wherever the CLI runs, and
+  that is the terminal tab's own child `vb.exe` — never the root backend that serves the
+  dashboard. So a savings number held in one process's memory describes one tab: the root's would
+  sit at zero forever, and a tab's restarts at zero every time that tab is spawned. Anything the
+  UI displays has to be re-read from the `TokenSavings` table (`ITokenSavingsStore.RefreshAsync`),
+  which is why `GET /api/v1/token-savings` refreshes before answering and why the root rewrites
+  the tallies on a `proxy_activity` ping it relays out of a child
+  (`TerminalTabHostService.EnrichPayload`). "This session" is a delta — what the table has gained
+  since this process started — not a counter of this process's own requests.

@@ -49,7 +49,14 @@ public sealed record GitStagedFileSnapshot(
     int? ChangedLineCount,
     string? Content,
     string? PreviousRelativePath = null,
-    string? PreviousContent = null);
+    string? PreviousContent = null,
+    // The lines Git reports as additions for this change. An empty string is meaningful:
+    // the file changed, but only through removals or a content-identical rename. Null is
+    // reserved for legacy/test snapshots that did not capture a patch.
+    string? AddedContent = null,
+    // One entry per line in AddedContent, mapping the fragment line back to its line in
+    // Content. MintLint scores the fragment while its report still links to the full file.
+    IReadOnlyList<int>? AddedLineNumbers = null);
 
 public sealed record GitStagedSnapshot(
     string RepositoryPath,

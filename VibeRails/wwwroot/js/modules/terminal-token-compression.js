@@ -455,12 +455,14 @@ export class TerminalTokenCompressionMeter {
 
     _syncSavingsDisplay() {
         if (!this._savingsMetric || !this._savingsValue) return;
-        // The trigger shows all-time savings — the monotonically-increasing tally that survives
-        // server restarts and never flashes to zero when a fresh session's counter resets. It
-        // still ticks visibly with each pulse because Record() adds every measured saving into
-        // the all-time counters alongside the session ones. The popover carries the full
-        // session/month/all-time breakdown.
-        const shown = this._savings.allTime;
+        // The trigger shows this app run's savings — the number that answers "is the saver
+        // working right now", which an all-time tally in the millions never does. It is safe to
+        // show again now that the server derives it from the shared savings table rather than
+        // from one process's counters: it starts at 0 each run, only climbs, and covers every
+        // terminal tab. (It used to flash to zero because the backend serving this page proxies
+        // nothing — every tab's traffic belongs to that tab's own child process.) Callers that
+        // supply a bare number still fall back to all time; the popover carries all three windows.
+        const shown = this._savings.session ?? this._savings.allTime;
         const isPlaceholder = shown == null;
         this._savingsMetric.classList.toggle('is-placeholder', isPlaceholder);
         this._savingsValue.textContent = isPlaceholder

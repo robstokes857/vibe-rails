@@ -21,8 +21,8 @@ namespace VibeRails.Services
         private const string END_MARKER = "# End Vibe Rails Hook";
         private const string DISABLED_MARKER = "# VibeRails: disabled";
         private const string HOOK_MARKER = "# Vibe Rails Pre-Commit Hook"; // Legacy compatibility
-        private const string HOOK_VERSION = "6";
-        private const string VERSION_MARKER = "# VibeRails Hook Version: " + HOOK_VERSION;
+        private const string VERSION_MARKER_PREFIX = "# VibeRails Hook Version: ";
+        private const string VERSION_PLACEHOLDER = "__VIBERAILS_HOOK_VERSION__";
         private const string EXECUTABLE_PLACEHOLDER = "__VIBERAILS_EXECUTABLE__";
         private const string EXECUTABLE_ARGUMENT_PLACEHOLDER = "__VIBERAILS_EXECUTABLE_ARGUMENT__";
         private const string CHAINED_HOOK_PLACEHOLDER = "__VIBERAILS_CHAINED_HOOK__";
@@ -32,6 +32,7 @@ namespace VibeRails.Services
         private readonly ILogger<HookInstallationService> _logger;
         private readonly string _scriptsDirectory;
         private readonly HookLaunchCommand _launchCommand;
+        private readonly string _hookVersion;
         private readonly Func<string, CancellationToken, Task>? _installationCheckpoint;
 
         public HookInstallationService(
@@ -41,7 +42,8 @@ namespace VibeRails.Services
                 logger,
                 scriptsDirectory,
                 GetCurrentLaunchCommand(),
-                installationCheckpoint: null)
+                installationCheckpoint: null,
+                hookVersion: VersionInfo.Version)
         {
         }
 
@@ -49,11 +51,24 @@ namespace VibeRails.Services
             ILogger<HookInstallationService> logger,
             string? scriptsDirectory,
             HookLaunchCommand launchCommand,
-            Func<string, CancellationToken, Task>? installationCheckpoint = null)
+            Func<string, CancellationToken, Task>? installationCheckpoint = null,
+            string? hookVersion = null)
         {
             _logger = logger;
             _scriptsDirectory = scriptsDirectory ?? Path.Combine(AppContext.BaseDirectory, "scripts");
             _launchCommand = launchCommand;
+            var configuredVersion = hookVersion ?? VersionInfo.Version;
+            if (!TryNormalizeHookVersion(configuredVersion, out _hookVersion))
+            {
+                _logger.LogWarning(
+                    "The configured hook version {ConfiguredVersion} is not a SemVer-style value, so "
+                    + "installed hooks will be stamped {FallbackVersion} instead. Set "
+                    + "VibeRails:Version to letters, digits, '.', '-' or '+' only — the stamp is "
+                    + "written into a shell script unescaped, so other characters are refused.",
+                    configuredVersion,
+                    _hookVersion);
+            }
+
             _installationCheckpoint = installationCheckpoint;
         }
 
@@ -690,7 +705,8 @@ namespace VibeRails.Services
 
                 var expectedExecutable = $"VIBERAILS_EXECUTABLE='{EscapeForSingleQuotedShell(_launchCommand.Executable)}'";
                 var expectedArgument = $"VIBERAILS_EXECUTABLE_ARGUMENT='{EscapeForSingleQuotedShell(_launchCommand.Argument)}'";
-                var isCurrent = content.Contains(VERSION_MARKER, StringComparison.Ordinal)
+                var expectedVersionMarker = VERSION_MARKER_PREFIX + _hookVersion;
+                var isCurrent = ManagedSectionContainsExactLine(content, marker, expectedVersionMarker)
                     && content.Contains(END_MARKER, StringComparison.Ordinal)
                     && content.Contains(expectedInvocation, StringComparison.Ordinal)
                     && content.Contains(expectedExecutable, StringComparison.Ordinal)
@@ -702,13 +718,13 @@ namespace VibeRails.Services
                         hookPath,
                         GitHookFileState.Current,
                         HasVibeRailsSection: true,
-                        "Hook is active and current.")
+                        $"Hook is active for VibeRails {_hookVersion}.")
                     : new GitHookFileStatus(
                         hookName,
                         hookPath,
                         GitHookFileState.Stale,
                         HasVibeRailsSection: true,
-                        "The installed VibeRails hook is stale or incomplete.");
+                        $"The installed VibeRails hook is stale or incomplete; expected app version {_hookVersion}.");
             }
             catch (Exception ex)
             {
@@ -743,12 +759,62 @@ namespace VibeRails.Services
             return content.IndexOf(value, startIndex, count, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        private static bool ManagedSectionContainsExactLine(
+            string content,
+            string marker,
+            string expectedLine)
+        {
+            var startIndex = content.IndexOf(marker, StringComparison.Ordinal);
+            if (startIndex < 0)
+            {
+                return false;
+            }
+
+            var endIndex = content.IndexOf(END_MARKER, startIndex, StringComparison.Ordinal);
+            var count = endIndex < 0
+                ? content.Length - startIndex
+                : endIndex + END_MARKER.Length - startIndex;
+            return content.Substring(startIndex, count)
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Split('\n')
+                .Any(line => line.TrimEnd('\r').Equals(expectedLine, StringComparison.Ordinal));
+        }
+
         private string MaterializeHookScript(string hookContent, string chainedHookPath)
         {
             return hookContent
+                .Replace(VERSION_PLACEHOLDER, _hookVersion, StringComparison.Ordinal)
                 .Replace(EXECUTABLE_PLACEHOLDER, EscapeForSingleQuotedShell(_launchCommand.Executable), StringComparison.Ordinal)
                 .Replace(EXECUTABLE_ARGUMENT_PLACEHOLDER, EscapeForSingleQuotedShell(_launchCommand.Argument), StringComparison.Ordinal)
                 .Replace(CHAINED_HOOK_PLACEHOLDER, EscapeForSingleQuotedShell(chainedHookPath), StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Constrains the version to SemVer-safe characters before it is substituted into the hook
+        /// script. This is a shell-injection guard, not cosmetics: <see cref="MaterializeHookScript"/>
+        /// escapes every other placeholder with <see cref="EscapeForSingleQuotedShell"/> and this one
+        /// is inserted raw, so the character set IS the escaping.
+        ///
+        /// A rejected value falls back rather than throwing. The version reaches here from
+        /// <c>VibeRails:Version</c> in configuration, so throwing put a misconfigured string in the
+        /// path of a constructor — turning a cosmetic typo into a failed service resolution, with an
+        /// ArgumentException that never names the setting responsible.
+        /// </summary>
+        private const string FallbackHookVersion = "0.0.0";
+
+        private static bool TryNormalizeHookVersion(string version, out string normalized)
+        {
+            normalized = version.Trim();
+            if (normalized.Length is 0 or > 64
+                || normalized.Any(character =>
+                    !char.IsAsciiLetterOrDigit(character)
+                    && character is not '.' and not '-' and not '+'))
+            {
+                normalized = FallbackHookVersion;
+                return false;
+            }
+
+            return true;
         }
 
         private static HookLaunchCommand GetCurrentLaunchCommand()

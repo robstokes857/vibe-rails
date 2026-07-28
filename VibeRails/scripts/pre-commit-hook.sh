@@ -1,6 +1,6 @@
 #!/bin/sh
 # Vibe Rails Pre-Commit Hook
-# VibeRails Hook Version: 6
+# VibeRails Hook Version: __VIBERAILS_HOOK_VERSION__
 # Validates staged changes before Git creates a commit.
 # Installed by VibeRails - use the dashboard to repair or remove this section.
 

@@ -1,6 +1,6 @@
 export const GIT_PREFLIGHT_STEPS = Object.freeze([
     Object.freeze({ id: 'vca', label: 'VCA rules', description: 'Validate staged changes against repository AGENTS.md rules.' }),
-    Object.freeze({ id: 'mintlint', label: 'MintLint', description: 'Grade staged files and surface maintainability findings.' }),
+    Object.freeze({ id: 'mintlint', label: 'MintLint', description: 'Grade added staged code and surface maintainability findings.' }),
     Object.freeze({ id: 'automated-workflows', label: 'Automated workflows', description: 'Run repository-defined commit safeguards.' })
 ]);
 
@@ -438,8 +438,12 @@ function buildMintLintReportModel(rawReport) {
         const rating = String(file.rating ?? '');
         const referencedBy = Number(file.referencedByCount);
         const priority = Number(file.priority);
-        const baseline = Number(file.baselineScore);
-        const introduced = Number(file.introducedScore);
+        const baseline = file.baselineScore === null || file.baselineScore === undefined
+            ? null
+            : Number(file.baselineScore);
+        const introduced = file.introducedScore === null || file.introducedScore === undefined
+            ? null
+            : Number(file.introducedScore);
         const categories = (Array.isArray(file.categories) ? file.categories : []).map(rawCategory => {
             const category = asObject(rawCategory);
             return {
@@ -458,8 +462,8 @@ function buildMintLintReportModel(rawReport) {
             rating,
             referencedBy: Number.isFinite(referencedBy) && referencedBy > 0 ? referencedBy : 0,
             priority: Number.isFinite(priority) ? priority : null,
-            baseline: Number.isFinite(baseline) ? baseline : null,
-            introduced: Number.isFinite(introduced) ? introduced : null,
+            baseline: baseline !== null && Number.isFinite(baseline) ? baseline : null,
+            introduced: introduced !== null && Number.isFinite(introduced) ? introduced : null,
             detailed: true,
             categories
         };
@@ -780,7 +784,7 @@ function renderMintLintFileCard(file, documentRef) {
                 impactParts.push(`all pre-existing (was ${file.baseline.toFixed(1)})`);
             }
         } else if (file.baseline === null) {
-            impactParts.push('new file');
+            impactParts.push('score covers added code only');
         }
         if (Number.isFinite(file.priority) && file.priority !== null) {
             impactParts.push(`priority ${file.priority.toFixed(1)}`);

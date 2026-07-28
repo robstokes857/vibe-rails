@@ -180,11 +180,14 @@ public static class OutputMinifier
             blankRun = isBlank ? blankRun + 1 : 0;
             if (flags.CollapseBlankLineRuns && isBlank && blankRun >= 3 && hasNewline)
             {
-                // A skipped CRLF blank drops two chars: the \r is either T1's (normalization owns
-                // it) or this transform's (T1 off would have re-emitted it) — count accordingly so
+                // A skipped CRLF blank drops two chars. The \r belongs to whichever transform would
+                // have removed it anyway — redraw collapse, CRLF normalization, or (with both off)
+                // this one, which would otherwise have re-emitted it. Attribute it accordingly so
                 // the diagnostic counters always sum to exactly the chars removed.
                 if (hasCrLf && flags.CollapseCrRedraws)
                     pending.CrRedrawChars += 1;
+                else if (hasCrLf && flags.NormalizeCrLf)
+                    pending.CrLfChars += 1;
                 else if (hasCrLf)
                     pending.BlankRunChars += 1;
                 pending.BlankRunChars += 1;
@@ -193,11 +196,16 @@ public static class OutputMinifier
 
             if (hasNewline)
             {
-                // T1 owns CRLF→LF normalization; with it off, the original ending is restored.
-                if (hasCrLf && !flags.CollapseCrRedraws)
+                // CRLF→LF normalization is owned by T1 (as a side effect of redraw collapse) and by
+                // the standalone crlf-normalize stage. With both off, the original ending is
+                // restored — which is what left every shape and condense stage no-opping on Windows
+                // payloads, since their guards fail open on any surviving \r.
+                if (hasCrLf && !flags.DropsCrLf)
                     destination[dstPos++] = '\r';
-                else if (hasCrLf)
+                else if (hasCrLf && flags.CollapseCrRedraws)
                     pending.CrRedrawChars += 1;
+                else if (hasCrLf)
+                    pending.CrLfChars += 1;
                 destination[dstPos++] = '\n';
             }
         }

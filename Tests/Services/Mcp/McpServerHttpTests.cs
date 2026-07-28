@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
 using VibeRails.DTOs;
-using VibeRails.Services.AgentTools;
 using VibeRails.Services.BertV2;
 using VibeRails.Services.Mcp;
 using VibeRails.Services.Mcp.HostShell;
@@ -37,10 +36,6 @@ public class McpServerHttpTests : IAsyncLifetime
     {
         "validate_vca",
         "search_history",
-        "list_terminals",
-        "open_terminal",
-        "send_terminal_input",
-        "get_terminal_snapshot",
     };
 
     public async ValueTask InitializeAsync()
@@ -52,9 +47,7 @@ public class McpServerHttpTests : IAsyncLifetime
 
         // Stand in for the real BGE/sqlite-vec search so the test is hermetic.
         builder.Services.AddSingleton<IUnifiedSearchService>(new FakeUnifiedSearchService());
-        builder.Services.AddSingleton<IAgentTerminalToolGateway>(new FakeTerminalToolGateway());
         builder.Services.AddScoped<SessionSearchTool>();
-        builder.Services.AddScoped<TerminalTools>();
 
         builder.Services
             .AddMcpServer(options =>
@@ -63,8 +56,7 @@ public class McpServerHttpTests : IAsyncLifetime
             })
             .WithHttpTransport()
             .WithTools<RulesTool>()
-            .WithTools<SessionSearchTool>()
-            .WithTools<TerminalTools>();
+            .WithTools<SessionSearchTool>();
 
         _app = builder.Build();
         _app.MapMcp("/mcp");
@@ -177,43 +169,4 @@ public class McpServerHttpTests : IAsyncLifetime
         }
     }
 
-    private sealed class FakeTerminalToolGateway : IAgentTerminalToolGateway
-    {
-        private static readonly TerminalTabStatusResponse Terminal = new(
-            TabId: "tab-123",
-            CreatedUTC: new DateTime(2026, 6, 15, 12, 0, 0, DateTimeKind.Utc),
-            HasActiveSession: true,
-            SessionId: "sess-term",
-            Cli: "Shell",
-            WorkingDirectory: "/repo");
-
-        public Task<AgentToolTerminalListResponse> ListTerminalsAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new AgentToolTerminalListResponse(new List<TerminalTabStatusResponse> { Terminal }, 8));
-
-        public Task<TerminalTabStatusResponse> OpenTerminalAsync(AgentToolOpenTerminalRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Terminal);
-
-        public Task<TerminalInputResponse> SendInputAsync(string? tabId, TerminalInputRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new TerminalInputResponse(true, "Input sent.", tabId ?? "tab-123", "sess-term"));
-
-        public Task<TerminalSnapshotResponse?> CaptureSnapshotAsync(string? tabId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<TerminalSnapshotResponse?>(new TerminalSnapshotResponse(
-                tabId ?? "tab-123",
-                "sess-term",
-                DateTimeOffset.UtcNow,
-                120,
-                30,
-                new[] { "prompt>" },
-                new TerminalXtermUiBytes(
-                    ContentType: "application/vnd.viberails.xterm-ui-bytes",
-                    Encoding: "base64",
-                    Format: "ansi-replay",
-                    Base64: "cHJvbXB0Pg==",
-                    ByteLength: 7,
-                    Cols: 120,
-                    Rows: 30,
-                    IncludesScrollback: true,
-                    RendererHint: "xterm.js"),
-                XtermPngString: null));
-    }
 }

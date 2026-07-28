@@ -24,7 +24,8 @@ public static class MintLintReportFactory
         int skippedFileCount,
         IReadOnlyDictionary<string, string>? contentByFile = null,
         IReadOnlyDictionary<string, int>? referencedByFile = null,
-        IReadOnlyDictionary<string, double>? baselineScoreByFile = null)
+        IReadOnlyDictionary<string, double>? baselineScoreByFile = null,
+        IReadOnlyDictionary<string, IReadOnlyList<int>>? sourceLineNumbersByFile = null)
     {
         List<MintLintFileReportResponse> files = [];
         Dictionary<string, (MintLintWorstMetricResponse Entry, double Score, double Value)> worst =
@@ -45,6 +46,10 @@ public static class MintLintReportFactory
                 List<MintLintMetricResponse> metrics = [];
                 foreach (var metric in category.Metrics)
                 {
+                    var sourceLine = MapSourceLine(
+                        sourceLineNumbersByFile,
+                        file.File,
+                        metric.Line);
                     metrics.Add(new MintLintMetricResponse(
                         metric.Name,
                         metric.Value,
@@ -53,8 +58,8 @@ public static class MintLintReportFactory
                         metric.Critical,
                         metric.HigherIsBetter,
                         metric.Source,
-                        metric.Line,
-                        ExtractSnippet(contentByFile, file.File, metric.Line),
+                        sourceLine,
+                        ExtractSnippet(contentByFile, file.File, sourceLine),
                         metric.Direction.ToString()));
 
                     if (countedForFile.Add(metric.Name))
@@ -78,8 +83,8 @@ public static class MintLintReportFactory
                             metric.Critical,
                             metric.HigherIsBetter,
                             metric.Source,
-                            metric.Line,
-                            ExtractSnippet(contentByFile, file.File, metric.Line),
+                            sourceLine,
+                            ExtractSnippet(contentByFile, file.File, sourceLine),
                             metric.Direction.ToString()), metric.Score, metric.Value);
                     }
                 }
@@ -301,6 +306,24 @@ public static class MintLintReportFactory
     private static bool WorseValue(MetricScore metric, double currentValue)
     {
         return metric.HigherIsBetter ? metric.Value < currentValue : metric.Value > currentValue;
+    }
+
+    private static int? MapSourceLine(
+        IReadOnlyDictionary<string, IReadOnlyList<int>>? sourceLineNumbersByFile,
+        string file,
+        int? fragmentLine)
+    {
+        if (fragmentLine is not > 0
+            || sourceLineNumbersByFile is null
+            || !sourceLineNumbersByFile.TryGetValue(file, out var sourceLines))
+        {
+            return fragmentLine;
+        }
+
+        var index = fragmentLine.Value - 1;
+        return index >= 0 && index < sourceLines.Count
+            ? sourceLines[index]
+            : fragmentLine;
     }
 
     /// <summary>

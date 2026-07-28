@@ -36,12 +36,6 @@ public static class RouteExtensions
         app.Services.GetRequiredService<AppEventWebSocketHandler>().MapWebSocket(app);
         BertRoutes.Map(app);
         SearchRoutes.Map(app);
-
-        // Debug routes - only map if in debug mode
-#if DEBUG
-        app.Services.GetRequiredService<DebugEventWebSocketHandler>().MapWebSocket(app);
-        EventTabProxyRoutes.Map(app);
-#endif
     }
 }
 

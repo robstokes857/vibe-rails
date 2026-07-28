@@ -676,9 +676,12 @@ namespace VibeRails.DTOs
     //   Target: where it went, e.g. an upstream URL (no query string).
     //   Status: outcome, e.g. an HTTP status code.
     //   BytesSaved: this request's minification win, when it was rewritten.
-    //   TokensSavedTotal: all-time running tally (~4 bytes/token estimate) for the light's label.
-    //   TokensSavedSession / TokensSavedMonth: the same estimate scoped to this server process
-    //   and to the current UTC month, for the light's popover breakdown.
+    //   TokensSavedTotal: all-time running tally (~4 bytes/token estimate) for the light's popover.
+    //   TokensSavedSession / TokensSavedMonth: the same estimate scoped to this app run (the
+    //   light's headline number) and to the current UTC month.
+    // A tab child tallies only its own proxy traffic, so the root backend rewrites these three
+    // fields with its app-wide view before relaying the ping to the browser (see
+    // TerminalTabHostService.RelayChildAppEventsAsync).
     public record ProxyActivityPingPayload(
         string Source,
         string? Label,
@@ -692,8 +695,8 @@ namespace VibeRails.DTOs
 
     // Served by GET /api/v1/token-savings for the UI's initial tally (live updates ride the
     // proxy_activity pings). Bytes are the measured truth; the token fields are the ~4 bytes/token
-    // display estimate — all-time, this server process, and the current UTC month — derived
-    // server-side so the heuristic lives in one place.
+    // display estimate — all-time, this app run, and the current UTC month — derived server-side
+    // so the heuristic lives in one place.
     public record TokenSavingsDto(
         long BytesBefore,
         long BytesAfter,
@@ -1011,8 +1014,6 @@ namespace VibeRails.DTOs
         string? IconColor = null
     );
 
-    public record EventMessage(string Type, string Text);
-
     // Generic typed event pushed to browser over /api/v1/events/ws
     public record AppEvent(string Type, JsonElement Payload);
 
@@ -1032,7 +1033,6 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SessionInputPayload))]
     [JsonSerializable(typeof(SessionWaitingForUserPayload))]
     [JsonSerializable(typeof(SessionCompletedPayload))]
-    [JsonSerializable(typeof(EventMessage))]
     [JsonSerializable(typeof(HealthResponse))]
     [JsonSerializable(typeof(FileResponse))]
     [JsonSerializable(typeof(ErrorResponse))]

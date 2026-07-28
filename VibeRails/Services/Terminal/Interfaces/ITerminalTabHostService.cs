@@ -15,6 +15,5 @@ public interface ITerminalTabHostService
     Task<TerminalInputResponse> SendInputAsync(string tabId, TerminalInputRequest request, CancellationToken cancellationToken = default);
     Task<TerminalSnapshotResponse?> CaptureSnapshotAsync(string tabId, CancellationToken cancellationToken = default);
     Task HandleWebSocketProxyAsync(string tabId, WebSocket browserSocket, int? cols = null, int? rows = null, CancellationToken cancellationToken = default);
-    Task HandleEventWebSocketProxyAsync(string tabId, WebSocket browserSocket, CancellationToken cancellationToken = default);
     Task StopAllAsync(CancellationToken cancellationToken = default);
 }
