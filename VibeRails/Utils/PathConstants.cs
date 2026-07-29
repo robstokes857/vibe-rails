@@ -6,6 +6,11 @@ namespace VibeRails.Utils
     /// </summary>
     public static class PathConstants
     {
+        public static string GetStateFilePath()
+        {
+            return Path.Combine(GetInstallDirPath(), STATE_FILENAME);
+        }
+
         // Primary installation directory name
         // This can be overridden via appsettings.json's "VibeRails:InstallDirName" property
         public const string DEFAULT_INSTALL_DIR_NAME = ".vibe_rails";

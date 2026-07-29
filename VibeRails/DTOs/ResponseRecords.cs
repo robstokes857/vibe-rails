@@ -636,6 +636,15 @@ namespace VibeRails.DTOs
         string Message
     );
 
+    public record DataExportResponse(
+        bool Success,
+        string Status,
+        string Message,
+        string? Sha256 = null
+    );
+
+    public record StateDatabaseSizeResponse(long Bytes);
+
     public record AppSettingsDto(
         bool RemoteAccess,
         string ApiKey,
@@ -660,7 +669,16 @@ namespace VibeRails.DTOs
         // Read-only: the live machine name, used by the client as the placeholder
         // and as the push-notification fallback when ComputerName is blank. Never
         // persisted (see AppSettingsRoutes), so renaming the machine reflects live.
-        string? MachineName = null
+        string? MachineName = null,
+        // Request-only: the explicit "remove the stored key" signal. A blank ApiKey means
+        // "unchanged" (the masked field was not edited), so without a separate flag a saved key
+        // could never be cleared from the UI. Nullable for the same stale-client guard as the
+        // proxy fields — a client that omits it must never wipe the key by accident.
+        bool? ClearApiKey = null,
+        // Read-only: whether VibeRails:ExportUrl holds a usable HTTPS URL. The client gates the
+        // Export Data button on this as well as on a saved key, so the shipped placeholder
+        // doesn't present a button whose only possible outcome is "not configured".
+        bool DataExportConfigured = false
     );
 
     // Narrow update for just the notification computer name. Lets the terminal
@@ -704,6 +722,14 @@ namespace VibeRails.DTOs
         long TokensSaved,
         long TokensSavedSession,
         long TokensSavedMonth
+    );
+
+    // Payload for the periodic token-savings publish job (POST /api/v1/token-savings).
+    // The total is an absolute cumulative value, not a delta — reposting upserts the record
+    // keyed by API key + computer name.
+    public record TokenSavingsPostDto(
+        string ComputerName,
+        long TotalTokensSaved
     );
 
     // Compression capture DTOs — served by /api/v1/compression/*.
@@ -1192,11 +1218,14 @@ namespace VibeRails.DTOs
     // Debug Bundle DTOs
     [JsonSerializable(typeof(DebugBundleSendRequest))]
     [JsonSerializable(typeof(DebugBundleSendResponse))]
+    [JsonSerializable(typeof(DataExportResponse))]
+    [JsonSerializable(typeof(StateDatabaseSizeResponse))]
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(AppSettingsDto))]
     [JsonSerializable(typeof(UpdateComputerNameDto))]
     [JsonSerializable(typeof(ProxyActivityPingPayload))]
     [JsonSerializable(typeof(TokenSavingsDto))]
+    [JsonSerializable(typeof(TokenSavingsPostDto))]
     // Compression capture DTOs
     [JsonSerializable(typeof(CompressionStageTraceResponse))]
     [JsonSerializable(typeof(List<CompressionStageTraceResponse>))]

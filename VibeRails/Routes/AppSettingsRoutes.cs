@@ -1,20 +1,32 @@
 using TokenSaver;
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Utils;
 
 namespace VibeRails.Routes;
 
 public static class AppSettingsRoutes
 {
-    private const int MaxComputerNameLength = 80;
-
     public static void Map(WebApplication app)
     {
+        app.MapGet("/api/v1/settings/db-size", () =>
+        {
+            // ParserConfigs is the source used by DataExportService and respects a custom
+            // install-directory configuration. The fallback also keeps this route useful in
+            // small hosts/tests that map routes before FileService initializes ParserConfigs.
+            var configuredPath = ParserConfigs.GetStatePath();
+            var path = string.IsNullOrWhiteSpace(configuredPath)
+                ? PathConstants.GetStateFilePath()
+                : configuredPath;
+
+            return Results.Ok(new StateDatabaseSizeResponse(SafeFileSize(path)));
+        }).WithName("GetDbSize");
+
         // GET /api/v1/settings - Read current app settings
         app.MapGet("/api/v1/settings", () =>
         {
-            return Results.Ok(BuildAppSettingsDto(Config.Load()));
+            return Results.Ok(BuildAppSettingsDto(Config.Load(), app.Configuration));
         }).WithName("GetAppSettings");
 
         // POST /api/v1/settings - Update app settings
@@ -29,15 +41,20 @@ public static class AppSettingsRoutes
             // the cache was filled — including flipping the token-saver kill switch back on.
             var settings = Config.LoadFresh();
 
-            // Empty apiKey means "unchanged" (masked value was not edited). Also reject the masked
-            // placeholder itself (bullet chars, U+2022) so a client that echoes it back can't
-            // overwrite the real key with dots.
-            var apiKeyProvided = !string.IsNullOrEmpty(settingsDto.ApiKey)
+            // A blank apiKey means "unchanged" (masked value was not edited), so removing a saved
+            // key needs its own explicit signal — otherwise a stored key can never be cleared from
+            // the UI. Also reject the masked placeholder itself (bullet chars, U+2022) so a client
+            // that echoes it back can't overwrite the real key with dots.
+            var clearApiKey = settingsDto.ClearApiKey == true;
+            var apiKeyProvided = !clearApiKey
+                && !string.IsNullOrWhiteSpace(settingsDto.ApiKey)
                 && !settingsDto.ApiKey.Contains('•');
 
             // Update only the app settings fields exposed by the UI
             settings.RemoteAccess = remoteAccess;
-            if (apiKeyProvided)
+            if (clearApiKey)
+                settings.ApiKey = "";
+            else if (apiKeyProvided)
                 settings.ApiKey = settingsDto.ApiKey!;
             settings.UseVsCodeTheme = settingsDto.UseVsCodeTheme;
             // MCP registration is always on. Keep the field true for old clients/settings files.
@@ -74,12 +91,14 @@ public static class AppSettingsRoutes
 
             // Update static Configs so runtime reflects the change immediately
             ParserConfigs.SetRemoteAccess(remoteAccess);
-            if (apiKeyProvided)
+            if (clearApiKey)
+                ParserConfigs.SetApiKey("");
+            else if (apiKeyProvided)
                 ParserConfigs.SetApiKey(settingsDto.ApiKey!);
             ParserConfigs.SetUseVsCodeTheme(settingsDto.UseVsCodeTheme);
             ParserConfigs.SetMcpEnabled(true);
 
-            return Results.Ok(BuildAppSettingsDto(settings));
+            return Results.Ok(BuildAppSettingsDto(settings, app.Configuration));
         }).WithName("UpdateAppSettings");
 
         // POST /api/v1/settings/computer-name - Update ONLY the notification computer
@@ -93,13 +112,13 @@ public static class AppSettingsRoutes
             var settings = Config.LoadFresh();
             settings.ComputerName = NormalizeComputerName(dto.ComputerName ?? settings.ComputerName);
             Config.Save(settings);
-            return Results.Ok(BuildAppSettingsDto(settings));
+            return Results.Ok(BuildAppSettingsDto(settings, app.Configuration));
         }).WithName("UpdateComputerName");
     }
 
-    private static AppSettingsDto BuildAppSettingsDto(Settings settings)
+    private static AppSettingsDto BuildAppSettingsDto(Settings settings, IConfiguration configuration)
     {
-        var maskedKey = string.IsNullOrEmpty(settings.ApiKey)
+        var maskedKey = string.IsNullOrWhiteSpace(settings.ApiKey)
             ? ""
             : settings.ApiKey.Length <= 4
                 ? new string('•', settings.ApiKey.Length)
@@ -121,33 +140,30 @@ public static class AppSettingsRoutes
             settings.CodexTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
             settings.OpenCodeTokenSaverEnabled ?? settings.ClaudeTokenSaverEnabled,
             settings.TokenSaverCaptureEnabled,
-            GetMachineName()
+            ComputerNameFormatter.Machine(),
+            // Response-only; the request flag is never echoed back.
+            ClearApiKey: null,
+            // Asked of DataExportService itself so the button the client shows and the rule the
+            // export enforces can't drift apart (placeholder value, non-HTTPS, unparseable).
+            DataExportConfigured: DataExportService.TryGetExportUri(configuration, out _)
         );
     }
 
-    private static string NormalizeComputerName(string? value)
-    {
-        var trimmed = (value ?? string.Empty).Trim();
-        if (trimmed.Length <= MaxComputerNameLength)
-            return trimmed;
+    private static string NormalizeComputerName(string? value) =>
+        ComputerNameFormatter.Normalize(value);
 
-        // Truncate by UTF-16 code units, but don't leave a dangling high surrogate
-        // (which would render as a replacement char) if the cut splits a pair.
-        var cut = char.IsHighSurrogate(trimmed[MaxComputerNameLength - 1])
-            ? MaxComputerNameLength - 1
-            : MaxComputerNameLength;
-        return trimmed[..cut];
-    }
-
-    private static string GetMachineName()
+    private static long SafeFileSize(string path)
     {
         try
         {
-            return NormalizeComputerName(Environment.MachineName);
+            return File.Exists(path) ? new FileInfo(path).Length : 0;
         }
         catch
         {
-            return string.Empty;
+            // This value is display-only. A transient file-system race or permission problem
+            // should not break Settings or prevent the export route from returning its own,
+            // more specific result if the user still chooses to export.
+            return 0;
         }
     }
 }

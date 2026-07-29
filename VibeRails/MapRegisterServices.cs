@@ -259,6 +259,26 @@ namespace VibeRails
                 serviceCollection.AddHostedService<ProjectCacheRefreshJob>();
                 serviceCollection.AddHostedService<BertEmbeddingBackfillJob>();
                 serviceCollection.AddHostedService<SessionAggregateEmbeddingBackfillJob>();
+                // Token-savings publish job — active root backends only. Multiple supported roots
+                // can coexist (for example browser + VS Code), so the job also holds an OS-backed
+                // lock across its refresh and absolute upsert. This branch still excludes
+                // LMBootstrap (--env) processes, which have no global background-job role.
+                if (isActiveRootBackendProcess)
+                {
+                    // A named client, not AddHttpClient<TokenSavingsPublishJob>: that registers a
+                    // transient typed client nothing resolves, while AddHostedService<T> activates
+                    // its own singleton from the container — which would silently get the default
+                    // unnamed HttpClient (100s timeout, redirects on) instead of this one.
+                    // Full URLs are sent per request, so BaseAddress is deliberately left null.
+                    serviceCollection
+                        .AddHttpClient(TokenSavingsPublishJob.HttpClientName, client =>
+                        {
+                            // 30s so a stalled endpoint can't starve the timer thread.
+                            client.Timeout = TimeSpan.FromSeconds(30);
+                        })
+                        .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
+                    serviceCollection.AddHostedService<TokenSavingsPublishJob>();
+                }
             }
 
             serviceCollection.AddScoped<ISessionTranscriptService, SessionTranscriptService>();
@@ -272,6 +292,15 @@ namespace VibeRails
 
             // Debug Bundle Service (builds + encrypts + uploads a session bundle for remote debugging)
             serviceCollection.AddHttpClient<IDebugBundleService, DebugBundleService>();
+
+            // Complete state.db export. Large databases are streamed, so allow a deliberate
+            // long-running upload window while still propagating request cancellation.
+            serviceCollection
+                .AddHttpClient<IDataExportService, DataExportService>(client =>
+                {
+                    client.Timeout = TimeSpan.FromMinutes(30);
+                })
+                .ConfigurePrimaryHttpMessageHandler(CreateNoRedirectHttpMessageHandler);
 
             // Push Notification Service (forwards per-tab "ready/waiting" pushes to VibeRails-Front)
             serviceCollection.AddHttpClient<IPushNotificationService, PushNotificationService>();
@@ -299,6 +328,18 @@ namespace VibeRails
                 arg.Equals("--parent-pid", StringComparison.OrdinalIgnoreCase) ||
                 arg.StartsWith("--parent-pid=", StringComparison.OrdinalIgnoreCase));
         }
+
+        /// <summary>
+        /// Shared by every client that sends the user's API key in an <c>X-Api-Key</c> header.
+        /// Unlike <c>Authorization</c>, custom headers are NOT stripped when a redirect crosses to
+        /// another host, so following one would replay the secret (and, for the export, the whole
+        /// database body) to wherever the response pointed. 3xx is treated as a plain failure.
+        /// </summary>
+        internal static HttpMessageHandler CreateNoRedirectHttpMessageHandler() =>
+            new HttpClientHandler
+            {
+                AllowAutoRedirect = false
+            };
 
         /// <summary>
         /// True only for a long-lived root backend that may coordinate global Automation work.
