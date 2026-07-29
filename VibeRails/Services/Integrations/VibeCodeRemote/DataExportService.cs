@@ -14,7 +14,8 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote;
 /// </summary>
 public sealed class DataExportService : IDataExportService
 {
-    internal const string ExportUrlPlaceholder = "EXPORT_URL_HERE";
+    internal const string ExportUrl = "https://viberails.ai/api/v1/data-exports";
+    private static readonly Uri ExportUri = new(ExportUrl);
     internal const string SnapshotFileName = "copy_state.db";
     internal const string CompressedFileName = "copy_state.db.br";
     internal const string LockFileName = ".data-export.lock";
@@ -70,13 +71,6 @@ public sealed class DataExportService : IDataExportService
             return new DataExportResult(
                 DataExportStatus.NoApiKey,
                 Detail: "No API key is configured.");
-        }
-
-        if (!TryGetExportUri(out var exportUri))
-        {
-            return new DataExportResult(
-                DataExportStatus.NotConfigured,
-                Detail: "The data export URL is not configured.");
         }
 
         var statePath = ParserConfigs.GetStatePath();
@@ -135,7 +129,7 @@ public sealed class DataExportService : IDataExportService
             DeleteSnapshotFilesBestEffort(snapshotPath);
 
             return await UploadAsync(
-                exportUri,
+                ExportUri,
                 apiKey,
                 computerName,
                 sha256,
@@ -203,30 +197,6 @@ public sealed class DataExportService : IDataExportService
         {
             return null;
         }
-    }
-
-    private bool TryGetExportUri(out Uri exportUri) =>
-        TryGetExportUri(_configuration, out exportUri);
-
-    /// <summary>
-    /// Whether <c>VibeRails:ExportUrl</c> holds a usable HTTPS URL. Static so the settings payload
-    /// can report configured-ness from the exact same rule the export path enforces — including
-    /// the shipped <see cref="ExportUrlPlaceholder"/>, which must never be treated as configured.
-    /// </summary>
-    internal static bool TryGetExportUri(IConfiguration configuration, out Uri exportUri)
-    {
-        var configuredValue = configuration["VibeRails:ExportUrl"];
-        if (string.IsNullOrWhiteSpace(configuredValue)
-            || string.Equals(configuredValue, ExportUrlPlaceholder, StringComparison.Ordinal)
-            || !Uri.TryCreate(configuredValue, UriKind.Absolute, out var parsed)
-            || !string.Equals(parsed.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-        {
-            exportUri = null!;
-            return false;
-        }
-
-        exportUri = parsed;
-        return true;
     }
 
     private static void CreateSnapshot(string statePath, string snapshotPath)

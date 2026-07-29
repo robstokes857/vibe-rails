@@ -145,7 +145,7 @@ public static class AppSettingsRoutes
             ClearApiKey: null,
             // Asked of DataExportService itself so the button the client shows and the rule the
             // export enforces can't drift apart (placeholder value, non-HTTPS, unparseable).
-            DataExportConfigured: DataExportService.TryGetExportUri(configuration, out _)
+            DataExportConfigured: true
         );
     }
 
