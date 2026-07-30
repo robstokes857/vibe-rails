@@ -14,6 +14,9 @@ dist/**
 *.vsix
 .vscodeignore.backup
 
+# Compiled tests — never needed at runtime, and they ship the smoke harness otherwise
+out/test/**
+
 # Scripts
 scripts/**
 
@@ -28,9 +31,10 @@ bin/**
 .git
 .gitignore
 
-# Documentation (except README)
+# Documentation (except the two the Marketplace renders as tabs)
 *.md
 !README.md
+!CHANGELOG.md
 
 
 

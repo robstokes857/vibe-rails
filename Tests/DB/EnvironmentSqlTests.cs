@@ -59,6 +59,7 @@ public class EnvironmentSqlTests
         insert.Parameters.AddWithValue("$customPrompt", "");
         insert.Parameters.AddWithValue("$createdUTC", DateTime.UtcNow.ToString("O"));
         insert.Parameters.AddWithValue("$lastUsedUTC", DateTime.UtcNow.ToString("O"));
+        insert.Parameters.AddWithValue("$hidden", 0);
         await insert.ExecuteScalarAsync(cancellationToken);
     }
 }

@@ -6,19 +6,20 @@ A VS Code extension that embeds the VibeRails dashboard directly inside Visual S
 
 - **Embedded Dashboard**: Opens the VibeRails dashboard in a VS Code webview panel (not a separate browser window)
 - **Automatic Backend Management**: Finds and launches the VibeRails .NET backend server with dynamic port allocation
-- **Status Bar Button**: Quick access via the `$(circuit-board) VibeRails` button in the bottom status bar
-- **Runtime Install Flow**: Uses `~/.vibe_rails` and installs VibeRails from GitHub releases when missing
+- **Status Bar Button**: Quick access via the `$(rocket) VibeRails` button in the bottom status bar
+- **Bundled Backend**: The platform-specific `vb` binary and `wwwroot/` ship inside the VSIX under `bin/<target>/`. There is no runtime download step — if those assets are missing the extension fails fast with a "reinstall the extension" error.
 - **Workspace-Aware**: Runs the backend in the context of your current workspace folder for local environment isolation
 
 ## Architecture
 
-Three main source files in `src/`:
+Source files in `src/`:
 
 | File | Purpose |
 |---|---|
-| `extension.ts` | Activation, command registration, status bar, lifecycle |
-| `backend-manager.ts` | Spawns/manages the .NET backend, port detection, health checks, graceful shutdown |
+| `extension.ts` | Activation, command registration, status bar, bootstrap/health handshake, lifecycle |
+| `backend-manager.ts` | Spawns/manages the .NET backend, port detection, graceful shutdown ladder |
 | `webview-panel.ts` | Creates the webview panel, loads UI from `wwwroot/`, rewrites asset paths, injects CSP |
+| `constants.ts` | Shared command ids, token header names, backend paths, and timeouts (no `vscode` import) |
 
 ## Local Development
 

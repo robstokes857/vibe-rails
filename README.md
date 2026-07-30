@@ -43,9 +43,9 @@
 
 **For Contributors (Working on the Project):**
 - [.NET 10.0 SDK](https://dotnet.microsoft.com/download) or later (required to build the backend)
-- [Node.js 20+](https://nodejs.org/) (required to build the VS Code extension)
+- [Node.js 24 LTS+](https://nodejs.org/) (required to build the VS Code extension; local development and release automation both read `.nvmrc`)
 - Git
-- VS Code 1.85.0 or later
+- VS Code 1.125.0 or later
 
 ### Installation
 

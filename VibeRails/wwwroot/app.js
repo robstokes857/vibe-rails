@@ -1332,15 +1332,9 @@ export class VibeControlApp {
             // Fetch environments (global, always available)
             try {
                 const envResponse = await this.apiCall('/api/v1/environments', 'GET', null, { showLoading: false });
-                this.data.environments = (envResponse.environments || []).map(env => ({
-                    id: env.id,
-                    name: env.name,
-                    cli: env.cli,
-                    customArgs: env.customArgs,
-                    customPrompt: env.customPrompt,
-                    defaultPrompt: env.defaultPrompt,
-                    lastUsed: this.formatRelativeTime(env.lastUsedUTC)
-                }));
+                // Keep one normalization path for environment records. In particular, this
+                // preserves the `hidden` flag used by every LLM/environment selector.
+                this.environmentController.setEnvironments(envResponse.environments || []);
             } catch (error) {
                 console.error('Failed to fetch environments:', error);
                 this.data.environments = [];

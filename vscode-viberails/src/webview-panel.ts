@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
+import { WEBVIEW_VIEW_TYPE } from './constants';
 
 export class WebviewPanelManager {
     private panel: vscode.WebviewPanel | null = null;
@@ -31,7 +32,7 @@ export class WebviewPanelManager {
         const wwwrootUri = vscode.Uri.file(this.wwwrootPath);
 
         this.panel = vscode.window.createWebviewPanel(
-            'viberailsDashboard',
+            WEBVIEW_VIEW_TYPE,
             this.getInitialPanelTitle(),
             vscode.ViewColumn.One,
             {
@@ -105,6 +106,11 @@ export class WebviewPanelManager {
             // Note: 'unsafe-inline' is ignored when a nonce is present per CSP spec.
             // All app event handlers use addEventListener (no inline onclick).
             `script-src 'nonce-${nonce}' ${webview.cspSource}`,
+            // The fonts.googleapis.com / fonts.gstatic.com entries below are NOT dead.
+            // Stripping the <link> tags above only removes HTML tags; assets/bootstrap.min.css
+            // still carries an `@import url(https://fonts.googleapis.com/css2?family=Lato...)`
+            // which in turn pulls woff2 files from fonts.gstatic.com. Removing either entry
+            // breaks the dashboard's body font. Self-hosting Lato would let both go away.
             `style-src ${webview.cspSource} 'unsafe-inline' https://fonts.googleapis.com`,
             `img-src ${webview.cspSource} https: data:`,
             `font-src ${webview.cspSource} https://fonts.gstatic.com`,
@@ -153,83 +159,11 @@ export class WebviewPanelManager {
         window.__viberails_SESSION_TOKEN__ = null;
         `;
 
-        const vscodeExitButtonPatch = `
-        const __vb_bind_exit_button__ = function(button) {
-            if (!button || button.dataset.viberailsExitBound === 'true') { return; }
-            button.dataset.viberailsExitBound = 'true';
-            button.addEventListener('click', function(event) {
-                event.preventDefault();
-                if (typeof window.__viberails_close__ === 'function') {
-                    window.__viberails_close__();
-                }
-            });
-        };
-
-        const __vb_ensure_exit_button__ = function() {
-            const existing = document.getElementById('exit-btn');
-            if (existing) {
-                existing.style.removeProperty('display');
-                __vb_bind_exit_button__(existing);
-                return true;
-            }
-
-            const navActions = document.querySelector('.nav-actions');
-            if (!navActions) { return false; }
-
-            if (document.getElementById('viberails-vscode-exit-btn')) { return true; }
-
-            const button = document.createElement('button');
-            button.id = 'viberails-vscode-exit-btn';
-            button.type = 'button';
-            button.title = 'Close VibeRails and stop backend';
-            button.textContent = 'Exit';
-            button.style.cssText = [
-                'display:flex',
-                'align-items:center',
-                'justify-content:center',
-                'gap:0.4rem',
-                'padding:0 0.75rem',
-                'height:40px',
-                'border-radius:999px',
-                'border:1px solid #e57373',
-                'background:transparent',
-                'color:#e57373',
-                'font-size:0.8rem',
-                'font-weight:600',
-                'letter-spacing:0.03em',
-                'cursor:pointer'
-            ].join(';');
-            button.addEventListener('mouseenter', function() {
-                button.style.background = '#e57373';
-                button.style.color = '#ffffff';
-            });
-            button.addEventListener('mouseleave', function() {
-                button.style.background = 'transparent';
-                button.style.color = '#e57373';
-            });
-            __vb_bind_exit_button__(button);
-            navActions.appendChild(button);
-            return true;
-        };
-
-        const __vb_schedule_exit_button__ = function() {
-            if (__vb_ensure_exit_button__()) { return; }
-            let attempts = 0;
-            const timer = window.setInterval(function() {
-                attempts += 1;
-                if (__vb_ensure_exit_button__() || attempts >= 30) {
-                    window.clearInterval(timer);
-                }
-            }, 100);
-        };
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', __vb_schedule_exit_button__, { once: true });
-        } else {
-            __vb_schedule_exit_button__();
-        }
-        `;
-
+        // The dashboard owns its own Exit buttons (`.nav-exit-btn-sm` in the top nav and
+        // sidebar, both visible by default) and wires them in app.js `setupVSCodeIntegration()`.
+        // The contract between the two is the injected globals below — `__viberails_VSCODE__`,
+        // `__viberails_close__`, `__viberails_setTitle__` — not any DOM structure. Do not
+        // reintroduce markup-scraping button injection here.
         const headInjection = `
     <meta http-equiv="Content-Security-Policy" content="${csp}">
     <base href="${assetsBaseUri}/">
@@ -243,7 +177,6 @@ export class WebviewPanelManager {
         window.__viberails_close__ = function() { vscode.postMessage({ command: 'close' }); };
         window.__viberails_setTitle__ = function(title) { vscode.postMessage({ command: 'setTitle', title: title }); };
         ${fetchPatch}
-        ${vscodeExitButtonPatch}
     </script>`;
 
         html = html.replace(/<head>/i, `<head>${headInjection}`);

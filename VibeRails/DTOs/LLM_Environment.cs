@@ -12,6 +12,9 @@ namespace VibeRails.DTOs
         public string CustomPrompt { get; set; } = "";
         public DateTime CreatedUTC { get; set; } = DateTime.UtcNow;
         public DateTime LastUsedUTC { get; set; } = DateTime.UtcNow;
+        // When true the environment is excluded from the LLM/terminal select boxes
+        // (it can still be launched from the Environments page and used by Automations).
+        public bool Hidden { get; set; }
 
         public static string DefaultPrompt => """
             Before starting work, read the AGENTS.md file in the project root and any .agents.md files in subdirectories for project-specific rules and context.

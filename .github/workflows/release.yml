@@ -179,7 +179,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: "24"
+          node-version-file: ".nvmrc"
           cache: npm
           cache-dependency-path: vscode-viberails/package-lock.json
 
@@ -228,10 +228,13 @@ jobs:
     env:
       VSCE_PAT: ${{ secrets.VS_PAT }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: "24"
+          node-version-file: ".nvmrc"
 
       - name: Download VSIX artifacts
         uses: actions/download-artifact@v7
