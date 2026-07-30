@@ -30,7 +30,8 @@ public static class EnvironmentRoutes
                     e.CustomArgs,
                     e.CustomPrompt,
                     LLM_Environment.DefaultPrompt,
-                    e.LastUsedUTC
+                    e.LastUsedUTC,
+                    e.Hidden
                 ))
                 .ToList();
 
@@ -60,7 +61,8 @@ public static class EnvironmentRoutes
                 environment.CustomArgs,
                 environment.CustomPrompt,
                 LLM_Environment.DefaultPrompt,
-                environment.LastUsedUTC
+                environment.LastUsedUTC,
+                environment.Hidden
             ));
         }).WithName("GetEnvironmentByName");
 
@@ -131,6 +133,7 @@ public static class EnvironmentRoutes
                 CustomName = trimmedName,
                 CustomArgs = request.CustomArgs ?? "",
                 CustomPrompt = request.CustomPrompt ?? "",
+                Hidden = request.Hidden,
                 CreatedUTC = DateTime.UtcNow,
                 LastUsedUTC = DateTime.UtcNow
             };
@@ -146,7 +149,8 @@ public static class EnvironmentRoutes
                 environment.CustomArgs,
                 environment.CustomPrompt,
                 LLM_Environment.DefaultPrompt,
-                environment.LastUsedUTC
+                environment.LastUsedUTC,
+                environment.Hidden
             ));
         }).WithName("CreateEnvironment");
 
@@ -190,6 +194,11 @@ public static class EnvironmentRoutes
                 environment.CustomPrompt = request.CustomPrompt;
             }
 
+            if (request.Hidden.HasValue)
+            {
+                environment.Hidden = request.Hidden.Value;
+            }
+
             environment.LastUsedUTC = DateTime.UtcNow;
             await repository.UpdateEnvironmentAsync(environment, cancellationToken);
 
@@ -201,7 +210,8 @@ public static class EnvironmentRoutes
                 environment.CustomArgs,
                 environment.CustomPrompt,
                 LLM_Environment.DefaultPrompt,
-                environment.LastUsedUTC
+                environment.LastUsedUTC,
+                environment.Hidden
             ));
         }).WithName("UpdateEnvironment");
 

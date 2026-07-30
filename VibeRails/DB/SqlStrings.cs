@@ -17,10 +17,15 @@ namespace VibeRails.DB
                 CustomPrompt TEXT NOT NULL DEFAULT '',
                 CreatedUTC TEXT NOT NULL,
                 LastUsedUTC TEXT NOT NULL,
+                Hidden INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(CustomName, LLM)
             )
             """;
         public const string CreateEnvironmentsIndex = "CREATE INDEX IF NOT EXISTS idx_environments_name_llm ON Environments(CustomName, LLM)";
+        // Hides the environment from LLM/terminal select boxes without deleting it. It can still
+        // be launched from the Environments page and referenced by Automations. Lives in
+        // MigrationStatements so a legacy DB picks up the column via ALTER TABLE.
+        public const string MigrateEnvironmentsAddHidden = "ALTER TABLE Environments ADD COLUMN Hidden INTEGER NOT NULL DEFAULT 0";
         // Durable backstop for the create-time collision check: the env name maps to a
         // case-insensitive directory (envs/{name}/{llm}), so "Work" and "work" for the same
         // LLM would share a credential directory. Upgrades the case-sensitive UNIQUE(CustomName,
@@ -521,7 +526,8 @@ namespace VibeRails.DB
             DropUserInputsFtsAfterInsertTrigger,
             DropUserInputsFtsAfterUpdateTrigger,
             CreateEnvironmentsNameNoCaseUniqueIndex,
-            MigrateCodeAnalyzerIgnoresAddMatchKind
+            MigrateCodeAnalyzerIgnoresAddMatchKind,
+            MigrateEnvironmentsAddHidden
         ];
 
         /// <summary>
@@ -532,22 +538,22 @@ namespace VibeRails.DB
 
         // Environment CRUD (global)
         public const string InsertEnvironment = """
-            INSERT INTO Environments (CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC)
-            VALUES ($customName, $llm, $path, $customArgs, $customPrompt, $createdUTC, $lastUsedUTC)
+            INSERT INTO Environments (CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden)
+            VALUES ($customName, $llm, $path, $customArgs, $customPrompt, $createdUTC, $lastUsedUTC, $hidden)
             RETURNING Id;
             """;
         public const string SelectEnvironmentById = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
             FROM Environments
             WHERE Id = $id;
             """;
         public const string SelectEnvironmentByNameAndLlm = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
             FROM Environments
             WHERE CustomName = $customName AND LLM = $llm;
             """;
         public const string SelectEnvironmentByName = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
             FROM Environments
             WHERE CustomName = $customName
             ORDER BY LastUsedUTC DESC
@@ -557,19 +563,19 @@ namespace VibeRails.DB
         // name maps to a case-insensitive directory). NOCASE folds ASCII, matching the
         // validated env-name charset.
         public const string SelectEnvironmentByNameNoCase = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
             FROM Environments
             WHERE CustomName = $customName COLLATE NOCASE
             ORDER BY LastUsedUTC DESC
             LIMIT 1;
             """;
         public const string SelectAllEnvironments = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
             FROM Environments
             ORDER BY LastUsedUTC DESC;
             """;
         public const string SelectCustomEnvironments = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
             FROM Environments
             WHERE CustomName != 'Default'
               AND NOT (
@@ -587,7 +593,8 @@ namespace VibeRails.DB
                 Path = $path,
                 CustomArgs = $customArgs,
                 CustomPrompt = $customPrompt,
-                LastUsedUTC = $lastUsedUTC
+                LastUsedUTC = $lastUsedUTC,
+                Hidden = $hidden
             WHERE Id = $id;
             """;
         // Recency-only bookkeeping. Launches must never use UpdateEnvironment for this:

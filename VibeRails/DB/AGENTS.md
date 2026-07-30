@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS Environments (
     CustomPrompt TEXT    NOT NULL DEFAULT '',
     CreatedUTC   TEXT    NOT NULL,
     LastUsedUTC  TEXT    NOT NULL,
+    Hidden       INTEGER NOT NULL DEFAULT 0,
     UNIQUE(CustomName, LLM)
 );
 ```
@@ -54,6 +55,10 @@ CREATE TABLE IF NOT EXISTS Environments (
 **Index:** `idx_environments_name_llm` on `(CustomName, LLM)`
 
 **Model:** `LLM_Environment` class in `DTOs/LLM_Environment.cs`
+
+`Hidden` (0/1) hides the environment from LLM/terminal select boxes without deleting it. It is a
+UI-visibility flag, not a CLI option — it never enters `CustomArgs`. Added via the
+`MigrateEnvironmentsAddHidden` ALTER TABLE migration.
 
 **LLM enum** (stored as integer):
 
@@ -74,7 +79,7 @@ CREATE TABLE IF NOT EXISTS Environments (
 | `GetEnvironmentByNameAndLlmAsync(name, llm)` | Lookup by the unique `(CustomName, LLM)` pair |
 | `GetOrCreateEnvironmentAsync(name, llm)` | Lookup, then create if missing. Bumps `LastUsedUTC` if found. |
 | `SaveEnvironmentAsync` | `INSERT ... RETURNING Id` |
-| `UpdateEnvironmentAsync` | Full field update by `Id` (CustomName, LLM, Path, CustomArgs, CustomPrompt, LastUsedUTC) |
+| `UpdateEnvironmentAsync` | Full field update by `Id` (CustomName, LLM, Path, CustomArgs, CustomPrompt, LastUsedUTC, Hidden) |
 | `DeleteEnvironmentAsync` | Delete by `Id` — **no deletion guard at DB layer**. The "cannot delete Default" rule is in `Routes.cs`. |
 
 ---

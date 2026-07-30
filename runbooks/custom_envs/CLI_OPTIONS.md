@@ -411,6 +411,24 @@ provider/model. In the frontend, `isOpencodeBackedCli(cli)` routes them to the O
 in the backend, `CommandService.PrepareSession` maps the enum to `opencode` and injects the
 pinned `--model` for base CLI launches.
 
+## Environment Visibility (Hidden flag)
+
+Each environment carries a `Hidden` boolean (DB column `Environments.Hidden`, default 0; round-tripped
+through `EnvironmentResponse.Hidden` and `Create/UpdateEnvironmentRequest.Hidden`). It is **not** a CLI
+option — it never enters `CustomArgs` or any CLI config file. It is a UI-visibility flag owned by the
+environment modal.
+
+- The create/edit modal exposes it as a "Hide from Environment select boxes" switch.
+- When true, the environment is filtered out of the shared LLM/terminal Tom Select boxes built by
+  `buildLlmSelectionOptions` / `populateLlmSelectionSelect` in `utils.js` (terminal tab picker, sandbox
+  CLI picker, automation editor picker, chat-history filter). This is the single place to change if the
+  filtering rule ever needs adjusting.
+- A hidden environment is **still** listed in the Environments table (with an eye-slash badge), still
+  launchable from there ("Launch in external terminal" / "Web Terminal"), and still usable by Automations.
+- `populateLlmSelectionSelect` re-injects the currently-selected value's hidden environment so an
+  existing reference (e.g. an Automation already pinned to a hidden env) is never silently cleared when
+  the picker is rebuilt. Callers that want every environment regardless of the flag pass `includeHidden: true`.
+
 ## Launch Flow
 
 These routes read saved environment args before starting a TUI:

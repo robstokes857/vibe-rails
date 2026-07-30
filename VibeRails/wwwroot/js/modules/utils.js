@@ -171,7 +171,8 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
         includeGroups = true,
         includeDefaultSuffix = true,
         includeShell = false,
-        includeBase = true
+        includeBase = true,
+        includeHidden = false
     } = options;
 
     const items = [];
@@ -180,6 +181,13 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
         const cli = normalizeCliValue(environment?.cli);
         const environmentId = Number.parseInt(environment?.id, 10);
         if (!cli || !Number.isFinite(environmentId)) {
+            return;
+        }
+
+        // Hidden environments are kept out of the dropdowns to keep them tractable. A
+        // currently-selected hidden env is preserved separately by populateLlmSelectionSelect
+        // so an existing reference (e.g. an Automation) is never silently dropped.
+        if (!includeHidden && environment?.hidden) {
             return;
         }
 
@@ -287,16 +295,46 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
         includeDefaultSuffix = true,
         includeShell = false,
         includeBase = true,
+        includeHidden = false,
         enhance = true,
         searchable = true
     } = options;
 
-    const optionItems = buildLlmSelectionOptions(environments, {
+    const normalizedSelectedValue = String(selectedValue || '');
+    const safeEnvironments = Array.isArray(environments) ? environments : [];
+    const optionItems = buildLlmSelectionOptions(safeEnvironments, {
         includeGroups,
         includeDefaultSuffix,
         includeShell,
-        includeBase
+        includeBase,
+        includeHidden
     });
+
+    // If the current selection is a hidden environment, it was filtered out above.
+    // Re-inject just that one option so an existing reference (e.g. an Automation using a
+    // hidden env) survives an edit instead of being silently cleared.
+    if (!includeHidden && normalizedSelectedValue.startsWith('env:')) {
+        const selectedEnvId = Number.parseInt(normalizedSelectedValue.split(':')[1], 10);
+        const alreadyIncluded = optionItems.some((item) => item.value === normalizedSelectedValue);
+        if (!alreadyIncluded && Number.isFinite(selectedEnvId)) {
+            const hiddenEnv = safeEnvironments.find((item) =>
+                Number.parseInt(item?.id, 10) === selectedEnvId && item?.hidden
+            );
+            if (hiddenEnv) {
+                const cli = normalizeCliValue(hiddenEnv.cli);
+                const environmentName = (hiddenEnv.name || '').toString().trim();
+                optionItems.push({
+                    group: includeGroups ? 'Custom Environments' : null,
+                    value: normalizedSelectedValue,
+                    label: `${environmentName || `Env ${selectedEnvId}`} (${cli})`,
+                    cli,
+                    environmentId: selectedEnvId,
+                    environmentName: environmentName || null,
+                    kind: 'environment'
+                });
+            }
+        }
+    }
 
     if (selectEl.tomselect) {
         selectEl.tomselect.destroy();
@@ -308,7 +346,7 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
         const placeholderOption = document.createElement('option');
         placeholderOption.value = '';
         placeholderOption.disabled = true;
-        placeholderOption.selected = !selectedValue;
+        placeholderOption.selected = !normalizedSelectedValue;
         placeholderOption.textContent = placeholder;
         selectEl.appendChild(placeholderOption);
     }
@@ -334,8 +372,8 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
         });
     });
 
-    if (selectedValue) {
-        selectEl.value = selectedValue;
+    if (normalizedSelectedValue) {
+        selectEl.value = normalizedSelectedValue;
     }
 
     if (enhance) {

@@ -40,7 +40,7 @@
 ### Prerequisites
 
 - [.NET 10.0 SDK](https://dotnet.microsoft.com/download) or later
-- [Node.js 20+](https://nodejs.org/) (for VS Code extension development)
+- [Node.js 24 LTS+](https://nodejs.org/) (for VS Code extension development)
 - Git
 - One or more LLM CLIs: Claude, Codex, or Antigravity
 

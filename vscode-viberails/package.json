@@ -15,11 +15,34 @@
     "url": "https://github.com/robstokes857/vibe-rails/issues"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "node": ">=24",
+    "vscode": "^1.125.0"
   },
   "categories": [
+    "AI",
+    "Machine Learning",
     "Other"
   ],
+  "keywords": [
+    "ai",
+    "llm",
+    "claude",
+    "codex",
+    "copilot",
+    "agents",
+    "terminal"
+  ],
+  "preview": false,
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "VibeRails launches a bundled local backend that runs git and AI CLI processes inside your workspace folder, which is unsafe in untrusted workspaces."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "VibeRails needs a real file system and the ability to spawn local processes."
+    }
+  },
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -48,7 +71,24 @@
         }
       ]
     },
+    "configuration": {
+      "title": "VibeRails",
+      "properties": {
+        "viberails.startupTimeoutMs": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 5000,
+          "maximum": 600000,
+          "markdownDescription": "How long to wait for the VibeRails backend to start before giving up. Raise this if a cold first launch on a slow machine times out."
+        }
+      }
+    },
     "keybindings": [
+      {
+        "key": "ctrl+alt+v",
+        "mac": "cmd+alt+v",
+        "command": "viberails.open"
+      },
       {
         "key": "escape",
         "command": "-editor.action.webvieweditor.escape",
@@ -91,10 +131,10 @@
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
-    "@types/node": "^20.10.0",
-    "@types/vscode": "^1.85.0",
+    "@types/node": "^24.13.3",
+    "@types/vscode": "^1.125.0",
     "@vscode/test-electron": "^2.5.2",
     "mocha": "^11.7.4",
-    "typescript": "^6.0.2"
+    "typescript": "^7.0.2"
   }
 }

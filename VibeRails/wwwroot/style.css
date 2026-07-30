@@ -4799,6 +4799,14 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     white-space: nowrap;
 }
 
+.env-hidden-badge {
+    display: inline-flex;
+    align-items: center;
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
+    flex: 0 0 auto;
+}
+
 .env-command-cell {
     white-space: normal;
 }

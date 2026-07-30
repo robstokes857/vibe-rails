@@ -213,6 +213,9 @@ export class EnvironmentController {
                             const logoMarkup = safeLogo
                                 ? `<img class="env-cli-logo${iconLightClass}" src="${safeLogo}" alt="${safeBrandLabel} logo" loading="lazy">`
                                 : `<i class="fa-solid fa-terminal env-cli-logo-fallback" aria-hidden="true"></i>`;
+                            const hiddenBadge = env.hidden
+                                ? `<span class="env-hidden-badge" title="Hidden from Environment select boxes" aria-label="Hidden from select boxes"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i></span>`
+                                : '';
                             const customArgs = env.customArgs || '';
                             const prompt = env.customPrompt || '';
                             const promptMarkup = prompt.trim()
@@ -233,6 +236,7 @@ export class EnvironmentController {
                                             ${logoMarkup}
                                         </div>
                                         <strong class="env-name-text">${safeName}</strong>
+                                        ${hiddenBadge}
                                     </div>
                                 </td>
                                 <td class="env-command-cell">
@@ -442,6 +446,7 @@ export class EnvironmentController {
 
         const customArgsValue = isEdit ? this.app.escapeHtml(env.customArgs || '') : '';
         const usesManagedArgs = this.usesManagedCustomArgs(initialCli);
+        const hiddenChecked = isEdit ? Boolean(env.hidden) : false;
 
         this.app.showModal(title, `
             <form id="env-form">
@@ -452,6 +457,13 @@ export class EnvironmentController {
                 <div class="mb-3">
                     <label class="form-label">CLI Type</label>
                     ${cliField}
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="env-hidden" ${hiddenChecked ? 'checked' : ''}>
+                        <label class="form-check-label" for="env-hidden">Hide from Environment select boxes</label>
+                    </div>
+                    <small class="form-text text-muted">Keeps this environment out of the terminal/sandbox/automation LLM dropdowns when it gets too full. It can still be launched from here and used by Automations.</small>
                 </div>
                 <div class="mb-3" data-custom-args-group ${usesManagedArgs ? 'style="display: none;"' : ''}>
                     <label class="form-label">Custom Arguments</label>
@@ -546,9 +558,10 @@ export class EnvironmentController {
             const submissionGeneration = this.environmentFormRequestGeneration;
 
             try {
+                const hidden = document.getElementById('env-hidden')?.checked ?? false;
                 if (isEdit) {
                     const settingsPayload = this.extractCliSettingsPayload(env.cli);
-                    const payload = this.buildEnvironmentSavePayload(env.cli, settingsPayload);
+                    const payload = { ...this.buildEnvironmentSavePayload(env.cli, settingsPayload), hidden };
                     await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(env.name)}`, 'PUT', payload);
                     await this.saveCliSettings(env.cli, env.name, settingsPayload);
                 } else {
@@ -558,7 +571,8 @@ export class EnvironmentController {
                     const payload = {
                         name,
                         cli,
-                        ...this.buildEnvironmentSavePayload(cli, settingsPayload)
+                        ...this.buildEnvironmentSavePayload(cli, settingsPayload),
+                        hidden
                     };
                     await this.app.apiCall('/api/v1/environments', 'POST', payload);
                     await this.saveCliSettings(cli, name, settingsPayload);
@@ -1908,6 +1922,7 @@ export class EnvironmentController {
             customArgs: env.customArgs,
             customPrompt: env.customPrompt,
             defaultPrompt: env.defaultPrompt,
+            hidden: Boolean(env.hidden),
             lastUsed: env.lastUsed || this.app.formatRelativeTime(env.lastUsedUTC)
         }));
         return this.app.data.environments;

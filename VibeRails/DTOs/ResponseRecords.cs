@@ -208,13 +208,17 @@ namespace VibeRails.DTOs
         string Name,
         string Cli,
         string? CustomArgs = null,
-        string? CustomPrompt = null
+        string? CustomPrompt = null,
+        bool Hidden = false
     );
 
+    // Hidden is nullable so a stale client that omits it leaves the stored value untouched
+    // (same guard as CustomArgs/CustomPrompt) instead of resetting a hidden env to visible.
     public record UpdateEnvironmentRequest(
         string Name,
         string? CustomArgs = null,
-        string? CustomPrompt = null
+        string? CustomPrompt = null,
+        bool? Hidden = null
     );
 
     public record EnvironmentResponse(
@@ -225,7 +229,8 @@ namespace VibeRails.DTOs
         string CustomArgs,
         string CustomPrompt,
         string DefaultPrompt,
-        DateTime LastUsedUTC
+        DateTime LastUsedUTC,
+        bool Hidden
     );
 
     public record EnvironmentListResponse(
