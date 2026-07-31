@@ -1,15 +1,28 @@
-using Microsoft.Extensions.Configuration;
+using System.Reflection;
 
 namespace VibeRails;
 
 public static class VersionInfo
 {
-    private static string? _version;
+    public static string Version { get; } = GetApplicationVersion();
 
-    public static string Version => _version ?? "1.0.0";
-
-    public static void Initialize(IConfiguration configuration)
+    private static string GetApplicationVersion()
     {
-        _version = configuration["VibeRails:Version"] ?? "1.0.0";
+        var informationalVersion = typeof(VersionInfo).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion;
+
+        if (!string.IsNullOrWhiteSpace(informationalVersion))
+        {
+            var buildMetadataIndex = informationalVersion.IndexOf('+');
+            return buildMetadataIndex >= 0
+                ? informationalVersion[..buildMetadataIndex]
+                : informationalVersion;
+        }
+
+        var assemblyVersion = typeof(VersionInfo).Assembly.GetName().Version;
+        return assemblyVersion is null
+            ? "1.0.0"
+            : $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{Math.Max(assemblyVersion.Build, 0)}";
     }
 }

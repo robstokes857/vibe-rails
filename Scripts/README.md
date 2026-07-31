@@ -14,6 +14,7 @@ This will:
 - Download the latest Windows release
 - Verify SHA256 checksum
 - Extract to `~/.vibe_rails`
+- Install BertV2 model assets (used for semantic history search)
 - Add to your PATH
 
 ## Linux/macOS
@@ -35,6 +36,7 @@ This will:
   - `vb-osx-arm64.tar.gz`
 - Verify SHA256 checksum
 - Extract to `~/.vibe_rails`
+- Install BertV2 model assets (used for semantic history search)
 - Update your shell configuration (`.bashrc`, `.zshrc`, `.zprofile`, or `.profile`)
 
 ## After Installation

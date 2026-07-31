@@ -169,6 +169,44 @@ public sealed class JobStoreOverlapTests : IDisposable
         Assert.Equal(45, job!.TimeoutMinutes);
     }
 
+    [Fact]
+    public async Task SessionInsert_AtomicallyLinksTheSessionIdToItsJobRun()
+    {
+        await CreateSessionsSchemaAsync(TestContext.Current.CancellationToken);
+        var (store, jobId) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+        const string sessionId = "job-session-123";
+
+        await InsertSessionAsync(sessionId, runId!, cancellationToken);
+
+        var run = await store.GetRunAsync(runId!, cancellationToken);
+        Assert.Equal(sessionId, run!.SessionId);
+    }
+
+    [Fact]
+    public async Task SessionInsert_AbortsWhenItsJobRunDoesNotExist()
+    {
+        await CreateSessionsSchemaAsync(TestContext.Current.CancellationToken);
+        var (store, _) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var error = await Assert.ThrowsAsync<SqliteException>(
+            () => InsertSessionAsync("orphaned-job-session", "missing-run", cancellationToken));
+
+        Assert.Contains("no longer exists", error.Message, StringComparison.OrdinalIgnoreCase);
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var count = connection.CreateCommand();
+        count.CommandText = "SELECT COUNT(*) FROM Sessions WHERE Id = 'orphaned-job-session';";
+        Assert.Equal(0L, (long)(await count.ExecuteScalarAsync(cancellationToken))!);
+
+        // Keep the store live through the assertion: the trigger failure must not poison later
+        // connections or the JobStore's schema.
+        Assert.Empty(await store.GetRunsAsync(cancellationToken: cancellationToken));
+    }
+
     /// <summary>
     /// Creates the Environments row the run insert INNER JOINs against, then a Job pointing at it.
     /// </summary>
@@ -215,5 +253,38 @@ public sealed class JobStoreOverlapTests : IDisposable
         insert.Parameters.AddWithValue("$llm", (int)LLM.Claude);
         insert.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
         return Convert.ToInt32(await insert.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+    }
+
+    private async Task CreateSessionsSchemaAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = SqlStrings.CreateSessionsTable;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task InsertSessionAsync(
+        string sessionId,
+        string jobRunId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO Sessions
+                (Id, Cli, EnvironmentName, WorkingDirectory, ProjectDisplayName, StartedUTC,
+                 OwnerPid, OwnershipTracked, JobRunId)
+            VALUES
+                ($id, 'claude', 'nightly', $workDir, 'test', $startedUtc, 4242, 1, $jobRunId);
+            """;
+        command.Parameters.AddWithValue("$id", sessionId);
+        command.Parameters.AddWithValue("$workDir", Path.GetTempPath());
+        command.Parameters.AddWithValue("$startedUtc", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$jobRunId", jobRunId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

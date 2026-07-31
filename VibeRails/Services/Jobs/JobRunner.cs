@@ -90,12 +90,9 @@ public static class JobRunner
                 jobRunId: runId,
                 onSessionCreated: sessionId =>
                 {
-                    // Fire-and-forget: linking the recording must never delay or fail the run.
-                    _ = Task.Run(async () =>
-                    {
-                        try { await store.SetRunSessionAsync(runId, sessionId, CancellationToken.None); }
-                        catch (Exception ex) { Log.Warning(ex, "[Jobs] Could not link session {SessionId} to run {RunId}", sessionId, runId); }
-                    });
+                    // Sessions_LinkJobRunSession stored the backlink atomically with the Sessions
+                    // row. Keep the callback only as an explicit diagnostic breadcrumb.
+                    Log.Information("[Jobs] Run {RunId} is recording terminal session {SessionId}", runId, sessionId);
                 });
 
             if (exitCode != 0)

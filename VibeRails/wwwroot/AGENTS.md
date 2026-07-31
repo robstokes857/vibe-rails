@@ -33,23 +33,25 @@ The terminal dropdown shows two groups:
 ### Flow: Launching a Custom Environment
 
 1. User selects environment from dropdown (or clicks "Web UI" button on environments page)
-2. `startTerminal()` calls `GET /api/v1/terminal/bootstrap-command?cli={type}&environmentName={name}`
-3. Backend returns the full `vb --env "{name}" --workdir "{dir}"` command
-4. Frontend sends command to PTY shell via WebSocket
-5. LMBootstrap runs inside PTY, sets up env vars, launches CLI
+2. `startFromSelection()` creates a tab via `POST /api/v1/terminal/tabs`
+3. `tab.instance.startSession(body)` calls `POST /api/v1/terminal/tabs/{tabId}/start` with `{ cli, environmentName, workingDirectory, title }`
+4. Frontend opens a WebSocket to `/api/v1/terminal/tabs/{tabId}/ws`
+5. Backend spawns the LLM CLI directly in a PTY inside the tab's session (with isolated env vars for the chosen environment)
 
 ### Flow: Launching a Base CLI
 
-1. User selects e.g. "Claude (default)" from dropdown
-2. `startTerminal()` detects `base:claude` prefix
-3. Sends `claude\r` directly to PTY — no backend call needed
+1. User selects e.g. "Claude (default)" from dropdown (selection value `base:claude`)
+2. Same tab-based flow as above: `POST /api/v1/terminal/tabs` then `POST /api/v1/terminal/tabs/{tabId}/start` with `{ cli: "claude", workingDirectory, title }` (no `environmentName`)
+3. WebSocket connects to `/api/v1/terminal/tabs/{tabId}/ws`
+
+Both base CLI and custom environment launches share one unified tab API; the only difference is whether `environmentName` is included in the start body.
 
 ### Flow: "Web UI" Button
 
 1. User clicks "Web UI" on environments page
 2. `launchInWebUI(envId, envName)` calls `app.navigate('dashboard', { preselectedEnvId })`
-3. Dashboard passes `preselectedEnvId` to `terminalController.bindTerminalActions()`
-4. `populateTerminalSelector()` pre-selects the environment in the dropdown
+3. Dashboard passes `preselectedEnvId` to `terminalController.bindTerminalActions(container, preselectedEnvId)`
+4. `bindTerminalActions` pre-selects the environment in the dropdown
 5. Terminal section scrolls into view
 
 ## Sandbox Management
@@ -67,8 +69,8 @@ The sandbox section appears on the dashboard when running in a local git project
 ### Flow: Launching Terminal in Sandbox
 
 1. User clicks a CLI button (Claude/Codex/Antigravity) on a sandbox card
-2. `sandboxController.launchInWebUI(sandboxId, sandboxName, cli)` calls `terminalController.startTerminalWithOptions()`
-3. `startTerminalWithOptions()` POSTs to `/api/v1/terminal/start` with `{ cli, workingDirectory: sandboxPath, title: "Sandbox: {name}" }`
+2. `sandboxController.launchInWebUI(sandboxId, sandboxName, cli, environmentName)` calls `terminalController.startTerminalWithOptions()`
+3. `startTerminalWithOptions()` creates a tab (`POST /api/v1/terminal/tabs`) and starts the session (`POST /api/v1/terminal/tabs/{tabId}/start`) with `{ cli, environmentName, workingDirectory: sandboxPath, title: "Sandbox: {name}" }`
 4. Terminal starts in sandbox directory with title bar showing sandbox name
 
 ### Flow: Launch VS Code in Sandbox
@@ -79,22 +81,27 @@ The sandbox section appears on the dashboard when running in a local git project
 
 ### Key Design Decisions
 
-- **Backend builds the command** — frontend doesn't know about exe paths or working directories
+- **Backend spawns the CLI directly** — the frontend sends the CLI type + optional environment to the tab start endpoint; the backend spawns the LLM CLI in a PTY (no command string is sent to a shell by the frontend)
 - **optgroups** separate base CLIs from custom environments visually
 - **Value format**: `base:cli` vs `env:id:cli` enables easy parsing in `startTerminal()`
 - **Navigation data** passed as object through `app.navigate()` (same pattern as agent-edit)
 
-### API Endpoint
+### API Endpoints
+
+The terminal UI is tab-based. Each tab is a blank container until a session is started in it:
 
 ```
-GET /api/v1/terminal/bootstrap-command?cli={type}&environmentName={name}
+POST   /api/v1/terminal/tabs                  # Create a blank tab
+GET    /api/v1/terminal/tabs                   # List tabs (and max tab count)
+DELETE /api/v1/terminal/tabs/{tabId}           # Close a tab
+GET    /api/v1/terminal/tabs/{tabId}/status    # Tab + session status
+POST   /api/v1/terminal/tabs/{tabId}/start     # Start a CLI session in the tab
+POST   /api/v1/terminal/tabs/{tabId}/stop      # Stop the session in a tab
+WS     /api/v1/terminal/tabs/{tabId}/ws        # Bidirectional PTY byte stream
 ```
 
-Returns `{ command: "& \"C:\\path\\to\\vb\" --env \"MyEnv\" --workdir \"C:\\project\"" }`.
+The `start` body: `{ cli, environmentName?, workingDirectory?, title?, initialPrompt?, resumeSessionId? }`.
+The WebSocket URL accepts `?cols=&rows=` so the backend can resize the PTY before
+replaying the session buffer (avoids the stale-geometry "double print" bug).
 
-The command is platform-aware:
-- **Windows**: Prefixed with `&` for PowerShell invocation
-- **Linux/Mac**: Standard shell format
-
-See also: [Cli/AGENTS.md](../Cli/AGENTS.md) for how `--env` works.
 See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for backend terminal service.

@@ -24,7 +24,6 @@ namespace VibeRails
         {
             var configuration = serviceProvider.GetRequiredService<IConfiguration>();
 
-            VersionInfo.Initialize(configuration);
             InitAppSettings(configuration);
 
             using var scope = serviceProvider.CreateScope();

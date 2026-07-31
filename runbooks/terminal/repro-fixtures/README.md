@@ -31,7 +31,8 @@ in response to a single SIGWINCH (rows 10 → 28). 7 ms apart. This is the
 2026-05-13 resize-reprint bug — see the top of `TERMINAL.md` for the full
 forensic write-up and why we have not fixed it yet.
 
-To eyeball the chunks again:
+To eyeball the chunks again (run from the repo root — the script lives in
+`python-scripts/` at the top level):
 
 ```
 python python-scripts/show_chunks.py f3e25a1e-c0eb-4834-a3d2-0eace2bb0e1f 5783642 5783643
