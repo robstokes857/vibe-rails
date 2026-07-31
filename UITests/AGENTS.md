@@ -1,6 +1,6 @@
 # UI Testing Suite
 
-This directory contains the [Playwright](https://playwright.dev/) end-to-end testing suite for the VibeRails frontend.
+This directory contains the [Playwright](https://playwright.dev/) end-to-end testing suite for the VibeRails frontend, plus a small set of Node-native unit tests.
 
 ## Prerequisites
 
@@ -14,15 +14,30 @@ Before running tests for the first time, install the dependencies:
 # Install npm packages
 npm install
 
-# Install browser binaries
-npx playwright install chromium
+# Install browser binaries (with OS deps)
+npx playwright install --with-deps chromium
 ```
 
 ## Running Tests
 
-### Standard Run
-Run all tests in headless mode (console output):
+### All Tests
+Run both the Node-native and Playwright suites (matches `npm test`):
 ```powershell
+npm test
+```
+
+### Node-Native Unit Tests Only
+Pure-Node tests (no browser) run via the built-in test runner:
+```powershell
+npm run test:node
+```
+Currently this runs `tests/xterm-scrollback.spec.js` using `node --test` with `@xterm/headless`.
+
+### Playwright E2E Only
+Run all E2E tests in headless mode (console output):
+```powershell
+npm run test:e2e
+# or
 npx playwright test
 ```
 
@@ -46,4 +61,4 @@ npx playwright show-report
 
 ## Adding New Tests
 
-When adding features to pp.js or index.html, add a corresponding spec file in ./tests/*.spec.js to ensure the UI interactions remain functional.
+When adding features to app.js or index.html, add a corresponding spec file in ./tests/*.spec.js to ensure the UI interactions remain functional.

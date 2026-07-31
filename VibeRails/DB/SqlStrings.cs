@@ -91,6 +91,27 @@ namespace VibeRails.DB
             )
             """;
         public const string CreateSessionsIndex = "CREATE INDEX IF NOT EXISTS idx_sessions_started ON Sessions(StartedUTC DESC)";
+        // A Job session and its JobRuns.SessionId backlink must be one atomic database operation.
+        // The terminal process can be closed or killed immediately after session creation, so a
+        // second fire-and-forget UPDATE from JobRunner is not durable enough. The trigger runs
+        // inside the INSERT transaction and aborts that INSERT if the claimed run disappeared.
+        //
+        // JobStore installs this after both Sessions and JobRuns exist. Defining it here keeps the
+        // shared session schema and the atomic link SQL together without making Repository depend
+        // on the Jobs schema.
+        public const string CreateJobRunSessionLinkTrigger = """
+            CREATE TRIGGER IF NOT EXISTS Sessions_LinkJobRunSession
+            AFTER INSERT ON Sessions
+            WHEN NEW.JobRunId IS NOT NULL
+            BEGIN
+                UPDATE JobRuns
+                SET SessionId = NEW.Id
+                WHERE Id = NEW.JobRunId;
+
+                SELECT RAISE(ABORT, 'The Job run for this terminal session no longer exists.')
+                WHERE changes() <> 1;
+            END;
+            """;
 
         // Session-level BERT aggregate embedding tracking — drives SessionAggregateEmbeddingBackfillJob's
         // ended-but-unembedded scan. Defined in MigrationStatements since it references the

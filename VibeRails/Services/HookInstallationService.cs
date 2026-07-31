@@ -63,7 +63,7 @@ namespace VibeRails.Services
                 _logger.LogWarning(
                     "The configured hook version {ConfiguredVersion} is not a SemVer-style value, so "
                     + "installed hooks will be stamped {FallbackVersion} instead. Set "
-                    + "VibeRails:Version to letters, digits, '.', '-' or '+' only — the stamp is "
+                    + "the application version to letters, digits, '.', '-' or '+' only — the stamp is "
                     + "written into a shell script unescaped, so other characters are refused.",
                     configuredVersion,
                     _hookVersion);
@@ -795,10 +795,9 @@ namespace VibeRails.Services
         /// escapes every other placeholder with <see cref="EscapeForSingleQuotedShell"/> and this one
         /// is inserted raw, so the character set IS the escaping.
         ///
-        /// A rejected value falls back rather than throwing. The version reaches here from
-        /// <c>VibeRails:Version</c> in configuration, so throwing put a misconfigured string in the
-        /// path of a constructor — turning a cosmetic typo into a failed service resolution, with an
-        /// ArgumentException that never names the setting responsible.
+        /// A rejected value falls back rather than throwing. The version reaches here from the built
+        /// application metadata, so throwing would put a malformed build version in the path of a
+        /// constructor — turning a cosmetic typo into a failed service resolution.
         /// </summary>
         private const string FallbackHookVersion = "0.0.0";
 

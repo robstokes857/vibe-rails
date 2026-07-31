@@ -35,7 +35,6 @@ public interface IJobStore
     Task<bool> TryMarkLaunchedAsync(string runId, CancellationToken cancellationToken = default);
     Task<int> FailStalledLaunchesAsync(TimeSpan grace, CancellationToken cancellationToken = default);
     Task<bool> StartRunAsync(string runId, int processId, CancellationToken cancellationToken = default);
-    Task SetRunSessionAsync(string runId, string sessionId, CancellationToken cancellationToken = default);
     Task CompleteRunAsync(string runId, JobRunStatus status, int? exitCode, string? errorMessage, CancellationToken cancellationToken = default);
     Task<bool> RequestCancelAsync(string runId, CancellationToken cancellationToken = default);
     Task<bool> IsCancelRequestedAsync(string runId, CancellationToken cancellationToken = default);
@@ -564,16 +563,6 @@ public sealed class JobStore : IJobStore
         return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
-    public async Task SetRunSessionAsync(string runId, string sessionId, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE JobRuns SET SessionId = $sessionId WHERE Id = $id;";
-        command.Parameters.AddWithValue("$sessionId", sessionId);
-        command.Parameters.AddWithValue("$id", runId);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
     public async Task CompleteRunAsync(string runId, JobRunStatus status, int? exitCode, string? errorMessage, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
@@ -930,6 +919,16 @@ public sealed class JobStore : IJobStore
             using var alter = connection.CreateCommand();
             alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
             alter.ExecuteNonQuery();
+        }
+
+        // Repository owns Sessions and initializes it before JobStore in the real application.
+        // Some isolated JobStore tests intentionally omit that unrelated schema, so only install
+        // the cross-table trigger when the tagged-session column is actually available.
+        if (HasColumn(connection, "Sessions", "JobRunId"))
+        {
+            using var linkSession = connection.CreateCommand();
+            linkSession.CommandText = SqlStrings.CreateJobRunSessionLinkTrigger;
+            linkSession.ExecuteNonQuery();
         }
     }
 
