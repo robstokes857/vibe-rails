@@ -35,7 +35,16 @@ public class TerminalStateService : ITerminalStateService, IDisposable
         _ioObserverService = ioObserverService;
     }
 
-    public async Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default, string? initialUserInput = null, string? jobRunId = null)
+    public async Task<string> CreateSessionAsync(
+        string cli,
+        string workDir,
+        string? envName,
+        bool makeRemote = false,
+        CancellationToken ct = default,
+        string? initialUserInput = null,
+        string? jobRunId = null,
+        int initialCols = Terminal.DefaultCols,
+        int initialRows = Terminal.DefaultRows)
     {
         var sessionId = Guid.NewGuid().ToString();
         await _repository.CreateSessionAsync(sessionId, cli, envName, workDir, Environment.ProcessId, jobRunId);
@@ -51,7 +60,7 @@ public class TerminalStateService : ITerminalStateService, IDisposable
 
         var now = DateTimeOffset.UtcNow;
         var outputWriter = new SessionOutputWriter(_repository);
-        outputWriter.Initialize(sessionId, Terminal.DefaultCols, Terminal.DefaultRows);
+        outputWriter.Initialize(sessionId, initialCols, initialRows);
         lock (s_stateLock)
         {
             s_inputAccumulators[sessionId] = new InputAccumulator(async inputText =>

@@ -158,6 +158,126 @@ public sealed class LlmProxySettingsServiceTests
     }
 
     [Fact]
+    public void Resolve_Paused_SuppressesEverySaverWithoutTouchingTheRelay()
+    {
+        // The pause is applied at this one gate rather than in each provider route, so a new
+        // provider inherits it by construction. What must NOT change is the relay: turning the
+        // proxy off here would 404 the CLI mid-conversation instead of quietly forwarding
+        // uncompressed bodies.
+        var resolved = LlmProxySettingsService.Resolve(ProxyOn(), tokenSaverPaused: true);
+
+        Assert.False(resolved.ClaudeTokenSaverEnabled);
+        Assert.False(resolved.CodexTokenSaverEnabled);
+        Assert.False(resolved.OpenCodeTokenSaverEnabled);
+
+        Assert.True(resolved.ClaudeLlmProxyEnabled);
+        Assert.True(resolved.CodexLlmProxyEnabled);
+        Assert.True(resolved.OpenCodeLlmProxyEnabled);
+    }
+
+    [Fact]
+    public void Resolve_Paused_LeavesThePlanIntactSoResumingRestoresTheSameStages()
+    {
+        // The pause must not be expressed by emptying the plan. The plan is what the capture view
+        // and the preview endpoint report as "the config we ran"; a pause that rewrote it would
+        // make a paused request indistinguishable from a saver configured to do nothing.
+        var resolved = LlmProxySettingsService.Resolve(ProxyOn(), tokenSaverPaused: true);
+
+        Assert.True(resolved.ResolvedPlan.EnabledIds.SetEquals(CompressionCatalog.DefaultSelection));
+    }
+
+    [Fact]
+    public void Resolve_NotPaused_IsTheDefaultAndChangesNothing()
+    {
+        var resolved = LlmProxySettingsService.Resolve(ProxyOn(), tokenSaverPaused: false);
+
+        Assert.True(resolved.ClaudeTokenSaverEnabled);
+        Assert.True(resolved.CodexTokenSaverEnabled);
+        Assert.True(resolved.OpenCodeTokenSaverEnabled);
+    }
+
+    [Fact]
+    public void IsConfiguredOn_ReadsOnlyTheProviderThisProcessProxies()
+    {
+        // The bug this pins: a proxy child serves exactly one CLI, but the answer used to be an OR
+        // across all three savers. A Claude tab whose own saver is off would report compression on
+        // merely because Codex's was — so pause_token_saver told the agent it had paused something
+        // that was never running, and the meter raised a badge for a tab nothing was compressing.
+        var settings = ProxyOn();
+        settings.ClaudeTokenSaverEnabled = false;
+        var configured = LlmProxySettingsService.Resolve(settings);
+
+        Assert.False(LlmProxySettingsService.IsConfiguredOn(configured, LlmProxyProvider.Claude));
+        Assert.True(LlmProxySettingsService.IsConfiguredOn(configured, LlmProxyProvider.Codex));
+    }
+
+    [Theory]
+    [InlineData(LlmProxyProvider.Claude)]
+    [InlineData(LlmProxyProvider.Codex)]
+    [InlineData(LlmProxyProvider.OpenCode)]
+    public void IsConfiguredOn_IsFalseWhenOnlyThisProvidersSaverIsOff(LlmProxyProvider provider)
+    {
+        var settings = ProxyOn();
+        switch (provider)
+        {
+            case LlmProxyProvider.Claude: settings.ClaudeTokenSaverEnabled = false; break;
+            case LlmProxyProvider.Codex: settings.CodexTokenSaverEnabled = false; break;
+            default: settings.OpenCodeTokenSaverEnabled = false; break;
+        }
+
+        var configured = LlmProxySettingsService.Resolve(settings);
+
+        Assert.False(LlmProxySettingsService.IsConfiguredOn(configured, provider));
+    }
+
+    [Theory]
+    [InlineData(LlmProxyProvider.Claude)]
+    [InlineData(LlmProxyProvider.Codex)]
+    [InlineData(LlmProxyProvider.OpenCode)]
+    public void IsConfiguredOn_IsTrueWhenThisProvidersSaverIsTheOnlyOneOn(LlmProxyProvider provider)
+    {
+        var settings = ProxyOn();
+        settings.ClaudeTokenSaverEnabled = provider == LlmProxyProvider.Claude;
+        settings.CodexTokenSaverEnabled = provider == LlmProxyProvider.Codex;
+        settings.OpenCodeTokenSaverEnabled = provider == LlmProxyProvider.OpenCode;
+
+        var configured = LlmProxySettingsService.Resolve(settings);
+
+        Assert.True(LlmProxySettingsService.IsConfiguredOn(configured, provider));
+    }
+
+    [Fact]
+    public void IsConfiguredOn_WithNoProxiedLaunch_FallsBackToAnySaverBeingOn()
+    {
+        // The root/dashboard backend hosts no tab's relay, so there is no "this provider" to ask
+        // about. Reporting off would claim compression is switched off app-wide, which is a
+        // different and wronger answer than "not here".
+        var settings = ProxyOn();
+        settings.ClaudeTokenSaverEnabled = false;
+        settings.CodexTokenSaverEnabled = false;
+
+        var configured = LlmProxySettingsService.Resolve(settings);
+
+        Assert.True(LlmProxySettingsService.IsConfiguredOn(configured, LlmProxyProvider.None));
+
+        settings.OpenCodeTokenSaverEnabled = false;
+        var allOff = LlmProxySettingsService.Resolve(settings);
+
+        Assert.False(LlmProxySettingsService.IsConfiguredOn(allOff, LlmProxyProvider.None));
+    }
+
+    [Fact]
+    public void IsConfiguredOn_IsBlindToAPause_SoAPausedSaverStillCountsAsConfiguredOn()
+    {
+        // The control endpoint has to tell "paused" apart from "switched off in Settings". The
+        // effective snapshot cannot: a pause reports every saver off. So the question is asked of a
+        // pause-blind resolve, and re-pausing inside a live window must still be allowed.
+        var configured = LlmProxySettingsService.Resolve(ProxyOn(), tokenSaverPaused: false);
+
+        Assert.True(LlmProxySettingsService.IsConfiguredOn(configured, LlmProxyProvider.Claude));
+    }
+
+    [Fact]
     public void Resolve_ActiveOpenCodeSessionKeepsProxyAndSaverEnabledAfterLaunchToggleTurnsOff()
     {
         var settings = ProxyOn();

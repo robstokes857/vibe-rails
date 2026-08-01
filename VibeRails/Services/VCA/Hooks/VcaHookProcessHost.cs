@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Serilog;
 using VibeRails.Services.GitPreflight;
 using VibeRails.DB;
 using VibeRails.Utils;
@@ -35,6 +36,11 @@ public static class VcaHookProcessHost
         input ??= Console.In;
 
         var invocation = new VcaHookCommandParser().Parse(args);
+
+        if (invocation.Kind == VcaHookKind.CleanCommitMessage)
+        {
+            return await RunCommitMessageCleanupAsync(invocation, output, error, cancellationToken);
+        }
 
         // When --console-window is requested and we're not already the respawned child,
         // re-launch ourselves with CREATE_NEW_CONSOLE. This produces a visible popup in
@@ -119,6 +125,50 @@ public static class VcaHookProcessHost
         }
 
         return exitCode;
+    }
+
+    /// <summary>
+    /// Commit-message cleanup on its own, invoked by the hook script before it runs any chained
+    /// commit-msg hook.
+    ///
+    /// Order is the whole point. Cleanup rewrites the message file, so a chained hook that
+    /// validates, signs, or derives metadata from the message has to see the text Git will record —
+    /// running cleanup afterwards showed that hook one message and committed another.
+    ///
+    /// Builds no service graph and produces no UI: it sits on the critical path of every commit and
+    /// has nothing to validate. It also never fails the commit. A policy whose job is to delete
+    /// trailers has no business rejecting a message it could not read, and the validation pass that
+    /// follows is what decides whether the commit proceeds.
+    /// </summary>
+    private static async Task<int> RunCommitMessageCleanupAsync(
+        VcaHookInvocation invocation,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var removed = await new CommitMessageCoAuthorCleaner()
+                .RemoveAsync(invocation.CommitMessagePath, cancellationToken);
+            if (removed > 0)
+            {
+                var suffix = removed == 1 ? "trailer" : "trailers";
+                await output.WriteLineAsync(
+                    $"VibeRails removed {removed} Co-authored-by {suffix} from the commit message.");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Commit-message co-author cleanup failed");
+            await error.WriteLineAsync(
+                "VibeRails could not apply commit-message cleanup; the message was left unchanged.");
+        }
+
+        return 0;
     }
 
     internal static async Task PauseForEnterAsync(
@@ -277,6 +327,7 @@ public static class VcaHookProcessHost
         VcaConsoleStyle? style = null)
     {
         services.AddSingleton<IVcaHookCommandParser, VcaHookCommandParser>();
+        services.AddSingleton<ICommitMessageCoAuthorCleaner, CommitMessageCoAuthorCleaner>();
         services.AddSingleton<IVcaHookRunner, VcaHookRunner>();
         services.AddSingleton<IVcaHookValidationAnalyzer, VcaHookValidationAnalyzer>();
         services.AddSingleton<IJobStore>(_ =>

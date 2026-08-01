@@ -438,7 +438,8 @@ public class CommandServiceTests : IDisposable
         bool codexLlmProxyEnabled = false,
         bool claudeLlmProxyEnabled = false,
         bool openCodeLlmProxyEnabled = false,
-        string codexLlmProxyMode = CodexLlmProxySettings.ModeSubscription)
+        string codexLlmProxyMode = CodexLlmProxySettings.ModeSubscription,
+        ILlmProxySessionState? sessionState = null)
     {
         var fileService = new Mock<IFileService>().Object;
         var envService = new LlmCliEnvironmentService(
@@ -459,7 +460,11 @@ public class CommandServiceTests : IDisposable
                 CodexLlmProxyMode: codexLlmProxyMode,
                 ClaudeLlmProxyEnabled: claudeLlmProxyEnabled,
                 OpenCodeLlmProxyEnabled: openCodeLlmProxyEnabled));
-        return new CommandService(envService, proxyContext.Object, proxySettings.Object);
+        return new CommandService(
+            envService,
+            proxyContext.Object,
+            proxySettings.Object,
+            sessionState ?? new LlmProxySessionState());
     }
 
     private static string ExpectedQuietRedirect() =>

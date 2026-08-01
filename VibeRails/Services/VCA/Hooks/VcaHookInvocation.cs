@@ -5,7 +5,11 @@ public enum VcaHookKind
     PreCommit,
     CommitMessage,
     AcknowledgeCommitMessage,
-    Preview
+    Preview,
+
+    // Commit-message cleanup on its own, with no validation and no UI. Runs ahead of any chained
+    // commit-msg hook so that hook sees the message Git will actually record.
+    CleanCommitMessage
 }
 
 public sealed record VcaHookInvocation(
@@ -20,7 +24,11 @@ public sealed record VcaHookInvocation(
     // True when the snapshot being validated is the whole working tree (the Rules page
     // preview) rather than the staged index (the real commit hooks). Only affects how
     // results are worded — the validation logic is identical.
-    bool WorkingTreeScope = false);
+    bool WorkingTreeScope = false,
+    // Set by the hook script once it has run the CleanCommitMessage pass itself. Hook scripts
+    // installed before that pass existed do not pass it, and those invocations still clean the
+    // message inline so an un-upgraded repository keeps the policy.
+    bool CoAuthorsAlreadyCleaned = false);
 
 public sealed record VcaHookDisplayInfo(
     string Title,

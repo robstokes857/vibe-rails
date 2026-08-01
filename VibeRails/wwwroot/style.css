@@ -622,6 +622,68 @@ code {
     transition: background 0.16s ease, box-shadow 0.16s ease;
 }
 
+/* Paused: an agent turned compression off for a few minutes to read output the saver had elided.
+   Hidden entirely until that happens — the element is always in the DOM, its text is not. */
+.vb-activity-blinker-paused {
+    display: none;
+    padding: 0.1rem 0.36rem;
+    border: 1px solid color-mix(in srgb, var(--color-warning) 42%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+    color: color-mix(in srgb, var(--color-warning) 80%, var(--color-text));
+    font-size: 0.62rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+
+.vb-activity-blinker.is-paused .vb-activity-blinker-paused {
+    display: inline-flex;
+}
+
+/* Paused outranks enabled: the saver is armed but deliberately not running right now, and the
+   armed cyan would read as "still compressing". */
+.vb-activity-blinker.is-paused .vb-activity-blinker-zip,
+.vb-activity-blinker.is-paused.is-enabled .vb-activity-blinker-zip {
+    color: color-mix(in srgb, var(--color-warning) 72%, var(--color-text-muted));
+}
+
+.vb-activity-blinker.is-paused .vb-activity-blinker-dot,
+.vb-activity-blinker.is-paused.is-enabled .vb-activity-blinker-dot {
+    background: color-mix(in srgb, var(--color-warning) 70%, transparent);
+    box-shadow: none;
+}
+
+.vb-activity-popover-paused {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid color-mix(in srgb, var(--color-warning) 32%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-warning) 9%, transparent);
+}
+
+.vb-activity-popover-paused-icon {
+    color: color-mix(in srgb, var(--color-warning) 82%, var(--color-text));
+}
+
+.vb-activity-popover-paused-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.vb-activity-popover-paused-label {
+    font-weight: 700;
+}
+
+.vb-activity-popover-paused-hint {
+    color: var(--color-text-muted);
+    font-size: 0.62rem;
+}
+
 /* Enabled: the saver is armed — cool cyan. */
 .vb-activity-blinker.is-enabled .vb-activity-blinker-trigger {
     border-color: color-mix(in srgb, var(--color-accent) 26%, var(--color-border));
@@ -9002,7 +9064,7 @@ kbd:not(.ch-search-kbd) {
 }
 
 .btn-outline-warning:hover {
-    background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, transparent);
+    background: color-mix(in srgb, var(--color-warning) 12%, transparent);
 }
 
 /* ── Modals — refined surface + mono-caps title cue (chrome only) ─────────── */
@@ -13478,16 +13540,42 @@ body.git-guard-focus-active #app-content {
 }
 
 .jobs-page-header {
+    align-items: flex-start;
     justify-content: space-between;
-    gap: 2rem;
+    gap: 1.5rem;
     margin-bottom: 1.25rem;
 }
 
+.jobs-page-header > div:first-child { min-width: 0; }
+
+/* Header actions hold one row. Without nowrap the description grows until the
+   two buttons wrap into a stack, which reads as a mistake rather than a layout. */
 .jobs-page-actions {
     display: flex;
+    flex: 0 0 auto;
     gap: 0.5rem;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
+}
+
+/* Uppercase action labels, tracked so the caps stay legible at small sizes. */
+.jobs-view .btn {
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.jobs-view .btn:not(.btn-sm) { font-size: 0.78rem; }
+.jobs-view .btn-sm { font-size: 0.7rem; }
+.jobs-view .job-icon-action { letter-spacing: normal; }
+
+@media (max-width: 720px) {
+    .jobs-page-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .jobs-page-actions { flex-wrap: wrap; }
 }
 
 .jobs-page-title {
@@ -13561,9 +13649,9 @@ body.git-guard-focus-active #app-content {
 }
 
 .jobs-section-heading h2 {
-    margin: 0.12rem 0 0;
+    margin: 0;
     color: var(--color-text);
-    font-size: 1.2rem;
+    font-size: 1.05rem;
 }
 
 .jobs-count {
@@ -13795,6 +13883,9 @@ body.git-guard-focus-active #app-content {
     flex-wrap: nowrap;
     gap: 0.36rem;
 }
+
+/* Hold delete off from Export so the destructive action isn't a neighbouring pixel. */
+.job-card-actions [data-job-action="delete"] { margin-left: 0.4rem; }
 
 .job-icon-action {
     display: inline-grid;
@@ -14294,6 +14385,10 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 .jobs-runs-table thead th { color: var(--color-text-muted); font-size: 0.65rem; letter-spacing: 0.07em; text-transform: uppercase; }
 .jobs-runs-table td { font-size: 0.76rem; }
 .jobs-runs-table td:first-child small { display: block; color: var(--color-text-muted); font-size: 0.64rem; }
+/* Why a run ended, under its status pill. Clamped because ErrorMessage carries whole
+   sentences and an unbounded cell would set the width of the entire table; the full
+   text stays reachable through the title attribute. */
+.job-run-detail { display: block; max-width: 22ch; margin-top: 0.25rem; overflow: hidden; color: var(--color-text-muted); font-size: 0.64rem; text-overflow: ellipsis; white-space: nowrap; }
 .job-run-link { padding: 0; border: 0; background: transparent; color: var(--color-text); font-weight: 700; text-align: left; }
 .job-run-link:hover { color: var(--color-accent); }
 .jobs-run-actions { white-space: nowrap; }

@@ -102,11 +102,21 @@ public sealed class JobStore : IJobStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO Jobs (Name, ProjectPath, EnvironmentId, TimeoutMinutes, Enabled, CreatedUTC, UpdatedUTC)
-            VALUES ($name, $projectPath, $environmentId, $timeoutMinutes, $enabled, $now, $now)
+            INSERT INTO Jobs
+                (Name, ProjectPath, EnvironmentId, TimeoutMinutes, Enabled, CreatedUTC, UpdatedUTC, LaunchMinimized)
+            VALUES
+                ($name, $projectPath, $environmentId, $timeoutMinutes, $enabled, $now, $now, $launchMinimized)
             RETURNING Id;
             """;
-        BindJob(command, request.Name, request.ProjectPath, request.EnvironmentId, request.TimeoutMinutes, request.Enabled, now);
+        BindJob(
+            command,
+            request.Name,
+            request.ProjectPath,
+            request.EnvironmentId,
+            request.TimeoutMinutes,
+            request.Enabled,
+            request.LaunchMinimized,
+            now);
         var id = Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
         await ReplaceTriggersAsync(connection, transaction, id, request.Triggers, now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -123,10 +133,19 @@ public sealed class JobStore : IJobStore
         command.CommandText = """
             UPDATE Jobs SET
                 Name = $name, ProjectPath = $projectPath, EnvironmentId = $environmentId,
-                TimeoutMinutes = $timeoutMinutes, Enabled = $enabled, UpdatedUTC = $now
+                TimeoutMinutes = $timeoutMinutes, Enabled = $enabled,
+                LaunchMinimized = $launchMinimized, UpdatedUTC = $now
             WHERE Id = $id AND DeletedUTC IS NULL;
             """;
-        BindJob(command, request.Name, request.ProjectPath, request.EnvironmentId, request.TimeoutMinutes, request.Enabled, now);
+        BindJob(
+            command,
+            request.Name,
+            request.ProjectPath,
+            request.EnvironmentId,
+            request.TimeoutMinutes,
+            request.Enabled,
+            request.LaunchMinimized,
+            now);
         command.Parameters.AddWithValue("$id", id);
         if (await command.ExecuteNonQueryAsync(cancellationToken) == 0)
         {
@@ -670,9 +689,10 @@ public sealed class JobStore : IJobStore
         command.CommandText = """
             INSERT OR IGNORE INTO JobRuns
                 (Id, JobId, TriggerKind, TriggerKey, Status, JobName, ProjectPath, Llm,
-                 EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC)
+                 EnvironmentId, EnvironmentName, TimeoutMinutes, QueuedUTC, LaunchMinimized)
             SELECT $runId, j.Id, $triggerKind, $triggerKey, $queued, j.Name, j.ProjectPath,
-                   e.LLM, j.EnvironmentId, e.CustomName, j.TimeoutMinutes, $queuedUtc
+                   e.LLM, j.EnvironmentId, e.CustomName, j.TimeoutMinutes, $queuedUtc,
+                   j.LaunchMinimized
             FROM Jobs j
             JOIN Environments e ON e.Id = j.EnvironmentId
             WHERE j.Id = $jobId AND ($requireEnabled = 0 OR j.Enabled = 1) AND j.DeletedUTC IS NULL
@@ -754,7 +774,15 @@ public sealed class JobStore : IJobStore
         }
     }
 
-    private static void BindJob(SqliteCommand command, string name, string projectPath, int? environmentId, int? timeoutMinutes, bool enabled, DateTime now)
+    private static void BindJob(
+        SqliteCommand command,
+        string name,
+        string projectPath,
+        int? environmentId,
+        int? timeoutMinutes,
+        bool enabled,
+        bool launchMinimized,
+        DateTime now)
     {
         command.Parameters.AddWithValue("$name", name.Trim());
         command.Parameters.AddWithValue("$projectPath", NormalizeProjectPath(projectPath));
@@ -762,6 +790,7 @@ public sealed class JobStore : IJobStore
         // No timeout is stored as 0; see ToOptionalTimeout.
         command.Parameters.AddWithValue("$timeoutMinutes", timeoutMinutes is > 0 ? timeoutMinutes.Value : 0);
         command.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);
+        command.Parameters.AddWithValue("$launchMinimized", launchMinimized ? 1 : 0);
         command.Parameters.AddWithValue("$now", ToDb(now));
     }
 
@@ -778,7 +807,8 @@ public sealed class JobStore : IJobStore
         ParseDb(reader.GetString(9)),
         ParseDb(reader.GetString(10)),
         reader.IsDBNull(11) ? null : ParseDb(reader.GetString(11)),
-        []);
+        [],
+        reader.GetInt32(12) != 0);
 
     private static async Task<IReadOnlyList<JobTriggerDto>> ReadTriggersAsync(SqliteConnection connection, long jobId, CancellationToken cancellationToken)
     {
@@ -858,7 +888,8 @@ public sealed class JobStore : IJobStore
         reader.IsDBNull(15) ? null : reader.GetInt32(15),
         reader.IsDBNull(16) ? null : reader.GetString(16),
         reader.GetInt32(17) != 0,
-        reader.IsDBNull(18) ? null : reader.GetInt32(18));
+        reader.IsDBNull(18) ? null : reader.GetInt32(18),
+        reader.GetInt32(19) != 0);
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken)
     {
@@ -911,7 +942,12 @@ public sealed class JobStore : IJobStore
         // won't alter an existing table. Guarded by an explicit column check rather than running the
         // ALTER and swallowing the failure: SQLITE_ERROR is the generic code and also covers "no
         // such table" and similar, so catching it would hide a real schema problem as a no-op.
-        foreach (var (table, column, definition) in new[] { ("JobRuns", "LaunchedUTC", "TEXT") })
+        foreach (var (table, column, definition) in new[]
+        {
+            ("JobRuns", "LaunchedUTC", "TEXT"),
+            ("Jobs", "LaunchMinimized", "INTEGER NOT NULL DEFAULT 0"),
+            ("JobRuns", "LaunchMinimized", "INTEGER NOT NULL DEFAULT 0")
+        })
         {
             if (HasColumn(connection, table, column))
                 continue;
@@ -958,7 +994,7 @@ public sealed class JobStore : IJobStore
     private const string JobSelectSql = """
         SELECT j.Id, j.Name, j.ProjectPath, e.LLM, j.EnvironmentId, e.CustomName,
                COALESCE(NULLIF(TRIM(e.CustomPrompt), ''), ''), j.TimeoutMinutes, j.Enabled,
-               j.CreatedUTC, j.UpdatedUTC, j.DeletedUTC
+               j.CreatedUTC, j.UpdatedUTC, j.DeletedUTC, j.LaunchMinimized
         FROM Jobs j LEFT JOIN Environments e ON e.Id = j.EnvironmentId
         """;
 
@@ -966,7 +1002,7 @@ public sealed class JobStore : IJobStore
         SELECT r.Id, r.JobId, r.TriggerKind, r.TriggerKey, r.Status, r.JobName, r.ProjectPath,
                r.Llm, r.EnvironmentId, r.EnvironmentName, r.TimeoutMinutes, r.SessionId,
                r.QueuedUTC, r.StartedUTC, r.EndedUTC, r.ExitCode, r.ErrorMessage,
-               r.CancelRequested, r.OwnerProcessId
+               r.CancelRequested, r.OwnerProcessId, r.LaunchMinimized
         FROM JobRuns r
         """;
 
@@ -982,6 +1018,7 @@ public sealed class JobStore : IJobStore
             EnvironmentId INTEGER,
             TimeoutMinutes INTEGER NOT NULL DEFAULT 60,
             Enabled INTEGER NOT NULL DEFAULT 0,
+            LaunchMinimized INTEGER NOT NULL DEFAULT 0,
             CreatedUTC TEXT NOT NULL,
             UpdatedUTC TEXT NOT NULL,
             DeletedUTC TEXT,
@@ -1024,6 +1061,7 @@ public sealed class JobStore : IJobStore
             CancelRequested INTEGER NOT NULL DEFAULT 0,
             OwnerProcessId INTEGER,
             LaunchedUTC TEXT,
+            LaunchMinimized INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (JobId) REFERENCES Jobs(Id)
         );
 

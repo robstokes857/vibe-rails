@@ -40,7 +40,8 @@ public sealed class EnvironmentLaunchServiceTests
                     "--caller-flag", "Review this repository."
                 })),
                 null,
-                true))
+                true,
+                false))
             .Returns(new LaunchResult(true, "launched"));
 
         var result = await new EnvironmentLaunchService(repository.Object, launcher.Object).LaunchAsync(
@@ -80,7 +81,8 @@ public sealed class EnvironmentLaunchServiceTests
                 AppContext.BaseDirectory,
                 It.IsAny<string[]>(),
                 null,
-                true))
+                true,
+                false))
             .Returns(new LaunchResult(true, "launched"));
 
         var result = await new EnvironmentLaunchService(repository.Object, launcher.Object).LaunchAsync(
@@ -153,6 +155,7 @@ public sealed class EnvironmentLaunchServiceTests
                 AppContext.BaseDirectory,
                 It.Is<string[]>(args => args.SequenceEqual(new[] { "Run it." })),
                 It.Is<string[]>(args => args.SequenceEqual(new[] { "--job-run", "run-1" })),
+                false,
                 false))
             .Returns(new LaunchResult(true, "launched"));
 
@@ -233,7 +236,8 @@ public sealed class EnvironmentLaunchServiceTests
                 AppContext.BaseDirectory,
                 It.Is<string[]>(args => args.SequenceEqual(new[] { "--model", "gpt-5.6-sol" })),
                 null,
-                true))
+                true,
+                false))
             .Returns(new LaunchResult(true, "launched"));
 
         var result = await new EnvironmentLaunchService(repository.Object, launcher.Object).LaunchAsync(
@@ -259,7 +263,8 @@ public sealed class EnvironmentLaunchServiceTests
                 AppContext.BaseDirectory,
                 Array.Empty<string>(),
                 null,
-                true))
+                true,
+                false))
             .Returns(new LaunchResult(true, "launched"));
 
         var result = await new EnvironmentLaunchService(repository.Object, launcher.Object).LaunchAsync(

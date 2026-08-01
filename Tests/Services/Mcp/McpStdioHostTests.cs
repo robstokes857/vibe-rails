@@ -41,4 +41,17 @@ public class McpStdioHostTests
         Assert.Contains(services, d => d.ServiceType == typeof(IBertV2BgeEmbedder));
         Assert.Contains(services, d => d.ServiceType == typeof(IBertSearchDbService));
     }
+
+    [Fact]
+    public void ConfigureServices_RegistersTokenSaverToolAndItsHttpClient()
+    {
+        // This is the transport that matters for the pause tools: the CLI spawns `vb mcp` and hands
+        // it the environment naming the proxy to call. Registered here but not in MapRegisterServices
+        // would mean agents silently have no way to pause, with nothing failing to say so.
+        var services = new ServiceCollection();
+        McpStdioHost.ConfigureServices(services);
+
+        Assert.Contains(services, d => d.ServiceType == typeof(TokenSaverTool));
+        Assert.Contains(services, d => d.ServiceType == typeof(IHttpClientFactory));
+    }
 }

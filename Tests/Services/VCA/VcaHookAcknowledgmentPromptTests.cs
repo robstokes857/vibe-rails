@@ -29,7 +29,8 @@ public class VcaHookAcknowledgmentPromptTests
                         new AutomatedWorkflowsPreflightStep()
                     ]),
                 new VcaHookValidationAnalyzer(),
-                presenter);
+                presenter,
+                new CommitMessageCoAuthorCleaner(() => false));
 
             var exitCode = await runner.RunAsync(
                 new VcaHookInvocation(
@@ -77,7 +78,8 @@ public class VcaHookAcknowledgmentPromptTests
             var runner = new VcaHookRunner(
                 new CancelAfterPreflightPipeline(cancellation, tempDir, summary),
                 new VcaHookValidationAnalyzer(),
-                new TestPresenter("should not be read"));
+                new TestPresenter("should not be read"),
+                new CommitMessageCoAuthorCleaner(() => false));
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runner.RunAsync(
                 new VcaHookInvocation(

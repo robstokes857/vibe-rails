@@ -24,6 +24,9 @@ python classifier.py check
 # Classify an image with a pretrained ResNet (needs torch + torchvision):
 python classifier.py classify --image path/to/photo.jpg --topk 5
 
+# Choose a ResNet variant and run timed inference passes for profiling:
+python classifier.py classify --model resnet50 --iters 10
+
 # No image? A synthetic test image is generated so the pipeline still runs end to end:
 python classifier.py classify
 ```

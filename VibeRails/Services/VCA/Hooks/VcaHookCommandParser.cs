@@ -39,6 +39,7 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
         var promptForAcknowledgment = false;
         var showConsoleWindow = false;
         var consoleWindowAttached = false;
+        var coAuthorsAlreadyCleaned = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -124,6 +125,12 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
                 continue;
             }
 
+            if (arg.Equals("--co-authors-cleaned", StringComparison.OrdinalIgnoreCase))
+            {
+                coAuthorsAlreadyCleaned = true;
+                continue;
+            }
+
             if (arg.Equals("--demo-duration-ms", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 if (int.TryParse(args[++i], out var ms) && ms > 0)
@@ -146,7 +153,9 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
             demoDuration,
             promptForAcknowledgment,
             showConsoleWindow,
-            consoleWindowAttached);
+            consoleWindowAttached,
+            WorkingTreeScope: false,
+            CoAuthorsAlreadyCleaned: coAuthorsAlreadyCleaned);
     }
 
     private static VcaHookKind ParseKind(string value)
@@ -157,6 +166,8 @@ public sealed class VcaHookCommandParser : IVcaHookCommandParser
             "precommit" => VcaHookKind.PreCommit,
             "commit-msg" => VcaHookKind.CommitMessage,
             "commit-message" => VcaHookKind.CommitMessage,
+            "clean-commit-msg" => VcaHookKind.CleanCommitMessage,
+            "clean-commit-message" => VcaHookKind.CleanCommitMessage,
             "ack" => VcaHookKind.AcknowledgeCommitMessage,
             "acknowledge" => VcaHookKind.AcknowledgeCommitMessage,
             "acknowledge-commit-msg" => VcaHookKind.AcknowledgeCommitMessage,

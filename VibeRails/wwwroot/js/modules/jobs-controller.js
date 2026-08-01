@@ -51,6 +51,18 @@ const RUN_STATUS = Object.freeze({
     6: { label: 'Interrupted', tone: 'warning' }
 });
 
+// Named codes for the comparisons below, so "which statuses can be retried" reads as
+// intent rather than as an integer boundary. Values mirror JobRunStatus in JobsDtos.cs.
+const RUN_STATUS_CODE = Object.freeze({
+    QUEUED: 0,
+    RUNNING: 1,
+    SUCCEEDED: 2,
+    FAILED: 3,
+    CANCELLED: 4,
+    TIMED_OUT: 5,
+    INTERRUPTED: 6
+});
+
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export class JobController {
@@ -68,6 +80,7 @@ export class JobController {
         this.activeEditorSource = null;
         this.activeEditorPreferredTrigger = null;
         this._lastJobsListHtml = null;
+        this._lastRunsHtml = null;
     }
 
     async loadView(data = {}) {
@@ -80,6 +93,7 @@ export class JobController {
         // The list now holds the loading placeholder; a stale render cache from a previous
         // visit would make the first renderJobs() skip and leave the spinner forever.
         this._lastJobsListHtml = null;
+        this._lastRunsHtml = null;
         await this.refreshAll();
 
         if (data?.newJob) {
@@ -169,7 +183,7 @@ export class JobController {
 
                 <section class="jobs-section" aria-labelledby="jobs-list-title">
                     <div class="jobs-section-heading">
-                        <div><span class="jobs-eyebrow">Saved schedules and triggers</span><h2 id="jobs-list-title">Automations</h2></div>
+                        <div><h2 id="jobs-list-title">Automations</h2></div>
                         <span class="jobs-count" data-jobs-count>0 automations</span>
                     </div>
                     <div class="job-inline-editor" data-job-editor hidden></div>
@@ -180,7 +194,7 @@ export class JobController {
 
                 <section class="jobs-section" aria-labelledby="job-runs-title">
                     <div class="jobs-section-heading">
-                        <div><span class="jobs-eyebrow">Recorded history</span><h2 id="job-runs-title">Recent runs</h2></div>
+                        <div><h2 id="job-runs-title">Recent runs</h2></div>
                         <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="refresh">
                             <i class="fa-solid fa-rotate-right me-1" aria-hidden="true"></i>Refresh
                         </button>
@@ -366,11 +380,21 @@ export class JobController {
     renderRuns() {
         const target = this.root?.querySelector('[data-job-runs]');
         if (!target) return;
+        const html = this.renderRunsHtml();
+        // Same reason renderJobs caches: the 5s poll calls this constantly, and rewriting
+        // innerHTML on every tick tore out hover, focus, and any just-clicked Cancel/Retry
+        // button in the row underneath the pointer. Only touch the DOM on a real change —
+        // a live run's ticking Duration still differs each tick, so it keeps updating.
+        if (html === this._lastRunsHtml) return;
+        this._lastRunsHtml = html;
+        target.innerHTML = html;
+    }
+
+    renderRunsHtml() {
         if (this.runs.length === 0) {
-            target.innerHTML = '<div class="jobs-empty">No automation runs yet.</div>';
-            return;
+            return '<div class="jobs-empty">No automation runs yet.</div>';
         }
-        target.innerHTML = `
+        return `
             <div class="table-responsive"><table class="table jobs-runs-table align-middle">
                 <thead><tr><th>Automation</th><th>Trigger</th><th>Status</th><th>Queued</th><th>Duration</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
                 <tbody>${this.runs.map(run => this.renderRunRow(run)).join('')}</tbody>
@@ -378,21 +402,54 @@ export class JobController {
     }
 
     renderRunRow(run) {
-        const status = RUN_STATUS[Number(run.status)] || { label: 'Unknown', tone: 'neutral' };
+        const statusCode = Number(run.status);
+        const status = RUN_STATUS[statusCode] || { label: 'Unknown', tone: 'neutral' };
         const trigger = { 0: 'Schedule', 2: 'After commit', 3: 'Manual' }[Number(run.triggerKind)] || 'Manual';
-        const active = Number(run.status) === 0 || Number(run.status) === 1;
-        const retryable = Number(run.status) >= 2;
+        const active = statusCode === RUN_STATUS_CODE.QUEUED || statusCode === RUN_STATUS_CODE.RUNNING;
+        // Succeeded is terminal but it is not a failure, and offering Retry on it invited
+        // re-running work that had already landed. Retry starts at Failed.
+        const retryable = statusCode >= RUN_STATUS_CODE.FAILED;
+        const detail = this.runDetail(run);
         return `<tr>
             <td><button class="job-run-link" type="button" data-job-action="view-run" data-run-id="${this.escape(run.id)}">${this.escape(run.jobName)}</button><small>${this.escape(getLlmName(Number(run.llm)))}${run.environmentName ? ` · ${this.escape(run.environmentName)}` : ''}</small></td>
             <td>${trigger}</td>
-            <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span></td>
+            <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}</td>
             <td title="${this.escape(run.queuedUtc)}">${this.escape(this.relativeTime(run.queuedUtc))}</td>
-            <td>${this.escape(this.formatDuration(run.startedUtc, run.endedUtc))}</td>
+            <td${this.durationTitle(run)}>${this.escape(this.runDuration(run))}</td>
             <td class="text-end jobs-run-actions">
                 ${active ? `<button class="btn btn-sm btn-outline-danger" type="button" data-job-action="cancel-run" data-run-id="${this.escape(run.id)}">Cancel</button>` : ''}
                 ${retryable ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="retry-run" data-run-id="${this.escape(run.id)}">Retry</button>` : ''}
             </td>
         </tr>`;
+    }
+
+    // Why a run ended, drawn from fields the row previously dropped on the floor.
+    // Without this a Failed or Interrupted row was a coloured word and nothing else,
+    // even though the store had already recorded the reason.
+    runDetail(run) {
+        const parts = [];
+        if (run.errorMessage) parts.push(String(run.errorMessage));
+        const exitCode = Number(run.exitCode);
+        // Exit 0 next to a success says nothing. A non-zero code is the only detail we
+        // have when the CLI failed without an ErrorMessage of its own.
+        if (run.exitCode !== null && run.exitCode !== undefined && Number.isFinite(exitCode) && exitCode !== 0) {
+            parts.push(`exit ${exitCode}`);
+        }
+        return parts.join(' · ');
+    }
+
+    // A reaped run's EndedUTC is when the reaper noticed the owning process was gone,
+    // not when it actually died, so the elapsed time overstates real runtime by up to a
+    // scheduler tick. Mark those approximate rather than showing a precision we do not have.
+    runDuration(run) {
+        const duration = this.formatDuration(run.startedUtc, run.endedUtc);
+        if (duration === '—') return duration;
+        return Number(run.status) === RUN_STATUS_CODE.INTERRUPTED ? `~${duration}` : duration;
+    }
+
+    durationTitle(run) {
+        if (Number(run.status) !== RUN_STATUS_CODE.INTERRUPTED || !run.startedUtc) return '';
+        return ' title="Approximate — measured to when VibeRails noticed the terminal had closed, not to when it closed."';
     }
 
     openEditor(job = null, preferredTrigger = null, editorState = null) {
@@ -464,7 +521,10 @@ export class JobController {
                             <div class="input-group mt-2" data-timeout-field ${source.timeoutMinutes ? '' : 'hidden'}><input class="form-control" type="number" id="job-timeout" min="1" max="720" value="${source.timeoutMinutes || 60}"><span class="input-group-text">minutes</span></div>
                             <small class="form-text text-muted">Off by default — the run stays open until the CLI finishes or you close its terminal window.</small>
                         </div>
-                        <div class="col-md-7 d-flex align-items-center"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="job-enabled" ${source.enabled !== false ? 'checked' : ''}><label class="form-check-label" for="job-enabled">Enabled — allow this automation to run on its triggers</label></div></div>
+                        <div class="col-md-7 d-flex flex-column justify-content-center gap-2">
+                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="job-enabled" ${source.enabled !== false ? 'checked' : ''}><label class="form-check-label" for="job-enabled">Enabled — allow this automation to run on its triggers</label></div>
+                            <div class="form-check"><input class="form-check-input" type="checkbox" id="job-launch-minimized" ${source.launchMinimized === true ? 'checked' : ''}><label class="form-check-label" for="job-launch-minimized">Launch minimized</label><small class="form-text text-muted d-block">Applied when the operating system supports minimized terminal launches.</small></div>
+                        </div>
                     </div>
                 </details>
 
@@ -680,7 +740,8 @@ export class JobController {
                 ? Number(form.querySelector('#job-timeout').value)
                 : null,
             enabled: form.querySelector('#job-enabled').checked,
-            triggers
+            triggers,
+            launchMinimized: form.querySelector('#job-launch-minimized')?.checked === true
         };
     }
 

@@ -21,8 +21,16 @@ namespace VibeRails.Services.LlmClis.Launchers
         /// <paramref name="keepTerminalOpen"/> leaves a usable shell behind after vb exits, which is
         /// what an interactive launch wants; Job launches pass false so each run's window closes
         /// with the run instead of accumulating one idle shell per run.
+        /// <paramref name="launchMinimized"/> requests a minimized terminal window where the
+        /// operating system supports it. It is currently honored on Windows and ignored elsewhere.
         /// </summary>
-        LaunchResult LaunchInTerminal(string? envName, string workingDirectory, string[] args, string[]? vbArgs = null, bool keepTerminalOpen = true);
+        LaunchResult LaunchInTerminal(
+            string? envName,
+            string workingDirectory,
+            string[] args,
+            string[]? vbArgs = null,
+            bool keepTerminalOpen = true,
+            bool launchMinimized = false);
         Dictionary<string, string> GetEnvironmentVariables(string envName);
     }
 
@@ -51,13 +59,20 @@ namespace VibeRails.Services.LlmClis.Launchers
             string workingDirectory,
             string[] args,
             string[]? vbArgs = null,
-            bool keepTerminalOpen = true)
+            bool keepTerminalOpen = true,
+            bool launchMinimized = false)
         {
             try
             {
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
-                    return LaunchInWindowsTerminal(workingDirectory, args, envName, vbArgs, keepTerminalOpen);
+                    return LaunchInWindowsTerminal(
+                        workingDirectory,
+                        args,
+                        envName,
+                        vbArgs,
+                        keepTerminalOpen,
+                        launchMinimized);
                 }
                 else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
                 {
@@ -112,7 +127,8 @@ namespace VibeRails.Services.LlmClis.Launchers
             string[] args,
             string? envName,
             string[]? vbArgs,
-            bool keepTerminalOpen)
+            bool keepTerminalOpen,
+            bool launchMinimized)
         {
             var exePath = Environment.ProcessPath ?? "vb";
             var argv = BuildVbArgv(workingDirectory, args, envName, vbArgs);
@@ -144,6 +160,7 @@ namespace VibeRails.Services.LlmClis.Launchers
                 FileName = ShellDefaults.WindowsCommandShell,
                 WorkingDirectory = workingDirectory,
                 UseShellExecute = true,
+                WindowStyle = launchMinimized ? ProcessWindowStyle.Minimized : ProcessWindowStyle.Normal,
             };
             if (keepTerminalOpen)
                 startInfo.ArgumentList.Add("-NoExit");

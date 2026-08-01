@@ -41,19 +41,20 @@ whole thing:
 | - | ---- | ---------- |
 | 1 | **`Pipeline/CompressionCatalog.cs`** | **The source of truth.** Every stage, its id, its default, its order. The settings UI, the what-if preview, and this README all render from here. Adding a stage starts here. |
 | 2 | **`Pipeline/CompressionPipeline.cs`** | **The whole compression path for one string.** If you set one breakpoint, set it on `Run`. There is no other path. |
-| 3 | **`Minify/OutputMinifier.cs`** | Stages 1–5, fused into one forward scan. The lossless pass. Its class comment is the real spec — read it before touching a byte. |
-| 4 | **`Shape/ShapeFilters.cs`** | Stages 6–9. Rewrites the output of a *recognised command*: regroups `git status --short`/`rg -n`/`find`, elides passing tests from a recognised test runner. |
-| 5 | **`Minify/OutputCondenser.cs`** | Stages 10–11, fused. The lossy pass — dedupe runs, elide long middles. |
+| 3 | **`Minify/OutputMinifier.cs`** | Stages 1–6, fused into one forward scan. The lossless pass. Its class comment is the real spec — read it before touching a byte. |
+| 4 | **`Shape/ShapeFilters.cs`** | Stages 7–10. Rewrites the output of a *recognised command*: regroups `git status --short`/`rg -n`/`find`, elides passing tests from a recognised test runner. |
+| 5 | **`Minify/OutputCondenser.cs`** | Stages 11–12, fused. The lossy pass — dedupe runs, elide long middles. |
 
-And the two files that decide **which strings ever reach the pipeline**:
+And the three files that decide **which strings ever reach the pipeline**:
 
 | File | What it is |
 | ---- | ---------- |
 | `Minify/AnthropicMessagesRewriter.cs` | Walks the Anthropic JSON body, finds `tool_result` blocks, matches each to the `tool_use` that produced it (for the tool name **and the command text**), and splices rewritten strings back in. |
 | `Minify/CodexResponsesRewriter.cs` | Same job for Codex's `/responses` shape. |
+| `Minify/ChatCompletionsRewriter.cs` | Same job for the OpenAI Chat Completions shape used by the zai/Z.AI (GLM) provider routed through OpenCode. |
 
 Everything else in this project is plumbing: relays, buffers, auth gates, settings
-seams. If you are debugging *compression*, it is one of the seven files above.
+seams. If you are debugging *compression*, it is one of the eight files above.
 
 ### The mental model
 
@@ -75,9 +76,9 @@ seams. If you are debugging *compression*, it is one of the seven files above.
                           |   CompressionPipeline.Run  |   <-- BREAKPOINT HERE
                           +----------------------------+
                                         |
-             1-5  OutputMinifier (fused) |  lossless
-             6-9  ShapeFilters           |  reshaping + test elision
-             10-11 OutputCondenser (fused)| lossy
+             1-6  OutputMinifier (fused) |  lossless
+             7-10 ShapeFilters           |  reshaping + test elision
+             11-12 OutputCondenser (fused)| lossy
                                         |
                                         v
                           rewritten string + StageTrace[]
@@ -98,17 +99,18 @@ payload under the truncation threshold).
 
 | # | Id | Kind | Default | What it does |
 | - | -- | ---- | ------- | ------------ |
-| 1 | `cr-collapse` | Lossless | **off** | Keeps the final frame of a `\r`-redrawn line, only when it provably covers earlier frames. Normalizes CRLF→LF. |
-| 2 | `ansi-strip` | Lossless | **off** | Drops SGR colour, OSC titles, BEL. Cursor moves/erases kept verbatim. |
-| 3 | `trailing-whitespace` | Lossless | on | Spaces/tabs at end of line. |
-| 4 | `blank-edges` | Lossless | on | Blank lines at the start/end of the payload. |
-| 5 | `blank-runs` | Lossless | on | Runs of 3+ blank lines → 2. |
-| 6 | `git-status-group` | Reshaping | on | Groups porcelain `XY path` lines under one header per status. |
-| 7 | `grep-group` | Reshaping | on | Groups `path:line:content` under one header per file. |
-| 8 | `find-group` | Reshaping | on | Groups a flat path list under one header per directory. |
-| 9 | `elide-passed-tests` | Lossy | on | Runs of individual passing-test lines from a recognised test runner → one `[... N passed ...]` marker. Failures/errors/skips/logs/summaries kept verbatim, in place. |
-| 10 | `dedupe-lines` | Lossy | on | 3+ identical lines → one, tagged `[xN]`. |
-| 11 | `truncate-long` | Lossy | on | Keeps first 150 + last 50 lines, elides the middle. |
+| 1 | `cr-collapse` | Lossless | **off** | Keeps the final frame of a `\r`-redrawn line (progress bars, spinners), only when that frame provably covers every earlier one. Also normalizes CRLF→LF. |
+| 2 | `crlf-normalize` | Lossless | on | Rewrites Windows `\r\n` line endings to `\n`. Every later stage fails open on a surviving `\r`, so without this the group, elide, dedupe and truncate stages all no-op on output from rg, PowerShell and dotnet. Split out of `cr-collapse` (2026-07-28) so CRLF normalization is on by default while `cr-collapse` stays off. |
+| 3 | `ansi-strip` | Lossless | **off** | Drops SGR colour, OSC titles, BEL. Cursor moves/erases kept verbatim. |
+| 4 | `trailing-whitespace` | Lossless | on | Spaces/tabs at end of line. |
+| 5 | `blank-edges` | Lossless | on | Blank lines at the start/end of the payload. |
+| 6 | `blank-runs` | Lossless | on | Runs of 3+ blank lines → 2. |
+| 7 | `git-status-group` | Reshaping | on | Groups porcelain `XY path` lines under one header per status. |
+| 8 | `grep-group` | Reshaping | on | Groups `path:line:content` under one header per file. |
+| 9 | `find-group` | Reshaping | on | Groups a flat path list under one header per directory. |
+| 10 | `elide-passed-tests` | Lossy | on | Runs of individual passing-test lines from a recognised test runner → one `[... N passed ...]` marker. Failures/errors/skips/logs/summaries kept verbatim, in place. |
+| 11 | `dedupe-lines` | Lossy | on | 3+ identical lines → one, tagged `[xN]`. |
+| 12 | `truncate-long` | Lossy | on | Keeps first 150 + last 50 lines, elides the middle. |
 
 **Why are `cr-collapse` and `ansi-strip` off by default?** They are the two largest
 lossless wins available, and they are off by deliberate product decision (2026-07-15,
@@ -251,18 +253,18 @@ maps those counters onto stage ids.
 
 ### Why the fused stages are not five separate passes
 
-`CompressionCatalog` lists stages 1–5 as five independent toggles, but they execute
+`CompressionCatalog` lists stages 1–6 as six independent toggles, but they execute
 as **one** forward scan in `OutputMinifier`. This looks like a leaky abstraction and
 is a deliberate trade:
 
 The idempotency proofs are **cross-transform**. The rule "with cr-collapse off, a bare
-CR aborts the whole string" only makes sense if T1 and T3 can see each other. Five
+CR aborts the whole string" only makes sense if T1 and T3 can see each other. Six
 genuinely independent passes would each be idempotent alone and **not** idempotent
 composed — which is the exact bug class that quietly destroys prompt caching.
 
 So: the transforms are individually **killable** (that's what the toggles give you,
 and it's what makes bisecting a misbehaving transform possible). They are not
-individually **schedulable**. Same story for stages 10–11 in `OutputCondenser`.
+individually **schedulable**. Same story for stages 11–12 in `OutputCondenser`.
 
 ## Captures
 
@@ -330,6 +332,51 @@ are now the only gates.
 Settings are read in **one fresh snapshot per request** (`ILlmProxySettingsService`)
 so a concurrent save can't tear a single body's rewrite in half.
 
+### Pausing — the agent's escape hatch
+
+Every elision leaves a marker, so a model always knows something was removed. Until 2026-07-31 it
+had no way to get it back short of asking the user to flip a switch. Now it can pause compression
+for **5 minutes, for its own terminal tab**, re-run the command, and read the output verbatim.
+
+Three MCP tools drive it — `pause_token_saver`, `resume_token_saver`, `get_token_saver_status`
+(`VibeRails/Services/Mcp/Tools/TokenSaverTool.cs`). They POST to
+`/llm/control/token-saver/*`, which sits under the same prefix and behind the same session+tab
+auth gate as the proxy routes.
+
+**The pause is held in memory by the process that hosts the proxy**
+(`VibeRails/Services/LlmProxy/TokenSaverPauseState.cs`), and that is the terminal tab's own child
+`vb.exe`. Everything else follows from that:
+
+- It is **per-tab by construction** — no tab id to plumb, no shared file to key or prune. One
+  agent's pause cannot disable another tab's saver.
+- No SQLite on the request path, and no ephemeral runtime state written into `settings.json`
+  where it would race the settings UI's read-modify-write save.
+- It dies with the tab, which is the right lifetime.
+- Expiry is evaluated **on read**, so nothing has to fire for compression to come back. There is no
+  timer to drop and no way to get stuck paused.
+
+It is applied in exactly one place: `LlmProxySettingsService.Resolve` forces the three
+`*TokenSaverEnabled` fields false while paused, so **every provider — and any provider added
+later — inherits the pause for free**, and this library needed no changes at all. The
+`*LlmProxyEnabled` flags are deliberately untouched: a pause makes requests pass through
+unrewritten, it does not 404 a CLI mid-conversation. The resolved plan is untouched too, so a
+capture taken during a pause still reports the configured stage set rather than looking like a
+saver configured to do nothing.
+
+**A pause costs two prompt-cache breaks, and that is the reason it is short and fixed.** The CLI
+re-sends its whole history every turn. Turning compression off rewrites the bytes of
+`tool_result`s that already went up compressed, which breaks the provider's cache at the first one
+and reprocesses everything after it at full price — once when the pause starts and again when it
+ends. That is a fair trade for a deliberate "I need to see this output" moment and a bad one for a
+speculative toggle, which is why the tool description tells the agent not to call it on a hunch,
+why there is no `minutes` argument to inflate, and why the window expires by itself.
+
+The dashboard's piggy-bank meter shows a `Paused m:ss` badge while any tab is paused, fed by the
+`token_saver_pause` app event the control route publishes. The browser counts down from the
+absolute expiry it was given, so the badge clears itself on time without polling. Known gap: a
+browser reload mid-pause loses the badge until the next pause or resume — the pause itself is
+unaffected and still expires on schedule.
+
 ## Project layout
 
 ```
@@ -340,31 +387,35 @@ TokenSaver/
 │  ├─ CompressionPlan.cs         ← A resolved selection (flags + shapes + allowlists).
 │  └─ CompressionTrace.cs        ← StageTrace / StageOutcome.
 ├─ Minify/
-│  ├─ OutputMinifier.cs          ← Stages 1-5, fused. Read the class comment.
-│  ├─ OutputCondenser.cs         ← Stages 10-11, fused. Read the class comment.
-│  ├─ MinifyFlags.cs             ← 5 bools ← catalog stages 1-5.
-│  ├─ CondenseOptions.cs         ← 2 bools ← catalog stages 10-11.
+│  ├─ OutputMinifier.cs          ← Stages 1-6, fused. Read the class comment.
+│  ├─ OutputCondenser.cs         ← Stages 11-12, fused. Read the class comment.
+│  ├─ MinifyFlags.cs             ← 6 bools ← catalog stages 1-6.
+│  ├─ CondenseOptions.cs         ← 2 bools ← catalog stages 11-12.
 │  ├─ MinifyStats.cs             ← Per-transform char counters (= the trace source).
 │  ├─ CondenseStats.cs
 │  ├─ AnthropicMessagesRewriter.cs  ← JSON walk + splice (Claude).
 │  ├─ AnthropicBodyTransform.cs     ← Buffering + fail-open (Claude).
 │  ├─ CodexResponsesRewriter.cs     ← JSON walk + splice (Codex).
 │  ├─ CodexBodyTransform.cs
+│  ├─ ChatCompletionsRewriter.cs    ← JSON walk + splice (zai/Z.AI via OpenCode).
+│  ├─ ZaiBodyTransform.cs           ← Buffering + fail-open (zai/Z.AI).
 │  ├─ PooledBufferWriter.cs      ← Plumbing.
 │  ├─ PrefixedBodyStream.cs      ← Plumbing (the over-cap stitch-back).
 │  └─ ToolOutputRewriteResult.cs
 ├─ Shape/
 │  ├─ CommandShape.cs            ← Classifies a COMMAND (not output) into a shape.
-│  └─ ShapeFilters.cs            ← Stages 6-9.
+│  └─ ShapeFilters.cs            ← Stages 7-10.
 ├─ LlmProxyRelay.cs              ← The generic forwarding relay.
 ├─ LlmProxyRoutes.cs             ← Codex proxy endpoints.
 ├─ LlmAnthropicProxyRoutes.cs    ← Claude proxy endpoints.
+├─ LlmZaiProxyRoutes.cs          ← zai/Z.AI (GLM) proxy endpoints (via OpenCode).
 ├─ ILlmProxySettingsService.cs   ← Settings seam (impl lives in VibeRails).
 ├─ ILlmProxyEventSink.cs         ← Telemetry seam. Counts only, never content.
+├─ ILlmProxyExchangeSink.cs      ← Whole-request/response exchange log seam.
 ├─ ICompressionCaptureSink.cs    ← Capture seam. Content, deliberately.
 ├─ ILlmProxyAuthGate.cs
 ├─ ILlmProxyBodyTransform.cs
-└─ LlmProxyBaseUrl.cs / LlmProxyClaudeConfig.cs / LlmProxyCodexConfig.cs
+└─ LlmProxyBaseUrl.cs / LlmProxyClaudeConfig.cs / LlmProxyCodexConfig.cs / LlmProxyZaiConfig.cs
 ```
 
 Host-side implementations live in `VibeRails/`:

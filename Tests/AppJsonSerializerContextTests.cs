@@ -29,6 +29,49 @@ public sealed class AppJsonSerializerContextTests
     }
 
     [Fact]
+    public void TokenSaverPausePayload_KeepsTheNamesTheMeterReads()
+    {
+        // The browser runs its own countdown off pausedUntilUtc and suppresses the badge on
+        // saverEnabled:false. Renaming either field silently stops the paused badge from ever
+        // appearing — nothing throws, the meter just never hears about a pause.
+        var json = JsonSerializer.Serialize(
+            new TokenSaverPausePayload("2026-07-31T12:05:00.0000000Z", SaverEnabled: true),
+            AppJsonSerializerContext.Default.TokenSaverPausePayload);
+
+        Assert.Equal(
+            """{"pausedUntilUtc":"2026-07-31T12:05:00.0000000Z","saverEnabled":true}""",
+            json);
+    }
+
+    [Fact]
+    public void TokenSaverPausePayload_Resume_SendsAnExplicitNullExpiry()
+    {
+        // A resume must be a value on the wire, not an omitted field: the meter clears its badge
+        // when it sees a null expiry, and an absent key would leave the old countdown running.
+        var json = JsonSerializer.Serialize(
+            new TokenSaverPausePayload(null, SaverEnabled: true),
+            AppJsonSerializerContext.Default.TokenSaverPausePayload);
+
+        Assert.Equal("""{"pausedUntilUtc":null,"saverEnabled":true}""", json);
+    }
+
+    [Fact]
+    public void TokenSaverPausePayload_OmittedSaverEnabled_ReadsAsOn()
+    {
+        // The MCP tool deserializes this from whatever proxy child its terminal happens to be
+        // running, which can predate the field. Before it existed the endpoint only ever paused a
+        // saver that was on, so absent must mean on: defaulting to false would make the tool report
+        // "the saver is switched off" about a pause it had just successfully started.
+        var payload = JsonSerializer.Deserialize(
+            """{"pausedUntilUtc":"2026-07-31T12:05:00.0000000Z"}""",
+            AppJsonSerializerContext.Default.TokenSaverPausePayload);
+
+        Assert.NotNull(payload);
+        Assert.True(payload!.SaverEnabled);
+        Assert.Equal("2026-07-31T12:05:00.0000000Z", payload.PausedUntilUtc);
+    }
+
+    [Fact]
     public void AppSettingsDto_OmittedOptionalFields_BindToSafeDefaults()
     {
         // The stale-client guard: a cached app.js that predates these fields must not be read as
@@ -43,6 +86,7 @@ public sealed class AppJsonSerializerContextTests
 
         Assert.NotNull(dto);
         Assert.Null(dto!.ClearApiKey);
+        Assert.Null(dto.RemoveCoAuthorTrailers);
         Assert.False(dto.DataExportConfigured);
     }
 
@@ -80,11 +124,15 @@ public sealed class AppJsonSerializerContextTests
                 TokenSaverCaptureEnabled: false,
                 MachineName: "build-box",
                 ClearApiKey: null,
-                DataExportConfigured: true),
+                DataExportConfigured: true,
+                RemoveCoAuthorTrailers: true),
             AppJsonSerializerContext.Default.AppSettingsDto);
 
         Assert.Contains("""
             "dataExportConfigured":true
+            """, json);
+        Assert.Contains("""
+            "removeCoAuthorTrailers":true
             """, json);
     }
 

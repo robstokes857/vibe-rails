@@ -21,6 +21,7 @@ public interface IEnvironmentLaunchService
         string[]? vbArgs = null,
         bool keepTerminalOpen = true,
         int? environmentId = null,
+        bool launchMinimized = false,
         CancellationToken cancellationToken = default);
 }
 
@@ -35,6 +36,7 @@ public sealed class EnvironmentLaunchService(
         string[]? vbArgs = null,
         bool keepTerminalOpen = true,
         int? environmentId = null,
+        bool launchMinimized = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -93,7 +95,8 @@ public sealed class EnvironmentLaunchService(
                 workingDirectory,
                 args.ToArray(),
                 vbArgs,
-                keepTerminalOpen);
+                keepTerminalOpen,
+                launchMinimized);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

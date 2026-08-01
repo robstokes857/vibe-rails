@@ -8,6 +8,7 @@ public class VcaHookCommandParserTests
     [Theory]
     [InlineData(new[] { "--vca-hook", "pre-commit" }, true)]
     [InlineData(new[] { "--vca-hook", "commit-msg", "--commit-message", ".git/COMMIT_EDITMSG" }, true)]
+    [InlineData(new[] { "--vca-hook", "clean-commit-msg", "--commit-message", ".git/COMMIT_EDITMSG" }, true)]
     [InlineData(new[] { "--validate-vca", "--pre-commit" }, true)]
     [InlineData(new[] { "--commit-msg", ".git/COMMIT_EDITMSG" }, true)]
     [InlineData(new[] { "--env", "claude", "--", "--commit-msg" }, false)]
@@ -67,6 +68,52 @@ public class VcaHookCommandParserTests
         Assert.Equal(VcaHookKind.Preview, invocation.Kind);
         Assert.True(invocation.DemoUi);
         Assert.Equal(TimeSpan.FromMilliseconds(25), invocation.DemoDuration);
+    }
+
+    [Theory]
+    [InlineData("clean-commit-msg")]
+    [InlineData("clean-commit-message")]
+    public void Parse_CleanCommitMessageCommand_ReturnsTheCleanupOnlyKind(string kind)
+    {
+        var parser = new VcaHookCommandParser();
+
+        var invocation = parser.Parse(["--vca-hook", kind, "--commit-message", ".git/COMMIT_EDITMSG"]);
+
+        Assert.Equal(VcaHookKind.CleanCommitMessage, invocation.Kind);
+        Assert.Equal(".git/COMMIT_EDITMSG", invocation.CommitMessagePath);
+    }
+
+    [Fact]
+    public void Parse_CoAuthorsCleanedFlag_TellsTheRunnerCleanupAlreadyRan()
+    {
+        // The hook script runs cleanup as its own pass, ahead of any chained commit-msg hook, so
+        // that hook sees the text git will record. This flag is how it says so — without it the
+        // runner cleans inline afterwards, which is the ordering bug the separate pass removed.
+        var parser = new VcaHookCommandParser();
+
+        var invocation = parser.Parse([
+            "--vca-hook",
+            "commit-msg",
+            "--co-authors-cleaned",
+            "--commit-message",
+            ".git/COMMIT_EDITMSG"]);
+
+        Assert.Equal(VcaHookKind.CommitMessage, invocation.Kind);
+        Assert.True(invocation.CoAuthorsAlreadyCleaned);
+    }
+
+    [Fact]
+    public void Parse_WithoutCoAuthorsCleanedFlag_KeepsTheInlineCleanupForOlderHookScripts()
+    {
+        // Hook scripts are stamped with the app version and only rewritten on an upgrade, so an
+        // installed repo can keep invoking the old single-pass form for a while. Defaulting to
+        // false is what keeps the policy applying there at all.
+        var parser = new VcaHookCommandParser();
+
+        var invocation = parser.Parse([
+            "--vca-hook", "commit-msg", "--commit-message", ".git/COMMIT_EDITMSG"]);
+
+        Assert.False(invocation.CoAuthorsAlreadyCleaned);
     }
 
     [Fact]

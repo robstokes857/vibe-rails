@@ -365,12 +365,8 @@ internal static class LlmProxyRelay
         }
     }
 
-    private static bool IsAuthenticated(HttpContext context, ILlmProxyAuthGate authGate)
-    {
-        var sessionToken = context.Request.Headers[LlmProxyCodexConfig.SessionHeaderName].FirstOrDefault();
-        var tabToken = context.Request.Headers[LlmProxyCodexConfig.TabHeaderName].FirstOrDefault();
-        return authGate.ValidateSessionToken(sessionToken) && authGate.ValidateTabToken(tabToken);
-    }
+    private static bool IsAuthenticated(HttpContext context, ILlmProxyAuthGate authGate) =>
+        authGate.IsRequestAuthenticated(context);
 
     /// <summary>
     /// Buffers whatever this request is actually sending upstream, hands the bytes to

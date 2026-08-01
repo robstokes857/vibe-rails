@@ -51,6 +51,30 @@ public sealed class JobLaunchServiceTests
             It.Is<string[]>(args => args.SequenceEqual(new[] { "--job-run", "run-1" })),
             false,
             7,
+            false,
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task LaunchQueuedRunsAsync_ForwardsTheMinimizedPreference()
+    {
+        var run = Run(projectPath: ExistingProjectPath(), launchMinimized: true);
+        var store = LaunchableStore(run);
+        var pipeline = SuccessfulPipeline();
+
+        var launched = await new JobLaunchService(store.Object, pipeline.Object)
+            .LaunchQueuedRunsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, launched);
+        pipeline.Verify(p => p.LaunchAsync(
+            run.Llm,
+            It.IsAny<LaunchCliRequest>(),
+            run.ProjectPath,
+            It.IsAny<string[]>(),
+            false,
+            run.EnvironmentId,
+            true,
             It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -68,6 +92,7 @@ public sealed class JobLaunchServiceTests
                 It.IsAny<string[]>(),
                 false,
                 It.IsAny<int?>(),
+                It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LaunchResult(false, "Environment was not found."));
 
@@ -172,6 +197,7 @@ public sealed class JobLaunchServiceTests
                 It.IsAny<string[]>(),
                 false,
                 It.IsAny<int?>(),
+                It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LaunchResult(true, "launched"));
         return pipeline;
@@ -214,7 +240,8 @@ public sealed class JobLaunchServiceTests
     private static JobRunRecord Run(
         int? timeoutMinutes = null,
         string id = "run-1",
-        string? projectPath = null) => new(
+        string? projectPath = null,
+        bool launchMinimized = false) => new(
         Id: id,
         JobId: 1,
         TriggerKind: JobTriggerKind.Manual,
@@ -233,5 +260,6 @@ public sealed class JobLaunchServiceTests
         ExitCode: null,
         ErrorMessage: null,
         CancelRequested: false,
-        OwnerProcessId: null);
+        OwnerProcessId: null,
+        LaunchMinimized: launchMinimized);
 }

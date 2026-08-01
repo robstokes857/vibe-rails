@@ -36,13 +36,21 @@ export class TerminalTokenCompressionMeter {
         title = 'Token saver',
         enabled = false,
         enabledSources = null,
-        tokensSaved = null
+        tokensSaved = null,
+        now = () => Date.now()
     } = {}) {
         this.sources = new Map();
         this.totalCount = 0;
         this._maxEntriesPerSource = maxEntriesPerSource;
         this._maxSources = maxSources;
         this._title = title;
+        // Injectable so expiry is testable without waiting out a real five-minute window.
+        this._now = now;
+        // tabId -> epoch ms at which that tab's pause lapses. A map because the meter is app-wide
+        // while a pause is per-tab: the agent in one terminal can pause its own compression without
+        // implying anything about the others.
+        this._pausedUntil = new Map();
+        this._pausedTicker = null;
         // A null source set retains the generic boolean behavior used by standalone callers.
         // The application supplies concrete proxy source names so a saver-disabled provider's
         // traffic cannot animate a saver that is enabled only for another provider.
@@ -84,6 +92,17 @@ export class TerminalTokenCompressionMeter {
                     allTime: payload.tokensSavedTotal
                 });
             }
+        });
+
+        // An agent can pause compression for its own tab through the MCP token-saver tools. This
+        // event is deliberately separate from proxy_activity: a pause is not traffic, and folding
+        // it in would inflate the request count and pulse the meter as if a relay had run.
+        app.appEventClient?.on('token_saver_pause', payload => {
+            this.setPaused(
+                payload?.tabId,
+                // A pause on a saver that is switched off changes nothing the user would see, so
+                // it must not light up a badge claiming otherwise.
+                payload?.saverEnabled === false ? null : payload?.pausedUntilUtc);
         });
 
         const savingsRevisionAtRequestStart = this._savingsRevision;
@@ -128,6 +147,84 @@ export class TerminalTokenCompressionMeter {
     setEnabledSources(enabledSources = []) {
         this._enabledSources = new Set(Array.from(enabledSources, source => String(source)));
         this.setEnabled(this._enabledSources.size > 0);
+    }
+
+    // Record (or clear) a tab's compression pause. `pausedUntil` is an absolute instant — an ISO
+    // string, Date, or epoch ms — not a remaining duration, so the badge clears itself at the right
+    // moment even if the tick that would have updated it was throttled or missed entirely. A null,
+    // unparseable, or already-past value clears the tab's pause.
+    //
+    // The instant is stamped by the server's clock and compared here against the browser's, so the
+    // countdown and the moment the badge clears are both off by whatever the two clocks disagree by.
+    // Same-machine dashboards have no skew; a remote viewer on a device with a wrong clock can see
+    // the badge lapse early or linger. That stays a display error only: whether compression actually
+    // runs is decided server-side against the server clock (LlmProxySettingsService reads
+    // ITokenSaverPauseState directly), never from anything computed in this file. Sending a
+    // remaining duration instead would trade this for a worse bug — a dropped or delayed event would
+    // then leave the countdown permanently wrong, with nothing to re-anchor it to.
+    setPaused(tabId, pausedUntil) {
+        const key = tabId == null || tabId === '' ? '(app)' : String(tabId);
+        const untilMs = this._toEpochMs(pausedUntil);
+        if (untilMs == null || untilMs <= this._now()) this._pausedUntil.delete(key);
+        else this._pausedUntil.set(key, untilMs);
+        this.refreshPausedState();
+    }
+
+    // Drops lapsed pauses and repaints. Called on a ticker while any pause is live, and directly by
+    // tests after advancing their clock.
+    refreshPausedState() {
+        const now = this._now();
+        for (const [key, untilMs] of this._pausedUntil) {
+            if (untilMs <= now) this._pausedUntil.delete(key);
+        }
+
+        const paused = this._pausedUntil.size > 0;
+        this._host.classList.toggle('is-paused', paused);
+        this._pausedBadge.textContent = paused
+            ? `Paused ${this._formatCountdown(this._latestPauseEndsAt() - now)}`
+            : '';
+        this._schedulePausedTicker();
+        this._syncAccessibleStatus();
+        if (this._host.classList.contains('is-open')) this._renderPopover();
+    }
+
+    get pausedTabCount() {
+        return this._pausedUntil.size;
+    }
+
+    _latestPauseEndsAt() {
+        return Math.max(...this._pausedUntil.values());
+    }
+
+    // One shared 1s ticker, running only while something is paused — the countdown is the only
+    // reason this component ever needs a repeating timer.
+    _schedulePausedTicker() {
+        const wanted = this._pausedUntil.size > 0;
+        if (wanted === (this._pausedTicker != null)) return;
+
+        if (!wanted) {
+            clearInterval(this._pausedTicker);
+            this._pausedTicker = null;
+            return;
+        }
+        if (typeof setInterval !== 'function') return;
+        this._pausedTicker = setInterval(() => this.refreshPausedState(), 1000);
+        // Never hold a Node/Electron event loop open for a cosmetic countdown.
+        this._pausedTicker?.unref?.();
+    }
+
+    _toEpochMs(value) {
+        if (value == null || value === '') return null;
+        if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
+        if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+        const parsed = Date.parse(String(value));
+        return Number.isNaN(parsed) ? null : parsed;
+    }
+
+    _formatCountdown(remainingMs) {
+        const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+        const minutes = Math.floor(totalSeconds / 60);
+        return `${minutes}:${String(totalSeconds % 60).padStart(2, '0')}`;
     }
 
     // Accepts a { session, month, allTime } breakdown (or a bare number, treated as all time).
@@ -235,6 +332,13 @@ export class TerminalTokenCompressionMeter {
         label.textContent = 'Token saver';
         trigger.appendChild(label);
 
+        // Empty (and CSS-hidden) unless an agent has paused compression for one of its tabs. A
+        // dedicated element rather than repurposing the savings metric: the tally is still true and
+        // still worth showing while paused.
+        const pausedBadge = document.createElement('span');
+        pausedBadge.className = 'vb-activity-blinker-paused';
+        trigger.appendChild(pausedBadge);
+
         const metric = document.createElement('span');
         metric.className = 'vb-activity-blinker-metric';
 
@@ -277,6 +381,7 @@ export class TerminalTokenCompressionMeter {
 
         this._host = host;
         this._trigger = trigger;
+        this._pausedBadge = pausedBadge;
         this._dot = dot;
         this._savingsMetric = metric;
         this._savingsValue = savingsValue;
@@ -301,6 +406,10 @@ export class TerminalTokenCompressionMeter {
         let status;
         if (!this._enabled) {
             status = `${this._title}: disabled`;
+        } else if (this._pausedUntil.size > 0) {
+            status = `${this._title}: paused by an agent for `
+                + `${this._pausedUntil.size} terminal${this._pausedUntil.size === 1 ? '' : 's'}, `
+                + `resuming in ${this._formatCountdown(this._latestPauseEndsAt() - this._now())}`;
         } else if (this._host.classList.contains('is-active')) {
             status = `${this._title}: proxy traffic detected`;
         } else if (this.totalCount === 0) {
@@ -375,6 +484,33 @@ export class TerminalTokenCompressionMeter {
         }
         savings.appendChild(breakdown);
         popover.appendChild(savings);
+
+        if (this._pausedUntil.size > 0) {
+            const paused = document.createElement('div');
+            paused.className = 'vb-activity-popover-paused';
+
+            const pausedIcon = document.createElement('span');
+            pausedIcon.className = 'vb-activity-popover-paused-icon';
+            pausedIcon.setAttribute('aria-hidden', 'true');
+            const pausedGlyph = document.createElement('i');
+            pausedGlyph.className = 'fa-solid fa-circle-pause';
+            pausedIcon.appendChild(pausedGlyph);
+            paused.appendChild(pausedIcon);
+
+            const pausedCopy = document.createElement('span');
+            pausedCopy.className = 'vb-activity-popover-paused-copy';
+            pausedCopy.appendChild(this._span(
+                `Paused for ${this._pausedUntil.size} terminal${this._pausedUntil.size === 1 ? '' : 's'}`,
+                'vb-activity-popover-paused-label'
+            ));
+            pausedCopy.appendChild(this._span(
+                'An agent asked to read output the saver had elided. Compression resumes in '
+                + `${this._formatCountdown(this._latestPauseEndsAt() - this._now())}.`,
+                'vb-activity-popover-paused-hint'
+            ));
+            paused.appendChild(pausedCopy);
+            popover.appendChild(paused);
+        }
 
         if (this.sources.size === 0) {
             popover.appendChild(this._span(

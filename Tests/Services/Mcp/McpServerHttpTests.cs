@@ -36,6 +36,9 @@ public class McpServerHttpTests : IAsyncLifetime
     {
         "validate_vca",
         "search_history",
+        "pause_token_saver",
+        "resume_token_saver",
+        "get_token_saver_status",
     };
 
     public async ValueTask InitializeAsync()
@@ -48,6 +51,8 @@ public class McpServerHttpTests : IAsyncLifetime
         // Stand in for the real BGE/sqlite-vec search so the test is hermetic.
         builder.Services.AddSingleton<IUnifiedSearchService>(new FakeUnifiedSearchService());
         builder.Services.AddScoped<SessionSearchTool>();
+        builder.Services.AddHttpClient(TokenSaverTool.HttpClientName);
+        builder.Services.AddScoped<TokenSaverTool>();
 
         builder.Services
             .AddMcpServer(options =>
@@ -56,7 +61,8 @@ public class McpServerHttpTests : IAsyncLifetime
             })
             .WithHttpTransport()
             .WithTools<RulesTool>()
-            .WithTools<SessionSearchTool>();
+            .WithTools<SessionSearchTool>()
+            .WithTools<TokenSaverTool>();
 
         _app = builder.Build();
         _app.MapMcp("/mcp");

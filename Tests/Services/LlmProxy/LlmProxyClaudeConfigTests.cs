@@ -173,6 +173,10 @@ public class LlmProxyClaudeConfigTests : IDisposable
         var proxySettings = new Mock<ILlmProxySettingsService>();
         proxySettings.Setup(x => x.GetSettings())
             .Returns(new LlmProxySettings(codexLlmProxyEnabled, CodexLlmProxySettings.ModeSubscription, claudeLlmProxyEnabled));
-        return new CommandService(envService, proxyContext.Object, proxySettings.Object);
+        return new CommandService(
+            envService,
+            proxyContext.Object,
+            proxySettings.Object,
+            new LlmProxySessionState());
     }
 }

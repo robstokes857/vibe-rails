@@ -11,6 +11,14 @@ namespace VibeRails.Services.Terminal;
 public class TerminalRunner
 {
     private static int s_emergencyShutdownRequested;
+
+    /// <summary>
+    /// How often the native console's geometry is re-read while a CLI session runs. Matches the
+    /// idle key-poll delay, so an idle loop probes exactly as often as it did before the interval
+    /// was made explicit — only a loop busy with input stops probing on every keystroke.
+    /// </summary>
+    private static readonly TimeSpan GeometryPollInterval = TimeSpan.FromMilliseconds(50);
+
     private readonly ITerminalStateService _stateService;
     private readonly ICommandService _commandService;
     private readonly ILocalToolApiContext _toolApiContext;
@@ -59,13 +67,33 @@ public class TerminalRunner
         // null; that path passes initialUserInput explicitly to record without
         // double-encoding the prompt into the launch command.
         var userInputToRecord = initialUserInput ?? initialPrompt;
-        var sessionId = await _stateService.CreateSessionAsync(LlmParser.ToWireName(llm), workDir, envName, shouldEnableRemote, ct, initialUserInput: userInputToRecord, jobRunId: jobRunId);
+        var initialSize = isNativeCli && NativeConsoleGeometry.TryGetSize(out var nativeSize)
+            ? nativeSize
+            : new NativeConsoleSize(Terminal.DefaultCols, Terminal.DefaultRows);
+        var sessionId = await _stateService.CreateSessionAsync(
+            LlmParser.ToWireName(llm),
+            workDir,
+            envName,
+            shouldEnableRemote,
+            ct,
+            initialUserInput: userInputToRecord,
+            jobRunId: jobRunId,
+            initialCols: initialSize.Cols,
+            initialRows: initialSize.Rows);
         Terminal? terminal = null;
         IRemoteTerminalConnection? activeRemoteConn = null;
         IDisposable? openCodeProxyLease = null;
 
         try
         {
+            if (isNativeCli)
+            {
+                Log.Information(
+                    "[Terminal] Starting native PTY at host console geometry {Cols}x{Rows}",
+                    initialSize.Cols,
+                    initialSize.Rows);
+            }
+
             var sessionTitle = ResolveSessionTitle(workDir, title);
             var preparedSession = await _commandService.PrepareSessionAsync(llm, envName, extraArgs, initialPrompt, summary);
             foreach (var kvp in _toolApiContext.BuildEnvironment(sessionId))
@@ -87,11 +115,24 @@ public class TerminalRunner
                     preparedSession.Argv ?? [],
                     preparedSession.SetupCommands);
                 terminal = await Terminal.CreateAsync(
-                    workDir, preparedSession.Environment, title: sessionTitle, ct: ct, app: app, argv: argv);
+                    workDir,
+                    preparedSession.Environment,
+                    cols: initialSize.Cols,
+                    rows: initialSize.Rows,
+                    title: sessionTitle,
+                    ct: ct,
+                    app: app,
+                    argv: argv);
             }
             else
             {
-                terminal = await Terminal.CreateAsync(workDir, preparedSession.Environment, title: sessionTitle, ct: ct);
+                terminal = await Terminal.CreateAsync(
+                    workDir,
+                    preparedSession.Environment,
+                    cols: initialSize.Cols,
+                    rows: initialSize.Rows,
+                    title: sessionTitle,
+                    ct: ct);
             }
             if (preparedSession.OpenCodeProxyActive)
             {
@@ -671,8 +712,59 @@ public class TerminalRunner
     /// </summary>
     private async Task ConsoleInputLoopAsync(Terminal terminal, string sessionId, CancellationToken ct)
     {
+        // Seeded from the geometry the PTY was actually created at, not from null. An unseeded
+        // first comparison always differs, so every native session opened with a resize it did not
+        // need: the same size re-applied to the PTY, a resize frame pushed at any web viewer, and a
+        // SIGWINCH landing on a CLI that has only just started drawing. Reading it from the terminal
+        // once is safe — the loop compares host-console reads from here on, so a web viewer resizing
+        // this PTY still cannot pull the native window's tracked size with it.
+        NativeConsoleSize? lastObservedSize = new(terminal.Cols, terminal.Rows);
+
+        // The key loop only waits when no key is pending, so a paste or a held-down key drives it as
+        // fast as the console yields characters. The geometry probe is a syscall, and a window
+        // cannot be dragged faster than a person can drag it, so it keeps its own cadence instead of
+        // riding the input rate.
+        var geometryClock = System.Diagnostics.Stopwatch.StartNew();
+        var nextGeometryCheck = TimeSpan.Zero;
+
         while (!ct.IsCancellationRequested && !terminal.HasExited)
         {
+            if (geometryClock.Elapsed >= nextGeometryCheck)
+            {
+                nextGeometryCheck = geometryClock.Elapsed + GeometryPollInterval;
+
+                if (NativeConsoleGeometry.TryGetSize(out var currentSize)
+                    && currentSize != lastObservedSize)
+                {
+                    // Track only real host-console changes. A web viewer may resize this externally
+                    // owned PTY while the native window remains unchanged; repeatedly comparing the
+                    // PTY size itself would make the two viewers fight over geometry every 50 ms.
+                    lastObservedSize = currentSize;
+                    try
+                    {
+                        TerminalResizeCoordinator.ApplyResize(
+                            terminal,
+                            _stateService,
+                            sessionId,
+                            currentSize.Cols,
+                            currentSize.Rows,
+                            TerminalIoSource.LocalCli);
+                        Log.Debug(
+                            "[Terminal] Synchronized native console resize to {Cols}x{Rows}",
+                            currentSize.Cols,
+                            currentSize.Rows);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(
+                            ex,
+                            "[Terminal] Failed to synchronize native console resize to {Cols}x{Rows}",
+                            currentSize.Cols,
+                            currentSize.Rows);
+                    }
+                }
+            }
+
             if (Console.IsInputRedirected || !Console.KeyAvailable)
             {
                 await Task.Delay(50, ct);

@@ -1,9 +1,9 @@
 # DB Layer — Business Logic & Technical Reference
 
-This document describes how Environments, Sandboxes, AgentMetadata, and Sessions work at the database layer.
+This document describes the database layer: Environments, Sandboxes, AgentMetadata, Sessions, UserInputs, and supporting tables.
 
 > **Contents:**
-> [Database Overview](#database-overview) | [Environments](#environments) | [Sandboxes](#sandboxes) | [AgentMetadata](#agentmetadata) | [Sessions](#sessions) | [Entity Relationships](#entity-relationships) | [Repository Patterns](#repository-patterns)
+> [Database Overview](#database-overview) | [Environments](#environments) | [Sandboxes](#sandboxes) | [AgentMetadata](#agentmetadata) | [Sessions](#sessions) | [User Input Tracking](#user-input-tracking) | [Additional Tables](#additional-tables) | [Entity Relationships](#entity-relationships) | [Repository Patterns](#repository-patterns)
 
 ---
 
@@ -54,6 +54,11 @@ CREATE TABLE IF NOT EXISTS Environments (
 
 **Index:** `idx_environments_name_llm` on `(CustomName, LLM)`
 
+A case-insensitive unique index `idx_environments_name_nocase_llm` on
+`(CustomName COLLATE NOCASE, LLM)` is also created via migration — the env name maps to a
+case-insensitive directory (`envs/{name}/{llm}`), so "Work" and "work" for the same LLM would
+share a credential directory.
+
 **Model:** `LLM_Environment` class in `DTOs/LLM_Environment.cs`
 
 `Hidden` (0/1) hides the environment from LLM/terminal select boxes without deleting it. It is a
@@ -62,15 +67,17 @@ UI-visibility flag, not a CLI option — it never enters `CustomArgs`. Added via
 
 **LLM enum** (stored as integer):
 
-| Value | Name |
-|:---:|---|
-| 0 | NotSet |
-| 1 | Codex |
-| 2 | Claude |
-| 3 | Antigravity |
-| 4 | Copilot |
-| 5 | Shell |
-| 6 | OpenCode |
+| Value | Name | Notes |
+|:---:|---|---|
+| 0 | NotSet | |
+| 1 | Codex | |
+| 2 | Claude | |
+| 3 | Antigravity | Binary is `agy` (mapped in CommandService) |
+| 4 | Copilot | Launch-flag-only (no config-dir env var) |
+| 5 | Shell | Plain shell terminal — no AI agent; spawns a real OS shell |
+| 6 | OpenCode | Binary is `opencode`; config isolation via `XDG_CONFIG_HOME` |
+| 7 | Glm52 | Pseudo-CLI: OpenCode launched with a pinned `--model` flag. `LlmParser` special-cases the string `"glm-5.2"` |
+| 8 | KimiK3 | Pseudo-CLI: OpenCode launched with a pinned `--model` flag. `LlmParser` special-cases the string `"kimi-k3"` |
 
 **Key operations:**
 
@@ -80,6 +87,7 @@ UI-visibility flag, not a CLI option — it never enters `CustomArgs`. Added via
 | `GetOrCreateEnvironmentAsync(name, llm)` | Lookup, then create if missing. Bumps `LastUsedUTC` if found. |
 | `SaveEnvironmentAsync` | `INSERT ... RETURNING Id` |
 | `UpdateEnvironmentAsync` | Full field update by `Id` (CustomName, LLM, Path, CustomArgs, CustomPrompt, LastUsedUTC, Hidden) |
+| `TouchEnvironmentLastUsedAsync(id)` | Recency-only bookkeeping — stamps `LastUsedUTC` without touching any other column (launches must never use `UpdateEnvironmentAsync` for this) |
 | `DeleteEnvironmentAsync` | Delete by `Id` — **no deletion guard at DB layer**. The "cannot delete Default" rule is in `Routes.cs`. |
 
 ---
@@ -111,10 +119,14 @@ CREATE TABLE IF NOT EXISTS Sandboxes (
     ProjectPath TEXT    NOT NULL,
     Branch      TEXT    NOT NULL DEFAULT '',
     CommitHash  TEXT,
+    RemoteUrl   TEXT,
+    SourceBranch TEXT,
     CreatedUTC  TEXT    NOT NULL,
     UNIQUE(Name, ProjectPath)
 );
 ```
+
+`RemoteUrl` and `SourceBranch` are added via `ALTER TABLE` migrations (safe to re-run).
 
 **Index:** `idx_sandboxes_project` on `(ProjectPath)`
 
@@ -177,45 +189,70 @@ CREATE TABLE IF NOT EXISTS AgentMetadata (
 
 ## Sessions
 
-> Managed by `DbService`, not the `Repository`. Sessions track CLI session history for logging purposes.
+> Managed by the `Repository`. Sessions track CLI session history for logging purposes.
 
 ### Schema
 
-*Created in `DbService.InitializeDatabase()`*
+*Created in `SqlStrings.InitStatements` (run by `Repository.EnsureInitialized()`)*
 
 ```sql
 CREATE TABLE IF NOT EXISTS Sessions (
-    Id               TEXT PRIMARY KEY,
-    Cli              TEXT NOT NULL,
-    EnvironmentName  TEXT,
-    WorkingDirectory TEXT NOT NULL,
+    Id                 TEXT PRIMARY KEY,
+    Cli                TEXT NOT NULL,
+    EnvironmentName    TEXT,
+    WorkingDirectory   TEXT NOT NULL,
     ProjectDisplayName TEXT NOT NULL DEFAULT '',
-    StartedUTC       TEXT NOT NULL,
-    EndedUTC         TEXT,
-    ExitCode         INTEGER
+    StartedUTC         TEXT NOT NULL,
+    EndedUTC           TEXT,
+    ExitCode           INTEGER,
+    Processed          INTEGER NOT NULL DEFAULT 0,
+    ParentSessionId    TEXT DEFAULT '',
+    SessionDisplayName TEXT DEFAULT '',
+    OwnerPid           INTEGER,
+    OwnershipTracked   INTEGER NOT NULL DEFAULT 1,
+    JobRunId           TEXT
 );
+```
 
+`Processed`, `ParentSessionId`, `SessionDisplayName`, `OwnerPid`, `OwnershipTracked`, and
+`JobRunId` are added via `ALTER TABLE` migrations (safe to re-run). Two further migration
+columns — `AggregateEmbeddedUTC` and `AggregateEmbedFailureCount` — drive the
+session-level BERT aggregate embedding backfill job.
+
+When `JobRunId` is not NULL the session belongs to an Automated Job; a trigger
+(`Sessions_LinkJobRunSession`) atomically backlinks the `JobRuns.SessionId` inside the INSERT
+transaction and aborts if the claimed run no longer exists.
+
+### SessionLogs
+
+```sql
 CREATE TABLE IF NOT EXISTS SessionLogs (
     Id        INTEGER PRIMARY KEY AUTOINCREMENT,
     SessionId TEXT    NOT NULL,
     Timestamp TEXT    NOT NULL,
-    Content   TEXT    NOT NULL,
+    Content   BLOB    NOT NULL,
     IsError   INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (SessionId) REFERENCES Sessions(Id)
 );
 ```
 
+> **Note:** `Content` is a **BLOB** (raw terminal bytes), not TEXT.
+
 ### Key Operations
 
 | Method | Behavior |
 |---|---|
-| `CreateSessionAsync(sessionId, cli, envName, workDir)` | Insert new session when CLI launches |
+| `CreateSessionAsync(sessionId, cli, envName, workDir, ownerPid, jobRunId)` | Insert new session when CLI launches |
 | `GetProjectDisplayNameAsync(path)` | Reads the latest project display name for a working directory, falling back to the folder name |
 | `UpdateLatestProjectDisplayNameAsync(path, projectDisplayName)` | Updates the newest session for that working directory |
-| `LogSessionOutputAsync(sessionId, content, isError)` | Append terminal output line |
+| `LogSessionOutputAsync(sessionId, content, isError)` | Append terminal output (byte buffer) |
 | `CompleteSessionAsync(sessionId, exitCode)` | Mark session as ended |
-| `GetRecentSessionsAsync(limit)` | Recent sessions ordered by `StartedUTC DESC` |
-| `GetSessionWithLogsAsync(sessionId)` | Session with all log entries |
+| `GetRecentSessionsAsync(limit, ct)` | Recent sessions ordered by `StartedUTC DESC` |
+| `GetSessionWithLogsAsync(sessionId, ct)` | Session with all log entries |
+| `GetSessionOutputAsync(sessionId, ct)` | Session row joined with `sessionOutPut` aggregated text |
+| `SetParentSessionIdAsync(sessionId, parentSessionId)` | Link a child session to its parent |
+| `SetSessionDisplayNameAsync(sessionId, displayName)` | Override the auto-derived display name |
+| `GetOpenSessionCleanupCandidatesAsync(trackedCutoff, untrackedCutoff, ct)` | Stale open sessions whose owner PID is gone |
 
 > **Note:** `EnvironmentName` and `WorkingDirectory` are stored as plain strings — no foreign keys to other tables.
 
@@ -223,7 +260,7 @@ CREATE TABLE IF NOT EXISTS SessionLogs (
 
 ## User Input Tracking
 
-> Managed by `DbService`. Tracks what the user types during CLI sessions and correlates their inputs with code changes (git diffs).
+> Managed by the `Repository`. Tracks what the user types during CLI sessions and correlates their inputs with code changes (git diffs).
 
 ### Business Logic
 
@@ -235,10 +272,12 @@ CREATE TABLE IF NOT EXISTS SessionLogs (
 | **Diff calculation** | When a second+ input is recorded, the system calculates all file changes since the previous input's commit |
 | **Fire and forget** | Recording happens asynchronously in the background so it doesn't block the user's terminal |
 | **Error tolerance** | Recording failures are logged to stderr but don't interrupt the CLI session |
+| **Secret filtering** | `InputEtlFilter.Process` strips secrets before text lands in `UserInputs` or the FTS index |
+| **BERT embeddings** | `BertEmbeddedUTC` / `BertEmbedFailureCount` (migration columns) drive the embedding backfill job |
 
 ### Schema
 
-*Created in `DbService.InitializeDatabase()`*
+*Created in `SqlStrings.InitStatements` (run by `Repository.EnsureInitialized()`)*
 
 ```sql
 CREATE TABLE IF NOT EXISTS UserInputs (
@@ -265,11 +304,32 @@ CREATE TABLE IF NOT EXISTS InputFileChanges (
 );
 ```
 
+**Migration columns** (added via `ALTER TABLE`, safe to re-run):
+- `BertEmbeddedUTC TEXT` — set when the BERT embedding backfill processes the row
+- `BertEmbedFailureCount INTEGER NOT NULL DEFAULT 0` — poison-pill skip counter (threshold: 3 consecutive failures)
+
 **Indexes:**
 - `idx_user_inputs_session` on `UserInputs(SessionId)`
 - `idx_user_inputs_session_seq` on `UserInputs(SessionId, Sequence)`
 - `idx_input_file_changes_input` on `InputFileChanges(UserInputId)`
 - `idx_input_file_changes_filepath` on `InputFileChanges(FilePath)`
+- `idx_user_inputs_unembedded` (partial) on `UserInputs(Id) WHERE BertEmbeddedUTC IS NULL`
+
+### FTS5 Full-Text Index
+
+```sql
+CREATE VIRTUAL TABLE IF NOT EXISTS UserInputs_fts USING fts5(
+    InputText,
+    content='UserInputs',
+    content_rowid='Id',
+    tokenize='porter unicode61'
+);
+```
+
+External-content FTS5 table — the virtual table is just the inverted index; raw text stays in
+`UserInputs`. FTS writes are driven from C# (after `InputEtlFilter` strips secrets), **not**
+from triggers, so secrets never land in the index. Legacy auto-insert/update triggers from
+earlier installs are dropped; only the delete trigger remains for sync.
 
 ### ChangeType Values
 
@@ -307,11 +367,171 @@ CREATE TABLE IF NOT EXISTS InputFileChanges (
 
 ---
 
+## Additional Tables
+
+All created in `SqlStrings.InitStatements` (run by `Repository.EnsureInitialized()`). Some are
+also created on demand by their respective store classes (`TokenSavingsStore`,
+`CompressionCaptureStore`, `CodeAnalyzerIgnoreStore`) since those writers can run before the
+first `Repository` initializes the schema.
+
+### TerminalSessionLogs
+
+Enriched per-chunk replay data for terminal session playback (cols, rows, alternate screen state).
+
+```sql
+CREATE TABLE IF NOT EXISTS TerminalSessionLogs (
+    Id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    SessionId         TEXT    NOT NULL,
+    Sequence          INTEGER NOT NULL,
+    IsAlternateScreen INTEGER NOT NULL DEFAULT 0,
+    Data              BLOB    NOT NULL,
+    Cols              INTEGER NOT NULL DEFAULT 80,
+    Rows              INTEGER NOT NULL DEFAULT 24,
+    Timestamp         TEXT    NOT NULL,
+    FOREIGN KEY (SessionId) REFERENCES Sessions(Id)
+);
+```
+
+**Index:** `idx_terminal_session_logs_session` on `(SessionId, Sequence)`
+
+### sessionOutPut
+
+Aggregated plain-text output for a session (one row per session, upserted). Joined to `Sessions`
+for the chat-history detail view.
+
+```sql
+CREATE TABLE IF NOT EXISTS sessionOutPut (
+    Id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    SessionId TEXT    NOT NULL,
+    Text      TEXT    NOT NULL,
+    FOREIGN KEY (SessionId) REFERENCES Sessions(Id) ON DELETE CASCADE
+);
+```
+
+**Index:** `idx_session_output_session` (unique) on `(SessionId)`
+
+### ChatSummary
+
+LLM-generated session summaries keyed by session.
+
+```sql
+CREATE TABLE IF NOT EXISTS ChatSummary (
+    Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    SessionId   TEXT    NOT NULL UNIQUE,
+    SummaryText TEXT    NOT NULL DEFAULT '',
+    Date        TEXT    NOT NULL
+);
+```
+
+### TokenSavings
+
+LLM-proxy token-saver tally: one row per UTC day per provider, upsert-incremented per request.
+
+```sql
+CREATE TABLE IF NOT EXISTS TokenSavings (
+    Day               TEXT    NOT NULL,
+    Provider          TEXT    NOT NULL,
+    Requests          INTEGER NOT NULL DEFAULT 0,
+    RewrittenRequests INTEGER NOT NULL DEFAULT 0,
+    BytesBefore       INTEGER NOT NULL DEFAULT 0,
+    BytesAfter        INTEGER NOT NULL DEFAULT 0,
+    UpdatedUTC        TEXT    NOT NULL,
+    PRIMARY KEY (Day, Provider)
+);
+```
+
+Byte counts are the measured wire truth; "tokens saved" is derived at display time.
+
+### CompressionCaptures
+
+Raw before/after compression captures: one row per tool_result the pipeline considered rewriting.
+Uncapped by explicit product decision — no retention, no row limit, no truncation. Deduped by
+`ContentHash` (partial unique index excluding legacy `''` defaults) with a `SeenCount` counter.
+
+```sql
+CREATE TABLE IF NOT EXISTS CompressionCaptures (
+    Id              TEXT    PRIMARY KEY,
+    CreatedUTC      TEXT    NOT NULL,
+    Provider        TEXT    NOT NULL,
+    ToolName        TEXT    NOT NULL,
+    Command         TEXT,
+    RawText         TEXT    NOT NULL,
+    CompressedText  TEXT    NOT NULL,
+    CharsBefore     INTEGER NOT NULL,
+    CharsAfter      INTEGER NOT NULL,
+    Changed         INTEGER NOT NULL,
+    RewriteAccepted INTEGER NOT NULL DEFAULT 0,
+    EnabledIds      TEXT    NOT NULL,
+    Trace           TEXT    NOT NULL,
+    ContentHash     TEXT    NOT NULL DEFAULT '',
+    SeenCount       INTEGER NOT NULL DEFAULT 1
+);
+```
+
+**Index:** `idx_compression_captures_created` on `(CreatedUTC DESC)`
+**Unique index (partial):** `idx_compression_captures_hash` on `(ContentHash) WHERE ContentHash != ''`
+
+`ContentHash`, `SeenCount`, and `RewriteAccepted` are added via `ALTER TABLE` migrations.
+
+### CodeAnalyzerIgnores
+
+Files the user excluded from Code quality (MintLint) scans, keyed per repository. `MatchKind` is
+`'file'` or `'directory'`; `ReasonKind` is `'test'`/`'config'`/`'other'` (or NULL).
+
+```sql
+CREATE TABLE IF NOT EXISTS CodeAnalyzerIgnores (
+    RepositoryPath TEXT NOT NULL COLLATE NOCASE,
+    Path           TEXT NOT NULL,
+    MatchKind      TEXT NOT NULL DEFAULT 'file',
+    ReasonKind     TEXT,
+    ReasonText     TEXT,
+    CreatedUTC     TEXT NOT NULL,
+    PRIMARY KEY (RepositoryPath, Path)
+);
+```
+
+`Path` collation follows host filesystem case semantics (NOCASE on Windows/macOS, BINARY on Linux).
+
+### ProjectCache
+
+Generic key-value store scoped per project path.
+
+```sql
+CREATE TABLE IF NOT EXISTS ProjectCache (
+    ProjectPath TEXT NOT NULL,
+    Key         TEXT NOT NULL,
+    Value       TEXT NOT NULL DEFAULT '',
+    UpdatedUTC  TEXT NOT NULL,
+    PRIMARY KEY (ProjectPath, Key)
+);
+```
+
+### GlobalCache
+
+Generic key-value store **not** scoped to a project. Used for machine/user-wide flags that must
+persist across projects.
+
+```sql
+CREATE TABLE IF NOT EXISTS GlobalCache (
+    Key        TEXT NOT NULL PRIMARY KEY,
+    Value      TEXT NOT NULL DEFAULT '',
+    UpdatedUTC TEXT NOT NULL
+);
+```
+
+---
+
 ## Entity Relationships
 
-Environments, Sandboxes, and AgentMetadata have **no foreign key relationships** — they are fully independent tables.
-Sessions reference environments and working directories by string value only — no FK constraints.
-Sandboxes reference projects by `ProjectPath` string value — no FK to any project table.
+Environments, Sandboxes, AgentMetadata, TokenSavings, CompressionCaptures, CodeAnalyzerIgnores,
+ProjectCache, and GlobalCache have **no foreign key relationships** — they are fully independent
+tables. Sessions reference environments and working directories by string value only — no FK
+constraints. Sandboxes reference projects by `ProjectPath` string value — no FK to any project
+table.
+
+The tables with actual FK constraints all point at `Sessions.Id`:
+`SessionLogs`, `sessionOutPut` (with `ON DELETE CASCADE`), `TerminalSessionLogs`, `UserInputs`,
+and `InputFileChanges` (self-referential via `PreviousInputId`).
 
 ```
 Environments              AgentMetadata
@@ -324,31 +544,43 @@ Environments              AgentMetadata
 | CustomPrompt |          Sandboxes
 | CreatedUTC   |          +-------------------+
 | LastUsedUTC  |          | Id (PK)           |
-+--------------+          | Name              |
-UQ(CustomName, LLM)      | Path              |
-                          | ProjectPath       |  <-- string, not FK
+| Hidden       |          | Name              |
++--------------+          | Path              |
+UQ(CustomName, LLM)      | ProjectPath       |  <-- string, not FK
                           | Branch            |
                           | CommitHash        |
+                          | RemoteUrl         |
+                          | SourceBranch      |
                           | CreatedUTC        |
                           +-------------------+
                           UQ(Name, ProjectPath)
 
-                          Sessions
-| CreatedUTC   |          +-------------------+
-| LastUsedUTC  |          | Id (PK)           |
-+--------------+          | Cli               |
-UQ(CustomName, LLM)      | EnvironmentName   |  <-- string, not FK
-                          | WorkingDirectory  |  <-- string, not FK
-                          | ProjectDisplayName|
-                          | StartedUTC        |
-SessionLogs               | EndedUTC          |
-+-------------------+     | ExitCode          |
-| Id (PK)           |     +-------------------+
-| SessionId (FK) ---|---> Sessions.Id
-| Timestamp         |
-| Content           |
-| IsError           |
-+-------------------+
+Sessions                  +-------------------+
++-------------------+     | Id (PK)           |
+| Id (PK)           |<----| (FK targets below)|
+| Cli               |     +-------------------+
+| EnvironmentName   |  <-- string, not FK
+| WorkingDirectory  |  <-- string, not FK
+| ProjectDisplayName|
+| StartedUTC        |     SessionLogs               sessionOutPut
+| EndedUTC          |     +-------------------+     +-------------------+
+| ExitCode          |     | Id (PK)           |     | Id (PK)           |
+| Processed         |     | SessionId (FK) ---|---> | SessionId (FK) ---|---> Sessions.Id
+| ParentSessionId   |     | Timestamp         |     | Text              |     (ON DELETE CASCADE)
+| SessionDisplayName|     | Content (BLOB)    |     +-------------------+
+| OwnerPid          |     | IsError           |
+| OwnershipTracked  |     +-------------------+
+| JobRunId          |
+| AggregateEmbedded*|     TerminalSessionLogs
++-------------------+     +-------------------+
+                          | Id (PK)           |
+                          | SessionId (FK) ---|---> Sessions.Id
+                          | Sequence          |
+                          | IsAlternateScreen |
+                          | Data (BLOB)       |
+                          | Cols / Rows       |
+                          | Timestamp         |
+                          +-------------------+
 
 UserInputs                InputFileChanges
 +-------------------+     +-------------------+
@@ -358,9 +590,19 @@ UserInputs                InputFileChanges
 | InputText         |     | FilePath          |
 | GitCommitHash     |     | ChangeType        |
 | TimestampUTC      |     | LinesAdded        |
-+-------------------+     | LinesDeleted      |
-                          | DiffContent       |
-                          +-------------------+
+| BertEmbeddedUTC*  |     | LinesDeleted      |
+| BertEmbedFailCnt* |     | DiffContent       |
++-------------------+     +-------------------+
+
+ChatSummary               TokenSavings / CompressionCaptures
++-------------------+     CodeAnalyzerIgnores / ProjectCache / GlobalCache
+| Id (PK)           |     (all independent — no FKs)
+| SessionId (UQ)    |
+| SummaryText       |
+| Date              |
++-------------------+
+
+* = migration column added via ALTER TABLE
 ```
 
 ---
