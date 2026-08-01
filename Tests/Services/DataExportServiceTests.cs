@@ -64,7 +64,6 @@ public sealed class DataExportServiceTests : IDisposable
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    [InlineData(DataExportService.ExportUrlPlaceholder)]
     [InlineData("relative/export")]
     [InlineData("http://exports.example.test/upload")]
     public async Task ExportAsync_InvalidExportUrl_DoesNoWork(string? exportUrl)

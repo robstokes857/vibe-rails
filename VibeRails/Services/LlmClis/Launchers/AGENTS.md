@@ -14,9 +14,14 @@ All launchers build commands using the unified `--env` flag:
 - **Custom environment**: `vb --env "{envName}" --workdir "{dir}"`
 - **Base CLI (no custom env)**: `vb --env {cliName} --workdir "{dir}"`
 
-Only `--env` is supported for environment bootstrap mode. The value is resolved smartly:
-1. If it matches an LLM enum name (claude/codex/antigravity, case-insensitive) → base CLI launch
-2. Otherwise → custom environment name, looked up in DB via `FindEnvironmentByNameAsync()`
+Only `--env` is supported for environment bootstrap mode. `ILlmParser.Parse()` does steps 1–2
+and returns `LLM.NotSet` for anything else; the caller (`CliLoop.RunTerminalWithWebAsync`) then
+performs step 3:
+1. If it matches an LLM enum name (claude/codex/antigravity/copilot/shell/opencode, case-insensitive)
+   → base CLI launch
+2. The special-case strings `"glm-5.2"` and `"kimi-k3"` (can't be C# enum names) → OpenCode-backed
+   pseudo-CLI base launch
+3. Otherwise → custom environment name, looked up in DB via `FindEnvironmentByNameAsync()`
 
 The old `--environment` / `--lmbootstrap` aliases and broader CLI command router have been removed.
 
@@ -35,6 +40,11 @@ IBaseLlmCliLauncher (Interface)
     │
     └── LaunchLLMService (Orchestrator - selects launcher by LLM type)
 ```
+
+> **Pseudo-CLIs:** `LLM.Glm52` and `LLM.KimiK3` (OpenCode launched with a pinned `--model` flag)
+> reuse `IOpencodeLlmCliLauncher`. Their binary is `opencode` (mapped in
+> `CommandService.PrepareSession`), and the model arg is injected server-side. `LLM.Shell` is a
+> plain shell terminal with no launcher (handled specially in `CommandService.PrepareSession`).
 
 ## Launcher Implementations
 
@@ -62,7 +72,9 @@ IBaseLlmCliLauncher (Interface)
   merges the user's global config. `XDG_DATA_HOME` is left unchanged, so credentials remain
   global. Launch-flag-only — no settings file is written (see
   runbooks/custom_envs/CLI_OPTIONS.md "### OpenCode"). YOLO is `--auto`; initial prompt is
-  `--prompt=<text>` (positional = project path); no MCP auto-reg.
+  `--prompt=<text>` (positional = project path). VibeRails registers its MCP server via
+  `opencode mcp add` (or `opencode.cmd mcp add` on Windows) as a setup command — see
+  `CommandService.McpClis` / `GetMcpCommands`.
 
 ## Antigravity (agy) — no settings feature
 
@@ -90,7 +102,7 @@ product name is "Antigravity" — see `CommandService.PrepareSession`.
 
 ### Business Logic
 
-The Codex CLI supports per-environment settings configuration. Settings are stored in `config.toml` within the environment's config directory.
+The Codex CLI supports per-environment settings configuration. Settings are stored in `config.toml` within the environment's config directory. Permission posture (approval_policy / sandbox_mode) is YOLO-or-nothing via `CustomArgs` launch flags, so VibeRails neither reads nor edits those keys.
 
 **Settings File Location**:
 ```
@@ -99,32 +111,28 @@ The Codex CLI supports per-environment settings configuration. Settings are stor
 
 **Supported Settings**:
 
-| Setting | DTO Property | TOML Key | Type | Default | Description |
-|---------|--------------|----------|------|---------|-------------|
-| Ask For Approval | `AskForApproval` | `approval_policy` | string | "" | Approval mode: default, untrusted, on-request, never |
-| YOLO | `Yolo` | `yolo` | bool | false | Bypass approvals and sandboxing |
-| Full-Auto | `FullAuto` | `full_auto` | bool | false | Shortcut for low-friction local work |
-| No Alternate Screen | `NoAltScreen` | `no_alt_screen` | bool | false | Disable alternate screen mode for the TUI |
-| OSS Provider | `Oss` | `oss` | bool | false | Use the local open source model provider |
-| Prompt | `Prompt` | `prompt` | string | "" | Optional text instruction to start the session |
-| Model | `Model` | `model` | string | "" | Optional Codex model override |
-| Effort | `Effort` | `model_reasoning_effort` | string | "" | Optional reasoning effort override |
+| Setting | DTO Property | TOML Key(s) | Type | Default | Description |
+|---------|--------------|-------------|------|---------|-------------|
+| Model | `Model` | `model` | string | "" | Codex model override (e.g. gpt-5.6-sol) |
+| Effort | `Effort` | `model_reasoning_effort` | string | "" | minimal/low/medium/high/xhigh/max/ultra |
 | Fast Mode | `FastMode` | `service_tier` + `[features].fast_mode` | bool | false | Enables fast service tier for supported models |
+| No Alternate Screen | `NoAltScreen` | `[tui].alternate_screen` | bool | false | Sets `alternate_screen = "never"` |
+| YOLO | `Yolo` | (launch-only) | bool | false | Carried for the settings payload; persisted as `--dangerously-bypass-approvals-and-sandbox` in CustomArgs, never written to config.toml |
+
+Legacy keys (`ask_for_approval`, `approval`, `yolo`, `full_auto`, `no_alt_screen`, `oss`, `prompt`)
+are **removed** on save so saved environments use current Codex config names only.
 
 **TOML Format**:
 ```toml
-approval_policy = "on-request"
-yolo = false
-full_auto = true
-no_alt_screen = true
-oss = false
-prompt = "Investigate failing tests"
-model = "gpt-5.4"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 service_tier = "fast"
 
 [features]
 fast_mode = true
+
+[tui]
+alternate_screen = "never"
 ```
 
 ### Technical Specs
@@ -135,15 +143,14 @@ fast_mode = true
 ```csharp
 public class CodexSettingsDto
 {
-    public string AskForApproval { get; set; } = "";
-    public bool Yolo { get; set; } = false;
-    public bool FullAuto { get; set; } = false;
-    public bool NoAltScreen { get; set; } = false;
-    public bool Oss { get; set; } = false;
-    public string Prompt { get; set; } = "";
+    // Fields persisted to config.toml.
     public string Model { get; set; } = "";
     public string Effort { get; set; } = "";
     public bool FastMode { get; set; } = false;
+    public bool NoAltScreen { get; set; } = false;
+
+    // YOLO is launch-only (CustomArgs); never written to config.toml.
+    public bool Yolo { get; set; } = false;
 }
 ```
 
@@ -152,7 +159,7 @@ public class CodexSettingsDto
 
 Key methods:
 - `GetSettings(envName)` - Reads `config.toml`, parses TOML format
-- `SaveSettings(envName, dto)` - Updates TOML file, preserves comments and unknown fields
+- `SaveSettings(envName, dto)` - Updates TOML file, preserves comments and unknown fields; strips legacy keys
 - `GetSettingsFilePath(envName)` - Resolves full path to `config.toml`
 
 **TOML Parsing**:
@@ -162,7 +169,7 @@ Uses simple regex-based parsing for key = value format, supporting:
 - Booleans: `key = true` or `key = false`
 
 #### API Routes
-**File**: [Routes.cs](../../Routes.cs)
+**File**: [Routes/LlmSettingsRoutes.cs](../../Routes/LlmSettingsRoutes.cs)
 
 ```
 GET  /api/v1/codex/settings/{envName}  → GetCodexSettings
@@ -176,11 +183,8 @@ Unit tests are located in [Tests/CodexSettingsTests.cs](../../../Tests/CodexSett
 Test coverage includes:
 - Reading settings from valid TOML
 - Reading with missing file (defaults)
-- Reading with partial TOML (missing fields)
-- Normalizing legacy `approval = "on-failure"` to `on-request`
 - Writing settings preserves existing content
-- Removing unsupported legacy Codex options
-- Removing empty prompt field
+- Removing unsupported legacy Codex options (ask_for_approval, approval, yolo, full_auto, no_alt_screen, oss, prompt)
 
 ---
 
@@ -188,7 +192,7 @@ Test coverage includes:
 
 ### Business Logic
 
-The Claude CLI supports per-environment settings configuration. Settings are stored in `settings.json` within the environment's config directory.
+The Claude CLI supports per-environment settings configuration. Settings are stored in `settings.json` within the environment's config directory. Permission posture is YOLO-or-nothing: `DangerouslySkipPermissions` is the single YOLO toggle, carried as a launch flag in `CustomArgs`. VibeRails never reads or edits Claude's `permissions` block.
 
 **Settings File Location**:
 ```
@@ -197,40 +201,29 @@ The Claude CLI supports per-environment settings configuration. Settings are sto
 
 **Supported Settings**:
 
-| Setting | DTO Property | JSON Key | Type | Default | Description |
-|---------|--------------|----------|------|---------|-------------|
-| Effort | `Effort` | `effort` | string | "" | `--effort` value: low, medium, high, xhigh, max |
-| No Session Persistence | `NoSessionPersistence` | `noSessionPersistence` | bool | false | `--no-session-persistence` |
-| Permission Mode | `PermissionMode` | `permissionMode` | string | "default" | Permission handling: default, acceptEdits, plan, auto, dontAsk, bypassPermissions |
-| System Prompt | `SystemPrompt` | `systemPrompt` | string | "" | `--system-prompt` text |
-| Allow Dangerous Skip | `AllowDangerouslySkipPermissions` | `allowDangerouslySkipPermissions` | bool | false | `--allow-dangerously-skip-permissions` |
-| Development Channels | `DangerouslyLoadDevelopmentChannels` | `dangerouslyLoadDevelopmentChannels` | string | "" | `--dangerously-load-development-channels` entries |
-| Dangerously Skip Permissions | `DangerouslySkipPermissions` | `dangerouslySkipPermissions` | bool | false | `--dangerously-skip-permissions` |
-| Allowed Tools | `AllowedTools` | `allowedTools` | string | "" | `--allowedTools` entries |
-| Append System Prompt | `AppendSystemPrompt` | `appendSystemPrompt` | string | "" | `--append-system-prompt` text |
-| Bare | `Bare` | `bare` | bool | false | `--bare` |
-| Betas | `Betas` | `betas` | string | "" | `--betas` entries |
-| Channels | `Channels` | `channels` | string | "" | `--channels` entries |
-| Debug | `Debug` | `debug` | bool | false | `--debug` |
-| Debug Filter | `DebugFilter` | `debugFilter` | string | "" | Optional `--debug` category filter |
+| Setting | DTO Property | JSON Key | Type | Default | Persisted? | Description |
+|---------|--------------|----------|------|---------|------------|-------------|
+| Effort | `Effort` | `effortLevel` | string | "" | Yes | low/medium/high/xhigh (not "max" — session-only) |
+| Model | `Model` | `model` | string | "" | Yes | Pinned model ID (e.g. claude-opus-4-8) |
+| Fast Mode | `FastMode` | `fastMode` | bool | false | Yes | Same as `/fast`; Opus-only, no launch flag |
+| Dangerously Skip Permissions | `DangerouslySkipPermissions` | — | bool | false | No (launch flag) | `--dangerously-skip-permissions` (YOLO) |
+| No Session Persistence | `NoSessionPersistence` | — | bool | false | No (launch flag) | `--no-session-persistence` |
+| System Prompt | `SystemPrompt` | — | string | "" | No (launch flag) | `--system-prompt` |
+| Bare | `Bare` | — | bool | false | No (launch flag) | `--bare` |
+| Debug | `Debug` | — | bool | false | No (launch flag) | `--debug` |
 
-**JSON Format**:
+Stale top-level keys from older VibeRails builds (`effort`, `permissionMode`, `systemPrompt`,
+`allowDangerouslySkipPermissions`, `dangerouslyLoadDevelopmentChannels`, `dangerouslySkipPermissions`,
+`allowedTools`, `appendSystemPrompt`, `bare`, `betas`, `channels`, `debug`, `debugFilter`,
+`skipPermissions`) are **removed** on save. The launch-only `noSessionPersistence` key is also
+stripped (it is never persisted to `settings.json`). The user's `permissions` block is left untouched.
+
+**JSON Format** (keys VibeRails writes):
 ```json
 {
-  "effort": "high",
-  "noSessionPersistence": true,
-  "permissionMode": "plan",
-  "systemPrompt": "You are a Python expert",
-  "allowDangerouslySkipPermissions": true,
-  "dangerouslyLoadDevelopmentChannels": "server:webhook",
-  "dangerouslySkipPermissions": false,
-  "allowedTools": "Bash(git log *)\nRead",
-  "appendSystemPrompt": "Always use TypeScript",
-  "bare": false,
-  "betas": "interleaved-thinking",
-  "channels": "plugin:my-notifier@my-marketplace",
-  "debug": true,
-  "debugFilter": "api,mcp"
+  "effortLevel": "high",
+  "model": "claude-opus-4-8",
+  "fastMode": true
 }
 ```
 
@@ -242,20 +235,17 @@ The Claude CLI supports per-environment settings configuration. Settings are sto
 ```csharp
 public class ClaudeSettingsDto
 {
+    // Fields persisted to settings.json.
     public string Effort { get; set; } = "";
-    public bool NoSessionPersistence { get; set; } = false;
-    public string PermissionMode { get; set; } = "default";
-    public string SystemPrompt { get; set; } = "";
-    public bool AllowDangerouslySkipPermissions { get; set; } = false;
-    public string DangerouslyLoadDevelopmentChannels { get; set; } = "";
+    public string Model { get; set; } = "";
+    public bool FastMode { get; set; } = false;
+
+    // Launch-only flags carried in CustomArgs, NOT settings.json.
     public bool DangerouslySkipPermissions { get; set; } = false;
-    public string AllowedTools { get; set; } = "";
-    public string AppendSystemPrompt { get; set; } = "";
+    public bool NoSessionPersistence { get; set; } = false;
+    public string SystemPrompt { get; set; } = "";
     public bool Bare { get; set; } = false;
-    public string Betas { get; set; } = "";
-    public string Channels { get; set; } = "";
     public bool Debug { get; set; } = false;
-    public string DebugFilter { get; set; } = "";
 }
 ```
 
@@ -274,25 +264,25 @@ public interface IClaudeLlmCliEnvironment : IBaseLlmCliEnvironment
 **File**: [ClaudeLlmCliEnvironment.cs](../ClaudeLlmCliEnvironment.cs)
 
 Key methods:
-- `GetSettings(envName)` - Reads `settings.json`, maps to DTO
-- `SaveSettings(envName, dto)` - Merges DTO into existing JSON, preserves other fields
+- `GetSettings(envName)` - Reads `settings.json`, maps `effortLevel`/`model`/`fastMode` to DTO
+- `SaveSettings(envName, dto)` - Merges DTO into existing JSON, preserves other fields; strips stale top-level keys
 - `GetSettingsFilePath(envName)` - Resolves full path to `settings.json`
 
 **Read Logic**:
 1. Build path: `{envBasePath}/{envName}/claude/settings.json`
 2. If file doesn't exist, return default DTO
 3. Parse JSON using `JsonNode`
-4. Extract values with null-coalescing defaults
+4. Extract `effortLevel`, `model`, `fastMode` values
 
 **Write Logic**:
 1. Read existing JSON (or create new `JsonObject`)
-2. Update only our managed fields
-3. Remove fields when set to default/empty values
+2. Update only `effortLevel`, `model`, `fastMode`
+3. Remove stale top-level keys from older VibeRails builds
 4. Serialize with `WriteIndented = true`
 5. Write back to file
 
 #### API Routes
-**File**: [Routes.cs](../../Routes.cs)
+**File**: [Routes/LlmSettingsRoutes.cs](../../Routes/LlmSettingsRoutes.cs)
 
 ```
 GET  /api/v1/claude/settings/{envName}  → GetClaudeSettings
@@ -315,8 +305,7 @@ Unit tests are located in [Tests/ClaudeSettingsTests.cs](../../../Tests/ClaudeSe
 Test coverage includes:
 - Reading settings from valid JSON
 - Reading with missing file (defaults)
-- Reading with partial JSON (missing fields)
 - Writing settings to JSON
-- Preserving existing content
-- Removing unsupported legacy fields
+- Preserving existing content (including user permissions block)
+- Removing stale top-level keys from older VibeRails builds
 - Removing empty/default values

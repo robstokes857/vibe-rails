@@ -319,20 +319,21 @@ test('TerminalTokenCompressionMeter shows an honest savings placeholder and a se
 test('TerminalTokenCompressionMeter owns app event wiring and the initial savings seed', async () => {
     const mount = new FakeElement('div');
     const calls = [];
-    let proxyActivityHandler;
+    // Keyed by event name: the meter owns more than one subscription (proxy traffic and the
+    // agent-driven pause), and each must land on its own handler.
+    const handlers = new Map();
     const meter = new TerminalTokenCompressionMeter({ mount }).connect({
         appEventClient: {
-            on: (eventName, handler) => {
-                assert.equal(eventName, 'proxy_activity');
-                proxyActivityHandler = handler;
-            }
+            on: (eventName, handler) => handlers.set(eventName, handler)
         },
         apiCall: async (...args) => {
             calls.push(args);
             return { tokensSavedSession: 900, tokensSavedMonth: 2400, tokensSaved: 8100 };
         }
     });
+    const proxyActivityHandler = handlers.get('proxy_activity');
 
+    assert.deepEqual([...handlers.keys()], ['proxy_activity', 'token_saver_pause']);
     await meter.initialSavingsReady;
     assert.deepEqual(calls, [[
         '/api/v1/token-savings',
@@ -357,21 +358,19 @@ test('TerminalTokenCompressionMeter owns app event wiring and the initial saving
 
 test('TerminalTokenCompressionMeter does not let a delayed startup seed overwrite a live tally', async () => {
     const mount = new FakeElement('div');
-    let proxyActivityHandler;
+    const handlers = new Map();
     let resolveInitialSavings;
     const initialSavings = new Promise(resolve => {
         resolveInitialSavings = resolve;
     });
     const meter = new TerminalTokenCompressionMeter({ mount }).connect({
         appEventClient: {
-            on: (_eventName, handler) => {
-                proxyActivityHandler = handler;
-            }
+            on: (eventName, handler) => handlers.set(eventName, handler)
         },
         apiCall: async () => initialSavings
     });
 
-    proxyActivityHandler({
+    handlers.get('proxy_activity')({
         source: 'Claude proxy',
         label: 'POST',
         status: 200,
@@ -433,4 +432,130 @@ test('TerminalTokenCompressionMeter.relocate() is a safe no-op for missing or un
 
     blinker.relocate(mount);
     assert.equal(blinker._host.parentElement, mount, 'relocating to the current parent is a no-op');
+});
+
+// --- Agent-driven pause (MCP token-saver tools) -----------------------------------------------
+//
+// The pause is per-tab but the meter is app-wide, so these pin the two things that follow from
+// that: one terminal's pause must not claim the others are paused, and the badge must clear itself
+// from the absolute expiry rather than from a "it ended" message that may never arrive.
+
+function pausableMeter(startMs = Date.parse('2026-07-31T12:00:00Z')) {
+    const clock = { now: startMs };
+    const mount = new FakeElement('div');
+    const meter = new TerminalTokenCompressionMeter({
+        mount,
+        enabledSources: ['Claude proxy'],
+        now: () => clock.now
+    });
+    return { meter, clock, host: mount.querySelector('.vb-activity-blinker') };
+}
+
+const inFiveMinutes = (clock) => new Date(clock.now + 5 * 60_000).toISOString();
+
+test('An agent pause shows a countdown badge on the meter', () => {
+    const { meter, clock, host } = pausableMeter();
+    const badge = host.querySelector('.vb-activity-blinker-paused');
+
+    assert.equal(host.classList.contains('is-paused'), false);
+    assert.equal(badge.textContent, '', 'the badge carries no text until something is paused');
+
+    meter.setPaused('tab-1', inFiveMinutes(clock));
+
+    assert.equal(host.classList.contains('is-paused'), true);
+    assert.equal(badge.textContent, 'Paused 5:00');
+    assert.match(
+        host.querySelector('.vb-activity-blinker-trigger').getAttribute('aria-label'),
+        /paused by an agent for 1 terminal/i
+    );
+});
+
+test('The paused badge counts down and clears itself when the window lapses', () => {
+    const { meter, clock, host } = pausableMeter();
+    const badge = host.querySelector('.vb-activity-blinker-paused');
+    meter.setPaused('tab-1', inFiveMinutes(clock));
+
+    clock.now += 4 * 60_000 + 31_000;
+    meter.refreshPausedState();
+    assert.equal(badge.textContent, 'Paused 0:29');
+
+    // Expiry is derived from the absolute instant the server sent, so a late or throttled tick
+    // still clears at the right state rather than leaving a stale "Paused" badge up forever.
+    clock.now += 60_000;
+    meter.refreshPausedState();
+    assert.equal(host.classList.contains('is-paused'), false);
+    assert.equal(badge.textContent, '');
+    assert.equal(meter.pausedTabCount, 0);
+});
+
+test('Pauses are tracked per tab and the badge reflects the longest remaining window', () => {
+    const { meter, clock, host } = pausableMeter();
+    const badge = host.querySelector('.vb-activity-blinker-paused');
+
+    meter.setPaused('tab-1', new Date(clock.now + 60_000).toISOString());
+    meter.setPaused('tab-2', new Date(clock.now + 300_000).toISOString());
+    assert.equal(meter.pausedTabCount, 2);
+    assert.equal(badge.textContent, 'Paused 5:00');
+
+    // tab-1 lapses; tab-2 is still compressing-free, so the meter must stay paused.
+    clock.now += 61_000;
+    meter.refreshPausedState();
+    assert.equal(meter.pausedTabCount, 1);
+    assert.equal(host.classList.contains('is-paused'), true);
+
+    meter.setPaused('tab-2', null);
+    assert.equal(meter.pausedTabCount, 0);
+    assert.equal(host.classList.contains('is-paused'), false);
+});
+
+test('A pause on a saver that is switched off never claims output is about to change', () => {
+    const { meter, clock, host } = pausableMeter();
+    const events = new Map();
+    meter.connect({
+        appEventClient: { on: (type, handler) => events.set(type, handler) },
+        apiCall: async () => ({})
+    });
+
+    events.get('token_saver_pause')({
+        tabId: 'tab-1',
+        pausedUntilUtc: inFiveMinutes(clock),
+        saverEnabled: false
+    });
+
+    assert.equal(host.classList.contains('is-paused'), false, 'nothing was being compressed to pause');
+
+    events.get('token_saver_pause')({
+        tabId: 'tab-1',
+        pausedUntilUtc: inFiveMinutes(clock),
+        saverEnabled: true
+    });
+    assert.equal(host.classList.contains('is-paused'), true);
+
+    // A resume arrives as a null expiry rather than a separate event type.
+    events.get('token_saver_pause')({ tabId: 'tab-1', pausedUntilUtc: null, saverEnabled: true });
+    assert.equal(host.classList.contains('is-paused'), false);
+});
+
+test('An already-expired or unparseable expiry is ignored rather than pinning the badge on', () => {
+    const { meter, clock, host } = pausableMeter();
+
+    meter.setPaused('tab-1', new Date(clock.now - 1000).toISOString());
+    assert.equal(host.classList.contains('is-paused'), false, 'a stale event must not paint a badge');
+
+    meter.setPaused('tab-2', 'not-a-timestamp');
+    assert.equal(host.classList.contains('is-paused'), false);
+    assert.equal(meter.pausedTabCount, 0);
+});
+
+test('The popover explains a pause instead of leaving the savings tally looking broken', () => {
+    const { meter, clock, host } = pausableMeter();
+    meter.setPaused('tab-1', inFiveMinutes(clock));
+    meter.report({ source: 'Claude proxy', label: 'POST', status: 200 });
+
+    host.querySelector('.vb-activity-blinker-trigger').dispatchEvent({ type: 'click' });
+
+    const popoverText = renderedText(host.querySelector('.vb-activity-blinker-popover'));
+    assert.match(popoverText, /Paused for 1 terminal/);
+    assert.match(popoverText, /resumes in 5:00/i);
+    assert.match(popoverText, /Tokens saved/, 'the tally is still true while paused and stays visible');
 });

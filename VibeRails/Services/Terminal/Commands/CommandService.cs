@@ -34,6 +34,7 @@ public class CommandService : ICommandService
     private readonly LlmCliEnvironmentService _envService;
     private readonly ILocalLlmProxyContext _llmProxyContext;
     private readonly ILlmProxySettingsService _llmProxySettings;
+    private readonly ILlmProxySessionState _llmProxySessionState;
     private const string VibeRailsMcpServerName = "viberails-mcp";
     private static int _fakeCliWarningEmitted;
 
@@ -54,11 +55,13 @@ public class CommandService : ICommandService
     public CommandService(
         LlmCliEnvironmentService envService,
         ILocalLlmProxyContext llmProxyContext,
-        ILlmProxySettingsService llmProxySettings)
+        ILlmProxySettingsService llmProxySettings,
+        ILlmProxySessionState llmProxySessionState)
     {
         _envService = envService;
         _llmProxyContext = llmProxyContext;
         _llmProxySettings = llmProxySettings;
+        _llmProxySessionState = llmProxySessionState;
     }
 
     public Task<PreparedTerminalSession> PrepareSessionAsync(
@@ -183,8 +186,7 @@ public class CommandService : ICommandService
         // added by TerminalRunner intentionally continue to target the root agent-tool API.
         if (ShouldUseCodexProxy(llm, extraArgs, proxySettings))
         {
-            environment[LocalLlmProxyContext.SessionTokenVariable] = _llmProxyContext.SessionToken;
-            environment[LocalLlmProxyContext.TabTokenVariable] = _llmProxyContext.TabToken;
+            AddProxyContactDetails(environment, LlmProxyProvider.Codex);
         }
 
         // If Claude proxying is enabled separately, route Claude Code's Anthropic API traffic
@@ -204,6 +206,7 @@ public class CommandService : ICommandService
                 _llmProxyContext.TabToken);
             foreach (var kvp in claudeProxyEnv)
                 environment[kvp.Key] = kvp.Value;
+            AddProxyContactDetails(environment, LlmProxyProvider.Claude);
         }
 
         // If OpenCode proxying is enabled, route OpenCode's zai (Z.AI/GLM) provider traffic through
@@ -221,8 +224,7 @@ public class CommandService : ICommandService
             && string.IsNullOrEmpty(inheritedOpenCodeConfig);
         if (openCodeProxyActive)
         {
-            environment[LocalLlmProxyContext.SessionTokenVariable] = _llmProxyContext.SessionToken;
-            environment[LocalLlmProxyContext.TabTokenVariable] = _llmProxyContext.TabToken;
+            AddProxyContactDetails(environment, LlmProxyProvider.OpenCode);
             environment[LlmProxyZaiConfig.ConfigContentVariable] = LlmProxyZaiConfig.BuildOpencodeConfigContent(
                 _llmProxyContext.ApiBaseUrl,
                 _llmProxyContext.SessionToken,
@@ -244,6 +246,34 @@ public class CommandService : ICommandService
             OpenCodeProxyActive: openCodeProxyActive,
             Executable: cli,
             Argv: directArgv));
+    }
+
+    /// <summary>
+    /// Stamps the session environment with everything needed to <b>call</b> this process's LLM
+    /// proxy: where it is, and the two tokens it demands. Set identically by all three provider
+    /// blocks, because the consumer is not the CLI — it is whatever the CLI spawns and hands its
+    /// environment to (today, the <c>vb mcp</c> server behind the token-saver pause tools). Those
+    /// children can't read Codex's <c>--config</c> args or parse OpenCode's config JSON, so the
+    /// contact details have to be stated the same way regardless of which CLI is launching.
+    ///
+    /// Tokens ride environment variables rather than arguments precisely so they never appear in a
+    /// process command line. The base URL is this process's own loopback address, and consumers
+    /// re-check that before attaching the tokens to a request
+    /// (<see cref="LlmProxyBaseUrl.TryNormalizeLoopback"/>) rather than trusting the variable to
+    /// still say what was written here.
+    ///
+    /// <paramref name="provider"/> is recorded rather than derived later because this is the only
+    /// place that knows it: the proxy child hosts one tab's relay, and questions like "is the saver
+    /// on for this session" have no answer without knowing which provider's toggle to read.
+    /// </summary>
+    private void AddProxyContactDetails(
+        Dictionary<string, string> environment,
+        LlmProxyProvider provider)
+    {
+        environment[LocalLlmProxyContext.BaseUrlVariable] = _llmProxyContext.ApiBaseUrl;
+        environment[LocalLlmProxyContext.SessionTokenVariable] = _llmProxyContext.SessionToken;
+        environment[LocalLlmProxyContext.TabTokenVariable] = _llmProxyContext.TabToken;
+        _llmProxySessionState.RecordProxiedLaunch(provider);
     }
 
     /// <summary>

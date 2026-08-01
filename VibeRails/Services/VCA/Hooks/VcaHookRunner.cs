@@ -14,15 +14,18 @@ public sealed class VcaHookRunner : IVcaHookRunner
     private readonly IGitPreflightPipeline _preflightPipeline;
     private readonly IVcaHookValidationAnalyzer _analyzer;
     private readonly IVcaHookPresenter _presenter;
+    private readonly ICommitMessageCoAuthorCleaner _coAuthorCleaner;
 
     public VcaHookRunner(
         IGitPreflightPipeline preflightPipeline,
         IVcaHookValidationAnalyzer analyzer,
-        IVcaHookPresenter presenter)
+        IVcaHookPresenter presenter,
+        ICommitMessageCoAuthorCleaner coAuthorCleaner)
     {
         _preflightPipeline = preflightPipeline;
         _analyzer = analyzer;
         _presenter = presenter;
+        _coAuthorCleaner = coAuthorCleaner;
     }
 
     public async Task<int> RunAsync(VcaHookInvocation invocation, CancellationToken cancellationToken)
@@ -31,6 +34,23 @@ public sealed class VcaHookRunner : IVcaHookRunner
 
         try
         {
+            // Hook scripts from this version onwards clean the message in a separate pass that runs
+            // before any chained commit-msg hook, and say so here. Cleaning again after that hook
+            // has already inspected the message is the ordering bug this flag exists to end; doing
+            // it inline is kept only for hook scripts installed before the separate pass existed.
+            if (invocation.Kind == VcaHookKind.CommitMessage && !invocation.CoAuthorsAlreadyCleaned)
+            {
+                var removedCount = await _coAuthorCleaner.RemoveAsync(
+                    invocation.CommitMessagePath,
+                    cancellationToken);
+                if (removedCount > 0)
+                {
+                    var suffix = removedCount == 1 ? "trailer" : "trailers";
+                    await _presenter.WriteWarningAsync(
+                        $"Removed {removedCount} Co-authored-by {suffix} from the commit message.");
+                }
+            }
+
             var preflightResult = await _preflightPipeline.RunAsync(
                 new GitPreflightRequest(
                     workingDirectory,

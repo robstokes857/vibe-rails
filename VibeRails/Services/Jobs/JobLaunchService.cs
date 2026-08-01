@@ -96,6 +96,7 @@ public sealed class JobLaunchService(
                 vbArgs,
                 keepTerminalOpen: false,
                 environmentId: run.EnvironmentId,
+                launchMinimized: run.LaunchMinimized,
                 cancellationToken: cancellationToken);
             result = new LaunchResultSnapshot(launch.Success, launch.Message);
         }
@@ -112,8 +113,8 @@ public sealed class JobLaunchService(
         }
 
         Log.Information(
-            "[Jobs] Launched run {RunId} for job '{JobName}' using worker '{Worker}' in {ProjectPath}",
-            run.Id, run.JobName, run.EnvironmentName, run.ProjectPath);
+            "[Jobs] Launched run {RunId} for job '{JobName}' using worker '{Worker}' in {ProjectPath}; minimized={LaunchMinimized}",
+            run.Id, run.JobName, run.EnvironmentName, run.ProjectPath, run.LaunchMinimized);
         return true;
     }
 

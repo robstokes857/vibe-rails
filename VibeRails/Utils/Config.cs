@@ -38,6 +38,11 @@ public class Settings
     public bool? CodexTokenSaverEnabled { get; set; }
     public bool? OpenCodeTokenSaverEnabled { get; set; }
 
+    // Git Guard commit-msg policy. Default-on for both new settings files and older files that
+    // predate this property: System.Text.Json leaves the initializer in place when the key is
+    // absent. The standalone hook process reloads this value for every commit.
+    public bool RemoveCoAuthorTrailers { get; set; } = true;
+
     // Hand-edit escape hatch, deliberately not exposed in any UI: a non-null list of stage/scope
     // ids from CompressionCatalog replaces the curated set wholesale, so a misbehaving stage can
     // be bisected on live traffic without turning the whole saver off. null (the only value the

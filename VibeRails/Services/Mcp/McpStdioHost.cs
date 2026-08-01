@@ -80,6 +80,15 @@ public static class McpStdioHost
         services.AddSingleton<IBertDocumentResponseMapper, BertDocumentResponseMapper>();
         services.AddSingleton<IUnifiedSearchService, UnifiedSearchService>();
         services.AddScoped<SessionSearchTool>();
+        // The token-saver control tools. This is the transport that matters for them: the CLI
+        // spawns this process and hands it the environment naming the proxy to call, so this child
+        // can pause the exact tab whose output it is reading. Named client, short timeout — the
+        // call is a loopback hop, so slow means broken.
+        services.AddHttpClient(TokenSaverTool.HttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+        services.AddScoped<TokenSaverTool>();
         // HostShellTools (run_shell_command) and WebResearchTools (web_search/web_fetch) are
         // intentionally not exposed for now (security review 2026-07-02); mirrors MapRegisterServices.
         // Classes kept in-tree for re-add.
@@ -91,6 +100,7 @@ public static class McpStdioHost
             })
             .WithStdioServerTransport()
             .WithTools<RulesTool>()
-            .WithTools<SessionSearchTool>();
+            .WithTools<SessionSearchTool>()
+            .WithTools<TokenSaverTool>();
     }
 }

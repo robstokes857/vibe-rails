@@ -249,7 +249,8 @@ test('New Automations derive repository, LLM, and prompt from the current Enviro
         ['#job-trigger-commit', { checked: true }],
         ['#job-name', { value: 'OpenCode review' }],
         ['#job-timeout', { value: '30' }],
-        ['#job-enabled', { checked: false }]
+        ['#job-enabled', { checked: false }],
+        ['#job-launch-minimized', { checked: true }]
     ]);
     const form = {
         querySelector(selector) { return controls.get(selector) || null; },
@@ -265,6 +266,7 @@ test('New Automations derive repository, LLM, and prompt from the current Enviro
     assert.equal(app.calls[0].body.llm, 6);
     assert.equal(app.calls[0].body.environmentId, 42);
     assert.equal(app.calls[0].body.prompt, 'Perform the Environment-owned security review.');
+    assert.equal(app.calls[0].body.launchMinimized, true);
     assert.deepEqual(app.calls[0].body.triggers, [{ kind: 2 }]);
 });
 
@@ -742,6 +744,127 @@ test('Run history exposes cancel only while active and retry after completion', 
     assert.doesNotMatch(failed, /run<&>/);
 });
 
+test('Retry is offered on failures but never on a run that already succeeded', () => {
+    const controller = new JobController(createApp());
+    const base = {
+        id: 'run-1',
+        jobName: 'Nightly',
+        llm: 2,
+        triggerKind: 0,
+        queuedUtc: '2026-07-19T12:00:00Z',
+        startedUtc: '2026-07-19T12:00:00Z',
+        endedUtc: '2026-07-19T12:00:10Z'
+    };
+
+    // Succeeded is terminal, but re-running work that already landed is not a repair.
+    assert.doesNotMatch(controller.renderRunRow({ ...base, status: 2 }), /Retry/);
+
+    for (const status of [3, 4, 5, 6]) {
+        assert.match(controller.renderRunRow({ ...base, status }), /Retry/, `status ${status} should be retryable`);
+    }
+});
+
+test('A run row explains why it ended instead of showing a bare status word', () => {
+    const controller = new JobController(createApp());
+    const base = {
+        id: 'run-1',
+        jobName: 'Nightly',
+        llm: 2,
+        triggerKind: 0,
+        queuedUtc: '2026-07-19T12:00:00Z',
+        startedUtc: '2026-07-19T12:00:00Z',
+        endedUtc: '2026-07-19T12:00:10Z'
+    };
+
+    const interrupted = controller.renderRunRow({
+        ...base,
+        status: 6,
+        errorMessage: 'The terminal running this Automation is no longer open.'
+    });
+    assert.match(interrupted, /no longer open/);
+
+    // A non-zero exit is the only detail available when the CLI failed silently.
+    const failed = controller.renderRunRow({ ...base, status: 3, errorMessage: null, exitCode: 1 });
+    assert.match(failed, /exit 1/);
+
+    // Exit 0 beside a success is noise, so the detail line stays off entirely.
+    const succeeded = controller.renderRunRow({ ...base, status: 2, errorMessage: null, exitCode: 0 });
+    assert.doesNotMatch(succeeded, /job-run-detail/);
+    assert.doesNotMatch(succeeded, /exit 0/);
+
+    // Escaping still applies to text that now reaches the DOM for the first time.
+    const nasty = controller.renderRunRow({ ...base, status: 3, errorMessage: '<img src=x>' });
+    assert.match(nasty, /&lt;img src=x&gt;/);
+    assert.doesNotMatch(nasty, /<img src=x>/);
+});
+
+test('An interrupted run reports its duration as approximate', () => {
+    const controller = new JobController(createApp());
+    const base = {
+        id: 'run-1',
+        jobName: 'Nightly',
+        llm: 2,
+        triggerKind: 0,
+        queuedUtc: '2026-07-19T12:00:00Z',
+        startedUtc: '2026-07-19T12:00:00Z',
+        endedUtc: '2026-07-19T12:00:10Z'
+    };
+
+    // EndedUTC on a reaped run is when the reaper noticed, not when the process died,
+    // so the row must not present that gap as measured runtime.
+    const interrupted = controller.renderRunRow({ ...base, status: 6 });
+    assert.match(interrupted, /~10s/);
+    assert.match(interrupted, /Approximate/);
+
+    // Every status that records its own end time keeps an exact duration.
+    const succeeded = controller.renderRunRow({ ...base, status: 2 });
+    assert.match(succeeded, />10s</);
+    assert.doesNotMatch(succeeded, /~10s/);
+    assert.doesNotMatch(succeeded, /Approximate/);
+});
+
+test('The run-history poll skips the DOM when the markup is unchanged', async () => {
+    const app = createApp();
+    const runs = [{
+        id: 'run-1',
+        jobName: 'Nightly',
+        llm: 2,
+        status: 2,
+        triggerKind: 0,
+        queuedUtc: '2026-07-19T12:00:00Z',
+        startedUtc: '2026-07-19T12:00:00Z',
+        endedUtc: '2026-07-19T12:00:10Z'
+    }];
+    app.apiCall = async () => ({ runs });
+
+    const controller = new JobController(app);
+    let assignments = 0;
+    const target = {
+        _html: '',
+        get innerHTML() { return this._html; },
+        set innerHTML(value) { this._html = value; assignments += 1; }
+    };
+    controller.root = {
+        querySelector(selector) {
+            return selector === '[data-job-runs]' ? target : null;
+        }
+    };
+
+    await controller.refreshRuns({ quiet: true });
+    assert.equal(assignments, 1);
+    assert.match(target.innerHTML, /Nightly/);
+
+    // A 5s poll that rewrites innerHTML tears out hover, focus, and a just-clicked
+    // Cancel/Retry button in the row under the pointer. Same data must not touch the DOM.
+    await controller.refreshRuns({ quiet: true });
+    assert.equal(assignments, 1);
+
+    // A page rebuild resets the cache, so the same markup renders again over the placeholder.
+    controller._lastRunsHtml = null;
+    controller.renderRuns();
+    assert.equal(assignments, 2);
+});
+
 // An Automation run IS a recorded terminal session, so opening one hands off to the shared xterm replay
 // player. The ad-hoc polling modal it replaced is gone; these two tests pin that split, which is
 // also what makes the old "stale poll callback writes into the replacement modal" bug unreachable.
@@ -945,6 +1068,14 @@ test('The editor defaults the time-limit checkbox off and hides its input', () =
     assert.match(source, /data-timeout-field \$\{source\.timeoutMinutes \? '' : 'hidden'\}/);
     // The old copy promised a stop that no longer happens by default.
     assert.doesNotMatch(source, /The run is stopped if it hasn't finished in this long/);
+});
+
+test('The editor exposes and persists the Launch minimized option', () => {
+    const source = readFileSync(modulePath, 'utf8');
+
+    assert.match(source, /id="job-launch-minimized"/);
+    assert.match(source, />Launch minimized</);
+    assert.match(source, /launchMinimized: form\.querySelector\('#job-launch-minimized'\)/);
 });
 
 test('Automation frontend has no OS scheduler controls or API calls', () => {

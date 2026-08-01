@@ -1,4 +1,3 @@
-We just forked this into this repo
 # PyBridge: call Python from C# without the pain
 
 A small, **AOT-friendly** .NET library for running Python from C#: buffered results,

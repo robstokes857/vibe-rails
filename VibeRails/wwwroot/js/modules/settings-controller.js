@@ -36,6 +36,7 @@ export class SettingsController {
             codexTokenSaverEnabled: true,
             openCodeTokenSaverEnabled: true,
             tokenSaverCaptureEnabled: false,
+            removeCoAuthorTrailers: true,
             machineName: ''
         };
         const dataExportSizePromise = this._loadDataExportSize();
@@ -87,6 +88,7 @@ export class SettingsController {
             const codexTokenSaverToggle = root.querySelector('#setting-token-saver-codex');
             const opencodeTokenSaverToggle = root.querySelector('#setting-token-saver-opencode');
             const tokenSaverCaptureToggle = root.querySelector('#setting-token-saver-capture');
+            const removeCoAuthorTrailersToggle = root.querySelector('#setting-remove-co-author-trailers');
 
             if (remoteAccessToggle) {
                 remoteAccessToggle.checked = settings.remoteAccess || false;
@@ -157,6 +159,10 @@ export class SettingsController {
             if (tokenSaverCaptureToggle) {
                 tokenSaverCaptureToggle.checked = settings.tokenSaverCaptureEnabled === true;
             }
+            if (removeCoAuthorTrailersToggle) {
+                // Missing on older servers/settings files means the documented default: enabled.
+                removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;
+            }
 
             const form = root.querySelector('#app-settings-form');
             if (form) {
@@ -199,6 +205,7 @@ export class SettingsController {
                             codexTokenSaverToggle?.checked ?? true,
                             opencodeTokenSaverToggle?.checked ?? true,
                             tokenSaverCaptureToggle?.checked ?? false,
+                            removeCoAuthorTrailersToggle?.checked ?? true,
                             clearApiKey
                         );
                         if (savedSettings) {
@@ -219,7 +226,7 @@ export class SettingsController {
         content.appendChild(fragment);
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, tokenSaverCaptureEnabled, clearApiKey = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, tokenSaverCaptureEnabled, removeCoAuthorTrailers, clearApiKey = false) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -235,6 +242,7 @@ export class SettingsController {
                 codexTokenSaverEnabled: codexTokenSaverEnabled,
                 openCodeTokenSaverEnabled: openCodeTokenSaverEnabled,
                 tokenSaverCaptureEnabled: tokenSaverCaptureEnabled,
+                removeCoAuthorTrailers: removeCoAuthorTrailers,
                 clearApiKey: clearApiKey
             });
             this.app.setAppSettings(savedSettings);
@@ -315,7 +323,8 @@ export class SettingsController {
             '#setting-token-saver-claude',
             '#setting-token-saver-codex',
             '#setting-token-saver-opencode',
-            '#setting-token-saver-capture'
+            '#setting-token-saver-capture',
+            '#setting-remove-co-author-trailers'
         ].join(',');
     }
 
@@ -335,7 +344,8 @@ export class SettingsController {
             claudeTokenSaverEnabled: isChecked('#setting-token-saver-claude'),
             codexTokenSaverEnabled: isChecked('#setting-token-saver-codex'),
             openCodeTokenSaverEnabled: isChecked('#setting-token-saver-opencode'),
-            tokenSaverCaptureEnabled: isChecked('#setting-token-saver-capture')
+            tokenSaverCaptureEnabled: isChecked('#setting-token-saver-capture'),
+            removeCoAuthorTrailers: isChecked('#setting-remove-co-author-trailers')
         });
     }
 
@@ -415,6 +425,9 @@ export class SettingsController {
 
         const tokenSaverCaptureToggle = root.querySelector('#setting-token-saver-capture');
         if (tokenSaverCaptureToggle) tokenSaverCaptureToggle.checked = settings.tokenSaverCaptureEnabled === true;
+
+        const removeCoAuthorTrailersToggle = root.querySelector('#setting-remove-co-author-trailers');
+        if (removeCoAuthorTrailersToggle) removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;
 
         this._updateDataExportAvailability(root);
     }

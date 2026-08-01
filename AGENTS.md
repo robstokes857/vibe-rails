@@ -25,9 +25,10 @@
 - **.NET 10.0** - Modern .NET with AOT compilation support
 - **ASP.NET Core Slim** - Lightweight web server
 - **SQLite** - Local database with WAL mode for concurrency
-- **ModelContextProtocol NuGet Package** (v0.5.0-preview.1) - MCP foundation with custom service layer and tools
-- **Pty.Net** - Cross-platform pseudo-terminal support (git submodule)
-- **PyBridge** - AOT-friendly Python process and session runner (git submodule)
+- **ModelContextProtocol NuGet Package** (v2.0.0) - MCP foundation with custom service layer and tools
+- **ModelContextProtocol.AspNetCore** (v2.0.0) - ASP.NET Core integration for the in-process MCP server
+- **Pty.Net** - Cross-platform pseudo-terminal support (inlined fork, ConPTY only)
+- **PyBridge** - AOT-friendly Python process and session runner (in-tree library)
 
 ### Frontend
 - **Vanilla JavaScript** - No framework dependencies
@@ -43,19 +44,23 @@
 
 ## Project Structure
 
-> **Note:** The project directory is named `VibeControl2` for legacy reasons, but the project branding is **VibeRails**.
-
 ```
-VibeControl2/
+vibe-rails/
 ├── VibeRails/                      # Main ASP.NET Core application
 │   ├── Program.cs                  # Entry point (web server + CLI loop)
-│   ├── Init.cs                     # Dependency injection setup
+│   ├── Init.cs                     # Startup checks (DB init, app settings, git detection)
+│   ├── MapRegisterServices.cs      # Dependency injection setup
 │   ├── CliLoop.cs                  # CLI interaction loop
-│   ├── Routes.cs                   # API endpoint definitions
+│   ├── Routes/                     # API endpoint definitions (split by domain)
+│   │   ├── Routes.cs               # Aggregator that maps all route modules
+│   │   ├── AgentRoutes.cs          # Agent file management
+│   │   ├── TerminalRoutes.cs       # Web terminal session endpoints
+│   │   ├── LlmSettingsRoutes.cs    # Claude/Codex per-env settings
+│   │   ├── McpRoutes.cs            # MCP tool inspection/calling
+│   │   └── ...                     # (SandboxRoutes, SessionRoutes, etc.)
 │   │
 │   ├── Services/                   # Business logic layer
 │   │   ├── AgentFileService.cs    # Agent file management
-│   │   ├── DbService.cs           # Database operations wrapper
 │   │   ├── FileService.cs         # File system abstraction
 │   │   ├── GitService.cs          # Git repository interaction
 │   │   ├── RulesService.cs        # Rule parsing and enforcement
@@ -69,7 +74,7 @@ VibeControl2/
 │   │       ├── ClaudeLlmCliEnvironment.cs
 │   │       ├── CodexLlmCliEnvironment.cs
 │   │       ├── AntigravityLlmCliEnvironment.cs
-│   │       └── Launchers/         # Platform-specific terminal launchers
+│   │       └── Launchers/         # CLI-type-specific launchers (Claude, Codex, Antigravity, Copilot, OpenCode)
 │   │
 │   ├── DB/                         # Data access layer
 │   │   ├── Repository.cs           # SQLite data access implementation
@@ -81,20 +86,19 @@ VibeControl2/
 │   ├── DTOs/                       # Data transfer objects
 │   │   ├── ResponseRecords.cs      # API response types
 │   │   ├── Sandbox.cs              # Sandbox entity model
-│   │   ├── LLM.cs                  # LLM enum (Claude, Codex, Antigravity)
+│   │   ├── LLM.cs                  # LLM enum (Claude, Codex, Antigravity, Copilot, Shell, OpenCode, Glm52, KimiK3)
 │   │   ├── LLM_Environment.cs      # Environment configuration
 │   │   ├── McpDtos.cs              # MCP protocol DTOs
 │   │   └── StateFileObject.cs
 │   │
 │   ├── Interfaces/                 # Service contracts
 │   │   ├── IFileService.cs
-│   │   ├── IDbService.cs
 │   │   ├── IBaseLlmCliEnvironment.cs
 │   │   ├── IMcpService.cs
 │   │   └── *LlmCliEnvironment.cs
 │   │
 │   ├── Utils/                      # Utility classes
-│   │   ├── Configs.cs              # Configuration management
+│   │   ├── Config.cs               # Configuration management
 │   │   ├── LaunchBrowser.cs        # Browser launcher
 │   │   ├── PortFinder.cs           # Free port detection
 │   │   ├── TerminalOutputFilter.cs # Terminal output filtering
@@ -105,14 +109,14 @@ VibeControl2/
 │       ├── app.js                  # Frontend application logic
 │       ├── style.css               # Custom styling
 │       ├── js/modules/
-│       │   ├── terminal-controller.js  # Web terminal with environment-aware selector
+│       │   ├── terminal-multitab.js      # Web terminal (multi-tab, environment-aware)
 │       │   ├── environment-controller.js # Environment CRUD + Web UI launch button
 │       │   ├── sandbox-controller.js   # Sandbox CRUD + launch into sandbox directory
 │       │   └── dashboard-controller.js  # Dashboard with state passing for preselection
 │       └── assets/                 # Images, fonts, icons
 │
-├── Pty.Net/                        # Cross-platform PTY library (ConPTY/forkpty)
-├── PyBridge/                       # AOT-friendly Python runner library (git submodule)
+├── Pty.Net/                        # Cross-platform PTY library (inlined fork, ConPTY only)
+├── PyBridge/                       # AOT-friendly Python runner library (in-tree)
 │
 ├── Tests/                          # xUnit test suite
 │   ├── AgentFileServiceTests.cs
@@ -176,19 +180,24 @@ vb --git-guard
 
 The old CLI management commands (`vb env`, `vb validate`, `vb hooks`, etc.) are no longer part of the supported surface. Use the Web UI, VS Code extension, or REST APIs for those workflows.
 
+> **Additional process-host modes** (internal, not user-facing): `vb mcp` (MCP stdio server),
+> `vb --vca-hook <type>` (VCA hook process host used by git hooks), `vb --job-run <id>`
+> (automated job run), and `vb --job-trigger` (post-commit job enqueue). These are invoked
+> internally by the main app or git hooks, not typed by end users.
+
 ### Component Interaction Flow
 
 #### Agent Rule Management Flow
 ```
 Browser (app.js)
   ↓ [GET /api/v1/agents]
-ASP.NET Route Handler (Routes.cs)
+ASP.NET Route Handler (Routes/AgentRoutes.cs)
   ↓ DI injects IAgentFileService
 AgentFileService
   ↓ Uses IGitService to find repository root
   ↓ Scans for agent.md/agents.md files
   ↓ Uses IRulesService to parse and validate rules
-  ↓ Optional: DbService for project tracking
+  ↓ Optional: Repository for project tracking
 Response [AgentFileListResponse]
   ↓ [JSON]
 Browser renders agent list with rules
@@ -230,8 +239,14 @@ LlmCliEnvironmentService
   ├─→ ICodexLlmCliEnvironment
   │     └─ Config: CODEX_HOME
   │
-  └─→ IAntigravityLlmCliEnvironment
-        └─ Config: none (agy is launch-flag-only)
+  ├─→ IAntigravityLlmCliEnvironment
+  │     └─ Config: none (agy is launch-flag-only)
+  │
+  ├─→ ICopilotLlmCliEnvironment
+  │     └─ Config: none (Copilot is launch-flag-only)
+  │
+  └─→ IOpencodeLlmCliEnvironment
+        └─ Config: XDG_CONFIG_HOME
 
 Each environment defines isolated config directories
 ```
@@ -249,6 +264,8 @@ app.navigate('dashboard', { preselectedEnvId: envId })
 dashboard-controller.js receives data.preselectedEnvId
   ↓
 Passes to terminalController.bindTerminalActions(container, envId)
+  ↓ (frontend terminal wiring lives in terminal-multitab.js; dashboard-controller.js
+     passes the preselected env id into the terminal selector)
   ↓
 populateTerminalSelector() fetches from app.data.environments
   ↓
@@ -282,7 +299,7 @@ CLI runs with full session tracking (same as CLI path)
 vb.exe (Main App)
   ├─ AddMcpServer().WithHttpTransport().WithTools<...>()   # in-process MCP server
   ├─ app.MapMcp("/mcp")                                    # Streamable HTTP endpoint (root backend only)
-  └─ Tools: validate_vca · search_history
+  └─ Tools: validate_vca · search_history · pause_token_saver · resume_token_saver · get_token_saver_status
      (run_shell_command + web research kept in-tree but not currently exposed — security review 2026-07-02)
 
 McpClientService — thin client wrapper used by the dashboard MCP Explorer to inspect the local
@@ -310,43 +327,45 @@ See [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md) for the
 # Agent Instructions
 
 ## Rules
-- COMMIT: max_complexity=10
-- STOP: min_coverage=80
-- WARN: log_files_changed
+- Cyclomatic complexity < 20 (COMMIT)
+- Require test coverage minimum 80% (STOP)
+- Log all file changes (WARN)
 ```
 
 #### RulesService ([Services/RulesService.cs](VibeRails/Services/RulesService.cs))
 **Purpose**: Define available rules and enforcement logic
 
-**Available Rules** (12 total):
-1. `max_complexity` - Maximum cyclomatic complexity
-2. `min_coverage` - Minimum test coverage percentage
-3. `log_files_changed` - Log all file modifications
-4. `no_console_logs` - Prevent console.log in production
-5. `max_file_length` - Maximum lines per file
-6. `require_tests` - Tests required for new code
-7. `no_todo_comments` - Prevent TODO comments in commits
-8. `enforce_naming_conventions` - Enforce naming patterns
-9. `max_method_length` - Maximum lines per method
-10. `require_documentation` - Documentation required
-11. `no_magic_numbers` - Prevent hardcoded numbers
-12. `enforce_error_handling` - Require error handling
+**Available Rules** (14 total):
+1. `LogAllFileChanges` - Log all file changes
+2. `LogFileChangesOver5Lines` - Log file changes > 5 lines
+3. `LogFileChangesOver10Lines` - Log file changes > 10 lines
+4. `CyclomaticComplexityUnder20` - Cyclomatic complexity < 20
+5. `CyclomaticComplexityUnder35` - Cyclomatic complexity < 35
+6. `CyclomaticComplexityUnder60` - Cyclomatic complexity < 60
+7. `CyclomaticComplexityDisabled` - Disable cyclomatic complexity checking
+8. `RequireTestCoverageMinimum50` - Require test coverage minimum 50%
+9. `RequireTestCoverageMinimum70` - Require test coverage minimum 70%
+10. `RequireTestCoverageMinimum80` - Require test coverage minimum 80%
+11. `RequireTestCoverageMinimum100` - Require test coverage minimum 100%
+12. `SkipTestCoverage` - Skip test coverage checking
+13. `PackageChangeDetected` - Detect changes to package/dependency files
+14. `CheckCommitMessageForWords` - Check commit message for forbidden words (CSV list)
 
 **Enforcement Levels**:
 - `WARN` - Log warning, allow continuation
-- `COMMIT` - Block commits that violate rule
-- `STOP` - Immediately halt execution on violation
+- `COMMIT` - Require explanation in commit/PR message
+- `STOP` - Block the commit/PR
 
-#### DbService ([Services/DbService.cs](VibeRails/Services/DbService.cs))
-**Purpose**: High-level database operations wrapper
+#### Repository ([DB/Repository.cs](VibeRails/DB/Repository.cs))
+**Purpose**: SQLite data access implementation (implements `IRepository`). See
+[VibeRails/DB/AGENTS.md](VibeRails/DB/AGENTS.md) for the full schema and operation reference.
 
-**Key Methods**:
-- `GetOrCreateProjectAsync(repoPath)` - Get/create project record
-- `GetEnvironmentAsync(name)` - Retrieve environment configuration
-- `CreateSessionAsync()` - Start new CLI session
-- `LogSessionOutputAsync()` - Append terminal output to session log
-- `GetRecentProjectsAsync()` - Get recently used projects
-- `GetRecentSessionsAsync()` - Get recent CLI sessions
+**Key Methods** (selected):
+- `GetOrCreateEnvironmentAsync(name, llm)` - Get/create environment record
+- `SaveSandboxAsync(sandbox)` / `DeleteSandboxAsync(id)` - Sandbox persistence
+- `CreateSessionAsync(...)` - Start new CLI session
+- `LogSessionOutputAsync(...)` - Append terminal output to session log
+- `GetRecentSessionsAsync(limit)` - Get recent CLI sessions
 
 #### GitService ([Services/GitService.cs](VibeRails/Services/GitService.cs))
 **Purpose**: Git repository operations
@@ -410,7 +429,8 @@ separate process. Full design: [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Serv
 
 **Tools** (snake_case wire names): `validate_vca` (staged-file AGENTS.md rule validation),
 `search_history` (semantic + keyword search over captured agent history via the real
-`IUnifiedSearchService` — BGE/sqlite-vec/RRF).
+`IUnifiedSearchService` — BGE/sqlite-vec/RRF), and the token-saver controls
+`pause_token_saver`, `resume_token_saver`, `get_token_saver_status`.
 
 Host shell command jobs (`run_shell_command`, `get_shell_command_status`, `cancel_shell_command`) and
 web research (`web_search`, `web_fetch`) remain in the codebase but are **not currently exposed** as MCP
@@ -421,32 +441,33 @@ tools (security review 2026-07-02).
 #### Repository ([DB/Repository.cs](VibeRails/DB/Repository.cs))
 **Purpose**: SQLite data access implementation
 
-**Database Tables**:
-- `RecentProjects` - Git repository tracking
-  - `Id`, `Path`, `Name`, `LastUsedUTC`
-- `LlmEnvironments` - Environment configurations
-  - `Id`, `Name`, `LlmType`, `ConfigJson`
+**Database Tables** (see [VibeRails/DB/AGENTS.md](VibeRails/DB/AGENTS.md) for the full reference):
+- `Environments` - Environment configurations (global, not project-scoped)
+  - `Id`, `CustomName`, `LLM`, `Path`, `CustomArgs`, `CustomPrompt`, `CreatedUTC`, `LastUsedUTC`, `Hidden`
+  - `UNIQUE(CustomName, LLM)`
 - `Sandboxes` - Sandbox git clones (project-scoped via ProjectPath)
-  - `Id`, `Name`, `Path`, `ProjectPath`, `Branch`, `CommitHash`, `CreatedUTC`
+  - `Id`, `Name`, `Path`, `ProjectPath`, `Branch`, `CommitHash`, `RemoteUrl`, `SourceBranch`, `CreatedUTC`
   - `UNIQUE(Name, ProjectPath)`
 - `Sessions` - CLI session metadata
-  - `Id`, `ProjectId`, `EnvironmentId`, `StartedUTC`, `EndedUTC`, `ExitCode`
+  - `Id` (TEXT PK), `Cli`, `EnvironmentName`, `WorkingDirectory`, `ProjectDisplayName`, `StartedUTC`, `EndedUTC`, `ExitCode`, `Processed`, `ParentSessionId`, `SessionDisplayName`, `OwnerPid`, `OwnershipTracked`, `JobRunId`
 - `SessionLogs` - Terminal output logs
-  - `Id`, `SessionId`, `Timestamp`, `Content`
+  - `Id`, `SessionId`, `Timestamp`, `Content` (BLOB), `IsError`
+- `UserInputs` / `InputFileChanges` - User input tracking + correlated git diffs
+- `TerminalSessionLogs` - Per-terminal-session structured log rows
+- Additional tables: `AgentMetadata`, `ChatSummary`, `sessionOutPut`, `TokenSavings`, `CompressionCaptures`, `CodeAnalyzerIgnores`, `ProjectCache`, `GlobalCache`
 
 **Configuration**:
 - WAL mode enabled for concurrent access
 - Foreign keys enforced
-- Indexes on `LastUsedUTC` for performance
+- Indexes on frequently queried columns (`StartedUTC`, `LastUsedUTC`, `ProjectPath`, etc.)
 
 **Database Location**:
-- Global: `~/.vibe_rails/vibecontrol.db`
-- Per-project: `.vibe_rails/vibecontrol.db`
+- Global: `~/.vibe_rails/state.db` (single shared database; no per-project database)
 
 ### API Layer
 
-#### Routes ([Routes.cs](VibeRails/Routes.cs))
-**Purpose**: REST API endpoint definitions
+#### Routes ([Routes/Routes.cs](VibeRails/Routes/Routes.cs))
+**Purpose**: REST API endpoint definitions (split across domain-specific modules in `Routes/`)
 
 **Agent Management**:
 - `GET /api/v1/agents` - List agent files
@@ -455,11 +476,10 @@ tools (security review 2026-07-02).
 - `POST /api/v1/agents/rules` - Add rule
 - `PUT /api/v1/agents/rules/enforcement` - Update enforcement
 - `DELETE /api/v1/agents/rules` - Delete rules
-- `DELETE /api/v1/agents?path={path}` - Delete agent file
 - `GET /api/v1/rules` - List available rules
 
 **Environment & CLI**:
-- `GET /api/v1/projects/recent` - Recent projects
+- `GET /api/v1/projects/name` - Get project display name
 - `GET /api/v1/environments/{name}/launch` - Get environment vars
 - `POST /api/v1/cli/launch/{cli}` - Launch CLI in terminal
 - `POST /api/cli/launch/vscode` - Launch VS Code
@@ -535,8 +555,8 @@ const state = {
 ## Design Patterns
 
 ### Dependency Injection
-All services registered in [Init.cs](VibeRails/Init.cs) with appropriate lifetimes:
-- **Scoped**: Services tied to request lifecycle (DbService, Repository)
+All services registered in [MapRegisterServices.cs](VibeRails/MapRegisterServices.cs) with appropriate lifetimes:
+- **Scoped**: Services tied to request lifecycle (Repository)
 - **Singleton**: Long-lived services (GitService, RulesService, MCP settings)
 
 ### Repository Pattern
@@ -546,13 +566,15 @@ All services registered in [Init.cs](VibeRails/Init.cs) with appropriate lifetim
 Business logic isolated from HTTP concerns. Services are reusable across CLI and web modes.
 
 ### Factory Pattern
-`BaseLlmCliLauncher` base class with platform-specific implementations:
-- `WindowsLlmCliLauncher` - Windows Terminal, PowerShell
-- `MacLlmCliLauncher` - Terminal.app, iTerm2
-- `LinuxLlmCliLauncher` - gnome-terminal, konsole, xterm
+`BaseLlmCliLauncher` base class with CLI-type-specific implementations:
+- `ClaudeLlmCliLauncher` → `CLAUDE_CONFIG_DIR`
+- `CodexLlmCliLauncher` → `CODEX_HOME`
+- `AntigravityLlmCliLauncher` → (none — launch-flag-only)
+- `CopilotLlmCliLauncher` → (none — launch-flag-only)
+- `OpencodeLlmCliLauncher` → `XDG_CONFIG_HOME`
 
 ### Configuration Pattern
-`Configs` static class manages runtime configuration paths and application state.
+`Config` / `ParserConfigs` static classes manage runtime configuration paths and application state.
 
 ### Strategy Pattern
 Different LLM CLI environments implement `IBaseLlmCliEnvironment` with specific configuration logic.
@@ -565,7 +587,7 @@ Different LLM CLI environments implement `IBaseLlmCliEnvironment` with specific 
 ### Application Configuration
 ```
 ~/.vibe_rails/                    # Global config directory
-├── vibecontrol.db                  # SQLite database
+├── state.db                        # SQLite database (single shared DB, no per-project database)
 ├── config.json                     # Application settings
 ├── history/                        # CLI command history
 ├── envs/                           # Environment configurations
@@ -585,8 +607,7 @@ Different LLM CLI environments implement `IBaseLlmCliEnvironment` with specific 
 project-root/
 ├── .git/
 ├── agent.md                        # or agents.md
-├── .vibe_rails/                  # Optional project-specific config
-│   └── vibecontrol.db              # Project-specific database
+├── .vibe_rails/                  # Optional project-specific config (no per-project database)
 └── src/
 ```
 
@@ -618,19 +639,25 @@ OpenCode data directory, normally `~/.local/share/opencode/auth.json`).
 ### Adding a New Rule
 
 1. **Define rule in RulesService.cs**:
+   - Add a new value to the `Rule` enum
+   - Add an entry to the `_keyValuePairs` dictionary (display string)
+   - Add an entry to the `_descriptions` dictionary (description)
+
 ```csharp
-new Rule(
-    "my_new_rule",
-    "Description of the rule",
-    "parameter_name",
-    "WARN"
-)
+// In the Rule enum:
+MyNewRule,
+
+// In _keyValuePairs:
+{ Rule.MyNewRule, "My new rule display text" },
+
+// In _descriptions:
+{ Rule.MyNewRule, "Description of the rule" },
 ```
 
 2. **Update agent.md files**:
 ```markdown
 ## Rules
-- COMMIT: my_new_rule=value
+- My new rule display text (COMMIT)
 ```
 
 3. **Implement enforcement logic** in appropriate service
@@ -650,7 +677,7 @@ public class MyLlmCliEnvironment : BaseLlmCliEnvironment
 }
 ```
 
-2. **Register in Init.cs**:
+2. **Register in [MapRegisterServices.cs](VibeRails/MapRegisterServices.cs)**:
 ```csharp
 builder.Services.AddSingleton<IMyLlmCliEnvironment, MyLlmCliEnvironment>();
 ```
@@ -743,8 +770,8 @@ var agentFiles = await agentFileService.GetAgentFilesAsync();
 // Use: AgentFileService.AddRuleAsync()
 await agentFileService.AddRuleAsync(
     agentPath: "/path/to/agent.md",
-    ruleName: "max_complexity",
-    ruleValue: "10",
+    ruleName: "Cyclomatic complexity < 20",
+    ruleValue: "20",
     enforcement: "COMMIT"
 );
 ```
@@ -758,15 +785,15 @@ vb --env claude --workdir /project # With explicit working directory
 
 ### Task: Retrieve session logs
 ```csharp
-// Use: DbService.GetSessionLogsAsync()
-var logs = await dbService.GetSessionLogsAsync(sessionId);
+// Use: Repository.GetSessionWithLogsAsync()
+var session = await repository.GetSessionWithLogsAsync(sessionId);
 ```
 
 ### Task: Call MCP tool
 ```csharp
 // Use: McpClientService.CallToolAsync()
-var result = await mcpService.CallToolAsync(
-    "vector_search",
+var result = await mService.CallToolAsync(
+    "search_history",
     new Dictionary<string, object> {
         ["query"] = "find similar code"
     }
@@ -936,7 +963,7 @@ vb --web  # Explicit web-dashboard launch
 - [Model Context Protocol Spec](https://modelcontextprotocol.io/)
 - [ModelContextProtocol NuGet Package](https://www.nuget.org/packages/ModelContextProtocol)
 - [Pty.Net](https://github.com/microsoft/vs-pty.net) (inlined fork, ConPTY only)
-- [PyBridge](https://github.com/robstokes857/PyBridge) (git submodule)
+- [PyBridge](https://github.com/robstokes857/PyBridge) (in-tree library)
 - [XTerm.js Documentation](https://xtermjs.org/)
 
 ### Related Projects
@@ -946,10 +973,11 @@ vb --web  # Explicit web-dashboard launch
 - **MCP SDK** - Model Context Protocol development kit
 
 ### Key Dependencies
-- **Microsoft.Data.Sqlite** (v10.0.2) - SQLite database access
-- **ModelContextProtocol** (v0.5.0-preview.1) - MCP foundation
-- **Pty.Net** (git submodule) - Pseudo-terminal support
-- **PyBridge** (git submodule) - Python script execution, streaming, and warm worker sessions
+- **Microsoft.Data.Sqlite** (v10.0.10) - SQLite database access
+- **ModelContextProtocol** (v2.0.0) - MCP foundation
+- **ModelContextProtocol.AspNetCore** (v2.0.0) - ASP.NET Core integration for the in-process MCP server
+- **Pty.Net** (inlined fork) - Pseudo-terminal support
+- **PyBridge** (in-tree library) - Python script execution, streaming, and warm worker sessions
 
 ---
 
@@ -989,7 +1017,7 @@ VibeRails includes a sophisticated git hook installation system that automatical
 **Installation Behavior**:
 - **Auto-install on startup** - Hooks installed automatically when VibeRails starts (configurable)
 - **Preserves existing hooks** - Inserts VCA ahead of existing shell-hook exits and chains non-shell/binary/symlink hooks through a preserved sidecar
-- **App-versioned health checks** - Installed hooks carry the running VibeRails version (for example `1.9.2`); startup detects missing, disabled, stale/older-version, partial, missing-launcher, or mismatched-launcher hooks and replaces them
+- **App-versioned health checks** - Installed hooks carry the running VibeRails version (for example `1.9.5`); startup detects missing, disabled, stale/older-version, partial, missing-launcher, or mismatched-launcher hooks and replaces them
 - **Git-aware path resolution** - Honors linked worktrees and `core.hooksPath`
 - **Safe hook chaining** - Runs before existing shell hooks and preserves non-shell hooks as executable sidecars
 - **Safe uninstallation** - Removes only VibeRails sections, keeps other hooks intact
@@ -1105,11 +1133,11 @@ dotnet test --filter "HookInstallationServiceTests"
 VibeRails/
 ├── scripts/                          # Hook script templates
 │   ├── pre-commit-hook.sh           # Pre-commit validation script
-│   └── commit-msg-hook.sh           # Commit message validation script
+│   ├── commit-msg-hook.sh           # Commit message validation script
+│   └── post-commit-hook.sh          # Post-commit (job trigger) script
 ├── Services/
 │   ├── HookInstallationService.cs   # Main service implementation
-│   ├── HookInstallationResult.cs    # Result types
-│   └── HookConfiguration.cs         # Configuration models
+│   └── HookInstallationResult.cs    # Result types
 └──appsettings.json                   # Application configuration
 
 .git/hooks/                           # Git hooks directory (per repo)
@@ -1158,8 +1186,8 @@ Current implementation:
 
 ---
 
-**Last Updated**: 2026-02-12
-**Version**: 1.2.0
+**Last Updated**: 2026-07-31
+**Version**: 1.9.5
 **Maintained By**: Robert Stokes
 
 ## Vibe Control Rules

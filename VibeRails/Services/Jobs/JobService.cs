@@ -255,7 +255,7 @@ public sealed class JobService(
     private static JobResponse ToResponse(JobDefinitionRecord job) => new(
         job.Id, job.Name, job.ProjectPath, job.Llm, job.EnvironmentId, job.EnvironmentName,
         job.Prompt, job.TimeoutMinutes, job.Enabled, job.CreatedUtc, job.UpdatedUtc, job.DeletedUtc,
-        job.Triggers.ToList());
+        job.Triggers.ToList(), job.LaunchMinimized);
 
     private static JobRunResponse ToResponse(JobRunRecord run) => new(
         run.Id, run.JobId, run.JobName, run.TriggerKind, run.Status, run.ProjectPath, run.Llm,

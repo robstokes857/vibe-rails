@@ -75,7 +75,7 @@ For an interactive loop, open `vscode-viberails/` in VS Code and press **F5** to
 The extension integrates with VibeRails agent system:
 
 - **Agents**: Custom AI configurations with specific instructions and rules
-- **Environments**: Isolated CLI environments (Claude, Aider, etc.) with unique settings
+- **Environments**: Isolated CLI environments (Claude, Codex, Antigravity, Copilot, OpenCode, etc.) with unique settings
 - **Rules**: Per-agent behavioral rules and constraints
 - **History**: Session tracking and management
 

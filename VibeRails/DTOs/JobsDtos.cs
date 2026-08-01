@@ -56,7 +56,8 @@ public sealed record JobResponse(
     DateTime CreatedUtc,
     DateTime UpdatedUtc,
     DateTime? DeletedUtc,
-    List<JobTriggerDto> Triggers);
+    List<JobTriggerDto> Triggers,
+    bool LaunchMinimized = false);
 
 public sealed record JobListResponse(List<JobResponse> Jobs);
 
@@ -76,7 +77,8 @@ public sealed record CreateJobRequest(
     string Prompt,
     int? TimeoutMinutes,
     bool Enabled,
-    List<JobTriggerRequest> Triggers);
+    List<JobTriggerRequest> Triggers,
+    bool LaunchMinimized = false);
 
 public sealed record UpdateJobRequest(
     string Name,
@@ -86,7 +88,8 @@ public sealed record UpdateJobRequest(
     string Prompt,
     int? TimeoutMinutes,
     bool Enabled,
-    List<JobTriggerRequest> Triggers);
+    List<JobTriggerRequest> Triggers,
+    bool LaunchMinimized = false);
 
 // A Job run is a recorded native terminal session. SessionId links to the Sessions row (and its
 // SessionLogs / TerminalSessionLogs) so the Jobs UI can replay it with the same xterm player the
@@ -126,7 +129,8 @@ public sealed record JobDefinitionRecord(
     DateTime CreatedUtc,
     DateTime UpdatedUtc,
     DateTime? DeletedUtc,
-    IReadOnlyList<JobTriggerDto> Triggers);
+    IReadOnlyList<JobTriggerDto> Triggers,
+    bool LaunchMinimized = false);
 
 public sealed record JobRunRecord(
     string Id,
@@ -147,4 +151,5 @@ public sealed record JobRunRecord(
     int? ExitCode,
     string? ErrorMessage,
     bool CancelRequested,
-    int? OwnerProcessId);
+    int? OwnerProcessId,
+    bool LaunchMinimized = false);

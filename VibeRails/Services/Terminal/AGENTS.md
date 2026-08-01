@@ -1,22 +1,20 @@
 # Terminal Service
 
 Current implementation reference for `VibeRails/Services/Terminal`.
-Verified against source on 2026-03-05.
+Verified against source on 2026-07-31.
 
 ## Scope
 This folder owns PTY lifecycle, session tracking hooks, local WebSocket viewer handling, and remote relay integration.
 
 Primary files (reorg'd into subdirectories):
-- `Services/Terminal/Pty/Terminal.cs`
-- `Services/Terminal/Core/TerminalRunner.cs`
-- `Services/Terminal/Core/TerminalSessionService.cs`
-- `Services/Terminal/Core/TerminalStateService.cs`
-- `Services/Terminal/Core/TerminalTabHostService.cs`
-- `Services/Terminal/Protocol/TerminalIoRouter.cs`
-- `Services/Terminal/Protocol/TerminalControlProtocol.cs`
+- `Services/Terminal/Pty/Terminal.cs`, `KeyTranslator.cs`, `ShellCommandBuilder.cs`
+- `Services/Terminal/Core/TerminalRunner.cs`, `TerminalSessionService.cs`, `TerminalStateService.cs`, `TerminalTabHostService.cs`, `ChildParentWatchdogService.cs`, `NativeConsoleGeometry.cs`
+- `Services/Terminal/Protocol/TerminalIoRouter.cs`, `TerminalControlProtocol.cs`, `TerminalGridSerializer.cs`, `TerminalTextSanitizer.cs`, `TerminalTextWithControlPart.cs`
 - `Services/Terminal/Remote/RemoteTerminalConnection.cs`
 - `Services/Terminal/Consumers/*.cs`
 - `Services/Terminal/Observers/*.cs`
+- `Services/Terminal/Sessions/*.cs` (session activity state, output writer, resize coordinator)
+- `Services/Terminal/Commands/CommandService.cs`
 - `Services/Terminal/Interfaces/*.cs` (interface contracts, namespace stays flat)
 
 Related routes/UI:
@@ -30,12 +28,13 @@ Remote relay server (other repo):
 
 ```
 Terminal (PTY owner, single read loop)
-  - CircularBuffer (16KB replay)
-  - Subscribe(ITerminalConsumer)
+  - TerminalEmulator (20k-line scrollback, drives grid replay/snapshot attach)
+  - Subscribe(ITerminalConsumer) / SubscribeWithSnapshot(ITerminalConsumer)
       - ConsoleOutputConsumer
       - DbLoggingConsumer
       - WebSocketConsumer (local viewer)
       - RemoteOutputConsumer (relay path)
+      - TerminalEmulatorConsumer (internal, feeds the headless emulator)
   - WriteAsync / WriteBytesAsync
   - Resize
 ```
@@ -56,6 +55,10 @@ Commands:
 - `__browser_disconnected__`
 - `__disconnect_browser__[:reason]`
 - `__resize__:{cols},{rows}`
+- `__cmd__:{command}[:payload]` — structured command prefix framework (e.g. `__cmd__:replay`)
+- PIN challenge protocol (sent as plain text, not `__cmd__:`):
+  - `__PIN__:{pin}` — PIN challenge response from the viewer
+  - `__LOCKED__` / `__UNLOCKED__` — lock-state frames
 
 Validation:
 - max inbound message size: `256 * 1024` bytes
@@ -65,11 +68,12 @@ Validation:
 ## Component Responsibilities
 
 ### `Terminal.cs`
-- Spawns PTY (`pwsh.exe` on Windows, `/bin/zsh` on macOS, `bash` on Linux).
-- Stores last 16KB output in `CircularBuffer`.
+- Spawns PTY (`pwsh.exe` on Windows, `/bin/zsh` on macOS, `bash` on Linux — resolved via `ShellDefaults`).
+- Feeds all output into a headless `TerminalEmulator` (20k-line scrollback) via an internal `TerminalEmulatorConsumer`.
 - Dispatches every PTY read chunk to current consumer snapshot.
-- Exposes `GetReplayBuffer()` and `Resize(cols, rows)`.
-- `CreateAsync(..., title)` sets PTY name and sends terminal title ANSI sequence when provided.
+- Exposes `GetGridReplay()` (ANSI byte stream from emulator grid) and `Resize(cols, rows)`.
+- `SubscribeWithSnapshot(...)` / `PushSnapshotTo(...)` provide atomic snapshot + live attach for reconnect.
+- `CreateAsync(..., title)` sets PTY name; supports `app`/`argv` to spawn a specific program instead of an interactive shell.
 - Implements `IAsyncDisposable` and kills PTY on dispose.
 
 ### `ITerminalConsumer.cs`
@@ -93,6 +97,10 @@ Validation:
 - Relay output consumer.
 - Calls `IRemoteTerminalConnection.SendOutputAsync(...)`.
 - Safe because remote connection copies payload before queueing.
+
+`TerminalEmulatorConsumer.cs`
+- Internal consumer that feeds all PTY output bytes into the headless `TerminalEmulator` so `GetGridReplay()` always reflects the current screen state.
+- Thread-safe via the shared emulator lock.
 
 ### `TerminalRunner.cs`
 Session orchestrator.
@@ -211,10 +219,41 @@ Behavior:
   - `OnBrowserDisconnected`
   - `OnResizeRequested`
 
-### `RemoteStateService.cs`
+### `RemoteStateService.cs` (moved to `Services/Integrations/VibeCodeRemote/`)
 HTTP registration with relay server:
 - `POST /api/v1/terminal` on session create
 - `DELETE /api/v1/terminal` on session complete
+
+> **Note:** `RemoteStateService` now lives at `Services/Integrations/VibeCodeRemote/RemoteStateService.cs`, not inside the Terminal folder. It is consumed by `TerminalStateService` via `IRemoteStateService`.
+
+### `Sessions/` subdirectory
+- `SessionActivityState.cs` — tracks per-session input/output/activity timestamps and idle notification state; owns a `CancellationToken` for the session.
+- `SessionOutputWriter.cs` — channel-backed writer that buffers and persists session output to the DB via `IRepository`; tracks alt-screen state and flushes at 5 MB threshold.
+- `TerminalResizeCoordinator.cs` — centralizes PTY resize handling so resize hooks and optional debounced redraw (`Ctrl+L`) are consistent across local and remote viewer paths.
+
+### `Commands/CommandService.cs`
+- Builds the `PreparedTerminalSession` record (launch command, setup commands, environment, optional executable/argv) for terminal sessions.
+- Resolves the MCP stdio server command path (published `vb.exe mcp` vs `dotnet <dll> mcp`).
+- Runs CLI MCP auto-registration commands (remove + add) via the platform shell.
+
+### `Pty/` additional files
+- `KeyTranslator.cs` — translates `Console.ReadKey` results to ANSI escape sequences for the CLI terminal path.
+- `ShellCommandBuilder.cs` — builds a chain of setup commands joined with `;` followed by the CLI launch command.
+
+### `Protocol/` additional files
+- `TerminalGridSerializer.cs` — converts a `TerminalEmulator` snapshot (scrollback + current screen) into an ANSI byte stream that xterm.js renders instantly on reconnect.
+- `TerminalTextSanitizer.cs` — strips ANSI escape/control sequences and non-printable characters from raw terminal text to produce plain text.
+- `TerminalTextWithControlPart.cs` — enum and helpers classifying common ANSI/control sequence types in PTY streams.
+
+### `Core/` additional files
+- `ChildParentWatchdogService.cs` — `BackgroundService` registered only in tab child processes (`--parent-pid`); exits the child when the root backend dies ungracefully so children don't become orphans.
+- `NativeConsoleGeometry.cs` — reads the visible cell grid of the real console hosting a native session so the inner PTY uses matching dimensions.
+
+### Observer implementations (`Observers/`)
+- `GitDiffIdleCaptureObserver.cs` — forwards terminal idle + session-complete events to `IGitDiffCaptureService` for git diff capture.
+- `WaitingForUserInputObserver.cs` — detects when Codex is sitting at a prompt waiting for user input by analyzing PTY chunk repetition patterns.
+- `SessionStateEventObserver.cs` — publishes session lifecycle state changes to `IAppEventBus` so browser clients receive real-time updates (metadata only, no raw I/O).
+- `MyTerminalObserver.cs` — debugging/development observer.
 
 ## Session Modes
 
@@ -297,7 +336,7 @@ they render/capture the xterm canvas.
 ## Known Constraints
 1. Single active terminal session (`TerminalSessionService` static state).
 2. One active local web viewer at a time.
-3. Replay buffer is byte-based (16KB), not line-aware.
+3. Grid replay is generated from the headless `TerminalEmulator` (20k-line scrollback), not a fixed byte ring buffer.
 4. Input/output are raw terminal bytes; rendering correctness depends on xterm configuration and PTY dimensions.
 5. `ITerminalIoObserverService` dispatch is in-process only.
 

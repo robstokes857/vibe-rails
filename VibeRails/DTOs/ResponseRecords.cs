@@ -683,8 +683,14 @@ namespace VibeRails.DTOs
         // Read-only: whether VibeRails:ExportUrl holds a usable HTTPS URL. The client gates the
         // Export Data button on this as well as on a saved key, so the shipped placeholder
         // doesn't present a button whose only possible outcome is "not configured".
-        bool DataExportConfigured = false
+        bool DataExportConfigured = false,
+        // Git Guard commit-msg policy. Nullable so an older cached client that does not send the
+        // field cannot reset the persisted choice when it saves unrelated settings.
+        bool? RemoveCoAuthorTrailers = null
     );
+    // Append new fields at the END of this record, with a default. Inserting one in the middle
+    // shifts every positional argument after it: call sites only fail to compile when the types
+    // stop lining up, so a same-typed neighbour is rebound silently.
 
     // Narrow update for just the notification computer name. Lets the terminal
     // settings panel change ComputerName without resending (and risking clobbering)
@@ -727,6 +733,18 @@ namespace VibeRails.DTOs
         long TokensSaved,
         long TokensSavedSession,
         long TokensSavedMonth
+    );
+
+    // Payload for the token_saver_pause app event, and the body of the /llm/control/token-saver
+    // responses. PausedUntilUtc is an absolute ISO-8601 instant, not a remaining duration: the
+    // browser renders its own countdown and clears the badge when the clock passes it, so the
+    // display self-heals without polling and without the server pushing an "it ended" event.
+    // Null means not paused (a resume, or an expiry that was observed server-side).
+    // TabId is stamped onto the event by TerminalTabHostService.EnrichPayload on the way out of the
+    // tab child — the pause is per-tab, and the meter is app-wide.
+    public record TokenSaverPausePayload(
+        string? PausedUntilUtc,
+        bool SaverEnabled = true
     );
 
     // Payload for the periodic token-savings publish job (POST /api/v1/token-savings).
@@ -1230,6 +1248,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateComputerNameDto))]
     [JsonSerializable(typeof(ProxyActivityPingPayload))]
     [JsonSerializable(typeof(TokenSavingsDto))]
+    [JsonSerializable(typeof(TokenSaverPausePayload))]
     [JsonSerializable(typeof(TokenSavingsPostDto))]
     // Compression capture DTOs
     [JsonSerializable(typeof(CompressionStageTraceResponse))]

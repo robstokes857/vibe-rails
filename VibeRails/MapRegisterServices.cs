@@ -86,7 +86,18 @@ namespace VibeRails
             serviceCollection.AddSingleton<ILocalLlmProxyContext>(sp =>
                 new LocalLlmProxyContext(localApiBaseUrl, sp.GetRequiredService<IAuthService>()));
             serviceCollection.AddSingleton<ILlmProxySessionState, LlmProxySessionState>();
-            serviceCollection.AddSingleton<ILlmProxySettingsService, LlmProxySettingsService>();
+            // Singleton, and ungated: the pause must outlive request scopes, and it is the terminal
+            // tab child — not the root — that hosts the proxy an agent is asking to pause. In the
+            // root it simply stays un-paused.
+            serviceCollection.AddSingleton<ITokenSaverPauseState, TokenSaverPauseState>();
+            // One instance behind two interfaces: the effective snapshot the proxy routes read, and
+            // the pause-blind "is it configured on" question the control endpoint asks. Registering
+            // them separately would give the control endpoint its own settings reader.
+            serviceCollection.AddSingleton<LlmProxySettingsService>();
+            serviceCollection.AddSingleton<ILlmProxySettingsService>(
+                sp => sp.GetRequiredService<LlmProxySettingsService>());
+            serviceCollection.AddSingleton<ITokenSaverConfiguration>(
+                sp => sp.GetRequiredService<LlmProxySettingsService>());
             // Host adapters behind the TokenSaver library's seams: auth-gate → IAuthService,
             // event sink → app event bus + Serilog + the state.db savings tally.
             serviceCollection.AddSingleton<ILlmProxyAuthGate, LlmProxyAuthGateAdapter>();
@@ -205,6 +216,15 @@ namespace VibeRails
                 // so the MCP server can resolve it (and its IUnifiedSearchService dependency)
                 // from the per-request scope.
                 serviceCollection.AddScoped<SessionSearchTool>();
+                // Same story for TokenSaverTool (ctor-injected IHttpClientFactory). Its named client
+                // is short-timeout because every call is a loopback hop to this machine's proxy.
+                // Registered here AND in McpStdioHost.ConfigureServices — the two transports must
+                // expose the same tools.
+                serviceCollection.AddHttpClient(TokenSaverTool.HttpClientName, client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(10);
+                });
+                serviceCollection.AddScoped<TokenSaverTool>();
                 // run_shell_command (HostShellTools) and web_search/web_fetch (WebResearchTools) are
                 // intentionally not exposed for now (security review 2026-07-02). Classes kept in-tree;
                 // to restore, re-add AddScoped<...>() here, WithTools<...>() in the chain below, and the
@@ -217,7 +237,8 @@ namespace VibeRails
                     })
                     .WithHttpTransport()
                     .WithTools<RulesTool>()
-                    .WithTools<SessionSearchTool>();
+                    .WithTools<SessionSearchTool>()
+                    .WithTools<TokenSaverTool>();
             }
 
             // Claude Agent Sync Service (syncs CLAUDE.md to AGENTS.md on session lifecycle)

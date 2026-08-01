@@ -1,5 +1,6 @@
 using TokenSaver;
 using VibeRails.Auth;
+using VibeRails.Routes;
 using VibeRails.Services;
 
 namespace VibeRails.Middleware;
@@ -58,8 +59,10 @@ public class CookieAuthMiddleware
                 return;
             }
 
-            // API and MCP calls should not be redirected (fetch/XHR/MCP clients expect status codes).
-            if (path.StartsWith("/api/") || IsMcpPath(path))
+            // API, MCP and token-saver control calls should not be redirected (fetch/XHR/MCP
+            // clients expect status codes). The control route is reached by an MCP tool, which
+            // surfaces whatever comes back as its result — an HTML page there is unreadable noise.
+            if (path.StartsWith("/api/") || IsMcpPath(path) || TokenSaverPauseRoutes.IsControlPath(path))
             {
                 context.Response.StatusCode = 401;
                 await context.Response.WriteAsync("Unauthorized");

@@ -170,6 +170,20 @@ public sealed class JobStoreOverlapTests : IDisposable
     }
 
     [Fact]
+    public async Task LaunchMinimized_RoundTripsAndIsSnapshottedOntoQueuedRuns()
+    {
+        var (store, jobId) = await SeedJobAsync(launchMinimized: true);
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var job = await store.GetJobAsync(jobId, cancellationToken);
+        var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+        var run = await store.GetRunAsync(runId!, cancellationToken);
+
+        Assert.True(job!.LaunchMinimized);
+        Assert.True(run!.LaunchMinimized);
+    }
+
+    [Fact]
     public async Task SessionInsert_AtomicallyLinksTheSessionIdToItsJobRun()
     {
         await CreateSessionsSchemaAsync(TestContext.Current.CancellationToken);
@@ -210,7 +224,10 @@ public sealed class JobStoreOverlapTests : IDisposable
     /// <summary>
     /// Creates the Environments row the run insert INNER JOINs against, then a Job pointing at it.
     /// </summary>
-    private async Task<(JobStore Store, long JobId)> SeedJobAsync(int? timeoutMinutes = null, int? intervalMinutes = null)
+    private async Task<(JobStore Store, long JobId)> SeedJobAsync(
+        int? timeoutMinutes = null,
+        int? intervalMinutes = null,
+        bool launchMinimized = false)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var store = new JobStore(_connectionString);
@@ -228,7 +245,8 @@ public sealed class JobStoreOverlapTests : IDisposable
             Prompt: "Run the nightly review.",
             TimeoutMinutes: timeoutMinutes,
             Enabled: true,
-            Triggers: triggers), cancellationToken);
+            Triggers: triggers,
+            LaunchMinimized: launchMinimized), cancellationToken);
 
         return (store, job.Id);
     }

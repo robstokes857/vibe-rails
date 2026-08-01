@@ -85,6 +85,8 @@ public static class AppSettingsRoutes
                 settings.OpenCodeTokenSaverEnabled = settingsDto.OpenCodeTokenSaverEnabled.Value;
             if (settingsDto.TokenSaverCaptureEnabled.HasValue)
                 settings.TokenSaverCaptureEnabled = settingsDto.TokenSaverCaptureEnabled.Value;
+            if (settingsDto.RemoveCoAuthorTrailers.HasValue)
+                settings.RemoveCoAuthorTrailers = settingsDto.RemoveCoAuthorTrailers.Value;
 
             // Save back to settings.json
             Config.Save(settings);
@@ -145,7 +147,8 @@ public static class AppSettingsRoutes
             ClearApiKey: null,
             // Asked of DataExportService itself so the button the client shows and the rule the
             // export enforces can't drift apart (placeholder value, non-HTTPS, unparseable).
-            DataExportConfigured: true
+            DataExportConfigured: true,
+            RemoveCoAuthorTrailers: settings.RemoveCoAuthorTrailers
         );
     }
 

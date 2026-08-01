@@ -2,7 +2,16 @@ namespace VibeRails.Services.Terminal;
 
 public interface ITerminalStateService
 {
-    Task<string> CreateSessionAsync(string cli, string workDir, string? envName, bool makeRemote = false, CancellationToken ct = default, string? initialUserInput = null, string? jobRunId = null);
+    Task<string> CreateSessionAsync(
+        string cli,
+        string workDir,
+        string? envName,
+        bool makeRemote = false,
+        CancellationToken ct = default,
+        string? initialUserInput = null,
+        string? jobRunId = null,
+        int initialCols = Terminal.DefaultCols,
+        int initialRows = Terminal.DefaultRows);
     void PublishSessionStart(string sessionId, string cli, string workDir, string? envName, IReadOnlyList<string> setupCommands, string launchCommand);
     void LogOutput(string sessionId, ReadOnlyMemory<byte> data, TerminalIoSource source = TerminalIoSource.Pty);
     void RecordInput(string sessionId, string input, TerminalIoSource source = TerminalIoSource.Unknown);

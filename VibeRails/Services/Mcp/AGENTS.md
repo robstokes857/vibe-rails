@@ -1,7 +1,7 @@
 # MCP Server (in-process)
 
 VibeRails hosts a Model Context Protocol (MCP) server **inside `vb.exe`** — no separate binary to
-build or ship. The same two tools are exposed over **two transports** so each consumer gets its
+build or ship. The same tools are exposed over **two transports** so each consumer gets its
 natural one:
 
 - **HTTP** at `/mcp` (Streamable HTTP) — for the dashboard MCP Explorer.
@@ -15,13 +15,13 @@ natural one:
 vb.exe — Native AOT, two MCP entry points sharing the same tool classes
 │
 ├── HTTP (dashboard's Kestrel, root backend only)
-│     MapRegisterServices: AddMcpServer().WithHttpTransport().WithTools<Rules/SessionSearch>()
+│     MapRegisterServices: AddMcpServer().WithHttpTransport().WithTools<Rules/SessionSearch/TokenSaver>()
 │     Program.cs:          app.MapMcp("/mcp")
 │     CookieAuthMiddleware in front of /mcp     ← viberails_session token required
 │
 └── stdio (`vb mcp`, McpStdioHost.cs)
       Program.cs branches BEFORE the web host:  if (McpStdioHost.IsRequested(args)) …
-      AddMcpServer().WithStdioServerTransport().WithTools<Rules/SessionSearch>()
+      AddMcpServer().WithStdioServerTransport().WithTools<Rules/SessionSearch/TokenSaver>()
       No web server, no port, no auth           ← inherently scoped to the spawning CLI
 ```
 
@@ -51,6 +51,9 @@ MCP normalizes C# method names to **snake_case**, so the wire names differ from 
 |------------------------|--------|-------------|
 | `validate_vca` | `RulesTool.ValidateVca` | Validates the staged Git index snapshot against `- [ENFORCEMENT] …` rules from the indexed AGENTS.md files. |
 | `search_history` | `SessionSearchTool.SearchHistory` | Semantic + keyword search over the developer's captured agent history. |
+| `pause_token_saver` | `TokenSaverTool.PauseTokenSaver` | Turns VibeRails' token compression off for 5 minutes for this terminal tab, so an agent can read elided output verbatim. |
+| `resume_token_saver` | `TokenSaverTool.ResumeTokenSaver` | Restores token compression immediately, ending an active pause early. |
+| `get_token_saver_status` | `TokenSaverTool.GetTokenSaverStatus` | Reports whether compression is active and whether a pause window is open. |
 
 > The wire names are what tool callers use. Calling `SearchHistory` (PascalCase) returns "Unknown tool".
 
@@ -71,6 +74,39 @@ It calls the same [`IUnifiedSearchService`](../BertV2/IUnifiedSearchService.cs) 
 the single best-overall ranking — formatted as readable text (agent, kind, timestamp, session id,
 preview). There is **no separate vector store for MCP**; it reuses the real corpus the app already
 builds from captured sessions.
+
+### `pause_token_saver` / `resume_token_saver` / `get_token_saver_status` — per-tab compression control
+
+`TokenSaverTool` is an **instance tool** with constructor injection (`IHttpClientFactory`). It is
+registered `AddScoped<TokenSaverTool>()` alongside `WithTools<TokenSaverTool>()` in both transports
+(the two transports must expose the same tools).
+
+The interesting part is which process answers. This tool usually runs inside a `vb mcp` child that
+the CLI spawned, while the proxy doing the compressing lives in the terminal tab's own child
+`vb.exe` — a different process entirely. The link between them is the environment: the CLI was
+launched with the proxy's base-URL env var and its two proxy tokens, and a spawned MCP server
+inherits that environment, so it can call the exact proxy whose output it is reading. That also
+makes the pause per-tab for free: the only proxy this tool can reach is its own tab's.
+
+`CommandService.AddProxyContactDetails` stamps the same three variables on every proxied launch,
+regardless of provider:
+
+| Variable | Purpose |
+|---|---|
+| `VIBERAILS_LLM_PROXY_BASE` | The proxy host to call. |
+| `VIBERAILS_LLM_PROXY_SESSION_TOKEN` | Session half of the proxy auth contract. |
+| `VIBERAILS_LLM_PROXY_TAB_TOKEN` | Tab half — required; session alone is not enough. |
+
+Stating them uniformly is the point: each CLI learns the proxy differently (Claude via
+`ANTHROPIC_BASE_URL`, Codex via a `--config` arg, OpenCode via JSON in `OPENCODE_CONFIG_CONTENT`),
+and none of those is readable by a generic child.
+
+When those env vars are absent — the dashboard's MCP Explorer, or a CLI launched with the proxy
+off — there is nothing to pause, and the tools say so rather than silently succeeding. Calls are
+loopback POSTs with a 10-second timeout; switching compression on or off invalidates the provider's
+prompt cache, so the descriptions tell the agent not to call speculatively. See
+[`TokenSaver/README.md`](../../../TokenSaver/README.md) § *Pausing* for the pause's lifetime and
+its single application point.
 
 ### Host shell command tools
 
@@ -142,8 +178,9 @@ case; the add step is intentionally not quiet.
 
 - `Tests/Services/Mcp/McpServerHttpTests.cs` — hosts the real `AddMcpServer().WithHttpTransport()
   + MapMcp` wiring on a loopback Kestrel and drives it through `McpClientService` over Streamable
-  HTTP; asserts the exact two-tool list, tool execution, and that the DI-injected `SessionSearchTool`
-  resolves (with a deterministic fake `IUnifiedSearchService`).
+  HTTP; asserts the exact five-tool list (`validate_vca`, `search_history`, `pause_token_saver`,
+  `resume_token_saver`, `get_token_saver_status`), tool execution, and that the DI-injected
+  `SessionSearchTool` resolves (with a deterministic fake `IUnifiedSearchService`).
 - `Tests/Services/Mcp/McpStdioHostTests.cs` — pins the `vb mcp` trigger and that
   `McpStdioHost.ConfigureServices` registers the tools + BERT read-path. End-to-end stdio is
   verified by spawning `vb mcp` and running a handshake (also asserts stdout stays JSON-only).

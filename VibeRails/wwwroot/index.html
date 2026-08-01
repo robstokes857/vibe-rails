@@ -1365,6 +1365,25 @@
                 <div class="col-md-8 col-lg-6 mb-4">
                     <div class="sandbox-item-card text-start">
                         <div class="mb-3">
+                            <span class="sandbox-item-name">Git Commit Settings</span>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox"
+                                id="setting-remove-co-author-trailers">
+                            <label class="form-check-label" for="setting-remove-co-author-trailers">
+                                Remove co-author tags
+                            </label>
+                        </div>
+                        <small class="form-text text-muted">When Git Guard's <code>commit-msg</code> hook runs,
+                            remove every <code>Co-authored-by:</code> trailer before Git creates the commit.
+                            Enabled by default.</small>
+                    </div>
+                </div>
+            </div>
+            <div class="row justify-content-center">
+                <div class="col-md-8 col-lg-6 mb-4">
+                    <div class="sandbox-item-card text-start">
+                        <div class="mb-3">
                             <span class="sandbox-item-name">Token Saver</span>
                         </div>
                         <small class="form-text text-muted d-block mb-3">Shrinks shell tool output on its way to the

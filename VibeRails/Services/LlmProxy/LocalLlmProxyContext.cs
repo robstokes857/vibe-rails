@@ -21,6 +21,17 @@ public sealed class LocalLlmProxyContext : ILocalLlmProxyContext
     public const string SessionTokenVariable = "VIBERAILS_LLM_PROXY_SESSION_TOKEN";
     public const string TabTokenVariable = "VIBERAILS_LLM_PROXY_TAB_TOKEN";
 
+    /// <summary>
+    /// The proxy host a CLI-spawned helper should talk to, e.g. an MCP server started by
+    /// <c>claude mcp add ... -- vb mcp</c>. Every provider already reaches the proxy, but by a
+    /// different route: Claude reads <c>ANTHROPIC_BASE_URL</c>, Codex gets its base URL in a
+    /// <c>--config</c> arg, and OpenCode gets it inside <c>OPENCODE_CONFIG_CONTENT</c> JSON. None of
+    /// those is a contract a generic child can read, so this variable states it once, the same way,
+    /// for all of them. Paired with <see cref="SessionTokenVariable"/> and
+    /// <see cref="TabTokenVariable"/> — the proxy requires both tokens.
+    /// </summary>
+    public const string BaseUrlVariable = "VIBERAILS_LLM_PROXY_BASE";
+
     private readonly IAuthService _authService;
 
     public LocalLlmProxyContext(string apiBaseUrl, IAuthService authService)
