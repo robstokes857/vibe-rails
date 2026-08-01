@@ -55,9 +55,11 @@ npx playwright show-report
 
 ## Configuration
 
-- **Target Files:** The tests serve files directly from ../VibeRails/wwwroot.
-- **Server:** Uses http-server on port 8080.
-- **Logic:** Tests are located in the ./tests directory.
+- **Backend:** `global-setup.js` spawns the real VibeRails backend (`dotnet run --project ../VibeRails -- --vs-code-v1`), consumes the one-time bootstrap URL to persist an auth cookie + tab token (`storageState`), and writes the dynamic `baseURL` to `.playwright-runtime.json`. `global-teardown.js` kills the backend by PID.
+- **Fake CLI:** `VIBERAILS_TEST_FAKE_CLI=1` (set by global-setup) makes `CommandService.PrepareSession` short-circuit to a portable echo+sleep so PTY+WS+xterm are exercised without a real LLM CLI.
+- **Custom backend:** Set `VIBERAILS_E2E_BACKEND_DLL` to point the suite at an already-built isolated DLL instead of `dotnet run`.
+- **Workers:** 1 (one backend instance per run, shared via saved `storageState`).
+- **Tests:** Located in `./tests`; `xterm-scrollback.spec.js` is excluded from Playwright (run via `npm run test:node` with `node --test` + `@xterm/headless`).
 
 ## Adding New Tests
 

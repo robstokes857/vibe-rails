@@ -28,6 +28,7 @@ public class RulesToolTests
     public void ParseRules_DeduplicatesSameRuleWhenFormatsOverlap()
     {
         const string content = """
+            ## Vibe Rails Rules
             - [COMMIT] Log all file changes
             - Log all file changes (COMMIT)
             """;
@@ -43,6 +44,7 @@ public class RulesToolTests
     public void ParseRules_DoesNotTreatSuffixInsideBracketRuleAsSecondRule()
     {
         const string content = """
+            ## Vibe Rails Rules
             - [WARN] Log all file changes (STOP)
             """;
 
@@ -51,6 +53,99 @@ public class RulesToolTests
         Assert.Single(rules);
         Assert.Equal("Log all file changes (STOP)", rules[0].RuleText);
         Assert.Equal("WARN", rules[0].Enforcement);
+    }
+
+    [Fact]
+    public void ParseRules_IgnoresRuleLinesOutsideARulesSection()
+    {
+        // The whole file used to be scanned, so any prose bullet that happened to end in
+        // "(STOP)" became policy.
+        const string content = """
+            ## Rule Format
+            - Require test coverage minimum 80% (STOP)
+
+            ## Vibe Rails Rules
+            - Log all file changes (WARN)
+
+            ## Files
+            - Cyclomatic complexity < 20 (STOP)
+            """;
+
+        var rules = RulesTool.ParseRules(content, "AGENTS.md");
+
+        Assert.Single(rules);
+        Assert.Equal("Log all file changes", rules[0].RuleText);
+    }
+
+    [Fact]
+    public void ParseRules_IgnoresExamplesInsideFencedCodeBlocks()
+    {
+        // This is the AGENTS.md pattern that blocked a real commit: a fenced example of how to
+        // write rules was read as three live rules, one of them an unbypassable STOP.
+        const string content = """
+            ## Vibe Rails Rules
+            - Log all file changes (WARN)
+
+            Write rules like this:
+
+            ```markdown
+            ## Vibe Rails Rules
+            - Cyclomatic complexity < 20 (COMMIT)
+            - Require test coverage minimum 80% (STOP)
+            ```
+            """;
+
+        var rules = RulesTool.ParseRules(content, "AGENTS.md");
+
+        Assert.Single(rules);
+        Assert.Equal("Log all file changes", rules[0].RuleText);
+        Assert.DoesNotContain(rules, rule => rule.RuleText.Contains("coverage", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ParseRules_ReadsBareBulletsAsWarn()
+    {
+        // AgentFileService.AddRulesAsync writes bare "- rule" lines, so the hook ignoring them
+        // meant the Rules page could add a rule that never ran.
+        const string content = """
+            ## Vibe Rails Rules
+            - Log all file changes
+            """;
+
+        var rules = RulesTool.ParseRules(content, "AGENTS.md");
+
+        Assert.Single(rules);
+        Assert.Equal("Log all file changes", rules[0].RuleText);
+        Assert.Equal("WARN", rules[0].Enforcement);
+    }
+
+    [Fact]
+    public async Task ValidateVcaReportAsync_UnrecognizedRule_WarnsInsteadOfBlocking()
+    {
+        var snapshot = CreateSnapshot(
+            "AGENTS.md",
+            """
+            # Agent Instructions
+            ## Vibe Rails Rules
+            - My new rule display text (STOP)
+            ## Files
+            - AGENTS.md
+            - src/app.cs
+            """,
+            "src/app.cs");
+
+        var report = await RulesTool.ValidateVcaReportAsync(
+            cancellationToken: TestContext.Current.CancellationToken,
+            stagedSnapshot: snapshot);
+
+        // A rule no validator understands describes a check that is not running. Blocking the
+        // commit over it would enforce nothing while costing the user the commit.
+        Assert.False(report.HasStopViolation);
+        Assert.Empty(report.RequiredAcknowledgments);
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(VcaRuleFindingKind.Warning, finding.Kind);
+        Assert.Equal("My new rule display text", finding.Rule);
+        Assert.Contains("UNRECOGNIZED", finding.Reason, StringComparison.Ordinal);
     }
 
     [Fact]

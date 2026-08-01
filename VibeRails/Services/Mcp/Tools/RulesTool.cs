@@ -47,7 +47,13 @@ public class RulesTool
     {
         Passed,
         Violated,
-        Deferred
+        Deferred,
+
+        // No validator matched the rule text at all. Distinct from Violated because it says
+        // nothing about the staged code — it says the rule is unenforceable as written. Blocking
+        // a commit over it punishes the wrong thing at the wrong moment, so it is always reported
+        // as a warning no matter what enforcement level the line declared.
+        Unrecognized
     }
 
     private sealed record RuleValidationResult(RuleValidationState State, string Message)
@@ -60,6 +66,9 @@ public class RulesTool
 
         public static RuleValidationResult Deferred(string message) =>
             new(RuleValidationState.Deferred, message);
+
+        public static RuleValidationResult Unrecognized(string message) =>
+            new(RuleValidationState.Unrecognized, message);
     }
 
     private sealed record GitCommandResult(
@@ -67,22 +76,6 @@ public class RulesTool
         string StdOut,
         string StdErr,
         bool TimedOut);
-
-    // Enforcement vocabulary understood in AGENTS.md rule lines. This is a deliberate SUPERSET of
-    // Services.EnforcementParser (WARN/COMMIT/STOP): the MCP tool additionally honors the bracket
-    // form and the SKIP/DISABLED opt-outs, which the UI-side parser has no concept of. Kept as one
-    // constant so the two patterns below can't drift apart from each other.
-    private const string EnforcementAlternation = "WARN|COMMIT|STOP|SKIP|DISABLED";
-
-    // Patterns to extract rules from AGENTS.md. The bracket form is the MCP-native
-    // format; the suffix form matches agent files produced by the current UI.
-    private static readonly Regex BracketRulePattern = new Regex(
-        $@"^-\s*\[({EnforcementAlternation})\]\s*(.+)$",
-        RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
-
-    private static readonly Regex SuffixRulePattern = new Regex(
-        $@"^-\s*(.+?)\s*\(({EnforcementAlternation})\)\s*$",
-        RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
 
     [McpServerTool]
     [Description("Validates staged files against VCA rules defined in AGENTS.md files. Supports '- [WARN] Rule' and '- Rule (WARN)' formats. Call this BEFORE attempting to commit changes. Returns validation results with any COMMIT-level violations that require acknowledgment.")]
@@ -220,6 +213,25 @@ public class RulesTool
                             VcaRuleFindingKind.Deferred,
                             validation.Message,
                             sourcePath)));
+                    continue;
+                }
+
+                // A rule no validator understands is a problem with the rule, not with the commit.
+                // It is reported so it cannot rot unnoticed, and reported as a warning so a typo
+                // in AGENTS.md can never stand between the user and a commit — the enforcement
+                // level on the line describes a check that is not actually running.
+                if (validation.State == RuleValidationState.Unrecognized)
+                {
+                    var unrecognizedPath = GetRuleSourcePath(sourceFile, gitRoot);
+                    warnings.Add($"[WARN] {ruleText}: {validation.Message}");
+                    findings.Add(new VcaRuleFinding(
+                        VcaRuleFindingKind.Warning,
+                        enforcement,
+                        ruleText,
+                        validation.Message,
+                        unrecognizedPath,
+                        $"Git Guard cannot evaluate this rule as written. Update or remove it in "
+                            + $"{unrecognizedPath}. Until then it enforces nothing, whatever level it declares."));
                     continue;
                 }
 
@@ -377,6 +389,12 @@ public class RulesTool
         }
     }
 
+    /// <summary>
+    /// Rules declared by one AGENTS.md, deduplicated. Discovery itself lives in
+    /// <see cref="AgentRuleSectionReader"/> so the Rules page and this hook cannot disagree about
+    /// what a file declares — they did, and the hook ended up enforcing fenced documentation
+    /// examples that the page could not show.
+    /// </summary>
     internal static List<(string RuleText, string Enforcement, string SourceFile)> ParseRules(
         string content,
         string sourceFile)
@@ -384,25 +402,9 @@ public class RulesTool
         var rules = new List<(string RuleText, string Enforcement, string SourceFile)>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var rawLine in content.Split('\n'))
+        foreach (var rule in AgentRuleSectionReader.Read(content))
         {
-            var line = rawLine.TrimEnd('\r');
-            var bracketMatch = BracketRulePattern.Match(line);
-            if (bracketMatch.Success)
-            {
-                var enforcement = bracketMatch.Groups[1].Value.ToUpperInvariant();
-                var ruleText = bracketMatch.Groups[2].Value.Trim();
-                AddRuleIfNew(rules, seen, ruleText, enforcement, sourceFile);
-                continue;
-            }
-
-            var suffixMatch = SuffixRulePattern.Match(line);
-            if (suffixMatch.Success)
-            {
-                var ruleText = suffixMatch.Groups[1].Value.Trim();
-                var enforcement = suffixMatch.Groups[2].Value.ToUpperInvariant();
-                AddRuleIfNew(rules, seen, ruleText, enforcement, sourceFile);
-            }
+            AddRuleIfNew(rules, seen, rule.RuleText, rule.Enforcement, sourceFile);
         }
 
         return rules;
@@ -729,8 +731,9 @@ public class RulesTool
                     $"Commit message contains forbidden words: {string.Join(", ", foundWords)}");
         }
 
-        return RuleValidationResult.Violation(
-            "UNSUPPORTED: this VCA rule has no validator and was not silently accepted.");
+        return RuleValidationResult.Unrecognized(
+            "UNRECOGNIZED: no validator matches this rule text, so nothing about it is being "
+                + "checked. Fix the wording or remove the rule.");
     }
 
     private static bool IsCommitMessageRule(string ruleText) =>

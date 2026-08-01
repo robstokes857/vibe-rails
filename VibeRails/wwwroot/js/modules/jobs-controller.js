@@ -410,15 +410,20 @@ export class JobController {
         // re-running work that had already landed. Retry starts at Failed.
         const retryable = statusCode >= RUN_STATUS_CODE.FAILED;
         const detail = this.runDetail(run);
+        // "Replay" and "Retry" both read as "run this again", so the row actions carry no
+        // text at all: an eye watches the recording, a play button runs it again. The
+        // wording moves to the tooltip, where it can be explicit without crowding the row.
+        const watchTitle = active ? 'Watch this run live' : 'Watch this recording';
         return `<tr>
-            <td><button class="job-run-link" type="button" data-job-action="view-run" data-run-id="${this.escape(run.id)}">${this.escape(run.jobName)}</button><small>${this.escape(getLlmName(Number(run.llm)))}${run.environmentName ? ` · ${this.escape(run.environmentName)}` : ''}</small></td>
+            <td><button class="job-run-link" type="button" data-job-action="view-run" data-run-id="${this.escape(run.id)}" title="${watchTitle}">${this.escape(run.jobName)}</button><small>${this.escape(getLlmName(Number(run.llm)))}${run.environmentName ? ` · ${this.escape(run.environmentName)}` : ''}</small></td>
             <td>${trigger}</td>
             <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}</td>
             <td title="${this.escape(run.queuedUtc)}">${this.escape(this.relativeTime(run.queuedUtc))}</td>
             <td${this.durationTitle(run)}>${this.escape(this.runDuration(run))}</td>
             <td class="text-end jobs-run-actions">
-                ${active ? `<button class="btn btn-sm btn-outline-danger" type="button" data-job-action="cancel-run" data-run-id="${this.escape(run.id)}">Cancel</button>` : ''}
-                ${retryable ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="retry-run" data-run-id="${this.escape(run.id)}">Retry</button>` : ''}
+                ${active ? `<button class="btn btn-sm btn-outline-danger job-icon-action" type="button" data-job-action="cancel-run" data-run-id="${this.escape(run.id)}" title="Stop this run" aria-label="Stop this run"><i class="fa-solid fa-stop" aria-hidden="true"></i></button>` : ''}
+                ${retryable ? `<button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="retry-run" data-run-id="${this.escape(run.id)}" title="Run this automation again" aria-label="Run this automation again"><i class="fa-solid fa-play" aria-hidden="true"></i></button>` : ''}
+                <button class="btn btn-sm btn-outline-secondary job-icon-action job-run-watch" type="button" data-job-action="view-run" data-run-id="${this.escape(run.id)}" title="${watchTitle}" aria-label="${watchTitle}"><i class="fa-solid fa-eye-slash" data-watch-idle aria-hidden="true"></i><i class="fa-solid fa-eye" data-watch-live aria-hidden="true"></i></button>
             </td>
         </tr>`;
     }
@@ -855,10 +860,10 @@ export class JobController {
                     <div><strong>${this.escape(run?.jobName || 'Automation run')}</strong><span class="job-run-status" data-tone="${status.tone}">${status.label}</span></div>
                     <small>${this.escape(run?.projectPath || '')}</small>
                     ${run?.errorMessage ? `<p class="text-danger mb-0 mt-2">${this.escape(run.errorMessage)}</p>` : ''}
-                    <p class="text-muted mb-0 mt-2">${active ? 'This run is starting — its recorded terminal will be replayable here shortly.' : 'This run has no recorded terminal to replay.'}</p>
+                    <p class="text-muted mb-0 mt-2">${active ? 'This run is starting — its recorded terminal will be ready to watch here shortly.' : 'This run has no recorded terminal to watch.'}</p>
                 </div>
                 <div class="d-flex justify-content-end gap-2 mt-3">
-                    ${active ? '<button class="btn btn-outline-danger" type="button" data-run-cancel>Cancel run</button>' : '<button class="btn btn-outline-secondary" type="button" data-run-retry>Retry</button>'}
+                    ${active ? '<button class="btn btn-outline-danger" type="button" data-run-cancel>Stop run</button>' : '<button class="btn btn-outline-secondary" type="button" data-run-retry>Run again</button>'}
                     <button class="btn btn-primary" type="button" data-action="close-modal">Close</button>
                 </div>
             </div>`);
@@ -949,10 +954,30 @@ export class JobController {
 
     async withBusy(button, label, operation) {
         const original = button?.innerHTML;
-        if (button) { button.disabled = true; button.textContent = label; }
+        const originalTitle = button?.getAttribute?.('title');
+        if (button) {
+            button.disabled = true;
+            // Icon actions are a fixed 32px square, so a text label ("Queueing…") overflows
+            // the box. Spin in place instead and put the wording in the tooltip, which is
+            // already where an icon-only button explains itself.
+            if (button.classList?.contains?.('job-icon-action')) {
+                button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>';
+                button.setAttribute?.('title', label);
+            } else {
+                button.textContent = label;
+            }
+        }
         try { await operation(); }
         catch (error) { this.app.showError(error?.message || 'The Automation action failed.'); }
-        finally { if (button?.isConnected) { button.disabled = false; button.innerHTML = original; } }
+        finally {
+            if (button?.isConnected) {
+                button.disabled = false;
+                button.innerHTML = original;
+                if (originalTitle !== null && originalTitle !== undefined) {
+                    button.setAttribute?.('title', originalTitle);
+                }
+            }
+        }
     }
 
     // ----- Recipes: export/import an Environment + Automation as a shareable recipe file -----

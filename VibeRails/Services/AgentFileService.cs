@@ -1,4 +1,5 @@
 using System.Text;
+using VibeRails.Services.VCA;
 using VibeRails.Utils;
 
 namespace VibeRails.Services
@@ -95,29 +96,23 @@ namespace VibeRails.Services
             return rulesWithEnforcement.Select(r => r.RuleText).ToList();
         }
 
+        /// <summary>
+        /// Rules this agent file declares, read through <see cref="AgentRuleSectionReader"/> — the
+        /// same reader the Git hook uses.
+        ///
+        /// Unrecognized rule text is returned rather than dropped. Silently hiding a rule the hook
+        /// can still see is what let a commit be blocked by a rule the Rules page insisted did not
+        /// exist. Writing is still validated (see <see cref="AddRulesAsync"/>), so the UI cannot
+        /// author junk; it just no longer pretends hand-edited junk is absent.
+        /// </summary>
         public async Task<List<RuleWithEnforcement>> GetRulesWithEnforcementAsync(string path, CancellationToken cancellationToken)
         {
-            string[] lines = await File.ReadAllLinesAsync(path, cancellationToken);
-            int index = lines.IndexOf(STRINGS.RULE_HEADER);
-            if (index == -1)
-                return new();
-
-            List<RuleWithEnforcement> rules = new List<RuleWithEnforcement>();
-            for (int i = index + 1; i < lines.Length; i++)
-            {
-                if (lines[i].StartsWith("##"))
-                    break;
-
-                if (lines[i].StartsWith("#") || string.IsNullOrWhiteSpace(lines[i]))
-                    continue;
-
-                string lineContent = lines[i].TrimStart('-', ' ').Trim();
-                var (ruleText, enforcement) = EnforcementParser.ParseRuleWithEnforcement(lineContent);
-
-                if (_rulesService.TryParse(ruleText, out Rule _))
-                    rules.Add(new RuleWithEnforcement(ruleText, enforcement));
-            }
-            return rules;
+            string content = await File.ReadAllTextAsync(path, cancellationToken);
+            return AgentRuleSectionReader.Read(content)
+                .Select(rule => new RuleWithEnforcement(
+                    rule.RuleText,
+                    EnforcementParser.Parse(rule.Enforcement)))
+                .ToList();
         }
 
         public async Task AddRulesAsync(string path, CancellationToken cancellationToken, params string[] rules)

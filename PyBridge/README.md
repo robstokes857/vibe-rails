@@ -2,8 +2,8 @@
 
 A small, **AOT-friendly** .NET library for running Python from C#: buffered results,
 live streaming in **both directions** (stdout/stderr out, stdin in), warm long-lived
-worker sessions, and zero-thought defaults  `PythonRunnerOptions.Discover()` finds the
-right interpreter (venv → conda → PATH) so your code doesn't have to care. Built on
+worker sessions, and zero-thought defaults. `PythonRunnerOptions.Discover()` finds the right
+interpreter (venv → conda → PATH) so your code doesn't have to care. Built on
 [CliWrap](https://github.com/Tyrrrz/CliWrap), which does the genuinely hard parts
 (async piping without deadlocks, argument escaping, cancellation, process teardown).
 
@@ -18,7 +18,7 @@ right interpreter (venv → conda → PATH) so your code doesn't have to care. B
 | `src/PyBridge.Console/` | Demo app: stdin/stdout round-trips, JSON parsing, GPU inference, streaming, error handling. |
 | `src/PyBridge.Tests/` | Failure-handling + API tests (bad exits, timeouts, kills, sessions, discovery). |
 | `src/PyBridge.Bench/` | Overhead benchmark: wrapper cost vs raw process cost. |
-| `src/PyBridge.LongRun/` | Long-run streaming profile: ~40s GPU training job streamed live with per-line timestamps. |
+| `src/PyBridge.LongRun/` | Long-run streaming profile: ~30s GPU training job streamed live with per-line timestamps. |
 | `python/` | `classifier.py` (ResNet inference), `train.py` (ResNet-18 training), `worker.py` (reference session worker). |
 
 ## Quick start
@@ -122,9 +122,9 @@ for line in iter(sys.stdin.readline, ''):
 
 `IPythonRunner` has just **four core methods**: `RunAsync`, `StreamAsync`, `Start`,
 `StartInteractive`. Everything else — `RunFileAsync`, `RunModuleAsync`, `RunCodeAsync`,
-the `Stream*` family, `StartFile`, `StartSession`, `ProbeAsync` — is provided as
-**C# 14 extension members**, so any implementation (including your test mock) gets the
-full convenience surface for free.
+the `Stream*` family, `StartFile`, `StartInteractiveFile`, `StartSession`,
+`StartSessionForModule`, `ProbeAsync` — is provided as **C# 14 extension members**, so any
+implementation (including your test mock) gets the full convenience surface for free.
 
 ```csharp
 services.AddSingleton<IPythonRunner>(new PythonRunner(PythonRunnerOptions.Discover()));

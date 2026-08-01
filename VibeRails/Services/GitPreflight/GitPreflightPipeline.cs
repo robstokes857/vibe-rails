@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using VibeRails.Services.VCA.Hooks;
 
 namespace VibeRails.Services.GitPreflight;
 
@@ -48,6 +49,7 @@ public sealed class GitPreflightPipeline : IGitPreflightPipeline
             bool blocking = false,
             bool? commitAllowed = null,
             int? stepNumber = null,
+            VcaHookValidationSummary? vcaSummary = null,
             CancellationToken emitCancellationToken = default)
         {
             if (eventSink == null)
@@ -68,7 +70,8 @@ public sealed class GitPreflightPipeline : IGitPreflightPipeline
                 blocking,
                 commitAllowed,
                 stepNumber,
-                _steps.Count), emitCancellationToken);
+                _steps.Count,
+                vcaSummary), emitCancellationToken);
         }
 
         GitStagedSnapshot snapshot;
@@ -200,6 +203,7 @@ public sealed class GitPreflightPipeline : IGitPreflightPipeline
                 result.DurationMs,
                 result.Blocking,
                 stepNumber: stepNumber,
+                vcaSummary: result.VcaSummary,
                 emitCancellationToken: cancellationToken);
         }
 

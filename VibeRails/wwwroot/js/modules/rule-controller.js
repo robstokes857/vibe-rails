@@ -447,6 +447,7 @@ export class RuleController {
             this.app.bindAction(root, '[data-action="run-git-preflight"]', () => this.runGitPreflight());
             this.app.bindAction(root, '[data-action="cancel-git-preflight"]', () => this.cancelGitPreflight());
             this.app.bindAction(root, '[data-action="exit-git-guard"]', () => this.exitToDashboard());
+            this.app.bindAction(root, '[data-action="open-hook-console"]', () => this.openHookConsole());
             this.bindHookControls(root);
         }
 
@@ -483,6 +484,39 @@ export class RuleController {
             // Navigation still works when an embedded host does not expose History.
         }
         this.app.navigate('dashboard', {}, { resetStack: true });
+    }
+
+    /**
+     * Opens the real pre-commit hook popup for this repository. This page already renders the
+     * same run as HTML; the console is what a commit actually shows, so it is worth being able
+     * to look at it — and to run the staged checks by hand — without making a commit first.
+     */
+    async openHookConsole() {
+        const button = this.query('[data-action="open-hook-console"]');
+        this.setButtonBusy(button, true, 'Opening…');
+
+        try {
+            const response = await this.app.apiCall(
+                '/api/v1/git/preflight/console', 'POST', null, { showLoading: false });
+            const succeeded = response?.success === true;
+            const message = response?.message || 'Hook console launch finished.';
+            this.setHookConsoleMessage(message);
+            this.app.showToast(
+                succeeded ? 'Hook Console Opened' : 'Hook Console Unavailable',
+                message,
+                succeeded ? 'success' : 'error');
+        } catch (error) {
+            const message = `Could not open the hook console: ${error.message}`;
+            this.setHookConsoleMessage(message);
+            this.app.showError(message);
+        } finally {
+            this.setButtonBusy(button, false);
+        }
+    }
+
+    setHookConsoleMessage(message) {
+        const target = this.query('[data-hook-console-message]');
+        if (target) target.textContent = String(message ?? '');
     }
 
     async refreshHookStatus() {
