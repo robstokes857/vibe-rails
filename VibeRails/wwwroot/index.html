@@ -857,6 +857,16 @@
                 <p class="text-muted mb-0">
                     Inspect the staged commit through VCA, MintLint, and repository workflows before Git writes it.
                 </p>
+                <div class="git-guard-page-actions mt-3">
+                    <button class="btn btn-outline-primary d-inline-flex align-items-center gap-2"
+                        type="button" data-action="open-hook-console" data-idle-label="Run the hook console">
+                        <i class="fa-solid fa-terminal" aria-hidden="true"></i>
+                        <span data-button-label>Run the hook console</span>
+                    </button>
+                    <span class="text-muted small" data-hook-console-message>
+                        Runs the real pre-commit hook in its own window — the same one a commit opens.
+                    </span>
+                </div>
             </header>
 
             <section class="git-preflight-overview mb-4" data-git-guard-focused-only aria-live="polite">

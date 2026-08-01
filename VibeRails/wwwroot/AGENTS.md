@@ -27,8 +27,8 @@ global compression stages or any sibling tab. The same module owns the persisten
 meter at the far right of the terminal controls bar.
 
 The terminal dropdown shows two groups:
-- **Base CLIs**: Claude (default), Codex (default), Antigravity (default) — resolved to its executable server-side (Antigravity → `agy`)
-- **Custom Environments**: User-created environments — launches via LMBootstrap
+- **Base CLIs**: Claude, Codex, GLM 5.2, Kimi K3, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
+- **Custom Environments**: User-created environments — spawned directly via the tab start endpoint
 
 ### Flow: Launching a Custom Environment
 
@@ -68,7 +68,7 @@ The sandbox section appears on the dashboard when running in a local git project
 
 ### Flow: Launching Terminal in Sandbox
 
-1. User clicks a CLI button (Claude/Codex/Antigravity) on a sandbox card
+1. User selects a CLI/environment from the dropdown on a sandbox card, then clicks the Web Terminal launch button
 2. `sandboxController.launchInWebUI(sandboxId, sandboxName, cli, environmentName)` calls `terminalController.startTerminalWithOptions()`
 3. `startTerminalWithOptions()` creates a tab (`POST /api/v1/terminal/tabs`) and starts the session (`POST /api/v1/terminal/tabs/{tabId}/start`) with `{ cli, environmentName, workingDirectory: sandboxPath, title: "Sandbox: {name}" }`
 4. Terminal starts in sandbox directory with title bar showing sandbox name
@@ -100,7 +100,7 @@ POST   /api/v1/terminal/tabs/{tabId}/stop      # Stop the session in a tab
 WS     /api/v1/terminal/tabs/{tabId}/ws        # Bidirectional PTY byte stream
 ```
 
-The `start` body: `{ cli, environmentName?, workingDirectory?, title?, initialPrompt?, resumeSessionId? }`.
+The `start` body: `{ cli, environmentName?, workingDirectory?, title?, initialPrompt?, resumeSessionId?, resumeSummary?, makeRemote? }`.
 The WebSocket URL accepts `?cols=&rows=` so the backend can resize the PTY before
 replaying the session buffer (avoids the stale-geometry "double print" bug).
 

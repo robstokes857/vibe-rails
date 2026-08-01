@@ -420,7 +420,7 @@ TokenSaver/
 
 Host-side implementations live in `VibeRails/`:
 
-- `VibeRails/Services/LlmProxy/` — the settings, event-sink, capture-sink and exchange-sink adapters.
+- `VibeRails/Services/LlmProxy/` — the settings, event-sink, capture-sink and exchange-sink adapters, and the in-memory pause state (`TokenSaverPauseState.cs`).
 - `VibeRails/DB/CompressionCaptureStore.cs` — the per-tool_result capture writer.
 - `VibeRails/DB/LlmExchangeLogStore.cs` — the whole-request/response log. Its own database file
   (`~/.vibe_rails/proxy_exchanges.db`), never state.db. Every authenticated exchange handled by
@@ -429,6 +429,7 @@ Host-side implementations live in `VibeRails/`:
   after the stages change.
 - `VibeRails/DB/TokenSavingsStore.cs` — the byte tally.
 - `VibeRails/Routes/CompressionCaptureRoutes.cs` — captures, catalog, preview.
+- `VibeRails/Routes/TokenSaverPauseRoutes.cs` — the pause/resume/status control surface (see [Pausing](#pausing--the-agents-escape-hatch)).
 
 ## Tests
 

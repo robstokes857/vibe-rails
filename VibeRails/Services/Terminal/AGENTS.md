@@ -1,7 +1,7 @@
 # Terminal Service
 
 Current implementation reference for `VibeRails/Services/Terminal`.
-Verified against source on 2026-07-31.
+Verified against source on 2026-08-01.
 
 ## Scope
 This folder owns PTY lifecycle, session tracking hooks, local WebSocket viewer handling, and remote relay integration.
@@ -105,15 +105,12 @@ Validation:
 ### `TerminalRunner.cs`
 Session orchestrator.
 
-`PrepareSession(...)`
-- Builds launch command and optional extra args.
-- Adds the VibeRails MCP stdio registration setup command for managed CLIs
-  (Claude, Codex, Antigravity, Copilot, and OpenCode-backed CLIs).
-- Builds base env vars (`LANG`, `LC_ALL`, `PYTHONIOENCODING`).
-- Merges CLI-specific env vars via `LlmCliEnvironmentService` when environment name is provided.
-- Keeps agent-tool/MCP calls on the inherited root `ILocalToolApiContext`, while Claude/Codex use
-  `ILocalLlmProxyContext` for the current process's proxy URL and auth. This lets each terminal-tab
-  child apply its own process-local token-saver gate without breaking root tool routing.
+`TerminalRunner` does **not** own session preparation — it delegates to
+`CommandService.PrepareSessionAsync` (see the `Commands/CommandService.cs` section below) to
+build the launch command, setup commands, env vars, and proxy context. `TerminalRunner` itself
+injects `ILocalToolApiContext` (root tool routing) and `ILlmProxySessionState` (per-tab proxy
+gate state); the Claude/Codex proxy URL/auth env vars are built inside `CommandService` via
+`ILocalLlmProxyContext`.
 
 `CreateSessionAsync(...)`
 1. Creates DB/logging session via `ITerminalStateService.CreateSessionAsync`.
@@ -217,7 +214,9 @@ Behavior:
   - `OnInputReceived`
   - `OnReplayRequested`
   - `OnBrowserDisconnected`
+  - `OnReconnected`
   - `OnResizeRequested`
+  - `OnCommandReceived`
 
 ### `RemoteStateService.cs` (moved to `Services/Integrations/VibeCodeRemote/`)
 HTTP registration with relay server:
@@ -232,9 +231,18 @@ HTTP registration with relay server:
 - `TerminalResizeCoordinator.cs` — centralizes PTY resize handling so resize hooks and optional debounced redraw (`Ctrl+L`) are consistent across local and remote viewer paths.
 
 ### `Commands/CommandService.cs`
-- Builds the `PreparedTerminalSession` record (launch command, setup commands, environment, optional executable/argv) for terminal sessions.
+Owns session preparation (`PrepareSessionAsync`) — builds the `PreparedTerminalSession` record
+(launch command, setup commands, environment, optional executable/argv) for terminal sessions.
+- Adds the VibeRails MCP stdio registration setup command for managed CLIs
+  (Claude, Codex, Antigravity, Copilot, and OpenCode-backed CLIs incl. GLM 5.2 / Kimi K3).
+- Builds base env vars (`LANG`, `LC_ALL`, `PYTHONIOENCODING`).
+- Merges CLI-specific env vars via `LlmCliEnvironmentService` when an environment name is provided.
 - Resolves the MCP stdio server command path (published `vb.exe mcp` vs `dotnet <dll> mcp`).
 - Runs CLI MCP auto-registration commands (remove + add) via the platform shell.
+- Builds Claude/Codex proxy env vars via `ILocalLlmProxyContext` (the current process's proxy URL
+  and auth), so each terminal-tab child can apply its own process-local token-saver gate without
+  breaking root tool routing. (`TerminalRunner` separately injects `ILocalToolApiContext` for root
+  tool routing and `ILlmProxySessionState` for per-tab proxy gate state.)
 
 ### `Pty/` additional files
 - `KeyTranslator.cs` — translates `Console.ReadKey` results to ANSI escape sequences for the CLI terminal path.
@@ -290,7 +298,7 @@ From `Routes/TerminalRoutes.cs`:
 - `GET /api/v1/terminal/bootstrap-command`
 - `WS /api/v1/terminal/ws`
 
-Agent/tool control surface:
+Agent/tool control surface (from `Routes/AgentToolRoutes.cs`):
 - `GET /api/v1/agent-tools/terminal`
 - `POST /api/v1/agent-tools/terminal/open`
 - `POST /api/v1/agent-tools/terminal/input`

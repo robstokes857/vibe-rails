@@ -43,8 +43,8 @@ IBaseLlmCliLauncher (Interface)
 
 > **Pseudo-CLIs:** `LLM.Glm52` and `LLM.KimiK3` (OpenCode launched with a pinned `--model` flag)
 > reuse `IOpencodeLlmCliLauncher`. Their binary is `opencode` (mapped in
-> `CommandService.PrepareSession`), and the model arg is injected server-side. `LLM.Shell` is a
-> plain shell terminal with no launcher (handled specially in `CommandService.PrepareSession`).
+> `CommandService.PrepareSessionAsync`), and the model arg is injected server-side. `LLM.Shell` is a
+> plain shell terminal with no launcher (handled specially in `CommandService.PrepareSessionAsync`).
 
 ## Launcher Implementations
 
@@ -59,7 +59,7 @@ IBaseLlmCliLauncher (Interface)
 - **Config Path**: `{envBasePath}/{envName}/codex`
 
 ### AntigravityLlmCliLauncher
-- **Executable**: `agy` (note: the binary name differs from the product/enum name "Antigravity"; the in-app PTY maps it in `CommandService.PrepareSession`)
+- **Executable**: `agy` (note: the binary name differs from the product/enum name "Antigravity"; the in-app PTY maps it in `CommandService.PrepareSessionAsync`)
 - **Config Env Var**: none — agy is launch-flag-only. There is no verified per-environment
   config-dir env var (the Node-era Gemini CLI used XDG; the Go-based agy exposes no documented
   equivalent), so `GetEnvironmentVariables` returns an empty dictionary, like Copilot.
@@ -86,7 +86,7 @@ and no `/api/v1/antigravity/settings` route. All options are launch flags carrie
 - Sandbox → `--sandbox`
 - YOLO → `--dangerously-skip-permissions` (the only permission control)
 - Initial message → `agy --prompt-interactive=<text>`
-- Model → `--model <id>` (via Additional Arguments; not a UI dropdown)
+- Model → `--model <display>` (pinned UI dropdown via `renderAntigravityModelOptions`; emitted as a dedicated `--model` field before `additionalArgs`, not via Additional Arguments. The value is the full display string from `agy models`, e.g. `"Gemini 3.5 Flash (Low)"`, not an ID/slug.)
 
 `AntigravityLlmCliEnvironment.CreateEnvironment` only ensures the env subdirectory
 exists. The frontend builds/parses args via `buildAntigravityCustomArgs()` /
@@ -94,7 +94,7 @@ exists. The frontend builds/parses args via `buildAntigravityCustomArgs()` /
 Gemini settings-file features) were dropped: agy exposes no verified config-dir env
 var, so per the compatibility policy VibeRails writes no config for it. Flags are
 verified against `agy --help` (v1.0.8). The binary is `agy` even though the enum/
-product name is "Antigravity" — see `CommandService.PrepareSession`.
+product name is "Antigravity" — see `CommandService.PrepareSessionAsync`.
 
 ---
 

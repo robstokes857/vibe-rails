@@ -17,7 +17,7 @@ vb.exe — Native AOT, two MCP entry points sharing the same tool classes
 ├── HTTP (dashboard's Kestrel, root backend only)
 │     MapRegisterServices: AddMcpServer().WithHttpTransport().WithTools<Rules/SessionSearch/TokenSaver>()
 │     Program.cs:          app.MapMcp("/mcp")
-│     CookieAuthMiddleware in front of /mcp     ← viberails_session token required
+│     CookieAuthMiddleware in front of /mcp     ← viberails_session + viberails_tab tokens required
 │
 └── stdio (`vb mcp`, McpStdioHost.cs)
       Program.cs branches BEFORE the web host:  if (McpStdioHost.IsRequested(args)) …
@@ -32,9 +32,11 @@ path registers its own minimal services in `McpStdioHost.ConfigureServices`.
 
 ## Transports & auth
 
-- **HTTP** (`ModelContextProtocol.AspNetCore`, `MapMcp`): `/mcp` is not under `/api/`, so
-  `CookieAuthMiddleware` requires only the `viberails_session` token (cookie or header), no per-tab
-  token. Used by the Explorer.
+- **HTTP** (`ModelContextProtocol.AspNetCore`, `MapMcp`): `/mcp` is not under `/api/`, but
+  `CookieAuthMiddleware` gates it at the **same bar as `/api/`** — **both** the
+  `viberails_session` token (cookie or header) **and** the `viberails_tab` per-tab token
+  (header) are required. MCP tools can open a host shell and send input, so a leaked session
+  token alone must never be enough to reach them. Used by the Explorer.
 - **stdio** (`ModelContextProtocol`, `WithStdioServerTransport`): the CLI spawns `vb mcp` and talks
   JSON-RPC over the child's stdin/stdout. The MCP transport itself has no listening socket or auth
   challenge because it is scoped to the spawning process. `McpStdioHost` clears the default console
@@ -135,9 +137,10 @@ agents with host-level capabilities.
 The `/api/v1/mcp/*` routes ([McpRoutes.cs](../../Routes/McpRoutes.cs)) are a thin Explorer layer
 for the dashboard. They default to the in-process `/mcp` over **loopback HTTP** — exercising the
 exact Streamable-HTTP path an external CLI would use — and can also inspect/call another
-Streamable HTTP MCP endpoint supplied by the user. The `viberails_session` token is forwarded
-automatically only for the local loopback `/mcp` endpoint so the request clears auth; external
-targets receive only the headers explicitly supplied in the Explorer. Kestrel serves local
+Streamable HTTP MCP endpoint supplied by the user. The `viberails_session` **and**
+`viberails_tab` tokens are both forwarded automatically for the local loopback `/mcp`
+endpoint so the request clears auth (which requires both); external targets receive only the
+headers explicitly supplied in the Explorer. Kestrel serves local
 loopback requests on a separate connection, so there is no self-deadlock.
 
 ## CLI auto-registration
@@ -182,8 +185,9 @@ case; the add step is intentionally not quiet.
   `resume_token_saver`, `get_token_saver_status`), tool execution, and that the DI-injected
   `SessionSearchTool` resolves (with a deterministic fake `IUnifiedSearchService`).
 - `Tests/Services/Mcp/McpStdioHostTests.cs` — pins the `vb mcp` trigger and that
-  `McpStdioHost.ConfigureServices` registers the tools + BERT read-path. End-to-end stdio is
-  verified by spawning `vb mcp` and running a handshake (also asserts stdout stays JSON-only).
+  `McpStdioHost.ConfigureServices` registers the tools (`SessionSearchTool`,
+  `TokenSaverTool`) and the BERT read-path. These are service-descriptor assertions only;
+  there is no end-to-end stdio handshake test in this file.
 
 ## AOT notes
 

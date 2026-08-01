@@ -3,7 +3,7 @@
 **VibeRails** is an opinionated framework that helps keep AI coding assistants from going off the rails.
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-3178C6)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-7.0-3178C6)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
@@ -84,9 +84,9 @@ Press `F5` to launch the extension in development mode, then click the VibeRails
 2. **Add coding rules** with enforcement levels:
    ```markdown
    ## Rules
-   - COMMIT: max_complexity=10
-   - STOP: min_coverage=80
-   - WARN: log_files_changed
+   - Cyclomatic complexity < 20 (COMMIT)
+   - Require test coverage minimum 80% (STOP)
+   - Log all file changes (WARN)
    ```
 3. **Launch a CLI** from the dashboard Web Terminal or from an environment's **Web UI** / native terminal action.
 
@@ -110,7 +110,7 @@ VibeRails consists of four main components:
 │  └──────────────┴──────────────┴──────────────────────┘ │
 │  ┌──────────────────────────────────────────────────────┐ │
 │  │  In-process MCP server  →  HTTP /mcp                  │ │
-│  │  validate_vca | search_history | terminal | shell | web │ │
+│  │  validate_vca | search_history | token-saver │ │
 │  └──────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -131,7 +131,7 @@ VibeRails consists of four main components:
 - **XTerm.js** for terminal emulation
 
 **Extension**
-- **TypeScript 5.9.3**
+- **TypeScript 7.0**
 - **VS Code API 1.85+**
 
 ---
@@ -145,15 +145,15 @@ The core ASP.NET application providing:
 - **Web Server** - Auto-detects available port, serves REST API and static files
 - **Service Layer** - Business logic for agents, rules, sessions, and MCP
 - **Data Layer** - SQLite repository with WAL mode
-- **LLM CLI Support** - Environment-specific configurations for Claude, Codex, Antigravity
+- **LLM CLI Support** - Environment-specific configurations for Claude, Codex, Antigravity, Copilot, and OpenCode
 
 **Key Services:**
 
 | Service | Purpose |
 |---------|---------|
 | `AgentFileService` | Find and manage agent.md files |
-| `RulesService` | Define and validate 12 built-in coding rules |
-| `DbService` | High-level database operations |
+| `RulesService` | Define and validate 14 built-in coding rules |
+| `Repository` | SQLite data access (state.db) |
 | `GitService` | Git repository interactions |
 | `McpClientService` | MCP client with custom tools |
 | `LlmCliEnvironmentService` | Multi-LLM environment management |
@@ -204,6 +204,7 @@ Tools (snake_case wire names):
 |------|---------|
 | `validate_vca` | Validate staged git files against AGENTS.md enforcement rules |
 | `search_history` | Semantic + keyword search over captured agent history (real BGE/sqlite-vec/RRF — the same `IUnifiedSearchService` as the "Vibe AI" inspector) |
+| `pause_token_saver` / `resume_token_saver` / `get_token_saver_status` | Control the LLM-proxy token saver |
 
 > `run_shell_command` / `get_shell_command_status` / `cancel_shell_command` and `web_search` / `web_fetch` are
 > present in the codebase but **not currently exposed** as MCP tools (security review 2026-07-02).
@@ -328,22 +329,24 @@ echo "## Rules\n- WARN: log_files_changed" > agent.md
 
 #### Add Rules
 
-12 built-in rules available:
+14 built-in rules available (see [`RulesService.cs`](Services/RulesService.cs)):
 
-| Rule | Description | Example Value |
-|------|-------------|---------------|
-| `max_complexity` | Maximum cyclomatic complexity | `10` |
-| `min_coverage` | Minimum test coverage | `80` |
-| `log_files_changed` | Log all file modifications | (no value) |
-| `no_console_logs` | Prevent console.log in production | (no value) |
-| `max_file_length` | Maximum lines per file | `500` |
-| `require_tests` | Tests required for new code | (no value) |
-| `no_todo_comments` | Prevent TODO comments | (no value) |
-| `enforce_naming_conventions` | Enforce naming patterns | `PascalCase` |
-| `max_method_length` | Maximum lines per method | `50` |
-| `require_documentation` | Documentation required | (no value) |
-| `no_magic_numbers` | Prevent hardcoded numbers | (no value) |
-| `enforce_error_handling` | Require error handling | (no value) |
+| Rule (display text) | Description |
+|------|-------------|
+| Log all file changes | Document every changed file in AGENTS.md |
+| Log file changes > 5 lines | Document files with > 5 changed lines |
+| Log file changes > 10 lines | Document files with > 10 changed lines |
+| Cyclomatic complexity < 20 | Enforce complexity under 20 |
+| Cyclomatic complexity < 35 | Enforce complexity under 35 |
+| Cyclomatic complexity < 60 | Lenient threshold (under 60) |
+| Cyclomatic complexity disabled | Disable complexity checking |
+| Require test coverage minimum 50% | At least 50% coverage for changed code |
+| Require test coverage minimum 70% | At least 70% coverage for changed code |
+| Require test coverage minimum 80% | At least 80% coverage for changed code |
+| Require test coverage minimum 100% | 100% coverage for changed code |
+| Skip test coverage | Disable coverage checking |
+| Package file changes | Detect changes to dependency files |
+| Check commit message for | Check commit message for forbidden words (CSV list) |
 
 **Enforcement Levels:**
 - `WARN` - Log warning, allow continuation
@@ -356,12 +359,11 @@ echo "## Rules\n- WARN: log_files_changed" > agent.md
 # Development Agent
 
 ## Rules
-- COMMIT: max_complexity=10
-- COMMIT: min_coverage=80
-- STOP: no_console_logs
-- WARN: log_files_changed
-- COMMIT: require_tests
-- WARN: max_file_length=500
+- Cyclomatic complexity < 20 (COMMIT)
+- Require test coverage minimum 80% (STOP)
+- Log all file changes (WARN)
+- Package file changes (COMMIT)
+- Check commit message for: typo,fixme (COMMIT)
 ```
 
 ### Environment Management
@@ -390,8 +392,7 @@ All CLI sessions are logged with full terminal output:
 Launch from the Web Terminal or an environment action, then navigate to Sessions and select a session to view terminal output.
 
 **Database Storage:**
-- Global: `~/.vibe_rails/vibecontrol.db`
-- Project-specific: `<repo>/.vibe_rails/vibecontrol.db`
+- Global: `~/.vibe_rails/state.db` (single shared database; no per-project database)
 
 ### MCP Integration
 
@@ -430,17 +431,19 @@ var result = await service.CallToolAsync("search_history", new Dictionary<string
 **Global Configuration:**
 ```
 ~/.vibe_rails/
-├── vibecontrol.db          # SQLite database
-├── config.json             # Application settings
+├── state.db                # SQLite database (single shared DB)
+├── settings.json           # Application settings
 └── envs/                   # Environment configurations
 ```
 
-**config.json Example:**
+**settings.json Example:**
 ```json
 {
-  "defaultEnvironment": "development",
-  "enableSessionLogging": true,
-  "browserAutoLaunch": true
+  "RemoteAccess": false,
+  "UseVsCodeTheme": false,
+  "McpEnabled": true,
+  "ClaudeTokenSaverEnabled": true,
+  "RemoveCoAuthorTrailers": true
 }
 ```
 
@@ -467,7 +470,7 @@ Launch-flag-only — VibeRails injects no per-environment config env vars for ag
 ### Project Structure
 
 ```
-VibeControl2/
+vibe-rails/
 ├── VibeRails/                  # ASP.NET Core backend
 │   ├── Services/               # Business logic
 │   ├── DB/                     # Data access layer
@@ -482,9 +485,13 @@ VibeControl2/
 │   │   └── webview-panel.ts
 │   └── package.json
 │
-├── Pty.Net/                    # Cross-platform PTY library
+├── Pty.Net/                    # Cross-platform PTY library (inlined fork, ConPTY only)
+├── PyBridge/                   # AOT-friendly Python runner (in-tree)
+├── MintLint/                   # Maintainability grading library
+├── TokenSaver/                 # Token-saver library
 ├── Tests/                      # xUnit tests
-└── Scripts/                    # PowerShell scripts
+├── deploy/                     # Build & release scripts
+└── Scripts/                    # Install scripts
 ```
 
 ### Running Tests
@@ -497,21 +504,26 @@ dotnet test
 # With coverage
 dotnet test /p:CollectCoverage=true
 
-# Integration tests
+# UI/E2E tests (Playwright, Node)
 cd UITests
-dotnet test
+npm test
 ```
 
 ### Adding a New Rule
 
 1. **Define in [RulesService.cs](VibeRails/Services/RulesService.cs)**:
+   - Add a value to the `Rule` enum
+   - Add a display string to `RuleParser._keyValuePairs`
+   - Add a description to `RuleParser._descriptions`
 ```csharp
-new Rule(
-    "my_new_rule",
-    "Description of the rule",
-    "parameter_name",
-    "WARN"
-)
+// In the Rule enum:
+MyNewRule,
+
+// In _keyValuePairs:
+{ Rule.MyNewRule, "My new rule display text" },
+
+// In _descriptions:
+{ Rule.MyNewRule, "Description of the rule" },
 ```
 
 2. **Update frontend** in [rule-controller.js](VibeRails/wwwroot/js/modules/rule-controller.js)
@@ -533,7 +545,7 @@ public class MyLlmCliEnvironment : BaseLlmCliEnvironment
 }
 ```
 
-2. **Register in [Init.cs](VibeRails/Init.cs)**:
+2. **Register in [MapRegisterServices.cs](VibeRails/MapRegisterServices.cs)**:
 ```csharp
 builder.Services.AddSingleton<IMyLlmCliEnvironment, MyLlmCliEnvironment>();
 ```
@@ -564,17 +576,15 @@ public class MyCustomTool
 ### Build Scripts
 
 ```powershell
-# Development build (Windows)
-.\Scripts\build.ps1
+# Full build + deploy packaging
+.\deploy\build.ps1
 
-# Ubuntu/Linux build
-.\Scripts\debug_ubuntu.ps1
+# Backend-only dev build
+dotnet build
 
-# Run tests on Ubuntu
-.\Scripts\test_ubuntu.ps1
-
-# Interactive shell
-.\Scripts\interactive_ubuntu.ps1
+# Run tests
+cd Tests
+dotnet test
 ```
 
 ---
@@ -786,10 +796,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Key Dependencies
 
-- **Microsoft.Data.Sqlite** (v10.0.x) - SQLite database access
-- **ModelContextProtocol / ModelContextProtocol.AspNetCore** (v1.4.0) - in-process MCP server + client
+- **Microsoft.Data.Sqlite** (v10.0.10) - SQLite database access
+- **ModelContextProtocol / ModelContextProtocol.AspNetCore** (v2.0.0) - in-process MCP server + client
 - **Microsoft.ML.OnnxRuntime + sqlite-vec** - BGE embeddings + vector search (the real `search_history` backend)
-- **Pty.Net** (git submodule) - Pseudo-terminal support
+- **Pty.Net** (inlined fork, ConPTY only) - Pseudo-terminal support
+- **PyBridge** (in-tree) - AOT-friendly Python process and session runner
 
 ---
 
@@ -797,6 +808,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Built with modern .NET 10.0, Native AOT compilation, and the Model Context Protocol for next-generation AI development workflows.
 
-**Last Updated**: 2026-02-05
-**Version**: 1.1.5
+**Last Updated**: 2026-07-31
+**Version**: 1.9.5
 **Maintained By**: Robert Stokes

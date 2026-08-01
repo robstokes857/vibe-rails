@@ -5,7 +5,7 @@
 **Live Site**: [https://viberails.ai/](https://viberails.ai/)
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-3178C6)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-7.0-3178C6)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
@@ -123,6 +123,6 @@ This gives you quick access to different configurations without remembering comm
 
 ---
 
-**Version**: 1.1.5
-**Last Updated**: 2026-02-05
+**Version**: 1.9.5
+**Last Updated**: 2026-07-31
 **Maintained By**: Robert Stokes

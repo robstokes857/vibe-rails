@@ -109,7 +109,11 @@ public sealed record GitPreflightEvent(
     bool Blocking = false,
     bool? CommitAllowed = null,
     int? StepNumber = null,
-    int? StepCount = null);
+    int? StepCount = null,
+    // Set on the StepFinished event of the VCA step. Lets a consumer render the individual
+    // rule findings (severity, rule, reason, acknowledgment token) instead of re-parsing them
+    // out of the transcript text the step also emits.
+    VcaHookValidationSummary? VcaSummary = null);
 
 public sealed record GitPreflightStepResult(
     string StepId,

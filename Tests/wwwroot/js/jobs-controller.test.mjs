@@ -736,10 +736,17 @@ test('Run history exposes cancel only while active and retry after completion', 
     const running = controller.renderRunRow({ ...base, status: 1 });
     const failed = controller.renderRunRow({ ...base, status: 3 });
 
-    assert.match(running, /Cancel/);
-    assert.doesNotMatch(running, /Retry/);
-    assert.match(failed, /Retry/);
-    assert.doesNotMatch(failed, /Cancel/);
+    // Row actions are icon-only: "Replay" and "Retry" both read as "run this again", so
+    // the labels moved into tooltips. Assert the action hook, not the rendered wording.
+    assert.match(running, /data-job-action="cancel-run"/);
+    assert.doesNotMatch(running, /data-job-action="retry-run"/);
+    assert.match(failed, /data-job-action="retry-run"/);
+    assert.doesNotMatch(failed, /data-job-action="cancel-run"/);
+
+    // Watching the recording is offered on every row, whatever the run's status.
+    assert.match(running, /job-run-watch/);
+    assert.match(failed, /job-run-watch/);
+
     assert.match(failed, /Security &lt;review&gt;/);
     assert.doesNotMatch(failed, /run<&>/);
 });
@@ -757,10 +764,13 @@ test('Retry is offered on failures but never on a run that already succeeded', (
     };
 
     // Succeeded is terminal, but re-running work that already landed is not a repair.
-    assert.doesNotMatch(controller.renderRunRow({ ...base, status: 2 }), /Retry/);
+    assert.doesNotMatch(controller.renderRunRow({ ...base, status: 2 }), /data-job-action="retry-run"/);
 
     for (const status of [3, 4, 5, 6]) {
-        assert.match(controller.renderRunRow({ ...base, status }), /Retry/, `status ${status} should be retryable`);
+        assert.match(
+            controller.renderRunRow({ ...base, status }),
+            /data-job-action="retry-run"/,
+            `status ${status} should be retryable`);
     }
 });
 

@@ -322,15 +322,19 @@ See [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md) for the
 - `UpdateRuleEnforcementAsync()` - Change enforcement level (WARN/COMMIT/STOP)
 - `DeleteRulesAsync()` - Remove rules from agent file
 
-**Rule Format**:
+**Rule Format** (full contract: [Services/VCA/AGENTS.md](VibeRails/Services/VCA/AGENTS.md)):
 ```markdown
 # Agent Instructions
 
-## Rules
+## Vibe Rails Rules
 - Cyclomatic complexity < 20 (COMMIT)
-- Require test coverage minimum 80% (STOP)
+
 - Log all file changes (WARN)
 ```
+
+The heading must be `## Vibe Rails Rules` (`## Vibe Control Rules` is still read for older files).
+The section ends at the next heading, and fenced code blocks like the one above are skipped — an
+example of a rule is never itself a rule.
 
 #### RulesService ([Services/RulesService.cs](VibeRails/Services/RulesService.cs))
 **Purpose**: Define available rules and enforcement logic
@@ -656,7 +660,7 @@ MyNewRule,
 
 2. **Update agent.md files**:
 ```markdown
-## Rules
+## Vibe Rails Rules
 - My new rule display text (COMMIT)
 ```
 
@@ -1190,5 +1194,5 @@ Current implementation:
 **Version**: 1.9.5
 **Maintained By**: Robert Stokes
 
-## Vibe Control Rules
+## Vibe Rails Rules
 - Log all file changes (WARN)

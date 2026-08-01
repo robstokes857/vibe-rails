@@ -352,6 +352,80 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
         Assert.Contains("package file(s) changed", result.Output);
     }
 
+    [Fact]
+    public async Task AttachedPopup_ClosesWithoutEnter_WhenOnlyWarningsWereFound()
+    {
+        await WriteAsync("AGENTS.md", """
+            # Agent Instructions
+            ## Vibe Rails Rules
+            - Log all file changes (WARN)
+            """);
+        await WriteAsync("src/app.cs", "class App { }\n");
+        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+
+        using var transcript = new StringWriter();
+        using var input = new NeverCompletingTextReader();
+        var runTask = VcaHookProcessHost.RunAsync(
+            [
+                "--vca-hook", "pre-commit",
+                "--workdir", _repositoryPath,
+                "--console-window-attached"
+            ],
+            transcript,
+            transcript,
+            input,
+            TestContext.Current.CancellationToken);
+
+        var completed = await Task.WhenAny(
+            runTask,
+            Task.Delay(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken));
+
+        // A commit Git is allowed to make must not hold a window open waiting to be dismissed.
+        // Warnings and skipped steps are reported, not blocking, so the popup owes the user
+        // nothing to read — anything less than this makes every clean commit cost a keypress.
+        Assert.Same(runTask, completed);
+        Assert.Equal(0, await runTask);
+        Assert.Contains("[WARN] Log all file changes", transcript.ToString());
+        Assert.DoesNotContain("Press Enter", transcript.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("auto-closes", transcript.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AttachedPopup_StaysOpenToBeRead_WhenTheCommitIsBlocked()
+    {
+        await WriteAsync("AGENTS.md", """
+            # Agent Instructions
+            ## Vibe Rails Rules
+            - Log all file changes (STOP)
+            """);
+        await WriteAsync("src/app.cs", "class App { }\n");
+        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+
+        using var transcript = new StringWriter();
+        using var input = new StringReader(Environment.NewLine);
+        var exitCode = await VcaHookProcessHost.RunAsync(
+            [
+                "--vca-hook", "pre-commit",
+                "--workdir", _repositoryPath,
+                "--console-window-attached"
+            ],
+            transcript,
+            transcript,
+            input,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("auto-closes", transcript.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class NeverCompletingTextReader : TextReader
+    {
+        private readonly TaskCompletionSource<string?> _completion = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override Task<string?> ReadLineAsync() => _completion.Task;
+    }
+
     private async Task<(int ExitCode, string Output)> RunHookAsync(
         string kind,
         string? commitMessagePath = null)

@@ -200,6 +200,26 @@ public static class HookRoutes
             }
         }).WithName("StreamGitPreflight");
 
+        // POST /api/v1/git/preflight/console - Open the real hook popup for this repository.
+        // The browser view above renders the same run as HTML; this exists so the console the
+        // user will actually meet at commit time can be checked on demand, and so the staged
+        // snapshot can be pre-checked by hand without committing to find out.
+        app.MapPost("/api/v1/git/preflight/console", async (
+            IGitService gitService,
+            CancellationToken cancellationToken) =>
+        {
+            var rootPath = await gitService.GetRootPathAsync(cancellationToken);
+            if (string.IsNullOrEmpty(rootPath))
+            {
+                return Results.BadRequest(new HookActionResponse(false, "Not in a git repository"));
+            }
+
+            // A launch that could not happen is a reportable outcome, not a bad request: the page
+            // shows the reason next to the button, the same way hook installation does.
+            var launch = VcaHookConsoleLauncher.LaunchPreCommit(rootPath);
+            return Results.Ok(new HookActionResponse(launch.Success, launch.Message));
+        }).WithName("LaunchGitPreflightConsole");
+
         // POST /api/v1/hooks/preview - Run VCA validation over the whole working tree
         // (staged + unstaged + untracked) for the Rules page, so problems surface before
         // anything is staged. Git Guard's commit-time validation keeps using the exact

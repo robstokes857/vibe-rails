@@ -9384,6 +9384,18 @@ button.git-guard-menu-button:focus-visible {
     letter-spacing: -0.035em;
 }
 
+.git-guard-page-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.65rem 0.85rem;
+}
+
+.git-guard-page-actions [data-hook-console-message] {
+    flex: 1 1 18rem;
+    min-width: 0;
+}
+
 .git-guard-eyebrow {
     margin-bottom: 0.45rem;
     color: var(--color-accent);
@@ -14389,9 +14401,35 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
    sentences and an unbounded cell would set the width of the entire table; the full
    text stays reachable through the title attribute. */
 .job-run-detail { display: block; max-width: 22ch; margin-top: 0.25rem; overflow: hidden; color: var(--color-text-muted); font-size: 0.64rem; text-overflow: ellipsis; white-space: nowrap; }
-.job-run-link { padding: 0; border: 0; background: transparent; color: var(--color-text); font-weight: 700; text-align: left; }
-.job-run-link:hover { color: var(--color-accent); }
+/* The name opens the recording, so it has to read as a link and not as bold text. */
+.job-run-link {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-text);
+    cursor: pointer;
+    font-weight: 700;
+    text-align: left;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+    text-underline-offset: 3px;
+}
+
+.job-run-link:hover,
+.job-run-link:focus-visible { color: var(--color-accent); text-decoration-color: currentColor; }
+
 .jobs-run-actions { white-space: nowrap; }
+.jobs-run-actions .job-icon-action + .job-icon-action { margin-left: 0.3rem; }
+
+/* Watch swaps a closed eye for an open one on hover. Two stacked <i> elements rather
+   than a ::before content override, so it doesn't hard-code Font Awesome codepoints. */
+.job-run-watch [data-watch-live] { display: none; }
+
+.job-run-watch:hover [data-watch-idle],
+.job-run-watch:focus-visible [data-watch-idle] { display: none; }
+
+.job-run-watch:hover [data-watch-live],
+.job-run-watch:focus-visible [data-watch-live] { display: inline; }
 
 .job-trigger-fieldset { padding: 1rem; border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent); border-radius: 10px; }
 .job-trigger-fieldset legend { float: none; width: auto; margin: 0; padding: 0 0.35rem; color: var(--color-text); font-size: 0.86rem; font-weight: 700; }
