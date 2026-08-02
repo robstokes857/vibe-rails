@@ -6,7 +6,7 @@ This VS Code extension provides seamless integration with VibeRails, a dashboard
 
 - **Embedded Dashboard**: Opens the VibeRails dashboard directly inside VS Code as a webview panel
 - **Backend Management**: Automatically starts and stops the VibeRails .NET backend server
-- **Status Bar Integration**: A `$(rocket) VibeRails` button in the bottom left opens the dashboard; a `$(close)` Stop item appears beside it while the backend is running
+- **Status Bar Integration**: A `$(terminal) VibeRails` button in the bottom left opens the dashboard; a `$(close)` Stop item appears beside it while the backend is running
 - **Local Context**: Runs in the context of your current workspace folder for project-specific configurations
 
 ## Usage
