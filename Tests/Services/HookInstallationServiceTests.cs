@@ -375,6 +375,64 @@ echo ""Another hook""
         }
 
         [Fact]
+        public async Task UninstallHooksAsync_DisablesAutoInstallUntilHooksAreExplicitlyInstalledAgain()
+        {
+            Assert.True((await _service.InstallHooksAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken)).Success);
+
+            var uninstallResult = await _service.UninstallHooksAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(uninstallResult.Success);
+            Assert.True(await _service.IsAutoInstallDisabledAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken));
+
+            Assert.True((await _service.InstallHooksAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken)).Success);
+            Assert.False(await _service.IsAutoInstallDisabledAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken));
+        }
+
+        [Fact]
+        public async Task UninstallHooksAsync_RemovesStalePartialInstallationAndPreservesOtherHookContent()
+        {
+            var preCommitPath = Path.Combine(_hooksDir, "pre-commit");
+            var postCommitPath = Path.Combine(_hooksDir, "post-commit");
+            await File.WriteAllTextAsync(
+                preCommitPath,
+                "#!/bin/sh\necho third-party\n# Vibe Rails Pre-Commit Hook\n# VibeRails: disabled\n# End Vibe Rails Hook\n",
+                TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(
+                postCommitPath,
+                "#!/bin/sh\n# Vibe Rails Post-Commit Hook\necho broken\n",
+                TestContext.Current.CancellationToken);
+
+            var before = await _service.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+            Assert.True(before.NeedsRepair);
+
+            var result = await _service.UninstallHooksAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+            var after = await _service.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.Success);
+            Assert.False(after.NeedsRepair);
+            Assert.Equal("#!/bin/sh\necho third-party", await File.ReadAllTextAsync(
+                preCommitPath,
+                TestContext.Current.CancellationToken));
+            Assert.False(File.Exists(postCommitPath));
+        }
+
+        [Fact]
         public async Task IsHookInstalled_ReturnsFalse_WhenOnlyPreCommitHookInstalled()
         {
             // Arrange
@@ -576,6 +634,66 @@ echo ""Another hook""
                 pythonHook,
                 await File.ReadAllTextAsync(hookPath, TestContext.Current.CancellationToken));
             Assert.False(File.Exists(hookPath + ".viberails-chain"));
+        }
+
+        [Fact]
+        public async Task UninstallHooksAsync_RestoresOrphanedPreservedHook_WhenWrapperIsMissing()
+        {
+            const string originalHook = "#!/usr/bin/env python3\nprint('third party')\n";
+            var hookPath = Path.Combine(_hooksDir, "pre-commit");
+            var sidecarPath = hookPath + ".viberails-chain";
+            await File.WriteAllTextAsync(
+                sidecarPath,
+                originalHook,
+                TestContext.Current.CancellationToken);
+
+            var before = await _service.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+            Assert.True(before.NeedsRepair);
+            Assert.Equal(GitHookFileState.Stale, before.PreCommit.State);
+
+            var result = await _service.UninstallHooksAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.Success);
+            Assert.Equal(originalHook, await File.ReadAllTextAsync(
+                hookPath,
+                TestContext.Current.CancellationToken));
+            Assert.False(File.Exists(sidecarPath));
+            Assert.False((await _service.GetStatusAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken)).NeedsRepair);
+        }
+
+        [Fact]
+        public async Task UninstallHooksAsync_ReportsConflictWithoutOverwritingEitherHook()
+        {
+            const string activeHook = "#!/bin/sh\necho active\n";
+            const string preservedHook = "#!/usr/bin/env python3\nprint('preserved')\n";
+            var hookPath = Path.Combine(_hooksDir, "pre-commit");
+            var sidecarPath = hookPath + ".viberails-chain";
+            await File.WriteAllTextAsync(
+                hookPath,
+                activeHook,
+                TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(
+                sidecarPath,
+                preservedHook,
+                TestContext.Current.CancellationToken);
+
+            var result = await _service.UninstallHooksAsync(
+                _testRepoPath,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.Success);
+            Assert.Equal(activeHook, await File.ReadAllTextAsync(
+                hookPath,
+                TestContext.Current.CancellationToken));
+            Assert.Equal(preservedHook, await File.ReadAllTextAsync(
+                sidecarPath,
+                TestContext.Current.CancellationToken));
         }
 
         [Fact]

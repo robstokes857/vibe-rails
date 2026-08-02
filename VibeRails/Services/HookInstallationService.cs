@@ -10,6 +10,7 @@ namespace VibeRails.Services
         Task<HookInstallationResult> InstallHooksAsync(string repoPath, CancellationToken cancellationToken);
         Task<HookInstallationResult> UninstallHooksAsync(string repoPath, CancellationToken cancellationToken);
         Task<GitHooksStatus> GetStatusAsync(string repoPath, CancellationToken cancellationToken);
+        Task<bool> IsAutoInstallDisabledAsync(string repoPath, CancellationToken cancellationToken);
         bool IsHookInstalled(string repoPath);
     }
 
@@ -27,6 +28,7 @@ namespace VibeRails.Services
         private const string EXECUTABLE_ARGUMENT_PLACEHOLDER = "__VIBERAILS_EXECUTABLE_ARGUMENT__";
         private const string CHAINED_HOOK_PLACEHOLDER = "__VIBERAILS_CHAINED_HOOK__";
         private const string CHAINED_HOOK_SUFFIX = ".viberails-chain";
+        private const string AUTO_INSTALL_DISABLED_FILE = ".viberails-git-guard-disabled";
         private static readonly TimeSpan GitPathTimeout = TimeSpan.FromSeconds(5);
 
         private readonly ILogger<HookInstallationService> _logger;
@@ -107,9 +109,29 @@ namespace VibeRails.Services
                 InspectHookFile(Path.Combine(hooksPath, "post-commit"), "post-commit", POST_COMMIT_MARKER));
         }
 
+        public async Task<bool> IsAutoInstallDisabledAsync(
+            string repoPath,
+            CancellationToken cancellationToken)
+        {
+            var preferencePath = await ResolveGitPathAsync(
+                repoPath,
+                AUTO_INSTALL_DISABLED_FILE,
+                cancellationToken);
+            return File.Exists(preferencePath);
+        }
+
         public async Task<HookInstallationResult> InstallHooksAsync(string repoPath, CancellationToken cancellationToken)
         {
             _logger.LogInformation("Installing all hooks for repository: {RepoPath}", repoPath);
+
+            var preferenceResult = await SetAutoInstallDisabledAsync(
+                repoPath,
+                disabled: false,
+                cancellationToken);
+            if (!preferenceResult.Success)
+            {
+                return preferenceResult;
+            }
 
             List<HookFileSnapshot> snapshots;
             try
@@ -230,6 +252,17 @@ namespace VibeRails.Services
         {
             _logger.LogInformation("Uninstalling all hooks for repository: {RepoPath}", repoPath);
 
+            // Persist the user's opt-out before touching any hook. If removal is only partial,
+            // startup must not "repair" the repository by installing everything again.
+            var preferenceResult = await SetAutoInstallDisabledAsync(
+                repoPath,
+                disabled: true,
+                cancellationToken);
+            if (!preferenceResult.Success)
+            {
+                return preferenceResult;
+            }
+
             var preCommitResult = await UninstallPreCommitHookAsync(repoPath, cancellationToken);
             var commitMsgResult = await UninstallCommitMsgHookAsync(repoPath, cancellationToken);
             var postCommitResult = await UninstallPostCommitHookAsync(repoPath, cancellationToken);
@@ -246,6 +279,62 @@ namespace VibeRails.Services
 
             _logger.LogInformation("All hooks uninstalled successfully");
             return HookInstallationResult.Ok();
+        }
+
+        private async Task<HookInstallationResult> SetAutoInstallDisabledAsync(
+            string repoPath,
+            bool disabled,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var preferencePath = await ResolveGitPathAsync(
+                    repoPath,
+                    AUTO_INSTALL_DISABLED_FILE,
+                    cancellationToken);
+
+                if (disabled)
+                {
+                    var directory = Path.GetDirectoryName(preferencePath);
+                    if (string.IsNullOrWhiteSpace(directory))
+                    {
+                        return HookInstallationResult.Fail(
+                            HookInstallationError.FileWriteError,
+                            "Could not persist the Git Guard auto-install preference",
+                            $"Invalid preference path: {preferencePath}");
+                    }
+
+                    Directory.CreateDirectory(directory);
+                    await File.WriteAllTextAsync(
+                        preferencePath,
+                        "Git Guard auto-install is disabled for this repository.\n",
+                        cancellationToken);
+                }
+                else if (File.Exists(preferencePath))
+                {
+                    File.Delete(preferencePath);
+                }
+
+                return HookInstallationResult.Ok();
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return HookInstallationResult.Fail(
+                    HookInstallationError.PermissionDenied,
+                    "Could not update the Git Guard auto-install preference",
+                    ex.Message);
+            }
+            catch (IOException ex)
+            {
+                return HookInstallationResult.Fail(
+                    HookInstallationError.FileWriteError,
+                    "Could not update the Git Guard auto-install preference",
+                    ex.Message);
+            }
         }
 
         private async Task<HookInstallationResult> InstallCommitMsgHookAsync(string repoPath, CancellationToken cancellationToken)
@@ -478,23 +567,43 @@ namespace VibeRails.Services
             {
                 var hooksPath = await ResolveHooksDirectoryAsync(repoPath, cancellationToken);
                 var hookPath = Path.Combine(hooksPath, hookName);
+                var chainedHookPath = hookPath + CHAINED_HOOK_SUFFIX;
 
                 if (!HookPathExists(hookPath))
                 {
-                    _logger.LogDebug("Hook file does not exist: {HookPath}", hookPath);
+                    if (HookPathExists(chainedHookPath))
+                    {
+                        File.Move(chainedHookPath, hookPath);
+                        _logger.LogInformation(
+                            "Restored orphaned preserved {HookName} hook from {ChainedHookPath}",
+                            hookName,
+                            chainedHookPath);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Hook file does not exist: {HookPath}", hookPath);
+                    }
+
                     return HookInstallationResult.Ok();
                 }
 
                 var content = await File.ReadAllTextAsync(hookPath, cancellationToken);
                 if (!content.Contains(marker))
                 {
+                    if (HookPathExists(chainedHookPath))
+                    {
+                        return HookInstallationResult.Fail(
+                            HookInstallationError.PartialInstallationFailure,
+                            $"Cannot restore the preserved {hookName} hook automatically",
+                            $"Both {hookPath} and {chainedHookPath} exist, and the active hook no longer contains a VibeRails section");
+                    }
+
                     _logger.LogDebug("Hook file does not contain Vibe Rails marker: {HookPath}", hookPath);
                     return HookInstallationResult.Ok();
                 }
 
                 await RemoveHookSection(hookPath, content, marker, cancellationToken);
 
-                var chainedHookPath = hookPath + CHAINED_HOOK_SUFFIX;
                 if (HookPathExists(chainedHookPath))
                 {
                     if (HookPathExists(hookPath))
@@ -607,11 +716,17 @@ namespace VibeRails.Services
 
         private async Task<string> ResolveHooksDirectoryAsync(
             string repoPath,
+            CancellationToken cancellationToken) =>
+            await ResolveGitPathAsync(repoPath, "hooks", cancellationToken);
+
+        private static async Task<string> ResolveGitPathAsync(
+            string repoPath,
+            string gitPath,
             CancellationToken cancellationToken)
         {
             var fullRepoPath = Path.GetFullPath(repoPath);
             var result = await GitProcessRunner.RunAsync(
-                "rev-parse --git-path hooks",
+                ["rev-parse", "--git-path", gitPath],
                 fullRepoPath,
                 GitPathTimeout,
                 cancellationToken);
@@ -628,7 +743,7 @@ namespace VibeRails.Services
             // The fallback keeps unit-test fake repositories useful and preserves behavior when
             // Git itself is temporarily unavailable. Real repositories normally take the path
             // above, including linked worktrees and core.hooksPath configurations.
-            return Path.Combine(fullRepoPath, ".git", "hooks");
+            return Path.Combine(fullRepoPath, ".git", gitPath);
         }
 
         private GitHookFileStatus InspectHookFile(
@@ -636,8 +751,20 @@ namespace VibeRails.Services
             string hookName,
             string marker)
         {
-            if (!File.Exists(hookPath))
+            var chainedHookPath = hookPath + CHAINED_HOOK_SUFFIX;
+            var hasPreservedHook = HookPathExists(chainedHookPath);
+            if (!HookPathExists(hookPath))
             {
+                if (hasPreservedHook)
+                {
+                    return new GitHookFileStatus(
+                        hookName,
+                        hookPath,
+                        GitHookFileState.Stale,
+                        HasVibeRailsSection: true,
+                        "The VibeRails wrapper is missing, but a preserved hook is waiting to be restored.");
+                }
+
                 return new GitHookFileStatus(
                     hookName,
                     hookPath,
@@ -651,6 +778,16 @@ namespace VibeRails.Services
                 var content = File.ReadAllText(hookPath);
                 if (!content.Contains(marker, StringComparison.Ordinal))
                 {
+                    if (hasPreservedHook)
+                    {
+                        return new GitHookFileStatus(
+                            hookName,
+                            hookPath,
+                            GitHookFileState.Stale,
+                            HasVibeRailsSection: true,
+                            "The active hook has no VibeRails section, but a preserved hook sidecar still exists.");
+                    }
+
                     return new GitHookFileStatus(
                         hookName,
                         hookPath,

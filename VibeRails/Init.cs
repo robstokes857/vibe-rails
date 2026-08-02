@@ -243,6 +243,14 @@ namespace VibeRails
                 }
 
                 var hookService = scope.ServiceProvider.GetRequiredService<IHookInstallationService>();
+                if (await hookService.IsAutoInstallDisabledAsync(repoPath, cancellationToken))
+                {
+                    Log.Debug(
+                        "[Hooks] Repository opted out of startup hook installation: {RepoPath}",
+                        repoPath);
+                    return;
+                }
+
                 var status = await hookService.GetStatusAsync(repoPath, cancellationToken);
                 if (status.IsInstalled)
                 {

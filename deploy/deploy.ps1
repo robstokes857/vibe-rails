@@ -17,6 +17,17 @@ $PackageLockFile = Join-Path $RepoRoot "vscode-viberails" "package-lock.json"
 $GithubRepo = "robstokes857/vibe-rails"
 # --- Helper Functions ---
 
+function Assert-NativeCommandSucceeded {
+    param(
+        [Parameter(Mandatory = $true)][int]$ExitCode,
+        [Parameter(Mandatory = $true)][string]$Operation
+    )
+
+    if ($ExitCode -ne 0) {
+        throw "$Operation failed with exit code $ExitCode."
+    }
+}
+
 function Test-PreFlightChecks {
     Write-Host "`nRunning pre-flight checks..." -ForegroundColor Cyan
 
@@ -84,8 +95,14 @@ function Get-LatestReleaseVersion {
 function Update-AppSettingsVersion {
     param([Parameter(Mandatory = $true)][string]$Version)
 
-    $config = Get-Content $AppSettingsFile -Raw | ConvertFrom-Json
-    $config.VibeRails.Version = $Version
+    $config = Get-Content $AppSettingsFile -Raw | ConvertFrom-Json -AsHashtable
+    if (-not $config.Contains("VibeRails") -or $config["VibeRails"] -isnot [System.Collections.IDictionary]) {
+        throw "appsettings.json does not contain a VibeRails object: $AppSettingsFile"
+    }
+
+    # Assignment through the dictionary also restores Version if an older settings cleanup
+    # removed it, instead of failing halfway through release orchestration.
+    $config["VibeRails"]["Version"] = $Version
     $config | ConvertTo-Json -Depth 100 | Set-Content $AppSettingsFile -Encoding utf8NoBOM
     Write-Host "Updated appsettings.json to version $Version" -ForegroundColor Green
 }
@@ -163,6 +180,74 @@ function Sync-ExtensionVersion {
         $packageLockJson | ConvertTo-Json -Depth 100 | Set-Content $PackageLockFile -Encoding utf8NoBOM
         Write-Host "Synced package-lock.json version to $Version" -ForegroundColor Green
     }
+}
+
+function Assert-VersionSynchronization {
+    param([Parameter(Mandatory = $true)][string]$Version)
+
+    $expectedVersion = [string]$Version
+    $expectedFileVersion = "$expectedVersion.0"
+    $mismatches = [System.Collections.Generic.List[string]]::new()
+
+    $appSettings = Get-Content $AppSettingsFile -Raw | ConvertFrom-Json -AsHashtable
+    $appSettingsVersion = if ($appSettings.Contains("VibeRails") -and
+        $appSettings["VibeRails"] -is [System.Collections.IDictionary] -and
+        $appSettings["VibeRails"].Contains("Version")) {
+        [string]$appSettings["VibeRails"]["Version"]
+    } else {
+        "<missing>"
+    }
+    if ($appSettingsVersion -ne $expectedVersion) {
+        $mismatches.Add("appsettings.json=$appSettingsVersion")
+    }
+
+    $projectXml = [System.Xml.XmlDocument]::new()
+    $projectXml.Load($ProjectFile)
+    $projectVersions = @{
+        Version = $expectedVersion
+        FileVersion = $expectedFileVersion
+        InformationalVersion = $expectedVersion
+    }
+    foreach ($property in $projectVersions.GetEnumerator()) {
+        $node = $projectXml.SelectSingleNode("/Project/PropertyGroup/$($property.Key)")
+        $actual = if ($node) { [string]$node.InnerText } else { "<missing>" }
+        if ($actual -ne $property.Value) {
+            $mismatches.Add("VibeRails.csproj:$($property.Key)=$actual")
+        }
+    }
+
+    $packageJson = Get-Content $PackageJsonFile -Raw | ConvertFrom-Json -AsHashtable
+    $packageVersion = if ($packageJson.Contains("version")) { [string]$packageJson["version"] } else { "<missing>" }
+    if ($packageVersion -ne $expectedVersion) {
+        $mismatches.Add("package.json=$packageVersion")
+    }
+
+    if (Test-Path $PackageLockFile) {
+        $packageLock = Get-Content $PackageLockFile -Raw | ConvertFrom-Json -AsHashtable
+        $lockVersion = if ($packageLock.Contains("version")) { [string]$packageLock["version"] } else { "<missing>" }
+        if ($lockVersion -ne $expectedVersion) {
+            $mismatches.Add("package-lock.json=$lockVersion")
+        }
+
+        $rootPackageVersion = if ($packageLock.Contains("packages") -and
+            $packageLock["packages"] -is [System.Collections.IDictionary] -and
+            $packageLock["packages"].Contains("") -and
+            $packageLock["packages"][""] -is [System.Collections.IDictionary] -and
+            $packageLock["packages"][""].Contains("version")) {
+            [string]$packageLock["packages"][""]["version"]
+        } else {
+            "<missing>"
+        }
+        if ($rootPackageVersion -ne $expectedVersion) {
+            $mismatches.Add("package-lock.json:packages['']=$rootPackageVersion")
+        }
+    }
+
+    if ($mismatches.Count -gt 0) {
+        throw "Version synchronization failed; no release tag was created. Expected $expectedVersion. Mismatches: $($mismatches -join ', ')"
+    }
+
+    Write-Host "Verified all release metadata is version $expectedVersion" -ForegroundColor Green
 }
 
 function Wait-ForReleaseWorkflow {
@@ -369,11 +454,14 @@ $tag = "v$newVersion"
 
 # Prevent accidental tag reuse
 git fetch --tags origin 2>$null
+Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Fetching release tags"
 $tagExistsRemote = git ls-remote --tags origin "refs/tags/$tag"
+Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Checking the remote release tag"
 if ($tagExistsRemote) {
     throw "Tag already exists on origin: $tag"
 }
 $tagExistsLocal = git tag --list $tag
+Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Checking the local release tag"
 if ($tagExistsLocal) {
     throw "Tag already exists locally: $tag"
 }
@@ -390,25 +478,47 @@ if ($confirm -and $confirm.ToLower() -ne "y") {
 Update-AppSettingsVersion -Version $newVersion
 Update-DotNetProjectVersion -Version $newVersion
 Sync-ExtensionVersion -Version $newVersion
+Assert-VersionSynchronization -Version $newVersion
 
 Write-Host "`nCommitting version changes..." -ForegroundColor Cyan
-git add $AppSettingsFile
-git add $ProjectFile
-git add $PackageJsonFile
+$versionFiles = @($AppSettingsFile, $ProjectFile, $PackageJsonFile)
 if (Test-Path $PackageLockFile) {
-    git add $PackageLockFile
+    $versionFiles += $PackageLockFile
 }
-git commit -m "Bump version to $newVersion"
+git add -- $versionFiles
+Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Staging version files"
+
+git diff --cached --quiet --exit-code
+$stagedVersionExitCode = $LASTEXITCODE
+if ($stagedVersionExitCode -eq 1) {
+    git commit -m "Bump version to $newVersion"
+    Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Committing version $newVersion (release stopped before push/tag)"
+} elseif ($stagedVersionExitCode -eq 0) {
+    Write-Host "Version metadata was already committed; using the current HEAD." -ForegroundColor Yellow
+} else {
+    throw "Could not inspect staged version changes (git diff exit code $stagedVersionExitCode)."
+}
+
+$remainingChanges = git status --porcelain
+Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Checking the post-commit working tree"
+if ($remainingChanges) {
+    throw "Version commit did not leave a clean working tree; release stopped before push/tag."
+}
 
 $currentBranch = git branch --show-current
+Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Resolving the release branch"
 Write-Host "Pushing $currentBranch..." -ForegroundColor Cyan
 git push origin $currentBranch
+Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Pushing release commit"
 
 Write-Host "Tagging $tag..." -ForegroundColor Cyan
 git tag -a $tag -m "Release $tag"
+Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Creating release tag $tag"
 git push origin $tag
+Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Pushing release tag $tag"
 
 $headSha = (git rev-parse HEAD).Trim()
+Assert-NativeCommandSucceeded -ExitCode $LASTEXITCODE -Operation "Resolving the release commit"
 Wait-ForReleaseWorkflow -HeadSha $headSha -Tag $tag
 Assert-ReleaseAssetsPresent -Tag $tag
 Assert-VsixContainsNativeOnnxRuntime -Tag $tag -Version $newVersion

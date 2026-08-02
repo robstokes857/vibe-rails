@@ -166,3 +166,10 @@ author junk. Reads no longer filter, so hand-edited junk is shown rather than hi
 `VcaHookEndToEndTests` builds throwaway Git repositories and runs the real hook host against them.
 Prefer adding cases there for anything that touches what blocks a commit — it is the only layer
 that exercises staging, scoping, and exit codes together.
+
+## Hook removal
+
+Removing Git Guard strips only the VibeRails-managed sections from `pre-commit`, `commit-msg`, and
+`post-commit`; third-party hook content and preserved sidecars are restored. A repository-local
+`.git/.viberails-git-guard-disabled` marker prevents startup auto-install from putting the hooks
+back. An explicit Install or Repair action removes that marker and re-enables startup installation.

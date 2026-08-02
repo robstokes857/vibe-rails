@@ -135,6 +135,7 @@ export function normalizeHookStatus(status = {}, { isError = false } = {}) {
             installLabel: 'Install Hooks',
             installDisabled: true,
             uninstallDisabled: true,
+            showRepairRemoval: false,
             repositoryPath: '',
             hooksPath: '',
             autoInstall: null,
@@ -166,6 +167,8 @@ export function normalizeHookStatus(status = {}, { isError = false } = {}) {
         fallbackMessage = 'VCA checks will run automatically during git commit.';
     }
 
+    const uninstallDisabled = !inGitRepo || !(reportedInstalled || anyHookInstalled || needsRepair);
+
     return {
         tone,
         badge,
@@ -176,7 +179,8 @@ export function normalizeHookStatus(status = {}, { isError = false } = {}) {
         needsRepair,
         installLabel: needsRepair ? 'Repair Hooks' : isInstalled ? 'Hooks Installed' : 'Install Hooks',
         installDisabled: !inGitRepo || (isInstalled && !needsRepair),
-        uninstallDisabled: !inGitRepo || !(reportedInstalled || anyHookInstalled || needsRepair),
+        uninstallDisabled,
+        showRepairRemoval: needsRepair && !uninstallDisabled,
         repositoryPath: String(payload.repositoryPath || ''),
         hooksPath: String(payload.hooksPath || ''),
         autoInstall: typeof payload.autoInstallEnabled === 'boolean'
@@ -608,20 +612,29 @@ export class RuleController {
     }
 
     confirmUninstallHooks() {
-        this.app.showModal('Keep Git Guard enabled?', `
+        const needsRepair = this.hookStatus?.needsRepair === true;
+        const heading = needsRepair
+            ? 'Remove the broken Git Guard hooks?'
+            : 'Are you sure you want to remove this protection?';
+        const explanation = needsRepair
+            ? 'VibeRails will remove its managed sections from pre-commit, commit-msg, and post-commit instead of trying to repair them.'
+            : 'Git Guard runs VCA and commit-message checks before Git creates a commit. Turning it off removes those automatic safeguards.';
+
+        this.app.showModal(needsRepair ? 'Remove Git Guard?' : 'Keep Git Guard enabled?', `
             <div class="git-guard-uninstall-warning">
                 <div class="git-guard-uninstall-warning-icon" aria-hidden="true">
                     <i class="fa-solid fa-shield-halved"></i>
                 </div>
                 <div>
-                    <h5>Are you sure you want to remove this protection?</h5>
-                    <p>Git Guard runs VCA and commit-message checks before Git creates a commit. Turning it off removes those automatic safeguards, so violations can reach the repository without being checked.</p>
-                    <p class="mb-0"><strong>We recommend leaving Git Guard enabled.</strong> You can still run either check manually from this page.</p>
+                    <h5>${heading}</h5>
+                    <p>${explanation}</p>
+                    <p>Other Git hook content is preserved. Startup will not reinstall Git Guard in this repository unless you explicitly install it again.</p>
+                    <p class="mb-0"><strong>You can still run either check manually from this page.</strong></p>
                 </div>
             </div>
             <div class="d-flex flex-wrap gap-2 justify-content-end mt-4">
                 <button type="button" class="btn btn-outline-danger" data-action="confirm-uninstall-hooks">
-                    Uninstall anyway
+                    Remove Git Guard
                 </button>
                 <button type="button" class="btn btn-primary" data-action="close-modal">
                     <i class="fa-solid fa-shield-halved me-1" aria-hidden="true"></i>
@@ -678,6 +691,9 @@ export class RuleController {
             }
             this.setButtonDisabled(installButton, viewModel.installDisabled);
         }
+        if (uninstallButton?.hasAttribute('data-repair-only')) {
+            uninstallButton.hidden = !viewModel.showRepairRemoval;
+        }
         this.setButtonDisabled(uninstallButton, viewModel.uninstallDisabled);
         if (toggleButton) {
             const isOn = viewModel.isInstalled && !viewModel.needsRepair;
@@ -716,6 +732,8 @@ export class RuleController {
         this.renderHookDetail('pre-commit', { tone: 'neutral', label: 'Checking', message: 'Inspecting hook…' });
         this.renderHookDetail('commit-message', { tone: 'neutral', label: 'Checking', message: 'Inspecting hook…' });
         this.renderHookDetail('post-commit', { tone: 'neutral', label: 'Checking', message: 'Inspecting hook…' });
+        const uninstallButton = this.query('[data-action="uninstall-hooks"][data-repair-only]');
+        if (uninstallButton) uninstallButton.hidden = true;
         this.setHookActionButtonsDisabled(true);
     }
 

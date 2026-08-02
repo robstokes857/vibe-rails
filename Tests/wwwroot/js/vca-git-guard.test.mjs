@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
@@ -53,6 +54,7 @@ test('detailed current hook status produces a protected health model', () => {
     assert.equal(model.tone, 'success');
     assert.equal(model.installDisabled, true);
     assert.equal(model.uninstallDisabled, false);
+    assert.equal(model.showRepairRemoval, false);
     assert.equal(model.preCommit.label, 'Current');
     assert.equal(model.commitMessage.label, 'Current');
     assert.equal(model.postCommit.label, 'Current');
@@ -86,6 +88,7 @@ test('partial or stale hooks expose Repair Hooks instead of claiming protection'
     assert.equal(model.installLabel, 'Repair Hooks');
     assert.equal(model.installDisabled, false);
     assert.equal(model.uninstallDisabled, false);
+    assert.equal(model.showRepairRemoval, true);
     assert.equal(model.preCommit.label, 'Needs repair');
     assert.equal(model.commitMessage.label, 'Not installed');
     assert.equal(model.postCommit.label, 'Not installed');
@@ -116,7 +119,21 @@ test('no-repository state disables all hook mutations', () => {
     assert.equal(model.badge, 'No repository');
     assert.equal(model.installDisabled, true);
     assert.equal(model.uninstallDisabled, true);
+    assert.equal(model.showRepairRemoval, false);
     assert.equal(model.preCommit.label, 'Unavailable');
+});
+
+test('Rules header includes a direct remove action for a broken Git Guard', async () => {
+    const html = await readFile('VibeRails/wwwroot/index.html', 'utf8');
+    const settingStart = html.indexOf('<section class="rules-git-setting"');
+    const settingEnd = html.indexOf('</section>', settingStart);
+    const setting = html.slice(settingStart, settingEnd);
+
+    assert.ok(settingStart >= 0);
+    assert.ok(settingEnd > settingStart);
+    assert.match(setting, /data-action="uninstall-hooks"/);
+    assert.match(setting, /data-repair-only/);
+    assert.match(setting, />Remove</);
 });
 
 test('Rules overview automatically starts validation and analysis together', async () => {
