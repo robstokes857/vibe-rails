@@ -352,6 +352,14 @@
                     </span>
                     <span class="hook-health-badge" data-hook-status-badge data-tone="neutral"
                         aria-live="polite">Checking</span>
+                    <button class="btn btn-sm btn-outline-danger rules-git-remove d-inline-flex align-items-center gap-1"
+                        type="button" data-action="uninstall-hooks" data-repair-only
+                        data-idle-label="Remove" title="Remove broken Git Guard hooks" hidden disabled>
+                        <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                            aria-hidden="true"></span>
+                        <i class="fa-solid fa-trash-can" data-button-icon aria-hidden="true"></i>
+                        <span data-button-label>Remove</span>
+                    </button>
                     <button class="rules-git-toggle" type="button" role="switch" aria-checked="false"
                         data-action="toggle-hooks" data-idle-label="Turn Git Guard on" disabled>
                         <span class="spinner-border spinner-border-sm" data-button-spinner hidden

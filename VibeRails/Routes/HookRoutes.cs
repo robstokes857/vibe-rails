@@ -38,6 +38,8 @@ public static class HookRoutes
             }
 
             var status = await hookService.GetStatusAsync(rootPath, cancellationToken);
+            var autoInstallEnabled = IsAutoInstallEnabled(configuration)
+                && !await hookService.IsAutoInstallDisabledAsync(rootPath, cancellationToken);
             var message = status.IsInstalled
                 ? "VCA and Jobs Git hooks are active and current."
                 : status.NeedsRepair
@@ -52,7 +54,7 @@ public static class HookRoutes
                 Message: message,
                 RepositoryPath: status.RepositoryPath,
                 HooksPath: status.HooksPath,
-                AutoInstallEnabled: IsAutoInstallEnabled(configuration),
+                AutoInstallEnabled: autoInstallEnabled,
                 PreCommit: ToResponse(status.PreCommit),
                 CommitMessage: ToResponse(status.CommitMessage),
                 PostCommit: ToResponse(status.PostCommit)));
@@ -100,7 +102,7 @@ public static class HookRoutes
 
             var result = await hookService.UninstallHooksAsync(rootPath, cancellationToken);
             var message = result.Success
-                ? "VCA and Jobs Git hooks uninstalled"
+                ? "VCA and Jobs Git hooks uninstalled; automatic reinstall is disabled for this repository"
                 : $"{result.ErrorMessage} {(result.Details != null ? $"({result.Details})" : "")}";
             return Results.Ok(new HookActionResponse(result.Success, message));
         }).WithName("UninstallHook");

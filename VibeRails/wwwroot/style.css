@@ -10904,6 +10904,17 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     font-size: 0.66rem;
 }
 
+.rules-git-remove {
+    min-height: 28px;
+    padding: 0.2rem 0.48rem;
+    font-size: 0.7rem;
+    white-space: nowrap;
+}
+
+.rules-git-remove[hidden] {
+    display: none !important;
+}
+
 .rules-git-toggle {
     position: relative;
     display: inline-grid;
