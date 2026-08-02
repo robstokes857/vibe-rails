@@ -28,8 +28,12 @@ arrival order:
 
 Both chunks start with `\e[H` (CUP home) and were emitted by Claude Code
 in response to a single SIGWINCH (rows 10 → 28). 7 ms apart. This is the
-2026-05-13 resize-reprint bug — see the top of `TERMINAL.md` for the full
-forensic write-up and why we have not fixed it yet.
+"stacked repaints during drag-resize" bug. The canonical write-up is the
+`## 2026-05-15 Stacked repaints during drag-resize` entry in `TERMINAL.md`
+— a fix has landed (resize debounce `140 → 2000` ms in `terminal-tab.js`)
+and is awaiting manual re-test. The original 2026-05-13 forensic entry is
+preserved below it as historical context; its symptom characterization was
+corrected 2026-05-15, but the byte-level data on these chunks still stands.
 
 To eyeball the chunks again (run from the repo root — the script lives in
 `python-scripts/` at the top level):
