@@ -32,7 +32,7 @@ An **Environment** is a reusable configuration for a specific LLM CLI (Claude, C
 | **Config directory** | `Path` stores the filesystem location for the environment's LLM-specific config files. Set by `LlmCliEnvironmentService`, not the DB layer. |
 | **Recency tracking** | `LastUsedUTC` is bumped on every access or launch. Dashboard orders by `LastUsedUTC DESC`. |
 | **Querying** | `GetCustomEnvironmentsAsync` filters out default environments and legacy bare provider rows whose `Path`, `CustomArgs`, and `CustomPrompt` are all empty. A user-created provider-named environment has a populated `Path` and remains visible. `GetAllEnvironmentsAsync` returns everything. |
-| **Deletion guard** | Default environments cannot be deleted — enforced in the Routes layer, not the DB layer. |
+| **Deletion guard** | Default environments cannot be deleted, and environments referenced by Automations cannot be deleted — both enforced in the Routes layer (`EnvironmentRoutes.cs`), not the DB layer. |
 
 ### Technical Details
 
@@ -88,7 +88,7 @@ UI-visibility flag, not a CLI option — it never enters `CustomArgs`. Added via
 | `SaveEnvironmentAsync` | `INSERT ... RETURNING Id` |
 | `UpdateEnvironmentAsync` | Full field update by `Id` (CustomName, LLM, Path, CustomArgs, CustomPrompt, LastUsedUTC, Hidden) |
 | `TouchEnvironmentLastUsedAsync(id)` | Recency-only bookkeeping — stamps `LastUsedUTC` without touching any other column (launches must never use `UpdateEnvironmentAsync` for this) |
-| `DeleteEnvironmentAsync` | Delete by `Id` — **no deletion guard at DB layer**. The "cannot delete Default" rule is in `Routes.cs`. |
+| `DeleteEnvironmentAsync` | Delete by `Id` — **no deletion guard at DB layer**. The "cannot delete Default" and "not referenced by Automations" rules are in `EnvironmentRoutes.cs`. |
 
 ---
 
