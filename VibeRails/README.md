@@ -176,7 +176,7 @@ wwwroot/
 │   ├── environment-controller.js  (~93KB)   # Environment CRUD + Web UI launch
 │   ├── rule-controller.js         (~70KB)   # Rule management
 │   ├── code-analyzer-dashboard.js (~67KB)   # Code quality scan UI
-│   ├── jobs-controller.js         (~81KB)   # Automated jobs
+│   ├── jobs-controller.js         (~84KB)   # Automated jobs
 │   ├── agent-controller.js        (~64KB)   # Agent file management
 │   ├── chat-history-sidebar.js    (~59KB)   # Session chat history
 │   ├── vibe-rails-ai-controller.js(~56KB)   # Vibe AI inspector
@@ -371,8 +371,8 @@ echo "## Vibe Rails Rules\n- WARN: log_files_changed" > agent.md
 
 **Enforcement Levels:**
 - `WARN` - Log warning, allow continuation
-- `COMMIT` - Block commits that violate rule
-- `STOP` - Immediately halt execution on violation
+- `COMMIT` - Require explanation/acknowledgment in commit or PR message
+- `STOP` - Block the commit/PR
 
 #### Example agent.md
 
@@ -915,10 +915,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Built with modern .NET 10.0, Native AOT compilation, and the Model Context Protocol for next-generation AI development workflows.
 
-**Last Updated**: 2026-08-02
-**Version**: 1.9.8
+**Last Updated**: 2026-08-03
+**Version**: 1.9.9
 **Maintained By**: Robert Stokes
 
 ---
 
-*Last checked: 2026-08-02 by opencode (glm-5.2)*
+*Last checked: 2026-08-03T20:04:52Z by opencode (glm-5.2)*
