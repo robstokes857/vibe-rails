@@ -149,7 +149,9 @@ CREATE TABLE IF NOT EXISTS Sandboxes (
 | `/api/v1/sandboxes` | GET | List sandboxes for current project |
 | `/api/v1/sandboxes` | POST | Create sandbox (body: `{ name }`) |
 | `/api/v1/sandboxes/{id}` | DELETE | Delete sandbox + directory |
-| `/api/v1/sandboxes/{id}/launch/vscode` | POST | Launch VS Code in sandbox directory |
+| `/api/v1/sandboxes/{id}/launch/{cli\|shell\|vscode}` | POST | Launch CLI, shell, or VS Code in sandbox directory |
+| `/api/v1/sandboxes/{id}/diff` | GET | Diff sandbox against source |
+| `/api/v1/sandboxes/{id}/push` · `/api/v1/sandboxes/{id}/merge` | POST | Push/merge sandbox changes |
 
 ---
 
@@ -214,9 +216,9 @@ CREATE TABLE IF NOT EXISTS Sessions (
 );
 ```
 
-`Processed`, `ParentSessionId`, `SessionDisplayName`, `OwnerPid`, `OwnershipTracked`, and
-`JobRunId` are added via `ALTER TABLE` migrations (safe to re-run). Two further migration
-columns — `AggregateEmbeddedUTC` and `AggregateEmbedFailureCount` — drive the
+`Processed`, `ParentSessionId`, `SessionDisplayName`, `ProjectDisplayName`, `OwnerPid`,
+`OwnershipTracked`, and `JobRunId` are added via `ALTER TABLE` migrations (safe to re-run). Two
+further migration columns — `AggregateEmbeddedUTC` and `AggregateEmbedFailureCount` — drive the
 session-level BERT aggregate embedding backfill job.
 
 When `JobRunId` is not NULL the session belongs to an Automated Job; a trigger
@@ -270,9 +272,9 @@ CREATE TABLE IF NOT EXISTS SessionLogs (
 | **Sequence tracking** | Each input within a session gets an incrementing sequence number (1, 2, 3...) |
 | **Git state capture** | On each input, the current HEAD commit hash is recorded |
 | **Diff calculation** | When a second+ input is recorded, the system calculates all file changes since the previous input's commit |
-| **Fire and forget** | Recording happens asynchronously in the background so it doesn't block the user's terminal |
+| **Fire and forget** | Recording is invoked from an `InputAccumulator` callback so it doesn't block the user's terminal; call sites `await` the method, not `Task.Run` |
 | **Error tolerance** | Recording failures are logged to stderr but don't interrupt the CLI session |
-| **Secret filtering** | `InputEtlFilter.Process` strips secrets before text lands in `UserInputs` or the FTS index |
+| **Secret filtering** | `InputEtlFilter.Process` strips secrets before text lands in the **FTS index** only. `UserInputs` itself holds the canonical raw row (transcript replay needs it). |
 | **BERT embeddings** | `BertEmbeddedUTC` / `BertEmbedFailureCount` (migration columns) drive the embedding backfill job |
 
 ### Schema
@@ -338,31 +340,33 @@ earlier installs are dropped; only the delete trigger remains for sync.
 | A | Added (new file) |
 | M | Modified |
 | D | Deleted |
-| R | Renamed |
+
+> Only `A`, `M`, and `D` are produced by `GitService` (determined from `--numstat` added/deleted
+> counts). Untracked files are captured as `A` with no line counts or diff content.
 
 ### Key Operations
 
 | Method | Behavior |
 |---|---|
-| `RecordUserInputAsync(sessionId, inputText, gitService)` | Orchestrates the full flow: gets commit hash, calculates diffs, stores everything |
+| `RecordUserInputAsync(sessionId, inputText, gitService)` | Gets current HEAD commit, inserts the `UserInputs` record, then opens a git-diff capture window via `IGitDiffCaptureService.BeginCaptureWindowAsync`. Does **not** calculate diffs inline — an idle observer re-runs the diff and replaces stored file changes until the next input finalizes the window. |
 | `GetLastUserInputAsync(sessionId)` | Returns the most recent input for a session (by sequence) |
-| `InsertUserInputAsync(sessionId, sequence, inputText, gitCommitHash)` | Insert a new user input record |
-| `InsertFileChangesAsync(userInputId, previousInputId, changes)` | Batch insert file changes in a transaction |
+| `InsertUserInputAsync(sessionId, sequence, inputText, gitCommitHash)` | Insert a new user input record (raw text; the FTS index write is filtered separately) |
+| `InsertFileChangesAsync(userInputId, previousInputId, changes)` | Append-only batch insert. **Deprecated for live capture** — kept for interface back-compat. New code uses `ReplaceFileChangesAsync`, which deletes then re-inserts a `userInputId`'s file changes in one transaction (the idle observer calls it on each re-run). |
 
 ### Data Flow
 
 1. User presses Enter in the terminal
 2. `InputAccumulator` fires callback with accumulated text
-3. `RecordUserInputAsync` is called (fire-and-forget via `Task.Run`)
+3. `RecordUserInputAsync` is called (awaited from the accumulator callback)
 4. System gets current HEAD commit via `git rev-parse HEAD`
-5. If there's a previous input, calculate diff via `git diff --numstat {prevCommit}`
-6. Insert `UserInputs` record
-7. Insert `InputFileChanges` records (one per changed file)
+5. Insert `UserInputs` record (raw text; FTS index write is filtered separately)
+6. Open a git-diff capture window via `IGitDiffCaptureService.BeginCaptureWindowAsync` (finalizes the previous input's window synchronously)
+7. An idle observer re-runs `git diff --numstat {prevCommit}` and calls `ReplaceFileChangesAsync` until the next input finalizes the window
 
 ### Diff Content Storage
 
 - **Line counts** (`LinesAdded`, `LinesDeleted`): Always captured for tracked files
-- **Full diff content**: Captured only when total lines changed < 500 AND diff size < 50KB
+- **Full diff content**: Captured when total lines changed < 500; **truncated to 50KB** if the diff is larger (not skipped)
 - **Untracked files**: Captured with `ChangeType='A'` but no line counts or diff content
 
 ---
@@ -529,9 +533,10 @@ tables. Sessions reference environments and working directories by string value 
 constraints. Sandboxes reference projects by `ProjectPath` string value — no FK to any project
 table.
 
-The tables with actual FK constraints all point at `Sessions.Id`:
-`SessionLogs`, `sessionOutPut` (with `ON DELETE CASCADE`), `TerminalSessionLogs`, `UserInputs`,
-and `InputFileChanges` (self-referential via `PreviousInputId`).
+The tables with actual FK constraints point at `Sessions.Id` (`SessionLogs`, `sessionOutPut`
+with `ON DELETE CASCADE`, `TerminalSessionLogs`, `UserInputs`) and at `UserInputs.Id`
+(`InputFileChanges`, whose `PreviousInputId` is a second FK to `UserInputs.Id` — not
+self-referential).
 
 ```
 Environments              AgentMetadata
@@ -617,4 +622,4 @@ ChatSummary               TokenSavings / CompressionCaptures
 
 ---
 
-*Last checked: 2026-08-02 by opencode (glm-5.2)*
+*Last checked: 2026-08-03T20:04:52Z by opencode (glm-5.2)*
