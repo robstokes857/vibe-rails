@@ -1,3 +1,4 @@
+using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Jobs;
@@ -69,9 +70,29 @@ public static class JobRoutes
             IJobService service,
             long? jobId,
             int? limit,
+            int? page,
+            int? pageSize,
             CancellationToken cancellationToken) =>
-            ExecuteAsync(() => service.GetRunsAsync(jobId, limit ?? 100, cancellationToken)))
+            ExecuteAsync(() => jobId.HasValue
+                ? service.GetRunsPageAsync(jobId.Value, page ?? 1, pageSize ?? limit ?? 50, cancellationToken)
+                : service.GetRunsAsync(null, limit ?? 100, cancellationToken)))
             .WithName("GetJobRuns");
+
+        // Registered ahead of /runs/{runId} so the literal segment is the obvious match. ASP.NET
+        // already prefers literals over route parameters; the ordering just keeps that visible.
+        app.MapGet("/api/v1/jobs/runs/summary", (
+            IJobService service,
+            string? projectPath,
+            CancellationToken cancellationToken) =>
+            ExecuteAsync(() => service.GetRunSummariesAsync(projectPath, cancellationToken)))
+            .WithName("GetJobRunSummaries");
+
+        app.MapPost("/api/v1/jobs/runs/delete", (
+            IJobService service,
+            DeleteJobRunsRequest request,
+            CancellationToken cancellationToken) =>
+            ExecuteAsync(() => service.DeleteRunsAsync(request.RunIds ?? [], cancellationToken)))
+            .WithName("DeleteJobRuns");
 
         app.MapGet("/api/v1/jobs/runs/{runId}", (
             IJobService service,
@@ -79,6 +100,13 @@ public static class JobRoutes
             CancellationToken cancellationToken) =>
             ExecuteAsync(() => service.GetRunAsync(runId, cancellationToken)))
             .WithName("GetJobRun");
+
+        app.MapDelete("/api/v1/jobs/runs/{runId}", (
+            IJobService service,
+            string runId,
+            CancellationToken cancellationToken) =>
+            ExecuteAsync(() => service.DeleteRunsAsync([runId], cancellationToken)))
+            .WithName("DeleteJobRun");
 
         app.MapPost("/api/v1/jobs/runs/{runId}/cancel", (
             IJobService service,
@@ -104,6 +132,22 @@ public static class JobRoutes
         catch (JobServiceException ex)
         {
             return Results.Json(new ErrorResponse(ex.Message), statusCode: ex.StatusCode);
+        }
+        catch (OperationCanceledException)
+        {
+            // Request aborts are normal (navigation, refresh, host shutdown). Let ASP.NET handle
+            // cancellation instead of logging it and fabricating a server-error response.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Anything that is not a JobServiceException used to escape as an unhandled exception,
+            // which reached the client as a 500 with an empty body and left no log line to explain
+            // it. A store-level fault is exactly the case where the message matters most.
+            Log.Error(ex, "[Jobs ✘] Unhandled Automation API failure");
+            return Results.Json(
+                new ErrorResponse("The Automation request failed. See the VibeRails log for details."),
+                statusCode: 500);
         }
     }
 

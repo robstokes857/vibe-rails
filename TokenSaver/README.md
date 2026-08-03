@@ -339,9 +339,9 @@ had no way to get it back short of asking the user to flip a switch. Now it can 
 for **5 minutes, for its own terminal tab**, re-run the command, and read the output verbatim.
 
 Three MCP tools drive it — `pause_token_saver`, `resume_token_saver`, `get_token_saver_status`
-(`VibeRails/Services/Mcp/Tools/TokenSaverTool.cs`). They POST to
-`/llm/control/token-saver/*`, which sits under the same prefix and behind the same session+tab
-auth gate as the proxy routes.
+(`VibeRails/Services/Mcp/Tools/TokenSaverTool.cs`). They call
+`/llm/control/token-saver/*` (POST for pause/resume, GET for status), which sits under the same
+prefix and behind the same session+tab auth gate as the proxy routes.
 
 **The pause is held in memory by the process that hosts the proxy**
 (`VibeRails/Services/LlmProxy/TokenSaverPauseState.cs`), and that is the terminal tab's own child
@@ -488,3 +488,7 @@ smudge byte-exact fixtures on a fresh Windows checkout and you'll get failures w
   the tallies on a `proxy_activity` ping it relays out of a child
   (`TerminalTabHostService.EnrichPayload`). "This session" is a delta — what the table has gained
   since this process started — not a counter of this process's own requests.
+
+---
+
+*Last checked: 2026-08-03T13:42:15Z by opencode (glm-5.2)*

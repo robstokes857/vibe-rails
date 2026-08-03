@@ -11,7 +11,7 @@ irm https://raw.githubusercontent.com/robstokes857/vibe-rails/main/Scripts/insta
 ```
 
 This will:
-- Download the latest Windows release
+- Download the latest Windows release (`vb-win-x64.zip`)
 - Verify SHA256 checksum
 - Extract to `~/.vibe_rails`
 - Install BertV2 model assets (used for semantic history search)
@@ -66,3 +66,7 @@ vb
 ```
 
 For more information, visit: https://github.com/robstokes857/vibe-rails
+
+---
+
+*Last checked: 2026-08-03 by opencode (glm-5.2)*

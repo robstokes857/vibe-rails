@@ -1,5 +1,28 @@
 # TERMINAL.md
 
+> ## 🟡 Fixed, awaiting Rob's test — Automation runs shredded in the native terminal (2026-08-02)
+>
+> Root-caused with byte evidence **and a measured probe**, fixed, unit-tested —
+> **not yet verified in Rob's env.** Server-side (`vb.exe`), so it needs a
+> rebuilt/reinstalled VS Code extension. **Rob tests, Rob marks it closed.**
+>
+> opentui emits `CSI 8;41;156t` ("resize your window") into its PTY output; we
+> relayed it to the **real console**, which obeyed — then the console snapped
+> back and reflowed the alt-screen cells it had already painted, which a diff
+> renderer never repaints. Fix = stop misdelivering that request on the native
+> console relay, plus a debounced repaint after a native alt-screen resize.
+> **Web / VS Code terminal paths are untouched by design.** Test steps at the
+> bottom of **"## 2026-08-02 Automation runs in a native terminal…"** below.
+
+> ## ⚪ Maybe-bug — typing lag reported on 1.9.6+, NOT reproduced (2026-08-02)
+>
+> Rob reported typing/display lag and initially attributed it to the 1.9.6+ VS
+> Code changes, then **walked it back the same session: "it is just this window."**
+> Localized to one window, not reproduced elsewhere, and **the 1.9.6+ diff
+> contains nothing on the terminal path at all.** Logged as a watch-item only —
+> do not treat it as a regression without a fresh repro. See **"## 2026-08-02
+> Typing lag on 1.9.6+ (maybe-bug)"** below.
+
 > ## 🟡 Open — awaiting Rob's test (2026-07-26)
 >
 > Two bugs found in session `71dee36a-caf6-42e1-b245-1625b39a9221` (GLM 5.2).
@@ -140,6 +163,265 @@
 > nothing. Harmless to leave in (and may help once Claude Code's
 > wrapping is fixed upstream), but it's belt-only — not the
 > suspenders. Full triage below.
+
+## 2026-08-02 Typing lag on 1.9.6+ (maybe-bug) — NOT reproduced, do not chase without a fresh repro
+
+**Status:** ⚪ **MAYBE-BUG / watch-item.** Reported by Rob 2026-08-02, then
+walked back by him the same session: **"it is just this window."** Localized to a
+single window, not systemic. No code change made. Recorded so the next report can
+be matched against it.
+
+**What was reported:** *"after we made the VS code changes in 1.9.6+ we
+re-introduced the lagging while typing bug… I am not sure if it is a 1 for 1 the
+same bug, which had to do with 'vs code setTimeout clamp', but it is lagging when
+I type in you and even in the display."*
+
+### Why it is not (yet) a regression — the 1.9.6+ diff is clean
+
+Versions map to commits as: **1.9.5** `6450216`…`19b2f9e`, **1.9.6** starts at
+`1d0c5ce`, **1.9.7** `82520e3`, **1.9.8** `607034c`. So "1.9.6+" is
+`19b2f9e..HEAD`, and the **entire** functional content of that range is:
+
+- Git Guard hook install/removal — `HookInstallationService.cs` (+147),
+  `Init.cs` (+8), `HookRoutes.cs`, `rule-controller.js`, `index.html` (a Remove
+  button), plus tests
+- `deploy/deploy.ps1`
+- version-string bumps in `VibeRails.csproj` / `appsettings.json`
+
+**Nothing on the terminal path.** Widening to 1.9.5 (`6450216..HEAD`) still
+leaves the hot path byte-identical:
+
+| File | Role on the hot path | Changed? |
+|---|---|---|
+| `terminal-tab.js` | `onData` → `socket.send`; `onmessage` → `queueMicrotask` flush | **No** |
+| `vibe-terminal.js` | xterm wrapper, write path | **No** |
+| `WebSocketConsumer.cs` | server send loop, 4 ms coalesce + 100 ms sync-hold | **No** |
+| `TerminalTabHostService.cs` | VS Code mode child-process WS proxy | **No** |
+
+So this is **not** a repeat of the 1.6.12 bug (Chromium clamping `setTimeout` to
+1 s in an occluded webview; fixed by moving the xterm coalesce to
+`queueMicrotask` — that code is unchanged). `webview-panel.ts` still sets
+`retainContextWhenHidden: true`, and no extension **source** file changed since
+1.9.5.
+
+### Ruled out by measurement (2026-08-02)
+
+- **Debug logging / the `[TypingLag]` probes.** `TerminalStateService.LogOutput`
+  and `RecordInput` allocate a `Stopwatch` and call `Log.Debug` **per PTY output
+  chunk**, which would be real synchronous file I/O if Debug were on. It is
+  **off** — `grep -c '\[DBG\]'` is **0** across every current log file.
+- **`terminal-token-compression.js` (+138 in the 1.9.5 range).** Its new 1 s
+  `setInterval` is DOM-only, runs **only while a TokenSaver pause is live**, and
+  self-cancels (`_schedulePausedTicker`). It does not touch terminal data.
+- **CPU.** All 7 live `vb` processes sampled at **0–0.2%** on a 32-core box, and a **5-minute** sweep (5 s interval, all `vb` PIDs) surfaced only two brief blips — **11.8%** and **5.8%** of one core-equivalent. No sustained load, and nothing on the ~3 min BERT-backfill cadence.
+
+### Standing environmental risk found while looking (worth its own ticket)
+
+`~/.vibe_rails/state.db` is **8.4 GB** (2,223,760 × 4 KiB pages) with
+**~32.0 M `SessionLogs` rows** and ~1.47 M `TerminalSessionLogs` rows, and
+**`PRAGMA busy_timeout = 0`**. Every PTY output chunk writes into that database,
+from up to 7 concurrent `vb` processes plus the BERT backfill jobs. Note also
+that raw PTY bytes are stored **twice** — `SessionLogs.Content` and
+`TerminalSessionLogs.Data` are the same byte stream (verified byte-identical on
+session `ca6a8608`). There is a matching ETL backlog: 1266 sessions with only
+7 `Processed=1`, 3768 `UserInputs` vs 457 `CleanedUserInput`.
+
+This is **not** the reported lag (CPU was idle and the report was window-local),
+but it is exactly the shape the
+`project_state_db_lock_contention` memory warns about — *"check orphan `vb`
+processes and the DB before diffing code."* If a **systemic**, machine-wide
+terminal slowdown is ever reported, start here, not with a code diff.
+
+### If it comes back, capture these first
+
+- **Constant or periodic?** Periodic ≈3 min ⇒ the BERT backfill job.
+- **Browser at `localhost:5000` vs the VS Code webview** — browser-clean ⇒
+  extension/webview host; both ⇒ server-side.
+- **Plain Shell tab vs agent tab** — shell-too ⇒ our path, not the CLI's bytes.
+- **One window or every window** — this report was *one*, which is what
+  demoted it.
+- **Heartbeat lines** around an episode: a `tpAvail` drop or `threads` jump ⇒
+  thread-pool starvation.
+
+**Guardrails if a fix ever lands:** no stripping the byte stream; the receive
+path stays on `queueMicrotask`, **never** `setTimeout` (the 2026-05-05 occlusion
+landmine).
+
+---
+
+## 2026-08-02 Automation runs in a native terminal display shredded — opentui's `CSI 8;h;w t` is relayed to the real console
+
+**Status:** 🟡 **FIX APPLIED — AWAITING ROB'S TEST. Do not mark closed until Rob
+confirms** (server-side, needs a rebuilt `vb.exe` / VS Code extension). Test steps
+at the bottom of this entry.
+
+**Symptom (Rob, 2026-08-02):** Automation runs *"never display right."* Rob
+characterised it as **shredded / overlapping text** *and* **wrapped at the wrong
+width** — explicitly not clipped and not blank. Affects the **native terminal
+window** the Automation opens, not the replay viewer.
+
+**Reference session:** `d2328427-187c-48ae-b0a5-2747a542fadf` (glm-5.2,
+`Documentation_drift` job, run `6d07e6fee2704e5d855351b6127f1c20`, 4 min).
+
+### The chain (every link has evidence)
+
+1. **opentui emits `CSI 8 ; 41 ; 156 t`** — XTWINOPS *"resize the text area to 41
+   rows × 156 columns"* — into its PTY **output**:
+   ```
+   CHUNK 31757009 @ 2026-08-03T03:27:41.3307327Z (len=4096)
+     \e[?25l\e[8;41;156t\e[38;2;255;255;255m…
+   ```
+   It appears **exactly once** in the whole session (`\e[14t` appears 3× —
+   opentui also queries the pixel size, which ConPTY does not answer).
+2. **`ConsoleOutputConsumer` relays it verbatim to the real console.** That class
+   is a bare `Console.Write(Encoding.UTF8.GetString(data.Span))` and is the
+   **native-console-only** output path (`TerminalRunner.cs:610` and `:672`).
+3. **conhost obeys it.** Measured directly with a probe that writes the exact
+   sequence into a `pwsh` window launched the same way a job launches one
+   (`UseShellExecute` → default terminal app, `-NoProfile -File`):
+   ```
+   before        Window=120x30  Buffer=120x30
+   after +0.5s   Window=156x41  Buffer=156x41     ← CSI 8;41;156t
+   after +10s    Window=156x41  Buffer=156x41
+   restored      Window=120x30  Buffer=120x30     ← CSI 8;30;120t
+   ```
+   (`WT_SESSION` was empty, so this was **conhost**, not Windows Terminal.)
+4. **vb's 50 ms geometry poll reads the new console size and pushes it into the
+   inner PTY.** `TerminalRunner.ConsoleInputLoopAsync` →
+   `NativeConsoleGeometry.TryGetSize` → `TerminalResizeCoordinator.ApplyResize`.
+   Recorded at `TerminalSessionLogs` seq 126 @ `03:27:41.3297131Z` — the **same
+   millisecond** as the emission.
+5. **At `03:27:50.9680963Z` the console returns to 120×30** (seq 383) and stays
+   there for the remaining 3m49s of the run. Nothing in the byte stream asked for
+   that — there is only the one `\e[8;…t` — so the window snapped back on its
+   own.
+
+**Why it never recovers.** When the console shrinks 156 → 120 it **reflows the
+alt-screen content it has already painted**, wrapping the 156-wide frames.
+opentui is a **diff** renderer: its model says those cells are already correct,
+so it never repaints them. That is simultaneously *"wrapped at the wrong width"*
+and *"shredded/overlapping"*, and it is permanent for the rest of the run.
+
+**Why this is native-only.** xterm.js ships `windowOptions` all-**false**, so it
+ignores `CSI 8 t` outright — the web/VS Code terminal never resizes and never
+enters this loop. That is why every entry on this page (all xterm-side) misses
+it, and why it is Automations, the main native-console path, that show it.
+
+### What is NOT wrong (checked, so nobody re-checks)
+
+- **The recording is intact.** Replaying the session's `SessionLogs` through a
+  terminal emulator at 120×30 produces a **perfect** final screen, with **zero**
+  UTF-8 replacement characters — including when each chunk is decoded
+  independently the way `ConsoleOutputConsumer` does.
+- **`SessionLogs` and `TerminalSessionLogs` are the same byte stream.**
+  Byte-identical for an interactive session (`ca6a8608`, 3,561,284 bytes each);
+  this job run differs only by a **101-byte tail flush** lost when the run was
+  killed. So `session-viewer.js`'s chunk→frame byte-offset mapping is sound, and
+  the replay viewer renders this session correctly.
+- **No web viewer was involved.** No WS attach to the session at `22:27:50`
+  local; the 156×41 → 120×30 flip came from vb's own console poll.
+
+### What we're trying (applied 2026-08-02) — both halves, native console path only
+
+**Web and VS Code terminal paths are untouched by design** — that was Rob's
+explicit condition on this fix.
+
+1. **Stop proxying the window-manipulation request to the outer console.**
+   New `NativeConsoleOutputFilter`, used by **`ConsoleOutputConsumer` only**.
+   It drops XTWINOPS ops **3 (move), 4 (resize px), 8 (resize chars),
+   9 (maximize), 10 (fullscreen)** — the ones that change window geometry — and
+   passes everything else through byte-for-byte, including every other XTWINOPS
+   op (`1/2/5/6/7`, the `11..21` report queries opentui actually uses such as
+   `\e[14t`, and title-stack `22/23`). Private forms (`CSI ? … t`, `CSI > … t`)
+   and `CSI Ps SP t` (DECSWBV) are explicitly not matched. Drops are logged
+   (first, then every 50th).
+   - Rationale, and why it does not contradict the no-stripping rule: in the
+     nested-PTY architecture VibeRails **is** the app's terminal, so
+     `CSI 8 ; h ; w t` is addressed to *us*. Forwarding it to a *different*
+     terminal is a **misdelivery**, not a rendering workaround. ⚠️ **This is the
+     one deliberate exception, and Rob signed off on it on exactly that
+     reasoning. Do not generalise it to rendering sequences** (SGR, DEC modes,
+     cursor ops).
+   - `WebSocketConsumer`, `RemoteOutputConsumer` and `DbLoggingConsumer` are not
+     touched, so the recording, the web viewer and the remote viewer all still
+     receive the unmodified stream.
+   - The filter **carries a partial escape sequence across PTY reads** (chunk
+     boundaries are arbitrary), capped at `MaxCarryBytes = 64` so an
+     unterminated `ESC` can never stall console output. While in there it also
+     **stops splitting multi-byte UTF-8 glyphs**, which the old per-chunk
+     `Encoding.UTF8.GetString(data.Span)` corrupted into replacement characters
+     — latent before, fixed in the same pass.
+2. **Debounced repaint after a native-console resize settles**, to clear reflow
+   residue from any *other* source (a real user drag-resize still reflows the
+   console). Reuses the existing `ScheduleDebouncedRedraw` (Ctrl+L, 160 ms) via
+   a new `NeedsNativeConsoleRepaint`, gated on **two** conditions:
+   - `source == TerminalIoSource.LocalCli` — exactly the native console poll, so
+     `LocalWebUi`/`RemoteWebUi` resizes never trigger it (xterm.js owns its own
+     buffer and reflows correctly).
+   - `terminal.IsAlternateScreen` — new passthrough property on `Terminal`
+     mirroring `IsSyncOutputActive`. Without this, resizing a native **shell**
+     window would Ctrl+L away the user's prompt and scrollback. Only
+     alt-screen diff renderers need the repaint.
+
+   The global `EnableDebouncedRedrawOnResize` flag keeps its old meaning and
+   stays `false`; **do not flip it globally** — it is `static`, so that would
+   send Ctrl+L on every web terminal resize too.
+
+**Deliberately not chosen:** pinning the PTY size, or making the geometry poll
+reconcile PTY-vs-console unconditionally. Reconciling heals the *geometry* but
+cannot undo conhost's reflow of already-painted cells, so the shredding would
+survive. Widening the XTWINOPS drop to all ops was also rejected — the report
+queries are how opentui learns its size.
+
+**Tests:** new `Tests/Services/Terminal/NativeConsoleOutputFilterTests.cs`
+(28 cases) — the literal `\e[8;41;156t` from chunk 31757009; each geometry op
+dropped and each non-geometry op preserved; lookalike/private forms untouched; a
+full rendering-sequence stream byte-for-byte identical (the no-stripping
+guardrail); the frame split across two reads **and** one byte at a time; a
+multi-byte glyph split across reads; no stall on an unterminated escape; ordering
+preserved across multiple drops. `Tests.Services.Terminal` **142/142**,
+`TerminalEmulator.Tests` **164 passed / 9 skipped** (unchanged baseline).
+
+⚠️ ESC is written as an `Esc = "\u001b"` constant in that test file — **never paste a raw
+0x1B byte into it** (see `project_fixture_autocrlf_corruption`: byte-exact
+sources in this repo have been mangled by git's text filters).
+
+### Rob's test → then mark this entry closed
+
+1. Rebuild + reinstall the extension (the fix lives in `vb.exe`).
+2. Run an Automation that uses OpenCode/GLM-5.2 (e.g. `Documentation_Drift`) and
+   watch the native window it opens.
+3. **Pass:** the window **does not jump size** a few seconds in, and the TUI
+   stays correctly laid out for the whole run — no wrapped/overlapping text.
+4. Also drag-resize the Automation window by hand mid-run: it should re-lay-out
+   cleanly rather than leaving shredded residue.
+5. **Regression check (this is the half that must not have changed anything):**
+   open a normal VS Code / browser terminal tab, resize the panel, and confirm
+   behaviour is exactly as before — no clearing, no Ctrl+L, no size jumps.
+6. Also confirm a plain **native shell** session (`vb --env shell`) does *not*
+   get cleared when you resize its window — that is what the
+   `IsAlternateScreen` gate protects.
+7. **Fail:** window still jumps → check the log for
+   `Dropped … XTWINOPS window-geometry request(s)` at Debug level. Present but
+   still jumping ⇒ something else is emitting geometry ops. Absent ⇒ the filter
+   is not on the path you are testing.
+
+### Related, found while investigating (separate bugs, not fixed)
+
+- **A `--job-run` process writes no log file at all.** There is no log for
+  pid 19696 anywhere under `~/.vibe_rails/logs/`, so Automations have zero
+  diagnostics. `[Terminal] Starting native PTY at host console geometry` — an
+  Information-level line on this exact path — has **zero** occurrences across
+  every log file.
+- **Two job sessions recorded `SessionLogs` but zero `TerminalSessionLogs`**
+  (`8986add7`, `9b3761a8`, 3 chunks each). The replay route falls back to
+  `120×40` when `enrichedChunks` is empty, which is the wrong row count for the
+  real `120×30` recording.
+- The run ended with `The terminal running this Automation is no longer open.`
+  while the TUI was still mid-spinner — related to the orphan/kill cluster in
+  `kill-job.md`, not to this display bug.
+
+---
 
 ## 2026-07-26 `__resize__:171,4` typed into the OpenCode composer — reserved control frame falls through to the PTY when rows < 5
 

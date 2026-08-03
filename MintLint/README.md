@@ -22,3 +22,7 @@ This changes **which text enters the measurement stage**, not the metric formula
 normalization thresholds, category weights, breadth-gated roll-up, or rating bands.
 The standalone `MintLintAnalyzer.AnalyzePath` and `AnalyzeFile` APIs continue to analyze
 complete files; change scoping belongs to VibeRails’ Git preflight integration.
+
+---
+
+*Last checked: 2026-08-03 by opencode (glm-5.2)*

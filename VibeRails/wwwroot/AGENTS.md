@@ -10,21 +10,22 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 |------|---------|
 | [app.js](app.js) | Central controller, routing, API layer |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
-| [js/modules/terminal-token-compression.js](js/modules/terminal-token-compression.js) | Persistent token-savings meter and per-tab compression control, including API synchronization and persisted state |
+| [js/modules/terminal-token-compression.js](js/modules/terminal-token-compression.js) | Persistent token-savings meter and per-tab pause-badge display (the per-tab on/off toggle was removed 2026-07-19; the saver is now per-LLM in Settings) |
 | [js/modules/terminal-snapshot-renderer.js](js/modules/terminal-snapshot-renderer.js) | Renders reserved `xterm_ui_bytes` payloads into xterm.js and captures PNG data URLs for MCP Explorer previews |
 | [js/modules/environment-controller.js](js/modules/environment-controller.js) | Environment CRUD + "Web UI" launch button |
 | [js/modules/sandbox-controller.js](js/modules/sandbox-controller.js) | Sandbox CRUD + launch terminals/VS Code into sandbox dirs |
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Dashboard layout with state passing for preselection |
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Interactive MintLint scan dashboard with Monaco code evidence for the Rules page |
 
-## Terminal Environment Integration
+## Token Saver Integration
 
-The tab hover actions include a green compression toggle. Its UI, API synchronization, and
-persisted state are owned by `terminal-token-compression.js`; `terminal-multitab.js` only calls the
-controller at tab lifecycle boundaries. The control changes a process-local gate in that tab's
-child VibeRails process, takes effect on the next Claude/Codex proxy request, and does not alter the
-global compression stages or any sibling tab. The same module owns the persistent token-savings
-meter at the far right of the terminal controls bar.
+The token-savings meter sits at the far right of the terminal controls bar and is owned by
+`terminal-token-compression.js`. The per-LLM on/off switches live in Settings (Claude, Codex,
+OpenCode); the per-tab compression toggle that used to sit on each tab was removed 2026-07-19.
+The meter displays accumulated savings and a `Paused m:ss` badge while any tab's compression is
+paused via the `pause_token_saver` / `resume_token_saver` MCP tools.
+
+## Terminal Environment Integration
 
 The terminal dropdown shows two groups:
 - **Base CLIs**: Claude, Codex, GLM 5.2, Kimi K3, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
@@ -49,7 +50,7 @@ Both base CLI and custom environment launches share one unified tab API; the onl
 ### Flow: "Web UI" Button
 
 1. User clicks "Web UI" on environments page
-2. `launchInWebUI(envId, envName)` calls `app.navigate('dashboard', { preselectedEnvId })`
+2. `launchInWebUI(envId, envName, cli)` calls `app.navigate('dashboard', { preselectedEnvId })`
 3. Dashboard passes `preselectedEnvId` to `terminalController.bindTerminalActions(container, preselectedEnvId)`
 4. `bindTerminalActions` pre-selects the environment in the dropdown
 5. Terminal section scrolls into view
@@ -105,3 +106,7 @@ The WebSocket URL accepts `?cols=&rows=` so the backend can resize the PTY befor
 replaying the session buffer (avoids the stale-geometry "double print" bug).
 
 See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for backend terminal service.
+
+---
+
+*Last checked: 2026-08-03T13:42:15Z by opencode (glm-5.2)*

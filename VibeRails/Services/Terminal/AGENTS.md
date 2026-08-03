@@ -102,6 +102,9 @@ Validation:
 - Internal consumer that feeds all PTY output bytes into the headless `TerminalEmulator` so `GetGridReplay()` always reflects the current screen state.
 - Thread-safe via the shared emulator lock.
 
+`NativeConsoleOutputFilter.cs`
+- Not a consumer, but lives in `Consumers/`. Strips XTWINOPS window-geometry operations from PTY output on its way to the **real OS console** of a native session, so an inner app cannot resize the outer console window out from under the geometry poll. Narrow on purpose; `DbLoggingConsumer`, `WebSocketConsumer`, and `RemoteOutputConsumer` still receive the unmodified stream.
+
 ### `TerminalRunner.cs`
 Session orchestrator.
 
@@ -241,8 +244,9 @@ Owns session preparation (`PrepareSessionAsync`) — builds the `PreparedTermina
 - Runs CLI MCP auto-registration commands (remove + add) via the platform shell.
 - Builds Claude/Codex proxy env vars via `ILocalLlmProxyContext` (the current process's proxy URL
   and auth), so each terminal-tab child can apply its own process-local token-saver gate without
-  breaking root tool routing. (`TerminalRunner` separately injects `ILocalToolApiContext` for root
-  tool routing and `ILlmProxySessionState` for per-tab proxy gate state.)
+  breaking root tool routing, and records the proxied launch via `ILlmProxySessionState`.
+  (`TerminalRunner` separately injects `ILocalToolApiContext` for root tool routing and also holds
+  `ILlmProxySessionState` for per-tab proxy gate state.)
 
 ### `Pty/` additional files
 - `KeyTranslator.cs` — translates `Console.ReadKey` results to ANSI escape sequences for the CLI terminal path.
@@ -262,6 +266,8 @@ Owns session preparation (`PrepareSessionAsync`) — builds the `PreparedTermina
 - `WaitingForUserInputObserver.cs` — detects when Codex is sitting at a prompt waiting for user input by analyzing PTY chunk repetition patterns.
 - `SessionStateEventObserver.cs` — publishes session lifecycle state changes to `IAppEventBus` so browser clients receive real-time updates (metadata only, no raw I/O).
 - `MyTerminalObserver.cs` — debugging/development observer.
+
+`Observers/` also holds `TerminalIoObserverService.cs`, the dispatcher described in its own section above (not an observer implementation itself).
 
 ## Session Modes
 
@@ -398,4 +404,8 @@ These issues regressed in production-like usage and should be treated as guardra
    - resize sync in both viewers
    - remote-only session survives beyond 120s with no local browser connected
    - Claude/Codex/Antigravity/Copilot local reconnect do not show duplicated welcome/prompt blocks
-   - Claude/Codex/Antigravity/Copilot font size and font family changes do not leave duplicated full-screen UI blocks
+    - Claude/Codex/Antigravity/Copilot font size and font family changes do not leave duplicated full-screen UI blocks
+
+---
+
+*Last checked: 2026-08-03T13:42:15Z by opencode (glm-5.2)*

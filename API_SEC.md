@@ -1,6 +1,7 @@
 # API authentication coverage
 
 Audit date: 2026-08-01  
+Jobs inventory re-checked: 2026-08-03 (three run-history routes added; see § 3).  
 Scope: the current working tree, including uncommitted changes.
 
 ## Terminology used in this report
@@ -24,8 +25,8 @@ session-scoped browser credential (`viberails_tab`), which the implementation ca
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 139 mapped route
-surfaces in this inventory: 129 `/api/v1` method/path mappings, seven non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 142 mapped route
+surfaces in this inventory: 132 `/api/v1` method/path mappings, seven non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -214,7 +215,7 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `DELETE /api/v1/code-analyzer/ignores`
 - `POST /api/v1/debug-bundle/{sessionId}/send`
 
-### Jobs (10)
+### Jobs (13)
 
 - `GET /api/v1/jobs`
 - `POST /api/v1/jobs`
@@ -223,7 +224,10 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `DELETE /api/v1/jobs/{id:long}`
 - `POST /api/v1/jobs/{id:long}/run`
 - `GET /api/v1/jobs/runs`
+- `GET /api/v1/jobs/runs/summary`
+- `POST /api/v1/jobs/runs/delete`
 - `GET /api/v1/jobs/runs/{runId}`
+- `DELETE /api/v1/jobs/runs/{runId}`
 - `POST /api/v1/jobs/runs/{runId}/cancel`
 - `POST /api/v1/jobs/runs/{runId}/retry`
 

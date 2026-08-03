@@ -55,8 +55,8 @@ npx playwright show-report
 
 ## Configuration
 
-- **Backend:** `global-setup.js` spawns the real VibeRails backend (`dotnet run --project ../VibeRails -- --vs-code-v1`), consumes the one-time bootstrap URL to persist an auth cookie + tab token (`storageState`), and writes the dynamic `baseURL` to `.playwright-runtime.json`. `global-teardown.js` kills the backend by PID.
-- **Fake CLI:** `VIBERAILS_TEST_FAKE_CLI=1` (set by global-setup) makes `CommandService.PrepareSession` short-circuit to a portable echo+sleep so PTY+WS+xterm are exercised without a real LLM CLI.
+- **Backend:** `global-setup.js` spawns the real VibeRails backend (`dotnet run --project ../VibeRails -c Debug -- --vs-code-v1`), consumes the one-time bootstrap URL to persist the auth cookie via `storageState` (the tab token lives in `sessionStorage`, which `storageState` does not persist, so it is captured separately for `fixtures.js` to re-inject), and writes the dynamic `baseURL` to `.playwright-runtime.json`. `global-teardown.js` kills the backend by PID.
+- **Fake CLI:** `VIBERAILS_TEST_FAKE_CLI=1` (set by global-setup) makes `CommandService.PrepareSessionAsync` short-circuit to a portable echo+sleep so PTY+WS+xterm are exercised without a real LLM CLI.
 - **Custom backend:** Set `VIBERAILS_E2E_BACKEND_DLL` to point the suite at an already-built isolated DLL instead of `dotnet run`.
 - **Workers:** 1 (one backend instance per run, shared via saved `storageState`).
 - **Tests:** Located in `./tests`; `xterm-scrollback.spec.js` is excluded from Playwright (run via `npm run test:node` with `node --test` + `@xterm/headless`).
@@ -64,3 +64,7 @@ npx playwright show-report
 ## Adding New Tests
 
 When adding features to app.js or index.html, add a corresponding spec file in ./tests/*.spec.js to ensure the UI interactions remain functional.
+
+---
+
+*Last checked: 2026-08-03T13:42:15Z by opencode (glm-5.2)*

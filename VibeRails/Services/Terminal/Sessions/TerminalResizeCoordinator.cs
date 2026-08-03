@@ -67,7 +67,13 @@ internal static class TerminalResizeCoordinator
         resizeCts?.Dispose();
     }
 
-    private static void ScheduleDebouncedRedraw(Terminal terminal, string sessionId)
+    /// <param name="requireAlternateScreen">
+    /// When true the alternate screen is re-checked immediately before the write. The debounce
+    /// window is long enough for the CLI to leave the alternate screen and hand the console back to
+    /// its shell, and a Ctrl+L delivered after that point clears the user's prompt and scrollback
+    /// instead of repainting a TUI.
+    /// </param>
+    private static void ScheduleDebouncedRedraw(Terminal terminal, string sessionId, bool requireAlternateScreen)
     {
         CancellationTokenSource cts;
         lock (s_lock)
@@ -87,14 +93,25 @@ internal static class TerminalResizeCoordinator
             try
             {
                 await Task.Delay(ResizeRedrawDebounceMs, cts.Token);
-                if (!cts.Token.IsCancellationRequested)
-                {
-                    await terminal.WriteBytesAsync(new byte[] { 0x0C }, cts.Token); // Ctrl+L
-                }
+
+                // Re-validate against the state as it is *now*, not as it was when the resize
+                // arrived 160 ms ago. The process may have exited, and a TUI may have dropped back
+                // to the primary screen — in both cases the repaint is no longer ours to send.
+                if (cts.Token.IsCancellationRequested || terminal.HasExited)
+                    return;
+
+                if (requireAlternateScreen && !TryReadIsAlternateScreen(terminal))
+                    return;
+
+                await terminal.WriteBytesAsync(new byte[] { 0x0C }, cts.Token); // Ctrl+L
             }
             catch (OperationCanceledException)
             {
                 // Superseded by a new resize or session ended.
+            }
+            catch (ObjectDisposedException)
+            {
+                // PTY torn down between the liveness check and the write.
             }
             catch (Exception ex)
             {
@@ -129,9 +146,49 @@ internal static class TerminalResizeCoordinator
         terminal.Resize(cols, rows);
         stateService.RecordResize(sessionId, cols, rows, source);
 
-        if (EnableDebouncedRedrawOnResize)
+        var nativeConsoleRepaint = NeedsNativeConsoleRepaint(terminal, source);
+        if (EnableDebouncedRedrawOnResize || nativeConsoleRepaint)
         {
-            ScheduleDebouncedRedraw(terminal, sessionId);
+            ScheduleDebouncedRedraw(terminal, sessionId, requireAlternateScreen: nativeConsoleRepaint);
+        }
+    }
+
+    /// <summary>
+    /// A native session relays PTY output into a real console window that owns its own screen
+    /// buffer. When that window is resized, the console reflows the cells it has already painted —
+    /// and an alternate-screen TUI is a diff renderer, so its model still says those cells are
+    /// correct and it never repaints them. The result is permanently shredded/rewrapped output
+    /// (TERMINAL.md "## 2026-08-02 Automation runs in a native terminal…"). A debounced repaint is
+    /// the only thing that clears that residue.
+    ///
+    /// <para>
+    /// Deliberately narrow on two axes. <see cref="TerminalIoSource.LocalCli"/> is exactly the
+    /// native-console geometry poll, so web (<c>LocalWebUi</c>) and remote (<c>RemoteWebUi</c>)
+    /// resizes never trigger it — xterm.js owns its own buffer and reflows correctly. And it
+    /// requires the alternate screen, so resizing a native <i>shell</i> window does not clear the
+    /// user's prompt and scrollback.
+    /// </para>
+    /// </summary>
+    private static bool NeedsNativeConsoleRepaint(Terminal terminal, TerminalIoSource source)
+    {
+        return source == TerminalIoSource.LocalCli && TryReadIsAlternateScreen(terminal);
+    }
+
+    /// <summary>
+    /// Reads the alternate-screen flag, treating a torn-down terminal as "not on the alternate
+    /// screen" — there is nothing left to repaint either way. Failures are logged rather than
+    /// swallowed so an unexpected one is not invisible.
+    /// </summary>
+    private static bool TryReadIsAlternateScreen(Terminal terminal)
+    {
+        try
+        {
+            return terminal.IsAlternateScreen;
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[Terminal] Could not read alternate-screen state; skipping resize repaint");
+            return false;
         }
     }
 

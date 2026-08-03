@@ -106,7 +106,7 @@ namespace VibeRails.DB
             BEGIN
                 UPDATE JobRuns
                 SET SessionId = NEW.Id
-                WHERE Id = NEW.JobRunId;
+                WHERE Id = NEW.JobRunId AND DeletedUTC IS NULL;
 
                 SELECT RAISE(ABORT, 'The Job run for this terminal session no longer exists.')
                 WHERE changes() <> 1;

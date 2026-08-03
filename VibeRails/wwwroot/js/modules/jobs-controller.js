@@ -70,7 +70,18 @@ export class JobController {
         this.app = app;
         this.root = null;
         this.jobs = [];
-        this.runs = [];
+        // One entry per automation for the page-level table; the full run list is fetched per
+        // automation when its history modal opens, so a busy job can't crowd out quieter ones.
+        this.runSummaries = [];
+        this.historyJobId = null;
+        this.historyRuns = [];
+        this.historySelection = new Set();
+        this.historyPage = 1;
+        this.historyPageSize = 50;
+        this.historyTotalRuns = 0;
+        this.historyRequestGeneration = 0;
+        this.historyLoadInFlight = false;
+        this._lastHistoryHtml = null;
         this.environments = [];
         this.pollTimer = null;
         this.logTimer = null;
@@ -110,6 +121,7 @@ export class JobController {
 
     unload() {
         this.runModalGeneration += 1;
+        this.historyRequestGeneration += 1;
         this.disposeEditorModal();
         this.activeEditorJob = null;
         this.activeEditorSource = null;
@@ -194,7 +206,7 @@ export class JobController {
 
                 <section class="jobs-section" aria-labelledby="job-runs-title">
                     <div class="jobs-section-heading">
-                        <div><h2 id="job-runs-title">Recent runs</h2></div>
+                        <div><h2 id="job-runs-title">Run history</h2></div>
                         <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="refresh">
                             <i class="fa-solid fa-rotate-right me-1" aria-hidden="true"></i>Refresh
                         </button>
@@ -221,6 +233,7 @@ export class JobController {
             if (action === 'export-recipe') return this.exportRecipe(jobId);
             if (action === 'import-recipe') return this.importRecipe();
             if (action === 'view-run' && runId) return this.openRun(runId);
+            if (action === 'view-history' && Number.isFinite(jobId)) return this.openRunHistory(jobId);
             if (action === 'cancel-run' && runId) return this.cancelRun(runId, actionElement);
             if (action === 'retry-run' && runId) return this.retryRun(runId, actionElement);
         });
@@ -234,11 +247,11 @@ export class JobController {
                 : Promise.resolve({ jobs: [] });
             const [jobsResponse, runsResponse, environmentsResponse] = await Promise.all([
                 jobsRequest,
-                this.app.apiCall('/api/v1/jobs/runs?limit=100', 'GET', null, { showLoading: false }),
+                this.app.apiCall(`/api/v1/jobs/runs/summary?projectPath=${encodeURIComponent(projectPath)}`, 'GET', null, { showLoading: false }),
                 this.app.apiCall('/api/v1/environments', 'GET', null, { showLoading: false })
             ]);
             this.jobs = jobsResponse?.jobs || [];
-            this.runs = runsResponse?.runs || [];
+            this.runSummaries = runsResponse?.summaries || [];
             const environmentRecords = environmentsResponse?.environments || [];
             this.environments = this.app.environmentController?.setEnvironments
                 ? this.app.environmentController.setEnvironments(environmentRecords)
@@ -253,9 +266,19 @@ export class JobController {
 
     async refreshRuns({ quiet = false } = {}) {
         try {
-            const response = await this.app.apiCall('/api/v1/jobs/runs?limit=100', 'GET', null, { showLoading: false });
-            this.runs = response?.runs || [];
+            const projectPath = this.currentProjectPath();
+            const response = await this.app.apiCall(
+                `/api/v1/jobs/runs/summary?projectPath=${encodeURIComponent(projectPath)}`,
+                'GET', null, { showLoading: false });
+            this.runSummaries = response?.summaries || [];
             this.renderRuns();
+            // The modal loads its rows from a different endpoint, so without this they keep saying
+            // "Queued"/"Running" after the run has finished — Stop stays visible and remove/run-again
+            // stay disabled until it is reopened. renderHistory skips an identical re-render, so a
+            // poll that changes nothing does not touch the DOM.
+            if (this.historyJobId !== null && document.querySelector('[data-job-history]')) {
+                await this.loadHistoryRuns({ quiet: true });
+            }
             if (!quiet) this.app.showToast('Automation', 'Run history refreshed.', 'info');
         } catch (error) {
             if (!quiet) this.app.showError(error?.message || 'Could not refresh automation runs.');
@@ -323,6 +346,9 @@ export class JobController {
                 : '';
             const jobId = this.escape(job.id);
             const safeName = this.escape(job.name);
+            // The Environment owns the initial message, but it is the automation's actual logic,
+            // so it belongs on the card rather than one click away in the editor.
+            const prompt = (job.prompt || '').trim();
             return `
                 <article class="job-card" data-enabled="${job.enabled === true}">
                     <div class="job-card-main">
@@ -347,6 +373,11 @@ export class JobController {
                                 <strong${nextRunTitle}>${this.escape(nextRun.label)}</strong>
                             </div>
                         </div>
+                        ${prompt ? `
+                        <div class="job-card-prompt">
+                            <span><i class="fa-regular fa-message" aria-hidden="true"></i>Initial message</span>
+                            <p title="${this.escape(this.truncate(prompt, 400))}">${this.escape(prompt)}</p>
+                        </div>` : ''}
                     </div>
                     <div class="job-card-actions">
                         <button class="btn btn-sm btn-primary" type="button" data-job-action="run" data-job-id="${jobId}"><i class="fa-solid fa-play me-1"></i>Run now</button>
@@ -391,39 +422,303 @@ export class JobController {
     }
 
     renderRunsHtml() {
-        if (this.runs.length === 0) {
-            return '<div class="jobs-empty">No automation runs yet.</div>';
+        if (this.runSummaries.length === 0) {
+            // The summary endpoint returns nothing at all without a project path, so "no runs yet"
+            // would be a guess here — say which of the two it actually is.
+            return this.currentProjectPath()
+                ? '<div class="jobs-empty">No automation runs yet.</div>'
+                : '<div class="jobs-empty">Open a project to see its automation runs.</div>';
         }
         return `
             <div class="table-responsive"><table class="table jobs-runs-table align-middle">
-                <thead><tr><th>Automation</th><th>Trigger</th><th>Status</th><th>Queued</th><th>Duration</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
-                <tbody>${this.runs.map(run => this.renderRunRow(run)).join('')}</tbody>
+                <thead><tr><th>Automation</th><th>Last run</th><th>When</th><th>Runs</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+                <tbody>${this.runSummaries.map(summary => this.renderSummaryRow(summary)).join('')}</tbody>
             </table></div>`;
     }
 
-    renderRunRow(run) {
+    // One row per automation. Listing every run put a job on a 15-minute timer at the top of the
+    // table forever and buried everything else, so the individual runs moved into a modal that is
+    // opened per automation and fetched on demand.
+    renderSummaryRow(summary) {
+        const statusCode = Number(summary.lastStatus);
+        const status = RUN_STATUS[statusCode] || { label: 'Unknown', tone: 'neutral' };
+        const jobId = this.escape(summary.jobId);
+        const safeName = this.escape(summary.jobName);
+        const detail = this.runDetail({ errorMessage: summary.lastErrorMessage, exitCode: summary.lastExitCode });
+        const total = Number(summary.totalRuns) || 0;
+        const activeRuns = Number(summary.activeRuns) || 0;
+        const openTitle = `View this automation's ${total} ${total === 1 ? 'run' : 'runs'}`;
+        return `<tr>
+            <td><button class="job-run-link" type="button" data-job-action="view-history" data-job-id="${jobId}" title="${openTitle}">${safeName}</button><small>${this.escape(getLlmName(Number(summary.lastLlm)))}${summary.lastEnvironmentName ? ` · ${this.escape(summary.lastEnvironmentName)}` : ''}</small></td>
+            <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}</td>
+            <td title="${this.escape(summary.lastQueuedUtc)}">${this.escape(this.relativeTime(summary.lastQueuedUtc))}</td>
+            <td><span class="jobs-run-count">${total}</span>${activeRuns > 0 ? `<small class="job-run-detail">${activeRuns} active</small>` : ''}</td>
+            <td class="text-end jobs-run-actions">
+                <button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="view-history" data-job-id="${jobId}" title="${openTitle}" aria-label="${openTitle}"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button>
+            </td>
+        </tr>`;
+    }
+
+    // ----- Run history modal: every run of one automation, with watch / run again / delete -----
+
+    async openRunHistory(jobId) {
+        const summary = this.runSummaries.find(entry => Number(entry.jobId) === jobId);
+        const name = this.jobs.find(job => job.id === jobId)?.name || summary?.jobName || 'Automation';
+        const modalGeneration = ++this.runModalGeneration;
+        this.historyJobId = jobId;
+        this.historyRuns = [];
+        this.historySelection = new Set();
+        this.historyPage = 1;
+        this.historyTotalRuns = 0;
+        // The modal body below is fresh markup, so the previous modal's cached html must not
+        // suppress the first real render.
+        this._lastHistoryHtml = null;
+        this.app.showModal(`Run history — ${name}`, `
+            <div class="job-history" data-job-history data-history-generation="${modalGeneration}">
+                <div class="jobs-empty"><span class="spinner-border spinner-border-sm"></span> Loading runs…</div>
+            </div>`);
+        // Bound once against the container. Every re-render replaces only its innerHTML, so the
+        // delegated listeners survive and never stack up.
+        this.bindHistoryActions();
+        await this.loadHistoryRuns({ jobId, page: 1, modalGeneration });
+    }
+
+    /// `quiet` is for the five-second poll: a transient fetch failure must leave the rows the user
+    /// is looking at alone rather than replacing the whole modal body with an error, and it defers
+    /// to any load already running. Without that, a poll starting between a "next page" click and
+    /// its response would request the still-current page, win the generation race, and silently
+    /// undo the user's navigation.
+    async loadHistoryRuns({
+        jobId = this.historyJobId,
+        page = this.historyPage,
+        modalGeneration = this.runModalGeneration,
+        quiet = false
+    } = {}) {
+        if (jobId === null) return;
+        if (quiet && this.historyLoadInFlight) return;
+        const requestGeneration = ++this.historyRequestGeneration;
+        const rootSelector = `[data-job-history][data-history-generation="${modalGeneration}"]`;
+        this.historyLoadInFlight = true;
+        try {
+            const response = await this.app.apiCall(
+                `/api/v1/jobs/runs?jobId=${encodeURIComponent(jobId)}&page=${encodeURIComponent(page)}&pageSize=${this.historyPageSize}`,
+                'GET', null, { showLoading: false });
+            const root = document.querySelector(rootSelector);
+            if (!root
+                || modalGeneration !== this.runModalGeneration
+                || requestGeneration !== this.historyRequestGeneration
+                || jobId !== this.historyJobId) return;
+
+            this.historyRuns = response?.runs || [];
+            // Pagination metadata is optional on the wire — `Number(null)` is 0, which would read as
+            // a valid "page 0 of 0 runs", so absent values fall back rather than being parsed.
+            const asCount = (value, fallback) => {
+                if (value === null || value === undefined) return fallback;
+                const parsed = Number(value);
+                return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+            };
+            this.historyPage = Math.max(1, asCount(response?.page, Math.max(1, Number(page) || 1)));
+            this.historyPageSize = asCount(response?.pageSize, 0) > 0
+                ? asCount(response?.pageSize, this.historyPageSize)
+                : this.historyPageSize;
+            this.historyTotalRuns = asCount(response?.totalRuns, this.historyRuns.length);
+            // A run deleted underneath us must not stay selected and re-appear in the next delete.
+            const present = new Set(this.historyRuns.map(run => run.id));
+            this.historySelection = new Set([...this.historySelection].filter(id => present.has(id)));
+            this.renderHistory(root);
+        } catch (error) {
+            if (quiet) return;
+            const root = document.querySelector(rootSelector);
+            if (root
+                && modalGeneration === this.runModalGeneration
+                && requestGeneration === this.historyRequestGeneration
+                && jobId === this.historyJobId) {
+                this._lastHistoryHtml = null;
+                root.innerHTML = `<div class="jobs-empty">${this.escape(error?.message || 'Could not load this automation’s runs.')}</div>`;
+            }
+        } finally {
+            this.historyLoadInFlight = false;
+        }
+    }
+
+    // Queued and running rows cannot be removed, so they are also not selectable — otherwise
+    // "select all" would arm an operation that the server refuses.
+    deletableRunIds() {
+        return this.historyRuns
+            .filter(run => Number(run.status) !== RUN_STATUS_CODE.QUEUED
+                && Number(run.status) !== RUN_STATUS_CODE.RUNNING)
+            .map(run => run.id);
+    }
+
+    bindHistoryActions() {
+        const root = document.querySelector('[data-job-history]');
+        if (!root) return;
+
+        root.addEventListener('click', async event => {
+            const element = event.target.closest('[data-history-action]');
+            if (!element) return;
+            const action = element.dataset.historyAction;
+            const runId = element.dataset.runId;
+
+            if (action === 'watch' && runId) {
+                this.runModalGeneration += 1;
+                this.historyRequestGeneration += 1;
+                this.app.closeModal();
+                return this.openRun(runId);
+            }
+            if (action === 'page') {
+                const nextPage = Number(element.dataset.historyPage);
+                if (!Number.isInteger(nextPage) || nextPage < 1 || nextPage === this.historyPage) return;
+                this.historySelection = new Set();
+                return this.loadHistoryRuns({ page: nextPage });
+            }
+            if (action === 'run-again' && runId) return this.runAgainFromHistory(runId, element);
+            if (action === 'stop' && runId) return this.stopFromHistory(runId, element);
+            if (action === 'delete' && runId) return this.deleteRuns([runId]);
+            if (action === 'delete-selected') return this.deleteRuns([...this.historySelection]);
+        });
+
+        root.addEventListener('change', event => {
+            const all = event.target.closest('[data-run-select-all]');
+            if (all) {
+                this.historySelection = new Set(all.checked ? this.deletableRunIds() : []);
+                root.querySelectorAll('[data-run-select]').forEach(box => {
+                    if (!box.disabled) box.checked = all.checked;
+                });
+                this.updateHistorySelectionUi(root);
+                return;
+            }
+
+            const box = event.target.closest('[data-run-select]');
+            if (!box) return;
+            if (box.checked) this.historySelection.add(box.dataset.runSelect);
+            else this.historySelection.delete(box.dataset.runSelect);
+            this.updateHistorySelectionUi(root);
+        });
+    }
+
+    // Updates the bulk bar in place rather than re-rendering: a re-render on every tick of a
+    // checkbox would drop focus and make keyboard selection unusable.
+    updateHistorySelectionUi(root = document.querySelector('[data-job-history]')) {
+        if (!root) return;
+        const selected = this.historySelection.size;
+        const deletable = this.deletableRunIds().length;
+
+        const bar = root.querySelector('[data-history-bulk]');
+        if (bar) bar.hidden = selected === 0;
+        const count = root.querySelector('[data-history-bulk-count]');
+        if (count) count.textContent = String(selected);
+
+        const all = root.querySelector('[data-run-select-all]');
+        if (all) {
+            all.checked = deletable > 0 && selected === deletable;
+            all.indeterminate = selected > 0 && selected < deletable;
+        }
+    }
+
+    async runAgainFromHistory(runId, button) {
+        await this.retryRun(runId, button);
+        await this.loadHistoryRuns();
+        await this.refreshRuns({ quiet: true });
+    }
+
+    async stopFromHistory(runId, button) {
+        await this.cancelRun(runId, button);
+        await this.loadHistoryRuns();
+        await this.refreshRuns({ quiet: true });
+    }
+
+    async deleteRuns(runIds) {
+        const ids = [...new Set(runIds.filter(Boolean))];
+        if (ids.length === 0) return;
+        const modalGeneration = this.runModalGeneration;
+        const jobId = this.historyJobId;
+        const subject = ids.length === 1 ? 'this run' : `these ${ids.length} runs`;
+        if (!window.confirm(`Remove ${subject} from this automation’s history? Any recorded terminal and logs will be kept in Chat History.`)) return;
+
+        try {
+            const response = await this.app.apiCall('/api/v1/jobs/runs/delete', 'POST', { runIds: ids });
+            this.app.showToast('Automation', response?.message || 'Runs removed from Automation history.', 'info');
+            if (modalGeneration !== this.runModalGeneration || jobId !== this.historyJobId) return;
+            this.historySelection = new Set();
+            await this.loadHistoryRuns();
+            await this.refreshRuns({ quiet: true });
+        } catch (error) {
+            this.app.showError(error?.message || 'Could not remove the selected runs.');
+        }
+    }
+
+    renderHistory(root = document.querySelector('[data-job-history]')) {
+        if (!root) return;
+        const html = this.renderHistoryHtml();
+        // Same guard as the page-level tables: the five-second poll re-renders this modal, and
+        // rewriting identical markup would drop the user's focus and reset the scroll position
+        // mid-interaction. Selection state still refreshes, since it lives outside the markup.
+        if (html !== this._lastHistoryHtml) {
+            this._lastHistoryHtml = html;
+            root.innerHTML = html;
+        }
+
+        if (this.historyTotalRuns > 0) this.updateHistorySelectionUi(root);
+    }
+
+    renderHistoryHtml() {
+        if (this.historyTotalRuns === 0) {
+            return '<div class="jobs-empty">This automation has no recorded runs.</div>';
+        }
+
+        const deletable = this.deletableRunIds().length;
+        const totalPages = Math.max(1, Math.ceil(this.historyTotalRuns / this.historyPageSize));
+        const firstVisible = ((this.historyPage - 1) * this.historyPageSize) + 1;
+        const lastVisible = Math.min(this.historyTotalRuns, firstVisible + this.historyRuns.length - 1);
+        return `
+            <div class="job-history-bulk" data-history-bulk hidden>
+                <span><strong data-history-bulk-count>0</strong> selected</span>
+                <button class="btn btn-sm btn-outline-danger" type="button" data-history-action="delete-selected">
+                    <i class="fa-solid fa-trash me-1" aria-hidden="true"></i>Remove selected
+                </button>
+            </div>
+            <div class="table-responsive"><table class="table jobs-runs-table align-middle">
+                <thead><tr>
+                    <th class="job-history-check"><input type="checkbox" class="form-check-input" data-run-select-all aria-label="Select every run that can be removed"${deletable === 0 ? ' disabled' : ''}></th>
+                    <th>Status</th><th>Trigger</th><th>Queued</th><th>Duration</th>
+                    <th><span class="visually-hidden">Actions</span></th>
+                </tr></thead>
+                <tbody>${this.historyRuns.map(run => this.renderHistoryRow(run)).join('')}</tbody>
+            </table></div>
+            <nav class="job-history-pagination" aria-label="Run history pages">
+                <span>Showing <strong>${firstVisible}–${lastVisible}</strong> of <strong>${this.historyTotalRuns}</strong> runs</span>
+                <div>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" data-history-action="page" data-history-page="${this.historyPage - 1}"${this.historyPage <= 1 ? ' disabled' : ''} aria-label="Previous run-history page"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+                    <span>Page ${this.historyPage} of ${totalPages}</span>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" data-history-action="page" data-history-page="${this.historyPage + 1}"${this.historyPage >= totalPages ? ' disabled' : ''} aria-label="Next run-history page"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+                </div>
+            </nav>`;
+    }
+
+    renderHistoryRow(run) {
         const statusCode = Number(run.status);
         const status = RUN_STATUS[statusCode] || { label: 'Unknown', tone: 'neutral' };
-        const trigger = { 0: 'Schedule', 2: 'After commit', 3: 'Manual' }[Number(run.triggerKind)] || 'Manual';
         const active = statusCode === RUN_STATUS_CODE.QUEUED || statusCode === RUN_STATUS_CODE.RUNNING;
-        // Succeeded is terminal but it is not a failure, and offering Retry on it invited
-        // re-running work that had already landed. Retry starts at Failed.
+        // Succeeded is terminal but it is not a failure, and offering a re-run on it invited
+        // repeating work that had already landed. Running again starts at Failed.
         const retryable = statusCode >= RUN_STATUS_CODE.FAILED;
+        const runId = this.escape(run.id);
         const detail = this.runDetail(run);
-        // "Replay" and "Retry" both read as "run this again", so the row actions carry no
-        // text at all: an eye watches the recording, a play button runs it again. The
-        // wording moves to the tooltip, where it can be explicit without crowding the row.
+        const trigger = { 0: 'Schedule', 2: 'After commit', 3: 'Manual' }[Number(run.triggerKind)] || 'Manual';
         const watchTitle = active ? 'Watch this run live' : 'Watch this recording';
+        const selected = this.historySelection.has(run.id);
         return `<tr>
-            <td><button class="job-run-link" type="button" data-job-action="view-run" data-run-id="${this.escape(run.id)}" title="${watchTitle}">${this.escape(run.jobName)}</button><small>${this.escape(getLlmName(Number(run.llm)))}${run.environmentName ? ` · ${this.escape(run.environmentName)}` : ''}</small></td>
-            <td>${trigger}</td>
+            <td class="job-history-check"><input type="checkbox" class="form-check-input" data-run-select="${runId}"${selected ? ' checked' : ''}${active ? ' disabled title="A run that is still going cannot be removed"' : ''} aria-label="Select this run"></td>
             <td><span class="job-run-status" data-tone="${status.tone}">${status.label}</span>${detail ? `<small class="job-run-detail" title="${this.escape(detail)}">${this.escape(detail)}</small>` : ''}</td>
+            <td>${trigger}</td>
             <td title="${this.escape(run.queuedUtc)}">${this.escape(this.relativeTime(run.queuedUtc))}</td>
             <td${this.durationTitle(run)}>${this.escape(this.runDuration(run))}</td>
             <td class="text-end jobs-run-actions">
-                ${active ? `<button class="btn btn-sm btn-outline-danger job-icon-action" type="button" data-job-action="cancel-run" data-run-id="${this.escape(run.id)}" title="Stop this run" aria-label="Stop this run"><i class="fa-solid fa-stop" aria-hidden="true"></i></button>` : ''}
-                ${retryable ? `<button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="retry-run" data-run-id="${this.escape(run.id)}" title="Run this automation again" aria-label="Run this automation again"><i class="fa-solid fa-play" aria-hidden="true"></i></button>` : ''}
-                <button class="btn btn-sm btn-outline-secondary job-icon-action job-run-watch" type="button" data-job-action="view-run" data-run-id="${this.escape(run.id)}" title="${watchTitle}" aria-label="${watchTitle}"><i class="fa-solid fa-eye-slash" data-watch-idle aria-hidden="true"></i><i class="fa-solid fa-eye" data-watch-live aria-hidden="true"></i></button>
+                ${active ? `<button class="btn btn-sm btn-outline-danger job-icon-action" type="button" data-history-action="stop" data-run-id="${runId}" title="Stop this run" aria-label="Stop this run"><i class="fa-solid fa-stop" aria-hidden="true"></i></button>` : ''}
+                ${retryable ? `<button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-history-action="run-again" data-run-id="${runId}" title="Run this automation again" aria-label="Run this automation again"><i class="fa-solid fa-play" aria-hidden="true"></i></button>` : ''}
+                ${active ? '' : `<button class="btn btn-sm btn-outline-danger job-icon-action" type="button" data-history-action="delete" data-run-id="${runId}" title="Remove this run from Automation history" aria-label="Remove this run from Automation history"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>`}
+                <button class="btn btn-sm btn-outline-secondary job-icon-action job-run-watch" type="button" data-history-action="watch" data-run-id="${runId}" title="${watchTitle}" aria-label="${watchTitle}"><i class="fa-solid fa-eye-slash" data-watch-idle aria-hidden="true"></i><i class="fa-solid fa-eye" data-watch-live aria-hidden="true"></i></button>
             </td>
         </tr>`;
     }
@@ -1196,4 +1491,11 @@ viberails-recipe -->
     }
 
     escape(value) { return this.app.escapeHtml(String(value ?? '')); }
+
+    // A prompt can be thousands of characters. Rendering all of it into a `title` produces a
+    // tooltip that covers the window and is unreadable, so the hover preview is capped.
+    truncate(value, max) {
+        const text = String(value ?? '');
+        return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
+    }
 }

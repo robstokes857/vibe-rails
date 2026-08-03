@@ -109,3 +109,7 @@ lifting (import torch, load a model) *before* the `ready` line so the C# side's
 
 The `PyBridge.Console` app in this repo drives `classifier.py`, `train.py`, and `worker.py`
 through the `PyBridge` library and prints what it captured. See the repo root `README.md`.
+
+---
+
+**Last checked**: 2026-08-03T12:14:36Z by opencode (glm-5.2)

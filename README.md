@@ -11,14 +11,14 @@
 ---
 
 ## Overview
-- **Environment Isolation** - Like Conda for LLMs. Create separate environments to experiment with Claude, Codex, or Antigravity settings without breaking your primary setup
-- **Cross-LLM Learning** - Share context and learnings between different LLM providers (Claude, Codex, Antigravity)
+- **Environment Isolation** - Like Conda for LLMs. Create separate environments to experiment with Claude, Codex, Antigravity, Copilot, or OpenCode settings without breaking your primary setup
+- **Cross-LLM Learning** - Share context and learnings between different LLM providers (Claude, Codex, Antigravity, Copilot, and OpenCode)
 - **RAG (Without The Rot) For Your Code** - Track things like repeated fixes the LLM forgets, including when you have to tell it the same thing 6 or 7 times in one session and it still doesn't understand, how you describe a feature and where that code lives, and file change summaries with commits, then only provide what’s useful at call time to prevent context rot.
 - **Few Shot Prompting** - Get Antigravity or codex to code like Claude for code that has been done before with few shot prompting... Making them up to 20% better (research paper and eval data coming soon.)
 - **Rule Enforcement** - Define and enforce coding standards like test coverage, cyclomatic complexity, logging practices, and more. LLMs fix their errors before code can be pushed or before the tech debt get astronomical.
 - **Token Savings** - Learn your codebase and how you describe it, providing LLMs with smart file hints to reduce token usage and costs
 - **AGENTS.md Management** - Create and manage agent instruction files following the [agents.md specification](https://agents.md/)
-- **Web Terminal** - Launch CLIs directly in the browser with xterm.js. Select base CLIs (Claude, Codex, Antigravity) or custom environments from a visual dropdown with optgroups
+- **Web Terminal** - Launch CLIs directly in the browser with xterm.js. Select base CLIs (Claude, Codex, Antigravity, Copilot, OpenCode) or custom environments from a visual dropdown with optgroups
 
 ---
 
@@ -38,7 +38,7 @@
 
 **For End Users:**
 - Just install from VS Code Marketplace... That's it
-- One or more LLM CLIs: Claude CLI, OpenAI Codex, or Google Antigravity CLI (`agy`)
+- One or more LLM CLIs: Claude CLI, OpenAI Codex, Google Antigravity CLI (`agy`), GitHub Copilot, or OpenCode
 - **No other dependencies required** - backend binaries are installed automatically on first run
 
 **For Contributors (Working on the Project):**
@@ -89,7 +89,7 @@ code .
 The integrated Web UI terminal lets you interact with LLM CLIs directly in your browser:
 
 ### Key Features
-- Launch Claude, Codex, or Antigravity CLIs in a browser-based terminal (xterm.js)
+- Launch Claude, Codex, Antigravity, Copilot, or OpenCode CLIs in a browser-based terminal (xterm.js)
 - Select from custom environments in a visual dropdown (Base CLIs vs Custom Environments)
 - Auto-populate environment settings (custom args, prompts, model configs)
 - Navigate from Environment Management → Dashboard with environment pre-selected
@@ -123,6 +123,10 @@ This gives you quick access to different configurations without remembering comm
 
 ---
 
-**Version**: 1.9.5
-**Last Updated**: 2026-07-31
+**Version**: 1.9.8
+**Last Updated**: 2026-08-02
 **Maintained By**: Robert Stokes
+
+---
+
+**Last checked**: 2026-08-03 by opencode (glm-5.2)

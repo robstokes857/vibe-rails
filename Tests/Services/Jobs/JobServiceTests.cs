@@ -258,6 +258,34 @@ public sealed class JobServiceTests : IDisposable
         Assert.Contains("cannot be detached", error.Message);
     }
 
+    [Fact]
+    public async Task DeleteRuns_RejectsMoreThanOneBoundedPageOfIds()
+    {
+        var ids = Enumerable.Range(0, 101).Select(index => $"run-{index}").ToList();
+
+        var error = await Assert.ThrowsAsync<JobServiceException>(() =>
+            Service().DeleteRunsAsync(ids, TestContext.Current.CancellationToken));
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Contains("at most 100", error.Message, StringComparison.OrdinalIgnoreCase);
+        _store.Verify(
+            store => store.SoftDeleteRunsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteRuns_RejectsAnOversizedRunId()
+    {
+        var error = await Assert.ThrowsAsync<JobServiceException>(() =>
+            Service().DeleteRunsAsync([new string('r', 129)], TestContext.Current.CancellationToken));
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Contains("too long", error.Message, StringComparison.OrdinalIgnoreCase);
+        _store.Verify(
+            store => store.SoftDeleteRunsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     private JobService Service() => new(
         _store.Object, _repository.Object, _executableResolver.Object, _scheduler.Object);
 
