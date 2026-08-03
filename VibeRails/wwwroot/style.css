@@ -13898,6 +13898,36 @@ body.git-guard-focus-active #app-content {
 
 .job-card-fact[data-tone="warning"] strong { color: var(--color-warning); }
 
+/* The initial message is the automation's logic, so it gets room to be read rather than a
+   single ellipsised line. Clamped to two lines with the full text on hover. */
+.job-card-prompt {
+    display: grid;
+    gap: 0.14rem;
+    min-width: 0;
+    margin-top: 0.6rem;
+}
+
+.job-card-prompt > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    color: var(--color-text-muted);
+    font-size: 0.6rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
+.job-card-prompt p {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    margin: 0;
+    overflow: hidden;
+    color: var(--color-text);
+    font-size: 0.74rem;
+    line-height: 1.45;
+}
+
 .job-card-trigger .job-triggers {
     margin: 0;
 }
@@ -14431,6 +14461,59 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
 .jobs-run-actions { white-space: nowrap; }
 .jobs-run-actions .job-icon-action + .job-icon-action { margin-left: 0.3rem; }
+
+.jobs-run-count { color: var(--color-text); font-family: var(--vb-font-mono, ui-monospace, monospace); font-weight: 700; }
+
+/* Run history modal. The bulk bar only exists once something is selected, so an untouched
+   table isn't carrying a permanently-disabled Delete button at the top. */
+.job-history-bulk {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+    color: var(--color-text);
+    font-size: 0.74rem;
+}
+
+.job-history-bulk[hidden] { display: none; }
+
+/* Matches the uppercase treatment on the Automation screen this modal is opened from. */
+.job-history-bulk .btn {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.job-history-check { width: 1%; white-space: nowrap; }
+
+.job-history-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 0.75rem;
+    color: var(--color-text-muted);
+    font-size: 0.72rem;
+}
+
+.job-history-pagination > div { display: flex; align-items: center; gap: 0.55rem; }
+.job-history-pagination strong { color: var(--color-text); }
+.job-history-pagination .btn { min-width: 2rem; }
+
+/* The default modal-lg is too narrow for six columns: the action buttons landed outside the
+   dialog and had to be scrolled horizontally into reach. Widened via :has() so only this
+   modal grows and every other caller of showModal keeps its own width. */
+.modal-dialog:has(.job-history) { max-width: min(900px, calc(100vw - 2rem)); }
+
+/* Relative timestamps ("18 minutes ago") wrapped to three lines and tripled the row height. */
+.job-history .jobs-runs-table th,
+.job-history .jobs-runs-table td { white-space: nowrap; }
 
 /* Watch swaps a closed eye for an open one on hover. Two stacked <i> elements rather
    than a ::before content override, so it doesn't hard-code Font Awesome codepoints. */

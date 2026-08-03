@@ -83,7 +83,7 @@ Press `F5` to launch the extension in development mode, then click the VibeRails
 1. **Create an agent file** in your repository root named `agent.md`
 2. **Add coding rules** with enforcement levels:
    ```markdown
-   ## Rules
+   ## Vibe Rails Rules
    - Cyclomatic complexity < 20 (COMMIT)
    - Require test coverage minimum 80% (STOP)
    - Log all file changes (WARN)
@@ -132,7 +132,7 @@ VibeRails consists of four main components:
 
 **Extension**
 - **TypeScript 7.0**
-- **VS Code API 1.85+**
+- **VS Code API 1.125+**
 
 ---
 
@@ -170,13 +170,22 @@ Single-page application with:
 **Frontend Architecture:**
 ```
 wwwroot/
-├── app.js              # Main application (519 lines)
-├── js/modules/
-│   ├── agent-controller.js      (46KB)
-│   ├── environment-controller.js (26KB)
-│   ├── rule-controller.js
-│   ├── dashboard-controller.js   (10KB)
-│   └── utils.js
+├── app.js              # Main application (~1,250 lines)
+├── js/modules/         # ~39 ES modules, key ones:
+│   ├── terminal-multitab.js       (~121KB)  # Web terminal (multi-tab)
+│   ├── environment-controller.js  (~93KB)   # Environment CRUD + Web UI launch
+│   ├── rule-controller.js         (~70KB)   # Rule management
+│   ├── code-analyzer-dashboard.js (~67KB)   # Code quality scan UI
+│   ├── jobs-controller.js         (~81KB)   # Automated jobs
+│   ├── agent-controller.js        (~64KB)   # Agent file management
+│   ├── chat-history-sidebar.js    (~59KB)   # Session chat history
+│   ├── vibe-rails-ai-controller.js(~56KB)   # Vibe AI inspector
+│   ├── sandbox-controller.js      (~32KB)   # Sandbox CRUD + launch
+│   ├── git-guard-preflight.js     (~35KB)   # Git Guard SSE dashboard
+│   ├── settings-controller.js     (~37KB)   # App settings
+│   ├── mcp-controller.js          (~22KB)   # MCP Explorer
+│   ├── dashboard-controller.js    (~2KB)    # Dashboard view + preselection
+│   └── utils.js                   (~19KB)
 └── assets/             # Bootstrap, XTerm.js, icons
 ```
 
@@ -191,8 +200,8 @@ TypeScript extension that:
 
 **Key Features:**
 - Automatic executable detection
-- Health checks via `/api/v1/IsLocal`
-- Graceful shutdown (stdin newline → SIGTERM → SIGKILL)
+- Health checks via `/health` (unauthenticated readiness probe; there is no `/api/v1/health`)
+- Graceful shutdown (POST /api/v1/shutdown → close stdin → taskkill /T /F (Windows) or SIGTERM/SIGKILL)
 - Asset path rewriting for webview sandbox
 
 ### 4. MCP Server
@@ -315,13 +324,25 @@ vb --env production --workdir /path/to/repo
 2. Extension spawns backend process
 3. Dashboard loads in webview panel
 
+#### 4. Git Guard Mode
+
+```bash
+vb --git-guard
+```
+
+- Opens the authenticated `/git-guard` focused web surface
+- Captures the exact staged Git index snapshot (including partially staged files)
+- Streams VCA, report-only MintLint, and automated-workflow stage events live to the browser via SSE (`POST /api/v1/git/preflight/stream`)
+- VCA is the only preflight stage that can block a commit
+- The native pre-commit hook uses the same shared pipeline
+
 ### Managing Agent Files
 
 #### Create Agent File
 
 ```bash
 # Via CLI (in repository root)
-echo "## Rules\n- WARN: log_files_changed" > agent.md
+echo "## Vibe Rails Rules\n- WARN: log_files_changed" > agent.md
 
 # Via Web UI
 # Navigate to Agents → Create New Agent
@@ -358,7 +379,7 @@ echo "## Rules\n- WARN: log_files_changed" > agent.md
 ```markdown
 # Development Agent
 
-## Rules
+## Vibe Rails Rules
 - Cyclomatic complexity < 20 (COMMIT)
 - Require test coverage minimum 80% (STOP)
 - Log all file changes (WARN)
@@ -463,6 +484,17 @@ CODEX_HOME=~/.vibe_rails/envs/myenv/codex
 Launch-flag-only — VibeRails injects no per-environment config env vars for agy
 (sandbox/permissions are launch flags).
 
+#### Copilot
+Launch-flag-only — no per-environment config env var (like agy).
+
+#### OpenCode
+```bash
+XDG_CONFIG_HOME=~/.vibe_rails/envs/myenv
+```
+OpenCode resolves its config/agents/commands/plugins directory at `$XDG_CONFIG_HOME/opencode`.
+Credentials are **not** isolated (`XDG_DATA_HOME` is unchanged, so auth stays in the user's global
+OpenCode data directory).
+
 ---
 
 ## Development
@@ -475,6 +507,7 @@ vibe-rails/
 │   ├── Services/               # Business logic
 │   ├── DB/                     # Data access layer
 │   ├── DTOs/                   # Data transfer objects
+│   ├── Routes/                 # API endpoint definitions (30 route files)
 │   ├── wwwroot/                # Static web assets
 │   └── VibeRails.csproj
 │
@@ -482,16 +515,23 @@ vibe-rails/
 │   ├── src/
 │   │   ├── extension.ts
 │   │   ├── backend-manager.ts
-│   │   └── webview-panel.ts
+│   │   ├── webview-panel.ts
+│   │   └── constants.ts
 │   └── package.json
 │
+├── TerminalEmulator/           # Terminal emulator library (project reference)
 ├── Pty.Net/                    # Cross-platform PTY library (inlined fork, ConPTY only)
 ├── PyBridge/                   # AOT-friendly Python runner (in-tree)
 ├── MintLint/                   # Maintainability grading library
 ├── TokenSaver/                 # Token-saver library
-├── Tests/                      # xUnit tests
+├── Tests/                      # xUnit unit tests
+├── TerminalEmulator.Tests/     # Terminal emulator tests
+├── IntegrationTest/            # Integration tests
+├── UITests/                    # Playwright E2E / UI tests
 ├── deploy/                     # Build & release scripts
-└── Scripts/                    # Install scripts
+├── Scripts/                    # Install scripts
+├── runbooks/                   # Operational documentation
+└── python-scripts/             # Python helper scripts
 ```
 
 ### Running Tests
@@ -599,34 +639,91 @@ http://localhost:<auto-detected-port>/api/v1/
 
 ### Endpoints
 
-#### Agent Management
+> The full surface lives in [`VibeRails/Routes/`](Routes/) (30 route files). The major groups:
+
+#### Agent & Rule Management
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/agents` | List all agent files |
 | GET | `/agents/rules?path={path}` | Get rules from agent file |
+| GET | `/agents/content` / `/agents/files` | Agent file content / file tree |
 | POST | `/agents` | Create agent file |
 | POST | `/agents/rules` | Add rule to agent |
+| POST | `/agents/validate` | Validate agent file |
 | PUT | `/agents/rules/enforcement` | Update rule enforcement level |
+| PUT | `/agents/name` | Rename agent file |
 | DELETE | `/agents/rules` | Delete rules |
-| DELETE | `/agents?path={path}` | Delete agent file |
-| GET | `/rules` | List available rule definitions |
+| GET | `/rules` / `/rules/details` | List available rule definitions |
 
-#### Environment & CLI
+#### Environments & CLI Launch
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/projects/recent` | Get recent projects |
-| GET | `/environments/{name}/launch` | Get environment variables |
+| GET | `/environments` | List all environments |
+| GET | `/environments/{name}` | Get a single environment |
+| POST | `/environments` | Create environment |
+| PUT | `/environments/{name}` | Update environment |
+| DELETE | `/environments/{name}` | Delete environment |
+| GET | `/environments/{name}/launch` | Get environment launch variables |
 | POST | `/cli/launch/{cli}` | Launch CLI in terminal |
 | POST | `/cli/launch/vscode` | Launch VS Code |
+| GET/PUT | `/claude/settings/{envName}` · `/codex/settings/{envName}` | Per-env Claude/Codex settings |
 
-#### Session Logging
+#### Web Terminal
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/sessions/{id}/logs` | Get session terminal logs |
+| POST | `/terminal/start` | Start a terminal session |
+| POST | `/terminal/stop` | Stop a terminal session |
+| POST | `/terminal/input` | Send input to terminal |
+| GET | `/terminal/snapshot` | Get terminal snapshot |
+| GET | `/terminal/status` | Get terminal status |
+| GET | `/terminal/bootstrap-command` | Get bootstrap command |
+| GET/POST/DELETE | `/terminal/tabs[/{tabId}]` | Multi-tab terminal management |
+
+#### Sandboxes
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/sandboxes` | List sandboxes for current project |
+| POST | `/sandboxes` | Create sandbox (shallow clone + dirty files) |
+| DELETE | `/sandboxes/{id}` | Delete sandbox (dir + DB record) |
+| POST | `/sandboxes/{id}/launch/{cli\|shell\|vscode}` | Launch into sandbox |
+| GET | `/sandboxes/{id}/diff` | Diff sandbox against source |
+| POST | `/sandboxes/{id}/push` · `/sandboxes/{id}/merge` | Push/merge sandbox changes |
+
+#### Hooks, Git Guard & Code Analyzer
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/hooks/status` | Check if git hooks are installed |
+| POST | `/hooks/install` | Install git hooks |
+| DELETE | `/hooks` | Uninstall git hooks |
+| POST | `/hooks/preview` · `/hooks/validate` | Run/validate the pre-commit pipeline |
+| POST | `/git/preflight/stream` | Stream staged-index Git Guard events as SSE |
+| POST | `/git/preflight/console` | Run preflight and capture console output |
+| GET/POST/DELETE | `/code-analyzer` · `/code-analyzer/ignores` · `/code-analyzer/source` | Code quality scan + ignore rules |
+
+#### Jobs & Automation
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET/POST/PUT/DELETE | `/jobs[/{id}]` | CRUD for automated jobs |
+| POST | `/jobs/{id}/run` | Run a job |
+| GET | `/jobs/runs[/{runId}]` | List/get job runs |
+| POST | `/jobs/runs/{runId}/cancel` · `/retry` | Cancel/retry a job run |
+
+#### Session Logging & Chat History
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/sessions/{sessionId}/logs` | Get session terminal logs |
+| GET | `/sessions/{sessionId}/inputs` | Get session user inputs |
+| GET | `/sessions/{sessionId}/output` | Get session output |
 | GET | `/sessions/recent` | Get recent CLI sessions |
+| GET/DELETE | `/chatHistory[/{sessionId}]` | Chat history list / per-session |
+| GET | `/chatHistory/{sessionId}/summary` · `/transcript` · `/replay` | Summary, transcript, replay |
 
 #### MCP Integration
 
@@ -634,13 +731,23 @@ http://localhost:<auto-detected-port>/api/v1/
 |--------|----------|-------------|
 | GET | `/mcp/status` | MCP server connection status |
 | GET | `/mcp/tools` | List available MCP tools |
+| POST | `/mcp/inspect` | Inspect tools on a local or remote MCP endpoint |
 | POST | `/mcp/tools/{name}` | Execute MCP tool |
 
-#### Utility
+#### Search, Settings & Utility
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/IsLocal` | Check if in git repository |
+| GET | `/context` | Get project context (replaces the old `/IsLocal`) |
+| GET | `/projects/name` · PUT | Get/set project display name |
+| GET | `/health` | Health check (extension startup verification) |
+| GET/POST | `/settings` · `/settings/db-size` · `/settings/pin` | App settings, DB size, pin status |
+| POST | `/settings/export-data` | Export all data as a zip |
+| POST | `/search` · `/bert/search` | Unified / BERT semantic search |
+| GET | `/version` · `/update/check` · `/update/version` | Version + update checks |
+| GET | `/token-savings` | Token savings metrics |
+| GET/POST/DELETE | `/compression/captures` · `/compression/catalog` | Compression capture records |
+| POST | `/shutdown` · `/lifecycle/ping` · `/lifecycle/disconnect` | Lifecycle control |
 
 ### Example Requests
 
@@ -808,6 +915,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Built with modern .NET 10.0, Native AOT compilation, and the Model Context Protocol for next-generation AI development workflows.
 
-**Last Updated**: 2026-07-31
-**Version**: 1.9.5
+**Last Updated**: 2026-08-02
+**Version**: 1.9.8
 **Maintained By**: Robert Stokes
+
+---
+
+*Last checked: 2026-08-02 by opencode (glm-5.2)*

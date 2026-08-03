@@ -18,3 +18,7 @@ across `install.ps1` and `install.sh` when changing model handling.
 - `download-bert-model.ps1` / `download-bert-model.sh` — dev-only helpers to
   fetch the BertV2 ONNX model + vocab for local development.
 - `test-vscode-extension-smoke.ps1` — smoke test for the VS Code extension.
+
+---
+
+*Last checked: 2026-08-03 by opencode (glm-5.2)*

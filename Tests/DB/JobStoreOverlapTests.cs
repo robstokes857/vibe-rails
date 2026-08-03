@@ -221,21 +221,149 @@ public sealed class JobStoreOverlapTests : IDisposable
         Assert.Empty(await store.GetRunsAsync(cancellationToken: cancellationToken));
     }
 
+    [Fact]
+    public async Task GetRunsPageAsync_ReturnsBoundedPagesAndTheVisibleTotal()
+    {
+        var (store, jobId) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        for (var index = 0; index < 5; index++)
+        {
+            var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+            await store.CompleteRunAsync(runId!, JobRunStatus.Succeeded, 0, null, cancellationToken);
+        }
+
+        var first = await store.GetRunsPageAsync(jobId, page: 1, pageSize: 2, cancellationToken: cancellationToken);
+        var second = await store.GetRunsPageAsync(jobId, page: 2, pageSize: 2, cancellationToken: cancellationToken);
+        var third = await store.GetRunsPageAsync(jobId, page: 3, pageSize: 2, cancellationToken: cancellationToken);
+
+        Assert.Equal(5, first.TotalRuns);
+        Assert.Equal(2, first.Runs.Count);
+        Assert.Equal(2, second.Runs.Count);
+        Assert.Single(third.Runs);
+        Assert.Equal(5, first.Runs.Concat(second.Runs).Concat(third.Runs).Select(run => run.Id).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task SoftDeleteRunsAsync_PreservesTriggerDeduplicationAndHidesTheRun()
+    {
+        var (store, _) = await SeedJobAsync(includeCommitTrigger: true);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var firstBatch = await store.EnqueueEventRunsAsync(
+            Path.GetTempPath(), JobTriggerKind.Commit, "commit-abc", cancellationToken);
+        var runId = Assert.Single(firstBatch);
+        await store.CompleteRunAsync(runId, JobRunStatus.Succeeded, 0, null, cancellationToken);
+
+        var (deleted, skipped) = await store.SoftDeleteRunsAsync([runId], cancellationToken);
+
+        Assert.Equal(1, deleted);
+        Assert.Equal(0, skipped);
+        Assert.Null(await store.GetRunAsync(runId, cancellationToken));
+        Assert.Empty(await store.GetRunsAsync(cancellationToken: cancellationToken));
+
+        // The same native hook can be delivered more than once. Keeping the row and its unique
+        // TriggerKey means removing it from history must not queue the commit again.
+        var repeatedBatch = await store.EnqueueEventRunsAsync(
+            Path.GetTempPath(), JobTriggerKind.Commit, "commit-abc", cancellationToken);
+        Assert.Empty(repeatedBatch);
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DeletedUTC, TriggerKey FROM JobRuns WHERE Id = $id;";
+        command.Parameters.AddWithValue("$id", runId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        Assert.True(await reader.ReadAsync(cancellationToken));
+        Assert.False(reader.IsDBNull(0));
+        Assert.Contains("commit-abc", reader.GetString(1), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Startup skips the trigger DROP/CREATE when the installed definition already matches, so it
+    /// does not take a schema-write lock on every boot. That comparison is against the text SQLite
+    /// stores, which is not the text we submit — it drops the statement terminator and strips
+    /// <c>IF NOT EXISTS</c>. If the normalization stops accounting for that the gate silently never
+    /// matches, so assert the store recognises its own freshly-written trigger.
+    /// </summary>
+    [Fact]
+    public async Task Initialize_LeavesTheSessionLinkTriggerRecognisableSoRestartsSkipRecreatingIt()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await CreateSessionsSchemaAsync(cancellationToken);
+        await SeedJobAsync();
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        Assert.True(JobStore.IsLinkTriggerCurrent(connection));
+    }
+
+    [Fact]
+    public async Task SoftDeleteRunsAsync_KeepsTheRecordedSessionAndReturnsItToChatHistory()
+    {
+        await CreateSessionsSchemaAsync(TestContext.Current.CancellationToken);
+        var (store, jobId) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+        const string sessionId = "retained-job-session";
+        await InsertSessionAsync(sessionId, runId!, cancellationToken);
+        await InsertSessionLogAsync(sessionId, cancellationToken);
+        await store.CompleteRunAsync(runId!, JobRunStatus.Succeeded, 0, null, cancellationToken);
+
+        var result = await store.SoftDeleteRunsAsync([runId!], cancellationToken);
+
+        Assert.Equal((1, 0), result);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT r.SessionId, s.JobRunId,
+                   (SELECT COUNT(*) FROM SessionLogs WHERE SessionId = s.Id)
+            FROM JobRuns r
+            JOIN Sessions s ON s.Id = r.SessionId
+            WHERE r.Id = $runId;
+            """;
+        command.Parameters.AddWithValue("$runId", runId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        Assert.True(await reader.ReadAsync(cancellationToken));
+        Assert.Equal(sessionId, reader.GetString(0));
+        Assert.True(reader.IsDBNull(1)); // SelectChatHistoryBase now includes this retained session.
+        Assert.Equal(1, reader.GetInt32(2));
+    }
+
+    [Fact]
+    public async Task GetRunSummariesAsync_IsProjectScopedAndExcludesSoftDeletedRuns()
+    {
+        var (store, jobId) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+        await store.CompleteRunAsync(runId!, JobRunStatus.Succeeded, 0, null, cancellationToken);
+
+        Assert.Single(await store.GetRunSummariesAsync(Path.GetTempPath(), cancellationToken));
+        Assert.Empty(await store.GetRunSummariesAsync(Path.Combine(Path.GetTempPath(), "another-project"), cancellationToken));
+
+        await store.SoftDeleteRunsAsync([runId!], cancellationToken);
+        Assert.Empty(await store.GetRunSummariesAsync(Path.GetTempPath(), cancellationToken));
+    }
+
     /// <summary>
     /// Creates the Environments row the run insert INNER JOINs against, then a Job pointing at it.
     /// </summary>
     private async Task<(JobStore Store, long JobId)> SeedJobAsync(
         int? timeoutMinutes = null,
         int? intervalMinutes = null,
-        bool launchMinimized = false)
+        bool launchMinimized = false,
+        bool includeCommitTrigger = false)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var store = new JobStore(_connectionString);
         var environmentId = await InsertEnvironmentAsync(cancellationToken);
 
-        var triggers = intervalMinutes is null
-            ? new List<JobTriggerRequest>()
-            : [new JobTriggerRequest(JobTriggerKind.Schedule, JobScheduleKind.Interval, intervalMinutes)];
+        var triggers = new List<JobTriggerRequest>();
+        if (intervalMinutes is not null)
+            triggers.Add(new JobTriggerRequest(JobTriggerKind.Schedule, JobScheduleKind.Interval, intervalMinutes));
+        if (includeCommitTrigger)
+            triggers.Add(new JobTriggerRequest(JobTriggerKind.Commit));
 
         var job = await store.CreateJobAsync(new CreateJobRequest(
             Name: "Nightly review",
@@ -279,7 +407,7 @@ public sealed class JobStoreOverlapTests : IDisposable
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = SqlStrings.CreateSessionsTable;
+        command.CommandText = SqlStrings.CreateSessionsTable + ";\n" + SqlStrings.CreateSessionLogsTable;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -303,6 +431,22 @@ public sealed class JobStoreOverlapTests : IDisposable
         command.Parameters.AddWithValue("$workDir", Path.GetTempPath());
         command.Parameters.AddWithValue("$startedUtc", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$jobRunId", jobRunId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task InsertSessionLogAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO SessionLogs (SessionId, Timestamp, Content, IsError)
+            VALUES ($sessionId, $timestamp, $content, 0);
+            """;
+        command.Parameters.AddWithValue("$sessionId", sessionId);
+        command.Parameters.AddWithValue("$timestamp", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$content", new byte[] { 1, 2, 3 });
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

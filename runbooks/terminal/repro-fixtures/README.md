@@ -30,8 +30,9 @@ Both chunks start with `\e[H` (CUP home) and were emitted by Claude Code
 in response to a single SIGWINCH (rows 10 → 28). 7 ms apart. This is the
 "stacked repaints during drag-resize" bug. The canonical write-up is the
 `## 2026-05-15 Stacked repaints during drag-resize` entry in `TERMINAL.md`
-— a fix has landed (resize debounce `140 → 2000` ms in `terminal-tab.js`)
-and is awaiting manual re-test. The original 2026-05-13 forensic entry is
+— a fix has landed (an opt-in `2000` ms "extended" debounce option was added
+in `terminal-tab.js` alongside the `140` ms default) and is awaiting manual
+re-test. The original 2026-05-13 forensic entry is
 preserved below it as historical context; its symptom characterization was
 corrected 2026-05-15, but the byte-level data on these chunks still stands.
 
@@ -48,3 +49,7 @@ To replay the bytes into a fresh emulator for a regression test:
 var bytes = File.ReadAllBytes("runbooks/terminal/repro-fixtures/session_f3e25a1e_resize_reprint.bin");
 // feed `bytes[0..1512]` and `bytes[1512..]` as two separate writes, geometry 150x28.
 ```
+
+---
+
+*Last checked: 2026-08-02 by opencode (glm-5.2)*

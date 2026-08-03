@@ -436,3 +436,7 @@ bin_check/
 # Anything worth keeping belongs in an AGENTS.md or a runbook, where it gets updated with the code.
 /kill-job.md
 /vscode-viberails/CLAUDE_VS_CODE_IMPROVE.md
+
+# Local-only rotation ledger for the timed doc-check job. Updated every ~30 min,
+# so it's pure machine-local churn — not worth tracking. Keep it gitignored.
+/agent_drift.md

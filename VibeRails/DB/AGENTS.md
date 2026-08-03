@@ -609,8 +609,12 @@ ChatSummary               TokenSavings / CompressionCaptures
 
 ## Repository Patterns
 
-- All methods are `async` with `CancellationToken` support
+- Most methods are `async` with `CancellationToken` support (some session/user-input methods omit it)
 - Each method opens its own `SqliteConnection` — no shared connection or unit of work
 - Reader mapping is **positional** (column index), not by column name
 
 ## Vibe Rails Rules
+
+---
+
+*Last checked: 2026-08-02 by opencode (glm-5.2)*

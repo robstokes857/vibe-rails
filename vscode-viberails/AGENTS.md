@@ -80,3 +80,7 @@ The extension integrates with VibeRails agent system:
 - **History**: Session tracking and management
 
 All agent configurations are stored in `~/.vibe_rails/` directory.
+
+---
+
+*Last checked: 2026-08-02 by opencode (glm-5.2)*

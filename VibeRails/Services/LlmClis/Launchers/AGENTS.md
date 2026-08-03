@@ -17,10 +17,10 @@ All launchers build commands using the unified `--env` flag:
 Only `--env` is supported for environment bootstrap mode. `ILlmParser.Parse()` does steps 1–2
 and returns `LLM.NotSet` for anything else; the caller (`CliLoop.RunTerminalWithWebAsync`) then
 performs step 3:
-1. If it matches an LLM enum name (claude/codex/antigravity/copilot/shell/opencode, case-insensitive)
-   → base CLI launch
-2. The special-case strings `"glm-5.2"` and `"kimi-k3"` (can't be C# enum names) → OpenCode-backed
+1. The special-case strings `"glm-5.2"` and `"kimi-k3"` (can't be C# enum names) → OpenCode-backed
    pseudo-CLI base launch
+2. If it matches an LLM enum name (claude/codex/antigravity/copilot/shell/opencode, case-insensitive)
+   → base CLI launch
 3. Otherwise → custom environment name, looked up in DB via `FindEnvironmentByNameAsync()`
 
 The old `--environment` / `--lmbootstrap` aliases and broader CLI command router have been removed.
@@ -309,3 +309,7 @@ Test coverage includes:
 - Preserving existing content (including user permissions block)
 - Removing stale top-level keys from older VibeRails builds
 - Removing empty/default values
+
+---
+
+**Last checked**: 2026-08-03T12:14:36Z by opencode (glm-5.2)

@@ -1207,6 +1207,11 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(JobRunResponse))]
     [JsonSerializable(typeof(List<JobRunResponse>))]
     [JsonSerializable(typeof(JobRunListResponse))]
+    [JsonSerializable(typeof(JobRunSummaryResponse))]
+    [JsonSerializable(typeof(List<JobRunSummaryResponse>))]
+    [JsonSerializable(typeof(JobRunSummaryListResponse))]
+    [JsonSerializable(typeof(DeleteJobRunsRequest))]
+    [JsonSerializable(typeof(DeleteJobRunsResponse))]
     [JsonSerializable(typeof(JobActionResponse))]
     // Codex Settings DTOs
     [JsonSerializable(typeof(CodexSettingsDto))]

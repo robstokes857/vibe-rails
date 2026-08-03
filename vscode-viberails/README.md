@@ -39,6 +39,8 @@ VibeRails is the control layer for AI coding inside VS Code. Work faster with Cl
 - Antigravity
 - Copilot
 - OpenCode
+- GLM-5.2 (via OpenCode)
+- Kimi K3 (via OpenCode)
 - VS Code
 
 ## See It in Action
@@ -58,7 +60,7 @@ VibeRails is the control layer for AI coding inside VS Code. Work faster with Cl
 ## Get Started
 
 1. Install the extension from the VS Code Marketplace.
-2. Run `VibeRails: Open Dashboard` (or press `Ctrl+Alt+V` / `Cmd+Alt+V`).
+2. Click the **VibeRails** button in the status bar (bottom left), run `VibeRails: Open Dashboard`, or press `Ctrl+Alt+V` / `Cmd+Alt+V`.
 3. Launch a base CLI or custom environment and start shipping.
 
 Install options for Windows, Linux, and Mac are available at https://viberails.ai/.
@@ -107,3 +109,7 @@ The extension ships the whole VibeRails backend inside the VSIX — there is **n
 ## License
 
 [MIT](https://github.com/robstokes857/vibe-rails/blob/main/vscode-viberails/LICENSE)
+
+---
+
+*Last checked: 2026-08-03 by opencode (glm-5.2)*

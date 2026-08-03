@@ -27,7 +27,10 @@ public interface IJobStore
     Task<IReadOnlyList<string>> EnqueueEventRunsAsync(string projectPath, JobTriggerKind kind, string eventKey, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> EnqueueDueSchedulesAsync(DateTime nowUtc, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JobRunRecord>> GetRunsAsync(long? jobId = null, int limit = 100, CancellationToken cancellationToken = default);
+    Task<JobRunPageRecord> GetRunsPageAsync(long jobId, int page = 1, int pageSize = 50, CancellationToken cancellationToken = default);
     Task<JobRunRecord?> GetRunAsync(string runId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<JobRunSummaryRecord>> GetRunSummariesAsync(string projectPath, CancellationToken cancellationToken = default);
+    Task<(int Deleted, int Skipped)> SoftDeleteRunsAsync(IReadOnlyList<string> runIds, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JobRunRecord>> GetQueuedRunsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JobRunRecord>> GetActiveRunsAsync(CancellationToken cancellationToken = default);
     Task<int> CountRunningRunsAsync(CancellationToken cancellationToken = default);
@@ -448,7 +451,8 @@ public sealed class JobStore : IJobStore
         var results = new List<JobRunRecord>();
         await using var command = connection.CreateCommand();
         command.CommandText = RunSelectSql + "\n" + """
-            WHERE ($jobId IS NULL OR r.JobId = $jobId)
+            WHERE r.DeletedUTC IS NULL
+              AND ($jobId IS NULL OR r.JobId = $jobId)
             ORDER BY r.QueuedUTC DESC, r.Id DESC LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$jobId", jobId is null ? DBNull.Value : jobId.Value);
@@ -458,14 +462,187 @@ public sealed class JobStore : IJobStore
         return results;
     }
 
+    /// <summary>
+    /// Returns one stable, bounded page for a single Automation together with the visible total.
+    /// The count and page read share a transaction so a concurrently queued run cannot make the
+    /// metadata disagree with the rows in the same response.
+    /// </summary>
+    public async Task<JobRunPageRecord> GetRunsPageAsync(
+        long jobId,
+        int page = 1,
+        int pageSize = 50,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedPage = Math.Max(1, page);
+        var normalizedPageSize = Math.Clamp(pageSize, 1, 100);
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction();
+
+        int totalRuns;
+        await using (var countCommand = connection.CreateCommand())
+        {
+            countCommand.Transaction = transaction;
+            countCommand.CommandText = "SELECT COUNT(*) FROM JobRuns WHERE JobId = $jobId AND DeletedUTC IS NULL;";
+            countCommand.Parameters.AddWithValue("$jobId", jobId);
+            totalRuns = Convert.ToInt32(
+                await countCommand.ExecuteScalarAsync(cancellationToken),
+                CultureInfo.InvariantCulture);
+        }
+
+        var totalPages = Math.Max(1, (totalRuns + normalizedPageSize - 1) / normalizedPageSize);
+        normalizedPage = Math.Min(normalizedPage, totalPages);
+        var offset = (long)(normalizedPage - 1) * normalizedPageSize;
+        var results = new List<JobRunRecord>(Math.Min(normalizedPageSize, totalRuns));
+
+        await using (var pageCommand = connection.CreateCommand())
+        {
+            pageCommand.Transaction = transaction;
+            pageCommand.CommandText = RunSelectSql + "\n" + """
+                WHERE r.JobId = $jobId AND r.DeletedUTC IS NULL
+                ORDER BY r.QueuedUTC DESC, r.Id DESC
+                LIMIT $pageSize OFFSET $offset;
+                """;
+            pageCommand.Parameters.AddWithValue("$jobId", jobId);
+            pageCommand.Parameters.AddWithValue("$pageSize", normalizedPageSize);
+            pageCommand.Parameters.AddWithValue("$offset", offset);
+            await using var reader = await pageCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                results.Add(ReadRun(reader));
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return new JobRunPageRecord(totalRuns, normalizedPage, normalizedPageSize, results);
+    }
+
     public async Task<JobRunRecord?> GetRunAsync(string runId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = RunSelectSql + " WHERE r.Id = $id LIMIT 1;";
+        command.CommandText = RunSelectSql + " WHERE r.Id = $id AND r.DeletedUTC IS NULL LIMIT 1;";
         command.Parameters.AddWithValue("$id", runId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? ReadRun(reader) : null;
+    }
+
+    /// <summary>
+    /// One row per job: its newest run plus counts over the current project's visible history.
+    /// Scoping happens inside the window input so the five-second UI poll never scans other
+    /// repositories' lifetime history.
+    /// The projection is built from <see cref="RunColumns"/> so <see cref="ReadRun"/> can read the
+    /// leading ordinals and the two aggregates follow at a computed offset.
+    /// </summary>
+    public async Task<IReadOnlyList<JobRunSummaryRecord>> GetRunSummariesAsync(
+        string projectPath,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        var results = new List<JobRunSummaryRecord>();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {RunColumnList}, TotalRuns, ActiveRuns
+            FROM (
+                SELECT r.*,
+                       COUNT(*) OVER (PARTITION BY r.JobId) AS TotalRuns,
+                       SUM(CASE WHEN r.Status IN (0, 1) THEN 1 ELSE 0 END)
+                           OVER (PARTITION BY r.JobId) AS ActiveRuns,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY r.JobId ORDER BY r.QueuedUTC DESC, r.Id DESC) AS Rn
+                FROM JobRuns r
+                WHERE r.DeletedUTC IS NULL
+                  AND r.ProjectPath = $projectPath{ProjectPathCollation}
+            )
+            WHERE Rn = 1
+            ORDER BY QueuedUTC DESC;
+            """;
+        command.Parameters.AddWithValue("$projectPath", NormalizeProjectPath(projectPath));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            // The two aggregates sit immediately after the run columns, so their ordinals follow
+            // RunColumns rather than being hard-coded alongside a list that can grow.
+            results.Add(new JobRunSummaryRecord(
+                reader.GetInt32(RunColumns.Length),
+                reader.GetInt32(RunColumns.Length + 1),
+                ReadRun(reader)));
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Hides completed run history without deleting its trigger key, recorded session, or logs.
+    /// Keeping the JobRuns row preserves event idempotency. The retained session is released into
+    /// Chat History so its terminal recording remains reachable after it leaves Automation history.
+    /// Queued and Running rows are refused because an in-flight run must remain visible and linked.
+    /// </summary>
+    public async Task<(int Deleted, int Skipped)> SoftDeleteRunsAsync(
+        IReadOnlyList<string> runIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (runIds.Count == 0) return (0, 0);
+        if (runIds.Count > 100)
+            throw new ArgumentOutOfRangeException(nameof(runIds), "At most 100 run ids may be removed at once.");
+
+        var parameterNames = runIds.Select((_, index) => $"$id{index}").ToArray();
+        var inClause = string.Join(", ", parameterNames);
+
+        await using var connection = await OpenAsync(cancellationToken);
+        var canReleaseSessions = HasColumn(connection, "Sessions", "JobRunId");
+        await using var transaction = connection.BeginTransaction(deferred: false);
+
+        int skipped;
+        await using (var countCommand = connection.CreateCommand())
+        {
+            countCommand.Transaction = transaction;
+            countCommand.CommandText =
+                $"SELECT COUNT(*) FROM JobRuns WHERE Id IN ({inClause}) AND DeletedUTC IS NULL AND Status IN (0, 1);";
+            for (var index = 0; index < runIds.Count; index++)
+            {
+                countCommand.Parameters.AddWithValue(parameterNames[index], runIds[index]);
+            }
+
+            skipped = Convert.ToInt32(await countCommand.ExecuteScalarAsync(cancellationToken));
+        }
+
+        var deletedUtc = ToDb(DateTime.UtcNow);
+        int deleted;
+        await using (var deleteCommand = connection.CreateCommand())
+        {
+            deleteCommand.Transaction = transaction;
+            deleteCommand.CommandText =
+                $"UPDATE JobRuns SET DeletedUTC = $deletedUtc WHERE Id IN ({inClause}) AND DeletedUTC IS NULL AND Status NOT IN (0, 1);";
+            deleteCommand.Parameters.AddWithValue("$deletedUtc", deletedUtc);
+            for (var index = 0; index < runIds.Count; index++)
+            {
+                deleteCommand.Parameters.AddWithValue(parameterNames[index], runIds[index]);
+            }
+
+            deleted = await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (deleted > 0 && canReleaseSessions)
+        {
+            await using var releaseCommand = connection.CreateCommand();
+            releaseCommand.Transaction = transaction;
+            releaseCommand.CommandText = $"""
+                UPDATE Sessions
+                SET JobRunId = NULL
+                WHERE JobRunId IN (
+                    SELECT Id FROM JobRuns
+                    WHERE Id IN ({inClause}) AND DeletedUTC = $deletedUtc
+                );
+                """;
+            releaseCommand.Parameters.AddWithValue("$deletedUtc", deletedUtc);
+            for (var index = 0; index < runIds.Count; index++)
+            {
+                releaseCommand.Parameters.AddWithValue(parameterNames[index], runIds[index]);
+            }
+            await releaseCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return (deleted, skipped);
     }
 
     /// <summary>
@@ -946,7 +1123,8 @@ public sealed class JobStore : IJobStore
         {
             ("JobRuns", "LaunchedUTC", "TEXT"),
             ("Jobs", "LaunchMinimized", "INTEGER NOT NULL DEFAULT 0"),
-            ("JobRuns", "LaunchMinimized", "INTEGER NOT NULL DEFAULT 0")
+            ("JobRuns", "LaunchMinimized", "INTEGER NOT NULL DEFAULT 0"),
+            ("JobRuns", "DeletedUTC", "TEXT")
         })
         {
             if (HasColumn(connection, table, column))
@@ -957,15 +1135,74 @@ public sealed class JobStore : IJobStore
             alter.ExecuteNonQuery();
         }
 
+        // These indexes reference DeletedUTC, so create them only after the guarded migration
+        // above. Putting them in SchemaSql would fail startup for an existing pre-soft-delete DB
+        // before ALTER TABLE had a chance to add the column.
+        using (var historyIndexes = connection.CreateCommand())
+        {
+            var projectHistoryIndexName = OperatingSystem.IsWindows()
+                ? "idx_job_runs_project_history_nocase"
+                : "idx_job_runs_project_history";
+            historyIndexes.CommandText = $"""
+                CREATE INDEX IF NOT EXISTS idx_job_runs_job_history
+                    ON JobRuns(JobId, DeletedUTC, QueuedUTC DESC, Id DESC);
+                CREATE INDEX IF NOT EXISTS {projectHistoryIndexName}
+                    ON JobRuns(ProjectPath{ProjectPathCollation}, DeletedUTC, JobId, QueuedUTC DESC, Id DESC);
+                """;
+            historyIndexes.ExecuteNonQuery();
+        }
+
         // Repository owns Sessions and initializes it before JobStore in the real application.
         // Some isolated JobStore tests intentionally omit that unrelated schema, so only install
         // the cross-table trigger when the tagged-session column is actually available.
-        if (HasColumn(connection, "Sessions", "JobRunId"))
+        if (HasColumn(connection, "Sessions", "JobRunId") && !IsLinkTriggerCurrent(connection))
         {
+            using var triggerTransaction = connection.BeginTransaction(deferred: false);
             using var linkSession = connection.CreateCommand();
-            linkSession.CommandText = SqlStrings.CreateJobRunSessionLinkTrigger;
+            linkSession.Transaction = triggerTransaction;
+            // Recreate rather than CREATE IF NOT EXISTS so databases with the pre-soft-delete
+            // trigger also gain its DeletedUTC guard.
+            linkSession.CommandText = "DROP TRIGGER IF EXISTS Sessions_LinkJobRunSession;\n"
+                + SqlStrings.CreateJobRunSessionLinkTrigger;
             linkSession.ExecuteNonQuery();
+            triggerTransaction.Commit();
         }
+    }
+
+    /// <summary>
+    /// True when the installed trigger already matches the definition we would write. SQLite stores
+    /// the CREATE statement verbatim, so comparing it lets startup skip the DROP/CREATE entirely —
+    /// which matters because dropping a trigger takes a schema-write lock, and every backend
+    /// process does this on boot against a shared database.
+    /// </summary>
+    internal static bool IsLinkTriggerCurrent(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'Sessions_LinkJobRunSession';";
+        if (command.ExecuteScalar() is not string installed)
+            return false;
+
+        return NormalizeTriggerSql(installed)
+            == NormalizeTriggerSql(SqlStrings.CreateJobRunSessionLinkTrigger);
+    }
+
+    /// <summary>
+    /// Puts a CREATE TRIGGER statement into the form sqlite_master stores it in: the statement
+    /// terminator is gone, whitespace may be reflowed, and — verified against SQLite, not assumed —
+    /// the <c>IF NOT EXISTS</c> clause is stripped. Without that last step the comparison could
+    /// never match and the gate above would recreate the trigger on every boot anyway.
+    /// </summary>
+    private static string NormalizeTriggerSql(string sql)
+    {
+        var collapsed = string.Join(
+            ' ',
+            sql.TrimEnd().TrimEnd(';').Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+        return collapsed.Replace(
+            "CREATE TRIGGER IF NOT EXISTS ",
+            "CREATE TRIGGER ",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool HasColumn(SqliteConnection connection, string table, string column)
@@ -998,13 +1235,24 @@ public sealed class JobStore : IJobStore
         FROM Jobs j LEFT JOIN Environments e ON e.Id = j.EnvironmentId
         """;
 
-    private const string RunSelectSql = """
-        SELECT r.Id, r.JobId, r.TriggerKind, r.TriggerKey, r.Status, r.JobName, r.ProjectPath,
-               r.Llm, r.EnvironmentId, r.EnvironmentName, r.TimeoutMinutes, r.SessionId,
-               r.QueuedUTC, r.StartedUTC, r.EndedUTC, r.ExitCode, r.ErrorMessage,
-               r.CancelRequested, r.OwnerProcessId, r.LaunchMinimized
-        FROM JobRuns r
-        """;
+    /// <summary>
+    /// The JobRuns columns every run projection selects, in the order <see cref="ReadRun"/> reads
+    /// them. Both the plain projection and the summary window query are built from this list, so a
+    /// column added here shifts the ordinals in both at once instead of silently desyncing one.
+    /// </summary>
+    private static readonly string[] RunColumns =
+    [
+        "Id", "JobId", "TriggerKind", "TriggerKey", "Status", "JobName", "ProjectPath",
+        "Llm", "EnvironmentId", "EnvironmentName", "TimeoutMinutes", "SessionId",
+        "QueuedUTC", "StartedUTC", "EndedUTC", "ExitCode", "ErrorMessage",
+        "CancelRequested", "OwnerProcessId", "LaunchMinimized"
+    ];
+
+    /// <summary>Bare column list, for projections that read JobRuns through a subquery.</summary>
+    private static readonly string RunColumnList = string.Join(", ", RunColumns);
+
+    private static readonly string RunSelectSql =
+        $"SELECT {string.Join(", ", RunColumns.Select(column => "r." + column))}\nFROM JobRuns r";
 
     private const string SchemaSql = """
         PRAGMA busy_timeout=5000;
@@ -1062,6 +1310,7 @@ public sealed class JobStore : IJobStore
             OwnerProcessId INTEGER,
             LaunchedUTC TEXT,
             LaunchMinimized INTEGER NOT NULL DEFAULT 0,
+            DeletedUTC TEXT,
             FOREIGN KEY (JobId) REFERENCES Jobs(Id)
         );
 

@@ -49,6 +49,21 @@ public sealed class Terminal : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// True while the CLI is on the alternate screen buffer — i.e. a full-screen TUI is painting.
+    /// Used to decide whether a post-resize repaint is warranted: alt-screen TUIs are diff
+    /// renderers and cannot recover from a host buffer being reflowed under them, whereas a shell
+    /// on the normal buffer reflows correctly and must not be cleared.
+    /// </summary>
+    public bool IsAlternateScreen
+    {
+        get
+        {
+            lock (_emulatorLock)
+                return _emulator.IsAlternateScreen;
+        }
+    }
+
     public static string GetDefaultShellPath() => ShellDefaults.GetDefaultPtyShellPath();
 
     /// <summary>
@@ -476,8 +491,32 @@ public sealed class Terminal : IAsyncDisposable
             try { exitCode = _pty.ExitCode; }
             catch { exitCode = -1; }
 
+            NotifyConsumersClosed();
+
             try { Exited?.Invoke(this, exitCode); }
             catch (Exception ex) { Log.Error(ex, "[Terminal] Error in exit handlers"); }
+        }
+    }
+
+    /// <summary>
+    /// Signals end-of-stream to every consumer, so any that buffers bytes between reads can flush.
+    /// Runs before <c>Exited</c> so trailing output lands before listeners tear the session down.
+    /// </summary>
+    private void NotifyConsumersClosed()
+    {
+        lock (_subscriberLock)
+        {
+            foreach (var consumer in _consumers)
+            {
+                try
+                {
+                    consumer.OnClosed();
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "[Terminal] Consumer error while closing");
+                }
+            }
         }
     }
 

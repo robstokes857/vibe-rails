@@ -126,7 +126,8 @@ run on the host, not a sandbox.
 
 > **Not currently exposed** (security review 2026-07-02) — kept in-tree, not registered. Details retained below.
 
-`WebResearchTools` is an **instance tool** backed by `IWebResearchService` and `IHttpClientFactory`.
+`WebResearchTools` is an **instance tool** backed by `IWebResearchService` (registered as a typed
+`HttpClient` via `AddHttpClient<IWebResearchService, WebResearchService>`).
 It provides no-key web search (DuckDuckGo HTML) and HTTP/HTTPS page fetch/cleaning. Fetches are
 limited in size, but they are not network-target filtered: the request runs as the local VibeRails
 process and can target localhost or private-network URLs. This tool is intended for trusted local
@@ -191,7 +192,13 @@ case; the add step is intentionally not quiet.
 
 ## AOT notes
 
-The whole app is Native AOT. `WithTools<T>()` (explicit types), `MapMcp`, and
-`WithStdioServerTransport()` are trim/AOT-clean — verified with the trim + AOT Roslyn analyzers
-(`EnableAotAnalyzer`/`EnableTrimAnalyzer`) reporting zero warnings. Avoid `WithToolsFromAssembly()`
-(reflection scan) — it is the AOT-unsafe variant.
+The whole app is Native AOT (`<PublishAot>true</PublishAot>` in `VibeRails.csproj`, which
+implicitly enables the AOT/trim Roslyn analyzers). `WithTools<T>()` (explicit types), `MapMcp`,
+and `WithStdioServerTransport()` are themselves trim/AOT-clean. A small, known set of analyzer
+warnings (`IL2026`/`IL2057`/`IL2070`/`IL2075`/`IL2080`/`IL2104`/`IL3050`) for reflection-based
+paths is suppressed via `<NoWarn>` rather than refactored away; don't add new reflection, and
+avoid `WithToolsFromAssembly()` (reflection scan) — it is the AOT-unsafe variant.
+
+---
+
+**Last checked**: 2026-08-03T12:14:36Z by opencode (glm-5.2)

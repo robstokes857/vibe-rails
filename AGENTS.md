@@ -38,7 +38,7 @@
 - **Fetch API** - REST API communication
 
 ### Build & Testing
-- **xUnit 2.9** - Unit testing framework
+- **xUnit v3** (xunit.v3 3.2.2) - Unit testing framework
 - **Native AOT** - Ahead-of-time compilation for standalone executables
 - **PowerShell** - Build automation scripts
 
@@ -122,11 +122,14 @@ vibe-rails/
 │   ├── AgentFileServiceTests.cs
 │   └── IntegrationAgentFileTests.cs
 │
-└── build/                          # Build scripts
+└── deploy/                         # Build & deploy scripts
     ├── build.ps1
-    ├── debug_ubuntu.ps1
-    ├── test_ubuntu.ps1
-    └── interactive_ubuntu.ps1
+    ├── buildAndDeployVSCodeExt.ps1
+    ├── deploy.ps1
+    ├── local_deploy.ps1
+    ├── package-platforms.ps1
+    ├── prepare-binaries.ps1
+    └── test-vscode-marketplace.ps1
 ```
 
 ## Architecture
@@ -182,8 +185,9 @@ The old CLI management commands (`vb env`, `vb validate`, `vb hooks`, etc.) are 
 
 > **Additional process-host modes** (internal, not user-facing): `vb mcp` (MCP stdio server),
 > `vb --vca-hook <type>` (VCA hook process host used by git hooks), `vb --job-run <id>`
-> (automated job run), and `vb --job-trigger` (post-commit job enqueue). These are invoked
-> internally by the main app or git hooks, not typed by end users.
+> (automated job run), `vb --job-trigger` (post-commit job enqueue), and `vb --job-tick`
+> (compatibility tombstone for the retired OS Jobs scheduler — recognized and exits before the
+> web host starts). These are invoked internally by the main app or git hooks, not typed by end users.
 
 ### Component Interaction Flow
 
@@ -486,7 +490,7 @@ tools (security review 2026-07-02).
 - `GET /api/v1/projects/name` - Get project display name
 - `GET /api/v1/environments/{name}/launch` - Get environment vars
 - `POST /api/v1/cli/launch/{cli}` - Launch CLI in terminal
-- `POST /api/cli/launch/vscode` - Launch VS Code
+- `POST /api/v1/cli/launch/vscode` - Launch VS Code
 
 **Sandboxes** (project-scoped):
 - `GET /api/v1/sandboxes` - List sandboxes for current project
@@ -505,7 +509,7 @@ tools (security review 2026-07-02).
 - `POST /api/v1/mcp/tools/{name}` - Call MCP tool
 
 **Utility**:
-- `GET /api/v1/IsLocal` - Check if in git repo
+- `GET /api/v1/context` - Project context (IsInGit, root path, git branch/remote, sandbox flag)
 - `POST /api/v1/git/preflight/stream` - Stream staged-index Git Guard events as SSE
 
 ### Frontend Layer
@@ -729,11 +733,8 @@ dotnet test /p:CollectCoverage=true
 
 #### Integration Testing
 ```bash
-# Build and run debug mode
-.\build\debug_ubuntu.ps1
-
-# Or interactive mode
-.\build\interactive_ubuntu.ps1
+# End-to-end PTY / terminal / agent-flow integration project
+dotnet run --project IntegrationTest
 ```
 
 ## Building & Deployment
@@ -750,12 +751,8 @@ dotnet publish -c Release
 
 ### Cross-Platform Builds
 ```powershell
-# Windows
-.\build\build.ps1
-
-# Ubuntu/Linux
-.\build\debug_ubuntu.ps1
-.\build\test_ubuntu.ps1
+# Windows (local AOT) + Linux (AOT via Docker) — single script handles both
+.\deploy\build.ps1
 ```
 
 ### Docker Build
@@ -887,7 +884,7 @@ VibeRails implements production-grade cookie-based authentication to prevent una
 **VSCode Extension Compatibility:**
 - Extension webview bypasses cookie auth (different origin: `vscode-webview://`)
 - Origin-based trust model (VSCode is local, trusted application)
-- Health check endpoint `/api/v1/IsLocal` allows extension startup verification
+- Health check endpoint `/health` (the only deliberately unauthenticated route) allows extension/parent-process startup verification
 
 **Browser Launch:**
 ```bash
@@ -1021,7 +1018,7 @@ VibeRails includes a sophisticated git hook installation system that automatical
 **Installation Behavior**:
 - **Auto-install on startup** - Hooks installed automatically when VibeRails starts (configurable)
 - **Preserves existing hooks** - Inserts VCA ahead of existing shell-hook exits and chains non-shell/binary/symlink hooks through a preserved sidecar
-- **App-versioned health checks** - Installed hooks carry the running VibeRails version (for example `1.9.5`); startup detects missing, disabled, stale/older-version, partial, missing-launcher, or mismatched-launcher hooks and replaces them
+- **App-versioned health checks** - Installed hooks carry the running VibeRails version (for example `1.9.8`); startup detects missing, disabled, stale/older-version, partial, missing-launcher, or mismatched-launcher hooks and replaces them
 - **Git-aware path resolution** - Honors linked worktrees and `core.hooksPath`
 - **Safe hook chaining** - Runs before existing shell hooks and preserves non-shell hooks as executable sidecars
 - **Safe uninstallation** - Removes only VibeRails sections, keeps other hooks intact
@@ -1190,9 +1187,13 @@ Current implementation:
 
 ---
 
-**Last Updated**: 2026-07-31
-**Version**: 1.9.5
+**Last Updated**: 2026-08-03
+**Version**: 1.9.8
 **Maintained By**: Robert Stokes
 
 ## Vibe Rails Rules
 - Log all file changes (WARN)
+
+---
+
+*Last checked: 2026-08-03T12:14:36Z by opencode (glm-5.2)*

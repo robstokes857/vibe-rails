@@ -12,7 +12,10 @@ public interface IJobService
     Task DeleteJobAsync(long id, CancellationToken cancellationToken = default);
     Task<JobActionResponse> RunNowAsync(long id, CancellationToken cancellationToken = default);
     Task<JobRunListResponse> GetRunsAsync(long? jobId, int limit, CancellationToken cancellationToken = default);
+    Task<JobRunListResponse> GetRunsPageAsync(long jobId, int page, int pageSize, CancellationToken cancellationToken = default);
     Task<JobRunResponse> GetRunAsync(string runId, CancellationToken cancellationToken = default);
+    Task<JobRunSummaryListResponse> GetRunSummariesAsync(string? projectPath, CancellationToken cancellationToken = default);
+    Task<DeleteJobRunsResponse> DeleteRunsAsync(IReadOnlyList<string> runIds, CancellationToken cancellationToken = default);
     Task<JobActionResponse> CancelRunAsync(string runId, CancellationToken cancellationToken = default);
     Task<JobActionResponse> RetryRunAsync(string runId, CancellationToken cancellationToken = default);
 }
@@ -26,6 +29,8 @@ public sealed class JobService(
     private const int MaximumNameLength = 100;
     private const int MaximumPromptLength = 50_000;
     private const int MinimumTimeoutMinutes = 1;
+    private const int MaximumRunDeleteBatchSize = 100;
+    private const int MaximumRunIdLength = 128;
 
     /// <summary>
     /// 12 hours. Deliberately generous, and raised from 2 hours when timeouts became opt-in: this is
@@ -97,8 +102,25 @@ public sealed class JobService(
 
     public async Task<JobRunListResponse> GetRunsAsync(long? jobId, int limit, CancellationToken cancellationToken = default)
     {
+        // No pagination metadata: GetRunsAsync applies a LIMIT, so runs.Count is the size of the
+        // truncated slice and reporting it as TotalRuns would tell a caller asking for 100 that
+        // exactly 100 runs exist. Callers that need a real total use GetRunsPageAsync.
         var runs = await store.GetRunsAsync(jobId, limit, cancellationToken);
         return new JobRunListResponse(runs.Select(ToResponse).ToList());
+    }
+
+    public async Task<JobRunListResponse> GetRunsPageAsync(
+        long jobId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await store.GetRunsPageAsync(jobId, page, pageSize, cancellationToken);
+        return new JobRunListResponse(
+            result.Runs.Select(ToResponse).ToList(),
+            result.TotalRuns,
+            result.Page,
+            result.PageSize);
     }
 
     public async Task<JobRunResponse> GetRunAsync(string runId, CancellationToken cancellationToken = default)
@@ -106,6 +128,98 @@ public sealed class JobService(
         var run = await store.GetRunAsync(runId, cancellationToken)
             ?? throw JobServiceException.NotFound("Automation run not found.");
         return ToResponse(run);
+    }
+
+    public async Task<JobRunSummaryListResponse> GetRunSummariesAsync(
+        string? projectPath,
+        CancellationToken cancellationToken = default)
+    {
+        // Never fall back to a global aggregation: this endpoint is polled every five seconds.
+        if (string.IsNullOrWhiteSpace(projectPath))
+            return new JobRunSummaryListResponse([]);
+
+        RequireValidProjectPath(projectPath);
+
+        var summaries = await store.GetRunSummariesAsync(projectPath, cancellationToken);
+        return new JobRunSummaryListResponse(summaries.Select(summary =>
+        {
+            var last = summary.LastRun;
+            return new JobRunSummaryResponse(
+                last.JobId,
+                last.JobName,
+                summary.TotalRuns,
+                summary.ActiveRuns,
+                last.Id,
+                last.Status,
+                last.TriggerKind,
+                last.Llm,
+                last.EnvironmentName,
+                last.QueuedUtc,
+                last.StartedUtc,
+                last.EndedUtc,
+                last.ExitCode,
+                last.ErrorMessage);
+        }).ToList());
+    }
+
+    /// <summary>
+    /// Removing nothing is a client bug rather than a server error, so an empty list is rejected
+    /// outright instead of silently reporting a successful no-op.
+    /// </summary>
+    public async Task<DeleteJobRunsResponse> DeleteRunsAsync(
+        IReadOnlyList<string> runIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (runIds.Count > MaximumRunDeleteBatchSize)
+            throw JobServiceException.BadRequest($"Remove at most {MaximumRunDeleteBatchSize} runs at a time.");
+        if (runIds.Any(id => id is not null && id.Length > MaximumRunIdLength))
+            throw JobServiceException.BadRequest("A run id is too long.");
+
+        var ids = runIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (ids.Count == 0)
+            throw JobServiceException.BadRequest("Select at least one run to remove.");
+
+        var (deleted, skipped) = await store.SoftDeleteRunsAsync(ids, cancellationToken);
+
+        // Removing nothing is never a success. Either the runs were live (a conflict the user can
+        // act on by stopping them) or they matched no visible row at all — reporting either as
+        // "Removed 0 runs" would leave the user staring at rows they were told had gone.
+        if (deleted == 0)
+        {
+            throw skipped > 0
+                ? JobServiceException.Conflict("A run that is queued or still running cannot be removed. Stop it first.")
+                : JobServiceException.NotFound("Those runs are no longer in Automation history.");
+        }
+
+        var message = skipped > 0
+            ? $"Removed {deleted} {Pluralize(deleted, "run")} from Automation history. {skipped} still running and {(skipped == 1 ? "was" : "were")} kept."
+            : $"Removed {deleted} {Pluralize(deleted, "run")} from Automation history.";
+
+        return new DeleteJobRunsResponse(true, message, deleted, skipped);
+    }
+
+    private static string Pluralize(int count, string noun) => count == 1 ? noun : noun + "s";
+
+    /// <summary>
+    /// The store normalizes project paths through <see cref="Path.GetFullPath(string)"/>, which
+    /// throws on syntactically invalid input. A caller sending a malformed path made a bad request,
+    /// so reject it as one instead of letting it surface as an unhandled 500.
+    /// </summary>
+    private static void RequireValidProjectPath(string projectPath)
+    {
+        try
+        {
+            _ = Path.GetFullPath(projectPath.Trim());
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw JobServiceException.BadRequest("That project path is not a valid path.");
+        }
     }
 
     public async Task<JobActionResponse> CancelRunAsync(string runId, CancellationToken cancellationToken = default)

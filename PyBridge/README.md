@@ -246,3 +246,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
 Then re-run the console app — the inference demo prints real ImageNet predictions,
 **no C# changes required**.
+
+---
+
+**Last checked**: 2026-08-03T12:14:36Z by opencode (glm-5.2)

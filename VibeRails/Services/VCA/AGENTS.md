@@ -19,14 +19,18 @@ Rules page (browser)              Git hooks (pre-commit, commit-msg)        MCP 
         │                                      │                                   │
  AgentFileService ────┐                 VcaPreflightStep                            │
                       │                        │                                   │
- FileAndRuleParser ───┤                 RulesTool.ValidateVcaReportAsync ───────────┘
- ValidationService    │                        │
+                      │                 VcaHookValidationService.ValidateAsync      │
+                      │                        │                                   │
+                      │                 RulesTool.ValidateVcaReportAsync ───────────┘
+                      │                        │
                       └──────► AgentRuleSectionReader ◄──────┘
                                  (rule discovery — one implementation)
 ```
 
 `AgentRuleSectionReader` is the only thing that decides what a file declares. It is shared on
-purpose; see [Why discovery is shared](#why-discovery-is-shared).
+purpose; see [Why discovery is shared](#why-discovery-is-shared). Rules-page working-tree
+validation (`ValidationService` / `FileAndRuleParser`) is a separate path that does not call
+`AgentRuleSectionReader`.
 
 ## The rule-discovery contract
 
@@ -173,3 +177,7 @@ Removing Git Guard strips only the VibeRails-managed sections from `pre-commit`,
 `post-commit`; third-party hook content and preserved sidecars are restored. A repository-local
 `.git/.viberails-git-guard-disabled` marker prevents startup auto-install from putting the hooks
 back. An explicit Install or Repair action removes that marker and re-enables startup installation.
+
+---
+
+*Last checked: 2026-08-03T13:42:15Z by opencode (glm-5.2)*
