@@ -17,6 +17,22 @@ public static class DataExportRoutes
             var result = await dataExportService.ExportAsync(cancellationToken);
             return Results.Ok(ToResponse(result));
         }).WithName("ExportData");
+
+        // Polled a few times a second while the export POST above is still in flight, so it stays
+        // allocation-light and never touches the database or the file system.
+        app.MapGet("/api/v1/settings/export-data/progress", (
+            IDataExportProgress progress) =>
+        {
+            var snapshot = progress.Current;
+            return Results.Ok(new DataExportProgressResponse(
+                snapshot.Active,
+                snapshot.RunId,
+                snapshot.Stage,
+                snapshot.ProcessedBytes,
+                snapshot.TotalBytes,
+                snapshot.ElapsedMs,
+                snapshot.StageElapsedMs));
+        }).WithName("ExportDataProgress");
     }
 
     internal static DataExportResponse ToResponse(DataExportResult result)

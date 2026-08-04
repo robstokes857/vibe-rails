@@ -221,7 +221,7 @@ test('TerminalTokenCompressionMeter stays visibly mounted while idle and exposes
     assert.equal(host.classList.contains('is-active'), false);
 });
 
-test('TerminalTokenCompressionMeter pulses and groups Claude and Codex proxy reports', () => {
+test('TerminalTokenCompressionMeter pulses without exposing per-request proxy details', () => {
     const mount = new FakeElement('div');
     const blinker = new TerminalTokenCompressionMeter({ mount, title: 'Proxy activity' });
     const host = mount.querySelector('.vb-activity-blinker');
@@ -245,10 +245,17 @@ test('TerminalTokenCompressionMeter pulses and groups Claude and Codex proxy rep
         target: 'https://api.openai.com/v1/responses',
         status: '200'
     });
+    blinker.report({
+        source: 'OpenCode proxy',
+        label: 'POST',
+        target: 'https://api.z.ai/api/paas/v4/chat/completions',
+        status: '200'
+    });
 
-    assert.equal(blinker.totalCount, 3);
+    assert.equal(blinker.totalCount, 4);
     assert.equal(blinker.sources.get('Claude proxy').count, 2);
     assert.equal(blinker.sources.get('Codex proxy').count, 1);
+    assert.equal(blinker.sources.get('OpenCode proxy').count, 1);
     assert.equal(host.classList.contains('is-active'), true);
     const trigger = host.querySelector('.vb-activity-blinker-trigger');
     assert.match(trigger.getAttribute('aria-label'), /proxy traffic detected/i);
@@ -256,20 +263,22 @@ test('TerminalTokenCompressionMeter pulses and groups Claude and Codex proxy rep
         host.classMutations.filter(mutation =>
             mutation.operation === 'add' && mutation.name === 'is-active'
         ).length,
-        3,
+        4,
         'each proxy report should restart the active-state pulse'
     );
 
     host.dispatchEvent({ type: 'mouseenter' });
     const popover = host.querySelector('.vb-activity-blinker-popover');
     const text = renderedText(popover);
-    assert.match(text, /3 requests/);
+    assert.match(text, /4 requests/);
     assert.match(text, /Tokens saved/);
     assert.match(text, /Savings measurement not connected yet/);
-    assert.match(text, /Claude proxy/);
-    assert.match(text, /2 ·/);
-    assert.match(text, /Codex proxy/);
-    assert.match(text, /1 ·/);
+    assert.doesNotMatch(text, /Claude proxy/);
+    assert.doesNotMatch(text, /Codex proxy/);
+    assert.doesNotMatch(text, /OpenCode proxy/);
+    assert.doesNotMatch(text, /api\.anthropic\.com/);
+    assert.doesNotMatch(text, /api\.openai\.com/);
+    assert.doesNotMatch(text, /api\.z\.ai/);
 });
 
 test('TerminalTokenCompressionMeter shows an honest savings placeholder and a session/month/all-time breakdown', () => {

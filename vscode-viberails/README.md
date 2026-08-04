@@ -73,7 +73,7 @@ The extension ships the whole VibeRails backend inside the VSIX — there is **n
 - Roughly 50–100 MB installed, depending on platform. You only ever download the build for your own platform.
 - The backend binds a **dynamic port on the loopback interface only**. Nothing listens on an external address, and the dashboard talks to it over `localhost`.
 - Every request is authenticated with a session and tab token minted at startup; the dashboard runs in a VS Code webview under a strict Content Security Policy.
-- Agent configuration, session history, and crash dumps live under `~/.vibe_rails/`.
+- Environment configuration, session history, and crash dumps live under `~/.vibe_rails/`. (Agent instruction files — `agent.md`/`agents.md` and their rules — live in the project repository root, not under `~/.vibe_rails/`.)
 
 ## Settings
 
@@ -97,7 +97,7 @@ The extension ships the whole VibeRails backend inside the VSIX — there is **n
 
 **`Ctrl+Alt+V` does nothing.** On some keyboard layouts `Ctrl+Alt` acts as AltGr, and the Paste Image extension binds the same chord. Rebind `viberails.open` under **File → Preferences → Keyboard Shortcuts**.
 
-**A rule shows a different enforcement level than expected.** The dashboard's rule list and the commit-gating hook use different parsers: the dashboard reads only the `- rule text (LEVEL)` suffix form under a `## Vibe Rails Rules` heading, while commit gating also accepts the `- [LEVEL] rule text` prefix form anywhere in any `AGENTS.md`. Write rules in the suffix form under that heading to have both agree.
+**A rule isn't being enforced or shown.** The dashboard Rules page and the commit-gating hook share one parser (`AgentRuleSectionReader`), so they always agree on what a file declares. Rules must live under a `## Vibe Rails Rules` heading (legacy `## Vibe Control Rules` also accepted), and fenced code blocks are skipped — documentation that shows what a rule looks like is never enforced. Three line forms are accepted: `- [LEVEL] rule text`, `- rule text (LEVEL)`, and bare `- rule text` (defaults to `WARN`). A rule outside that heading, under a different heading such as `## Rules`, or inside a code fence is simply not read.
 
 ## Links
 
@@ -112,4 +112,4 @@ The extension ships the whole VibeRails backend inside the VSIX — there is **n
 
 ---
 
-*Last checked: 2026-08-03 by opencode (glm-5.2)*
+*Last checked: 2026-08-04T19:38:40Z by opencode (glm-5.2)*

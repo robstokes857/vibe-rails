@@ -170,8 +170,8 @@ Single-page application with:
 **Frontend Architecture:**
 ```
 wwwroot/
-├── app.js              # Main application (~1,250 lines)
-├── js/modules/         # ~39 ES modules, key ones:
+├── app.js              # Main application (~1,410 lines)
+├── js/modules/         # ~40 ES modules, key ones:
 │   ├── terminal-multitab.js       (~121KB)  # Web terminal (multi-tab)
 │   ├── environment-controller.js  (~93KB)   # Environment CRUD + Web UI launch
 │   ├── rule-controller.js         (~70KB)   # Rule management
@@ -915,10 +915,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Built with modern .NET 10.0, Native AOT compilation, and the Model Context Protocol for next-generation AI development workflows.
 
-**Last Updated**: 2026-08-03
+**Last Updated**: 2026-08-04
 **Version**: 1.9.9
 **Maintained By**: Robert Stokes
 
 ---
 
-*Last checked: 2026-08-03T20:04:52Z by opencode (glm-5.2)*
+*Last checked: 2026-08-04T13:39:29Z by opencode (glm-5.2)*

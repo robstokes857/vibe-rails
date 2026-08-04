@@ -1,7 +1,10 @@
+using System.Buffers;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Serilog;
 using VibeRails.Utils;
@@ -14,11 +17,43 @@ namespace VibeRails.Services.Integrations.VibeCodeRemote;
 /// </summary>
 public sealed class DataExportService : IDataExportService
 {
-    internal const string ExportUrl = "https://viberails.ai/api/v1/data-exports";
-    private static readonly Uri ExportUri = new(ExportUrl);
+    internal const string ExportUrlSettingKey = "VibeRails:ExportUrl";
     internal const string SnapshotFileName = "copy_state.db";
     internal const string CompressedFileName = "copy_state.db.br";
     internal const string LockFileName = ".data-export.lock";
+
+    // Anything larger than one block goes through the resumable chunked protocol: a shared host
+    // can cap request size and time out a long request, so a multi-GB single POST is at the mercy
+    // of one uninterrupted connection. Smaller payloads are not worth the extra round trips. This
+    // only decides *whether* to chunk — the server reports the block size actually used.
+    internal const int ChunkedUploadThresholdBytes = 4 * 1024 * 1024;
+    private const int DefaultUploadBlockSizeBytes = 4 * 1024 * 1024;
+    private const int MaxUploadAttemptsPerBlock = 3;
+    private const int MaxCommitPasses = 2;
+
+    // The block size arrives from the server, so it is bounded before it is used to size a pooled
+    // buffer or to divide the payload. Left unchecked, a huge value is a multi-gigabyte rent and a
+    // tiny one is a request per byte. These are rejected rather than clamped on purpose: the server
+    // validates the block count against its *own* block size, so quietly substituting a different
+    // one would fail every commit instead of failing here with a readable reason.
+    private const int MinUploadBlockSizeBytes = 1024 * 1024;
+    private const int MaxUploadBlockSizeBytes = 64 * 1024 * 1024;
+
+    // Azure's ceiling on blocks per block blob. More than this could never be committed.
+    private const int MaxUploadBlockCount = 50_000;
+
+    // Metadata responses (the probe, and any error body) are small by contract. Bounding the read
+    // stops a stalled or endlessly-streaming server from growing the heap while this export holds
+    // the process gate and the cross-process lock.
+    private const int MaxMetadataBodyBytes = 64 * 1024;
+    private const int MaxErrorBodyBytes = 4 * 1024;
+
+    // ResponseHeadersRead hands back the response once headers land, so the body is read outside
+    // whatever the send itself was bounded by. These calls exchange a few hundred bytes; without
+    // a deadline of their own a silent server could hold both locks indefinitely.
+    private static readonly TimeSpan MetadataResponseTimeout = TimeSpan.FromSeconds(30);
+
+    private const int SnapshotPollIntervalMs = 250;
 
     // Fast in-process rejection avoids touching the lock file for duplicate requests in one host.
     // CrossProcessFileLock below supplies the actual machine-wide guarantee across browser, VS
@@ -35,17 +70,20 @@ public sealed class DataExportService : IDataExportService
     private readonly IConfiguration _configuration;
     private readonly Func<string> _temporaryDirectoryFactory;
     private readonly Func<string> _computerNameFactory;
+    private readonly IDataExportProgress _progress;
 
     public DataExportService(
         HttpClient httpClient,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IDataExportProgress progress)
         : this(
             httpClient,
             configuration,
             static () => Path.Combine(
                 Path.GetTempPath(),
                 $"viberails-data-export-{Guid.NewGuid():N}"),
-            ResolveComputerName)
+            ResolveComputerName,
+            progress)
     {
     }
 
@@ -53,12 +91,47 @@ public sealed class DataExportService : IDataExportService
         HttpClient httpClient,
         IConfiguration configuration,
         Func<string> temporaryDirectoryFactory,
-        Func<string> computerNameFactory)
+        Func<string> computerNameFactory,
+        IDataExportProgress? progress = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _temporaryDirectoryFactory = temporaryDirectoryFactory;
         _computerNameFactory = computerNameFactory;
+        _progress = progress ?? NullDataExportProgress.Instance;
+    }
+
+    /// <summary>
+    /// Absolute HTTPS only. The API key travels in a request header, so a relative or cleartext
+    /// URL must never be used — and the shipped placeholder must not look configured.
+    /// </summary>
+    internal bool TryGetExportUri(out Uri exportUri)
+        => TryParseExportUri(_configuration[ExportUrlSettingKey], out exportUri);
+
+    /// <summary>
+    /// Static so the settings endpoint can gate the Export button on exactly the rule the export
+    /// itself enforces, instead of the two drifting apart.
+    /// </summary>
+    internal static bool TryParseExportUri(string? configured, out Uri exportUri)
+    {
+        exportUri = null!;
+
+        if (string.IsNullOrWhiteSpace(configured))
+            return false;
+        if (!Uri.TryCreate(configured.Trim(), UriKind.Absolute, out var parsed))
+            return false;
+        if (!string.Equals(parsed.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Chunk endpoints are built by appending path segments. Appending to a URL that already
+        // carries a query or fragment silently lands the new path inside the query, leaving every
+        // chunk request pointed at the base path. Refuse it here so the misconfiguration is
+        // visible rather than mysterious.
+        if (!string.IsNullOrEmpty(parsed.Query) || !string.IsNullOrEmpty(parsed.Fragment))
+            return false;
+
+        exportUri = parsed;
+        return true;
     }
 
     public async Task<DataExportResult> ExportAsync(CancellationToken cancellationToken)
@@ -71,6 +144,13 @@ public sealed class DataExportService : IDataExportService
             return new DataExportResult(
                 DataExportStatus.NoApiKey,
                 Detail: "No API key is configured.");
+        }
+
+        if (!TryGetExportUri(out var exportUri))
+        {
+            return new DataExportResult(
+                DataExportStatus.NotConfigured,
+                Detail: "No absolute HTTPS export URL is configured.");
         }
 
         var statePath = ParserConfigs.GetStatePath();
@@ -90,6 +170,7 @@ public sealed class DataExportService : IDataExportService
 
         string? temporaryDirectory = null;
         CrossProcessFileLock? crossProcessLock = null;
+        var progressStarted = false;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -102,6 +183,11 @@ public sealed class DataExportService : IDataExportService
                     DataExportStatus.Busy,
                     Detail: "Another data export is already running.");
             }
+
+            // Only after both locks are held: an export that loses the race must not reset the
+            // progress the winning run is publishing.
+            _progress.Begin();
+            progressStarted = true;
 
             temporaryDirectory = _temporaryDirectoryFactory();
             PrivateFilePermissions.EnsureDirectory(temporaryDirectory);
@@ -116,11 +202,15 @@ public sealed class DataExportService : IDataExportService
             var snapshotPath = Path.Combine(temporaryDirectory, SnapshotFileName);
             var compressedPath = Path.Combine(temporaryDirectory, CompressedFileName);
 
-            // Microsoft.Data.Sqlite exposes BackupDatabase synchronously, so cancellation is
-            // observed immediately before and after this one transactionally consistent call.
-            CreateSnapshot(statePath, snapshotPath);
+            _progress.SetStage(DataExportStage.Snapshot, TryGetFileLength(statePath));
+            await CreateSnapshotWithProgressAsync(statePath, snapshotPath, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+
+            _progress.SetStage(DataExportStage.Compressing, TryGetFileLength(snapshotPath));
             await CompressSnapshotAsync(snapshotPath, compressedPath, cancellationToken);
+
+            var compressedLength = TryGetFileLength(compressedPath);
+            _progress.SetStage(DataExportStage.Hashing, compressedLength);
             var sha256 = await ComputeSha256Async(compressedPath, cancellationToken);
             var computerName = ComputerNameFormatter.Normalize(_computerNameFactory());
             if (string.IsNullOrWhiteSpace(computerName))
@@ -128,17 +218,34 @@ public sealed class DataExportService : IDataExportService
 
             DeleteSnapshotFilesBestEffort(snapshotPath);
 
-            return await UploadAsync(
-                ExportUri,
+            _progress.SetStage(DataExportStage.Uploading, compressedLength);
+            return await SendCompressedExportAsync(
+                exportUri,
                 apiKey,
                 computerName,
                 sha256,
                 compressedPath,
+                compressedLength,
                 cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (SqliteException exception)
+        {
+            // Overwhelmingly the "something else has the database open" case, which has its own
+            // obvious fix. Reporting it as a generic preparation failure sends people diffing code.
+            Log.Error(
+                exception,
+                "[DataExport] SQLite refused to snapshot the state database (code {ErrorCode}).",
+                exception.SqliteErrorCode);
+            return new DataExportResult(
+                DataExportStatus.Failed,
+                Detail: exception.SqliteErrorCode == 5
+                    ? "The state database is locked by another program. Close any SQLite browser "
+                      + "or leftover vb process and try again."
+                    : "SQLite could not read the state database.");
         }
         catch (Exception exception)
         {
@@ -153,19 +260,70 @@ public sealed class DataExportService : IDataExportService
         {
             try
             {
-                CleanupTemporaryArtifacts(temporaryDirectory);
+                if (progressStarted)
+                    _progress.End();
             }
             finally
             {
                 try
                 {
-                    crossProcessLock?.Dispose();
+                    CleanupTemporaryArtifacts(temporaryDirectory);
                 }
                 finally
                 {
-                    ExportGate.Release();
+                    try
+                    {
+                        crossProcessLock?.Dispose();
+                    }
+                    finally
+                    {
+                        ExportGate.Release();
+                    }
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Runs the one blocking backup call while reporting how far it has got. SQLite exposes no
+    /// incremental backup progress through Microsoft.Data.Sqlite, so the signal is the destination
+    /// file's own growth — a real measurement rather than a synthetic ramp. Only the temp copy is
+    /// ever inspected; nothing here opens the live database.
+    /// </summary>
+    private async Task CreateSnapshotWithProgressAsync(
+        string statePath,
+        string snapshotPath,
+        CancellationToken cancellationToken)
+    {
+        // Deliberately not cancellable, exactly as before: BackupDatabase cannot be interrupted,
+        // and abandoning it while cleanup deletes the file it is writing would be worse than
+        // waiting. Cancellation is observed by the caller as soon as this returns.
+        var backup = Task.Run(() => CreateSnapshot(statePath, snapshotPath), CancellationToken.None);
+
+        while (true)
+        {
+            var finished = await Task.WhenAny(backup, Task.Delay(SnapshotPollIntervalMs));
+            if (ReferenceEquals(finished, backup))
+                break;
+
+            _progress.SetProcessed(TryGetFileLength(snapshotPath));
+        }
+
+        await backup;
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    private static long TryGetFileLength(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists ? info.Length : 0;
+        }
+        catch
+        {
+            // Progress display only — an unreadable length must never fail an export.
+            return 0;
         }
     }
 
@@ -201,6 +359,19 @@ public sealed class DataExportService : IDataExportService
 
     private static void CreateSnapshot(string statePath, string snapshotPath)
     {
+        // The only line in this file that opens a database for writing is the destination
+        // connection below. If a refactor ever pointed it at the live path, File.Create would
+        // truncate state.db before SQLite even got involved. The export is read-only with respect
+        // to the live database by design, and this keeps it that way.
+        if (string.Equals(
+                Path.GetFullPath(statePath),
+                Path.GetFullPath(snapshotPath),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The export snapshot destination must never be the live state database.");
+        }
+
         // Pre-create and restrict the destination before SQLite writes any sensitive pages.
         using (File.Create(snapshotPath))
         {
@@ -227,7 +398,7 @@ public sealed class DataExportService : IDataExportService
         sourceConnection.BackupDatabase(destinationConnection);
     }
 
-    private static async Task CompressSnapshotAsync(
+    private async Task CompressSnapshotAsync(
         string snapshotPath,
         string compressedPath,
         CancellationToken cancellationToken)
@@ -260,13 +431,16 @@ public sealed class DataExportService : IDataExportService
             new BrotliCompressionOptions { Quality = BrotliQuality },
             leaveOpen: true))
         {
-            await source.CopyToAsync(compressor, cancellationToken);
+            // Progress is measured on the read side: the snapshot's size is known, the compressed
+            // size is not until it has been written.
+            await new ProgressReadStream(source, _progress)
+                .CopyToAsync(compressor, cancellationToken);
         }
 
         await destination.FlushAsync(cancellationToken);
     }
 
-    private static async Task<string> ComputeSha256Async(
+    private async Task<string> ComputeSha256Async(
         string compressedPath,
         CancellationToken cancellationToken)
     {
@@ -277,8 +451,51 @@ public sealed class DataExportService : IDataExportService
             FileShare.Read,
             bufferSize: 128 * 1024,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var hash = await SHA256.HashDataAsync(compressedStream, cancellationToken);
+        var hash = await SHA256.HashDataAsync(
+            new ProgressReadStream(compressedStream, _progress),
+            cancellationToken);
         return Convert.ToHexStringLower(hash);
+    }
+
+    /// <summary>
+    /// Chooses how to get the compressed copy to the server. Anything over a single block goes
+    /// through the resumable chunked protocol; a server that does not offer it falls back to the
+    /// original single request, so the client works either side of a server deploy.
+    /// </summary>
+    private async Task<DataExportResult> SendCompressedExportAsync(
+        Uri exportUri,
+        string apiKey,
+        string computerName,
+        string sha256,
+        string compressedPath,
+        long compressedLength,
+        CancellationToken cancellationToken)
+    {
+        if (compressedLength > ChunkedUploadThresholdBytes)
+        {
+            var chunked = await UploadInBlocksAsync(
+                exportUri,
+                apiKey,
+                computerName,
+                sha256,
+                compressedPath,
+                compressedLength,
+                cancellationToken);
+            if (chunked is not null)
+                return chunked;
+
+            Log.Information(
+                "[DataExport] The server has no chunked upload endpoint; using a single request.");
+        }
+
+        return await UploadAsync(
+            exportUri,
+            apiKey,
+            computerName,
+            sha256,
+            compressedPath,
+            compressedLength,
+            cancellationToken);
     }
 
     private async Task<DataExportResult> UploadAsync(
@@ -287,6 +504,7 @@ public sealed class DataExportService : IDataExportService
         string computerName,
         string sha256,
         string compressedPath,
+        long compressedLength,
         CancellationToken cancellationToken)
     {
         try
@@ -298,16 +516,21 @@ public sealed class DataExportService : IDataExportService
                 FileShare.Read,
                 bufferSize: 128 * 1024,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
-            using var content = new StreamContent(uploadStream);
+            using var content = new StreamContent(
+                new ProgressReadStream(uploadStream, _progress));
             content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             content.Headers.ContentDisposition = new ContentDispositionHeaderValue("attachment")
             {
                 FileName = $"\"{CompressedFileName}\""
             };
 
+            // Must be set by hand. StreamContent only derives Content-Length from a seekable
+            // stream, the progress wrapper is not seekable, and the server answers a request
+            // without Content-Length with 411 rather than storing anything.
+            content.Headers.ContentLength = compressedLength;
+
             using var request = new HttpRequestMessage(HttpMethod.Post, exportUri);
-            request.Headers.Add("X-Api-Key", apiKey);
-            request.Headers.Add("X-Computer-Name", Uri.EscapeDataString(computerName));
+            AddExportHeaders(request, apiKey, computerName);
             request.Headers.Add("X-Content-SHA256", sha256);
             request.Content = content;
 
@@ -321,7 +544,10 @@ public sealed class DataExportService : IDataExportService
                 return new DataExportResult(
                     DataExportStatus.InvalidApiKey,
                     sha256,
-                    "The export server rejected the API key.");
+                    await DescribeFailureAsync(
+                        response,
+                        "The export server rejected the API key.",
+                        cancellationToken));
             }
 
             if (!response.IsSuccessStatusCode)
@@ -329,7 +555,7 @@ public sealed class DataExportService : IDataExportService
                 return new DataExportResult(
                     DataExportStatus.UploadFailed,
                     sha256,
-                    $"The export server returned HTTP {(int)response.StatusCode}.");
+                    await DescribeFailureAsync(response, null, cancellationToken));
             }
 
             return new DataExportResult(DataExportStatus.Success, sha256);
@@ -359,6 +585,575 @@ public sealed class DataExportService : IDataExportService
                 DataExportStatus.UploadFailed,
                 sha256,
                 "Failed to upload the data export.");
+        }
+    }
+
+    // ── Resumable chunked upload ─────────────────────────────────────────────────────────────
+    //
+    // Reads exclusively from the compressed temp copy. A retry or a resumed upload never re-opens
+    // the live state database — the snapshot happens once per export, and only once.
+
+    /// <summary>
+    /// Returns null when the server has no chunked endpoints, which tells the caller to fall back
+    /// to a single request. Any other outcome is a real result.
+    /// </summary>
+    private async Task<DataExportResult?> UploadInBlocksAsync(
+        Uri exportUri,
+        string apiKey,
+        string computerName,
+        string sha256,
+        string compressedPath,
+        long compressedLength,
+        CancellationToken cancellationToken)
+    {
+        // The server answers a commit whose blocks are incomplete with 409 and expects the client
+        // to re-probe and re-send what is missing. One automatic pass closes that loop instead of
+        // making the user press Retry to do exactly the same thing.
+        for (var pass = 1; ; pass++)
+        {
+            var probe = await ProbeChunksAsync(
+                exportUri,
+                apiKey,
+                computerName,
+                sha256,
+                compressedLength,
+                cancellationToken);
+            if (probe.NotSupported)
+                return null;
+            if (probe.Failure is not null)
+                return probe.Failure;
+
+            var blockSize = probe.BlockSizeBytes > 0
+                ? probe.BlockSizeBytes
+                : DefaultUploadBlockSizeBytes;
+            if (blockSize is < MinUploadBlockSizeBytes or > MaxUploadBlockSizeBytes)
+            {
+                Log.Warning(
+                    "[DataExport] The server asked for an unusable {BlockSize}-byte block size.",
+                    blockSize);
+                return new DataExportResult(
+                    DataExportStatus.UploadFailed,
+                    sha256,
+                    "The export server asked for an unusable upload block size.");
+            }
+
+            // Long arithmetic throughout: at a small block size the count for a large export
+            // overflows an int and would silently produce a negative or truncated block count.
+            var totalBlocks = (compressedLength + blockSize - 1) / blockSize;
+            if (totalBlocks > MaxUploadBlockCount)
+            {
+                return new DataExportResult(
+                    DataExportStatus.UploadFailed,
+                    sha256,
+                    $"This export needs {totalBlocks} upload blocks, more than the "
+                        + $"{MaxUploadBlockCount} the server can commit.");
+            }
+
+            var blockCount = (int)totalBlocks;
+
+            if (probe.AlreadyStored)
+            {
+                _progress.SetProcessed(compressedLength);
+            }
+            else
+            {
+                var failure = await StageMissingBlocksAsync(
+                    exportUri,
+                    apiKey,
+                    computerName,
+                    sha256,
+                    compressedPath,
+                    compressedLength,
+                    blockSize,
+                    blockCount,
+                    probe.UploadedIndices,
+                    cancellationToken);
+                if (failure is not null)
+                    return failure;
+            }
+
+            var commit = await CommitChunksAsync(
+                exportUri,
+                apiKey,
+                computerName,
+                sha256,
+                compressedLength,
+                blockCount,
+                cancellationToken);
+
+            if (!commit.BlocksMissing || pass >= MaxCommitPasses)
+                return commit.Result;
+
+            Log.Warning(
+                "[DataExport] The server reported incomplete blocks at commit; re-sending them.");
+        }
+    }
+
+    private async Task<DataExportResult?> StageMissingBlocksAsync(
+        Uri exportUri,
+        string apiKey,
+        string computerName,
+        string sha256,
+        string compressedPath,
+        long compressedLength,
+        int blockSize,
+        int blockCount,
+        IReadOnlyList<int> uploadedIndices,
+        CancellationToken cancellationToken)
+    {
+        var alreadyStaged = uploadedIndices.ToHashSet();
+        var sentBytes = 0L;
+        foreach (var index in alreadyStaged)
+            sentBytes += BlockLength(index, blockSize, compressedLength);
+        _progress.SetProcessed(sentBytes);
+
+        if (alreadyStaged.Count > 0)
+        {
+            Log.Information(
+                "[DataExport] Resuming upload: {Staged} of {Total} blocks already stored.",
+                alreadyStaged.Count,
+                blockCount);
+        }
+
+        var buffer = ArrayPool<byte>.Shared.Rent(blockSize);
+        try
+        {
+            await using var source = new FileStream(
+                compressedPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 128 * 1024,
+                FileOptions.Asynchronous);
+
+            for (var index = 0; index < blockCount; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (alreadyStaged.Contains(index))
+                    continue;
+
+                var length = (int)BlockLength(index, blockSize, compressedLength);
+                source.Position = (long)index * blockSize;
+                await source.ReadExactlyAsync(buffer.AsMemory(0, length), cancellationToken);
+
+                var failure = await StageBlockAsync(
+                    exportUri,
+                    apiKey,
+                    computerName,
+                    sha256,
+                    index,
+                    buffer,
+                    length,
+                    cancellationToken);
+                if (failure is not null)
+                    return failure;
+
+                sentBytes += length;
+                _progress.SetProcessed(sentBytes);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// <see cref="CommitOutcome.BlocksMissing"/> distinguishes the server's "re-send and commit
+    /// again" answer from a failure that retrying cannot fix.
+    /// </summary>
+    private sealed record CommitOutcome(DataExportResult Result, bool BlocksMissing);
+
+    private sealed record ChunkProbe(
+        bool NotSupported,
+        DataExportResult? Failure,
+        int BlockSizeBytes,
+        IReadOnlyList<int> UploadedIndices,
+        bool AlreadyStored);
+
+    private async Task<ChunkProbe> ProbeChunksAsync(
+        Uri exportUri,
+        string apiKey,
+        string computerName,
+        string sha256,
+        long compressedLength,
+        CancellationToken cancellationToken)
+    {
+        using var deadline = CreateMetadataDeadline(cancellationToken);
+        var token = deadline.Token;
+        try
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                ChunkUri(exportUri, sha256, $"?length={compressedLength}"));
+            AddExportHeaders(request, apiKey, computerName);
+
+            using var response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                token);
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return new ChunkProbe(true, null, 0, Array.Empty<int>(), false);
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                return new ChunkProbe(
+                    false,
+                    new DataExportResult(
+                        DataExportStatus.InvalidApiKey,
+                        sha256,
+                        await DescribeFailureAsync(
+                            response,
+                            "The export server rejected the API key.",
+                            token)),
+                    0,
+                    Array.Empty<int>(),
+                    false);
+            }
+            if (!response.IsSuccessStatusCode)
+            {
+                return new ChunkProbe(
+                    false,
+                    new DataExportResult(
+                        DataExportStatus.UploadFailed,
+                        sha256,
+                        await DescribeFailureAsync(response, null, token)),
+                    0,
+                    Array.Empty<int>(),
+                    false);
+            }
+
+            var body = await ReadBoundedBodyAsync(response.Content, MaxMetadataBodyBytes, token);
+            if (body is null)
+            {
+                return new ChunkProbe(
+                    false,
+                    new DataExportResult(
+                        DataExportStatus.UploadFailed,
+                        sha256,
+                        "The export server sent an unusable response to the upload probe."),
+                    0,
+                    Array.Empty<int>(),
+                    false);
+            }
+
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+
+            var uploaded = new List<int>();
+            if (root.TryGetProperty("uploadedIndices", out var indices)
+                && indices.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var element in indices.EnumerateArray())
+                {
+                    if (element.TryGetInt32(out var index) && index >= 0)
+                        uploaded.Add(index);
+                }
+            }
+
+            return new ChunkProbe(
+                false,
+                null,
+                root.TryGetProperty("blockSizeBytes", out var size) && size.TryGetInt32(out var blockSize)
+                    ? blockSize
+                    : 0,
+                uploaded,
+                root.TryGetProperty("alreadyStored", out var present)
+                    && present.ValueKind == JsonValueKind.True);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (JsonException)
+        {
+            // A server that answers the probe with something unparseable is not one that can be
+            // chunk-uploaded to. Fall back rather than fail the whole export.
+            return new ChunkProbe(true, null, 0, Array.Empty<int>(), false);
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(
+                "[DataExport] Chunk probe failed ({ExceptionType}).",
+                exception.GetType().Name);
+            return new ChunkProbe(
+                false,
+                new DataExportResult(
+                    DataExportStatus.UploadFailed,
+                    sha256,
+                    "Could not reach the export server."),
+                0,
+                Array.Empty<int>(),
+                false);
+        }
+    }
+
+    /// <summary>Returns null on success, or the failure that should end the export.</summary>
+    private async Task<DataExportResult?> StageBlockAsync(
+        Uri exportUri,
+        string apiKey,
+        string computerName,
+        string sha256,
+        int index,
+        byte[] buffer,
+        int length,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                using var content = new ByteArrayContent(buffer, 0, length);
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+                using var request = new HttpRequestMessage(
+                    HttpMethod.Put,
+                    ChunkUri(exportUri, sha256, $"/{index}"))
+                {
+                    Content = content
+                };
+                AddExportHeaders(request, apiKey, computerName);
+
+                using var response = await _httpClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+
+                if (response.IsSuccessStatusCode)
+                    return null;
+
+                if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                {
+                    return new DataExportResult(
+                        DataExportStatus.InvalidApiKey,
+                        sha256,
+                        await DescribeFailureAsync(
+                            response,
+                            "The export server rejected the API key.",
+                            cancellationToken));
+                }
+
+                if (!IsTransient(response.StatusCode) || attempt >= MaxUploadAttemptsPerBlock)
+                {
+                    return new DataExportResult(
+                        DataExportStatus.UploadFailed,
+                        sha256,
+                        await DescribeFailureAsync(response, null, cancellationToken));
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (attempt < MaxUploadAttemptsPerBlock)
+            {
+                Log.Warning(
+                    "[DataExport] Block {Index} attempt {Attempt} failed ({ExceptionType}); retrying.",
+                    index,
+                    attempt,
+                    exception.GetType().Name);
+            }
+            catch (Exception exception)
+            {
+                Log.Warning(
+                    "[DataExport] Block {Index} failed ({ExceptionType}).",
+                    index,
+                    exception.GetType().Name);
+                return new DataExportResult(
+                    DataExportStatus.UploadFailed,
+                    sha256,
+                    "Failed to upload part of the data export.");
+            }
+
+            await Task.Delay(RetryDelayMs(attempt), cancellationToken);
+        }
+    }
+
+    private async Task<CommitOutcome> CommitChunksAsync(
+        Uri exportUri,
+        string apiKey,
+        string computerName,
+        string sha256,
+        long compressedLength,
+        int blockCount,
+        CancellationToken cancellationToken)
+    {
+        using var deadline = CreateMetadataDeadline(cancellationToken);
+        var token = deadline.Token;
+        try
+        {
+            using var content = new StringContent(
+                $"{{\"length\":{compressedLength},\"blockCount\":{blockCount}}}",
+                Encoding.UTF8,
+                "application/json");
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                ChunkUri(exportUri, sha256, "/commit"))
+            {
+                Content = content
+            };
+            AddExportHeaders(request, apiKey, computerName);
+
+            using var response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                token);
+
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                return new CommitOutcome(
+                    new DataExportResult(
+                        DataExportStatus.InvalidApiKey,
+                        sha256,
+                        await DescribeFailureAsync(
+                            response,
+                            "The export server rejected the API key.",
+                            token)),
+                    BlocksMissing: false);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new CommitOutcome(
+                    new DataExportResult(
+                        DataExportStatus.UploadFailed,
+                        sha256,
+                        await DescribeFailureAsync(response, null, token)),
+                    // 409 is the server asking for the missing blocks, not a dead end.
+                    response.StatusCode == HttpStatusCode.Conflict);
+            }
+
+            return new CommitOutcome(
+                new DataExportResult(DataExportStatus.Success, sha256),
+                BlocksMissing: false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(
+                "[DataExport] Commit failed ({ExceptionType}).",
+                exception.GetType().Name);
+            return new CommitOutcome(
+                new DataExportResult(
+                    DataExportStatus.UploadFailed,
+                    sha256,
+                    "The upload finished but the export could not be completed."),
+                BlocksMissing: false);
+        }
+    }
+
+    private static long BlockLength(int index, int blockSize, long totalLength)
+    {
+        var remaining = totalLength - ((long)index * blockSize);
+        return remaining >= blockSize ? blockSize : Math.Max(0, remaining);
+    }
+
+    private static Uri ChunkUri(Uri exportUri, string sha256, string suffix)
+        => new($"{exportUri.AbsoluteUri.TrimEnd('/')}/chunks/{sha256}{suffix}");
+
+    private static void AddExportHeaders(
+        HttpRequestMessage request,
+        string apiKey,
+        string computerName)
+    {
+        request.Headers.Add("X-Api-Key", apiKey);
+        request.Headers.Add("X-Computer-Name", Uri.EscapeDataString(computerName));
+    }
+
+    private static bool IsTransient(HttpStatusCode statusCode)
+        => statusCode is HttpStatusCode.RequestTimeout
+            or HttpStatusCode.TooManyRequests
+            or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable
+            or HttpStatusCode.GatewayTimeout;
+
+    private static int RetryDelayMs(int attempt) => 500 * (1 << (attempt - 1));
+
+    /// <summary>
+    /// Prefers the server's own explanation. It returns { "error": "..." } for every failure —
+    /// a bad hash header, a missing computer name, storage being down — and reporting only the
+    /// status code throws all of that away.
+    /// </summary>
+    private static async Task<string> DescribeFailureAsync(
+        HttpResponseMessage response,
+        string? fallback,
+        CancellationToken cancellationToken)
+    {
+        var serverMessage = await TryReadErrorMessageAsync(response, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(serverMessage))
+            return serverMessage;
+
+        return fallback ?? $"The export server returned HTTP {(int)response.StatusCode}.";
+    }
+
+    /// <summary>
+    /// Bounds a metadata response body. Returns null when it is empty or larger than the caller
+    /// will accept, so a server that streams without end cannot grow the heap while this export
+    /// still holds the process gate and the cross-process lock.
+    /// </summary>
+    private static async Task<byte[]?> ReadBoundedBodyAsync(
+        HttpContent content,
+        int maxBytes,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+
+        // One byte of headroom: reading the full buffer means the body reached the cap, and a
+        // truncated document is worse to parse than none at all.
+        var buffer = new byte[maxBytes + 1];
+        var read = await stream.ReadAtLeastAsync(
+            buffer,
+            buffer.Length,
+            throwOnEndOfStream: false,
+            cancellationToken);
+
+        return read == 0 || read > maxBytes ? null : buffer[..read];
+    }
+
+    private static CancellationTokenSource CreateMetadataDeadline(CancellationToken cancellationToken)
+    {
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(MetadataResponseTimeout);
+        return deadline;
+    }
+
+    private static async Task<string?> TryReadErrorMessageAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var body = await ReadBoundedBodyAsync(response.Content, MaxErrorBodyBytes, cancellationToken);
+            if (body is null)
+                return null;
+
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("error", out var error)
+                || error.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            var message = error.GetString();
+            return string.IsNullOrWhiteSpace(message) ? null : message.Trim();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // A truncated body, an HTML error page from an edge proxy, anything at all: the
+            // caller still has a status-code message to fall back on.
+            return null;
         }
     }
 

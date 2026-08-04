@@ -4,7 +4,7 @@
 // controls bar, so it keeps its accumulated per-provider history across the view re-renders that
 // rebuild that bar. Only `proxy_activity` app events are wired to report() (see app.js), and only
 // authenticated LLM proxy routes publish those events. Hover, focus, or click to see
-// recent query-free, payload-free request metadata grouped by provider.
+// savings totals and any active agent-requested pause.
 //
 // (The per-tab compression toggle that used to live here was removed 2026-07-19 — the saver is
 // per-LLM in Settings now, and the tab action strip was overcrowded.)
@@ -517,32 +517,6 @@ export class TerminalTokenCompressionMeter {
                 this._enabled ? 'Enabled — waiting for proxied traffic.' : 'Disabled in application settings.',
                 'vb-activity-popover-empty'
             ));
-            return;
-        }
-
-        const groups = [...this.sources.entries()].sort(
-            (left, right) => (right[1].last?.getTime() || 0) - (left[1].last?.getTime() || 0)
-        );
-
-        for (const [name, rec] of groups) {
-            const group = document.createElement('div');
-            group.className = 'vb-activity-popover-group';
-
-            const groupTitle = document.createElement('div');
-            groupTitle.className = 'vb-activity-popover-group-title';
-            groupTitle.appendChild(this._span(name, 'vb-activity-popover-source'));
-            const when = rec.last ? rec.last.toLocaleTimeString() : '';
-            groupTitle.appendChild(this._span(`${rec.count} · ${when}`, 'vb-activity-popover-time'));
-            group.appendChild(groupTitle);
-
-            for (const entry of rec.entries.slice(0, 3)) {
-                const parts = [];
-                if (entry.label) parts.push(entry.label);
-                if (entry.target) parts.push(`→ ${entry.target}`);
-                if (entry.status) parts.push(`· ${entry.status}`);
-                group.appendChild(this._span(parts.join(' '), 'vb-activity-popover-entry'));
-            }
-            popover.appendChild(group);
         }
     }
 

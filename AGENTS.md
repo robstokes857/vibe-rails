@@ -1188,7 +1188,7 @@ Current implementation:
 ---
 
 **Last Updated**: 2026-08-03
-**Version**: 1.9.8
+**Version**: 1.9.9
 **Maintained By**: Robert Stokes
 
 ## Vibe Rails Rules
@@ -1196,4 +1196,4 @@ Current implementation:
 
 ---
 
-*Last checked: 2026-08-03T12:14:36Z by opencode (glm-5.2)*
+*Last checked: 2026-08-04T13:39:29Z by opencode (glm-5.2)*

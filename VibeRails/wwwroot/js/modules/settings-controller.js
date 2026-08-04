@@ -1,3 +1,5 @@
+import { showDataExportModal } from './data-export-modal.js';
+
 export class SettingsController {
     constructor(app) {
         this.app = app;
@@ -517,17 +519,18 @@ export class SettingsController {
         this._dataExportInProgress = true;
         this._updateDataExportAvailability(root);
         try {
-            const result = await this.app.apiCall(
-                '/api/v1/settings/export-data',
-                'POST',
-                null,
-                { showLoading: false }
-            );
-            this.app.showToast(
-                'Data Export',
-                result?.message || (result?.success ? 'Data exported successfully.' : 'Failed to export data.'),
-                result?.success ? 'success' : 'error'
-            );
+            // Resolves when the export finishes, not when the modal is dismissed — the button
+            // comes back while the result stays on screen for the user to read.
+            const result = await showDataExportModal(this.app, {
+                sizeBytes: this._dataExportSizeBytes
+            });
+            if (result) {
+                this.app.showToast(
+                    'Data Export',
+                    result?.message || (result?.success ? 'Data exported successfully.' : 'Failed to export data.'),
+                    result?.success ? 'success' : 'error'
+                );
+            }
         } catch (error) {
             this.app.showToast(
                 'Data Export',
