@@ -754,8 +754,7 @@ code {
     display: block;
 }
 
-.vb-activity-popover-header,
-.vb-activity-popover-group-title {
+.vb-activity-popover-header {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
@@ -788,7 +787,6 @@ code {
 }
 
 .vb-activity-popover-total,
-.vb-activity-popover-time,
 .vb-activity-popover-empty,
 .vb-activity-popover-savings-hint {
     color: var(--color-text-muted);
@@ -882,24 +880,6 @@ code {
 .vb-activity-popover-empty {
     display: block;
     padding-top: 0.62rem;
-}
-
-.vb-activity-popover-group {
-    margin-top: 0.62rem;
-}
-
-.vb-activity-popover-source {
-    color: #4ade80;
-    font-weight: 700;
-}
-
-.vb-activity-popover-entry {
-    display: block;
-    margin-top: 0.16rem;
-    overflow: hidden;
-    color: color-mix(in srgb, var(--color-text) 82%, var(--color-text-muted));
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {

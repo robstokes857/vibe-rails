@@ -314,6 +314,10 @@ namespace VibeRails
             // Debug Bundle Service (builds + encrypts + uploads a session bundle for remote debugging)
             serviceCollection.AddHttpClient<IDebugBundleService, DebugBundleService>();
 
+            // Progress for the running export, polled by the settings modal. Singleton because a
+            // process-wide gate means only one export can ever be in flight here.
+            serviceCollection.AddSingleton<IDataExportProgress, DataExportProgress>();
+
             // Complete state.db export. Large databases are streamed, so allow a deliberate
             // long-running upload window while still propagating request cancellation.
             serviceCollection

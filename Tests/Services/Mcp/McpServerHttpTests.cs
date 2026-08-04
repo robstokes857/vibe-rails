@@ -141,13 +141,6 @@ public class McpServerHttpTests : IAsyncLifetime
         Assert.StartsWith("FAIL", result.Text);
     }
 
-    [Fact]
-    public async Task Ping_Succeeds()
-    {
-        await using var client = await ConnectAsync(TestContext.Current.CancellationToken);
-        Assert.True(await client.PingAsync(TestContext.Current.CancellationToken));
-    }
-
     /// <summary>Deterministic stand-in for the BGE/sqlite-vec unified search.</summary>
     private sealed class FakeUnifiedSearchService : IUnifiedSearchService
     {

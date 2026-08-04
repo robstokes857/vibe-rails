@@ -117,6 +117,15 @@ async function readToastCalls(page) {
     return page.evaluate(() => window.__settingsDataExportToasts || []);
 }
 
+// The progress modal stays open on the result so it can be read; dismissing it is what frees the
+// Export button for the next click.
+async function dismissExportModal(page) {
+    const close = page.locator('#data-export-close');
+    await expect(close).toBeVisible();
+    await close.click();
+    await expect(page.locator('#data-export-modal')).toHaveCount(0);
+}
+
 for (const scenario of [
     { name: 'empty API key', apiKey: '', visible: false },
     { name: 'whitespace-only API key', apiKey: '   \t', visible: false },
@@ -291,6 +300,7 @@ test('structured success and failure results use the backend message and toast t
         page.locator('.vr-toast-body').filter({ hasText: 'Snapshot uploaded.' })
     ).toBeVisible();
     await expect(ui.exportButton).toBeEnabled();
+    await dismissExportModal(page);
 
     await ui.exportButton.click();
     await expect.poll(() => readToastCalls(page)).toEqual([

@@ -66,6 +66,11 @@ public sealed class DataExportServiceTests : IDisposable
     [InlineData("   ")]
     [InlineData("relative/export")]
     [InlineData("http://exports.example.test/upload")]
+    // Chunk endpoints are built by appending path segments, and appending to a URL that already
+    // has a query or fragment buries the new path inside the query — every chunk request would
+    // silently target the base path instead.
+    [InlineData("https://exports.example.test/upload?tenant=x")]
+    [InlineData("https://exports.example.test/upload#fragment")]
     public async Task ExportAsync_InvalidExportUrl_DoesNoWork(string? exportUrl)
     {
         ParserConfigs.SetApiKey(ConfiguredApiKey);

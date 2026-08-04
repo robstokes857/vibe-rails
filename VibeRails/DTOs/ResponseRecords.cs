@@ -648,6 +648,19 @@ namespace VibeRails.DTOs
         string? Sha256 = null
     );
 
+    // Polled by the export modal while a data export runs. TotalBytes is 0 when the current stage
+    // has no known total, which the client renders as an indeterminate bar instead of inventing a
+    // percentage. RunId lets the client ignore a snapshot belonging to some other export.
+    public record DataExportProgressResponse(
+        bool Active,
+        int RunId,
+        string Stage,
+        long ProcessedBytes,
+        long TotalBytes,
+        long ElapsedMs,
+        long StageElapsedMs
+    );
+
     public record StateDatabaseSizeResponse(long Bytes);
 
     public record AppSettingsDto(
@@ -1247,6 +1260,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(DebugBundleSendRequest))]
     [JsonSerializable(typeof(DebugBundleSendResponse))]
     [JsonSerializable(typeof(DataExportResponse))]
+    [JsonSerializable(typeof(DataExportProgressResponse))]
     [JsonSerializable(typeof(StateDatabaseSizeResponse))]
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(AppSettingsDto))]
