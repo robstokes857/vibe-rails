@@ -28,6 +28,13 @@ namespace Pty.Net.Mac
         }
 
         /// <inheritdoc/>
+        protected override bool KillProcessGroup(int pid)
+        {
+            // Negative pid addresses the whole process group (kill(2)).
+            return kill(-pid, SIGKILL) != -1;
+        }
+
+        /// <inheritdoc/>
         protected override bool Resize(int fd, int cols, int rows)
         {
             var size = new WinSize((ushort)rows, (ushort)cols);

@@ -129,7 +129,6 @@ public class CliSpawnCommandBuilderTests
     [InlineData(LLM.Copilot)]
     [InlineData(LLM.OpenCode)]
     [InlineData(LLM.Glm52)]
-    [InlineData(LLM.KimiK3)]
     public void ResolvedExecutableMatchesTheNativeLauncher(LLM llm)
     {
         var launchService = new LaunchLLMService(

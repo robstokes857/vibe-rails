@@ -102,7 +102,7 @@ public sealed class TerminalGridSerializerTests
     }
 
     // opentui's exact terminal setup, as captured at the start of every OpenCode /
-    // GLM 5.2 / Kimi K3 session (session 71dee36a chunk 26179241). Emitted once and
+    // GLM 5.2 session (session 71dee36a chunk 26179241). Emitted once and
     // never re-asserted — not even on SIGWINCH.
     private const string OpenTuiStartupModes = "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h";
 

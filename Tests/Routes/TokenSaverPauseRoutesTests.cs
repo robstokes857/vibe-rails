@@ -210,8 +210,8 @@ public sealed class TokenSaverPauseRoutesTests
         // "auth required" HTML page. These endpoints are reached by an MCP tool, which surfaces
         // whatever comes back as its result verbatim — a page of markup there tells the agent
         // nothing it can act on, and reads as a malfunction rather than as "not authorised".
-        // The middleware has to recognise the control prefix for that to hold, which is the wiring
-        // this pins (CookieAuthMiddleware -> TokenSaverPauseRoutes.IsControlPath).
+        // The middleware has to recognise /llm/** as machine-facing for that to hold, which is
+        // the wiring this pins (CookieAuthMiddleware's IsLlmPath status-code rule).
         await using var host = await StartAsync();
         var method = action == "status" ? HttpMethod.Get : HttpMethod.Post;
 

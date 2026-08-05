@@ -18,6 +18,7 @@ using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.Mcp.WebResearch;
 using VibeRails.Services.Messaging;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.Terminal.Consumers;
 
 using VibeRails.Services.VCA;
 using VibeRails.Services.VCA.Validators;
@@ -152,6 +153,7 @@ namespace VibeRails
                 var logger = sp.GetService<ILogger<Repository>>();
                 return new Repository(connectionString, gitDiff, logger);
             });
+            serviceCollection.AddScoped<ILlmPickerPreferenceService, LlmPickerPreferenceService>();
             serviceCollection.AddScoped<IGetUserText, GetUserText>();
             serviceCollection.AddScoped<IProjectCache, ProjectCache>();
             serviceCollection.AddScoped<IGlobalCache, GlobalCache>();
@@ -253,6 +255,9 @@ namespace VibeRails
             serviceCollection.AddScoped<ITerminalIoObserverService, TerminalIoObserverService>();
             serviceCollection.AddScoped<ITerminalStateService, TerminalStateService>();
             serviceCollection.AddScoped<ICommandService, CommandService>();
+            // One lazy scanner for raw PTY activity in this process. Only --job-run terminals call
+            // RegisterSession, so normal Web/CLI hosts never start its timer.
+            serviceCollection.AddSingleton<IAutomationConsumer, AutomationConsumer>();
             serviceCollection.AddScoped<TerminalRunner>();
             serviceCollection.AddScoped<ITerminalSessionService, TerminalSessionService>();
             serviceCollection.AddSingleton<ITerminalTabHostService, TerminalTabHostService>();

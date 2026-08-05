@@ -6,7 +6,7 @@ This describes the entire custom env option workflow but it has mainly been used
 
 This runbook explains how to change, add, or delete custom environment options
 for the managed TUI CLIs: Claude, Codex, Antigravity, Copilot, OpenCode, and the
-OpenCode-backed pseudo-CLIs GLM 5.2 and Kimi K3.
+the OpenCode-backed pseudo-CLI GLM 5.2.
 
 Use it when editing the Environments page's create/edit modal, the per-CLI
 settings APIs, or the generated launch arguments stored in `CustomArgs`.
@@ -115,7 +115,7 @@ Current pinned values (Claude refreshed 2026-07-24; Codex 2026-07-10; all others
   `claude-opus-4.8-fast`, `claude-opus-4.7`, `claude-opus-4.6`,
   `claude-opus-4.5`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`,
   `gpt-5.3-codex`, `gpt-5-mini`, `gemini-3.5-flash`, `gemini-3.1-pro`,
-  `gemini-3-flash`, `gemini-2.5-pro`, `kimi-k2.7-code`, `mai-code-1-flash`,
+  `gemini-3-flash`, `gemini-2.5-pro`, `mai-code-1-flash`,
   `raptor-mini`, plus an empty "Default (auto)" entry (empty omits `--model`;
   `--model auto` is Copilot's explicit auto-selection value). Dropped
   2026-07-02: `claude-sonnet-4`, `claude-opus-4.6-fast` (deprecated in CLI
@@ -127,13 +127,12 @@ Current pinned values (Claude refreshed 2026-07-24; Codex 2026-07-10; all others
   follows the docs' supported-in-CLI table, not one account's entitlements.
 - OpenCode: `anthropic/claude-opus-4-5`, `anthropic/claude-sonnet-4-5`,
   `openai/gpt-5.2`, `openai/gpt-5.1-codex`, `google/gemini-3-pro`,
-  `zai/glm-5.2`, `moonshotai/kimi-k3`, `opencode/gpt-5.1-codex` (Zen), plus an empty "Default (OpenCode recommended)" entry.
+  `zai/glm-5.2`, `opencode/gpt-5.1-codex` (Zen), plus an empty "Default (OpenCode recommended)" entry.
   OpenCode model IDs are `provider/model` (the format `--model` and `opencode models` use).
   Refresh via `opencode models` (optionally `--refresh` to update the cache from models.dev).
   Added 2026-07-16 alongside the OpenCode CLI integration; `zai/glm-5.2` added 2026-07-17;
-  `moonshotai/kimi-k3` added 2026-07-19 (verified present in `opencode models` on this host).
-  `zai/glm-5.2` and `moonshotai/kimi-k3` are also exposed as first-class base CLIs and custom
-  env types (see "GLM 5.2" and "Kimi K3" sections below) — they launch `opencode` with the
+  `zai/glm-5.2` is also exposed as a first-class base CLI and custom
+  env type (see the "GLM 5.2" section below) — it launches `opencode` with the
   model pinned via `--model`, so users get a dedicated dropdown entry instead of picking the
   model from the OpenCode list.
 
@@ -373,25 +372,9 @@ UI-managed launch and prompt settings (same as OpenCode, with Model pinned):
 
 Frontend helpers (environment-controller.js):
 
-- `isOpencodeBackedCli(cli)` returns true for `opencode`, `glm-5.2`, `kimi-k3` — use this
+- `isOpencodeBackedCli(cli)` returns true for `opencode`, `glm-5.2` — use this
   instead of `=== 'opencode'` when routing to the OpenCode settings form / arg builder.
-- `pinnedModelForCli(cli)` returns `'zai/glm-5.2'` for `glm-5.2`, `'moonshotai/kimi-k3'` for
-  `kimi-k3`, and `null` for plain OpenCode.
-
-### Kimi K3
-
-Kimi K3 is an **OpenCode-backed pseudo-CLI**: it launches `opencode` with
-`--model=moonshotai/kimi-k3` pinned. Identical architecture to GLM 5.2 (see above), with these
-differences:
-
-- Enum: `LLM.KimiK3` (value 8). `LlmParser` special-cases `"kimi-k3"` → `LLM.KimiK3`.
-- Pinned model: `moonshotai/kimi-k3` (the `moonshotai` provider, NOT `zai`).
-- Proxy: the Z.AI proxy does **not** apply to Kimi K3 (it runs through the `moonshotai`
-  provider, not `zai`). See `CommandService.PrepareSessionAsync`.
-- `getLlmName()` (frontend) maps `8` → `'Kimi K3'`.
-
-UI-managed launch and prompt settings: identical to GLM 5.2 (see above) with the model pinned
-to `moonshotai/kimi-k3`.
+- `pinnedModelForCli(cli)` returns `'zai/glm-5.2'` for `glm-5.2` and `null` for plain OpenCode.
 
 ## Mental Model
 
@@ -400,14 +383,14 @@ Custom environments have two layers:
 1. `CustomArgs` and `CustomPrompt` live in the `Environments` table and apply
    to every launch path.
 2. Per-CLI settings files exist for Claude and Codex only. Antigravity, Copilot, OpenCode,
-   GLM 5.2, and Kimi K3 are frontend-managed through `CustomArgs` and `CustomPrompt`.
+   and GLM 5.2 are frontend-managed through `CustomArgs` and `CustomPrompt`.
 
 The important rule: a visible control is not enough. Every CLI option must
 round-trip through render, read, save, parse existing args, and launch.
 
-GLM 5.2 and Kimi K3 are **OpenCode-backed pseudo-CLIs**: they reuse OpenCode's settings form,
-arg builder, env isolation (`XDG_CONFIG_HOME`), and launcher, but pin `--model` to a specific
-provider/model. In the frontend, `isOpencodeBackedCli(cli)` routes them to the OpenCode branch;
+GLM 5.2 is an **OpenCode-backed pseudo-CLI**: it reuses OpenCode's settings form,
+arg builder, env isolation (`XDG_CONFIG_HOME`), and launcher, but pins `--model` to a specific
+provider/model. In the frontend, `isOpencodeBackedCli(cli)` routes it to the OpenCode branch;
 in the backend, `CommandService.PrepareSession` maps the enum to `opencode` and injects the
 pinned `--model` for base CLI launches.
 
@@ -586,17 +569,6 @@ GLM 5.2 :
 - Settings form reuses OpenCode's (`isOpencodeBackedCli()` routes `glm-5.2` to the OpenCode
   branch); the Model field is a read-only display pinned to `zai/glm-5.2`.
 - The Z.AI proxy applies (GLM 5.2 IS the `zai` provider model).
-- `customPrompt` is populated from the initial message.
-- No MCP auto-registration (inherited from OpenCode).
-
-Kimi K3 :
-
-- Pseudo-CLI backed by OpenCode. Enum `LLM.KimiK3` (8); `LlmParser` special-cases `"kimi-k3"`.
-- Executable is `opencode` (remapped in `CommandService.PrepareSession`). `--model=moonshotai/kimi-k3`
-  is injected for base CLI launches; custom envs carry it in `CustomArgs`.
-- Settings form reuses OpenCode's; the Model field is a read-only display pinned to
-  `moonshotai/kimi-k3`.
-- The Z.AI proxy does **not** apply (Kimi uses the `moonshotai` provider, not `zai`).
 - `customPrompt` is populated from the initial message.
 - No MCP auto-registration (inherited from OpenCode).
 

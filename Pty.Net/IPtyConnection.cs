@@ -49,6 +49,13 @@ namespace Pty.Net
         void Kill();
 
         /// <summary>
+        /// Immediately terminates the pty process and descendants using the connection's owned
+        /// process identity. Implementations that cannot provide tree semantics fall back to the
+        /// platform PTY termination behavior.
+        /// </summary>
+        void KillProcessTree();
+
+        /// <summary>
         /// Change the size of the pty.
         /// </summary>
         /// <param name="cols">The number of columns.</param>

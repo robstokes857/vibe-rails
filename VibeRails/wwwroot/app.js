@@ -16,6 +16,7 @@ import { SettingsController } from './js/modules/settings-controller.js';
 import { VibeRailsAiController } from './js/modules/vibe-rails-ai-controller.js';
 import { McpController } from './js/modules/mcp-controller.js';
 import { JobController } from './js/modules/jobs-controller.js';
+import { LlmPickerController } from './js/modules/llm-picker-controller.js';
 import { AppEventClient } from './js/modules/app-event-client.js';
 import { TerminalTokenCompressionMeter, getTokenSaverEnabledSources } from './js/modules/terminal-token-compression.js';
 import { showAppToast } from './js/modules/toast-service.js';
@@ -35,6 +36,7 @@ export class VibeControlApp {
             configs: null,
             projectDisplayName: null
         };
+        this.llmPickerController = new LlmPickerController(this);
         this.hostUnreachableToastShown = false;
         this.brandClickTimestamps = [];
         
@@ -66,9 +68,16 @@ export class VibeControlApp {
 
     async init() {
         this.startLifecycleHeartbeat();
+        // Launch pickers render during the initial view mount, so the machine-wide
+        // catalog must be resolved before then — but the request is independent of
+        // configs/settings, so start it now and await it only after those, keeping
+        // it off the serial cold-start path. The controller falls back to canonical
+        // defaults if the request fails, so a failure never blocks startup either.
+        const llmPickerPreferencesReady = this.llmPickerController.loadPreferences();
         await this.fetchConfigs();
         this.applyDocumentTitle();
         await this.applyInitialSettings();
+        await llmPickerPreferencesReady;
         this.terminalController.bindSessionEvents(this.appEventClient);
 
         // Persistent proxy/token-compression indicator. It intentionally listens to the dedicated proxy
@@ -814,6 +823,7 @@ export class VibeControlApp {
         this.ruleController?.unload?.();
         this.jobController?.unload?.();
         this.environmentController?.unload?.();
+        this.sandboxController?.unload?.();
         // Tears down the Rules workspace's local-nav observers and listeners.
         // mountAgentsOverview re-creates them, so this is safe when re-entering Rules.
         this.agentController?.unload?.();
@@ -1337,6 +1347,10 @@ export class VibeControlApp {
                 // Keep one normalization path for environment records. In particular, this
                 // preserves the `hidden` flag used by every LLM/environment selector.
                 this.environmentController.setEnvironments(envResponse.environments || []);
+                // Re-resolve after Environment CRUD/legacy Hidden updates so the
+                // cached catalog and every currently mounted picker stay in sync.
+                // No-ops when the picker-relevant environment data is unchanged.
+                await this.llmPickerController.refreshFromEnvironments(envResponse.environments || []);
             } catch (error) {
                 console.error('Failed to fetch environments:', error);
                 this.data.environments = [];

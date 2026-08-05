@@ -46,14 +46,4 @@ public class LlmProxyCodexConfigTests
         Assert.Contains(LocalLlmProxyContext.TabTokenVariable, joined);
         Assert.DoesNotContain("chatgpt_base_url", joined);
     }
-
-    [Theory]
-    [InlineData("/llm/openai", true)]
-    [InlineData("/LLM/OPENAI/v1/responses", true)]
-    [InlineData("/llm/openaiish/v1/responses", false)]
-    [InlineData("/.well-known/oauth-protected-resource/llm/openai/v1/responses", false)]
-    public void IsOpenAiProxyPath_MatchesOnlyTheProxyTree(string path, bool expected)
-    {
-        Assert.Equal(expected, LlmProxyCodexConfig.IsOpenAiProxyPath(path));
-    }
 }

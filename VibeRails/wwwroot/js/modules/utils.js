@@ -6,8 +6,7 @@ export function getLlmName(llmEnum) {
         3: 'Antigravity',
         4: 'Copilot',
         6: 'OpenCode',
-        7: 'GLM 5.2',
-        8: 'Kimi K3'
+        7: 'GLM 5.2'
     };
     return names[llmEnum] || 'Unknown';
 }
@@ -112,12 +111,6 @@ export function getCliBrand(cli) {
             // throughout the SVG's style block).
             accentColor: '#1F63EC'
         },
-        'kimi-k3': {
-            label: 'Kimi K3',
-            logo: getAssetPath('assets/img/kimi.png'),
-            className: 'badge-cli-kimi',
-            accentColor: '#7c3aed'
-        },
         shell: {
             label: 'Terminal',
             logo: getAssetPath('assets/img/terminal.svg'),
@@ -130,11 +123,10 @@ export function getCliBrand(cli) {
     return brands[key] || { label: cli || 'Unknown', logo: '', className: '', accentColor: null };
 }
 
-const BASE_LLM_CHOICES = Object.freeze([
+export const BASE_LLM_CHOICES = Object.freeze([
     { cli: 'claude', label: 'Claude' },
     { cli: 'codex', label: 'Codex' },
     { cli: 'glm-5.2', label: 'GLM 5.2' },
-    { cli: 'kimi-k3', label: 'Kimi K3' },
     { cli: 'opencode', label: 'OpenCode' },
     { cli: 'copilot', label: 'Copilot' },
     { cli: 'antigravity', label: 'Antigravity' }
@@ -143,7 +135,7 @@ const BASE_LLM_CHOICES = Object.freeze([
 // Plain shell — a no-agent terminal. Kept out of BASE_LLM_CHOICES so it only surfaces
 // where explicitly opted in (the in-app terminal tab picker), not in multi-run /
 // chat-history / sandbox pickers where a bare shell has no meaning.
-const SHELL_LLM_CHOICE = Object.freeze({ cli: 'shell', label: 'Terminal' });
+export const SHELL_LLM_CHOICE = Object.freeze({ cli: 'shell', label: 'Terminal' });
 
 function normalizeCliValue(value) {
     return (value || '').toString().trim().toLowerCase();
@@ -295,9 +287,7 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
         includeDefaultSuffix = true,
         includeShell = false,
         includeBase = true,
-        includeHidden = false,
-        enhance = true,
-        searchable = true
+        includeHidden = false
     } = options;
 
     const normalizedSelectedValue = String(selectedValue || '');
@@ -336,6 +326,32 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
         }
     }
 
+    return populateLlmSelectionItemsSelect(selectEl, optionItems, {
+        ...options,
+        selectedValue: normalizedSelectedValue
+    });
+}
+
+/**
+ * Low-level native-select + Tom Select renderer for already-resolved picker
+ * items. Persistence/context orchestration belongs to llm-picker-controller;
+ * this helper only renders the declared snapshot.
+ */
+export function populateLlmSelectionItemsSelect(selectEl, optionItems = [], options = {}) {
+    if (!selectEl) return [];
+
+    const {
+        placeholder = 'Select LLM...',
+        selectedValue = '',
+        enhance = true,
+        searchable = true,
+        searchPlaceholder = 'Search LLMs...',
+        onCustomize = null,
+        emptyMessage = 'No matching LLMs.'
+    } = options;
+    const normalizedSelectedValue = String(selectedValue || '');
+    const safeItems = Array.isArray(optionItems) ? optionItems : [];
+
     if (selectEl.tomselect) {
         selectEl.tomselect.destroy();
     }
@@ -351,7 +367,7 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
         selectEl.appendChild(placeholderOption);
     }
 
-    groupLlmSelectionOptions(optionItems).forEach((group) => {
+    groupLlmSelectionOptions(safeItems).forEach((group) => {
         let parent = selectEl;
         if (group.label) {
             const optgroup = document.createElement('optgroup');
@@ -379,11 +395,14 @@ export function populateLlmSelectionSelect(selectEl, environments = [], options 
     if (enhance) {
         enhanceLlmSelectWithTomSelect(selectEl, {
             placeholder: placeholder || 'Select LLM...',
-            searchable
+            searchable,
+            searchPlaceholder,
+            onCustomize,
+            emptyMessage
         });
     }
 
-    return optionItems;
+    return safeItems;
 }
 
 function renderCliRowHtml(cliKey, data, escape) {
@@ -404,7 +423,9 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
         placeholder = 'Select LLM...',
         cliKey = 'cli',
         searchable = true,
-        searchPlaceholder = 'Search LLMs...'
+        searchPlaceholder = 'Search LLMs...',
+        onCustomize = null,
+        emptyMessage = 'No matching LLMs.'
     } = options;
 
     if (selectEl.tomselect) {
@@ -421,7 +442,9 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
         dropdownParent: 'body',
         render: {
             option: (data, escape) => renderCliRowHtml(cliKey, data, escape),
-            item: (data, escape) => renderCliRowHtml(cliKey, data, escape)
+            item: (data, escape) => renderCliRowHtml(cliKey, data, escape),
+            no_results: (_data, escape) =>
+                `<div class="no-results llm-picker-empty-state">${escape(emptyMessage)}</div>`
         }
     };
 
@@ -430,6 +453,10 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
     }
 
     const ts = new window.TomSelect(selectEl, config);
+
+    if (typeof onCustomize === 'function') {
+        mountLlmPickerFooter(ts, selectEl, onCustomize);
+    }
 
     if (searchable) {
         const configureSearchInput = () => {
@@ -454,6 +481,74 @@ export function enhanceLlmSelectWithTomSelect(selectEl, options = {}) {
     });
 
     return ts;
+}
+
+// NOTE: the footer's focus hand-off below writes Tom Select PRIVATE state (ts.isFocused;
+// llm-picker-controller's focus restore additionally uses ts.ignoreFocus). Verified against
+// the vendored Tom Select v2.4.3 bundle (wwwroot/assets/tom-select/). When bumping that
+// bundle, re-run UITests/tests/llm-picker-preferences.spec.js — the footer Tab hand-off and
+// modal focus-restore tests fail fast if these internals moved.
+function mountLlmPickerFooter(ts, selectEl, onCustomize) {
+    if (!ts?.dropdown) return;
+
+    const footer = document.createElement('div');
+    footer.className = 'llm-picker-dropdown-footer';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'llm-picker-customize-button';
+    button.setAttribute('aria-label', 'Customize LLM list');
+    button.innerHTML = '<i class="fa-solid fa-gear" aria-hidden="true"></i><span>Customize LLM list</span>';
+    footer.appendChild(button);
+    ts.dropdown.appendChild(footer);
+
+    // Tom Select normally closes on the mousedown that precedes click. Keeping
+    // focus here lets the real button receive the click/keyboard activation.
+    footer.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+    });
+
+    const moveFocusWithinDropdown = (target) => {
+        // Moving focus out of Tom Select's search input normally triggers its
+        // blur handler and hides the dropdown before the footer can receive Tab.
+        // Its onBlur closes whenever the instance believes it owns focus, so
+        // clear that flag for this synchronous hand-off and then restore the
+        // logical focused state while the footer owns focus.
+        ts.isFocused = false;
+        target?.focus?.({ preventScroll: true });
+        ts.isFocused = true;
+        requestAnimationFrame(() => {
+            if (document.activeElement === button && !ts.isOpen) ts.open();
+            ts.refreshState?.();
+        });
+    };
+    const handleForwardTab = (event) => {
+        if (event.key !== 'Tab' || event.shiftKey || !ts.isOpen) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        moveFocusWithinDropdown(button);
+    };
+    new Set([ts.focus_node, ts.control, ts.control_input])
+        .forEach((focusNode) => focusNode?.addEventListener('keydown', handleForwardTab, true));
+    button.addEventListener('keydown', (event) => {
+        if (event.key !== 'Tab' || !event.shiftKey) return;
+        event.preventDefault();
+        event.stopPropagation();
+        moveFocusWithinDropdown(ts.focus_node || ts.control_input);
+    });
+    button.addEventListener('blur', (event) => {
+        const next = event.relatedTarget;
+        if (next && (ts.wrapper?.contains(next) || ts.dropdown?.contains(next))) return;
+        ts.isFocused = false;
+        ts.close();
+        ts.refreshState?.();
+    });
+    button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        ts.close();
+        onCustomize({ selectEl, tomSelect: ts, triggerElement: ts.control });
+    });
 }
 
 function positionTomSelectDropdown(ts) {

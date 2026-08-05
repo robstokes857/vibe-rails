@@ -1,9 +1,7 @@
 import {
     buildLlmSelectionValue,
-    enhanceLlmSelectWithTomSelect,
     getLlmName,
-    parseLlmSelection,
-    populateLlmSelectionSelect
+    parseLlmSelection
 } from './utils.js';
 import { showReplayModal } from './session-viewer.js';
 
@@ -13,8 +11,7 @@ const LLM = Object.freeze({
     ANTIGRAVITY: 3,
     COPILOT: 4,
     OPENCODE: 6,
-    GLM_52: 7,
-    KIMI_K3: 8
+    GLM_52: 7
 });
 
 const LLM_BY_CLI = Object.freeze({
@@ -23,8 +20,7 @@ const LLM_BY_CLI = Object.freeze({
     antigravity: LLM.ANTIGRAVITY,
     copilot: LLM.COPILOT,
     opencode: LLM.OPENCODE,
-    'glm-5.2': LLM.GLM_52,
-    'kimi-k3': LLM.KIMI_K3
+    'glm-5.2': LLM.GLM_52
 });
 
 const CLI_BY_LLM = Object.freeze(Object.fromEntries(
@@ -139,7 +135,7 @@ export class JobController {
         cleanup?.();
     }
 
-    registerEditorModalCleanup(selection) {
+    registerEditorModalCleanup(selection, pickerDisposer = null) {
         this.disposeEditorModal();
 
         let disposed = false;
@@ -154,9 +150,8 @@ export class JobController {
             if (disposed) return;
             disposed = true;
             keydownTarget?.removeEventListener?.('keydown', handleEscape, true);
-            if (selection?.tomselect && typeof selection.tomselect.destroy === 'function') {
-                selection.tomselect.destroy();
-            }
+            if (pickerDisposer) pickerDisposer();
+            else if (selection?.tomselect && typeof selection.tomselect.destroy === 'function') selection.tomselect.destroy();
             if (this.editorModalCleanup === cleanup) {
                 this.editorModalCleanup = null;
             }
@@ -881,28 +876,25 @@ export class JobController {
             : currentValue || '';
 
         this.disposeEditorModal();
-        populateLlmSelectionSelect(selection, this.environments, {
+        const parsedValue = parseLlmSelection(valueToRestore, this.environments);
+        const missingEnvironment = valueToRestore.startsWith('env:')
+            && !this.findEnvironment(parsedValue.envId);
+        const pickerDisposer = this.app.llmPickerController.mount(selection, {
+            context: 'automation',
             placeholder: this.environments.length > 0 ? 'Select an Environment...' : 'Add an Environment to continue...',
             selectedValue: valueToRestore,
-            includeBase: false,
-            enhance: false
+            searchPlaceholder: 'Search Environments...',
+            selectedFallback: missingEnvironment ? {
+                value: valueToRestore,
+                label: `${this.activeEditorJob?.environmentName || 'Deleted Environment'} (missing)`,
+                cli: parsedValue.cli || '',
+                environmentId: parsedValue.envId,
+                environmentName: this.activeEditorJob?.environmentName || null,
+                kind: 'environment',
+                group: 'Custom Environments'
+            } : null
         });
-
-        if (valueToRestore.startsWith('env:') && !this.findEnvironment(parseLlmSelection(valueToRestore, this.environments).envId)) {
-            const parsed = parseLlmSelection(valueToRestore, this.environments);
-            const option = document.createElement('option');
-            option.value = valueToRestore;
-            option.textContent = `${this.activeEditorJob?.environmentName || 'Deleted Environment'} (missing)`;
-            option.dataset.cli = parsed.cli || '';
-            selection.appendChild(option);
-            selection.value = valueToRestore;
-        }
-
-        enhanceLlmSelectWithTomSelect(selection, {
-            placeholder: this.environments.length > 0 ? 'Select an Environment...' : 'Add an Environment to continue...',
-            searchPlaceholder: 'Search Environments...'
-        });
-        this.registerEditorModalCleanup(selection);
+        this.registerEditorModalCleanup(selection, pickerDisposer);
         this.updateEditorEnvironmentPreview();
     }
 

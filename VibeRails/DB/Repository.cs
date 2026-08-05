@@ -671,6 +671,61 @@ namespace VibeRails.DB
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        public async Task SaveLlmPickerStateAsync(
+            string cacheKey,
+            string? preferenceJson,
+            IReadOnlyDictionary<int, bool> environmentHidden,
+            CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction =
+                (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+            try
+            {
+                await using (var preferenceCommand = connection.CreateCommand())
+                {
+                    preferenceCommand.Transaction = transaction;
+                    preferenceCommand.CommandText = preferenceJson == null
+                        ? SqlStrings.DeleteGlobalCacheByKey
+                        : SqlStrings.UpsertGlobalCache;
+                    preferenceCommand.Parameters.AddWithValue("$key", cacheKey);
+                    if (preferenceJson != null)
+                    {
+                        preferenceCommand.Parameters.AddWithValue("$value", preferenceJson);
+                        preferenceCommand.Parameters.AddWithValue(
+                            "$updatedUTC",
+                            DateTime.UtcNow.ToString("O"));
+                    }
+
+                    await preferenceCommand.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await using (var environmentCommand = connection.CreateCommand())
+                {
+                    environmentCommand.Transaction = transaction;
+                    environmentCommand.CommandText = SqlStrings.UpdateEnvironmentHidden;
+                    var idParameter = environmentCommand.Parameters.Add("$id", SqliteType.Integer);
+                    var hiddenParameter = environmentCommand.Parameters.Add("$hidden", SqliteType.Integer);
+
+                    foreach (var (environmentId, hidden) in environmentHidden)
+                    {
+                        idParameter.Value = environmentId;
+                        hiddenParameter.Value = hidden ? 1 : 0;
+                        await environmentCommand.ExecuteNonQueryAsync(cancellationToken);
+                    }
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                throw;
+            }
+        }
+
         #endregion
 
         #region ChatSummary CRUD

@@ -25,6 +25,23 @@ function readRuntime() {
     return cachedRuntime;
 }
 
+/**
+ * Authenticated APIRequestContext for beforeAll/afterAll hooks, where the per-test
+ * `context` fixture is unavailable. Callers must dispose() it. The suite runs against
+ * the developer's real backend state (workers: 1, so files never interleave); use this
+ * to snapshot global server state in beforeAll and restore it in afterAll rather than
+ * leaving tests' resets behind.
+ */
+async function newApiContext(playwright) {
+    const { storageState, baseURL, sessionStorage: sessionData } = readRuntime();
+    const tabToken = sessionData?.viberails_tab || '';
+    return playwright.request.newContext({
+        baseURL,
+        storageState,
+        extraHTTPHeaders: tabToken ? { viberails_tab: tabToken } : {}
+    });
+}
+
 const test = base.test.extend({
     context: async ({ browser }, use) => {
         const { storageState, baseURL, sessionStorage: sessionData } = readRuntime();
@@ -75,4 +92,4 @@ const selectors = {
     undoDropdownKill: (tabId) => `.vb-undo-dropdown [data-kill="${tabId}"]`,
 };
 
-module.exports = { test, expect: base.expect, selectors };
+module.exports = { test, expect: base.expect, selectors, newApiContext };

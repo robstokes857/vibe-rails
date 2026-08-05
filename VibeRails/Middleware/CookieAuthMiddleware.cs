@@ -1,6 +1,4 @@
-using TokenSaver;
 using VibeRails.Auth;
-using VibeRails.Routes;
 using VibeRails.Services;
 
 namespace VibeRails.Middleware;
@@ -21,14 +19,14 @@ public class CookieAuthMiddleware
         var path = context.Request.Path.Value ?? "";
         var isWebSocketRequest = IsWebSocketHandshake(context);
 
-        // Skip auth for bootstrap, the bare readiness probe, local LLM proxy, and CORS preflight
-        // requests. The proxy route validates the session and tab headers injected into the model
-        // provider. Everything else — including /api/v1/context, which leaks paths and the git
-        // remote URL — requires full auth.
+        // Skip auth ONLY for bootstrap (it mints the credentials), the bare readiness probe, and
+        // CORS preflights. This list is frozen: adding a path or predicate here is a security
+        // regression (API_SEC.md § 1 is the authority and pins it). The /llm/** proxy trees are
+        // deliberately NOT here — the CLIs send the session/tab tokens as headers, so they clear
+        // this middleware like any other caller, and the proxy's own two-header gate re-checks
+        // both behind it (removed from this list 2026-08-05).
         if (path.StartsWith("/auth/bootstrap") ||
             path.Equals("/health", StringComparison.OrdinalIgnoreCase) ||
-            LlmProxyCodexConfig.IsOpenAiProxyPath(path) ||
-            LlmProxyZaiConfig.IsZaiProxyPath(path) ||
             context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
@@ -59,10 +57,11 @@ public class CookieAuthMiddleware
                 return;
             }
 
-            // API, MCP and token-saver control calls should not be redirected (fetch/XHR/MCP
-            // clients expect status codes). The control route is reached by an MCP tool, which
-            // surfaces whatever comes back as its result — an HTML page there is unreadable noise.
-            if (path.StartsWith("/api/") || IsMcpPath(path) || TokenSaverPauseRoutes.IsControlPath(path))
+            // API, MCP and /llm calls should not be redirected (fetch/XHR/MCP clients and CLI
+            // HTTP clients expect status codes). Every /llm/** surface — the three proxy trees
+            // and the token-saver control routes — is machine-facing: an MCP tool surfaces the
+            // body verbatim and a CLI logs it, so an HTML page there is unreadable noise.
+            if (path.StartsWith("/api/") || IsMcpPath(path) || IsLlmPath(path))
             {
                 context.Response.StatusCode = 401;
                 await context.Response.WriteAsync("Unauthorized");
@@ -105,7 +104,7 @@ public class CookieAuthMiddleware
                 var tabToken = context.Request.Headers["viberails_tab"].FirstOrDefault();
                 if (!_authService.ValidateTabToken(tabToken))
                 {
-                    if (path.StartsWith("/api/") || IsMcpPath(path))
+                    if (path.StartsWith("/api/") || IsMcpPath(path) || IsLlmPath(path))
                     {
                         context.Response.StatusCode = 401;
                         await context.Response.WriteAsync("Unauthorized");
@@ -128,6 +127,11 @@ public class CookieAuthMiddleware
     private static bool IsMcpPath(string path) =>
         path.Equals("/mcp", StringComparison.OrdinalIgnoreCase)
         || path.StartsWith("/mcp/", StringComparison.OrdinalIgnoreCase);
+
+    // Every /llm/** surface (proxy trees + token-saver control) is machine-facing — CLI HTTP
+    // clients and MCP tools, never a browser page — so auth failures there must be status codes.
+    private static bool IsLlmPath(string path) =>
+        path.StartsWith("/llm/", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeTabToken(string? token)
     {

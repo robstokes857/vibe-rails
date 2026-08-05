@@ -41,14 +41,6 @@ public class LlmParserTests
         Assert.Equal(LLM.Glm52, result);
     }
 
-    [Fact]
-    public void Parse_ReturnsKimiK3_ForKimiK3String()
-    {
-        var result = _parser.Parse("kimi-k3");
-
-        Assert.Equal(LLM.KimiK3, result);
-    }
-
     [Theory]
     [InlineData("GLM-5.2")]
     [InlineData("Glm-5.2")]
@@ -68,14 +60,6 @@ public class LlmParserTests
         var result = _parser.Normalize("glm-5.2");
 
         Assert.Equal("glm-5.2", result);
-    }
-
-    [Fact]
-    public void Normalize_ReturnsWireFormat_ForKimiK3()
-    {
-        var result = _parser.Normalize("kimi-k3");
-
-        Assert.Equal("kimi-k3", result);
     }
 
     [Fact]
@@ -104,12 +88,10 @@ public class LlmParserTests
         Assert.Contains(LLM.Copilot, _parser.All);
         Assert.Contains(LLM.OpenCode, _parser.All);
         Assert.Contains(LLM.Glm52, _parser.All);
-        Assert.Contains(LLM.KimiK3, _parser.All);
     }
 
     [Theory]
     [InlineData(LLM.Glm52, "glm-5.2")]
-    [InlineData(LLM.KimiK3, "kimi-k3")]
     [InlineData(LLM.Claude, "Claude")]
     [InlineData(LLM.Codex, "Codex")]
     public void ToWireName_ReturnsWireFormat_ForEnumValue(LLM llm, string expected)

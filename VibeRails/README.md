@@ -170,7 +170,7 @@ Single-page application with:
 **Frontend Architecture:**
 ```
 wwwroot/
-├── app.js              # Main application (~1,410 lines)
+├── app.js              # Main application (~1,250 lines)
 ├── js/modules/         # ~40 ES modules, key ones:
 │   ├── terminal-multitab.js       (~121KB)  # Web terminal (multi-tab)
 │   ├── environment-controller.js  (~93KB)   # Environment CRUD + Web UI launch
@@ -182,10 +182,10 @@ wwwroot/
 │   ├── vibe-rails-ai-controller.js(~56KB)   # Vibe AI inspector
 │   ├── sandbox-controller.js      (~32KB)   # Sandbox CRUD + launch
 │   ├── git-guard-preflight.js     (~35KB)   # Git Guard SSE dashboard
-│   ├── settings-controller.js     (~37KB)   # App settings
+│   ├── settings-controller.js     (~38KB)   # App settings
 │   ├── mcp-controller.js          (~22KB)   # MCP Explorer
 │   ├── dashboard-controller.js    (~2KB)    # Dashboard view + preselection
-│   └── utils.js                   (~19KB)
+│   └── utils.js                   (~23KB)
 └── assets/             # Bootstrap, XTerm.js, icons
 ```
 
@@ -915,10 +915,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Built with modern .NET 10.0, Native AOT compilation, and the Model Context Protocol for next-generation AI development workflows.
 
-**Last Updated**: 2026-08-04
-**Version**: 1.9.9
+**Last Updated**: 2026-08-05
+**Version**: 1.9.10
 **Maintained By**: Robert Stokes
 
 ---
 
-*Last checked: 2026-08-04T13:39:29Z by opencode (glm-5.2)*
+*Last checked: 2026-08-05T20:26:47Z by opencode (glm-5.2)*

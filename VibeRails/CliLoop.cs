@@ -45,7 +45,8 @@ public static class CliLoop
         ParsedArgs parsedArgs,
         IServiceProvider services,
         string? jobRunId = null,
-        Action<string>? onSessionCreated = null)
+        Action<string>? onSessionCreated = null,
+        CancellationToken cancellationToken = default)
     {
         using var scope = services.CreateScope();
         var scopedServices = scope.ServiceProvider;
@@ -56,8 +57,8 @@ public static class CliLoop
         var llmParser = scopedServices.GetRequiredService<ILlmParser>();
 
         // Resolve LLM type (smart resolution: LLM enum name → base CLI, otherwise → DB lookup).
-        // Use ILlmParser instead of Enum.TryParse so pseudo-CLI strings like "glm-5.2" and
-        // "kimi-k3" (which can't be C# enum names due to hyphens/periods) resolve correctly.
+        // Use ILlmParser instead of Enum.TryParse so pseudo-CLI strings like "glm-5.2"
+        // (which can't be a C# enum name due to punctuation) resolve correctly.
         LLM llm;
         string? environmentName = null;
         string? environmentInitialMessage = null;
@@ -104,7 +105,7 @@ public static class CliLoop
             parsedArgs.ExtraArgs,
             sessionService,
             makeRemote: false,
-            CancellationToken.None,
+            cancellationToken,
             environmentInitialMessage,
             jobRunId,
             onSessionCreated);

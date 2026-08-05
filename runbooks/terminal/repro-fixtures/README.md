@@ -52,4 +52,4 @@ var bytes = File.ReadAllBytes("runbooks/terminal/repro-fixtures/session_f3e25a1e
 
 ---
 
-*Last checked: 2026-08-04T13:39:29Z by opencode (glm-5.2)*
+*Last checked: 2026-08-05T20:26:47Z by opencode (glm-5.2)*

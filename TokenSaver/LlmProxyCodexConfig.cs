@@ -16,17 +16,6 @@ public static class LlmProxyCodexConfig
         string.Concat(LlmProxyBaseUrl.Normalize(apiBaseUrl), OpenAiProxyPath, ChatGptCodexApiPath);
 
     /// <summary>
-    /// True when <paramref name="path"/> targets the OpenAI proxy prefix or one of its children.
-    /// Shared with <c>CookieAuthMiddleware</c> so the middleware and route cannot drift apart.
-    /// </summary>
-    public static bool IsOpenAiProxyPath(string path) =>
-        IsPathOrChild(path, OpenAiProxyPath);
-
-    private static bool IsPathOrChild(string path, string prefix) =>
-        path.Equals(prefix, StringComparison.OrdinalIgnoreCase)
-        || path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
     /// Builds the Codex <c>--config</c> args that point it at the proxy. The session/tab env-var
     /// names are parameters because that contract is owned by the host app's tool-API environment
     /// (<c>LocalToolApiContext</c>), not by this library — the caller passes the same names it

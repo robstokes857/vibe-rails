@@ -23,6 +23,7 @@ public class TerminalRunner
     private readonly ICommandService _commandService;
     private readonly ILocalToolApiContext _toolApiContext;
     private readonly ILlmProxySessionState _llmProxySessionState;
+    private readonly IAutomationConsumer _automationConsumer;
     private readonly IHostApplicationLifetime? _appLifetime;
 
     public TerminalRunner(
@@ -30,12 +31,14 @@ public class TerminalRunner
         ICommandService commandService,
         ILocalToolApiContext toolApiContext,
         ILlmProxySessionState llmProxySessionState,
+        IAutomationConsumer automationConsumer,
         IHostApplicationLifetime? appLifetime = null)
     {
         _stateService = stateService;
         _commandService = commandService;
         _toolApiContext = toolApiContext;
         _llmProxySessionState = llmProxySessionState;
+        _automationConsumer = automationConsumer;
         _appLifetime = appLifetime;
     }
 
@@ -671,6 +674,13 @@ public class TerminalRunner
         {
             terminal.Subscribe(new ConsoleOutputConsumer());
 
+            // Automation inactivity is deliberately based only on bytes read from the PTY. This
+            // subscription happens after CreateSessionAsync's synthetic title publication and
+            // before StartReadLoop, so title/snapshot output cannot keep a Job alive while every
+            // real PTY byte is observed.
+            if (jobRunId is not null)
+                terminal.Subscribe(_automationConsumer.RegisterSession(sessionId));
+
             if (remoteConn != null)
             {
                 Log.Information("[Terminal] Remote connection established — native CLI coexists with remote viewer");
@@ -697,6 +707,9 @@ public class TerminalRunner
             }
             finally
             {
+                if (jobRunId is not null && _automationConsumer.IdleShutdownRequested)
+                    KillAutomationTerminalProcessTree(terminal);
+
                 await sessionService.UnregisterTerminalAsync();
             }
 
@@ -705,6 +718,28 @@ public class TerminalRunner
 
         await CompleteSessionAsync(sessionId, exitCode);
         return exitCode;
+    }
+
+    private static void KillAutomationTerminalProcessTree(Terminal terminal)
+    {
+        // On Windows the Job PTY is a PowerShell wrapper around the configured CLI. Terminal's
+        // ordinary Dispose kills that wrapper, but Process.Kill() alone does not guarantee its CLI,
+        // MCP, or git children go with it. Idle completion owns this terminal, so close the exact
+        // PTY-rooted process tree before the wrapper can disappear and orphan its descendants.
+        try
+        {
+            terminal.KillProcessTree();
+        }
+        catch (InvalidOperationException)
+        {
+            // The PTY process exited naturally between the idle signal and teardown.
+        }
+        catch (Exception ex)
+        {
+            // JobRunner's bounded idle fallback still kills the host tree if cooperative teardown
+            // cannot finish. Keep this path non-throwing so session finalization can proceed.
+            Log.Warning(ex, "[Jobs] Could not terminate idle Automation terminal process tree");
+        }
     }
 
     /// <summary>

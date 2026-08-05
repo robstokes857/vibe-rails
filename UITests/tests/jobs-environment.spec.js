@@ -5,7 +5,7 @@ const { test, expect } = require('./fixtures');
 const CURRENT_REPOSITORY = 'C:\\source\\fixture-repository';
 
 function createFixtureState() {
-    return {
+    const state = {
         environments: [
             {
                 id: 41,
@@ -51,6 +51,32 @@ function createFixtureState() {
         }],
         nextJobId: 18
     };
+    const base = [
+        ['codex', 'Codex'],
+        ['claude', 'Claude'],
+        ['opencode', 'OpenCode'],
+        ['glm-5.2', 'GLM 5.2'],
+        ['antigravity', 'Antigravity'],
+        ['copilot', 'Copilot'],
+        ['shell', 'Terminal']
+    ];
+    state.pickerItems = [
+        ...base.map(([cli, label], order) => ({
+            key: `base:${cli}`, kind: 'base', group: 'Base CLIs', label, cli,
+            environmentId: null, enabled: true, order
+        })),
+        ...state.environments.map((environment, order) => ({
+            key: `env:${environment.id}:${environment.cli}`,
+            kind: 'environment',
+            group: 'Custom Environments',
+            label: `${environment.name} (${environment.cli})`,
+            cli: environment.cli,
+            environmentId: environment.id,
+            enabled: true,
+            order
+        }))
+    ];
+    return state;
 }
 
 async function installStatefulApi(page) {
@@ -81,6 +107,14 @@ async function installStatefulApi(page) {
         }
         if (method === 'GET' && path === '/api/v1/environments') {
             return respond({ environments: state.environments });
+        }
+        if (path === '/api/v1/llm-picker/preferences') {
+            if (method === 'GET') return respond({ items: state.pickerItems });
+            if (method === 'PUT') {
+                state.pickerItems = request.postDataJSON().items;
+                return respond({ items: state.pickerItems });
+            }
+            if (method === 'DELETE') return respond({ items: state.pickerItems });
         }
         if (method === 'PUT' && path.startsWith('/api/v1/environments/')) {
             const name = decodeURIComponent(path.slice('/api/v1/environments/'.length));

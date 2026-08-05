@@ -123,10 +123,10 @@ This gives you quick access to different configurations without remembering comm
 
 ---
 
-**Version**: 1.9.9
-**Last Updated**: 2026-08-02
+**Version**: 1.9.10
+**Last Updated**: 2026-08-05
 **Maintained By**: Robert Stokes
 
 ---
 
-**Last checked**: 2026-08-04T19:38:40Z by opencode (glm-5.2)
+**Last checked**: 2026-08-05T13:55:33Z by opencode (glm-5.2)

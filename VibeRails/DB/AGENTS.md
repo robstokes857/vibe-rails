@@ -61,9 +61,10 @@ share a credential directory.
 
 **Model:** `LLM_Environment` class in `DTOs/LLM_Environment.cs`
 
-`Hidden` (0/1) hides the environment from LLM/terminal select boxes without deleting it. It is a
-UI-visibility flag, not a CLI option — it never enters `CustomArgs`. Added via the
-`MigrateEnvironmentsAddHidden` ALTER TABLE migration.
+`Hidden` (0/1) hides the environment from new-launch picker choices without deleting it. It is a
+UI-visibility flag, not a CLI option — it never enters `CustomArgs`. Existing saved references are
+still rendered with a hidden label, and provider creation/history filters do not inherit this
+visibility. Added via the `MigrateEnvironmentsAddHidden` ALTER TABLE migration.
 
 **LLM enum** (stored as integer):
 
@@ -77,7 +78,6 @@ UI-visibility flag, not a CLI option — it never enters `CustomArgs`. Added via
 | 5 | Shell | Plain shell terminal — no AI agent; spawns a real OS shell |
 | 6 | OpenCode | Binary is `opencode`; config isolation via `XDG_CONFIG_HOME` |
 | 7 | Glm52 | Pseudo-CLI: OpenCode launched with a pinned `--model` flag. `LlmParser` special-cases the string `"glm-5.2"` |
-| 8 | KimiK3 | Pseudo-CLI: OpenCode launched with a pinned `--model` flag. `LlmParser` special-cases the string `"kimi-k3"` |
 
 **Key operations:**
 
@@ -523,6 +523,18 @@ CREATE TABLE IF NOT EXISTS GlobalCache (
 );
 ```
 
+#### LLM picker preferences
+
+The customizable launch pickers store their versioned document under
+`ui.llm-picker.v1`. The JSON contains the ordered base keys, ordered Environment keys, and disabled
+built-in keys. Custom Environment visibility remains authoritative in `Environments.Hidden` for
+compatibility with older Environment clients.
+
+`Repository.SaveLlmPickerStateAsync` writes or removes the `GlobalCache` document and updates all
+submitted `Environments.Hidden` values in one SQLite transaction. The resolver ignores stale keys,
+appends newly supported CLIs/Environments in canonical order, and returns contiguous positions to
+the browser. Reset removes the cache document and makes supported custom Environments visible.
+
 ---
 
 ## Entity Relationships
@@ -622,4 +634,4 @@ ChatSummary               TokenSavings / CompressionCaptures
 
 ---
 
-*Last checked: 2026-08-04T13:39:29Z by opencode (glm-5.2)*
+*Last checked: 2026-08-05T20:26:47Z by opencode (glm-5.2)*

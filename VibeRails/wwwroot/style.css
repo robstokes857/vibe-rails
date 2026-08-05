@@ -4809,6 +4809,214 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     padding: 10px 12px;
 }
 
+/* Customizable launch-picker footer. It is a sibling of the scrolling
+   .ts-dropdown-content, so search/results scroll without moving the action. */
+.llm-picker-dropdown-footer {
+    border-top: 1px solid var(--color-border);
+    padding: 6px;
+    background: color-mix(in srgb, var(--color-bg-surface) 78%, var(--color-bg-base));
+}
+
+.llm-picker-customize-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 34px;
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-text-muted);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.llm-picker-customize-button:hover,
+.llm-picker-customize-button:focus-visible {
+    color: var(--color-text);
+    background: var(--color-bg-surface-hover);
+    outline: none;
+}
+
+.llm-picker-customize-button:focus-visible {
+    box-shadow: 0 0 0 0.16rem color-mix(in srgb, var(--color-primary, #6ea8fe) 28%, transparent);
+}
+
+.llm-picker-empty-state {
+    min-width: 280px;
+    text-align: center;
+}
+
+/* The picker customizer can open above another app modal (Multi Run). Its
+   layer keeps that originating modal mounted so Cancel can restore focus. */
+.llm-picker-modal-layer > .llm-picker-customization-modal {
+    z-index: 1070;
+}
+
+.llm-picker-modal-layer > .llm-picker-customization-backdrop {
+    z-index: 1065;
+}
+
+.llm-picker-customization-modal .modal-dialog {
+    max-width: 760px;
+}
+
+.llm-picker-modal-section > h6 {
+    margin-bottom: 8px;
+    color: var(--color-text-muted);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.llm-picker-modal-row {
+    display: grid;
+    grid-template-columns: 28px 32px minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 52px;
+    padding: 7px 9px;
+    border: 1px solid var(--color-border);
+    border-bottom-width: 0;
+    background: var(--color-bg-surface);
+    transition: opacity 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+
+.llm-picker-modal-row:first-child {
+    border-radius: 8px 8px 0 0;
+}
+
+.llm-picker-modal-row:last-child {
+    border-bottom-width: 1px;
+    border-radius: 0 0 8px 8px;
+}
+
+.llm-picker-modal-row:only-child {
+    border-radius: 8px;
+}
+
+.llm-picker-modal-row.is-hidden {
+    opacity: 0.58;
+}
+
+.llm-picker-modal-row.is-dragging {
+    opacity: 0.35;
+    transform: scale(0.99);
+}
+
+.llm-picker-modal-row.is-drag-target {
+    background: color-mix(in srgb, var(--color-primary, #6ea8fe) 16%, var(--color-bg-surface));
+    box-shadow: inset 0 2px 0 var(--color-primary, #6ea8fe);
+}
+
+.llm-picker-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    min-height: 32px;
+    border-radius: 5px;
+    color: var(--color-text-muted);
+    cursor: grab;
+}
+
+.llm-picker-drag-handle:active {
+    cursor: grabbing;
+}
+
+.llm-picker-drag-handle:focus-visible {
+    color: var(--color-text);
+    outline: 2px solid var(--color-primary, #6ea8fe);
+    outline-offset: 1px;
+}
+
+.llm-picker-row-logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+}
+
+.llm-picker-row-logo-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-muted);
+}
+
+.llm-picker-row-label {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--color-text);
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.llm-picker-visibility-switch {
+    min-height: 0;
+    margin: 0;
+    padding-left: 2.6em;
+}
+
+.llm-picker-move-buttons {
+    display: inline-flex;
+    gap: 4px;
+}
+
+.llm-picker-move-buttons .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+}
+
+.llm-picker-group-empty {
+    padding: 14px;
+    border: 1px dashed var(--color-border);
+    border-radius: 8px;
+    text-align: center;
+}
+
+@media (max-width: 575.98px) {
+    .llm-picker-customization-modal .modal-dialog {
+        margin: 0.5rem;
+    }
+
+    .llm-picker-customization-modal .modal-header {
+        align-items: flex-start;
+    }
+
+    .llm-picker-modal-row {
+        grid-template-columns: 24px 28px minmax(0, 1fr) auto;
+        gap: 7px;
+        padding: 7px;
+    }
+
+    .llm-picker-move-buttons {
+        grid-column: 3 / -1;
+        justify-self: end;
+    }
+
+    .llm-picker-modal-actions {
+        align-items: stretch;
+    }
+
+    .llm-picker-modal-actions .btn {
+        flex: 1 1 auto;
+    }
+
+    .llm-picker-modal-actions .btn.me-auto {
+        flex-basis: 100%;
+        margin-right: 0 !important;
+    }
+}
+
 /* Compact variants — match BS5 form-select-sm / form-select-xs sizing */
 .ts-wrapper.form-select-sm .ts-control {
     min-height: 31px;

@@ -73,6 +73,14 @@ namespace Pty.Net.Windows
         }
 
         /// <inheritdoc/>
+        public void KillProcessTree()
+        {
+            // Use the Process instance captured when ConPTY was created. Looking the PID up again
+            // after exit risks targeting an unrelated process if Windows has already reused it.
+            this.process.Kill(entireProcessTree: true);
+        }
+
+        /// <inheritdoc/>
         public void Resize(int cols, int rows)
         {
             int hr = ResizePseudoConsole(this.handles.PseudoConsoleHandle, new Coord(cols, rows));

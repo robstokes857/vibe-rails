@@ -75,6 +75,41 @@ public sealed class JobStoreOverlapTests : IDisposable
     }
 
     [Fact]
+    public async Task CompleteIdleRunAsync_AtomicallyPrefersAPendingUserCancellation()
+    {
+        var (store, jobId) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+        Assert.True(await store.StartRunAsync(runId!, 4242, cancellationToken));
+        Assert.True(await store.RequestCancelAsync(runId!, cancellationToken));
+
+        var status = await store.CompleteIdleRunAsync(runId!, cancellationToken);
+        var run = await store.GetRunAsync(runId!, cancellationToken);
+
+        Assert.Equal(JobRunStatus.Cancelled, status);
+        Assert.Equal(JobRunStatus.Cancelled, run!.Status);
+        Assert.Equal(3, run.ExitCode);
+        Assert.Equal("Automation was cancelled.", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task CompleteIdleRunAsync_SucceedsWhenNoCancellationIsPending()
+    {
+        var (store, jobId) = await SeedJobAsync();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var runId = await store.EnqueueManualRunAsync(jobId, cancellationToken);
+        Assert.True(await store.StartRunAsync(runId!, 4242, cancellationToken));
+
+        var status = await store.CompleteIdleRunAsync(runId!, cancellationToken);
+        var run = await store.GetRunAsync(runId!, cancellationToken);
+
+        Assert.Equal(JobRunStatus.Succeeded, status);
+        Assert.Equal(JobRunStatus.Succeeded, run!.Status);
+        Assert.Equal(0, run.ExitCode);
+        Assert.Null(run.ErrorMessage);
+    }
+
+    [Fact]
     public async Task EnqueueDueSchedulesAsync_DoesNotStackRuns_WhenThePreviousOccurrenceIsStillActive()
     {
         // The failure this prevents: a 5-minute schedule on a job whose agent runs for an hour.

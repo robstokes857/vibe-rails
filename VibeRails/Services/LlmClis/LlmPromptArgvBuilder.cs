@@ -21,7 +21,7 @@ internal static class LlmPromptArgvBuilder
             argv.Add($"--interactive={prompt}");
         else if (llm == LLM.Antigravity)
             argv.Add($"--prompt-interactive={prompt}");
-        else if (llm == LLM.OpenCode || llm == LLM.Glm52 || llm == LLM.KimiK3)
+        else if (llm == LLM.OpenCode || llm == LLM.Glm52)
             argv.Add($"--prompt={prompt}");
         else
             argv.Add(prompt);

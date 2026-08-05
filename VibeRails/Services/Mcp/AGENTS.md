@@ -164,8 +164,8 @@ opencode mcp add viberails-mcp -- "<path-to-vb>" mcp
 ```
 
 OpenCode 1.18.8 supports the non-interactive local-command form shown above. It has no matching
-`mcp remove` command, but adding the same name replaces that entry, so OpenCode, GLM 5.2, and Kimi
-K3 launches run one add command immediately before launch. On Windows, `CommandService` invokes
+`mcp remove` command, but adding the same name replaces that entry, so OpenCode and GLM 5.2
+launches run one add command immediately before launch. On Windows, `CommandService` invokes
 the npm `opencode.cmd` shim because PowerShell consumes the `--` separator when routing through
 `opencode.ps1`; Unix launches use `opencode`.
 
@@ -201,4 +201,4 @@ avoid `WithToolsFromAssembly()` (reflection scan) — it is the AOT-unsafe varia
 
 ---
 
-**Last checked**: 2026-08-04T20:10:23Z by opencode (glm-5.2)
+**Last checked**: 2026-08-05T14:24:43Z by opencode (glm-5.2)

@@ -406,6 +406,8 @@ public sealed class Terminal : IAsyncDisposable
             _emulator.Resize(cols, rows);
     }
 
+    internal void KillProcessTree() => _pty.KillProcessTree();
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
