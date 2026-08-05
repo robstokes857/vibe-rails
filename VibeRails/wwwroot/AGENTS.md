@@ -10,6 +10,7 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 |------|---------|
 | [app.js](app.js) | Central controller, routing, API layer |
 | [js/modules/terminal-multitab.js](js/modules/terminal-multitab.js) | Reusable xterm.js terminal manager with per-tab lifecycle and environment picker |
+| [js/modules/llm-picker-controller.js](js/modules/llm-picker-controller.js) | Shared launch-picker catalog, Tom Select lifecycle, customization modal, and live preference refresh |
 | [js/modules/terminal-token-compression.js](js/modules/terminal-token-compression.js) | Persistent token-savings meter and per-tab pause-badge display (the per-tab on/off toggle was removed 2026-07-19; the saver is now per-LLM in Settings) |
 | [js/modules/terminal-snapshot-renderer.js](js/modules/terminal-snapshot-renderer.js) | Renders reserved `xterm_ui_bytes` payloads into xterm.js and captures PNG data URLs for MCP Explorer previews |
 | [js/modules/environment-controller.js](js/modules/environment-controller.js) | Environment CRUD + "Web UI" launch button |
@@ -28,8 +29,32 @@ paused via the `pause_token_saver` / `resume_token_saver` MCP tools.
 ## Terminal Environment Integration
 
 The terminal dropdown shows two groups:
-- **Base CLIs**: Claude, Codex, GLM 5.2, Kimi K3, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
+- **Base CLIs**: Claude, Codex, GLM 5.2, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
 - **Custom Environments**: User-created environments — spawned directly via the tab start endpoint
+
+## Customizable LLM Pickers
+
+`LlmPickerController` loads the resolved machine-wide catalog from
+`/api/v1/llm-picker/preferences` before the initial view renders. It mounts the native selects,
+owns their Tom Select instances, tracks mounted pickers, and refreshes them after a preference
+save or reset while preserving current selections and search text. Each mount returns a disposer;
+view/modal owners must call it when their select is removed.
+
+The controller applies one of five contexts after the global ordering is resolved:
+
+| Context | Items shown |
+|---|---|
+| `terminal` | Base CLIs, custom Environments, and plain Terminal |
+| `sandbox` | Base CLIs and custom Environments |
+| `automation` | Custom Environments only |
+| `multi-run` | Base CLIs only, excluding plain Terminal |
+| `environment-provider` | Supported providers, excluding Terminal; ignores visibility preferences |
+
+The four launch contexts add a persistent **Customize LLM list** footer to their dropdowns. Its
+nested modal changes visibility and within-group order globally. A disabled selection that is
+already referenced is reinserted with a `(hidden)` label so editing another field cannot silently
+clear it. The Environment provider picker deliberately has no customization footer, and Chat
+History remains unfiltered so launch preferences never hide historical sessions.
 
 ### Flow: Launching a Custom Environment
 
@@ -50,10 +75,11 @@ Both base CLI and custom environment launches share one unified tab API; the onl
 ### Flow: "Web UI" Button
 
 1. User clicks "Web UI" on environments page
-2. `launchInWebUI(envId, envName, cli)` calls `app.navigate('dashboard', { preselectedEnvId })`
+2. `launchInWebUI(envId, envName, cli)` navigates to dashboard (if not already there) with `{ preselectedEnvId }`
 3. Dashboard passes `preselectedEnvId` to `terminalController.bindTerminalActions(container, preselectedEnvId)`
 4. `bindTerminalActions` pre-selects the environment in the dropdown
 5. Terminal section scrolls into view
+6. `startTerminal(terminalContent, 'env:${envId}:${cli}')` auto-starts the terminal session
 
 ## Sandbox Management
 
@@ -109,4 +135,4 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
 
 ---
 
-*Last checked: 2026-08-04T12:05:26Z by opencode (glm-5.2)*
+*Last checked: 2026-08-05T16:26:31Z by opencode (glm-5.2)*

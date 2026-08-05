@@ -40,7 +40,6 @@ VibeRails is the control layer for AI coding inside VS Code. Work faster with Cl
 - Copilot
 - OpenCode
 - GLM-5.2 (via OpenCode)
-- Kimi K3 (via OpenCode)
 - VS Code
 
 ## See It in Action
@@ -112,4 +111,4 @@ The extension ships the whole VibeRails backend inside the VSIX — there is **n
 
 ---
 
-*Last checked: 2026-08-04T19:38:40Z by opencode (glm-5.2)*
+*Last checked: 2026-08-05T13:55:33Z by opencode (glm-5.2)*

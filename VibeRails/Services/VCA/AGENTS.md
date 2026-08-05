@@ -29,8 +29,11 @@ Rules page (browser)              Git hooks (pre-commit, commit-msg)        MCP 
 
 `AgentRuleSectionReader` is the only thing that decides what a file declares. It is shared on
 purpose; see [Why discovery is shared](#why-discovery-is-shared). Rules-page working-tree
-validation (`ValidationService` / `FileAndRuleParser`) is a separate path that does not call
-`AgentRuleSectionReader`.
+validation (`RuleValidationService` in `../RuleValidationService.cs`) is a separate step that
+validates already-discovered rules — it does not call `AgentRuleSectionReader` itself (the
+endpoint that invokes it calls `AgentFileService.GetRulesWithEnforcementAsync` for discovery).
+`ValidationService` / `FileAndRuleParser` in this directory are legacy and no longer used in
+production.
 
 ## The rule-discovery contract
 
@@ -152,7 +155,8 @@ author junk. Reads no longer filter, so hand-edited junk is shown rather than hi
 | --- | --- |
 | `AgentRuleSectionReader.cs` | Rule discovery. The contract above, and nothing else. |
 | `Validators/` | Per-rule validators used by the older `ValidationService` path. |
-| `ValidationService.cs`, `FileAndRuleParser.cs` | Working-tree validation for the Rules page. |
+| `ValidationService.cs`, `FileAndRuleParser.cs` | Legacy working-tree validation (registered in DI, unused in production — only exercised by `ValidationServiceIntegrationTests.cs`). |
+| `../RuleValidationService.cs` | Active working-tree validation for the Rules page (`/api/v1/agents/validate`). |
 | `Hooks/` | Git-hook host, runner, console presenter. See `Hooks/` for the console UI. |
 | `../Mcp/Tools/RulesTool.cs` | `ValidateVcaReportAsync` — the validation the hooks actually run. |
 | `../AgentFileService.cs` | Rules-page CRUD over `AGENTS.md` files. |
@@ -180,4 +184,4 @@ back. An explicit Install or Repair action removes that marker and re-enables st
 
 ---
 
-*Last checked: 2026-08-04T12:05:26Z by opencode (glm-5.2)*
+*Last checked: 2026-08-05T16:26:31Z by opencode (glm-5.2)*

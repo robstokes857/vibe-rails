@@ -48,8 +48,7 @@ public class CommandService : ICommandService
         LLM.Antigravity,
         LLM.Copilot,
         LLM.OpenCode,
-        LLM.Glm52,
-        LLM.KimiK3
+        LLM.Glm52
     };
 
     public CommandService(
@@ -104,7 +103,7 @@ public class CommandService : ICommandService
         }
 
         var cli = ResolveCliExecutable(llm);
-        // Pseudo-CLIs (Glm52/KimiK3) are OpenCode with a pinned --model flag. For base CLI
+        // The Glm52 pseudo-CLI is OpenCode with a pinned --model flag. For base CLI
         // launches (no envName) inject it here so every base launch pins the right model.
         // Custom environments already carry --model in their CustomArgs (built by the env
         // settings form), so we skip injection when an env is selected to avoid a duplicate.
@@ -113,7 +112,6 @@ public class CommandService : ICommandService
             extraArgs = llm switch
             {
                 LLM.Glm52 => WithPinnedModel(extraArgs, "zai/glm-5.2"),
-                LLM.KimiK3 => WithPinnedModel(extraArgs, "moonshotai/kimi-k3"),
                 _ => extraArgs
             };
         }
@@ -139,8 +137,8 @@ public class CommandService : ICommandService
                 LLM.Antigravity => $"{cliCommand} --prompt-interactive={quoted}",
                 // OpenCode's TUI treats a positional arg as the [project] path, not a prompt,
                 // so the initial prompt must ride on --prompt (never the default branch).
-                // Glm52/KimiK3 are OpenCode under the hood and share the --prompt convention.
-                LLM.OpenCode or LLM.Glm52 or LLM.KimiK3 => $"{cliCommand} --prompt={quoted}",
+                // Glm52 is OpenCode under the hood and shares the --prompt convention.
+                LLM.OpenCode or LLM.Glm52 => $"{cliCommand} --prompt={quoted}",
                 _ => $"{cliCommand} {quoted}"
             };
         }
@@ -214,8 +212,7 @@ public class CommandService : ICommandService
         // written: OPENCODE_CONFIG_CONTENT carries an inline JSON override of the zai provider's
         // baseURL + auth headers (see LlmProxyZaiConfig). Skip if the caller already set
         // OPENCODE_CONFIG_CONTENT, so an explicit value is respected rather than clobbered.
-        // Glm52 is included because it IS the zai provider model; KimiK3 is excluded because it
-        // runs through the moonshotai provider, not zai, so the zai proxy config is irrelevant.
+        // Glm52 is included because it is the zai provider model.
         var inheritedOpenCodeConfig = Environment.GetEnvironmentVariable(
             LlmProxyZaiConfig.ConfigContentVariable);
         var openCodeProxyActive = proxySettings.OpenCodeLlmProxyLaunchEnabled
@@ -278,7 +275,7 @@ public class CommandService : ICommandService
 
     /// <summary>
     /// Every CLI's enum name lowercased is its executable — except Antigravity (binary <c>agy</c>)
-    /// and the OpenCode-backed pseudo-CLIs Glm52/KimiK3 (binary <c>opencode</c>).
+    /// and the OpenCode-backed pseudo-CLI Glm52 (binary <c>opencode</c>).
     ///
     /// Must stay in step with <c>IBaseLlmCliLauncher.CliExecutable</c>, which is the same mapping
     /// expressed per-launcher for the native-terminal path. The two agree today; Antigravity is the
@@ -288,7 +285,6 @@ public class CommandService : ICommandService
     {
         LLM.Antigravity => "agy",
         LLM.Glm52 => "opencode",
-        LLM.KimiK3 => "opencode",
         _ => llm.ToString().ToLower()
     };
 
@@ -313,7 +309,7 @@ public class CommandService : ICommandService
 
     /// <summary>
     /// Prepends a <c>--model=&lt;model&gt;</c> arg to <paramref name="extraArgs"/>. Used by the
-    /// OpenCode-backed pseudo-CLIs (Glm52, KimiK3) to pin their model on base CLI launches.
+    /// OpenCode-backed pseudo-CLI Glm52 to pin its model on base CLI launches.
     /// Uses =-form so the arg survives ShellArgSanitizer without re-quoting. It is prepended so a
     /// later caller-supplied <c>--model</c> retains yargs' last-value precedence.
     /// </summary>
@@ -437,7 +433,7 @@ public class CommandService : ICommandService
             LLM.Copilot => (
                 SuppressCommandOutput($"copilot mcp remove {VibeRailsMcpServerName}"),
                 $"copilot mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
-            LLM.OpenCode or LLM.Glm52 or LLM.KimiK3 => (
+            LLM.OpenCode or LLM.Glm52 => (
                 null,
                 $"{openCodeExecutable} mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
             _ => (null, null)

@@ -165,6 +165,28 @@ public sealed class AppJsonSerializerContextTests
     }
 
     [Fact]
+    public void LlmPickerPreferences_UseTheAotContextAndStableWireNames()
+    {
+        var response = new LlmPickerPreferencesResponse([
+            new LlmPickerPreferenceItem(
+                "base:claude", "base", "Base CLIs", "Claude", "claude", null, true, 0)
+        ]);
+
+        var json = JsonSerializer.Serialize(
+            response,
+            AppJsonSerializerContext.Default.LlmPickerPreferencesResponse);
+        var request = JsonSerializer.Deserialize(
+            """{"items":[{"key":"base:claude","kind":"base","group":"Base CLIs","label":"Claude","cli":"claude","environmentId":null,"enabled":false,"order":0}]}""",
+            AppJsonSerializerContext.Default.UpdateLlmPickerPreferencesRequest);
+
+        Assert.Equal(
+            """{"items":[{"key":"base:claude","kind":"base","group":"Base CLIs","label":"Claude","cli":"claude","environmentId":null,"enabled":true,"order":0}]}""",
+            json);
+        Assert.NotNull(request);
+        Assert.False(Assert.Single(request!.Items!).Enabled);
+    }
+
+    [Fact]
     public void TerminalSnapshotResponse_UsesReservedXtermRendererFieldNames()
     {
         var json = JsonSerializer.Serialize(

@@ -1,11 +1,20 @@
 import { ensureMonaco } from './monaco-loader.js';
-import { parseLlmSelection, populateLlmSelectionSelect } from './utils.js';
+import { parseLlmSelection } from './utils.js';
 
 // Sandbox Controller - Manages sandbox creation, listing, and actions
 export class SandboxController {
     constructor(app) {
         this.app = app;
         this._diffEditor = null;
+        this._pickerDisposers = [];
+    }
+
+    unload() {
+        this._disposePickers();
+    }
+
+    _disposePickers() {
+        this._pickerDisposers.splice(0).forEach((dispose) => dispose?.());
     }
 
     // Fetch sandboxes from API
@@ -127,6 +136,7 @@ export class SandboxController {
 
     populateSandboxesList(container) {
         if (!container) return;
+        this._disposePickers();
         container.innerHTML = '';
 
         const sandboxes = this.app.data.sandboxes || [];
@@ -263,10 +273,13 @@ export class SandboxController {
     }
 
     populateSandboxCliSelect(selectEl) {
-        populateLlmSelectionSelect(selectEl, this.app.data.environments || [], {
+        const dispose = this.app.llmPickerController.mount(selectEl, {
+            context: 'sandbox',
             placeholder: 'Select CLI...',
             includeDefaultSuffix: false
         });
+        this._pickerDisposers.push(dispose);
+        return dispose;
     }
 
     parseSandboxCliSelection(selectEl) {

@@ -237,6 +237,38 @@ namespace VibeRails.DTOs
         List<EnvironmentResponse> Environments
     );
 
+    // Shared launch-picker preferences. Keys intentionally match the browser's
+    // existing selection values (base:{cli} / env:{id}:{cli}) so saved ordering
+    // does not need a second identity scheme.
+    public record LlmPickerPreferenceItem(
+        string Key,
+        string Kind,
+        string Group,
+        string Label,
+        string Cli,
+        int? EnvironmentId,
+        bool Enabled,
+        int Order
+    );
+
+    public record LlmPickerPreferencesResponse(
+        List<LlmPickerPreferenceItem> Items
+    );
+
+    public record UpdateLlmPickerPreferencesRequest(
+        List<LlmPickerPreferenceItem>? Items
+    );
+
+    // Versioned document persisted in GlobalCache. Custom Environment visibility
+    // deliberately stays out of this document because Environments.Hidden remains
+    // the compatibility boundary for older clients.
+    public record LlmPickerPreferenceDocument(
+        int Version,
+        List<string> BaseOrder,
+        List<string> EnvironmentOrder,
+        List<string> DisabledBaseKeys
+    );
+
     // Hook Management DTOs
     public record HookFileStatusResponse(
         string Name,
@@ -1207,6 +1239,12 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(EnvironmentResponse))]
     [JsonSerializable(typeof(EnvironmentListResponse))]
     [JsonSerializable(typeof(List<EnvironmentResponse>))]
+    // Shared LLM picker preferences
+    [JsonSerializable(typeof(LlmPickerPreferenceItem))]
+    [JsonSerializable(typeof(List<LlmPickerPreferenceItem>))]
+    [JsonSerializable(typeof(LlmPickerPreferencesResponse))]
+    [JsonSerializable(typeof(UpdateLlmPickerPreferencesRequest))]
+    [JsonSerializable(typeof(LlmPickerPreferenceDocument))]
     // Jobs DTOs
     [JsonSerializable(typeof(JobTriggerDto))]
     [JsonSerializable(typeof(List<JobTriggerDto>))]

@@ -88,6 +88,13 @@ internal sealed class ManualTimeProvider : TimeProvider
 
     public override DateTimeOffset GetUtcNow() => _utcNow;
 
+    // Keep TimeProvider's monotonic clock aligned with the hand-controlled UTC clock. Production
+    // code that correctly uses GetTimestamp/GetElapsedTime can then share this fixture instead of
+    // falling back to wall-clock comparisons just to be testable.
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    public override long GetTimestamp() => _utcNow.UtcTicks;
+
     public void SetUtcNow(DateTimeOffset value) => _utcNow = value;
 
     public void Advance(TimeSpan value) => _utcNow += value;

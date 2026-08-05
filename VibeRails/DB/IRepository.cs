@@ -95,6 +95,15 @@ namespace VibeRails.DB
         Task SetGlobalCacheValueAsync(string key, string value, CancellationToken cancellationToken = default);
         Task<Dictionary<string, string>> GetAllGlobalCacheAsync(CancellationToken cancellationToken = default);
         Task RemoveGlobalCacheValueAsync(string key, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Atomically saves or removes the global LLM-picker document and applies
+        /// Environment visibility changes in the same SQLite transaction.
+        /// </summary>
+        Task SaveLlmPickerStateAsync(
+            string cacheKey,
+            string? preferenceJson,
+            IReadOnlyDictionary<int, bool> environmentHidden,
+            CancellationToken cancellationToken = default);
 
         // ChatSummary operations
         Task<ChatSummary> SaveChatSummaryAsync(ChatSummary chatSummary, CancellationToken cancellationToken = default);

@@ -183,7 +183,7 @@ public sealed class JobLaunchServiceTests
     [InlineData(JobRunStatus.Queued, 5)]
     public void ToExitCode_ReportsTheOutcomeDistinctly(JobRunStatus status, int expected)
     {
-        Assert.Equal(expected, JobRunner.ToExitCode(status));
+        Assert.Equal(expected, JobRunOutcome.ToExitCode(status));
     }
 
     private static Mock<IEnvironmentLaunchService> SuccessfulPipeline()

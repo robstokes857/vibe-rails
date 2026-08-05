@@ -27,15 +27,6 @@ public static class TokenSaverPauseRoutes
 {
     public const string ControlPathPrefix = "/llm/control/token-saver";
 
-    /// <summary>
-    /// True when <paramref name="path"/> targets the control prefix or one of its children. Shared
-    /// with <c>CookieAuthMiddleware</c> so the middleware answers these calls with status codes
-    /// rather than the HTML "auth required" page a tool caller cannot read.
-    /// </summary>
-    public static bool IsControlPath(string path) =>
-        path.Equals(ControlPathPrefix, StringComparison.OrdinalIgnoreCase)
-        || path.StartsWith(ControlPathPrefix + "/", StringComparison.OrdinalIgnoreCase);
-
     public static void Map(WebApplication app)
     {
         app.MapPost(ControlPathPrefix + "/pause", Handle(pause: true)).WithName("TokenSaverPause");

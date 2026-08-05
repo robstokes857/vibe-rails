@@ -21,4 +21,4 @@ across `install.ps1` and `install.sh` when changing model handling.
 
 ---
 
-*Last checked: 2026-08-04T19:38:40Z by opencode (glm-5.2)*
+*Last checked: 2026-08-05T13:55:33Z by opencode (glm-5.2)*

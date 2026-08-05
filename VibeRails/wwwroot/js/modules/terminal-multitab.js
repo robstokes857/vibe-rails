@@ -2,7 +2,6 @@ import { ChatHistorySidebar } from './chat-history-sidebar.js';
 import {
     buildLlmSelectionValue,
     parseLlmSelection,
-    populateLlmSelectionSelect,
     getCliBrand
 } from './utils.js';
 import { TabStatusController } from './terminal-tab-status.js';
@@ -93,6 +92,7 @@ class TerminalManager {
         this.stopBtn = null;
         this.controlsBar = null;
         this.headerSelect = null;
+        this._headerPickerDisposer = null;
         this.closeDot = null;
         this.minimizeDot = null;
         this.maximizeDot = null;
@@ -260,6 +260,8 @@ class TerminalManager {
         });
         this._pendingCloses.clear();
         this._stopUndoCountdown();
+        this._headerPickerDisposer?.();
+        this._headerPickerDisposer = null;
         if (this._undoBodyClickHandler) {
             document.removeEventListener('click', this._undoBodyClickHandler, true);
             this._undoBodyClickHandler = null;
@@ -1828,9 +1830,11 @@ class TerminalManager {
 
     populateSelect() {
         if (!this.headerSelect || this.headerSelect.tagName !== 'SELECT') return;
-        populateLlmSelectionSelect(this.headerSelect, this.app.data.environments || [], {
+        this._headerPickerDisposer?.();
+        this._headerPickerDisposer = this.app.llmPickerController.mount(this.headerSelect, {
+            context: 'terminal',
             placeholder: 'Select LLM...',
-            includeShell: true
+            includeDefaultSuffix: true
         });
     }
 
@@ -2065,11 +2069,7 @@ class TerminalManager {
             if (active && !active.state.hasActiveSession) {
                 this.launchSelection = active.state.selection || null;
             }
-            if (ts) {
-                ts.setValue(nextValue, true);
-            } else {
-                this.headerSelect.value = nextValue;
-            }
+            this.app.llmPickerController.setValue(this.headerSelect, nextValue);
         }
     }
 

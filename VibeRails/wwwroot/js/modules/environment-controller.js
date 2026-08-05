@@ -1,5 +1,3 @@
-import { enhanceLlmSelectWithTomSelect } from './utils.js';
-
 export class EnvironmentController {
     constructor(app) {
         this.app = app;
@@ -214,7 +212,7 @@ export class EnvironmentController {
                                 ? `<img class="env-cli-logo${iconLightClass}" src="${safeLogo}" alt="${safeBrandLabel} logo" loading="lazy">`
                                 : `<i class="fa-solid fa-terminal env-cli-logo-fallback" aria-hidden="true"></i>`;
                             const hiddenBadge = env.hidden
-                                ? `<span class="env-hidden-badge" title="Hidden from Environment select boxes" aria-label="Hidden from select boxes"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i></span>`
+                                ? `<span class="env-hidden-badge" title="Hidden from new launch pickers" aria-label="Hidden from new launch pickers"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i></span>`
                                 : '';
                             const customArgs = env.customArgs || '';
                             const prompt = env.customPrompt || '';
@@ -394,7 +392,7 @@ export class EnvironmentController {
                 cliSettings.initialMessage = env.customPrompt;
             }
             this.mergeOpencodeSettingsFromCustomArgs(cliSettings, env.customArgs || '');
-            // For pseudo-CLIs (GLM 5.2 / Kimi K3), force the model to the pinned value so
+            // For the GLM 5.2 pseudo-CLI, force the model to the pinned value so
             // the form always reflects the env type's contract — a saved --model that
             // drifted to a different provider would otherwise mislead the user.
             const pinnedModel = this.pinnedModelForCli(cliLower);
@@ -411,19 +409,10 @@ export class EnvironmentController {
         this.disposeEnvironmentFormLifecycle();
         const isEdit = mode === 'edit';
 
-        // CLI types selectable in the create-environment modal. `glm-5.2` and `kimi-k3` are
-        // OpenCode-backed pseudo-CLIs (they launch `opencode --model <pinned>`); they reuse
-        // the OpenCode settings form with the Model field pinned.
-        const cliOptions = [
-            { value: 'codex', label: 'Codex' },
-            { value: 'claude', label: 'Claude' },
-            { value: 'opencode', label: 'OpenCode' },
-            { value: 'glm-5.2', label: 'GLM 5.2' },
-            { value: 'kimi-k3', label: 'Kimi K3' },
-            { value: 'antigravity', label: 'Antigravity' },
-            { value: 'copilot', label: 'Copilot' }
-        ];
-        const initialCli = isEdit ? env.cli : cliOptions[0].value;
+        // Provider creation reuses the centralized catalog/order, but deliberately
+        // ignores launch visibility preferences and never includes plain Terminal.
+        const cliOptions = this.app.llmPickerController.getEnabledItems('environment-provider');
+        const initialCli = isEdit ? env.cli : (cliOptions[0]?.cli || 'claude');
         const title = isEdit ? `Edit Environment / Worker: ${env.name}` : 'Create Environment / Worker';
         const submitLabel = isEdit ? 'Save Changes' : 'Create Worker';
         const submitIcon = isEdit
@@ -440,13 +429,10 @@ export class EnvironmentController {
 
         const cliField = isEdit
             ? `<input type="text" class="form-control" value="${this.app.escapeHtml(env.cli)}" disabled>`
-            : `<select class="form-select" id="env-cli" required>
-                ${cliOptions.map(c => `<option value="${c.value}">${c.label}</option>`).join('')}
-              </select>`;
+            : '<select class="form-select" id="env-cli" required></select>';
 
         const customArgsValue = isEdit ? this.app.escapeHtml(env.customArgs || '') : '';
         const usesManagedArgs = this.usesManagedCustomArgs(initialCli);
-        const hiddenChecked = isEdit ? Boolean(env.hidden) : false;
 
         this.app.showModal(title, `
             <form id="env-form">
@@ -457,13 +443,6 @@ export class EnvironmentController {
                 <div class="mb-3">
                     <label class="form-label">CLI Type</label>
                     ${cliField}
-                </div>
-                <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="env-hidden" ${hiddenChecked ? 'checked' : ''}>
-                        <label class="form-check-label" for="env-hidden">Hide from Environment select boxes</label>
-                    </div>
-                    <small class="form-text text-muted">Keeps this environment out of the terminal/sandbox/automation LLM dropdowns when it gets too full. It can still be launched from here and used by Automations.</small>
                 </div>
                 <div class="mb-3" data-custom-args-group ${usesManagedArgs ? 'style="display: none;"' : ''}>
                     <label class="form-label">Custom Arguments</label>
@@ -480,12 +459,15 @@ export class EnvironmentController {
 
         const slot = document.querySelector('[data-cli-settings-slot]');
         let cliSelect = null;
+        let cliPickerDisposer = null;
 
         if (!isEdit) {
             cliSelect = document.getElementById('env-cli');
-            enhanceLlmSelectWithTomSelect(cliSelect, {
-                placeholder: 'Select CLI...',
-                cliKey: 'value'
+            cliPickerDisposer = this.app.llmPickerController.mount(cliSelect, {
+                context: 'environment-provider',
+                placeholder: null,
+                selectedValue: initialCli,
+                includeGroups: false
             });
             cliSelect.addEventListener('change', () => {
                 const cli = cliSelect.value;
@@ -511,9 +493,7 @@ export class EnvironmentController {
             lifecycleDisposed = true;
             keydownTarget.removeEventListener('keydown', handleEscape, true);
             closeButtons.forEach(button => button.removeEventListener('click', handleClose));
-            if (cliSelect?.tomselect && typeof cliSelect.tomselect.destroy === 'function') {
-                cliSelect.tomselect.destroy();
-            }
+            cliPickerDisposer?.();
             if (this.environmentFormLifecycleCleanup === disposeLifecycle) {
                 this.environmentFormLifecycleCleanup = null;
             }
@@ -558,10 +538,9 @@ export class EnvironmentController {
             const submissionGeneration = this.environmentFormRequestGeneration;
 
             try {
-                const hidden = document.getElementById('env-hidden')?.checked ?? false;
                 if (isEdit) {
                     const settingsPayload = this.extractCliSettingsPayload(env.cli);
-                    const payload = { ...this.buildEnvironmentSavePayload(env.cli, settingsPayload), hidden };
+                    const payload = this.buildEnvironmentSavePayload(env.cli, settingsPayload);
                     await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(env.name)}`, 'PUT', payload);
                     await this.saveCliSettings(env.cli, env.name, settingsPayload);
                 } else {
@@ -571,8 +550,7 @@ export class EnvironmentController {
                     const payload = {
                         name,
                         cli,
-                        ...this.buildEnvironmentSavePayload(cli, settingsPayload),
-                        hidden
+                        ...this.buildEnvironmentSavePayload(cli, settingsPayload)
                     };
                     await this.app.apiCall('/api/v1/environments', 'POST', payload);
                     await this.saveCliSettings(cli, name, settingsPayload);
@@ -613,12 +591,12 @@ export class EnvironmentController {
         return null;
     }
 
-    // GLM 5.2 and Kimi K3 are OpenCode-backed pseudo-CLIs: they launch `opencode` with a
+    // GLM 5.2 is an OpenCode-backed pseudo-CLI: it launches `opencode` with a
     // pinned --model flag. They share the OpenCode settings form, env handling, and arg
     // builder, so most call sites route through this helper instead of checking === 'opencode'.
     isOpencodeBackedCli(cli) {
         const cliLower = (cli || '').toLowerCase();
-        return cliLower === 'opencode' || cliLower === 'glm-5.2' || cliLower === 'kimi-k3';
+        return cliLower === 'opencode' || cliLower === 'glm-5.2';
     }
 
     // Returns the pinned provider/model ID for a pseudo-CLI, or null for plain OpenCode
@@ -626,7 +604,6 @@ export class EnvironmentController {
     pinnedModelForCli(cli) {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'glm-5.2') return 'zai/glm-5.2';
-        if (cliLower === 'kimi-k3') return 'moonshotai/kimi-k3';
         return null;
     }
 
@@ -1072,7 +1049,6 @@ export class EnvironmentController {
             ['gemini-3.1-pro', 'gemini-3.1-pro'],
             ['gemini-3-flash', 'gemini-3-flash'],
             ['gemini-2.5-pro', 'gemini-2.5-pro'],
-            ['kimi-k2.7-code', 'kimi-k2.7-code'],
             ['mai-code-1-flash', 'mai-code-1-flash'],
             ['raptor-mini', 'raptor-mini'],
         ];
@@ -1219,7 +1195,6 @@ export class EnvironmentController {
             ['openai/gpt-5.1-codex', 'openai/gpt-5.1-codex'],
             ['google/gemini-3-pro', 'google/gemini-3-pro'],
             ['zai/glm-5.2', 'zai/glm-5.2'],
-            ['moonshotai/kimi-k3', 'moonshotai/kimi-k3'],
             ['opencode/gpt-5.1-codex', 'opencode/gpt-5.1-codex (Zen)'],
         ];
         const known = new Set(options.map(([value]) => value));
@@ -1684,7 +1659,7 @@ export class EnvironmentController {
         if (this.isOpencodeBackedCli(cliLower)) {
             const initialMessage = this.app.escapeHtml(s.initialMessage || '');
             const pinnedModel = this.pinnedModelForCli(cliLower);
-            // For pseudo-CLIs (GLM 5.2 / Kimi K3) the model is pinned — show a read-only
+            // For the GLM 5.2 pseudo-CLI the model is pinned — show a read-only
             // display of the pinned provider/model instead of the editable dropdown, so
             // users can't accidentally switch a "GLM 5.2" env to a different model.
             const model = pinnedModel || (s.model || '');
@@ -1696,7 +1671,7 @@ export class EnvironmentController {
                    </select>
                    <small class="form-text text-muted">Passed as <code>--model provider/model</code>; leave blank for OpenCode's default</small>`;
             const headerLabel = pinnedModel
-                ? `${cliLower === 'glm-5.2' ? 'GLM 5.2' : 'Kimi K3'} CLI Settings`
+                ? 'GLM 5.2 CLI Settings'
                 : 'OpenCode CLI Settings';
             const agent = this.app.escapeHtml(s.agent || '');
             const additionalArgs = this.app.escapeHtml(s.additionalArgs || '');
@@ -1932,6 +1907,7 @@ export class EnvironmentController {
         try {
             const response = await this.app.apiCall('/api/v1/environments', 'GET');
             this.setEnvironments(response.environments || []);
+            await this.app.llmPickerController.refreshFromEnvironments(response.environments || []);
         } catch (error) {
             console.error('Failed to refresh environments:', error);
             // Keep the last known-good profiles. Clearing them after a successful edit can make

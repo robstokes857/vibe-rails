@@ -1,7 +1,4 @@
-import { populateLlmSelectionSelect, parseLlmSelection } from './utils.js';
-
-const DEFAULT_LEFT_VALUE = 'base:claude';
-const DEFAULT_RIGHT_VALUE = 'base:codex';
+import { parseLlmSelection } from './utils.js';
 
 export function renderTerminalMultiRunModalHtml() {
     return `
@@ -50,6 +47,8 @@ export class TerminalMultiRun {
         this._tom2 = null;
         this._input = null;
         this._runBtn = null;
+        this._pickerDisposers = [];
+        this._modalObserver = null;
         this._handleRun = this._handleRun.bind(this);
         this._handleKeydown = this._handleKeydown.bind(this);
     }
@@ -68,12 +67,21 @@ export class TerminalMultiRun {
         this._input = container.querySelector('#vb-multirun-input');
         this._runBtn = container.querySelector('#vb-multirun-run-btn');
 
-        this._tom1 = this._buildBaseCliSelect(this._cli1Select, DEFAULT_LEFT_VALUE);
-        this._tom2 = this._buildBaseCliSelect(this._cli2Select, DEFAULT_RIGHT_VALUE);
+        const enabledBaseItems = this.app.llmPickerController.getEnabledItems('multi-run');
+        const leftDefault = enabledBaseItems[0]?.key || '';
+        const rightDefault = enabledBaseItems[1]?.key || leftDefault;
+        this._tom1 = this._buildBaseCliSelect(this._cli1Select, leftDefault);
+        this._tom2 = this._buildBaseCliSelect(this._cli2Select, rightDefault);
 
         this._runBtn?.addEventListener('click', this._handleRun);
         this._input?.addEventListener('keydown', this._handleKeydown);
         this._input?.focus();
+
+        const modalRoot = container.querySelector('.vb-multirun-modal');
+        this._modalObserver = new MutationObserver(() => {
+            if (!modalRoot?.isConnected) this.dispose();
+        });
+        this._modalObserver.observe(container, { childList: true, subtree: true });
     }
 
     _buildBaseCliSelect(selectEl, defaultValue) {
@@ -81,13 +89,14 @@ export class TerminalMultiRun {
         // Empty environments list → only base CLIs render in the dropdown.
         // When sandboxes are tied to a CLI/env (see terminal-multirun.md), the
         // sandbox list goes here in a custom group.
-        populateLlmSelectionSelect(selectEl, [], {
+        const dispose = this.app.llmPickerController.mount(selectEl, {
+            context: 'multi-run',
             placeholder: null,
             includeGroups: false,
             includeDefaultSuffix: false,
-            selectedValue: defaultValue,
-            enhance: true
+            selectedValue: defaultValue
         });
+        this._pickerDisposers.push(dispose);
         return selectEl.tomselect || null;
     }
 
@@ -129,6 +138,7 @@ export class TerminalMultiRun {
             // matches expectation.
             await this._launchTab(sel1, prompt);
             await this._launchTab(sel2, prompt);
+            this.dispose();
             this.app.closeModal();
         } catch (error) {
             this.app.showError(`Failed to launch Multi Run: ${error.message}`);
@@ -158,5 +168,13 @@ export class TerminalMultiRun {
             workingDirectory
         });
         this.manager.updateUi();
+    }
+
+    dispose() {
+        this._modalObserver?.disconnect();
+        this._modalObserver = null;
+        this._pickerDisposers.splice(0).forEach((dispose) => dispose?.());
+        this._runBtn?.removeEventListener('click', this._handleRun);
+        this._input?.removeEventListener('keydown', this._handleKeydown);
     }
 }

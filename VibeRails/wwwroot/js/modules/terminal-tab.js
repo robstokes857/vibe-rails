@@ -139,7 +139,7 @@ export class TerminalTab {
     }
 
     _translateOpenCodeMouseWheel(data) {
-        // OpenCode's TUI (and the OpenCode-backed pseudo-CLIs Glm52/KimiK3)
+        // OpenCode's TUI (and the OpenCode-backed Glm52 pseudo-CLI)
         // intermittently routes SGR mouse wheel events to the input history
         // (cycling previous prompts) instead of the chat viewport. Once the
         // textarea grabs the events, the focus sticks and the user can't
@@ -162,7 +162,7 @@ export class TerminalTab {
         // through untouched. See runbooks/terminal/TERMINAL.md "OpenCode
         // mouse wheel" entry.
         const cli = (this.state.cli || '').toLowerCase();
-        if (cli !== 'opencode' && cli !== 'glm-5.2' && cli !== 'kimi-k3') {
+        if (cli !== 'opencode' && cli !== 'glm-5.2') {
             return data;
         }
         if (typeof data !== 'string' || data.indexOf('\x1b[<6') === -1) {

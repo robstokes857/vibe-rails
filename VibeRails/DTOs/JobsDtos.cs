@@ -29,6 +29,42 @@ public enum JobRunStatus
     Interrupted = 6
 }
 
+/// <summary>
+/// The shared outcome contract for a Job-run process: the exit code reported for each terminal
+/// <see cref="JobRunStatus"/> and the user-facing cancellation message. It lives beside the enum
+/// so JobStore's atomic completion SQL and the JobRunner agree on one mapping without the DB
+/// layer referencing Services.
+/// </summary>
+public static class JobRunOutcome
+{
+    public const string CancelledMessage = "Automation was cancelled.";
+
+    /// <summary>
+    /// Exit code for "this process had no run to execute" — the run id was missing from the DB, or
+    /// another process claimed it first. Deliberately distinct from every status code: nothing went
+    /// wrong with a run here, because no run was ever started by this process. Mapping it onto
+    /// <see cref="JobRunStatus.Queued"/> would tell a supervisor "still queued" for the
+    /// already-claimed case, which is the opposite of what happened.
+    /// </summary>
+    public const int CouldNotStartExitCode = 5;
+
+    /// <summary>
+    /// Exit codes are the contract for anything supervising this process, so they must be truthful
+    /// rather than uniformly 0 — a caller should not have to read SQLite to learn what happened.
+    /// Queued is unmapped on purpose: a process that reaches an exit code has, by definition, gone
+    /// past queued, so seeing it here means a caller passed a status that cannot occur.
+    /// </summary>
+    public static int ToExitCode(JobRunStatus status) => status switch
+    {
+        JobRunStatus.Succeeded => 0,
+        JobRunStatus.Failed => 1,
+        JobRunStatus.TimedOut => 2,
+        JobRunStatus.Cancelled => 3,
+        JobRunStatus.Interrupted => 4,
+        _ => CouldNotStartExitCode
+    };
+}
+
 // TimeoutMinutes is opt-in throughout: null means the run lives until its CLI exits or the user
 // closes its terminal window, which is the default. It is stored as 0 in SQLite (the column is NOT
 // NULL) and mapped back to null on read, so no migration was needed to make it optional.

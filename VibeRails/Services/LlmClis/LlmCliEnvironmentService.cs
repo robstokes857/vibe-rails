@@ -60,10 +60,9 @@ namespace VibeRails.Services.LlmClis
                 case LLM.OpenCode:
                     await _opencodeLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
                     break;
-                // Glm52/KimiK3 are OpenCode-backed pseudo-CLIs — delegate to the OpenCode
+                // Glm52 is an OpenCode-backed pseudo-CLI — delegate to the OpenCode
                 // environment so they share XDG_CONFIG_HOME isolation and config layout.
                 case LLM.Glm52:
-                case LLM.KimiK3:
                     await _opencodeLlmCliEnvironment.SaveEnvironment(environment, cancellationToken);
                     break;
                 default:
@@ -278,9 +277,9 @@ namespace VibeRails.Services.LlmClis
                 {
                     ["XDG_CONFIG_HOME"] = envPath
                 },
-                // Glm52/KimiK3 are OpenCode-backed pseudo-CLIs — share the same XDG_CONFIG_HOME
+                // Glm52 is an OpenCode-backed pseudo-CLI — share the same XDG_CONFIG_HOME
                 // isolation so per-env config/agents/commands/plugins stay separated.
-                LLM.Glm52 or LLM.KimiK3 => new Dictionary<string, string>
+                LLM.Glm52 => new Dictionary<string, string>
                 {
                     ["XDG_CONFIG_HOME"] = envPath
                 },

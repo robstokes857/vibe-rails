@@ -35,14 +35,4 @@ public sealed class LlmProxyZaiConfigTests
         Assert.Equal("session-\"quoted", headers.GetProperty("viberails_session").GetString());
         Assert.Equal("tab\\slash", headers.GetProperty("viberails_tab").GetString());
     }
-
-    [Theory]
-    [InlineData("/llm/zai", true)]
-    [InlineData("/LLM/ZAI/chat/completions", true)]
-    [InlineData("/llm/zaiish", false)]
-    [InlineData("/api/llm/zai", false)]
-    public void IsZaiProxyPath_RequiresAPathSegmentBoundary(string path, bool expected)
-    {
-        Assert.Equal(expected, LlmProxyZaiConfig.IsZaiProxyPath(path));
-    }
 }

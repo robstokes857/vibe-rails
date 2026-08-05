@@ -39,6 +39,7 @@ public interface IJobStore
     Task<int> FailStalledLaunchesAsync(TimeSpan grace, CancellationToken cancellationToken = default);
     Task<bool> StartRunAsync(string runId, int processId, CancellationToken cancellationToken = default);
     Task CompleteRunAsync(string runId, JobRunStatus status, int? exitCode, string? errorMessage, CancellationToken cancellationToken = default);
+    Task<JobRunStatus> CompleteIdleRunAsync(string runId, CancellationToken cancellationToken = default);
     Task<bool> RequestCancelAsync(string runId, CancellationToken cancellationToken = default);
     Task<bool> IsCancelRequestedAsync(string runId, CancellationToken cancellationToken = default);
 }
@@ -777,6 +778,52 @@ public sealed class JobStore : IJobStore
         command.Parameters.AddWithValue("$errorMessage", errorMessage is null ? DBNull.Value : errorMessage);
         command.Parameters.AddWithValue("$id", runId);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Finalizes a raw-output-idle Automation as success unless an explicit cancel is already
+    /// pending. The choice and terminal write happen in one SQLite statement, so cancellation
+    /// cannot slip between a separate check and a successful idle completion.
+    /// </summary>
+    public async Task<JobRunStatus> CompleteIdleRunAsync(
+        string runId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                UPDATE JobRuns SET
+                    Status = CASE WHEN CancelRequested = 1 THEN $cancelled ELSE $succeeded END,
+                    EndedUTC = $ended,
+                    ExitCode = CASE WHEN CancelRequested = 1 THEN $cancelExitCode ELSE 0 END,
+                    ErrorMessage = CASE WHEN CancelRequested = 1 THEN $cancelMessage ELSE NULL END
+                WHERE Id = $id AND Status IN ($running, $queued)
+                RETURNING Status;
+                """;
+            command.Parameters.AddWithValue("$cancelled", (int)JobRunStatus.Cancelled);
+            command.Parameters.AddWithValue("$succeeded", (int)JobRunStatus.Succeeded);
+            command.Parameters.AddWithValue("$running", (int)JobRunStatus.Running);
+            command.Parameters.AddWithValue("$queued", (int)JobRunStatus.Queued);
+            command.Parameters.AddWithValue("$ended", ToDb(DateTime.UtcNow));
+            command.Parameters.AddWithValue("$cancelExitCode", JobRunOutcome.ToExitCode(JobRunStatus.Cancelled));
+            command.Parameters.AddWithValue("$cancelMessage", JobRunOutcome.CancelledMessage);
+            command.Parameters.AddWithValue("$id", runId);
+
+            var updatedStatus = await command.ExecuteScalarAsync(cancellationToken);
+            if (updatedStatus is not null && updatedStatus is not DBNull)
+                return (JobRunStatus)Convert.ToInt32(updatedStatus, CultureInfo.InvariantCulture);
+        }
+
+        // Another terminal path may have won first (deadline/cancellation/reaper). Return that
+        // durable outcome rather than pretending this idle completion was the winner.
+        await using var readCommand = connection.CreateCommand();
+        readCommand.CommandText = "SELECT Status FROM JobRuns WHERE Id = $id;";
+        readCommand.Parameters.AddWithValue("$id", runId);
+        var existingStatus = await readCommand.ExecuteScalarAsync(cancellationToken);
+        return existingStatus is null || existingStatus is DBNull
+            ? JobRunStatus.Succeeded
+            : (JobRunStatus)Convert.ToInt32(existingStatus, CultureInfo.InvariantCulture);
     }
 
     public async Task<bool> RequestCancelAsync(string runId, CancellationToken cancellationToken = default)

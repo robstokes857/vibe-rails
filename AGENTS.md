@@ -86,7 +86,7 @@ vibe-rails/
 │   ├── DTOs/                       # Data transfer objects
 │   │   ├── ResponseRecords.cs      # API response types
 │   │   ├── Sandbox.cs              # Sandbox entity model
-│   │   ├── LLM.cs                  # LLM enum (Claude, Codex, Antigravity, Copilot, Shell, OpenCode, Glm52, KimiK3)
+│   │   ├── LLM.cs                  # LLM enum (NotSet, Codex, Claude, Antigravity, Copilot, Shell, OpenCode, Glm52)
 │   │   ├── LLM_Environment.cs      # Environment configuration
 │   │   ├── McpDtos.cs              # MCP protocol DTOs
 │   │   └── StateFileObject.cs
@@ -1187,8 +1187,8 @@ Current implementation:
 
 ---
 
-**Last Updated**: 2026-08-03
-**Version**: 1.9.9
+**Last Updated**: 2026-08-05
+**Version**: 1.9.10
 **Maintained By**: Robert Stokes
 
 ## Vibe Rails Rules
@@ -1196,4 +1196,4 @@ Current implementation:
 
 ---
 
-*Last checked: 2026-08-04T13:39:29Z by opencode (glm-5.2)*
+*Last checked: 2026-08-05T14:24:43Z by opencode (glm-5.2)*

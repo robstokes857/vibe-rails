@@ -184,7 +184,6 @@ public class CommandServiceTests : IDisposable
     [InlineData(LLM.Copilot)]
     [InlineData(LLM.OpenCode)]
     [InlineData(LLM.Glm52)]
-    [InlineData(LLM.KimiK3)]
     public async Task PrepareSession_NonClaude_DoesNotSetForceSyncOutputEnvVar(LLM llm)
     {
         var service = CreateService();
@@ -235,7 +234,6 @@ public class CommandServiceTests : IDisposable
     [Theory]
     [InlineData(LLM.OpenCode)]
     [InlineData(LLM.Glm52)]
-    [InlineData(LLM.KimiK3)]
     public async Task PrepareSession_OpenCodeBackedClis_AddVibeRailsMcpBeforeLaunch(LLM llm)
     {
         var service = CreateService();
@@ -328,16 +326,6 @@ public class CommandServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task PrepareSession_KimiK3_UsesOpencodeExecutableWithPinnedModel()
-    {
-        var service = CreateService();
-
-        var prepared = await service.PrepareSessionAsync(LLM.KimiK3, envName: null, extraArgs: null);
-
-        Assert.Equal("opencode --model=moonshotai/kimi-k3", prepared.LaunchCommand);
-    }
-
-    [Fact]
     public async Task PrepareSession_Glm52_PassesPromptViaPromptFlag()
     {
         var service = CreateService();
@@ -366,19 +354,6 @@ public class CommandServiceTests : IDisposable
             "test-tab-token",
             prepared.Environment[LocalLlmProxyContext.TabTokenVariable]);
         Assert.True(prepared.Environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable));
-    }
-
-    [Fact]
-    public async Task PrepareSession_KimiK3_DoesNotInjectZaiProxy()
-    {
-        // Kimi K3 runs through the moonshotai provider, not zai, so the Z.AI proxy config
-        // is irrelevant and must NOT be injected even when the proxy is enabled.
-        var service = CreateService(openCodeLlmProxyEnabled: true);
-
-        var prepared = await service.PrepareSessionAsync(LLM.KimiK3, envName: null, extraArgs: null);
-
-        Assert.False(prepared.OpenCodeProxyActive);
-        Assert.False(prepared.Environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable));
     }
 
     [Fact]

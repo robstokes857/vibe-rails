@@ -101,16 +101,4 @@ public static class LlmProxyZaiConfig
 
         return Encoding.UTF8.GetString(buffer.WrittenMemory.Span);
     }
-
-    /// <summary>
-    /// True when <paramref name="path"/> targets the zai proxy prefix or one of its children.
-    /// Shared with <c>CookieAuthMiddleware</c> so the middleware and route cannot drift apart
-    /// (mirrors <see cref="LlmProxyCodexConfig.IsOpenAiProxyPath"/>).
-    /// </summary>
-    public static bool IsZaiProxyPath(string path) =>
-        IsPathOrChild(path, ZaiProxyPath);
-
-    private static bool IsPathOrChild(string path, string prefix) =>
-        path.Equals(prefix, StringComparison.OrdinalIgnoreCase)
-        || path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase);
 }

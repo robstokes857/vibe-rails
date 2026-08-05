@@ -59,7 +59,6 @@ test.describe('Copilot environment form – Model field', () => {
             'gpt-5.4',
             'gpt-5.4-mini',
             'gpt-5-mini',
-            'kimi-k2.7-code',
         ];
 
         for (const value of expectedValues) {

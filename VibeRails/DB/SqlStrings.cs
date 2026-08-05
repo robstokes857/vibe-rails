@@ -1089,5 +1089,11 @@ namespace VibeRails.DB
             DELETE FROM GlobalCache
             WHERE Key = $key;
             """;
+
+        public const string UpdateEnvironmentHidden = """
+            UPDATE Environments
+            SET Hidden = $hidden
+            WHERE Id = $id;
+            """;
     }
 }

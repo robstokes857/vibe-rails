@@ -86,8 +86,7 @@ test('Automation maps every non-shell Environment CLI to the shared LLM enum val
         ['antigravity', 3],
         ['copilot', 4],
         ['opencode', 6],
-        ['glm-5.2', 7],
-        ['kimi-k3', 8]
+        ['glm-5.2', 7]
     ];
 
     for (const [cli, llm] of expected) {
@@ -202,7 +201,7 @@ test('Automation rows display every supported Environment provider', () => {
     };
     const providers = [
         [1, 'Codex'], [2, 'Claude'], [3, 'Antigravity'], [4, 'Copilot'],
-        [6, 'OpenCode'], [7, 'GLM 5.2'], [8, 'Kimi K3']
+        [6, 'OpenCode'], [7, 'GLM 5.2']
     ];
     controller.environments = providers.map(([llm, name], index) => ({
         id: index + 1,
@@ -223,7 +222,7 @@ test('Automation rows display every supported Environment provider', () => {
 
     controller.renderJobs();
 
-    for (const name of ['Codex', 'Claude', 'Antigravity', 'Copilot', 'OpenCode', 'GLM 5.2', 'Kimi K3']) {
+    for (const name of ['Codex', 'Claude', 'Antigravity', 'Copilot', 'OpenCode', 'GLM 5.2']) {
         assert.match(list.innerHTML, new RegExp(`>${name}<`));
     }
 });
@@ -275,10 +274,10 @@ test('Automations require a saved Environment and do not retain legacy base-CLI 
     app.data = { configs: { rootPath: '/derived/current-repo' }, isInGit: true };
     const controller = new JobController(app);
     const controls = new Map([
-        ['#job-llm-selection', { value: 'base:kimi-k3' }],
+        ['#job-llm-selection', { value: 'base:opencode' }],
         ['#job-trigger-schedule', { checked: false }],
         ['#job-trigger-commit', { checked: false }],
-        ['#job-name', { value: 'Kimi review' }],
+        ['#job-name', { value: 'Legacy review' }],
         ['#job-timeout', { value: '30' }],
         ['#job-enabled', { checked: true }]
     ]);
@@ -294,9 +293,9 @@ test('Automations require a saved Environment and do not retain legacy base-CLI 
 
     const legacyJob = {
         id: 99,
-        name: 'Legacy Kimi review',
+        name: 'Legacy review',
         projectPath: '/old/repository',
-        llm: 8,
+        llm: 6,
         environmentId: null,
         prompt: 'Keep this cached legacy security-review prompt.',
         executionMode: 0,

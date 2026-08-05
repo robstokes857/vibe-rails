@@ -15,6 +15,7 @@ namespace Pty.Net.Linux
         internal const uint TIOCSIG = 0x4004_5436;
         internal const ulong TIOCSWINSZ = 0x5414;
         internal const int SIGHUP = 1;
+        internal const int SIGKILL = 9;
 
         private const string LibSystem = "libc.so.6";
         private static readonly int SizeOfIntPtr = Marshal.SizeOf<IntPtr>();

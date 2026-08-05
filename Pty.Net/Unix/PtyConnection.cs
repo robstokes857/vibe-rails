@@ -78,6 +78,22 @@ namespace Pty.Net.Unix
         }
 
         /// <inheritdoc/>
+        public void KillProcessTree()
+        {
+            // The spawned child is a session leader (forkpty/login_tty), so its process-group id
+            // equals its pid and signalling the group (-pid) reaches the CLI's descendants — MCP
+            // servers, git, shells — which a single-pid Kill() would orphan. SIGKILL rather than
+            // SIGHUP because this path is the immediate-teardown contract: any polite hangup
+            // already happened upstream by the time tree termination is requested.
+            if (!this.KillProcessGroup(this.pid))
+            {
+                // Group signalling failed (e.g. the group is already gone); fall back to the
+                // platform's single-process termination so behavior degrades, not disappears.
+                this.Kill();
+            }
+        }
+
+        /// <inheritdoc/>
         public void Resize(int cols, int rows)
         {
             if (!this.Resize(this.controller, cols, rows))
@@ -107,6 +123,13 @@ namespace Pty.Net.Unix
         /// <param name="controller">The fd of the pty controller.</param>
         /// <returns>True if the function succeeded in killing the process, false otherwise.</returns>
         protected abstract bool Kill(int controller);
+
+        /// <summary>
+        /// OS-specific kill of the entire process group rooted at the session-leader child.
+        /// </summary>
+        /// <param name="pid">The id of the spawned process, which is also its process-group id.</param>
+        /// <returns>True if the signal was delivered, false otherwise.</returns>
+        protected abstract bool KillProcessGroup(int pid);
 
         /// <summary>
         /// OS-specific implementation of waiting on the given process id.

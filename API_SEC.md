@@ -2,6 +2,9 @@
 
 Audit date: 2026-08-01  
 Jobs inventory re-checked: 2026-08-03 (three run-history routes added; see § 3).  
+LLM proxy posture re-audited: 2026-08-05 (`/llm/openai` and `/llm/zai` removed from the
+`CookieAuthMiddleware` skip list; the § 1 conditional-response finding is resolved — see
+§§ 1–3).  
 Scope: the current working tree, including uncommitted changes.
 
 ## Terminology used in this report
@@ -47,17 +50,37 @@ lists.
   This is therefore **not** an unprotected endpoint, even though it uses neither normal
   credential.
 
-### Conditional unauthenticated responses on proxy routes
+### The complete middleware skip list (FROZEN — review gate)
 
-- `ANY /llm/openai/{**rest}`
-- `ANY /llm/zai/{**rest}`
+`CookieAuthMiddleware.InvokeAsync` bypasses authentication for exactly three cases, all
+already listed above:
 
-These two path trees bypass `CookieAuthMiddleware` and rely on the proxy's own two-header
-gate. However, each handler checks whether its proxy feature is enabled before invoking
-that gate. When the feature is disabled, an unauthenticated caller receives `404` before
-either token is checked. No proxy action or upstream data is available on that branch,
-but the `404` versus `401` response reveals whether the feature is enabled. When enabled,
-both credentials are required as listed in section 3.
+1. `path.StartsWith("/auth/bootstrap")` — protected by the one-time bootstrap code.
+2. `/health` (exact match, case-insensitive) — bare readiness probe.
+3. Every `OPTIONS` request — CORS preflights.
+
+**This list must not grow.** Any PR that adds a path or predicate to the skip condition
+in `CookieAuthMiddleware.InvokeAsync` is a security regression and must be rejected
+unless this document is amended with an explicit justification in the same PR. In
+particular, the `/llm/**` proxy trees were removed from this list on 2026-08-05 and must
+not return: the CLIs authenticate with the same session/tab secrets as every other
+caller, sent as headers, so nothing about the proxy requires a bypass.
+`Tests/Middleware/CookieAuthMiddlewareTests.cs` pins this invariant executable-y; the
+list here is the reviewable statement of intent.
+
+### Resolved findings
+
+- **Conditional unauthenticated responses on proxy routes** (reported 2026-08-01,
+  resolved 2026-08-05). `ANY /llm/openai/{**rest}` and `ANY /llm/zai/{**rest}` formerly
+  bypassed `CookieAuthMiddleware` and relied only on the proxy's in-handler two-header
+  gate; because each handler checked its feature flag before that gate, an
+  unauthenticated caller could distinguish `404` (feature disabled) from `401` (feature
+  enabled). No proxy action or upstream data was ever reachable on that branch — the
+  exposure was the one-bit feature oracle. Resolved by removing both trees from the skip
+  list: an unauthenticated caller now receives `401` from the middleware regardless of
+  feature state, and the feature-flag distinction is visible only to callers already
+  holding valid credentials. Both routes now appear in §§ 2–3 alongside
+  `/llm/anthropic`.
 
 ## 2. Exactly one credential, not both
 
@@ -75,13 +98,23 @@ There are **no mapped business `/api/v1` endpoints** in this category.
   `CookieAuthMiddleware`, while the tab-token rule intentionally excludes ordinary page
   and asset loads.
 
-### Conditional one-credential response on the Claude proxy
+### Conditional one-credential responses on the LLM proxies
 
-- `ANY /llm/anthropic/{**rest}` — the path is not on the middleware skip list, so a valid
-  `viberails_session` credential is always required. The handler checks its feature flag
-  before the proxy gate checks `viberails_tab`; when the feature is disabled, a caller
-  with only the session credential receives `404`. When enabled, the relay requires both
-  credentials as listed below.
+- `ANY /llm/anthropic/{**rest}`
+- `ANY /llm/openai/{**rest}` (on the middleware since 2026-08-05)
+
+No `/llm` path is on the middleware skip list, so a valid `viberails_session` credential
+(sent as a header by the CLIs) is always required before the handler runs. The
+middleware's tab rule keys off `/api/` appearing in the path, which no real Claude or
+Codex request path contains — so for these two trees the middleware enforces the session
+credential only. Each handler then checks its feature flag before the proxy gate checks
+both headers: a caller holding only the session credential sees `404` when the feature
+is disabled and `401` when it is enabled. When enabled, the relay requires both
+credentials as listed in section 3. (`/llm/zai` is stricter: every real OpenCode path
+contains `/api/`, so the middleware enforces both credentials — see section 3.)
+
+Auth failures anywhere under `/llm/**` return plain-text status codes, never the HTML
+auth page — every caller there is a CLI HTTP client or an MCP tool.
 
 ## 3. Both credentials
 
@@ -93,12 +126,15 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 ### Non-`/api/v1` API surfaces (7)
 
 - `MCP /mcp` — the Streamable HTTP MCP endpoint. The middleware also protects `/mcp/**`.
-- `ANY /llm/openai/{**rest}` — when enabled, the proxy's own gate requires both
-  `viberails_session` and `viberails_tab` as headers. `CookieAuthMiddleware` is bypassed.
-- `ANY /llm/anthropic/{**rest}` — when enabled, both headers are required by the proxy
-  gate; the session credential is also checked by `CookieAuthMiddleware`.
-- `ANY /llm/zai/{**rest}` — when enabled, the proxy's own gate requires both headers.
-  `CookieAuthMiddleware` is bypassed.
+- `ANY /llm/openai/{**rest}` — `CookieAuthMiddleware` checks the session credential
+  (skip-list removal, 2026-08-05); when enabled, the proxy's own gate then requires both
+  `viberails_session` and `viberails_tab` as headers.
+- `ANY /llm/anthropic/{**rest}` — same shape: the middleware checks the session
+  credential, and when enabled the proxy gate requires both headers.
+- `ANY /llm/zai/{**rest}` — the middleware checks the session credential, and because
+  every real OpenCode request path contains `/api/` (`/llm/zai/api/paas/v4/...`), the
+  middleware's tab rule applies too — both credentials are enforced before the handler
+  runs. When enabled, the proxy gate re-checks both.
 - `POST /llm/control/token-saver/pause` — both headers are required by the control
   handler's proxy auth gate.
 - `POST /llm/control/token-saver/resume` — both headers are required by the control
@@ -288,9 +324,11 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
   `viberails_tab`.
 - The normal `/api/v1/**` invariant is strong and simple: every mapped HTTP and WebSocket
   API is behind both session and tab validation before its handler runs.
-- The OpenAI and Z.AI proxy trees deliberately bypass the cookie middleware, but enabled
-  relay traffic is still protected by both values as custom headers. Their feature-disabled
-  `404` responses occur before the custom auth gate.
+- As of 2026-08-05, no `/llm` path bypasses `CookieAuthMiddleware`. All three proxy trees
+  clear the middleware with the same header-borne credentials the in-handler gate checks,
+  making the gate defense in depth rather than the only line. The feature-disabled `404`
+  is now observable only by callers that already hold valid credentials; unauthenticated
+  callers receive `401` from the middleware in every feature state.
 - `/auth/bootstrap` is excluded by `path.StartsWith("/auth/bootstrap")`, rather than an exact
   or path-segment-boundary check. Only the exact bootstrap route is currently mapped, so no
   additional application operation is exposed, but any future route or static file sharing

@@ -5,7 +5,42 @@
 // utils.js. Backend is spawned with VIBERAILS_TEST_FAKE_CLI=1 so the launches
 // run a portable echo+sleep instead of a real CLI.
 
-const { test, expect, selectors } = require('./fixtures');
+const { test, expect, selectors, newApiContext } = require('./fixtures');
+
+const PREFERENCES = '/api/v1/llm-picker/preferences';
+
+// The per-test preference resets below hit MACHINE-WIDE state on the developer's real
+// backend. Snapshot whatever the developer had before this file runs and put it back
+// afterwards, so test isolation cannot destroy their saved ordering/visibility.
+let savedPickerItems = null;
+
+test.beforeAll(async ({ playwright }) => {
+    const api = await newApiContext(playwright);
+    try {
+        const response = await api.get(PREFERENCES);
+        if (response.ok()) savedPickerItems = (await response.json()).items;
+    } finally {
+        await api.dispose();
+    }
+});
+
+test.afterAll(async ({ playwright }) => {
+    const api = await newApiContext(playwright);
+    try {
+        if (savedPickerItems) {
+            const restored = await api.put(PREFERENCES, { data: { items: savedPickerItems } });
+            if (!restored.ok()) {
+                console.warn(`[terminal-multirun spec] preference restore failed: ${restored.status()}`);
+            }
+        } else {
+            await api.delete(PREFERENCES);
+        }
+    } catch (error) {
+        console.warn('[terminal-multirun spec] preference restore failed:', error);
+    } finally {
+        await api.dispose();
+    }
+});
 
 async function navigateToDashboard(page) {
     await page.goto('/');
@@ -30,6 +65,7 @@ async function openMultiRunModal(page) {
 // tabs would throw off `toHaveCount(N)` expectations.
 test.beforeEach(async ({ context }) => {
     try {
+        await context.request.delete(PREFERENCES);
         const res = await context.request.get('/api/v1/terminal/tabs');
         if (res.ok()) {
             const data = await res.json();
@@ -41,6 +77,14 @@ test.beforeEach(async ({ context }) => {
         }
     } catch {
         // Best-effort cleanup; tests will fail loudly if state is wrong.
+    }
+});
+
+test.afterEach(async ({ context }) => {
+    try {
+        await context.request.delete(PREFERENCES);
+    } catch {
+        // Best-effort global preference isolation; afterAll restores the developer's state.
     }
 });
 
@@ -79,7 +123,7 @@ test.describe('terminal-multirun', () => {
         expect(sel2Value).toBe('base:codex');
     });
 
-    test('Multi Run dropdowns expose the five base CLIs and nothing else', async ({ page }) => {
+    test('Multi Run dropdowns expose every base LLM and nothing else', async ({ page }) => {
         await navigateToDashboard(page);
         await openMultiRunModal(page);
 
@@ -91,7 +135,14 @@ test.describe('terminal-multirun', () => {
         });
 
         expect(optionValues.sort()).toEqual(
-            ['base:claude', 'base:codex', 'base:copilot', 'base:antigravity', 'base:opencode'].sort()
+            [
+                'base:claude',
+                'base:codex',
+                'base:glm-5.2',
+                'base:opencode',
+                'base:copilot',
+                'base:antigravity'
+            ].sort()
         );
     });
 
