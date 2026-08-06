@@ -111,4 +111,4 @@ The extension ships the whole VibeRails backend inside the VSIX — there is **n
 
 ---
 
-*Last checked: 2026-08-05T13:55:33Z by opencode (glm-5.2)*
+*Last checked: 2026-08-06T18:21:17Z by opencode (glm-5.2)*

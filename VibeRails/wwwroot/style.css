@@ -4864,6 +4864,17 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     max-width: 760px;
 }
 
+/* The customizer's <form> wraps .modal-body + .modal-footer inside the
+   flex-column .modal-content, which breaks modal-dialog-scrollable: the form
+   (a flex item with min-height: auto) refuses to shrink, so long catalogs get
+   clipped by .modal-content's overflow: hidden instead of scrolling. Extend the
+   flex chain through the form so .modal-body's overflow-y: auto works again. */
+.llm-picker-customization-modal [data-llm-picker-form] {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
 .llm-picker-modal-section > h6 {
     margin-bottom: 8px;
     color: var(--color-text-muted);

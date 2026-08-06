@@ -105,6 +105,9 @@ Validation:
 `NativeConsoleOutputFilter.cs`
 - Not a consumer, but lives in `Consumers/`. Strips XTWINOPS window-geometry operations from PTY output on its way to the **real OS console** of a native session, so an inner app cannot resize the outer console window out from under the geometry poll. Narrow on purpose; `DbLoggingConsumer`, `WebSocketConsumer`, and `RemoteOutputConsumer` still receive the unmodified stream.
 
+`AutomationConsumer.cs`
+- Singleton that tracks raw PTY output for Automation (Job) terminals and requests Job host shutdown when a registered session produces no bytes for two minutes (`IdleTimeout`). Owns one timer shared by every registered session (`ScanInterval` = 1s); ordinary interactive terminals never register, so the timer never starts for them. `RegisterSession(sessionId)` returns a lightweight inner `SessionOutputConsumer` (`ITerminalConsumer`) that must be attached before the PTY read loop starts. Implements `IAutomationConsumer`, `IDisposable`.
+
 ### `TerminalRunner.cs`
 Session orchestrator.
 
@@ -408,4 +411,4 @@ These issues regressed in production-like usage and should be treated as guardra
 
 ---
 
-*Last checked: 2026-08-05T16:26:31Z by opencode (glm-5.2)*
+*Last checked: 2026-08-06T17:22:10Z by opencode (glm-5.2)*

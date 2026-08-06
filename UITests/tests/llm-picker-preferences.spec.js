@@ -104,6 +104,28 @@ test.describe('customizable LLM launch pickers', () => {
         expect(await optionValues(page, '#terminal-header-select')).toContain('base:shell');
     });
 
+    test('a short viewport scrolls the catalog instead of clipping it', async ({ page }) => {
+        // Short enough that the Base CLIs group alone overflows the dialog. The
+        // <form> wrapping .modal-body + .modal-footer used to break Bootstrap's
+        // modal-dialog-scrollable flex chain, clipping the list with no scrollbar.
+        await page.setViewportSize({ width: 900, height: 420 });
+        await openTerminal(page);
+        await openTomSelect(page, '#terminal-header-select');
+        await page.locator('.ts-dropdown:visible .llm-picker-customize-button').click();
+        const customizer = page.locator('.llm-picker-customization-modal');
+        await expect(customizer).toBeVisible();
+
+        // The footer must stay on-screen because the body absorbs the overflow…
+        await expect(customizer.locator('[data-llm-picker-action="save"]')).toBeInViewport();
+        expect(await customizer.locator('.modal-body').evaluate(
+            (element) => element.scrollHeight > element.clientHeight + 1)).toBe(true);
+
+        // …and every row must be reachable by scrolling that body.
+        const lastRow = customizer.locator('.llm-picker-modal-row').last();
+        await lastRow.scrollIntoViewIfNeeded();
+        await expect(lastRow).toBeInViewport();
+    });
+
     test('Cancel and a failed Save leave live picker state unchanged', async ({ page }) => {
         await openTerminal(page);
         const original = await optionValues(page, '#terminal-header-select');
