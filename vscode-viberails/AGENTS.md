@@ -83,4 +83,4 @@ Agent files (`agent.md`/`agents.md`) and their rules live in the **project (git 
 
 ---
 
-*Last checked: 2026-08-05T20:26:47Z by opencode (glm-5.2)*
+*Last checked: 2026-08-06T17:54:34Z by opencode (glm-5.2)*

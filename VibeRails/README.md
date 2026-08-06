@@ -127,7 +127,7 @@ VibeRails consists of four main components:
 **Frontend**
 - **Vanilla JavaScript** (ES6 modules, no frameworks)
 - **Bootstrap 5** for UI components
-- **Font Awesome 6** for icons
+- **Font Awesome 7** for icons
 - **XTerm.js** for terminal emulation
 
 **Extension**
@@ -170,7 +170,7 @@ Single-page application with:
 **Frontend Architecture:**
 ```
 wwwroot/
-├── app.js              # Main application (~1,250 lines)
+├── app.js              # Main application (~1,430 lines)
 ├── js/modules/         # ~40 ES modules, key ones:
 │   ├── terminal-multitab.js       (~121KB)  # Web terminal (multi-tab)
 │   ├── environment-controller.js  (~93KB)   # Environment CRUD + Web UI launch
@@ -915,10 +915,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Built with modern .NET 10.0, Native AOT compilation, and the Model Context Protocol for next-generation AI development workflows.
 
-**Last Updated**: 2026-08-05
-**Version**: 1.9.10
+**Last Updated**: 2026-08-06
+**Version**: 1.9.11
 **Maintained By**: Robert Stokes
 
 ---
 
-*Last checked: 2026-08-05T20:26:47Z by opencode (glm-5.2)*
+*Last checked: 2026-08-06T17:54:34Z by opencode (glm-5.2)*

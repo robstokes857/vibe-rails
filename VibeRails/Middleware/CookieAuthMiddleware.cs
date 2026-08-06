@@ -19,15 +19,17 @@ public class CookieAuthMiddleware
         var path = context.Request.Path.Value ?? "";
         var isWebSocketRequest = IsWebSocketHandshake(context);
 
-        // Skip auth ONLY for bootstrap (it mints the credentials), the bare readiness probe, and
-        // CORS preflights. This list is frozen: adding a path or predicate here is a security
+        // Skip auth ONLY for the exact GET bootstrap route (it mints the credentials), the exact
+        // GET readiness probe, and CORS preflights. This list is frozen: adding a path or
+        // predicate here is a security
         // regression (API_SEC.md § 1 is the authority and pins it). The /llm/** proxy trees are
         // deliberately NOT here — the CLIs send the session/tab tokens as headers, so they clear
         // this middleware like any other caller, and the proxy's own two-header gate re-checks
         // both behind it (removed from this list 2026-08-05).
-        if (path.StartsWith("/auth/bootstrap") ||
-            path.Equals("/health", StringComparison.OrdinalIgnoreCase) ||
-            context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
+        var isGetRequest = HttpMethods.IsGet(context.Request.Method);
+        if ((isGetRequest && path.Equals("/auth/bootstrap", StringComparison.OrdinalIgnoreCase)) ||
+            (isGetRequest && path.Equals("/health", StringComparison.OrdinalIgnoreCase)) ||
+            HttpMethods.IsOptions(context.Request.Method))
         {
             await _next(context);
             return;

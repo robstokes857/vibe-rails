@@ -535,20 +535,112 @@ submitted `Environments.Hidden` values in one SQLite transaction. The resolver i
 appends newly supported CLIs/Environments in canonical order, and returns contiguous positions to
 the browser. Reset removes the cache document and makes supported custom Environments visible.
 
+### Automated Jobs Tables
+
+Created by `JobStore.cs` (`JobStore.SchemaSql`), **not** `SqlStrings` — but they live in the same
+`state.db` and are initialized on first use by `JobStore`. These power the Automated Jobs feature
+(scheduled/triggered CLI sessions).
+
+**Jobs** — a scheduled/triggered automation definition.
+
+```sql
+CREATE TABLE IF NOT EXISTS Jobs (
+    Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    Name            TEXT    NOT NULL,
+    ProjectPath     TEXT    NOT NULL,
+    EnvironmentId   INTEGER,
+    TimeoutMinutes  INTEGER NOT NULL DEFAULT 60,
+    Enabled         INTEGER NOT NULL DEFAULT 0,
+    LaunchMinimized INTEGER NOT NULL DEFAULT 0,
+    CreatedUTC      TEXT    NOT NULL,
+    UpdatedUTC      TEXT    NOT NULL,
+    DeletedUTC      TEXT,
+    FOREIGN KEY (EnvironmentId) REFERENCES Environments(Id) ON DELETE SET NULL
+);
+```
+
+**Index:** `idx_jobs_project` on `(ProjectPath, Enabled, DeletedUTC)`
+
+**JobTriggers** — one or more triggers per Job (interval, scheduled, manual).
+
+```sql
+CREATE TABLE IF NOT EXISTS JobTriggers (
+    Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    JobId           INTEGER NOT NULL,
+    Kind            INTEGER NOT NULL,
+    ScheduleKind    INTEGER,
+    IntervalMinutes INTEGER,
+    LocalTime       TEXT,
+    DaysOfWeekMask  INTEGER NOT NULL DEFAULT 0,
+    TimeZoneId      TEXT,
+    NextRunUTC      TEXT,
+    LastRunUTC      TEXT,
+    FOREIGN KEY (JobId) REFERENCES Jobs(Id),
+    UNIQUE(JobId, Kind)
+);
+```
+
+**Index:** `idx_job_triggers_due` on `(Kind, NextRunUTC)`
+
+**JobRuns** — one row per executed job run. `SessionId` links back to `Sessions` (the
+`Sessions_LinkJobRunSession` trigger backlinks it atomically — see Sessions above).
+
+```sql
+CREATE TABLE IF NOT EXISTS JobRuns (
+    Id               TEXT PRIMARY KEY,
+    JobId            INTEGER NOT NULL,
+    TriggerKind      INTEGER NOT NULL,
+    TriggerKey       TEXT    NOT NULL UNIQUE,
+    Status           INTEGER NOT NULL,
+    JobName          TEXT    NOT NULL,
+    ProjectPath      TEXT    NOT NULL,
+    Llm              INTEGER NOT NULL,
+    EnvironmentId    INTEGER,
+    EnvironmentName  TEXT,
+    TimeoutMinutes   INTEGER NOT NULL,
+    SessionId        TEXT,
+    QueuedUTC        TEXT    NOT NULL,
+    StartedUTC       TEXT,
+    EndedUTC         TEXT,
+    ExitCode         INTEGER,
+    ErrorMessage     TEXT,
+    CancelRequested  INTEGER NOT NULL DEFAULT 0,
+    OwnerProcessId   INTEGER,
+    LaunchedUTC      TEXT,
+    LaunchMinimized  INTEGER NOT NULL DEFAULT 0,
+    DeletedUTC       TEXT,
+    FOREIGN KEY (JobId) REFERENCES Jobs(Id)
+);
+```
+
+**Indexes:** `idx_job_runs_queue` on `(Status, QueuedUTC)`, `idx_job_runs_job` on `(JobId, QueuedUTC DESC)`
+
+**JobSchedulerLease** — single-writer lease so only one process runs the job scheduler at a time.
+
+```sql
+CREATE TABLE IF NOT EXISTS JobSchedulerLease (
+    LeaseName  TEXT PRIMARY KEY,
+    OwnerId    TEXT NOT NULL,
+    ExpiresUTC TEXT NOT NULL
+);
+```
+
 ---
 
 ## Entity Relationships
 
-Environments, Sandboxes, AgentMetadata, TokenSavings, CompressionCaptures, CodeAnalyzerIgnores,
+Sandboxes, AgentMetadata, TokenSavings, CompressionCaptures, CodeAnalyzerIgnores,
 ProjectCache, and GlobalCache have **no foreign key relationships** — they are fully independent
-tables. Sessions reference environments and working directories by string value only — no FK
-constraints. Sandboxes reference projects by `ProjectPath` string value — no FK to any project
-table.
+tables. `Environments` is referenced by `Jobs.EnvironmentId` (`ON DELETE SET NULL` — see the
+Automated Jobs Tables above). Sessions reference environments and working directories by string
+value only — no FK constraints. Sandboxes reference projects by `ProjectPath` string value — no
+FK to any project table.
 
 The tables with actual FK constraints point at `Sessions.Id` (`SessionLogs`, `sessionOutPut`
 with `ON DELETE CASCADE`, `TerminalSessionLogs`, `UserInputs`) and at `UserInputs.Id`
 (`InputFileChanges`, whose `PreviousInputId` is a second FK to `UserInputs.Id` — not
-self-referential).
+self-referential). The Automated Jobs tables add two more FK chains: `Jobs.EnvironmentId →
+Environments(Id)` (`ON DELETE SET NULL`) and `JobTriggers.JobId` / `JobRuns.JobId → Jobs(Id)`.
 
 ```
 Environments              AgentMetadata
@@ -634,4 +726,4 @@ ChatSummary               TokenSavings / CompressionCaptures
 
 ---
 
-*Last checked: 2026-08-05T20:26:47Z by opencode (glm-5.2)*
+*Last checked: 2026-08-06T17:54:34Z by opencode (glm-5.2)*

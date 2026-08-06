@@ -26,10 +26,11 @@ arrival order:
 |      0 |   1512 |        5783642 | 2026-05-13 05:29:25.181 | Partial paint — bottom UI at rows 1-9. |
 |   1512 |   1974 |        5783643 | 2026-05-13 05:29:25.189 | Full paint — banner rows 1-3, bottom UI rows 7-15. |
 
-Both chunks start with `\e[H` (CUP home) and were emitted by Claude Code
-in response to a single SIGWINCH (rows 10 → 28). 7 ms apart. This is the
-"stacked repaints during drag-resize" bug. The canonical write-up is the
-`## 2026-05-15 Stacked repaints during drag-resize` entry in `TERMINAL.md`
+Both chunks contain `\e[H` (CUP home) near their start (each is preceded by an SGR color
+escape) and were emitted by Claude Code in response to a single SIGWINCH (rows 10 → 28).
+8 ms apart. This is the "stacked repaints during drag-resize" bug. The canonical write-up is
+the `## 2026-05-15 Stacked repaints during drag-resize — diagnosis, fix, and lessons` entry in
+`TERMINAL.md`
 — a fix has landed (an opt-in `2000` ms "extended" debounce option was added
 in `terminal-tab.js` alongside the `140` ms default) and is awaiting manual
 re-test. The original 2026-05-13 forensic entry is
@@ -52,4 +53,4 @@ var bytes = File.ReadAllBytes("runbooks/terminal/repro-fixtures/session_f3e25a1e
 
 ---
 
-*Last checked: 2026-08-05T20:26:47Z by opencode (glm-5.2)*
+*Last checked: 2026-08-06T17:54:34Z by opencode (glm-5.2)*

@@ -8,7 +8,7 @@ async function openCodexEnvironmentForm(page) {
     const environmentsNav = page.locator('.app-subnav-link[data-view="environments"]:visible');
     await expect(environmentsNav).toBeVisible({ timeout: 15_000 });
     await environmentsNav.click();
-    await expect(page.getByRole('heading', { name: /environments/i })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: /environment \/ workers/i })).toBeVisible({ timeout: 10_000 });
 
     await page.locator('[data-action="create-environment"]').click();
     await expect(page.locator('#env-form')).toBeVisible({ timeout: 5_000 });
@@ -66,5 +66,44 @@ test.describe('Codex environment form – Model field', () => {
 
         await modelSelect.selectOption('gpt-5.6-sol');
         await expect(maxOption).toBeEnabled();
+    });
+});
+
+test.describe('Environment form – visibility switch', () => {
+    test('the switch is present, defaults to visible, and posts hidden on create', async ({ page }) => {
+        await openCodexEnvironmentForm(page);
+
+        const hiddenSwitch = page.locator('#env-hidden');
+        await expect(hiddenSwitch).toBeVisible();
+        await expect(hiddenSwitch).not.toBeChecked();
+        await expect(page.locator('label[for="env-hidden"]')).toHaveText('Hide from launch pickers');
+
+        // Intercept the writes so the test never mutates real machine-wide state;
+        // the assertion is on the request payload, not the backend result.
+        let createPayload = null;
+        await page.route('**/api/v1/environments', async (route) => {
+            if (route.request().method() !== 'POST') return route.fallback();
+            createPayload = route.request().postDataJSON();
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    id: 424242, name: createPayload.name, cli: 'codex', path: '',
+                    customArgs: createPayload.customArgs || '', customPrompt: '',
+                    defaultPrompt: '', lastUsedUTC: new Date().toISOString(), hidden: true
+                })
+            });
+        });
+        await page.route('**/api/v1/codex/settings/**', (route) => route.fulfill({
+            status: 200, contentType: 'application/json', body: '{}'
+        }));
+
+        await page.locator('#env-name').fill('e2e-hidden-switch');
+        await hiddenSwitch.check();
+        await page.locator('#env-form button[type="submit"]').click();
+
+        await expect.poll(() => createPayload).not.toBeNull();
+        expect(createPayload.hidden).toBe(true);
+        await expect(page.locator('#env-form')).toHaveCount(0);
     });
 });

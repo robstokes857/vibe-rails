@@ -249,4 +249,4 @@ Then re-run the console app — the inference demo prints real ImageNet predicti
 
 ---
 
-**Last checked**: 2026-08-05T16:26:31Z by opencode (glm-5.2)
+**Last checked**: 2026-08-06T17:54:34Z by opencode (glm-5.2)

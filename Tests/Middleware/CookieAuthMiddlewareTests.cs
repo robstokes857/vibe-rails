@@ -60,6 +60,23 @@ public sealed class CookieAuthMiddlewareTests
         Assert.True(reachedNext[0]);
     }
 
+    [Theory]
+    [InlineData("POST", "/health")]
+    [InlineData("POST", "/auth/bootstrap")]
+    [InlineData("GET", "/auth/bootstrap/child")]
+    [InlineData("GET", "/auth/bootstrap-extra")]
+    public async Task OnlyExactGetProbeAndBootstrap_BypassAuthentication(string method, string path)
+    {
+        var middleware = Build(out var reachedNext);
+        var ctx = Request(path);
+        ctx.Request.Method = method;
+
+        await middleware.InvokeAsync(ctx);
+
+        Assert.False(reachedNext[0]);
+        Assert.Equal(403, ctx.Response.StatusCode);
+    }
+
     [Fact]
     public async Task Context_NowRequiresAuth()
     {
@@ -119,6 +136,20 @@ public sealed class CookieAuthMiddlewareTests
         await middleware.InvokeAsync(ctx);
 
         Assert.True(reachedNext[0]);
+    }
+
+    [Theory]
+    [InlineData("/api/v1/llm-picker/preferences")]
+    [InlineData("/api/v1/settings/export-data/progress")]
+    public async Task NewlyInventoriedApiRoutes_WithSessionTokenOnly_AreRejected(string path)
+    {
+        var middleware = Build(out var reachedNext);
+        var ctx = Request(path, session: Auth.GetInstanceToken());
+
+        await middleware.InvokeAsync(ctx);
+
+        Assert.False(reachedNext[0]);
+        Assert.Equal(401, ctx.Response.StatusCode);
     }
 
     [Theory]

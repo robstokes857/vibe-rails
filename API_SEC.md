@@ -1,10 +1,16 @@
 # API authentication coverage
 
-Audit date: 2026-08-01  
-Jobs inventory re-checked: 2026-08-03 (three run-history routes added; see § 3).  
+Audit date: 2026-08-06
+
+Jobs inventory re-checked: 2026-08-03 (three run-history routes added; see § 3).
+
 LLM proxy posture re-audited: 2026-08-05 (`/llm/openai` and `/llm/zai` removed from the
 `CookieAuthMiddleware` skip list; the § 1 conditional-response finding is resolved — see
-§§ 1–3).  
+§§ 1–3).
+
+Route inventory re-checked: 2026-08-06 (four mappings added: the three LLM-picker
+preference methods and the data-export progress route; see § 3).
+
 Scope: the current working tree, including uncommitted changes.
 
 ## Terminology used in this report
@@ -28,8 +34,8 @@ session-scoped browser credential (`viberails_tab`), which the implementation ca
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 142 mapped route
-surfaces in this inventory: 132 `/api/v1` method/path mappings, seven non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 146 mapped route
+surfaces in this inventory: 136 `/api/v1` method/path mappings, seven non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -55,8 +61,9 @@ lists.
 `CookieAuthMiddleware.InvokeAsync` bypasses authentication for exactly three cases, all
 already listed above:
 
-1. `path.StartsWith("/auth/bootstrap")` — protected by the one-time bootstrap code.
-2. `/health` (exact match, case-insensitive) — bare readiness probe.
+1. `GET /auth/bootstrap` (exact path match, case-insensitive) — protected by the one-time
+   bootstrap code.
+2. `GET /health` (exact path match, case-insensitive) — bare readiness probe.
 3. Every `OPTIONS` request — CORS preflights.
 
 **This list must not grow.** Any PR that adds a path or predicate to the skip condition
@@ -167,7 +174,7 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `GET /api/v1/rules`
 - `GET /api/v1/rules/details`
 
-### Application settings, PIN, export, and push (12)
+### Application settings, PIN, export, and push (13)
 
 - `GET /api/v1/settings`
 - `POST /api/v1/settings`
@@ -177,6 +184,8 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `POST /api/v1/settings/pin`
 - `DELETE /api/v1/settings/pin`
 - `POST /api/v1/settings/export-data` — mapped only by an active root-backend process.
+- `GET /api/v1/settings/export-data/progress` — mapped only by an active root-backend
+  process.
 - `POST /api/v1/push/send`
 - `GET /api/v1/update/check`
 - `GET /api/v1/update/version`
@@ -208,7 +217,7 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `GET /api/v1/sessions/{sessionId}/inputs`
 - `GET /api/v1/sessions/{sessionId}/output`
 
-### CLI and environment management (12)
+### CLI, environment, and LLM-picker management (15)
 
 - `GET /api/v1/environments`
 - `POST /api/v1/environments`
@@ -222,6 +231,9 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `PUT /api/v1/codex/settings/{envName}`
 - `GET /api/v1/claude/settings/{envName}`
 - `PUT /api/v1/claude/settings/{envName}`
+- `GET /api/v1/llm-picker/preferences`
+- `PUT /api/v1/llm-picker/preferences`
+- `DELETE /api/v1/llm-picker/preferences`
 
 ### Compression and token savings (6)
 
@@ -329,7 +341,6 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
   making the gate defense in depth rather than the only line. The feature-disabled `404`
   is now observable only by callers that already hold valid credentials; unauthenticated
   callers receive `401` from the middleware in every feature state.
-- `/auth/bootstrap` is excluded by `path.StartsWith("/auth/bootstrap")`, rather than an exact
-  or path-segment-boundary check. Only the exact bootstrap route is currently mapped, so no
-  additional application operation is exposed, but any future route or static file sharing
-  that prefix would also bypass the middleware.
+- The bootstrap and health bypasses now match only the exact, case-insensitive GET routes.
+  Other verbs and sibling paths such as `/auth/bootstrap-extra` remain behind the session
+  credential check (apart from the separately documented global `OPTIONS` behavior).

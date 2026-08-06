@@ -33,7 +33,7 @@
 ### Frontend
 - **Vanilla JavaScript** - No framework dependencies
 - **Bootstrap 5** - UI framework
-- **Font Awesome 6** - Icon library
+- **Font Awesome 7** - Icon library
 - **XTerm.js** - Terminal emulation in browser
 - **Fetch API** - REST API communication
 
@@ -350,14 +350,14 @@ example of a rule is never itself a rule.
 4. `CyclomaticComplexityUnder20` - Cyclomatic complexity < 20
 5. `CyclomaticComplexityUnder35` - Cyclomatic complexity < 35
 6. `CyclomaticComplexityUnder60` - Cyclomatic complexity < 60
-7. `CyclomaticComplexityDisabled` - Disable cyclomatic complexity checking
+7. `CyclomaticComplexityDisabled` - Cyclomatic complexity disabled
 8. `RequireTestCoverageMinimum50` - Require test coverage minimum 50%
 9. `RequireTestCoverageMinimum70` - Require test coverage minimum 70%
 10. `RequireTestCoverageMinimum80` - Require test coverage minimum 80%
 11. `RequireTestCoverageMinimum100` - Require test coverage minimum 100%
-12. `SkipTestCoverage` - Skip test coverage checking
-13. `PackageChangeDetected` - Detect changes to package/dependency files
-14. `CheckCommitMessageForWords` - Check commit message for forbidden words (CSV list)
+12. `SkipTestCoverage` - Skip test coverage
+13. `PackageChangeDetected` - Package file changes
+14. `CheckCommitMessageForWords` - Check commit message for
 
 **Enforcement Levels**:
 - `WARN` - Log warning, allow continuation
@@ -1187,8 +1187,8 @@ Current implementation:
 
 ---
 
-**Last Updated**: 2026-08-05
-**Version**: 1.9.10
+**Last Updated**: 2026-08-06
+**Version**: 1.9.11
 **Maintained By**: Robert Stokes
 
 ## Vibe Rails Rules
@@ -1196,4 +1196,4 @@ Current implementation:
 
 ---
 
-*Last checked: 2026-08-05T14:24:43Z by opencode (glm-5.2)*
+*Last checked: 2026-08-06T17:22:10Z by opencode (glm-5.2)*

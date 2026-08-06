@@ -25,4 +25,4 @@ complete files; change scoping belongs to VibeRails’ Git preflight integration
 
 ---
 
-*Last checked: 2026-08-05T20:26:47Z by opencode (glm-5.2)*
+*Last checked: 2026-08-06T18:21:17Z by opencode (glm-5.2)*
