@@ -176,6 +176,12 @@ export function buildLlmSelectionOptions(environments = [], options = {}) {
             return;
         }
 
+        // Automation Workers never appear in LLM/environment selects — they belong to
+        // the automation editor's Worker picker (pickers/worker-picker.js) only.
+        if (environment?.automationWorker) {
+            return;
+        }
+
         // Hidden environments are kept out of the dropdowns to keep them tractable. A
         // currently-selected hidden env is preserved separately by populateLlmSelectionSelect
         // so an existing reference (e.g. an Automation) is never silently dropped.

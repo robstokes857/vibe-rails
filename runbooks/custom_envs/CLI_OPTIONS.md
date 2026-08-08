@@ -394,23 +394,122 @@ provider/model. In the frontend, `isOpencodeBackedCli(cli)` routes it to the Ope
 in the backend, `CommandService.PrepareSession` maps the enum to `opencode` and injects the
 pinned `--model` for base CLI launches.
 
-## Environment Visibility (Hidden flag)
+## Environment Visibility (Hidden + AutomationWorker flags)
 
-Each environment carries a `Hidden` boolean (DB column `Environments.Hidden`, default 0; round-tripped
-through `EnvironmentResponse.Hidden` and `Create/UpdateEnvironmentRequest.Hidden`). It is **not** a CLI
-option — it never enters `CustomArgs` or any CLI config file. It is a UI-visibility flag owned by the
-environment modal.
+Each environment carries two UI-classification booleans. Neither is a CLI option — they never enter
+`CustomArgs` or any CLI config file.
 
-- The create/edit modal exposes it as a "Hide from Environment select boxes" switch.
-- When true, the environment is filtered out of the shared LLM/terminal Tom Select boxes built by
-  `buildLlmSelectionOptions` / `populateLlmSelectionSelect` in `utils.js` (terminal tab picker, sandbox
-  CLI picker, automation editor picker, chat-history filter). This is the single place to change if the
-  filtering rule ever needs adjusting.
+`Hidden` (DB column `Environments.Hidden`, default 0; round-tripped through
+`EnvironmentResponse.Hidden` and `Create/UpdateEnvironmentRequest.Hidden`):
+
+- The create/edit modal exposes it as a "Hide from launch pickers" switch (not rendered for
+  Workers — see below). The launch pickers' "Customize LLM list" modal writes the same column
+  through the preferences save.
+- When true, the environment is filtered out of the LLM/terminal launch pickers: the
+  preferences catalog resolves it `enabled: false`, and the legacy `buildLlmSelectionOptions` /
+  `populateLlmSelectionSelect` path in `utils.js` (chat-history filter etc.) skips it unless
+  `includeHidden: true`.
 - A hidden environment is **still** listed in the Environments table (with an eye-slash badge), still
   launchable from there ("Launch in external terminal" / "Web Terminal"), and still usable by Automations.
 - `populateLlmSelectionSelect` re-injects the currently-selected value's hidden environment so an
-  existing reference (e.g. an Automation already pinned to a hidden env) is never silently cleared when
-  the picker is rebuilt. Callers that want every environment regardless of the flag pass `includeHidden: true`.
+  existing reference is never silently cleared when the picker is rebuilt.
+
+`AutomationWorker` (DB column `Environments.AutomationWorker`, default 0; create-only via
+`CreateEnvironmentRequest.AutomationWorker` — there is no update-path field):
+
+- Marks a "Worker": an environment created from the Automation editor's "Add Worker" flow, named
+  after its automation (one-name rule — the shared modal renders no name row for it).
+- Workers are excluded from the LLM-picker preferences catalog server-side
+  (`LlmPickerPreferenceService.IsSupportedCustomEnvironment`), so they never appear in launch
+  pickers or the "Customize LLM list" modal regardless of `Hidden`, and preference saves can never
+  touch a Worker's `Hidden` value. `buildLlmSelectionOptions` skips them unconditionally too.
+- The automation editor's Worker picker (`js/modules/pickers/worker-picker.js`) lists every Worker
+  from `/api/v1/environments` — `hidden` has no effect there.
+- The Environments table shows Workers with a robot badge instead of the eye-slash badge.
+- Pre-flag environments referenced by existing automations are deliberately not backfilled; the
+  Worker picker resolves such a selection by id so it keeps working.
+
+## Workspace Mode (where an environment runs)
+
+`WorkspaceMode` (DB column `Environments.WorkspaceMode`, default 0; round-tripped through
+`EnvironmentResponse.WorkspaceMode` and `Create/UpdateEnvironmentRequest.WorkspaceMode`) decides
+the working directory. It applies to Workers exactly as it does to Environments — a nightly
+automation that clones fresh every run is the clearest case for it.
+
+| Value | Meaning |
+|:---:|---|
+| 0 | Project directory (default, original behaviour) |
+| 1 | Its own clone, created on first launch and reused |
+| 2 | Git clone and start fresh each run |
+
+Modes 1 and 2 are the same mechanism at different retention. Both create a row in `Sandboxes`
+owned by the environment (`EnvironmentId`), reuse `SandboxService` for the clone, and surface
+Diff / Merge / Push buttons on the environment's row in the Environments table. The Sandboxes card
+renders only sandboxes with a NULL owner, so a released workspace reappears there automatically.
+
+Things that will bite, and are intentional:
+
+- **On the wire it is an `int`, not the enum.** An unrecognised value is a 400 from explicit
+  validation (`TryParseWorkspaceMode`), never a 500 out of the deserializer.
+- **Nullable on update.** A cached client that omits it leaves the stored mode alone — switching
+  an environment into or out of a clone is never a side effect of saving something else. The
+  frontend omits the field entirely outside a git repo for the same reason.
+- **The clone is made on first launch, not at create time.** "Mode set, `workspaceSandboxId` null"
+  is the normal not-yet-provisioned state, not an error.
+- **Mode 2 clones the last commit only.** No uncommitted work, and no gitignored files — so no
+  `.env` and no local config. That is what "fresh" means, and it is the sharpest edge of the
+  feature.
+- **`--depth 1`** (inherited from `SandboxService`): the clone has no history, so an agent running
+  `git log` / `git blame` / `git diff main...HEAD` in there will not get what it expects.
+- **Submodules are not cloned** — `SandboxService` does not pass `--recurse-submodules`.
+- **Git hooks are not in a clone**, so Git Guard / VCA are not installed in the workspace.
+- **Retention is 3** (`RunWorkspaceService.MaxRetainedPerRunWorkspaces`), but it is a *soft* cap.
+  A workspace is kept past retention when it still has an open session in it
+  (`HasOpenSessionUnderDirectoryAsync`), when it is younger than
+  `RunWorkspaceService.MinimumPruneAge` (10 min — the gap between the clone finishing and the
+  CLI's session row appearing), or when the in-use check itself fails. Deleting a live run's
+  working tree is not a trade retention is allowed to make; Windows file locks would refuse it
+  anyway, but Linux would happily unlink the directory out from under a running agent.
+  Pruning only touches names `WorkspaceNameSlug.ForRun` produced **for that environment id**, so
+  a persistent workspace, a hand-attached sandbox, and another environment's clones are all
+  out of reach.
+- **Names are slugged, not shared, and identity lives in the id.** Environment names allow
+  spaces; sandbox names and git branch names do not. Slugging is lossy — "Nightly Review" and
+  "Nightly-Review" produce identical text — and the workspace root is a flat global
+  `sandboxes/{name}`, so every generated name carries `-e{environmentId}`. Run names add a
+  timestamp *and* a random token, because a timestamp alone has one-second precision and a burst
+  of automations starts inside the same second. `ForEnvironment` must stay deterministic: it is
+  re-derived on every launch to find a persistent workspace, and if it drifted the clone would be
+  re-made instead of reused.
+- **A workspace cannot be deleted from the Sandboxes card.** `DELETE /api/v1/sandboxes/{id}`
+  returns 409 for a sandbox with an owner, and the card does not render owned rows. Release it
+  first by changing the workspace mode or deleting the environment.
+- The environment credential directory (`~/.vibe_rails/envs/{name}`) is **never** cloned or
+  refreshed. Workspace mode is about the code, not the CLI's auth.
+
+`ProjectPath` (same migration batch) scopes an environment to the project it was created in.
+**NULL means it predates scoping and stays visible everywhere** — no backfill, so nothing
+disappears from a project where it was already in use.
+
+Scoping is enforced at every door, not just the list, because the underlying lookups are all
+global — the unique key is `(CustomName, LLM)` with no project in it, and automations persist a
+bare environment id:
+
+| Path | Where |
+|---|---|
+| List | `EnvironmentRoutes` GET `/environments` |
+| Read / update / delete by name | `EnvironmentRoutes.IsVisibleHere` — answers **404**, not 403, so a name's existence elsewhere stays private |
+| Launch (Env page *and* every Job/Worker run) | `EnvironmentLaunchService.ResolveEnvironmentAsync`, against the launch's project |
+| Automation create/update | `JobService.ValidateCommonAsync`, against the automation's own `ProjectPath` |
+| Picker catalog | `LlmPickerPreferenceService.GetScopedEnvironmentsAsync` |
+
+All of them go through `ProjectPathComparer.IsVisibleIn`. As with Workers, an out-of-scope
+environment is absent from the picker catalog entirely, so a preferences save can never rewrite
+another project's `Hidden` values.
+
+`ProjectPathComparer` folds case only on Windows and macOS. On Linux `/work/Foo` and `/work/foo`
+are different directories and must not be treated as one project — do not "simplify" that back to
+an unconditional `OrdinalIgnoreCase`.
 
 ## Launch Flow
 

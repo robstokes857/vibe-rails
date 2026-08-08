@@ -18,6 +18,9 @@ namespace VibeRails.DB
                 CreatedUTC TEXT NOT NULL,
                 LastUsedUTC TEXT NOT NULL,
                 Hidden INTEGER NOT NULL DEFAULT 0,
+                AutomationWorker INTEGER NOT NULL DEFAULT 0,
+                WorkspaceMode INTEGER NOT NULL DEFAULT 0,
+                ProjectPath TEXT,
                 UNIQUE(CustomName, LLM)
             )
             """;
@@ -26,6 +29,23 @@ namespace VibeRails.DB
         // be launched from the Environments page and referenced by Automations. Lives in
         // MigrationStatements so a legacy DB picks up the column via ALTER TABLE.
         public const string MigrateEnvironmentsAddHidden = "ALTER TABLE Environments ADD COLUMN Hidden INTEGER NOT NULL DEFAULT 0";
+        // Marks an environment as an Automation Worker (created from the Automation editor).
+        // Workers are excluded from every launch picker and from the LLM-picker preferences
+        // catalog regardless of Hidden; the automation editor's Worker picker lists them
+        // instead. Lives in MigrationStatements so a legacy DB picks up the column via ALTER.
+        public const string MigrateEnvironmentsAddAutomationWorker = "ALTER TABLE Environments ADD COLUMN AutomationWorker INTEGER NOT NULL DEFAULT 0";
+        // Where this environment runs: 0 = the project directory (the original behaviour),
+        // 1 = a persistent git clone reused across launches, 2 = a fresh clone per launch.
+        // Modes 1 and 2 are the same mechanism at different retention; both are backed by a
+        // row in Sandboxes whose EnvironmentId points here. Lives in MigrationStatements so a
+        // legacy DB picks up the column via ALTER TABLE.
+        public const string MigrateEnvironmentsAddWorkspaceMode = "ALTER TABLE Environments ADD COLUMN WorkspaceMode INTEGER NOT NULL DEFAULT 0";
+        // The project an environment belongs to. NULL means "created before environments were
+        // project-scoped" and stays visible everywhere — there is deliberately no backfill, so
+        // an existing environment never disappears from a project it was being used in.
+        // Cloning environments (WorkspaceMode 1/2) only make sense against the repo they were
+        // cloned from, which is what makes the scoping necessary rather than cosmetic.
+        public const string MigrateEnvironmentsAddProjectPath = "ALTER TABLE Environments ADD COLUMN ProjectPath TEXT";
         // Durable backstop for the create-time collision check: the env name maps to a
         // case-insensitive directory (envs/{name}/{llm}), so "Work" and "work" for the same
         // LLM would share a credential directory. Upgrades the case-sensitive UNIQUE(CustomName,
@@ -66,10 +86,18 @@ namespace VibeRails.DB
                 RemoteUrl TEXT,
                 SourceBranch TEXT,
                 CreatedUTC TEXT NOT NULL,
+                EnvironmentId INTEGER,
                 UNIQUE(Name, ProjectPath)
             )
             """;
         public const string CreateSandboxesIndex = "CREATE INDEX IF NOT EXISTS idx_sandboxes_project ON Sandboxes(ProjectPath)";
+        // The environment that owns this sandbox as its workspace. NULL is a standalone
+        // sandbox — the only kind that existed before the fold — and those keep behaving
+        // exactly as they always have, including the per-row "launch any CLI here" picker.
+        // No FK: deleting an environment orphans its workspace (sets this back to NULL)
+        // rather than cascading a multi-GB directory delete into the delete transaction.
+        public const string MigrateSandboxesAddEnvironmentId = "ALTER TABLE Sandboxes ADD COLUMN EnvironmentId INTEGER";
+        public const string CreateSandboxesEnvironmentIndex = "CREATE INDEX IF NOT EXISTS idx_sandboxes_environment ON Sandboxes(EnvironmentId)";
 
         // Sessions Table
         public const string CreateSessionsTable = """
@@ -548,7 +576,12 @@ namespace VibeRails.DB
             DropUserInputsFtsAfterUpdateTrigger,
             CreateEnvironmentsNameNoCaseUniqueIndex,
             MigrateCodeAnalyzerIgnoresAddMatchKind,
-            MigrateEnvironmentsAddHidden
+            MigrateEnvironmentsAddHidden,
+            MigrateEnvironmentsAddAutomationWorker,
+            MigrateEnvironmentsAddWorkspaceMode,
+            MigrateEnvironmentsAddProjectPath,
+            MigrateSandboxesAddEnvironmentId,
+            CreateSandboxesEnvironmentIndex
         ];
 
         /// <summary>
@@ -559,22 +592,22 @@ namespace VibeRails.DB
 
         // Environment CRUD (global)
         public const string InsertEnvironment = """
-            INSERT INTO Environments (CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden)
-            VALUES ($customName, $llm, $path, $customArgs, $customPrompt, $createdUTC, $lastUsedUTC, $hidden)
+            INSERT INTO Environments (CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath)
+            VALUES ($customName, $llm, $path, $customArgs, $customPrompt, $createdUTC, $lastUsedUTC, $hidden, $automationWorker, $workspaceMode, $projectPath)
             RETURNING Id;
             """;
         public const string SelectEnvironmentById = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
             FROM Environments
             WHERE Id = $id;
             """;
         public const string SelectEnvironmentByNameAndLlm = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
             FROM Environments
             WHERE CustomName = $customName AND LLM = $llm;
             """;
         public const string SelectEnvironmentByName = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
             FROM Environments
             WHERE CustomName = $customName
             ORDER BY LastUsedUTC DESC
@@ -584,19 +617,19 @@ namespace VibeRails.DB
         // name maps to a case-insensitive directory). NOCASE folds ASCII, matching the
         // validated env-name charset.
         public const string SelectEnvironmentByNameNoCase = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
             FROM Environments
             WHERE CustomName = $customName COLLATE NOCASE
             ORDER BY LastUsedUTC DESC
             LIMIT 1;
             """;
         public const string SelectAllEnvironments = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
             FROM Environments
             ORDER BY LastUsedUTC DESC;
             """;
         public const string SelectCustomEnvironments = """
-            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden
+            SELECT Id, CustomName, LLM, Path, CustomArgs, CustomPrompt, CreatedUTC, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath
             FROM Environments
             WHERE CustomName != 'Default'
               AND NOT (
@@ -615,7 +648,10 @@ namespace VibeRails.DB
                 CustomArgs = $customArgs,
                 CustomPrompt = $customPrompt,
                 LastUsedUTC = $lastUsedUTC,
-                Hidden = $hidden
+                Hidden = $hidden,
+                AutomationWorker = $automationWorker,
+                WorkspaceMode = $workspaceMode,
+                ProjectPath = $projectPath
             WHERE Id = $id;
             """;
         // Recency-only bookkeeping. Launches must never use UpdateEnvironment for this:
@@ -630,26 +666,38 @@ namespace VibeRails.DB
 
         // Sandbox CRUD (project-scoped)
         public const string InsertSandbox = """
-            INSERT INTO Sandboxes (Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC)
-            VALUES ($name, $path, $projectPath, $branch, $commitHash, $remoteUrl, $sourceBranch, $createdUTC)
+            INSERT INTO Sandboxes (Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC, EnvironmentId)
+            VALUES ($name, $path, $projectPath, $branch, $commitHash, $remoteUrl, $sourceBranch, $createdUTC, $environmentId)
             RETURNING Id;
             """;
         public const string SelectSandboxesByProject = """
-            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC
+            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC, EnvironmentId
             FROM Sandboxes
             WHERE ProjectPath = $projectPath
             ORDER BY CreatedUTC DESC;
             """;
         public const string SelectSandboxById = """
-            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC
+            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC, EnvironmentId
             FROM Sandboxes
             WHERE Id = $id;
             """;
         public const string SelectSandboxByNameAndProject = """
-            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC
+            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC, EnvironmentId
             FROM Sandboxes
             WHERE Name = $name AND ProjectPath = $projectPath;
             """;
+        // Workspaces owned by one environment, newest first. Mode 1 (persistent) expects at
+        // most one; mode 2 (per-run) accumulates them, and the retention pass prunes the tail.
+        public const string SelectSandboxesByEnvironmentId = """
+            SELECT Id, Name, Path, ProjectPath, Branch, CommitHash, RemoteUrl, SourceBranch, CreatedUTC, EnvironmentId
+            FROM Sandboxes
+            WHERE EnvironmentId = $environmentId
+            ORDER BY CreatedUTC DESC;
+            """;
+        // Deleting an environment releases its workspaces instead of cascading into a
+        // directory delete. The rows survive as standalone sandboxes so an unfinished run's
+        // work is never destroyed by a delete the user aimed at the environment.
+        public const string OrphanSandboxesByEnvironmentId = "UPDATE Sandboxes SET EnvironmentId = NULL WHERE EnvironmentId = $environmentId;";
         public const string DeleteSandbox = "DELETE FROM Sandboxes WHERE Id = $id;";
 
         // AgentMetadata CRUD
@@ -734,6 +782,19 @@ namespace VibeRails.DB
         public const string InsertSessionLog = """
             INSERT INTO SessionLogs (SessionId, Timestamp, Content, IsError)
             VALUES ($sessionId, $timestamp, $content, $isError);
+            """;
+        // Is anything still running inside this directory? Used before pruning a workspace: a
+        // retention count alone would happily delete the clone a live run is working in, and on
+        // Linux nothing at the filesystem level would stop it.
+        //
+        // Matches the directory itself or anything beneath it, because a CLI may chdir into a
+        // subdirectory. The LIKE prefix is passed pre-escaped by the caller ('\' as the escape
+        // character) since real paths can contain '%' and '_'.
+        public const string CountOpenSessionsUnderDirectory = """
+            SELECT COUNT(*)
+            FROM Sessions
+            WHERE EndedUTC IS NULL
+              AND (WorkingDirectory = $directory OR WorkingDirectory LIKE $directoryPrefix ESCAPE '\');
             """;
         public const string SelectOpenSessionCleanupCandidates = """
             SELECT s.Id, s.OwnerPid

@@ -207,14 +207,16 @@ test.describe('customizable LLM launch pickers', () => {
         await expect(page.locator('.ts-dropdown:visible .llm-picker-customize-button')).toBeVisible();
         await page.locator('#llm-picker-test-sandbox').evaluate((element) => element.tomselect.close());
 
+        // The automation editor's Worker picker is a separate component: only
+        // env:{id}:{cli} values (workers), never base CLIs, and no customization
+        // footer — it is not a launch picker.
         await page.evaluate(() => window.app.navigate('jobs', {}, { resetStack: true }));
         await expect(page.locator('.jobs-view[data-view="jobs"]')).toBeVisible({ timeout: 15_000 });
         await page.evaluate(() => window.app.jobController.openEditor());
         await expect(page.locator('#job-llm-selection')).toHaveCount(1);
         expect((await optionValues(page, '#job-llm-selection')).every((value) => value.startsWith('env:'))).toBe(true);
-        await openTomSelect(page, '#job-llm-selection');
-        await expect(page.locator('.ts-dropdown:visible .llm-picker-customize-button')).toBeVisible();
-        await page.locator('#job-llm-selection').evaluate((element) => element.tomselect.close());
+        expect(await page.locator('#job-llm-selection').evaluate((element) =>
+            Boolean(element.tomselect.dropdown.querySelector('.llm-picker-customize-button')))).toBe(false);
 
         await page.evaluate(() => window.app.navigate('terminal-focus', {}, { resetStack: true }));
         await expect(page.locator('#terminal-settings-btn')).toBeVisible({ timeout: 15_000 });
@@ -226,6 +228,13 @@ test.describe('customizable LLM launch pickers', () => {
 
         await page.evaluate(() => window.app.navigate('environments', {}, { resetStack: true }));
         await expect(page.locator('.view[data-view="environments"]')).toBeVisible({ timeout: 15_000 });
+
+        // The Environments screen has its own header entry point to the customizer.
+        await page.locator('[data-action="customize-llm-list"]').click();
+        await expect(page.locator('.llm-picker-customization-modal')).toBeVisible();
+        await page.locator('[data-llm-picker-action="cancel"]').last().click();
+        await expect(page.locator('.llm-picker-customization-modal')).toHaveCount(0);
+
         await page.locator('[data-action="create-environment"]').click();
         await page.waitForFunction(() => Boolean(document.querySelector('#env-cli')?.tomselect));
         const providerValues = await optionValues(page, '#env-cli');
@@ -236,35 +245,36 @@ test.describe('customizable LLM launch pickers', () => {
         await expect(page.locator('.ts-dropdown:visible .llm-picker-customize-button')).toHaveCount(0);
     });
 
-    test('an already-selected hidden Automation Environment is retained and labeled', async ({ page }) => {
+    test('the Worker picker ignores hidden and retains a legacy environment selection', async ({ page }) => {
         await openTerminal(page);
-        const snapshot = await page.evaluate(() => {
-            const controller = window.app.llmPickerController;
-            controller.catalog = [
-                ...controller.catalog,
-                {
-                    key: 'env:987:codex', kind: 'environment', group: 'Custom Environments',
-                    label: 'Archived worker (codex)', cli: 'codex', environmentId: 987,
-                    enabled: false, order: 999
-                }
+        const snapshot = await page.evaluate(async () => {
+            const { mountWorkerPicker } = await import('/js/modules/pickers/worker-picker.js');
+            const app = window.app;
+            app.data.environments = [
+                ...(app.data.environments || []),
+                { id: 987, name: 'Hidden worker', cli: 'codex', hidden: true, automationWorker: true },
+                { id: 988, name: 'Legacy env', cli: 'claude', hidden: false, automationWorker: false }
             ];
             const select = document.createElement('select');
-            select.id = 'hidden-automation-environment';
+            select.id = 'worker-picker-test';
             document.body.appendChild(select);
-            controller.mount(select, {
-                context: 'automation',
-                selectedValue: 'env:987:codex',
-                placeholder: 'Select an Environment...'
-            });
+            mountWorkerPicker(app, select, { selectedValue: 'env:988:claude' });
             return {
+                values: Array.from(select.querySelectorAll('option'))
+                    .map((option) => option.value).filter(Boolean),
                 value: select.tomselect.getValue(),
-                label: select.querySelector('option[value="env:987:codex"]')?.textContent
+                legacyLabel: select.querySelector('option[value="env:988:claude"]')?.textContent,
+                hasFooter: Boolean(select.tomselect.dropdown.querySelector('.llm-picker-customize-button'))
             };
         });
 
-        expect(snapshot.value).toBe('env:987:codex');
-        expect(snapshot.label).toContain('(hidden)');
-        await openTomSelect(page, '#hidden-automation-environment');
-        await expect(page.locator('.ts-dropdown:visible .llm-picker-customize-button')).toBeVisible();
+        // `hidden` has no power over the Worker picker…
+        expect(snapshot.values).toContain('env:987:codex');
+        // …a pre-flag environment already referenced by an automation keeps
+        // resolving with its real name…
+        expect(snapshot.value).toBe('env:988:claude');
+        expect(snapshot.legacyLabel).toContain('Legacy env');
+        // …and there is no customization footer (not a launch picker).
+        expect(snapshot.hasFooter).toBe(false);
     });
 });

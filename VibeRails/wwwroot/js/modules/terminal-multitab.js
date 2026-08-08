@@ -4,6 +4,7 @@ import {
     parseLlmSelection,
     getCliBrand
 } from './utils.js';
+import { mountLlmPicker, setLlmPickerValue } from './pickers/llm-picker.js';
 import { TabStatusController } from './terminal-tab-status.js';
 import { TerminalSettings, renderTerminalSettingsPanelHtml } from './terminal-settings.js';
 import { TerminalMenu } from './terminal-menu.js';
@@ -1831,7 +1832,7 @@ class TerminalManager {
     populateSelect() {
         if (!this.headerSelect || this.headerSelect.tagName !== 'SELECT') return;
         this._headerPickerDisposer?.();
-        this._headerPickerDisposer = this.app.llmPickerController.mount(this.headerSelect, {
+        this._headerPickerDisposer = mountLlmPicker(this.app, this.headerSelect, {
             context: 'terminal',
             placeholder: 'Select LLM...',
             includeDefaultSuffix: true
@@ -2069,7 +2070,7 @@ class TerminalManager {
             if (active && !active.state.hasActiveSession) {
                 this.launchSelection = active.state.selection || null;
             }
-            this.app.llmPickerController.setValue(this.headerSelect, nextValue);
+            setLlmPickerValue(this.app, this.headerSelect, nextValue);
         }
     }
 

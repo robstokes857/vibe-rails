@@ -1,5 +1,6 @@
 using VibeRails.DB;
 using VibeRails.DTOs;
+using VibeRails.Utils;
 
 namespace VibeRails.Services.Jobs;
 
@@ -255,7 +256,7 @@ public sealed class JobService(
         var projectPath = await ValidateProjectAsync(request.ProjectPath, cancellationToken);
         var (llm, prompt) = await ValidateCommonAsync(
             request.Name, request.EnvironmentId, request.TimeoutMinutes, request.Triggers,
-            requireEnvironmentPrompt, cancellationToken);
+            projectPath, requireEnvironmentPrompt, cancellationToken);
         return request with
         {
             Name = request.Name.Trim(),
@@ -271,7 +272,7 @@ public sealed class JobService(
         var projectPath = await ValidateProjectAsync(request.ProjectPath, cancellationToken);
         var (llm, prompt) = await ValidateCommonAsync(
             request.Name, request.EnvironmentId, request.TimeoutMinutes, request.Triggers,
-            requireEnvironmentPrompt, cancellationToken);
+            projectPath, requireEnvironmentPrompt, cancellationToken);
         return request with
         {
             Name = request.Name.Trim(),
@@ -287,6 +288,7 @@ public sealed class JobService(
         int? environmentId,
         int? timeoutMinutes,
         IReadOnlyList<JobTriggerRequest>? triggers,
+        string projectPath,
         bool requireEnvironmentPrompt,
         CancellationToken cancellationToken)
     {
@@ -300,8 +302,14 @@ public sealed class JobService(
         if (environmentId is null)
             throw JobServiceException.BadRequest("Choose an Environment.");
 
+        // Scoped to the automation's own project. The id arrives from the client, and
+        // GetAllEnvironmentsAsync is global, so an id from another project would otherwise be
+        // accepted here and then launched — with that environment's arguments and permissions —
+        // on every run. Environments with a null ProjectPath predate scoping and stay usable.
         var environment = (await repository.GetAllEnvironmentsAsync(cancellationToken))
-            .FirstOrDefault(item => item.Id == environmentId.Value)
+            .FirstOrDefault(item =>
+                item.Id == environmentId.Value
+                && ProjectPathComparer.IsVisibleIn(item.ProjectPath, projectPath))
             ?? throw JobServiceException.BadRequest("The selected Environment no longer exists.");
 
         resolvedLlm = environment.LLM;

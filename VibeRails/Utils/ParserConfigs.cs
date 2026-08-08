@@ -141,6 +141,7 @@ namespace VibeRails.Utils
         }
 
         private static bool _remoteAccess = false;
+        private static bool _routeThroughVibeRailsAi = false;
         private static string _apiKey = string.Empty;
         private static bool _useVsCodeTheme = false;
         private static string _frontendUrl = string.Empty;
@@ -152,6 +153,14 @@ namespace VibeRails.Utils
         public static void SetRemoteAccess(bool value)
         {
             _remoteAccess = value;
+        }
+        public static bool GetRouteThroughVibeRailsAi()
+        {
+            return _routeThroughVibeRailsAi;
+        }
+        public static void SetRouteThroughVibeRailsAi(bool value)
+        {
+            _routeThroughVibeRailsAi = value;
         }
         public static string GetApiKey()
         {

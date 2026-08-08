@@ -13,6 +13,7 @@ using VibeRails.Interfaces;
 using VibeRails.Routes;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
+using VibeRails.Services.Workspaces;
 using VibeRails.Utils;
 using Xunit;
 
@@ -44,6 +45,9 @@ public sealed class EnvironmentRoutesDeletionTests
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton<IRepository>(repository.Object);
         builder.Services.AddSingleton<IJobStore>(jobStore.Object);
+        // Strict: this request is rejected before the workspace is ever consulted, so any call
+        // here would mean validation started mutating workspace state on its way to a 400.
+        builder.Services.AddSingleton(new Mock<IRunWorkspaceService>(MockBehavior.Strict).Object);
 
         await using var app = builder.Build();
         EnvironmentRoutes.Map(app);
@@ -414,6 +418,8 @@ public sealed class EnvironmentRoutesDeletionTests
                 CustomPrompt TEXT NOT NULL DEFAULT '',
                 CreatedUTC TEXT NOT NULL,
                 LastUsedUTC TEXT NOT NULL,
+                Hidden INTEGER NOT NULL DEFAULT 0,
+                AutomationWorker INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(CustomName, LLM)
             );
             """;

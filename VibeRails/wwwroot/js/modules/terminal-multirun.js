@@ -1,3 +1,4 @@
+import { getEnabledLlmItems, mountLlmPicker } from './pickers/llm-picker.js';
 import { parseLlmSelection } from './utils.js';
 
 export function renderTerminalMultiRunModalHtml() {
@@ -67,7 +68,7 @@ export class TerminalMultiRun {
         this._input = container.querySelector('#vb-multirun-input');
         this._runBtn = container.querySelector('#vb-multirun-run-btn');
 
-        const enabledBaseItems = this.app.llmPickerController.getEnabledItems('multi-run');
+        const enabledBaseItems = getEnabledLlmItems(this.app, 'multi-run');
         const leftDefault = enabledBaseItems[0]?.key || '';
         const rightDefault = enabledBaseItems[1]?.key || leftDefault;
         this._tom1 = this._buildBaseCliSelect(this._cli1Select, leftDefault);
@@ -89,7 +90,7 @@ export class TerminalMultiRun {
         // Empty environments list → only base CLIs render in the dropdown.
         // When sandboxes are tied to a CLI/env (see terminal-multirun.md), the
         // sandbox list goes here in a custom group.
-        const dispose = this.app.llmPickerController.mount(selectEl, {
+        const dispose = mountLlmPicker(this.app, selectEl, {
             context: 'multi-run',
             placeholder: null,
             includeGroups: false,

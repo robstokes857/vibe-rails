@@ -1,18 +1,42 @@
 using System.Text.RegularExpressions;
+using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Utils;
 
 namespace VibeRails.Services
 {
+    /// <summary>
+    /// How one sandbox differs from the default, user-created kind.
+    /// </summary>
+    /// <param name="CopyDirtyFiles">
+    /// Whether the source project's dirty and untracked files are copied over the clone.
+    /// True for a user-created sandbox: it is meant to continue the work in progress. False for
+    /// an environment workspace in <see cref="DTOs.EnvironmentWorkspaceMode.PerRun"/> mode,
+    /// where the entire point is a pristine tree — copying local mess in would defeat "fresh".
+    /// Note the cost of false: no .env, no gitignored config. See the workspace docs.
+    /// </param>
+    /// <param name="EnvironmentId">
+    /// The environment this sandbox is a workspace for, or null for a standalone sandbox.
+    /// </param>
+    public sealed record SandboxCreateOptions(
+        bool CopyDirtyFiles = true,
+        int? EnvironmentId = null);
+
     public interface ISandboxService
     {
-        Task<Sandbox> CreateSandboxAsync(string name, string projectPath, CancellationToken ct = default);
+        Task<Sandbox> CreateSandboxAsync(string name, string projectPath, SandboxCreateOptions? options = null, CancellationToken ct = default);
         Task DeleteSandboxAsync(int sandboxId, CancellationToken ct = default);
         Task<List<Sandbox>> GetSandboxesAsync(string projectPath, CancellationToken ct = default);
         Task<SandboxDiffResult> GetDiffAsync(int sandboxId, CancellationToken ct = default);
         Task<string> PushToRemoteAsync(int sandboxId, CancellationToken ct = default);
         Task<string> MergeLocallyAsync(int sandboxId, CancellationToken ct = default);
+        /// <summary>
+        /// Deletes a sandbox without letting failure propagate, returning whether it succeeded.
+        /// Used when releasing an environment's workspaces: the directory is very often still
+        /// locked by a CLI running inside it, and that must not fail the environment delete.
+        /// </summary>
+        Task<bool> TryDeleteSandboxAsync(int sandboxId, CancellationToken ct = default);
     }
 
     public class SandboxDiffFile
@@ -59,8 +83,9 @@ namespace VibeRails.Services
             _sandboxBasePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sandboxBasePath));
         }
 
-        public async Task<Sandbox> CreateSandboxAsync(string name, string projectPath, CancellationToken ct = default)
+        public async Task<Sandbox> CreateSandboxAsync(string name, string projectPath, SandboxCreateOptions? options = null, CancellationToken ct = default)
         {
+            options ??= new SandboxCreateOptions();
             ValidateSandboxName(name);
 
             // Check for duplicate
@@ -82,8 +107,10 @@ namespace VibeRails.Services
             // Shallow clone from local repo
             await RunGitCloneAsync(projectPath, sandboxPath, branch, ct);
 
-            // Get dirty + untracked files from source and copy them over
-            await CopyDirtyFilesAsync(projectPath, sandboxPath, ct);
+            // Get dirty + untracked files from source and copy them over. Skipped for a
+            // per-run workspace, whose contract is a tree matching the last commit exactly.
+            if (options.CopyDirtyFiles)
+                await CopyDirtyFilesAsync(projectPath, sandboxPath, ct);
 
             // If the source project has a real remote, point the sandbox at it
             // (the clone's origin currently points at the local filesystem path)
@@ -103,10 +130,32 @@ namespace VibeRails.Services
                 SourceBranch = branch,
                 CommitHash = commitHash,
                 RemoteUrl = remoteUrl,
-                CreatedUTC = DateTime.UtcNow
+                CreatedUTC = DateTime.UtcNow,
+                EnvironmentId = options.EnvironmentId
             };
 
             return await _repository.SaveSandboxAsync(sandbox, ct);
+        }
+
+        public async Task<bool> TryDeleteSandboxAsync(int sandboxId, CancellationToken ct = default)
+        {
+            try
+            {
+                await DeleteSandboxAsync(sandboxId, ct);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // Logged, not swallowed. The overwhelmingly common cause is a CLI still holding
+                // files open inside the clone, and the caller's fallback (leaving the row as a
+                // standalone sandbox) is what makes that recoverable — the user can delete it
+                // from the Sandboxes card once the process exits.
+                Log.Warning(
+                    ex,
+                    "[Sandbox] Could not delete sandbox {SandboxId}; it stays listed so it can be removed later",
+                    sandboxId);
+                return false;
+            }
         }
 
         public async Task DeleteSandboxAsync(int sandboxId, CancellationToken ct = default)

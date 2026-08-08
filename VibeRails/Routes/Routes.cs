@@ -32,6 +32,7 @@ public static class RouteExtensions
         LlmSettingsRoutes.Map(app);
         UpdateRoutes.Map(app);
         AppSettingsRoutes.Map(app);
+        HttpRelayRoutes.Map(app);
         // Active root backend only: terminal-tab children do not serve the Settings workflow.
         // More than one root backend can coexist, so DataExportService also holds an OS-backed
         // lock beside state.db across snapshot, upload, and cleanup.

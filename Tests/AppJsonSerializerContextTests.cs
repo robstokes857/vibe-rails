@@ -87,7 +87,20 @@ public sealed class AppJsonSerializerContextTests
         Assert.NotNull(dto);
         Assert.Null(dto!.ClearApiKey);
         Assert.Null(dto.RemoveCoAuthorTrailers);
+        Assert.Null(dto.RouteThroughVibeRailsAi);
         Assert.False(dto.DataExportConfigured);
+    }
+
+    [Fact]
+    public void AppSettingsDto_HttpRelaySetting_UsesTheAppAotContext()
+    {
+        var dto = JsonSerializer.Deserialize(
+            """{"remoteAccess":false,"apiKey":"","useVsCodeTheme":false,"mcpEnabled":true,"computerName":"","routeThroughVibeRailsAi":true}""",
+            AppJsonSerializerContext.Default.AppSettingsDto);
+
+        Assert.NotNull(dto);
+        Assert.True(dto!.RouteThroughVibeRailsAi);
+        Assert.False(new VibeRails.Utils.Settings().RouteThroughVibeRailsAi);
     }
 
     [Fact]

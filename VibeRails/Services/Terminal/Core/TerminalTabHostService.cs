@@ -9,6 +9,7 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.AgentTools;
+using VibeRails.Services.Workspaces;
 
 namespace VibeRails.Services.Terminal;
 
@@ -32,6 +33,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     private readonly IAppEventBus _appEventBus;
     private readonly ILocalToolApiContext _toolApiContext;
     private readonly ITokenSavingsStore _tokenSavings;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly SemaphoreSlim _createGate = new(1, 1);
     private readonly Lock _lock = new();
     private readonly Dictionary<string, TerminalChildProcess> _tabs = new(StringComparer.Ordinal);
@@ -47,13 +49,15 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         ILocalClientTracker localClientTracker,
         IAppEventBus appEventBus,
         ILocalToolApiContext toolApiContext,
-        ITokenSavingsStore tokenSavings)
+        ITokenSavingsStore tokenSavings,
+        IServiceScopeFactory scopeFactory)
     {
         _httpClientFactory = httpClientFactory;
         _localClientTracker = localClientTracker;
         _appEventBus = appEventBus;
         _toolApiContext = toolApiContext;
         _tokenSavings = tokenSavings;
+        _scopeFactory = scopeFactory;
         _launchDirectory = Directory.GetCurrentDirectory();
         _tabsOwnerId = $"terminal-tabs:{Environment.ProcessId}";
     }
@@ -165,13 +169,64 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             throw new InvalidOperationException("CLI type is required.");
         }
 
+        // Resolve the tab BEFORE provisioning. Workspace resolution can clone a whole
+        // repository, and doing that for a tab id that turns out not to exist would burn
+        // minutes and disk on a request that was always going to 404.
         var child = GetChildOrThrow(tabId);
+
+        // Resolved here rather than in the browser: the frontend always sends the project root,
+        // and an environment's workspace mode is server state. Doing the swap at this seam keeps
+        // in-app tabs consistent with external launches without the client knowing about clones.
+        request = await ApplyWorkspaceAsync(request, cancellationToken);
+
         return await SendTerminalStatusRequestAsync(
             child,
             HttpMethod.Post,
             "/api/v1/terminal/start",
             request,
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Redirects a start request into the environment's workspace when it has one. Returns the
+    /// request unchanged for a plain CLI, an unknown environment, or Project mode — the common
+    /// case pays one environment lookup and nothing else.
+    /// </summary>
+    private async Task<StartTerminalRequest> ApplyWorkspaceAsync(
+        StartTerminalRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.EnvironmentName))
+            return request;
+
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var llm = scope.ServiceProvider.GetRequiredService<ILlmParser>().Parse(request.Cli);
+        if (llm == LLM.NotSet || llm == LLM.Shell)
+            return request;
+
+        var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
+        var environment = await repository.GetEnvironmentByNameAndLlmAsync(
+            request.EnvironmentName,
+            llm,
+            cancellationToken);
+
+        if (environment is null || !environment.UsesWorkspaceClone)
+            return request;
+
+        var projectPath = string.IsNullOrWhiteSpace(request.WorkingDirectory)
+            ? _launchDirectory
+            : request.WorkingDirectory;
+
+        var workspaceService = scope.ServiceProvider.GetRequiredService<IRunWorkspaceService>();
+        var workspace = await workspaceService.ResolveAsync(environment, projectPath, cancellationToken);
+
+        // The route turns this into a 400 carrying the reason, which is what the user needs to
+        // see — starting the tab in the project directory instead would silently write the
+        // agent's changes to the very tree the workspace exists to protect.
+        if (!workspace.Success)
+            throw new InvalidOperationException(workspace.Error);
+
+        return request with { WorkingDirectory = workspace.WorkingDirectory };
     }
 
     public async Task<TerminalStatusResponse> StopSessionAsync(string tabId, CancellationToken cancellationToken = default)

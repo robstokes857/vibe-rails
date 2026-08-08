@@ -5068,6 +5068,25 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     flex: 0 0 auto;
 }
 
+.env-worker-badge {
+    display: inline-flex;
+    align-items: center;
+    color: var(--color-accent);
+    font-size: 0.8rem;
+    flex: 0 0 auto;
+}
+
+/* Marks an environment that runs in a git clone rather than the project directory.
+   Stacks alongside the worker/hidden badges rather than replacing them: whether
+   something is a Worker and where it runs are independent facts. */
+.env-workspace-badge {
+    display: inline-flex;
+    align-items: center;
+    color: var(--color-success, #4caf50);
+    font-size: 0.8rem;
+    flex: 0 0 auto;
+}
+
 .env-command-cell {
     white-space: normal;
 }
@@ -8046,6 +8065,102 @@ input.form-control:disabled {
 
 .settings-save-bar .btn {
     flex-shrink: 0;
+}
+
+/* ── HTTP relay test modal ───────────────────────────────────────────────── */
+.http-relay-test-modal {
+    display: grid;
+    gap: 1rem;
+}
+
+.http-relay-test-controls {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) auto;
+    align-items: end;
+    gap: 1rem;
+}
+
+.http-relay-test-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.http-relay-results {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.http-relay-result {
+    min-width: 0;
+    padding: 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--color-bg-base) 72%, transparent);
+}
+
+.http-relay-result[data-state="running"] {
+    border-color: color-mix(in srgb, var(--color-primary) 58%, var(--color-border));
+}
+
+.http-relay-result[data-state="success"] {
+    border-color: color-mix(in srgb, var(--color-success) 58%, var(--color-border));
+}
+
+.http-relay-result[data-state="error"] {
+    border-color: color-mix(in srgb, var(--color-danger) 58%, var(--color-border));
+}
+
+.http-relay-result-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.45rem;
+}
+
+.http-relay-result-heading span,
+.http-relay-result-target,
+.http-relay-result summary {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.http-relay-result-target {
+    min-height: 2.2em;
+    margin-bottom: 0.5rem;
+    overflow-wrap: anywhere;
+    font-family: var(--vb-font-mono);
+}
+
+.http-relay-result details {
+    margin-bottom: 0.5rem;
+}
+
+.http-relay-result pre {
+    max-height: 14rem;
+    margin: 0.35rem 0 0;
+    padding: 0.6rem;
+    overflow: auto;
+    border-radius: 4px;
+    background: var(--color-bg-base);
+    color: var(--color-text);
+    font: 0.72rem/1.45 var(--vb-font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+    .http-relay-test-controls,
+    .http-relay-results {
+        grid-template-columns: 1fr;
+    }
+
+    .http-relay-test-actions {
+        justify-content: flex-start;
+    }
 }
 
 /* ── PIN Entry Modal ──────────────────────────────────────────────────────── */
@@ -13945,18 +14060,26 @@ body.git-guard-focus-active #app-content {
     min-width: 0;
 }
 
+/* Worker preview: a real card surface — the earlier translucent version was hard
+   to read against the editor gradient. */
 .job-environment-preview {
     min-height: 52px;
-    padding: 0.7rem 0.8rem;
-    border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--color-border);
     border-radius: 8px;
-    background: color-mix(in srgb, var(--color-bg-base) 42%, transparent);
+    background: var(--color-bg-surface);
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--color-text, #f8fafc) 4%, transparent) inset;
+    color: var(--color-text);
+    font-size: 0.82rem;
+}
+
+.job-environment-preview[data-tone="empty"] {
     color: var(--color-text-muted);
-    font-size: 0.74rem;
 }
 
 .job-environment-preview[data-tone="ready"] {
     border-color: color-mix(in srgb, var(--color-success) 34%, var(--color-border));
+    background: color-mix(in srgb, var(--color-success) 4%, var(--color-bg-surface));
 }
 
 .job-environment-preview[data-tone="warning"] {
@@ -14145,6 +14268,20 @@ body.git-guard-focus-active #app-content {
     height: 32px;
     padding: 0;
     place-items: center;
+}
+
+/* Enabled/disabled toggle reads by color at a glance: green = enabled,
+   red = disabled. A subtle fill keeps the state visible without hover. */
+.job-toggle-action.btn-outline-success {
+    background: color-mix(in srgb, var(--color-success, #22c55e) 12%, transparent);
+}
+
+.job-toggle-action.btn-outline-danger {
+    background: color-mix(in srgb, var(--color-danger, #ef4444) 12%, transparent);
+}
+
+.job-toggle-action i {
+    font-size: 1rem;
 }
 
 .job-provider,

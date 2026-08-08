@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS Environments (
     CreatedUTC   TEXT    NOT NULL,
     LastUsedUTC  TEXT    NOT NULL,
     Hidden       INTEGER NOT NULL DEFAULT 0,
+    AutomationWorker INTEGER NOT NULL DEFAULT 0,
+    WorkspaceMode INTEGER NOT NULL DEFAULT 0,
+    ProjectPath  TEXT,
     UNIQUE(CustomName, LLM)
 );
 ```
@@ -65,6 +68,57 @@ share a credential directory.
 UI-visibility flag, not a CLI option — it never enters `CustomArgs`. Existing saved references are
 still rendered with a hidden label, and provider creation/history filters do not inherit this
 visibility. Added via the `MigrateEnvironmentsAddHidden` ALTER TABLE migration.
+
+`AutomationWorker` (0/1) marks an environment created from the Automation editor to back an
+automation ("Worker"). Set at creation only (`CreateEnvironmentRequest`; no update-path field).
+Workers are excluded from the LLM-picker preferences catalog entirely
+(`LlmPickerPreferenceService.IsSupportedCustomEnvironment`) — regardless of `Hidden` — so they
+never appear in launch pickers or the "Customize LLM list" modal; the automation editor's Worker
+picker lists them from `/api/v1/environments` instead. Added via the
+`MigrateEnvironmentsAddAutomationWorker` ALTER TABLE migration. Environments that predate the flag
+are deliberately NOT backfilled.
+
+`WorkspaceMode` (0/1/2) is where the environment's CLI runs — see `EnvironmentWorkspaceMode`:
+
+| Value | Name | Behavior |
+|:---:|---|---|
+| 0 | `Project` | Runs in the project directory. The original behavior and the default. |
+| 1 | `Persistent` | One git clone, created on first launch and reused by every launch after. |
+| 2 | `PerRun` | A fresh clone per launch, pristine (no dirty-file copy), older ones pruned. |
+
+Modes 1 and 2 are the **same mechanism at different retention** — both are backed by a row in
+`Sandboxes` whose `EnvironmentId` points back here, and both reuse `SandboxService` wholesale for
+the clone, path containment, and Windows read-only handling. `RunWorkspaceService` owns only the
+questions SandboxService has no opinion on: which name (`WorkspaceNameSlug` — env names allow
+spaces, sandbox names and git branches do not), whether to reuse, and what to prune. Added via
+`MigrateEnvironmentsAddWorkspaceMode`.
+
+`ProjectPath` scopes an environment to one project. **NULL means "predates project scoping" and
+stays visible everywhere** — there is deliberately no backfill, so an environment already in use
+never vanishes from a project. Every environment created from now on carries the project it was
+created in. Filtering happens in the route/service layer (`ProjectPathComparer.IsVisibleIn`), not
+in SQL, so `SelectAllEnvironments` and `SelectCustomEnvironments` stay project-agnostic. Added via
+`MigrateEnvironmentsAddProjectPath`.
+
+Workspace lifecycle rules worth not regressing:
+
+- The clone is **never** made at environment-create time — only on first launch, where there is a
+  progress surface and a failure can be reported against that launch.
+- Changing `WorkspaceMode` **detaches** the old workspace (`EnvironmentId → NULL`) but never
+  deletes it. The clone may hold uncommitted work; changing a dropdown is not consent to destroy it.
+- Deleting an environment **releases** its workspaces: orphan the rows first, then best-effort
+  delete each directory. A clone still locked by a running CLI simply survives as a standalone
+  sandbox instead of failing the delete.
+- Retention never deletes a workspace with an open session under it, one younger than
+  `RunWorkspaceService.MinimumPruneAge`, or one whose in-use check failed. The cap is a
+  disk-space policy, not a licence to destroy an in-flight run's working tree.
+- `DELETE /api/v1/sandboxes/{id}` refuses (409) a sandbox that has an owner. A workspace is
+  released by re-moding or deleting its environment, never by deleting it out from under one.
+
+Scoping is enforced on every path that resolves an environment — list, read/update/delete by
+name, launch, and automation validation — because all the underlying lookups are global. See
+`ProjectPathComparer.IsVisibleIn`; the by-name routes answer 404 rather than 403 so a name's
+existence in another project is not itself disclosed.
 
 **LLM enum** (stored as integer):
 
@@ -86,7 +140,7 @@ visibility. Added via the `MigrateEnvironmentsAddHidden` ALTER TABLE migration.
 | `GetEnvironmentByNameAndLlmAsync(name, llm)` | Lookup by the unique `(CustomName, LLM)` pair |
 | `GetOrCreateEnvironmentAsync(name, llm)` | Lookup, then create if missing. Bumps `LastUsedUTC` if found. |
 | `SaveEnvironmentAsync` | `INSERT ... RETURNING Id` |
-| `UpdateEnvironmentAsync` | Full field update by `Id` (CustomName, LLM, Path, CustomArgs, CustomPrompt, LastUsedUTC, Hidden) |
+| `UpdateEnvironmentAsync` | Full field update by `Id` (CustomName, LLM, Path, CustomArgs, CustomPrompt, LastUsedUTC, Hidden, AutomationWorker, WorkspaceMode, ProjectPath) |
 | `TouchEnvironmentLastUsedAsync(id)` | Recency-only bookkeeping — stamps `LastUsedUTC` without touching any other column (launches must never use `UpdateEnvironmentAsync` for this) |
 | `DeleteEnvironmentAsync` | Delete by `Id` — **no deletion guard at DB layer**. The "cannot delete Default" and "not referenced by Automations" rules are in `EnvironmentRoutes.cs`. |
 
@@ -104,9 +158,10 @@ A **Sandbox** is an isolated git clone of a project where users can run parallel
 | **Global storage** | Sandbox directories live at `~/.vibe_rails/sandboxes/{name}`, NOT inside the project directory. |
 | **Project scoping** | `ProjectPath` links a sandbox to its source project. API queries filter by current project path. |
 | **Shallow clone** | Created via `git clone --depth 1 --branch {branch} --single-branch` for fast creation. |
-| **Dirty files** | All dirty + untracked files from the source project are copied into the sandbox after cloning. |
+| **Dirty files** | Copied into the sandbox after cloning — but only when `SandboxCreateOptions.CopyDirtyFiles` is true. A `PerRun` environment workspace sets it false: "fresh" means the committed tree and nothing else. |
 | **Deletion** | Deleting a sandbox removes both the directory (`Directory.Delete(recursive: true)`) and the DB record. |
 | **Name validation** | Names must match `^[a-zA-Z0-9_-]+$` (alphanumeric, hyphens, underscores, no spaces). |
+| **Ownership** | `EnvironmentId` NULL = standalone sandbox (the pre-fold kind, created from the Sandboxes card, launchable with any CLI). NOT NULL = an environment's workspace, driven by that environment instead. |
 
 ### Technical Details
 
@@ -122,13 +177,20 @@ CREATE TABLE IF NOT EXISTS Sandboxes (
     RemoteUrl   TEXT,
     SourceBranch TEXT,
     CreatedUTC  TEXT    NOT NULL,
+    EnvironmentId INTEGER,
     UNIQUE(Name, ProjectPath)
 );
 ```
 
-`RemoteUrl` and `SourceBranch` are added via `ALTER TABLE` migrations (safe to re-run).
+`RemoteUrl`, `SourceBranch`, and `EnvironmentId` are added via `ALTER TABLE` migrations (safe to
+re-run).
 
-**Index:** `idx_sandboxes_project` on `(ProjectPath)`
+`EnvironmentId` deliberately has **no foreign key**: deleting an environment orphans its workspace
+(sets this back to NULL) rather than cascading a multi-GB directory delete into the delete
+transaction. Orphaning is also what makes the UI coherent — the Sandboxes card renders exactly the
+rows with a NULL owner, so a released workspace simply reappears there.
+
+**Index:** `idx_sandboxes_project` on `(ProjectPath)`, `idx_sandboxes_environment` on `(EnvironmentId)`
 
 **Model:** `Sandbox` class in `DTOs/Sandbox.cs`
 
@@ -140,6 +202,8 @@ CREATE TABLE IF NOT EXISTS Sandboxes (
 | `GetSandboxesByProjectAsync(projectPath)` | All sandboxes for a project, ordered by `CreatedUTC DESC` |
 | `GetSandboxByIdAsync(id)` | Lookup by primary key |
 | `GetSandboxByNameAndProjectAsync(name, projectPath)` | Lookup by unique `(Name, ProjectPath)` pair |
+| `GetSandboxesByEnvironmentIdAsync(environmentId)` | Workspaces owned by one environment, newest first |
+| `OrphanSandboxesForEnvironmentAsync(environmentId)` | Releases an environment's workspaces to standalone (`EnvironmentId = NULL`) |
 | `DeleteSandboxAsync(id)` | Delete by `Id` — directory cleanup handled by `SandboxService`, not the DB layer |
 
 **API endpoints:**
@@ -528,7 +592,8 @@ CREATE TABLE IF NOT EXISTS GlobalCache (
 The customizable launch pickers store their versioned document under
 `ui.llm-picker.v1`. The JSON contains the ordered base keys, ordered Environment keys, and disabled
 built-in keys. Custom Environment visibility remains authoritative in `Environments.Hidden` for
-compatibility with older Environment clients.
+compatibility with older Environment clients. Environments flagged `AutomationWorker` are excluded
+from the resolved catalog entirely, so picker saves never touch a Worker's `Hidden` value.
 
 `Repository.SaveLlmPickerStateAsync` writes or removes the `GlobalCache` document and updates all
 submitted `Environments.Hidden` values in one SQLite transaction. The resolver ignores stale keys,
@@ -654,9 +719,9 @@ Environments              AgentMetadata
 | CreatedUTC   |          +-------------------+
 | LastUsedUTC  |          | Id (PK)           |
 | Hidden       |          | Name              |
-+--------------+          | Path              |
-UQ(CustomName, LLM)      | ProjectPath       |  <-- string, not FK
-                          | Branch            |
+| AutomationWorker* |     | Path              |
++--------------+          | ProjectPath       |  <-- string, not FK
+UQ(CustomName, LLM)      | Branch            |
                           | CommitHash        |
                           | RemoteUrl         |
                           | SourceBranch      |

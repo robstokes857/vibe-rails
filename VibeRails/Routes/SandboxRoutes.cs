@@ -13,6 +13,7 @@ public static class SandboxRoutes
         // GET /api/v1/sandboxes - List sandboxes for current project
         app.MapGet("/api/v1/sandboxes", async (
             ISandboxService sandboxService,
+            IRepository repository,
             CancellationToken cancellationToken) =>
         {
             var projectPath = ParserConfigs.GetRootPath();
@@ -20,8 +21,15 @@ public static class SandboxRoutes
                 return Results.BadRequest(new ErrorResponse("Sandboxes require a git repository"));
 
             var sandboxes = await sandboxService.GetSandboxesAsync(projectPath, cancellationToken);
+
+            // Owned workspaces stay in the payload rather than being filtered out: the client
+            // renders standalone sandboxes on the Sandboxes card and owned ones on their
+            // environment's row, and it needs both to decide which is which.
+            var ownerNames = await ResolveOwnerNamesAsync(repository, sandboxes, cancellationToken);
             var response = sandboxes.Select(s => new SandboxResponse(
-                s.Id, s.Name, s.Path, s.Branch, s.SourceBranch, s.CommitHash, s.RemoteUrl, s.CreatedUTC
+                s.Id, s.Name, s.Path, s.Branch, s.SourceBranch, s.CommitHash, s.RemoteUrl, s.CreatedUTC,
+                s.EnvironmentId,
+                s.EnvironmentId.HasValue && ownerNames.TryGetValue(s.EnvironmentId.Value, out var owner) ? owner : null
             )).ToList();
 
             return Results.Ok(new SandboxListResponse(response));
@@ -43,7 +51,7 @@ public static class SandboxRoutes
             try
             {
                 var sandbox = await sandboxService.CreateSandboxAsync(
-                    request.Name, projectPath, cancellationToken);
+                    request.Name, projectPath, options: null, cancellationToken);
                 return Results.Ok(new SandboxResponse(
                     sandbox.Id, sandbox.Name, sandbox.Path,
                     sandbox.Branch, sandbox.SourceBranch, sandbox.CommitHash, sandbox.RemoteUrl, sandbox.CreatedUTC));
@@ -57,9 +65,23 @@ public static class SandboxRoutes
         // DELETE /api/v1/sandboxes/{id} - Delete a sandbox
         app.MapDelete("/api/v1/sandboxes/{id:int}", async (
             ISandboxService sandboxService,
+            IRepository repository,
             int id,
             CancellationToken cancellationToken) =>
         {
+            // A sandbox that belongs to an environment is that environment's workspace, and a
+            // run may be using it right now. Deleting it from here would be a destructive edit
+            // to an environment the caller never named, so ownership has to be released first —
+            // by changing the workspace mode, or by deleting the environment.
+            var existing = await repository.GetSandboxByIdAsync(id, cancellationToken);
+            if (existing?.EnvironmentId is int ownerId)
+            {
+                var owner = await repository.GetEnvironmentByIdAsync(ownerId, cancellationToken);
+                var ownerName = owner?.CustomName ?? $"environment {ownerId}";
+                return Results.Conflict(new ErrorResponse(
+                    $"This sandbox is the workspace for '{ownerName}'. Change that environment's workspace mode, or delete the environment, to release it first."));
+            }
+
             try
             {
                 await sandboxService.DeleteSandboxAsync(id, cancellationToken);
@@ -290,5 +312,32 @@ public static class SandboxRoutes
                 return Results.BadRequest(new ErrorResponse(ex.Message));
             }
         }).WithName("MergeSandboxLocally");
+    }
+
+    /// <summary>
+    /// Display names for the environments owning any of these sandboxes, keyed by id. A
+    /// workspace whose environment has since been deleted simply resolves to no name — the
+    /// row is a standalone sandbox at that point anyway.
+    /// </summary>
+    private static async Task<Dictionary<int, string>> ResolveOwnerNamesAsync(
+        IRepository repository,
+        IReadOnlyCollection<Sandbox> sandboxes,
+        CancellationToken cancellationToken)
+    {
+        var ownerIds = sandboxes
+            .Where(s => s.EnvironmentId.HasValue)
+            .Select(s => s.EnvironmentId!.Value)
+            .Distinct()
+            .ToList();
+
+        var names = new Dictionary<int, string>(ownerIds.Count);
+        foreach (var ownerId in ownerIds)
+        {
+            var environment = await repository.GetEnvironmentByIdAsync(ownerId, cancellationToken);
+            if (environment is not null)
+                names[ownerId] = environment.CustomName;
+        }
+
+        return names;
     }
 }

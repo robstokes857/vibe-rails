@@ -363,6 +363,9 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$createdUTC", environment.CreatedUTC.ToString("O"));
             cmd.Parameters.AddWithValue("$lastUsedUTC", environment.LastUsedUTC.ToString("O"));
             cmd.Parameters.AddWithValue("$hidden", environment.Hidden ? 1 : 0);
+            cmd.Parameters.AddWithValue("$automationWorker", environment.AutomationWorker ? 1 : 0);
+            cmd.Parameters.AddWithValue("$workspaceMode", (int)environment.WorkspaceMode);
+            cmd.Parameters.AddWithValue("$projectPath", (object?)environment.ProjectPath ?? DBNull.Value);
 
             var result = await cmd.ExecuteScalarAsync(cancellationToken);
             environment.Id = Convert.ToInt32(result);
@@ -385,6 +388,9 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$customPrompt", environment.CustomPrompt);
             cmd.Parameters.AddWithValue("$lastUsedUTC", environment.LastUsedUTC.ToString("O"));
             cmd.Parameters.AddWithValue("$hidden", environment.Hidden ? 1 : 0);
+            cmd.Parameters.AddWithValue("$automationWorker", environment.AutomationWorker ? 1 : 0);
+            cmd.Parameters.AddWithValue("$workspaceMode", (int)environment.WorkspaceMode);
+            cmd.Parameters.AddWithValue("$projectPath", (object?)environment.ProjectPath ?? DBNull.Value);
 
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -433,6 +439,7 @@ namespace VibeRails.DB
             cmd.Parameters.AddWithValue("$remoteUrl", (object?)sandbox.RemoteUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$sourceBranch", (object?)sandbox.SourceBranch ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$createdUTC", sandbox.CreatedUTC.ToString("O"));
+            cmd.Parameters.AddWithValue("$environmentId", (object?)sandbox.EnvironmentId ?? DBNull.Value);
 
             var result = await cmd.ExecuteScalarAsync(cancellationToken);
             sandbox.Id = Convert.ToInt32(result);
@@ -494,6 +501,68 @@ namespace VibeRails.DB
             }
 
             return null;
+        }
+
+        public async Task<List<Sandbox>> GetSandboxesByEnvironmentIdAsync(int environmentId, CancellationToken cancellationToken = default)
+        {
+            var sandboxes = new List<Sandbox>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectSandboxesByEnvironmentId;
+            cmd.Parameters.AddWithValue("$environmentId", environmentId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                sandboxes.Add(ReadSandbox(reader));
+            }
+
+            return sandboxes;
+        }
+
+        public async Task OrphanSandboxesForEnvironmentAsync(int environmentId, CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.OrphanSandboxesByEnvironmentId;
+            cmd.Parameters.AddWithValue("$environmentId", environmentId);
+
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        public async Task<bool> HasOpenSessionUnderDirectoryAsync(string directory, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(directory))
+                return false;
+
+            var normalized = Path.TrimEndingDirectorySeparator(directory);
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.CountOpenSessionsUnderDirectory;
+            cmd.Parameters.AddWithValue("$directory", normalized);
+            // The prefix carries a trailing separator so it matches only paths *inside* this
+            // directory. Without it, "…/nightly" would also match the sibling "…/nightly-2".
+            //
+            // Escape LIKE metacharacters afterwards: a real path may legitimately contain '%'
+            // or '_', and an unescaped '_' matches any single character. Backslash goes first
+            // since it is the ESCAPE character itself.
+            var prefix = normalized + Path.DirectorySeparatorChar;
+            var escaped = prefix
+                .Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("%", "\\%", StringComparison.Ordinal)
+                .Replace("_", "\\_", StringComparison.Ordinal);
+            cmd.Parameters.AddWithValue("$directoryPrefix", $"{escaped}%");
+
+            var result = await cmd.ExecuteScalarAsync(cancellationToken);
+            return Convert.ToInt64(result) > 0;
         }
 
         public async Task DeleteSandboxAsync(int id, CancellationToken cancellationToken = default)
@@ -862,7 +931,10 @@ namespace VibeRails.DB
                 CustomPrompt = reader.GetString(5),
                 CreatedUTC = DateTime.Parse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind),
                 LastUsedUTC = DateTime.Parse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind),
-                Hidden = reader.GetBoolean(8)
+                Hidden = reader.GetBoolean(8),
+                AutomationWorker = reader.GetBoolean(9),
+                WorkspaceMode = (EnvironmentWorkspaceMode)reader.GetInt32(10),
+                ProjectPath = reader.IsDBNull(11) ? null : reader.GetString(11)
             };
         }
 
@@ -889,7 +961,8 @@ namespace VibeRails.DB
                 CommitHash = reader.IsDBNull(5) ? null : reader.GetString(5),
                 RemoteUrl = reader.IsDBNull(6) ? null : reader.GetString(6),
                 SourceBranch = reader.IsDBNull(7) ? null : reader.GetString(7),
-                CreatedUTC = DateTime.Parse(reader.GetString(8), null, System.Globalization.DateTimeStyles.RoundtripKind)
+                CreatedUTC = DateTime.Parse(reader.GetString(8), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                EnvironmentId = reader.IsDBNull(9) ? null : reader.GetInt32(9)
             };
         }
 

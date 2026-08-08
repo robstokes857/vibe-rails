@@ -1,6 +1,7 @@
 using System.Text.Json;
 using VibeRails.DB;
 using VibeRails.DTOs;
+using VibeRails.Utils;
 
 namespace VibeRails.Services;
 
@@ -39,7 +40,7 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
     public async Task<LlmPickerPreferencesResponse> GetAsync(
         CancellationToken cancellationToken = default)
     {
-        var environments = await _repository.GetCustomEnvironmentsAsync(cancellationToken);
+        var environments = await GetScopedEnvironmentsAsync(cancellationToken);
         var documentJson = await _repository.GetGlobalCacheValueAsync(CacheKey, cancellationToken);
         var document = DeserializeDocument(documentJson);
         return Resolve(environments, document);
@@ -49,7 +50,7 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
         UpdateLlmPickerPreferencesRequest request,
         CancellationToken cancellationToken = default)
     {
-        var environments = await _repository.GetCustomEnvironmentsAsync(cancellationToken);
+        var environments = await GetScopedEnvironmentsAsync(cancellationToken);
         var currentCatalog = Resolve(environments, document: null).Items;
         var normalized = ValidateAndNormalize(request.Items, currentCatalog);
 
@@ -89,7 +90,7 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
     public async Task<LlmPickerPreferencesResponse> ResetAsync(
         CancellationToken cancellationToken = default)
     {
-        var environments = await _repository.GetCustomEnvironmentsAsync(cancellationToken);
+        var environments = await GetScopedEnvironmentsAsync(cancellationToken);
         var visibleEnvironmentState = environments
             .Where(IsSupportedCustomEnvironment)
             .ToDictionary(environment => environment.Id, _ => false);
@@ -100,7 +101,9 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
             visibleEnvironmentState,
             cancellationToken);
 
-        foreach (var environment in environments)
+        // Mirror exactly what was persisted: unsupported environments (including
+        // Automation Workers) keep their stored Hidden value.
+        foreach (var environment in environments.Where(IsSupportedCustomEnvironment))
         {
             environment.Hidden = false;
         }
@@ -297,8 +300,32 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
         }
     }
 
+    /// <summary>
+    /// The custom environments this project may see. Environments created before project
+    /// scoping have a null ProjectPath and stay visible everywhere, so no existing setup loses
+    /// entries from its pickers.
+    ///
+    /// Filtering here rather than inside <see cref="IsSupportedCustomEnvironment"/> means an
+    /// out-of-scope environment is absent from the catalog entirely — so, exactly as with
+    /// Automation Workers, a preferences save or reset can never reach in and rewrite the
+    /// Hidden flag of an environment belonging to a different project.
+    /// </summary>
+    private async Task<List<LLM_Environment>> GetScopedEnvironmentsAsync(CancellationToken cancellationToken)
+    {
+        var projectPath = ParserConfigs.GetRootPath();
+        var environments = await _repository.GetCustomEnvironmentsAsync(cancellationToken);
+        return environments
+            .Where(environment => ProjectPathComparer.IsVisibleIn(environment.ProjectPath, projectPath))
+            .ToList();
+    }
+
+    // Automation Workers are excluded from the preferences catalog entirely: they never
+    // appear in launch pickers or the customization modal, and preference saves therefore
+    // can never touch a worker's Hidden flag. The automation editor's Worker picker lists
+    // them from /api/v1/environments instead.
     private static bool IsSupportedCustomEnvironment(LLM_Environment environment) =>
         environment.Id > 0
+        && !environment.AutomationWorker
         && environment.LLM is not (LLM.NotSet or LLM.Shell)
         && CanonicalBaseItems.Any(item => item.Cli == ToPickerCli(environment.LLM));
 

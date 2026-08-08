@@ -390,8 +390,9 @@ example of a rule is never itself a rule.
 **Purpose**: Create and manage isolated git clone sandboxes for parallel AI workflows
 
 **Key Methods**:
-- `CreateSandboxAsync(name, projectPath)` - Shallow clone current branch, copy all dirty/untracked files, save to DB
+- `CreateSandboxAsync(name, projectPath, options)` - Shallow clone current branch, copy dirty/untracked files (unless `options.CopyDirtyFiles` is false), save to DB
 - `DeleteSandboxAsync(sandboxId)` - Remove sandbox directory and DB record
+- `TryDeleteSandboxAsync(sandboxId)` - Same, but returns false instead of throwing. Used when releasing an environment's workspaces, where a clone locked by a running CLI must not fail the caller.
 - `GetSandboxesAsync(projectPath)` - List sandboxes for a project
 
 **Creation Flow**:
@@ -400,10 +401,29 @@ example of a rule is never itself a rule.
 3. Get current branch and commit hash from source project
 4. `git clone --depth 1 --branch {branch} --single-branch "{projectPath}" "{sandboxPath}"`
 5. Parse `git status --porcelain` for all dirty/untracked files
-6. Copy each non-deleted file to sandbox (skips `.vibe_rails/` paths)
+6. Copy each non-deleted file to sandbox (skips `.vibe_rails/` paths) — **skipped entirely when `CopyDirtyFiles` is false**
 7. Save sandbox record to DB
 
 **Storage**: Global at `~/.vibe_rails/sandboxes/{name}` (not project-local)
+
+#### RunWorkspaceService ([Services/Workspaces/RunWorkspaceService.cs](VibeRails/Services/Workspaces/RunWorkspaceService.cs))
+**Purpose**: Turn an environment's `WorkspaceMode` into the directory its CLI actually runs in
+
+A sandbox and "clone fresh each run" are one mechanism at two retentions, so this service adds no
+git handling of its own — it delegates every clone to `SandboxService` and owns only the naming,
+reuse, and pruning decisions.
+
+**Key Methods**:
+- `ResolveAsync(environment, projectPath)` - The directory to launch in. Pure pass-through in `Project` mode; reuses the existing clone in `Persistent` mode; clones + prunes in `PerRun` mode. Returns a user-facing `Error` rather than throwing, so a failed clone becomes a launch that never started.
+- `DetachAsync(environmentId)` - Unbind workspaces without deleting (workspace mode changed)
+- `ReleaseAsync(environmentId)` - Orphan then best-effort delete (environment deleted)
+
+**Two launch choke points call it** — `EnvironmentLaunchService.LaunchAsync` (covers the
+Environments page *and* every Job/Worker run) and `TerminalTabHostService.StartSessionAsync`
+(in-app tabs, resolved server-side so the browser keeps sending the project root).
+
+**Retention**: `MaxRetainedPerRunWorkspaces` (3). Every run is a full working copy, so this is the
+only thing between a nightly automation and a full disk.
 
 #### McpClientService ([Services/Mcp/McpClientService.cs](VibeRails/Services/Mcp/McpClientService.cs))
 **Purpose**: Custom MCP client service layer built on ModelContextProtocol NuGet package

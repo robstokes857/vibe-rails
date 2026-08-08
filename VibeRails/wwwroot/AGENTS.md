@@ -40,17 +40,37 @@ owns their Tom Select instances, tracks mounted pickers, and refreshes them afte
 save or reset while preserving current selections and search text. Each mount returns a disposer;
 view/modal owners must call it when their select is removed.
 
-The controller applies one of five contexts after the global ordering is resolved:
+The controller applies one of four contexts after the global ordering is resolved:
 
 | Context | Items shown |
 |---|---|
 | `terminal` | Base CLIs, custom Environments, and plain Terminal |
 | `sandbox` | Base CLIs and custom Environments |
-| `automation` | Custom Environments only |
 | `multi-run` | Base CLIs only, excluding plain Terminal |
 | `environment-provider` | Supported providers, excluding Terminal; ignores visibility preferences |
 
-The four launch contexts add a persistent **Customize LLM list** footer to their dropdowns. Its
+Consumers import the facades in `js/modules/pickers/` instead of touching the controller:
+`llm-picker.js` (`mountLlmPicker` / `setLlmPickerValue` / `getEnabledLlmItems`) for the contexts
+above, and `worker-picker.js` (`mountWorkerPicker`) for the Automation editor. The Worker picker
+is NOT a controller context: it lists environments flagged `automationWorker` straight from
+`app.data.environments`, ignores `hidden` entirely (a Worker can never be hidden there), and has
+no customization footer. Workers, in turn, never appear in any launch context — the server
+excludes them from the preferences catalog.
+
+Environments are scoped to a project. The list endpoint filters them, so `app.data.environments`
+already contains only what this project may see — with one deliberate exception: an environment
+created before scoping has a null `projectPath` and appears everywhere.
+
+Each environment also carries `workspaceMode` (0 project dir / 1 own clone / 2 fresh clone each
+run) plus `workspaceSandboxId` / `workspacePath` / `workspaceBranch`, exported as `WORKSPACE_MODE`
+from `environment-controller.js`. A clone-mode environment shows a `fa-code-branch` badge that
+stacks alongside the worker/hidden badges — whether something is a Worker and where it runs are
+independent facts. When `workspaceSandboxId` is set the row also grows Diff / Merge / Push buttons
+emitting the same `data-action="sandbox-*"` handlers the Sandboxes card uses
+(`bindSandboxGitActions` binds both). The Sandboxes card renders only sandboxes with no
+`environmentId`, so releasing a workspace moves it back there with no extra plumbing.
+
+The three launch contexts add a persistent **Customize LLM list** footer to their dropdowns. Its
 nested modal changes visibility and within-group order globally. A disabled selection that is
 already referenced is reinserted with a `(hidden)` label so editing another field cannot silently
 clear it. The Environment provider picker deliberately has no customization footer, and Chat
@@ -60,7 +80,7 @@ History remains unfiltered so launch preferences never hide historical sessions.
 
 1. User selects environment from dropdown (or clicks "Web UI" button on environments page)
 2. `startFromSelection()` creates a tab via `POST /api/v1/terminal/tabs`
-3. `tab.instance.startSession(body)` calls `POST /api/v1/terminal/tabs/{tabId}/start` with `{ cli, environmentName, workingDirectory, title }`
+3. `tab.instance.startSession(body)` calls `POST /api/v1/terminal/tabs/{tabId}/start` with `{ cli, environmentName, workingDirectory, title }`. The client **always** sends the project root here — if the environment has a workspace mode, the server swaps in the clone directory (`TerminalTabHostService.ApplyWorkspaceAsync`). Do not try to resolve workspaces client-side; a failed clone comes back as a 400 with the reason.
 4. Frontend opens a WebSocket to `/api/v1/terminal/tabs/{tabId}/ws`
 5. Backend spawns the LLM CLI directly in a PTY inside the tab's session (with isolated env vars for the chosen environment)
 

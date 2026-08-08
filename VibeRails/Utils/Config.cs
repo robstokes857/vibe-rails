@@ -13,6 +13,9 @@ public class Settings
     public string InstallDirName { get; set; } = PathConstants.DEFAULT_INSTALL_DIR_NAME;
     public string ApiKey { get; set; } = string.Empty;
     public bool RemoteAccess { get; set; } = false;
+    // Proof-of-concept HTTP proxy. Off by default; the settings route also forces it off when
+    // there is no saved cloud API key.
+    public bool RouteThroughVibeRailsAi { get; set; } = false;
     public bool UseVsCodeTheme { get; set; } = false;
     // Retained for settings.json/API compatibility. MCP registration is always on.
     public bool McpEnabled { get; set; } = true;
