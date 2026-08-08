@@ -1140,15 +1140,22 @@
                                     src="assets/img/icons/sliders-solid-full.svg" alt="" class="icon-light"
                                     style="height: 18px; width: 18px; margin-right: 8px; vertical-align: text-bottom;">Environment /
                                 Workers</span>
-                            <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" type="button"
-                                data-action="create-environment">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
-                                    viewBox="0 0 16 16">
-                                    <path
-                                        d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4" />
-                                </svg>
-                                <span>Add Worker</span>
-                            </button>
+                            <div class="d-flex align-items-center gap-2">
+                                <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2" type="button"
+                                    data-action="customize-llm-list" title="Choose what appears in the LLM launch pickers">
+                                    <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+                                    <span>Customize LLM list</span>
+                                </button>
+                                <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-2" type="button"
+                                    data-action="create-environment">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                                        viewBox="0 0 16 16">
+                                        <path
+                                            d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4" />
+                                    </svg>
+                                    <span>Add Environment</span>
+                                </button>
+                            </div>
                         </div>
                         <div class="card-body">
                             <div data-environments-table></div>
@@ -1477,6 +1484,27 @@
                                     <button type="button" class="btn btn-outline-primary btn-sm"
                                         id="settings-export-data-button">Export Data</button>
                                 </div>
+                            </div>
+                            <div class="mb-4" id="settings-http-relay-wrapper">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox"
+                                        id="setting-route-through-viberails-ai">
+                                    <label class="form-check-label" for="setting-route-through-viberails-ai">
+                                        Route through viberails.ai
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted d-block mb-3">
+                                    Allow supported local HTTP requests to travel through an authenticated WSS
+                                    connection to viberails.ai.
+                                </small>
+                                <button type="button" class="btn btn-outline-primary btn-sm"
+                                    id="settings-http-relay-test-button" disabled>
+                                    Test HTTP relay
+                                </button>
+                                <small class="form-text text-muted d-block mt-2"
+                                    id="settings-http-relay-test-hint">
+                                    Turn on this setting and save it before testing the relay.
+                                </small>
                             </div>
                             <div class="mb-4">
                                 <label class="form-label" for="setting-computer-name">Computer Name</label>

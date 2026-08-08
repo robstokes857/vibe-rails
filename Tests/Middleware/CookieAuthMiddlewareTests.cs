@@ -60,6 +60,18 @@ public sealed class CookieAuthMiddlewareTests
         Assert.True(reachedNext[0]);
     }
 
+    [Fact]
+    public async Task OptionsRequests_PassThrough()
+    {
+        var middleware = Build(out var reachedNext);
+        var ctx = Request("/api/v1/context");
+        ctx.Request.Method = "OPTIONS";
+
+        await middleware.InvokeAsync(ctx);
+
+        Assert.True(reachedNext[0]);
+    }
+
     [Theory]
     [InlineData("POST", "/health")]
     [InlineData("POST", "/auth/bootstrap")]
@@ -141,6 +153,8 @@ public sealed class CookieAuthMiddlewareTests
     [Theory]
     [InlineData("/api/v1/llm-picker/preferences")]
     [InlineData("/api/v1/settings/export-data/progress")]
+    [InlineData("/api/v1/http-relay/test/posts")]
+    [InlineData("/api/v1/http-relay/test/posts/7")]
     public async Task NewlyInventoriedApiRoutes_WithSessionTokenOnly_AreRejected(string path)
     {
         var middleware = Build(out var reachedNext);

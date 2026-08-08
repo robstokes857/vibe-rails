@@ -206,6 +206,10 @@ namespace VibeRails
             var settings = Config.Load();
             ParserConfigs.SetRemoteAccess(settings.RemoteAccess);
             ParserConfigs.SetApiKey(settings.ApiKey);
+            // A hand-edited legacy/inconsistent file must never make the relay effective without
+            // a credential, even if RouteThroughVibeRailsAi was set to true.
+            ParserConfigs.SetRouteThroughVibeRailsAi(
+                settings.RouteThroughVibeRailsAi && !string.IsNullOrWhiteSpace(settings.ApiKey));
             ParserConfigs.SetUseVsCodeTheme(settings.UseVsCodeTheme);
             if (!settings.McpEnabled)
             {

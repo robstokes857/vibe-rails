@@ -1,6 +1,7 @@
 using TokenSaver;
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.HttpRelay;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Utils;
 
@@ -40,6 +41,8 @@ public static class AppSettingsRoutes
             // the process's cached copy would silently revert any settings.json edit made since
             // the cache was filled — including flipping the token-saver kill switch back on.
             var settings = Config.LoadFresh();
+            var previousApiKey = settings.ApiKey;
+            var previousRelaySetting = settings.RouteThroughVibeRailsAi;
 
             // A blank apiKey means "unchanged" (masked value was not edited), so removing a saved
             // key needs its own explicit signal — otherwise a stored key can never be cleared from
@@ -88,6 +91,18 @@ public static class AppSettingsRoutes
             if (settingsDto.RemoveCoAuthorTrailers.HasValue)
                 settings.RemoveCoAuthorTrailers = settingsDto.RemoveCoAuthorTrailers.Value;
 
+            // Nullable is the stale-client guard. Enabling is effective only with the final raw
+            // key after clear/replace semantics above have been applied.
+            if (settingsDto.RouteThroughVibeRailsAi.HasValue)
+            {
+                settings.RouteThroughVibeRailsAi = ResolveHttpRelaySetting(
+                    settings.RouteThroughVibeRailsAi,
+                    settingsDto.RouteThroughVibeRailsAi,
+                    settings.ApiKey);
+            }
+            if (string.IsNullOrWhiteSpace(settings.ApiKey))
+                settings.RouteThroughVibeRailsAi = false;
+
             // Save back to settings.json
             Config.Save(settings);
 
@@ -99,6 +114,16 @@ public static class AppSettingsRoutes
                 ParserConfigs.SetApiKey(settingsDto.ApiKey!);
             ParserConfigs.SetUseVsCodeTheme(settingsDto.UseVsCodeTheme);
             ParserConfigs.SetMcpEnabled(true);
+            ParserConfigs.SetRouteThroughVibeRailsAi(settings.RouteThroughVibeRailsAi);
+
+            // The credential is deliberately bound to the WebSocket handshake. A toggle or key
+            // update therefore invalidates any established socket; the next test request creates
+            // one with current settings.
+            if (previousRelaySetting != settings.RouteThroughVibeRailsAi
+                || !string.Equals(previousApiKey, settings.ApiKey, StringComparison.Ordinal))
+            {
+                app.Services.GetService<IRemoteHttpRelayClient>()?.Reset();
+            }
 
             return Results.Ok(BuildAppSettingsDto(settings, app.Configuration));
         }).WithName("UpdateAppSettings");
@@ -150,12 +175,19 @@ public static class AppSettingsRoutes
             DataExportConfigured: DataExportService.TryParseExportUri(
                 configuration[DataExportService.ExportUrlSettingKey],
                 out _),
-            RemoveCoAuthorTrailers: settings.RemoveCoAuthorTrailers
+            RemoveCoAuthorTrailers: settings.RemoveCoAuthorTrailers,
+            RouteThroughVibeRailsAi: settings.RouteThroughVibeRailsAi
         );
     }
 
     private static string NormalizeComputerName(string? value) =>
         ComputerNameFormatter.Normalize(value);
+
+    internal static bool ResolveHttpRelaySetting(
+        bool storedValue,
+        bool? requestedValue,
+        string? finalApiKey) =>
+        !string.IsNullOrWhiteSpace(finalApiKey) && (requestedValue ?? storedValue);
 
     private static long SafeFileSize(string path)
     {

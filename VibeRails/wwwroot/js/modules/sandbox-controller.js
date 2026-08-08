@@ -1,4 +1,5 @@
 import { ensureMonaco } from './monaco-loader.js';
+import { mountLlmPicker } from './pickers/llm-picker.js';
 import { parseLlmSelection } from './utils.js';
 
 // Sandbox Controller - Manages sandbox creation, listing, and actions
@@ -29,6 +30,11 @@ export class SandboxController {
                 sourceBranch: sb.sourceBranch || null,
                 commitHash: sb.commitHash,
                 remoteUrl: sb.remoteUrl || null,
+                // Set when this sandbox is an Environment's workspace rather than a
+                // standalone one. Owned workspaces render on their environment's row; the
+                // Sandboxes card shows only the standalone ones.
+                environmentId: sb.environmentId ?? null,
+                environmentName: sb.environmentName || null,
                 created: this.app.formatRelativeTime(sb.createdUTC)
             }));
         } catch (error) {
@@ -139,7 +145,10 @@ export class SandboxController {
         this._disposePickers();
         container.innerHTML = '';
 
-        const sandboxes = this.app.data.sandboxes || [];
+        // Standalone sandboxes only. A sandbox owned by an environment is that environment's
+        // workspace and is driven from its row on the Environments page — rendering it here
+        // would offer a Delete button that can destroy an in-flight run's working tree.
+        const sandboxes = (this.app.data.sandboxes || []).filter(sb => !sb.environmentId);
 
         if (sandboxes.length === 0) {
             container.innerHTML = '<p class="text-muted text-center py-3">No sandboxes yet. Create one to work in an isolated copy of your project.</p>';
@@ -273,7 +282,7 @@ export class SandboxController {
     }
 
     populateSandboxCliSelect(selectEl) {
-        const dispose = this.app.llmPickerController.mount(selectEl, {
+        const dispose = mountLlmPicker(this.app, selectEl, {
             context: 'sandbox',
             placeholder: 'Select CLI...',
             includeDefaultSuffix: false

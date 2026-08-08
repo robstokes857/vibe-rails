@@ -1,4 +1,5 @@
 import { showDataExportModal } from './data-export-modal.js';
+import { showHttpRelayTestModal } from './http-relay-test-modal.js';
 
 export class SettingsController {
     constructor(app) {
@@ -25,6 +26,7 @@ export class SettingsController {
         let settings = {
             remoteAccess: false,
             apiKey: '',
+            routeThroughVibeRailsAi: false,
             useVsCodeTheme: false,
             mcpEnabled: true,
             computerName: '',
@@ -75,6 +77,8 @@ export class SettingsController {
 
             const remoteAccessToggle = root.querySelector('#setting-remote-access');
             const apiKeyInput = root.querySelector('#setting-api-key');
+            const routeThroughVibeRailsAiToggle = root.querySelector('#setting-route-through-viberails-ai');
+            const httpRelayTestButton = root.querySelector('#settings-http-relay-test-button');
             const exportDataButton = root.querySelector('#settings-export-data-button');
             const performanceModeToggle = root.querySelector('#setting-performance-mode');
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
@@ -106,6 +110,20 @@ export class SettingsController {
                 apiKeyInput.value = settings.apiKey || '';
                 apiKeyInput.dataset.originalValue = settings.apiKey || '';
             }
+            if (routeThroughVibeRailsAiToggle) {
+                routeThroughVibeRailsAiToggle.checked = settings.routeThroughVibeRailsAi === true;
+                routeThroughVibeRailsAiToggle.dataset.originalValue = String(
+                    settings.routeThroughVibeRailsAi === true
+                );
+            }
+            if (httpRelayTestButton) {
+                httpRelayTestButton.addEventListener('click', () => {
+                    if (!httpRelayTestButton.disabled) {
+                        showHttpRelayTestModal(this.app);
+                    }
+                });
+            }
+            this._updateHttpRelayTestAvailability(root);
             this._dataExportConfigured = settings.dataExportConfigured === true;
             if (exportDataButton) {
                 exportDataButton.addEventListener('click', () => this._exportData(root));
@@ -208,6 +226,7 @@ export class SettingsController {
                             opencodeTokenSaverToggle?.checked ?? true,
                             tokenSaverCaptureToggle?.checked ?? false,
                             removeCoAuthorTrailersToggle?.checked ?? true,
+                            routeThroughVibeRailsAiToggle?.checked ?? false,
                             clearApiKey
                         );
                         if (savedSettings) {
@@ -228,7 +247,7 @@ export class SettingsController {
         content.appendChild(fragment);
     }
 
-    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, tokenSaverCaptureEnabled, removeCoAuthorTrailers, clearApiKey = false) {
+    async saveSettings(remoteAccess, apiKey, useVsCodeTheme, mcpEnabled, computerName, codexLlmProxyEnabled, codexLlmProxyMode, claudeLlmProxyEnabled, openCodeLlmProxyEnabled, claudeTokenSaverEnabled, codexTokenSaverEnabled, openCodeTokenSaverEnabled, tokenSaverCaptureEnabled, removeCoAuthorTrailers, routeThroughVibeRailsAi, clearApiKey = false) {
         try {
             const savedSettings = await this.app.apiCall('/api/v1/settings', 'POST', {
                 remoteAccess: remoteAccess,
@@ -245,6 +264,7 @@ export class SettingsController {
                 openCodeTokenSaverEnabled: openCodeTokenSaverEnabled,
                 tokenSaverCaptureEnabled: tokenSaverCaptureEnabled,
                 removeCoAuthorTrailers: removeCoAuthorTrailers,
+                routeThroughVibeRailsAi: routeThroughVibeRailsAi,
                 clearApiKey: clearApiKey
             });
             this.app.setAppSettings(savedSettings);
@@ -316,6 +336,7 @@ export class SettingsController {
         return [
             '#setting-remote-access',
             '#setting-api-key',
+            '#setting-route-through-viberails-ai',
             '#setting-use-vscode-theme',
             '#setting-computer-name',
             '#setting-codex-llm-proxy-enabled',
@@ -337,6 +358,7 @@ export class SettingsController {
         return JSON.stringify({
             remoteAccess: isChecked('#setting-remote-access'),
             apiKey: valueOf('#setting-api-key'),
+            routeThroughVibeRailsAi: isChecked('#setting-route-through-viberails-ai'),
             useVsCodeTheme: isChecked('#setting-use-vscode-theme'),
             computerName: valueOf('#setting-computer-name'),
             codexLlmProxyEnabled: isChecked('#setting-codex-llm-proxy-enabled'),
@@ -355,12 +377,14 @@ export class SettingsController {
         this._settingsDirty = this._captureSettingsSnapshot(root) !== this._settingsSnapshot;
         this._updateSaveBar(root);
         this._updateDataExportAvailability(root);
+        this._updateHttpRelayTestAvailability(root);
     }
 
     _markSettingsClean(root) {
         this._settingsSnapshot = this._captureSettingsSnapshot(root);
         this._settingsDirty = false;
         this._updateSaveBar(root);
+        this._updateHttpRelayTestAvailability(root);
     }
 
     _updateSaveBar(root) {
@@ -391,6 +415,7 @@ export class SettingsController {
 
         const remoteAccessToggle = root.querySelector('#setting-remote-access');
         const apiKeyInput = root.querySelector('#setting-api-key');
+        const routeThroughVibeRailsAiToggle = root.querySelector('#setting-route-through-viberails-ai');
         const useVsCodeThemeToggle = root.querySelector('#setting-use-vscode-theme');
         const computerNameInput = root.querySelector('#setting-computer-name');
         const codexLlmProxyEnabledToggle = root.querySelector('#setting-codex-llm-proxy-enabled');
@@ -403,6 +428,12 @@ export class SettingsController {
         if (apiKeyInput) {
             apiKeyInput.value = settings.apiKey || '';
             apiKeyInput.dataset.originalValue = settings.apiKey || '';
+        }
+        if (routeThroughVibeRailsAiToggle) {
+            routeThroughVibeRailsAiToggle.checked = settings.routeThroughVibeRailsAi === true;
+            routeThroughVibeRailsAiToggle.dataset.originalValue = String(
+                settings.routeThroughVibeRailsAi === true
+            );
         }
         this._dataExportConfigured = settings.dataExportConfigured === true;
         if (useVsCodeThemeToggle) useVsCodeThemeToggle.checked = settings.useVsCodeTheme === true;
@@ -432,6 +463,7 @@ export class SettingsController {
         if (removeCoAuthorTrailersToggle) removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;
 
         this._updateDataExportAvailability(root);
+        this._updateHttpRelayTestAvailability(root);
     }
 
     _updateDataExportAvailability(root) {
@@ -452,6 +484,35 @@ export class SettingsController {
         if (button) {
             button.disabled = !available || this._dataExportInProgress;
             button.textContent = this._getDataExportButtonText();
+        }
+    }
+
+    _updateHttpRelayTestAvailability(root) {
+        const toggle = root.querySelector('#setting-route-through-viberails-ai');
+        const apiKeyInput = root.querySelector('#setting-api-key');
+        const button = root.querySelector('#settings-http-relay-test-button');
+        const hint = root.querySelector('#settings-http-relay-test-hint');
+        if (!toggle || !apiKeyInput || !button) return;
+
+        const savedEnabled = toggle.dataset.originalValue === 'true';
+        const savedApiKey = apiKeyInput.dataset.originalValue || '';
+        const controlsMatchSaved = toggle.checked === savedEnabled
+            && apiKeyInput.value === savedApiKey;
+        const available = savedEnabled
+            && savedApiKey.trim().length > 0
+            && controlsMatchSaved;
+
+        button.disabled = !available;
+        if (!hint) return;
+
+        if (available) {
+            hint.textContent = 'Send GET, POST, PUT, and DELETE through the saved relay connection.';
+        } else if (!controlsMatchSaved) {
+            hint.textContent = 'Save or discard your setting changes before testing the relay.';
+        } else if (!savedEnabled) {
+            hint.textContent = 'Turn on this setting and save it before testing the relay.';
+        } else {
+            hint.textContent = 'Save an API key before testing the relay.';
         }
     }
 

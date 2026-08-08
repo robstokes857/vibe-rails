@@ -191,6 +191,48 @@ public sealed class LlmPickerPreferenceServiceTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task GetAsync_ExcludesAutomationWorkersRegardlessOfHidden()
+    {
+        var environments = new List<LLM_Environment>
+        {
+            Environment(60, "Regular", LLM.Claude),
+            Environment(61, "Worker", LLM.Codex, automationWorker: true),
+            Environment(62, "HiddenWorker", LLM.Codex, hidden: true, automationWorker: true)
+        };
+        var service = new LlmPickerPreferenceService(
+            NewRepository(environments, (string?)null).Object);
+
+        var response = await service.GetAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            ["env:60:claude"],
+            response.Items.Where(item => item.Kind == "environment").Select(item => item.Key));
+    }
+
+    [Fact]
+    public async Task ResetAsync_NeverTouchesAutomationWorkerVisibility()
+    {
+        var environments = new List<LLM_Environment>
+        {
+            Environment(70, "Regular", LLM.Claude, hidden: true),
+            Environment(71, "Worker", LLM.Codex, hidden: true, automationWorker: true)
+        };
+        var repository = NewRepository(environments, "{\"version\":1}");
+        var service = new LlmPickerPreferenceService(repository.Object);
+
+        await service.ResetAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(environments.Single(item => item.Id == 70).Hidden);
+        Assert.True(environments.Single(item => item.Id == 71).Hidden);
+        repository.Verify(item => item.SaveLlmPickerStateAsync(
+            LlmPickerPreferenceService.CacheKey,
+            null,
+            It.Is<IReadOnlyDictionary<int, bool>>(values =>
+                values.ContainsKey(70) && !values.ContainsKey(71)),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     private static Mock<IRepository> NewRepository(
         List<LLM_Environment> environments,
         string? document)
@@ -210,12 +252,14 @@ public sealed class LlmPickerPreferenceServiceTests
         return repository;
     }
 
-    private static LLM_Environment Environment(int id, string name, LLM llm, bool hidden = false) => new()
+    private static LLM_Environment Environment(
+        int id, string name, LLM llm, bool hidden = false, bool automationWorker = false) => new()
     {
         Id = id,
         CustomName = name,
         LLM = llm,
-        Hidden = hidden
+        Hidden = hidden,
+        AutomationWorker = automationWorker
     };
 
     private static List<LlmPickerPreferenceItem> Reorder(

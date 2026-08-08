@@ -3,6 +3,7 @@ using VibeRails.DTOs;
 using Serilog;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
+using VibeRails.Services.Workspaces;
 using VibeRails.Utils;
 
 namespace VibeRails.Routes;
@@ -20,19 +21,21 @@ public static class EnvironmentRoutes
             IRepository repository,
             CancellationToken cancellationToken) =>
         {
+            var projectPath = ParserConfigs.GetRootPath();
             var environments = await repository.GetCustomEnvironmentsAsync(cancellationToken);
+
+            // One query for every workspace in this project, indexed by owner, rather than a
+            // per-environment lookup while building the list.
+            var workspacesByEnvironment = (await repository.GetSandboxesByProjectAsync(projectPath, cancellationToken))
+                .Where(s => s.EnvironmentId.HasValue)
+                .GroupBy(s => s.EnvironmentId!.Value)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.CreatedUTC).First());
+
             var response = environments
-                .Select(e => new EnvironmentResponse(
-                    e.Id,
-                    e.CustomName,
-                    LlmParser.ToWireName(e.LLM),
-                    e.Path,
-                    e.CustomArgs,
-                    e.CustomPrompt,
-                    LLM_Environment.DefaultPrompt,
-                    e.LastUsedUTC,
-                    e.Hidden
-                ))
+                .Where(e => ProjectPathComparer.IsVisibleIn(e.ProjectPath, projectPath))
+                .Select(e => ToResponse(
+                    e,
+                    workspacesByEnvironment.TryGetValue(e.Id, out var workspace) ? workspace : null))
                 .ToList();
 
             return Results.Ok(new EnvironmentListResponse(response));
@@ -43,27 +46,19 @@ public static class EnvironmentRoutes
         // can resolve any env the UI exposes through the launch flow.
         app.MapGet("/api/v1/environments/{name}", async (
             IRepository repository,
+            IRunWorkspaceService workspaceService,
             string name,
             CancellationToken cancellationToken) =>
         {
             var environment = await repository.FindEnvironmentByNameAsync(name, cancellationToken);
 
-            if (environment == null)
+            if (environment == null || !IsVisibleHere(environment))
             {
                 return Results.NotFound(new ErrorResponse($"Environment not found: {name}"));
             }
 
-            return Results.Ok(new EnvironmentResponse(
-                environment.Id,
-                environment.CustomName,
-                LlmParser.ToWireName(environment.LLM),
-                environment.Path,
-                environment.CustomArgs,
-                environment.CustomPrompt,
-                LLM_Environment.DefaultPrompt,
-                environment.LastUsedUTC,
-                environment.Hidden
-            ));
+            var workspace = await workspaceService.GetWorkspaceAsync(environment, cancellationToken);
+            return Results.Ok(ToResponse(environment, workspace));
         }).WithName("GetEnvironmentByName");
 
         // POST /api/v1/environments - Create new environment
@@ -114,6 +109,18 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse($"CustomPrompt exceeds {MaxCustomPromptLength} character limit."));
             }
 
+            if (!TryParseWorkspaceMode(request.WorkspaceMode, out var workspaceMode))
+            {
+                return Results.BadRequest(new ErrorResponse(UnknownWorkspaceModeMessage(request.WorkspaceMode)));
+            }
+
+            var projectPath = ParserConfigs.GetRootPath();
+            if (workspaceMode != EnvironmentWorkspaceMode.Project && !ParserConfigs.GetIsInGit())
+            {
+                return Results.BadRequest(new ErrorResponse(
+                    "This workspace mode clones the project, so it needs the current project to be a git repository."));
+            }
+
             // Reject case-insensitive name collisions across all LLMs. CustomName
             // becomes the path segment under ~/.vibe_rails/envs/ which is
             // case-insensitive on Windows ("Nightly" and "nightly" resolve to the
@@ -134,6 +141,11 @@ public static class EnvironmentRoutes
                 CustomArgs = request.CustomArgs ?? "",
                 CustomPrompt = request.CustomPrompt ?? "",
                 Hidden = request.Hidden,
+                AutomationWorker = request.AutomationWorker,
+                WorkspaceMode = workspaceMode,
+                // Every environment created from now on belongs to the project it was created
+                // in. Existing rows keep a null scope and stay visible everywhere.
+                ProjectPath = projectPath,
                 CreatedUTC = DateTime.UtcNow,
                 LastUsedUTC = DateTime.UtcNow
             };
@@ -141,30 +153,24 @@ public static class EnvironmentRoutes
             await envService.CreateEnvironmentAsync(environment, cancellationToken);
             await repository.SaveEnvironmentAsync(environment, cancellationToken);
 
-            return Results.Ok(new EnvironmentResponse(
-                environment.Id,
-                environment.CustomName,
-                LlmParser.ToWireName(environment.LLM),
-                environment.Path,
-                environment.CustomArgs,
-                environment.CustomPrompt,
-                LLM_Environment.DefaultPrompt,
-                environment.LastUsedUTC,
-                environment.Hidden
-            ));
+            // The clone itself is deliberately NOT made here. Creating an environment stays a
+            // fast, local operation; the first launch pays the clone, where there is already a
+            // progress surface and where a failure can be reported against that launch.
+            return Results.Ok(ToResponse(environment));
         }).WithName("CreateEnvironment");
 
         // PUT /api/v1/environments/{name} - Update environment
         app.MapPut("/api/v1/environments/{name}", async (
             IRepository repository,
             IJobStore jobStore,
+            IRunWorkspaceService workspaceService,
             string name,
             UpdateEnvironmentRequest request,
             CancellationToken cancellationToken) =>
         {
             var environment = await repository.FindEnvironmentByNameAsync(name, cancellationToken);
 
-            if (environment == null)
+            if (environment == null || !IsVisibleHere(environment))
             {
                 return Results.NotFound(new ErrorResponse($"Environment not found: {name}"));
             }
@@ -199,20 +205,38 @@ public static class EnvironmentRoutes
                 environment.Hidden = request.Hidden.Value;
             }
 
+            var workspaceModeChanged = false;
+            if (request.WorkspaceMode.HasValue)
+            {
+                if (!TryParseWorkspaceMode(request.WorkspaceMode.Value, out var requestedMode))
+                {
+                    return Results.BadRequest(new ErrorResponse(UnknownWorkspaceModeMessage(request.WorkspaceMode.Value)));
+                }
+
+                if (requestedMode != EnvironmentWorkspaceMode.Project && !ParserConfigs.GetIsInGit())
+                {
+                    return Results.BadRequest(new ErrorResponse(
+                        "This workspace mode clones the project, so it needs the current project to be a git repository."));
+                }
+
+                workspaceModeChanged = requestedMode != environment.WorkspaceMode;
+                environment.WorkspaceMode = requestedMode;
+            }
+
             environment.LastUsedUTC = DateTime.UtcNow;
             await repository.UpdateEnvironmentAsync(environment, cancellationToken);
 
-            return Results.Ok(new EnvironmentResponse(
-                environment.Id,
-                environment.CustomName,
-                LlmParser.ToWireName(environment.LLM),
-                environment.Path,
-                environment.CustomArgs,
-                environment.CustomPrompt,
-                LLM_Environment.DefaultPrompt,
-                environment.LastUsedUTC,
-                environment.Hidden
-            ));
+            // A mode change detaches the old workspace but never deletes it. The user may have
+            // uncommitted work in there, and changing a dropdown is not consent to destroy it —
+            // it becomes a standalone sandbox they can diff, push, or delete deliberately.
+            // (Deleting the environment is different, and does try to remove the directory.)
+            if (workspaceModeChanged)
+            {
+                await workspaceService.DetachAsync(environment.Id, cancellationToken);
+            }
+
+            var workspace = await workspaceService.GetWorkspaceAsync(environment, cancellationToken);
+            return Results.Ok(ToResponse(environment, workspace));
         }).WithName("UpdateEnvironment");
 
         // DELETE /api/v1/environments/{name} - Delete environment
@@ -220,12 +244,13 @@ public static class EnvironmentRoutes
             LlmCliEnvironmentService envService,
             IRepository repository,
             IJobStore jobStore,
+            IServiceScopeFactory scopeFactory,
             string name,
             CancellationToken cancellationToken) =>
         {
             var environment = await repository.FindEnvironmentByNameAsync(name, cancellationToken);
 
-            if (environment == null)
+            if (environment == null || !IsVisibleHere(environment))
             {
                 return Results.NotFound(new ErrorResponse($"Environment not found: {name}"));
             }
@@ -266,9 +291,97 @@ public static class EnvironmentRoutes
                     "This environment is already being deleted. Refresh and try again."));
             }
 
+            // Only after the environment row is genuinely gone. ReleaseAsync orphans first and
+            // then tries to remove each workspace directory; a clone still locked by a running
+            // CLI simply stays behind as a standalone sandbox instead of failing this delete.
+            //
+            // Not awaited into the response — a multi-GB tree takes a while to remove and the
+            // durable outcome (the rows are released) is already committed. It therefore needs
+            // its OWN scope: the request scope, and every scoped service resolved from it, is
+            // disposed the moment this handler returns.
+            ReleaseWorkspacesInBackground(scopeFactory, environment.Id);
+
             return Results.Ok(new OK("Environment deleted"));
         }).WithName("DeleteEnvironment");
     }
+
+    /// <summary>
+    /// Removes an environment's workspace directories after its delete has already been
+    /// committed and answered. Runs in a fresh DI scope because the request scope is gone by
+    /// then, and swallows nothing silently — a workspace that will not delete is already safe
+    /// (it was orphaned first), so the only thing left to do about a failure is log it.
+    /// </summary>
+    private static void ReleaseWorkspacesInBackground(IServiceScopeFactory scopeFactory, int environmentId)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var workspaceService = scope.ServiceProvider.GetRequiredService<IRunWorkspaceService>();
+                await workspaceService.ReleaseAsync(environmentId, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(
+                    ex,
+                    "[Environments] Background workspace release failed for environment {EnvironmentId}; its workspaces remain as standalone sandboxes",
+                    environmentId);
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Whether this request's project may see the environment at all.
+    ///
+    /// The name lookups behind GET/PUT/DELETE are global — the unique key is (CustomName, LLM),
+    /// with no project in it — so without this a request could read, edit, or delete an
+    /// environment belonging to another project simply by naming it. Answering 404 rather than
+    /// 403 keeps the two cases indistinguishable: whether a name exists elsewhere is itself
+    /// information this project has no business learning.
+    ///
+    /// A null scope is an environment that predates project scoping and stays visible
+    /// everywhere — the no-backfill guarantee.
+    /// </summary>
+    private static bool IsVisibleHere(LLM_Environment environment) =>
+        ProjectPathComparer.IsVisibleIn(environment.ProjectPath, ParserConfigs.GetRootPath());
+
+    private static EnvironmentResponse ToResponse(LLM_Environment environment, Sandbox? workspace = null) =>
+        new(
+            environment.Id,
+            environment.CustomName,
+            LlmParser.ToWireName(environment.LLM),
+            environment.Path,
+            environment.CustomArgs,
+            environment.CustomPrompt,
+            LLM_Environment.DefaultPrompt,
+            environment.LastUsedUTC,
+            environment.Hidden,
+            environment.AutomationWorker,
+            (int)environment.WorkspaceMode,
+            workspace?.Id,
+            workspace?.Path,
+            workspace?.Branch);
+
+    /// <summary>
+    /// Parses a wire workspace mode. Explicit rather than casting the int straight to the enum:
+    /// an unknown value from a newer or corrupted client must be a 400 the user can read, not a
+    /// silently stored mode that no launch path knows how to honour.
+    /// </summary>
+    private static bool TryParseWorkspaceMode(int value, out EnvironmentWorkspaceMode mode)
+    {
+        if (Enum.IsDefined(typeof(EnvironmentWorkspaceMode), value))
+        {
+            mode = (EnvironmentWorkspaceMode)value;
+            return true;
+        }
+
+        mode = EnvironmentWorkspaceMode.Project;
+        return false;
+    }
+
+    private static string UnknownWorkspaceModeMessage(int value) =>
+        $"Unknown workspace mode: {value}. Expected 0 (project directory), 1 (persistent clone), or 2 (fresh clone per run).";
 
     private static string EnvironmentInUseMessage(int automationCount) =>
         automationCount == 1

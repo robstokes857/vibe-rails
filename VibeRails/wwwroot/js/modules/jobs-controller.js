@@ -3,6 +3,7 @@ import {
     getLlmName,
     parseLlmSelection
 } from './utils.js';
+import { mountWorkerPicker } from './pickers/worker-picker.js';
 import { showReplayModal } from './session-viewer.js';
 
 const LLM = Object.freeze({
@@ -377,7 +378,7 @@ export class JobController {
                     <div class="job-card-actions">
                         <button class="btn btn-sm btn-primary" type="button" data-job-action="run" data-job-id="${jobId}"><i class="fa-solid fa-play me-1"></i>Run now</button>
                         <button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="edit" data-job-id="${jobId}" title="Edit automation" aria-label="Edit ${safeName}"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
-                        <button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="toggle" data-job-id="${jobId}" title="${job.enabled ? 'Disable' : 'Enable'} automation" aria-label="${job.enabled ? 'Disable' : 'Enable'} ${safeName}"><i class="fa-solid ${job.enabled ? 'fa-pause' : 'fa-play'}" aria-hidden="true"></i></button>
+                        <button class="btn btn-sm ${job.enabled ? 'btn-outline-success' : 'btn-outline-danger'} job-icon-action job-toggle-action" type="button" data-job-action="toggle" data-job-id="${jobId}" title="${job.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable'}" aria-label="${job.enabled ? 'Disable' : 'Enable'} ${safeName}"><i class="fa-solid ${job.enabled ? 'fa-toggle-on' : 'fa-toggle-off'}" aria-hidden="true"></i></button>
                         <button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="export-recipe" data-job-id="${jobId}" title="Export as recipe" aria-label="Export ${safeName} as recipe"><i class="fa-solid fa-file-export" aria-hidden="true"></i></button>
                         <button class="btn btn-sm btn-outline-danger job-icon-action" type="button" data-job-action="delete" data-job-id="${jobId}" title="Delete automation" aria-label="Delete ${safeName}"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
                     </div>
@@ -776,19 +777,19 @@ export class JobController {
         editor.innerHTML = `
             <form data-job-form class="job-inline-form">
                 <div class="job-inline-form-header">
-                    <div><span class="jobs-eyebrow">${isEdit ? 'Edit automation' : 'New automation'}</span><h3>${isEdit ? this.escape(source.name) : 'Create an automation'}</h3><p>The Environment owns the CLI, model, arguments, and initial message. This automation controls when it runs and its timeout.</p></div>
+                    <div><span class="jobs-eyebrow">${isEdit ? 'Edit automation' : 'New automation'}</span><h3>${isEdit ? this.escape(source.name) : 'Create an automation'}</h3><p>The Worker owns the CLI, model, arguments, and initial message. This automation controls when it runs and its timeout.</p></div>
                     <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="cancel-editor" aria-label="Close automation editor"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 <div class="row g-3">
                     <div class="col-lg-5"><label class="form-label" for="job-name">Automation name</label><input class="form-control" id="job-name" maxlength="100" required value="${this.escape(source.name || '')}" placeholder="Security review after commit"></div>
                     <div class="col-lg-7">
-                        <label class="form-label" for="job-llm-selection">Environment</label>
+                        <label class="form-label" for="job-llm-selection">Worker</label>
                         <div class="job-environment-picker-row">
                             <div class="job-environment-picker"><select class="form-select" id="job-llm-selection" required></select></div>
-                            <button class="btn btn-outline-primary text-nowrap" type="button" data-job-action="add-environment-from-editor"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add Environment</button>
-                            <button class="btn btn-outline-secondary text-nowrap" type="button" data-job-action="edit-selected-environment" hidden disabled>Edit Environment</button>
+                            <button class="btn btn-outline-primary text-nowrap" type="button" data-job-action="add-environment-from-editor"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add Worker</button>
+                            <button class="btn btn-outline-secondary text-nowrap" type="button" data-job-action="edit-selected-environment" hidden disabled>Edit Worker</button>
                         </div>
-                        <small class="form-text text-muted">The saved model, arguments, CLI settings, and initial message stay synchronized with this Environment.</small>
+                        <small class="form-text text-muted">The saved model, arguments, CLI settings, and initial message stay synchronized with this Worker.</small>
                     </div>
                     <div class="col-12"><div class="job-environment-preview" data-job-environment-preview aria-live="polite"></div></div>
                 </div>
@@ -879,19 +880,14 @@ export class JobController {
         const parsedValue = parseLlmSelection(valueToRestore, this.environments);
         const missingEnvironment = valueToRestore.startsWith('env:')
             && !this.findEnvironment(parsedValue.envId);
-        const pickerDisposer = this.app.llmPickerController.mount(selection, {
-            context: 'automation',
-            placeholder: this.environments.length > 0 ? 'Select an Environment...' : 'Add an Environment to continue...',
+        const pickerDisposer = mountWorkerPicker(this.app, selection, {
             selectedValue: valueToRestore,
-            searchPlaceholder: 'Search Environments...',
             selectedFallback: missingEnvironment ? {
                 value: valueToRestore,
-                label: `${this.activeEditorJob?.environmentName || 'Deleted Environment'} (missing)`,
+                label: `${this.activeEditorJob?.environmentName || 'Deleted Worker'} (missing)`,
                 cli: parsedValue.cli || '',
                 environmentId: parsedValue.envId,
-                environmentName: this.activeEditorJob?.environmentName || null,
-                kind: 'environment',
-                group: 'Custom Environments'
+                environmentName: this.activeEditorJob?.environmentName || null
             } : null
         });
         this.registerEditorModalCleanup(selection, pickerDisposer);
@@ -917,7 +913,7 @@ export class JobController {
             const prompt = (environment.customPrompt || '').trim();
             preview.dataset.tone = prompt ? 'ready' : 'warning';
             preview.innerHTML = prompt
-                ? `<div><span><i class="fa-solid fa-layer-group" aria-hidden="true"></i><strong>${this.escape(environment.name)}</strong> owns this initial message</span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-environment">Edit Environment</button></div><pre></pre>`
+                ? `<div><span><i class="fa-solid fa-layer-group" aria-hidden="true"></i><strong>${this.escape(environment.name)}</strong> owns this initial message</span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-environment">Edit Worker</button></div><pre></pre>`
                 : `<div><span><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><strong>${this.escape(environment.name)}</strong> needs an Initial Message before it can run as an Automation.</span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-environment">Add initial message</button></div>`;
             const promptTarget = preview.querySelector('pre');
             if (promptTarget) promptTarget.textContent = prompt;
@@ -926,16 +922,44 @@ export class JobController {
         }
 
         preview.dataset.tone = 'empty';
-        preview.innerHTML = '<span>Select an Environment, or add one without leaving this editor.</span>';
+        preview.innerHTML = '<span>Select a Worker, or add one without leaving this editor.</span>';
     }
 
     async createEnvironmentFromEditor() {
         const controller = this.app.environmentController;
         if (!controller) return;
+
+        // One-name rule: the Worker is named after its automation, so the automation
+        // name must exist first and must not collide with an existing environment
+        // (env names are case-insensitive backend identifiers).
+        const nameInput = this.root?.querySelector('[data-job-editor] #job-name');
+        const automationName = (nameInput?.value || '').trim();
+        if (!automationName) {
+            nameInput?.focus();
+            this.app.showError('Name the automation first — its Worker uses the same name.');
+            return;
+        }
+        // Mirror of the backend EnvironmentNameValidator charset, checked up front so
+        // the user hears about an unusable automation name before the modal opens.
+        if (!/^[A-Za-z0-9][A-Za-z0-9_\- ]{0,63}$/.test(automationName)) {
+            nameInput?.focus();
+            this.app.showError('The Worker reuses the automation name, so it must be 64 characters or fewer using only letters, digits, spaces, hyphens, and underscores.');
+            return;
+        }
+        const collision = this.environments.find(environment =>
+            (environment.name || '').toLowerCase() === automationName.toLowerCase());
+        if (collision) {
+            nameInput?.focus();
+            this.app.showError(`A Worker or Environment named "${collision.name}" already exists. Rename the automation, or select the existing one.`);
+            return;
+        }
+
         const knownIds = new Set(this.environments.map(environment => Number(environment.id)));
         const selection = this.root?.querySelector('[data-job-editor] #job-llm-selection');
         const current = parseLlmSelection(selection?.tomselect?.getValue?.() || selection?.value, this.environments);
         controller.createEnvironment({
+            presetName: automationName,
+            automationWorker: true,
             onChanged: async () => {
                 const latest = this.app.data.environments || [];
                 const created = latest.find(environment => !knownIds.has(Number(environment.id)));
@@ -976,22 +1000,22 @@ export class JobController {
             : null;
 
         if (parsedSelection.kind === 'environment' && !selectedEnvironment) {
-            if (validate) this.app.showError('The selected Environment no longer exists. Choose another Environment.');
+            if (validate) this.app.showError('The selected Worker no longer exists. Choose another Worker.');
             return null;
         }
         if (!selectedEnvironment) {
-            if (validate) this.app.showError('Choose an Environment.');
+            if (validate) this.app.showError('Choose a Worker.');
             return null;
         }
 
         const llm = getJobLlmForCli(selectedEnvironment.cli);
         const prompt = (selectedEnvironment.customPrompt || '').trim();
         if (llm === null) {
-            if (validate) this.app.showError('The selected Environment uses an unsupported CLI.');
+            if (validate) this.app.showError('The selected Worker uses an unsupported CLI.');
             return null;
         }
         if (!prompt) {
-            if (validate) this.app.showError('Edit this Environment and add an Initial Message before creating the automation.');
+            if (validate) this.app.showError('Edit this Worker and add an Initial Message before creating the automation.');
             return null;
         }
 
@@ -1071,12 +1095,12 @@ export class JobController {
         if (!job) return;
         const environment = this.findEnvironment(job.environmentId);
         if (!environment) {
-            this.app.showError('This automation needs a valid Environment before it can be enabled or disabled.');
+            this.app.showError('This automation needs a valid Worker before it can be enabled or disabled.');
             return;
         }
         const llm = getJobLlmForCli(environment.cli);
         if (llm === null) {
-            this.app.showError('This automation uses an Environment with an unsupported CLI.');
+            this.app.showError('This automation uses a Worker with an unsupported CLI.');
             return;
         }
         const payload = {

@@ -1,6 +1,6 @@
 # API authentication coverage
 
-Audit date: 2026-08-06
+Audit date: 2026-08-07
 
 Jobs inventory re-checked: 2026-08-03 (three run-history routes added; see § 3).
 
@@ -8,8 +8,8 @@ LLM proxy posture re-audited: 2026-08-05 (`/llm/openai` and `/llm/zai` removed f
 `CookieAuthMiddleware` skip list; the § 1 conditional-response finding is resolved — see
 §§ 1–3).
 
-Route inventory re-checked: 2026-08-06 (four mappings added: the three LLM-picker
-preference methods and the data-export progress route; see § 3).
+Route inventory re-checked: 2026-08-07 (five authenticated HTTP-relay proof mappings
+added; see § 3).
 
 Scope: the current working tree, including uncommitted changes.
 
@@ -34,8 +34,8 @@ session-scoped browser credential (`viberails_tab`), which the implementation ca
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 146 mapped route
-surfaces in this inventory: 136 `/api/v1` method/path mappings, seven non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 151 mapped route
+surfaces in this inventory: 141 `/api/v1` method/path mappings, seven non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -109,16 +109,21 @@ There are **no mapped business `/api/v1` endpoints** in this category.
 
 - `ANY /llm/anthropic/{**rest}`
 - `ANY /llm/openai/{**rest}` (on the middleware since 2026-08-05)
+- `ANY /llm/zai/{**rest}` — only for nonstandard catch-all paths that do not contain
+  `/api/`; normal OpenCode requests use `/llm/zai/api/paas/v4/...` and therefore receive
+  both middleware checks.
 
 No `/llm` path is on the middleware skip list, so a valid `viberails_session` credential
 (sent as a header by the CLIs) is always required before the handler runs. The
 middleware's tab rule keys off `/api/` appearing in the path, which no real Claude or
-Codex request path contains — so for these two trees the middleware enforces the session
-credential only. Each handler then checks its feature flag before the proxy gate checks
-both headers: a caller holding only the session credential sees `404` when the feature
-is disabled and `401` when it is enabled. When enabled, the relay requires both
-credentials as listed in section 3. (`/llm/zai` is stricter: every real OpenCode path
-contains `/api/`, so the middleware enforces both credentials — see section 3.)
+Codex request path contains — so for those two trees the middleware enforces the session
+credential only. Normal Z.AI requests do contain `/api/`, but its catch-all mapping also
+accepts nonstandard paths that do not. Each handler checks its feature flag before the
+proxy gate checks both headers: on a path where the middleware has required only the
+session credential, a caller holding only that credential sees `404` when the feature is
+disabled and `401` when it is enabled. When enabled, the relay requires both credentials
+as listed in section 3. This conditional distinction does not create a public endpoint:
+every `/llm/**` request must first present a valid session credential.
 
 Auth failures anywhere under `/llm/**` return plain-text status codes, never the HTML
 auth page — every caller there is a CLI HTTP client or an MCP tool.
@@ -139,9 +144,10 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `ANY /llm/anthropic/{**rest}` — same shape: the middleware checks the session
   credential, and when enabled the proxy gate requires both headers.
 - `ANY /llm/zai/{**rest}` — the middleware checks the session credential, and because
-  every real OpenCode request path contains `/api/` (`/llm/zai/api/paas/v4/...`), the
+  every normal OpenCode request path contains `/api/` (`/llm/zai/api/paas/v4/...`), the
   middleware's tab rule applies too — both credentials are enforced before the handler
-  runs. When enabled, the proxy gate re-checks both.
+  runs. When enabled, the proxy gate re-checks both; the nonstandard catch-all-path nuance
+  is documented in section 2.
 - `POST /llm/control/token-saver/pause` — both headers are required by the control
   handler's proxy auth gate.
 - `POST /llm/control/token-saver/resume` — both headers are required by the control
@@ -174,7 +180,7 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `GET /api/v1/rules`
 - `GET /api/v1/rules/details`
 
-### Application settings, PIN, export, and push (13)
+### Application settings, PIN, export, push, and HTTP relay (18)
 
 - `GET /api/v1/settings`
 - `POST /api/v1/settings`
@@ -190,6 +196,11 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `GET /api/v1/update/check`
 - `GET /api/v1/update/version`
 - `GET /api/v1/version`
+- `GET /api/v1/http-relay/test/posts`
+- `GET /api/v1/http-relay/test/posts/{id:int}`
+- `POST /api/v1/http-relay/test/posts`
+- `PUT /api/v1/http-relay/test/posts/{id:int}`
+- `DELETE /api/v1/http-relay/test/posts/{id:int}`
 
 ### BERT and unified search (7)
 

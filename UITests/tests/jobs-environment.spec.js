@@ -14,6 +14,8 @@ function createFixtureState() {
                 path: 'C:\\test-envs\\nightly-codex',
                 customArgs: '--model gpt-5.6-sol -c model_reasoning_effort=high',
                 customPrompt: 'Use the nightly security-review profile.',
+                hidden: false,
+                automationWorker: true,
                 lastUsedUTC: '2026-07-21T12:00:00Z'
             },
             {
@@ -23,6 +25,19 @@ function createFixtureState() {
                 path: 'C:\\test-envs\\copilot-reviewer',
                 customArgs: '--model gpt-5.5',
                 customPrompt: 'Review this commit with Copilot.',
+                hidden: true,
+                automationWorker: true,
+                lastUsedUTC: '2026-07-21T12:00:00Z'
+            },
+            {
+                id: 43,
+                name: 'Terminal helper',
+                cli: 'claude',
+                path: 'C:\\test-envs\\terminal-helper',
+                customArgs: '',
+                customPrompt: '',
+                hidden: false,
+                automationWorker: false,
                 lastUsedUTC: '2026-07-21T12:00:00Z'
             }
         ],
@@ -49,7 +64,8 @@ function createFixtureState() {
             enabled: false,
             triggers: []
         }],
-        nextJobId: 18
+        nextJobId: 18,
+        nextEnvironmentId: 60
     };
     const base = [
         ['codex', 'Codex'],
@@ -60,21 +76,25 @@ function createFixtureState() {
         ['copilot', 'Copilot'],
         ['shell', 'Terminal']
     ];
+    // Mirrors the server: Automation Workers are excluded from the preferences
+    // catalog, so only the regular custom environment (43) appears here.
     state.pickerItems = [
         ...base.map(([cli, label], order) => ({
             key: `base:${cli}`, kind: 'base', group: 'Base CLIs', label, cli,
             environmentId: null, enabled: true, order
         })),
-        ...state.environments.map((environment, order) => ({
-            key: `env:${environment.id}:${environment.cli}`,
-            kind: 'environment',
-            group: 'Custom Environments',
-            label: `${environment.name} (${environment.cli})`,
-            cli: environment.cli,
-            environmentId: environment.id,
-            enabled: true,
-            order
-        }))
+        ...state.environments
+            .filter(environment => !environment.automationWorker)
+            .map((environment, order) => ({
+                key: `env:${environment.id}:${environment.cli}`,
+                kind: 'environment',
+                group: 'Custom Environments',
+                label: `${environment.name} (${environment.cli})`,
+                cli: environment.cli,
+                environmentId: environment.id,
+                enabled: !environment.hidden,
+                order
+            }))
     ];
     return state;
 }
@@ -83,6 +103,7 @@ async function installStatefulApi(page) {
     const state = createFixtureState();
     const writes = {
         environments: [],
+        environmentCreates: [],
         settings: [],
         jobs: []
     };
@@ -107,6 +128,23 @@ async function installStatefulApi(page) {
         }
         if (method === 'GET' && path === '/api/v1/environments') {
             return respond({ environments: state.environments });
+        }
+        if (method === 'POST' && path === '/api/v1/environments') {
+            const body = request.postDataJSON();
+            const environment = {
+                id: state.nextEnvironmentId++,
+                name: body.name,
+                cli: body.cli,
+                path: `C:\\test-envs\\${body.name}`,
+                customArgs: body.customArgs || '',
+                customPrompt: body.customPrompt || '',
+                hidden: Boolean(body.hidden),
+                automationWorker: Boolean(body.automationWorker),
+                lastUsedUTC: '2026-07-21T13:00:00Z'
+            };
+            state.environments.push(environment);
+            writes.environmentCreates.push({ body });
+            return respond(environment);
         }
         if (path === '/api/v1/llm-picker/preferences') {
             if (method === 'GET') return respond({ items: state.pickerItems });
@@ -199,9 +237,7 @@ async function openJobs(page) {
         await page.locator('.app-subnav-link[data-view="jobs"]:visible').click();
     }
     await expect(page.locator('.jobs-view[data-view="jobs"]')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole('heading', { name: 'Environment / Workers', exact: true })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Automation rules', exact: true })).toBeVisible();
-    await expect(page.locator('[data-job-environments-table]')).toContainText('Nightly Codex');
+    await expect(page.locator('[data-jobs-list]')).toContainText('Environment review');
 }
 
 async function openWorkers(page) {
@@ -212,15 +248,11 @@ async function openWorkers(page) {
     await expect(page.locator('[data-environments-table]')).toContainText('Nightly Codex');
 }
 
-async function openNightlyWorkerFrom(page, tableSelector) {
-    await page.locator(
-        `${tableSelector} [data-action="edit-environment"][data-env-name="Nightly Codex"]`
-    ).click();
-    await expect(page.locator('#env-form')).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByRole('heading', {
-        name: 'Edit Environment / Worker: Nightly Codex',
-        exact: true
-    })).toBeVisible();
+async function openAutomationEditorForExistingJob(page) {
+    await page.locator('[data-job-action="edit"][data-job-id="17"]').click();
+    await expect(page.locator('[data-job-form]')).toBeVisible();
+    await expect.poll(() => page.locator('#job-llm-selection').evaluate(
+        element => Boolean(element.tomselect))).toBe(true);
 }
 
 async function environmentControlSnapshot(page) {
@@ -237,14 +269,17 @@ async function closeEnvironmentModal(page) {
     await expect(page.locator('#env-form')).toHaveCount(0);
 }
 
-test.describe('Jobs Environment / Workers integration', () => {
-    test('Jobs and Workers launch the very same full Add Worker modal', async ({ page }) => {
+test.describe('Jobs Worker / Environments integration', () => {
+    test('Add Worker opens the shared modal minus the name and visibility rows', async ({ page }) => {
         await installStatefulApi(page);
         await openApp(page);
         await openJobs(page);
 
-        await page.locator('[data-job-action="new-environment"]').click();
-        await expect(page.getByRole('heading', { name: 'Create Environment / Worker', exact: true }))
+        await page.locator('[data-job-action="new"]').click();
+        await expect(page.locator('[data-job-form]')).toBeVisible();
+        await page.locator('#job-name').fill('Post-merge auditor');
+        await page.locator('[data-job-action="add-environment-from-editor"]').click();
+        await expect(page.getByRole('heading', { name: 'Create Worker: Post-merge auditor', exact: true }))
             .toBeVisible();
         const jobsControls = await environmentControlSnapshot(page);
         await closeEnvironmentModal(page);
@@ -254,73 +289,95 @@ test.describe('Jobs Environment / Workers integration', () => {
         await expect(page.getByRole('heading', { name: 'Create Environment / Worker', exact: true }))
             .toBeVisible();
         const workersControls = await environmentControlSnapshot(page);
+        await closeEnvironmentModal(page);
 
-        expect(workersControls).toEqual(jobsControls);
-        expect(Object.keys(workersControls).sort()).toEqual([
-            'codex-effort',
-            'codex-fast-mode',
-            'codex-model',
-            'codex-no-alt-screen',
-            'codex-prompt',
-            'codex-yolo',
-            'env-cli',
-            'env-cli-ts-control',
-            'env-custom-args',
-            'env-name'
-        ]);
+        // One shared modal: the Worker variant only drops the immutable name row and
+        // the launch-picker visibility switch; every CLI settings control is identical.
+        expect(Object.keys(jobsControls)).not.toContain('env-name');
+        expect(Object.keys(jobsControls)).not.toContain('env-hidden');
+        expect(Object.keys(workersControls).sort()).toEqual(
+            [...Object.keys(jobsControls), 'env-name', 'env-hidden'].sort());
     });
 
-    test('editing Worker settings on either screen stays synchronized on the other', async ({ page }) => {
+    test('Add Worker requires the automation name and creates the worker with it', async ({ page }) => {
+        const { writes } = await installStatefulApi(page);
+        await openApp(page);
+        await openJobs(page);
+
+        await page.locator('[data-job-action="new"]').click();
+        await expect(page.locator('[data-job-form]')).toBeVisible();
+
+        // One-name rule: without an automation name there is nothing to name the
+        // Worker after, so the modal must not open.
+        await page.locator('[data-job-action="add-environment-from-editor"]').click();
+        await expect(page.locator('#env-form')).toHaveCount(0);
+        await expect(page.getByText('Name the automation first')).toBeVisible();
+
+        await page.locator('#job-name').fill('Post-merge auditor');
+        await page.locator('[data-job-action="add-environment-from-editor"]').click();
+        await expect(page.locator('#env-form')).toBeVisible({ timeout: 5_000 });
+        await page.locator('#codex-prompt').fill('Audit every merge.');
+        await page.locator('#env-form button[type="submit"]').click();
+        await expect(page.locator('#env-form')).toHaveCount(0);
+
+        expect(writes.environmentCreates).toHaveLength(1);
+        const created = writes.environmentCreates[0].body;
+        expect(created.name).toBe('Post-merge auditor');
+        expect(created.automationWorker).toBe(true);
+        expect(created.hidden).toBeUndefined();
+
+        // The freshly created worker is auto-selected in the Worker picker.
+        await expect.poll(() => page.locator('#job-llm-selection').evaluate(
+            element => element.tomselect?.getValue?.() || element.value)).toBe('env:60:codex');
+    });
+
+    test('editing a Worker from either screen stays synchronized', async ({ page }) => {
         const { state, writes } = await installStatefulApi(page);
         await openApp(page);
         await openJobs(page);
 
-        await openNightlyWorkerFrom(page, '[data-job-environments-table]');
-        const originalJobsControls = await environmentControlSnapshot(page);
-        expect(originalJobsControls['codex-prompt']).toBe('Use the nightly security-review profile.');
-        expect(originalJobsControls['codex-model']).toBe('gpt-5.6-sol');
-        expect(originalJobsControls['codex-effort']).toBe('high');
+        await openAutomationEditorForExistingJob(page);
+        await expect(page.locator('[data-job-environment-preview]'))
+            .toContainText('Use the nightly security-review profile.');
+        await page.locator('[data-job-action="edit-selected-environment"]').click();
+        await expect(page.getByRole('heading', { name: 'Edit Worker: Nightly Codex', exact: true }))
+            .toBeVisible();
+        const jobsControls = await environmentControlSnapshot(page);
+        expect(jobsControls['codex-prompt']).toBe('Use the nightly security-review profile.');
+        expect(jobsControls['codex-model']).toBe('gpt-5.6-sol');
+        expect(Object.keys(jobsControls)).not.toContain('env-name');
+        expect(Object.keys(jobsControls)).not.toContain('env-hidden');
+
         await page.locator('#codex-prompt').fill('Security review configured from Jobs.');
         await page.locator('#codex-model').selectOption('gpt-5.6-luna');
-        await page.locator('#codex-effort').selectOption('max');
-        await page.locator('#codex-fast-mode').check();
         await page.locator('#env-form button[type="submit"]').click();
         await expect(page.locator('#env-form')).toHaveCount(0);
-        await expect(page.locator('[data-job-environments-table]'))
+        await expect(page.locator('[data-job-environment-preview]'))
             .toContainText('Security review configured from Jobs.');
 
         await openWorkers(page);
         await expect(page.locator('[data-environments-table]'))
             .toContainText('Security review configured from Jobs.');
-        await openNightlyWorkerFrom(page, '[data-environments-table]');
+        // Workers carry the robot badge in the Environments table.
+        await expect(page.locator('[data-environments-table] tr', { hasText: 'Nightly Codex' })
+            .locator('.env-worker-badge')).toBeVisible();
+        await page.locator('[data-environments-table] [data-action="edit-environment"][data-env-name="Nightly Codex"]').click();
+        await expect(page.getByRole('heading', { name: 'Edit Worker: Nightly Codex', exact: true }))
+            .toBeVisible();
         const workersControls = await environmentControlSnapshot(page);
         expect(workersControls['codex-prompt']).toBe('Security review configured from Jobs.');
         expect(workersControls['codex-model']).toBe('gpt-5.6-luna');
-        expect(workersControls['codex-effort']).toBe('max');
-        expect(workersControls['codex-fast-mode']).toBe(true);
 
         await page.locator('#codex-prompt').fill('Security review updated from Workers.');
-        await page.locator('#codex-model').selectOption('gpt-5.6-terra');
-        await page.locator('#codex-effort').selectOption('ultra');
         await page.locator('#env-form button[type="submit"]').click();
         await expect(page.locator('#env-form')).toHaveCount(0);
-
-        await openJobs(page);
-        await expect(page.locator('[data-job-environments-table]'))
-            .toContainText('Security review updated from Workers.');
-        await expect(page.locator('[data-jobs-list]'))
-            .toContainText('Security review updated from Workers.');
-        await openNightlyWorkerFrom(page, '[data-job-environments-table]');
-        await expect(page.locator('#codex-prompt')).toHaveValue('Security review updated from Workers.');
-        await expect(page.locator('#codex-model')).toHaveValue('gpt-5.6-terra');
-        await expect(page.locator('#codex-effort')).toHaveValue('ultra');
 
         expect(state.environments[0].customPrompt).toBe('Security review updated from Workers.');
         expect(writes.environments).toHaveLength(2);
         expect(writes.settings).toHaveLength(2);
     });
 
-    test('new automation uses a custom Worker and current repository without duplicate editors', async ({ page }) => {
+    test('new automation lists only Workers and posts the denormalized prompt', async ({ page }) => {
         const { writes } = await installStatefulApi(page);
         await openApp(page);
         await openJobs(page);
@@ -338,8 +395,14 @@ test.describe('Jobs Environment / Workers integration', () => {
             .toBe(true);
         const optionValues = await picker.locator('option').evaluateAll(options =>
             options.map(option => option.value).filter(Boolean));
+        // Workers only — the regular custom environment (43) and base CLIs are for
+        // launch pickers. The hidden worker (42) still appears: `hidden` has no
+        // power over the Worker picker.
         expect(optionValues.sort()).toEqual(['env:41:codex', 'env:42:copilot']);
-        expect(optionValues.some(value => value.startsWith('base:'))).toBe(false);
+
+        // The Worker picker is not a launch picker: no customization footer.
+        expect(await picker.evaluate(element =>
+            Boolean(element.tomselect.dropdown.querySelector('.llm-picker-customize-button')))).toBe(false);
 
         await picker.evaluate(element => element.tomselect.setValue('env:41:codex'));
         await page.locator('#job-name').fill('Security review after commit');
@@ -354,5 +417,21 @@ test.describe('Jobs Environment / Workers integration', () => {
         expect(create.body.llm).toBe(1);
         expect(create.body.prompt).toBe('Use the nightly security-review profile.');
         expect(create.body.triggers).toEqual([{ kind: 2 }]);
+    });
+
+    test('the enable toggle is state-colored green/red', async ({ page }) => {
+        await installStatefulApi(page);
+        await openApp(page);
+        await openJobs(page);
+
+        // Fixture job 17 is disabled → red with the off icon.
+        const toggle = page.locator('[data-job-action="toggle"][data-job-id="17"]');
+        await expect(toggle).toHaveClass(/btn-outline-danger/);
+        await expect(toggle.locator('.fa-toggle-off')).toBeVisible();
+
+        await toggle.click();
+        const enabledToggle = page.locator('[data-job-action="toggle"][data-job-id="17"]');
+        await expect(enabledToggle).toHaveClass(/btn-outline-success/);
+        await expect(enabledToggle.locator('.fa-toggle-on')).toBeVisible();
     });
 });

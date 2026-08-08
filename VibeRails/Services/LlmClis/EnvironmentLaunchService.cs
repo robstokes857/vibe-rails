@@ -2,6 +2,7 @@ using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services.LlmClis.Launchers;
+using VibeRails.Services.Workspaces;
 using VibeRails.Utils;
 
 namespace VibeRails.Services.LlmClis;
@@ -27,7 +28,8 @@ public interface IEnvironmentLaunchService
 
 public sealed class EnvironmentLaunchService(
     IRepository repository,
-    ILaunchLLMService launchService) : IEnvironmentLaunchService
+    ILaunchLLMService launchService,
+    IRunWorkspaceService workspaceService) : IEnvironmentLaunchService
 {
     public async Task<LaunchResult> LaunchAsync(
         LLM llm,
@@ -57,6 +59,10 @@ public sealed class EnvironmentLaunchService(
                     llm,
                     environmentId,
                     environmentName,
+                    // The project, not the eventual working directory: the two are the same
+                    // here (the workspace swap below happens after this) but only the former
+                    // is what the environment is scoped against.
+                    workingDirectory,
                     cancellationToken);
                 if (environment is null)
                 {
@@ -67,6 +73,22 @@ public sealed class EnvironmentLaunchService(
                 }
 
                 environmentName = environment.CustomName;
+
+                // Workspace resolution happens before anything is spawned, so a failed clone
+                // is a launch that never started rather than a terminal opened in the wrong
+                // directory. Project mode returns the incoming directory untouched.
+                if (environment.UsesWorkspaceClone)
+                {
+                    var workspace = await workspaceService.ResolveAsync(
+                        environment,
+                        workingDirectory,
+                        cancellationToken);
+                    if (!workspace.Success)
+                        return new LaunchResult(false, workspace.Error!);
+
+                    workingDirectory = workspace.WorkingDirectory;
+                }
+
                 if (!string.IsNullOrWhiteSpace(environment.CustomArgs))
                     args.InsertRange(0, ShellArgSanitizer.ParseAndValidate(environment.CustomArgs));
                 LlmPromptArgvBuilder.AppendInitialPrompt(args, llm, environment.CustomPrompt);
@@ -119,23 +141,44 @@ public sealed class EnvironmentLaunchService(
         }
     }
 
+    /// <param name="projectPath">
+    /// The project this launch belongs to — the launch directory for an interactive launch, the
+    /// run's own ProjectPath for an Automation. Both lookups below are global (by id, or by the
+    /// global (CustomName, LLM) key), so this is where an environment belonging to a different
+    /// project is rejected. Without it, a saved id or a known name would launch another
+    /// project's environment — with its arguments, its permissions flags, and its workspace.
+    /// </param>
     private async Task<LLM_Environment?> ResolveEnvironmentAsync(
         LLM llm,
         int? environmentId,
         string? environmentName,
+        string projectPath,
         CancellationToken cancellationToken)
     {
+        LLM_Environment? resolved;
         if (environmentId is int id)
         {
             var byId = await repository.GetEnvironmentByIdAsync(id, cancellationToken);
             // Automation persists the Environment's stable ID. If that record is gone or changed
             // provider, do not fall back to its old display name: a newly-created Environment may
             // legitimately reuse that name but carry entirely different arguments or permissions.
-            return byId is not null && byId.LLM == llm ? byId : null;
+            resolved = byId is not null && byId.LLM == llm ? byId : null;
+        }
+        else
+        {
+            resolved = string.IsNullOrWhiteSpace(environmentName)
+                ? null
+                : await repository.GetEnvironmentByNameAndLlmAsync(environmentName, llm, cancellationToken);
         }
 
-        return string.IsNullOrWhiteSpace(environmentName)
-            ? null
-            : await repository.GetEnvironmentByNameAndLlmAsync(environmentName, llm, cancellationToken);
+        if (resolved is not null && !ProjectPathComparer.IsVisibleIn(resolved.ProjectPath, projectPath))
+        {
+            Log.Warning(
+                "[Launch] Environment {EnvironmentId} ('{Name}') belongs to {OwnerProject} and was not launched from {ProjectPath}",
+                resolved.Id, resolved.CustomName, resolved.ProjectPath, projectPath);
+            return null;
+        }
+
+        return resolved;
     }
 }

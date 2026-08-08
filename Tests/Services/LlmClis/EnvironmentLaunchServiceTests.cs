@@ -4,12 +4,21 @@ using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
+using VibeRails.Services.Workspaces;
 using Xunit;
 
 namespace Tests.Services.LlmClis;
 
 public sealed class EnvironmentLaunchServiceTests
 {
+    /// <summary>
+    /// A workspace service that fails on any call. Every environment in these tests is in the
+    /// default Project mode, so reaching workspace resolution at all would be the bug — strict
+    /// mode turns "launch quietly started cloning" into a test failure instead of a slow test.
+    /// </summary>
+    private static IRunWorkspaceService NoWorkspace() =>
+        new Mock<IRunWorkspaceService>(MockBehavior.Strict).Object;
+
     [Fact]
     public async Task LaunchAsync_AppliesSavedEnvironmentOnce_AndTouchesOnlyRecency()
     {
@@ -44,7 +53,7 @@ public sealed class EnvironmentLaunchServiceTests
                 false))
             .Returns(new LaunchResult(true, "launched"));
 
-        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object).LaunchAsync(
+        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object, NoWorkspace()).LaunchAsync(
             LLM.Claude,
             new LaunchCliRequest(AppContext.BaseDirectory, "nightly", ["--caller-flag"]),
             fallbackWorkingDirectory: Path.GetTempPath(),
@@ -85,7 +94,7 @@ public sealed class EnvironmentLaunchServiceTests
                 false))
             .Returns(new LaunchResult(true, "launched"));
 
-        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object).LaunchAsync(
+        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object, NoWorkspace()).LaunchAsync(
             LLM.Claude,
             new LaunchCliRequest(AppContext.BaseDirectory, "nightly", []),
             fallbackWorkingDirectory: Path.GetTempPath(),
@@ -107,7 +116,7 @@ public sealed class EnvironmentLaunchServiceTests
                 "nightly", LLM.Claude, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException(@"SQLite Error 14: unable to open C:\secret\state.db"));
 
-        var faulted = await new EnvironmentLaunchService(repository.Object, Mock.Of<ILaunchLLMService>()).LaunchAsync(
+        var faulted = await new EnvironmentLaunchService(repository.Object, Mock.Of<ILaunchLLMService>(), NoWorkspace()).LaunchAsync(
             LLM.Claude,
             new LaunchCliRequest(AppContext.BaseDirectory, "nightly", []),
             fallbackWorkingDirectory: Path.GetTempPath(),
@@ -126,7 +135,7 @@ public sealed class EnvironmentLaunchServiceTests
                 "nightly", LLM.Claude, It.IsAny<CancellationToken>()))
             .ReturnsAsync(badArgs);
 
-        var rejected = await new EnvironmentLaunchService(validating.Object, Mock.Of<ILaunchLLMService>()).LaunchAsync(
+        var rejected = await new EnvironmentLaunchService(validating.Object, Mock.Of<ILaunchLLMService>(), NoWorkspace()).LaunchAsync(
             LLM.Claude,
             new LaunchCliRequest(AppContext.BaseDirectory, "nightly", []),
             fallbackWorkingDirectory: Path.GetTempPath(),
@@ -159,7 +168,7 @@ public sealed class EnvironmentLaunchServiceTests
                 false))
             .Returns(new LaunchResult(true, "launched"));
 
-        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object).LaunchAsync(
+        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object, NoWorkspace()).LaunchAsync(
             LLM.Claude,
             new LaunchCliRequest(AppContext.BaseDirectory, "old-name", []),
             fallbackWorkingDirectory: Path.GetTempPath(),
@@ -187,7 +196,7 @@ public sealed class EnvironmentLaunchServiceTests
             .ReturnsAsync((LLM_Environment?)null);
         var launcher = new Mock<ILaunchLLMService>(MockBehavior.Strict);
 
-        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object).LaunchAsync(
+        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object, NoWorkspace()).LaunchAsync(
             LLM.Codex,
             new LaunchCliRequest(AppContext.BaseDirectory, "gone", []),
             fallbackWorkingDirectory: Path.GetTempPath(),
@@ -207,7 +216,7 @@ public sealed class EnvironmentLaunchServiceTests
             .ReturnsAsync((LLM_Environment?)null);
         var launcher = new Mock<ILaunchLLMService>(MockBehavior.Strict);
 
-        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object).LaunchAsync(
+        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object, NoWorkspace()).LaunchAsync(
             LLM.Codex,
             new LaunchCliRequest(AppContext.BaseDirectory, "reused-name", []),
             fallbackWorkingDirectory: Path.GetTempPath(),
@@ -240,7 +249,7 @@ public sealed class EnvironmentLaunchServiceTests
                 false))
             .Returns(new LaunchResult(true, "launched"));
 
-        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object).LaunchAsync(
+        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object, NoWorkspace()).LaunchAsync(
             LLM.Codex,
             new LaunchCliRequest(AppContext.BaseDirectory, null, ["--model", "gpt-5.6-sol"]),
             fallbackWorkingDirectory: Path.GetTempPath(),
@@ -267,7 +276,7 @@ public sealed class EnvironmentLaunchServiceTests
                 false))
             .Returns(new LaunchResult(true, "launched"));
 
-        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object).LaunchAsync(
+        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object, NoWorkspace()).LaunchAsync(
             LLM.Codex,
             new LaunchCliRequest(AppContext.BaseDirectory, "   ", []),
             fallbackWorkingDirectory: Path.GetTempPath(),
@@ -276,6 +285,76 @@ public sealed class EnvironmentLaunchServiceTests
         Assert.True(result.Success);
         repository.VerifyNoOtherCalls();
         launcher.VerifyAll();
+    }
+
+    [Fact]
+    public async Task LaunchAsync_RefusesAnEnvironmentBelongingToAnotherProject()
+    {
+        var environment = Environment(
+            id: 7,
+            name: "nightly",
+            customArgs: "--dangerously-skip-permissions",
+            prompt: "Review this repository.",
+            lastUsedUtc: DateTime.UtcNow);
+        environment.ProjectPath = Path.Combine(Path.GetTempPath(), "some-other-project");
+
+        var repository = new Mock<IRepository>();
+        repository
+            .Setup(r => r.GetEnvironmentByIdAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(environment);
+
+        // Strict: nothing may be spawned. The saved id resolves to a real row, so without the
+        // scope check this would launch another project's environment — with its arguments and
+        // its permission flags — inside this project's directory.
+        var launcher = new Mock<ILaunchLLMService>(MockBehavior.Strict);
+
+        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object, NoWorkspace()).LaunchAsync(
+            LLM.Claude,
+            new LaunchCliRequest(AppContext.BaseDirectory, null, []),
+            fallbackWorkingDirectory: AppContext.BaseDirectory,
+            environmentId: 7,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("was not found", result.Message, StringComparison.OrdinalIgnoreCase);
+        launcher.VerifyAll();
+    }
+
+    [Fact]
+    public async Task LaunchAsync_AllowsAnEnvironmentThatPredatesProjectScoping()
+    {
+        var environment = Environment(
+            id: 8,
+            name: "legacy",
+            customArgs: "",
+            prompt: "",
+            lastUsedUtc: DateTime.UtcNow);
+        // Null scope is the no-backfill state — it must keep working in every project.
+        environment.ProjectPath = null;
+
+        var repository = new Mock<IRepository>();
+        repository
+            .Setup(r => r.GetEnvironmentByIdAsync(8, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(environment);
+        repository
+            .Setup(r => r.TouchEnvironmentLastUsedAsync(8, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var launcher = new Mock<ILaunchLLMService>();
+        launcher
+            .Setup(l => l.LaunchInTerminal(
+                LLM.Claude, "legacy", AppContext.BaseDirectory,
+                It.IsAny<string[]>(), null, true, false))
+            .Returns(new LaunchResult(true, "launched"));
+
+        var result = await new EnvironmentLaunchService(repository.Object, launcher.Object, NoWorkspace()).LaunchAsync(
+            LLM.Claude,
+            new LaunchCliRequest(AppContext.BaseDirectory, null, []),
+            fallbackWorkingDirectory: AppContext.BaseDirectory,
+            environmentId: 8,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
     }
 
     private static LLM_Environment Environment(
@@ -291,6 +370,9 @@ public sealed class EnvironmentLaunchServiceTests
             LLM = LLM.Claude,
             CustomArgs = customArgs,
             CustomPrompt = prompt,
-            LastUsedUTC = lastUsedUtc
+            LastUsedUTC = lastUsedUtc,
+            // Scoped to the directory these tests launch from, so the existing cases exercise
+            // the allow path rather than accidentally relying on a null scope.
+            ProjectPath = AppContext.BaseDirectory
         };
 }

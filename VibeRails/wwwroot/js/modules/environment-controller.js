@@ -1,3 +1,19 @@
+import { getEnabledLlmItems, mountLlmPicker } from './pickers/llm-picker.js';
+
+// Mirrors EnvironmentWorkspaceMode in the backend. Persistent and PerRun are the same
+// mechanism — a git clone of the project — differing only in how long a clone survives.
+export const WORKSPACE_MODE = Object.freeze({
+    PROJECT: 0,
+    PERSISTENT: 1,
+    PER_RUN: 2
+});
+
+const WORKSPACE_MODE_LABELS = Object.freeze({
+    [WORKSPACE_MODE.PROJECT]: 'Project directory',
+    [WORKSPACE_MODE.PERSISTENT]: 'Its own clone (kept)',
+    [WORKSPACE_MODE.PER_RUN]: 'Fresh clone each run'
+});
+
 export class EnvironmentController {
     constructor(app) {
         this.app = app;
@@ -62,6 +78,11 @@ export class EnvironmentController {
         if (root) {
             this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
             this.app.bindAction(root, '[data-action="create-environment"]', () => this.createEnvironment());
+            this.app.bindAction(root, '[data-action="customize-llm-list"]', (event) => {
+                this.app.llmPickerController.openCustomizationModal({
+                    triggerElement: event?.currentTarget || null
+                });
+            });
             this.app.bindAction(root, '[data-action="create-sandbox"]', () => {
                 this.app.sandboxController.createSandbox();
             });
@@ -70,6 +91,9 @@ export class EnvironmentController {
             if (tableSlot) {
                 tableSlot.innerHTML = this.renderEnvironmentsTable();
                 this.bindEnvironmentTableActions(tableSlot);
+                // Environment rows carry the same git actions for their workspace, pointing at
+                // the same sandbox ids, so they get the same handlers.
+                this.bindSandboxGitActions(tableSlot);
             }
 
             const sandboxesTableSlot = root.querySelector('[data-sandboxes-table]');
@@ -81,16 +105,7 @@ export class EnvironmentController {
                     this.app.sandboxController.populateSandboxCliSelect(select);
                 });
 
-                // Bind actions
-                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-diff"]', (el) => {
-                    this.app.sandboxController.showDiff(el.dataset.sbId, el.dataset.sbName);
-                });
-                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-merge"]', (el) => {
-                    this.app.sandboxController.mergeLocally(el.dataset.sbId, el.dataset.sbName, el.dataset.sbBranch);
-                });
-                this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-push"]', (el) => {
-                    this.app.sandboxController.pushToRemote(el.dataset.sbId, el.dataset.sbName);
-                });
+                this.bindSandboxGitActions(sandboxesTableSlot);
                 this.app.bindActions(sandboxesTableSlot, '[data-action="sandbox-vscode"]', (el) => {
                     this.app.sandboxController.launchVSCode(el.dataset.sbId, el.dataset.sbName);
                 });
@@ -211,8 +226,39 @@ export class EnvironmentController {
                             const logoMarkup = safeLogo
                                 ? `<img class="env-cli-logo${iconLightClass}" src="${safeLogo}" alt="${safeBrandLabel} logo" loading="lazy">`
                                 : `<i class="fa-solid fa-terminal env-cli-logo-fallback" aria-hidden="true"></i>`;
-                            const hiddenBadge = env.hidden
-                                ? `<span class="env-hidden-badge" title="Hidden from new launch pickers" aria-label="Hidden from new launch pickers"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i></span>`
+                            // Workers get the robot badge; the eye-slash hidden badge only
+                            // applies to regular envs (a Worker is never in launch pickers,
+                            // so "hidden" would be redundant noise on it).
+                            const hiddenBadge = env.automationWorker
+                                ? `<span class="env-worker-badge" title="Automation Worker — appears in the automation editor's Worker picker, never in launch pickers" aria-label="Automation Worker"><i class="fa-solid fa-robot" aria-hidden="true"></i></span>`
+                                : env.hidden
+                                    ? `<span class="env-hidden-badge" title="Hidden from launch pickers" aria-label="Hidden from launch pickers"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i></span>`
+                                    : '';
+                            // Clone-mode environments get their own badge. It reports the mode
+                            // even before the clone exists, because the mode is what the user
+                            // chose — the directory is just when it happens.
+                            const workspaceMode = env.workspaceMode || WORKSPACE_MODE.PROJECT;
+                            const workspaceBadge = workspaceMode === WORKSPACE_MODE.PROJECT
+                                ? ''
+                                : `<span class="env-workspace-badge" title="${escape(
+                                      workspaceMode === WORKSPACE_MODE.PER_RUN
+                                          ? `Clones the project fresh for every run${env.workspaceBranch ? ` — latest branch ${env.workspaceBranch}` : ''}`
+                                          : `Runs in its own clone of the project${env.workspaceBranch ? ` on branch ${env.workspaceBranch}` : ' (created on first launch)'}`
+                                  )}" aria-label="${escape(WORKSPACE_MODE_LABELS[workspaceMode])}"><i class="fa-solid fa-code-branch" aria-hidden="true"></i></span>`;
+                            // The workspace's git actions are the sandbox actions, on the
+                            // sandbox row that backs it — same handlers, same ids.
+                            const safeWorkspaceId = escape(env.workspaceSandboxId ?? '');
+                            const safeWorkspaceBranch = escape(env.workspaceBranch || '');
+                            const workspaceActions = env.workspaceSandboxId
+                                ? `<button class="btn btn-xs btn-outline-secondary env-action-btn" type="button" data-action="sandbox-diff" data-sb-id="${safeWorkspaceId}" data-sb-name="${safeName}" title="View workspace diff" aria-label="View ${safeName} workspace diff">
+                                            <i class="fa-solid fa-code-compare"></i>
+                                        </button>
+                                        <button class="btn btn-xs btn-outline-secondary env-action-btn" type="button" data-action="sandbox-merge" data-sb-id="${safeWorkspaceId}" data-sb-name="${safeName}" data-sb-branch="${safeWorkspaceBranch}" title="Merge workspace into local branch" aria-label="Merge ${safeName} workspace">
+                                            <i class="fa-solid fa-code-merge"></i>
+                                        </button>
+                                        <button class="btn btn-xs btn-outline-secondary env-action-btn" type="button" data-action="sandbox-push" data-sb-id="${safeWorkspaceId}" data-sb-name="${safeName}" title="Push workspace to remote" aria-label="Push ${safeName} workspace">
+                                            <i class="fa-solid fa-cloud-arrow-up"></i>
+                                        </button>`
                                 : '';
                             const customArgs = env.customArgs || '';
                             const prompt = env.customPrompt || '';
@@ -235,6 +281,7 @@ export class EnvironmentController {
                                         </div>
                                         <strong class="env-name-text">${safeName}</strong>
                                         ${hiddenBadge}
+                                        ${workspaceBadge}
                                     </div>
                                 </td>
                                 <td class="env-command-cell">
@@ -250,6 +297,7 @@ export class EnvironmentController {
                                         <button class="btn btn-xs btn-outline-success env-action-btn" type="button" data-action="launch-in-webui" data-env-id="${safeEnvId}" data-env-name="${safeName}" data-env-cli="${safeCli}" title="Launch in Web Terminal" aria-label="Launch ${safeName} in Web Terminal">
                                             <i class="fa-solid fa-display"></i>
                                         </button>
+                                        ${workspaceActions}
                                         <button class="btn btn-xs btn-outline-secondary env-action-btn" type="button" data-action="edit-environment" data-env-name="${safeName}" title="Settings" aria-label="Edit ${safeName} settings">
                                             <i class="fa-solid fa-sliders"></i>
                                         </button>
@@ -266,8 +314,29 @@ export class EnvironmentController {
         `;
     }
 
+    /**
+     * Diff / merge / push for a sandbox, wherever its row is rendered. Both the Sandboxes card
+     * (standalone sandboxes) and the Environments table (owned workspaces) emit these actions
+     * against a sandbox id, so the handlers are identical and live in one place.
+     */
+    bindSandboxGitActions(scope) {
+        if (!scope) return;
+        this.app.bindActions(scope, '[data-action="sandbox-diff"]', (el) => {
+            this.app.sandboxController.showDiff(el.dataset.sbId, el.dataset.sbName);
+        });
+        this.app.bindActions(scope, '[data-action="sandbox-merge"]', (el) => {
+            this.app.sandboxController.mergeLocally(el.dataset.sbId, el.dataset.sbName, el.dataset.sbBranch);
+        });
+        this.app.bindActions(scope, '[data-action="sandbox-push"]', (el) => {
+            this.app.sandboxController.pushToRemote(el.dataset.sbId, el.dataset.sbName);
+        });
+    }
+
     renderSandboxesTable() {
-        const sandboxes = this.app.data.sandboxes || [];
+        // Only standalone sandboxes. A sandbox owned by an environment is that environment's
+        // workspace and is shown on its row instead — and because deleting or re-moding an
+        // environment releases its workspace, an orphaned one reappears here automatically.
+        const sandboxes = (this.app.data.sandboxes || []).filter(sb => !sb.environmentId);
         if (sandboxes.length === 0) {
             return '<p class="text-muted text-center py-3">No sandboxes yet. Create one to work in an isolated copy of your project.</p>';
         }
@@ -405,16 +474,30 @@ export class EnvironmentController {
         return true;
     }
 
-    showEnvironmentForm({ mode, env = null, cliSettings = {}, onChanged = null, onCancel = null }) {
+    showEnvironmentForm({ mode, env = null, cliSettings = {}, presetName = null, automationWorker = false, onChanged = null, onCancel = null }) {
         this.disposeEnvironmentFormLifecycle();
         const isEdit = mode === 'edit';
+        // Automation Workers share this modal but are named after their automation
+        // (one-name rule) and are never launch-picker visible, so the name row and
+        // the "Hide from launch pickers" switch are meaningless for them. Names are
+        // immutable identifiers — a field the user can't edit is not displayed.
+        const workerOnly = automationWorker === true || Boolean(env?.automationWorker);
 
         // Provider creation reuses the centralized catalog/order, but deliberately
         // ignores launch visibility preferences and never includes plain Terminal.
-        const cliOptions = this.app.llmPickerController.getEnabledItems('environment-provider');
+        const cliOptions = getEnabledLlmItems(this.app, 'environment-provider');
         const initialCli = isEdit ? env.cli : (cliOptions[0]?.cli || 'claude');
-        const title = isEdit ? `Edit Environment / Worker: ${env.name}` : 'Create Environment / Worker';
-        const submitLabel = isEdit ? 'Save Changes' : 'Create Worker';
+        // showModal escapes the title itself — pass it raw.
+        const title = isEdit
+            ? `${workerOnly ? 'Edit Worker' : 'Edit Environment / Worker'}: ${env.name}`
+            : (presetName ? `Create Worker: ${presetName}` : 'Create Environment / Worker');
+        // Say what will actually be created. Only the Automation editor's flow passes
+        // automationWorker, so labelling this button "Create Worker" everywhere promised a
+        // Worker while the Environments page produced a plain Environment — one that the
+        // Worker picker then refused to list.
+        const submitLabel = isEdit
+            ? 'Save Changes'
+            : (workerOnly ? 'Create Worker' : 'Create Environment');
         const submitIcon = isEdit
             ? `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                 <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
@@ -423,9 +506,15 @@ export class EnvironmentController {
                 <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
               </svg>`;
 
-        const nameField = isEdit
-            ? `<input type="text" class="form-control" value="${this.app.escapeHtml(env.name)}" disabled>`
-            : `<input type="text" class="form-control" id="env-name" required>`;
+        // The name is an immutable backend identifier, so the input renders only in
+        // the one state where it is actually editable: creating a regular environment.
+        // Edit mode and preset-named Worker creation carry the name in the title.
+        const nameRow = (!isEdit && !presetName)
+            ? `<div class="mb-3">
+                    <label class="form-label">Environment / Worker Name</label>
+                    <input type="text" class="form-control" id="env-name" required>
+                </div>`
+            : '';
 
         const cliField = isEdit
             ? `<input type="text" class="form-control" value="${this.app.escapeHtml(env.cli)}" disabled>`
@@ -434,24 +523,47 @@ export class EnvironmentController {
         const customArgsValue = isEdit ? this.app.escapeHtml(env.customArgs || '') : '';
         const usesManagedArgs = this.usesManagedCustomArgs(initialCli);
         const hiddenChecked = isEdit ? Boolean(env.hidden) : false;
-
-        this.app.showModal(title, `
-            <form id="env-form">
-                <div class="mb-3">
-                    <label class="form-label">Environment / Worker Name</label>
-                    ${nameField}
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">CLI Type</label>
-                    ${cliField}
-                </div>
+        // Workers are excluded from launch pickers unconditionally, so the switch
+        // would be a no-op for them.
+        const hiddenRow = workerOnly ? '' : `
                 <div class="mb-3">
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" id="env-hidden" ${hiddenChecked ? 'checked' : ''}>
                         <label class="form-check-label" for="env-hidden">Hide from launch pickers</label>
                     </div>
-                    <small class="form-text text-muted">Keeps this environment out of the terminal/sandbox/automation LLM dropdowns when they get too full. It can still be launched from here and used by Automations, and you can change this later from the picker's "Customize LLM list".</small>
+                    <small class="form-text text-muted">Keeps this environment out of the terminal/sandbox LLM dropdowns when they get too full. It can still be launched from here and used by Automations, and you can change this later from the picker's "Customize LLM list".</small>
+                </div>`;
+
+        // Workspace mode applies to Workers exactly as it does to Environments — an automation
+        // that clones fresh every night is the clearest case for it. Both clone modes need a
+        // git repo, so outside one the control is replaced by an explanation.
+        const currentWorkspaceMode = isEdit
+            ? (env.workspaceMode || WORKSPACE_MODE.PROJECT)
+            : WORKSPACE_MODE.PROJECT;
+        const workspaceRow = this.app.data.isInGit
+            ? `<div class="mb-3">
+                    <label class="form-label" for="env-workspace-mode">Where it runs</label>
+                    <select class="form-select" id="env-workspace-mode">
+                        <option value="${WORKSPACE_MODE.PROJECT}" ${currentWorkspaceMode === WORKSPACE_MODE.PROJECT ? 'selected' : ''}>Project directory — run directly in this project</option>
+                        <option value="${WORKSPACE_MODE.PERSISTENT}" ${currentWorkspaceMode === WORKSPACE_MODE.PERSISTENT ? 'selected' : ''}>Its own clone — one workspace, reused every launch</option>
+                        <option value="${WORKSPACE_MODE.PER_RUN}" ${currentWorkspaceMode === WORKSPACE_MODE.PER_RUN ? 'selected' : ''}>Git clone and start fresh each run</option>
+                    </select>
+                    <small class="form-text text-muted d-block">A clone is made on first launch, on its own branch, and gets Diff / Merge / Push buttons on this list. <strong>Fresh each run</strong> clones the last commit only — no uncommitted work and no gitignored files such as <code>.env</code>, and only the newest few runs are kept. Changing this later releases the old workspace as a standalone sandbox rather than deleting it.</small>
+                </div>`
+            : `<div class="mb-3">
+                    <label class="form-label">Where it runs</label>
+                    <div class="form-control-plaintext text-muted small">This project is not a git repository, so it can only run in the project directory.</div>
+                </div>`;
+
+        this.app.showModal(title, `
+            <form id="env-form">
+                ${nameRow}
+                <div class="mb-3">
+                    <label class="form-label">CLI Type</label>
+                    ${cliField}
                 </div>
+                ${hiddenRow}
+                ${workspaceRow}
                 <div class="mb-3" data-custom-args-group ${usesManagedArgs ? 'style="display: none;"' : ''}>
                     <label class="form-label">Custom Arguments</label>
                     <input type="text" class="form-control" id="env-custom-args" value="${customArgsValue}" placeholder="e.g., --yolo --sandbox">
@@ -471,7 +583,7 @@ export class EnvironmentController {
 
         if (!isEdit) {
             cliSelect = document.getElementById('env-cli');
-            cliPickerDisposer = this.app.llmPickerController.mount(cliSelect, {
+            cliPickerDisposer = mountLlmPicker(this.app, cliSelect, {
                 context: 'environment-provider',
                 placeholder: null,
                 selectedValue: initialCli,
@@ -546,21 +658,32 @@ export class EnvironmentController {
             const submissionGeneration = this.environmentFormRequestGeneration;
 
             try {
-                const hidden = document.getElementById('env-hidden')?.checked ?? false;
+                // Absent for Workers — omit `hidden` so the PUT's nullable guard
+                // leaves the stored value untouched.
+                const hiddenInput = document.getElementById('env-hidden');
+                // Absent outside a git repo, where the only legal mode is Project. Omitting it
+                // means the PUT's nullable guard leaves the stored mode alone, so opening the
+                // editor in a non-git project can never silently downgrade a clone environment.
+                const workspaceInput = document.getElementById('env-workspace-mode');
+                const workspaceMode = workspaceInput ? Number(workspaceInput.value) : null;
                 if (isEdit) {
                     const settingsPayload = this.extractCliSettingsPayload(env.cli);
-                    const payload = { ...this.buildEnvironmentSavePayload(env.cli, settingsPayload), hidden };
+                    const payload = this.buildEnvironmentSavePayload(env.cli, settingsPayload);
+                    if (hiddenInput) payload.hidden = hiddenInput.checked;
+                    if (workspaceMode !== null) payload.workspaceMode = workspaceMode;
                     await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(env.name)}`, 'PUT', payload);
                     await this.saveCliSettings(env.cli, env.name, settingsPayload);
                 } else {
-                    const name = document.getElementById('env-name').value.trim();
+                    const name = presetName || document.getElementById('env-name').value.trim();
                     const cli = document.getElementById('env-cli').value;
                     const settingsPayload = this.extractCliSettingsPayload(cli);
                     const payload = {
                         name,
                         cli,
                         ...this.buildEnvironmentSavePayload(cli, settingsPayload),
-                        hidden
+                        ...(hiddenInput ? { hidden: hiddenInput.checked } : {}),
+                        ...(workspaceMode !== null ? { workspaceMode } : {}),
+                        ...(automationWorker === true ? { automationWorker: true } : {})
                     };
                     await this.app.apiCall('/api/v1/environments', 'POST', payload);
                     await this.saveCliSettings(cli, name, settingsPayload);
@@ -1908,6 +2031,14 @@ export class EnvironmentController {
             customPrompt: env.customPrompt,
             defaultPrompt: env.defaultPrompt,
             hidden: Boolean(env.hidden),
+            automationWorker: Boolean(env.automationWorker),
+            // Workspace mode is set the moment the environment is created, but the clone is
+            // only made on first launch — so a mode of 1/2 with a null sandbox id is the
+            // normal "configured, not provisioned yet" state, not an error.
+            workspaceMode: Number(env.workspaceMode) || WORKSPACE_MODE.PROJECT,
+            workspaceSandboxId: env.workspaceSandboxId ?? null,
+            workspacePath: env.workspacePath || null,
+            workspaceBranch: env.workspaceBranch || null,
             lastUsed: env.lastUsed || this.app.formatRelativeTime(env.lastUsedUTC)
         }));
         return this.app.data.environments;

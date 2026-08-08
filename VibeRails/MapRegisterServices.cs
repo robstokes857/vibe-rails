@@ -18,6 +18,7 @@ using VibeRails.Services.Mcp.Tools;
 using VibeRails.Services.Mcp.WebResearch;
 using VibeRails.Services.Messaging;
 using VibeRails.Services.Terminal;
+using VibeRails.Services.Workspaces;
 using VibeRails.Services.Terminal.Consumers;
 
 using VibeRails.Services.VCA;
@@ -26,6 +27,7 @@ using VibeRails.Utils;
 using VibeRails.Services.Integrations.VibeCodeRemote;
 using VibeRails.Services.GitPreflight;
 using VibeRails.Services.Jobs;
+using VibeRails.Services.HttpRelay;
 
 namespace VibeRails
 {
@@ -196,8 +198,10 @@ namespace VibeRails
             serviceCollection.AddScoped<IOpencodeLlmCliEnvironment, OpencodeLlmCliEnvironment>();
             serviceCollection.AddScoped<LlmCliEnvironmentService>();
 
-            // Sandbox service
+            // Sandbox service, and the workspace resolution that reuses it to back an
+            // environment's Persistent / PerRun clone modes.
             serviceCollection.AddScoped<ISandboxService, SandboxService>();
+            serviceCollection.AddScoped<IRunWorkspaceService, RunWorkspaceService>();
 
             // LLM CLI Launcher services
             serviceCollection.AddScoped<IClaudeLlmCliLauncher, ClaudeLlmCliLauncher>();
@@ -337,6 +341,10 @@ namespace VibeRails
 
             // Update Service (singleton with HttpClient)
             serviceCollection.AddHttpClient<UpdateService>();
+
+            // Dedicated persistent HTTP-over-WSS relay. It connects on first use and is reset by
+            // settings changes so API-key rotation is reflected by the next handshake.
+            serviceCollection.AddSingleton<IRemoteHttpRelayClient, RemoteHttpRelayClient>();
 
             // WebSocket Messaging Client (singleton - auto-reconnects, URL from appsettings.json)
             serviceCollection.AddSingleton<MessagingClient>(sp =>

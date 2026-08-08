@@ -29,6 +29,7 @@ public sealed class LlmPickerRepositoryTests : IDisposable
                 CreatedUTC TEXT NOT NULL,
                 LastUsedUTC TEXT NOT NULL,
                 Hidden INTEGER NOT NULL DEFAULT 0,
+                AutomationWorker INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(CustomName, LLM)
             );
             CREATE TABLE GlobalCache (

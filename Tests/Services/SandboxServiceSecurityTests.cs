@@ -357,6 +357,7 @@ public sealed class SandboxServiceSecurityTests : IDisposable
         var sandbox = await service.CreateSandboxAsync(
             "review",
             sourcePath,
+            options: null,
             TestContext.Current.CancellationToken);
 
         Assert.Equal(remoteUrl, sandbox.RemoteUrl);

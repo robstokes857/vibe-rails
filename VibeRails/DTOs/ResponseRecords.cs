@@ -171,6 +171,9 @@ namespace VibeRails.DTOs
         string Name
     );
 
+    // EnvironmentId/EnvironmentName are null for a standalone sandbox — the pre-fold kind,
+    // created from the Sandboxes card and launchable with any CLI. When set, this sandbox is
+    // an environment's workspace and the environment drives it instead.
     public record SandboxResponse(
         int Id,
         string Name,
@@ -179,7 +182,9 @@ namespace VibeRails.DTOs
         string? SourceBranch,
         string? CommitHash,
         string? RemoteUrl,
-        DateTime CreatedUTC
+        DateTime CreatedUTC,
+        int? EnvironmentId = null,
+        string? EnvironmentName = null
     );
 
     public record SandboxDiffFileResponse(
@@ -204,23 +209,36 @@ namespace VibeRails.DTOs
     );
 
     // Environment DTOs
+    // AutomationWorker is create-only classification (see LLM_Environment.AutomationWorker);
+    // UpdateEnvironmentRequest deliberately has no counterpart.
+    // WorkspaceMode is an int on the wire (not the enum) so a value from a newer or corrupted
+    // client fails as a 400 from explicit validation rather than a 500 out of the deserializer.
+    // See EnvironmentWorkspaceMode: 0 = project directory, 1 = persistent clone, 2 = clone per run.
     public record CreateEnvironmentRequest(
         string Name,
         string Cli,
         string? CustomArgs = null,
         string? CustomPrompt = null,
-        bool Hidden = false
+        bool Hidden = false,
+        bool AutomationWorker = false,
+        int WorkspaceMode = 0
     );
 
     // Hidden is nullable so a stale client that omits it leaves the stored value untouched
     // (same guard as CustomArgs/CustomPrompt) instead of resetting a hidden env to visible.
+    // WorkspaceMode carries the same guard: switching an environment into or out of a clone
+    // is a deliberate act, never a side effect of a cached client saving something else.
     public record UpdateEnvironmentRequest(
         string Name,
         string? CustomArgs = null,
         string? CustomPrompt = null,
-        bool? Hidden = null
+        bool? Hidden = null,
+        int? WorkspaceMode = null
     );
 
+    // WorkspacePath/WorkspaceBranch are null until the clone actually exists — a clone-mode
+    // environment reports its mode from the moment it is created, but the directory is only
+    // provisioned on first launch, so the UI must treat "mode set, path null" as valid.
     public record EnvironmentResponse(
         int Id,
         string Name,
@@ -230,7 +248,12 @@ namespace VibeRails.DTOs
         string CustomPrompt,
         string DefaultPrompt,
         DateTime LastUsedUTC,
-        bool Hidden
+        bool Hidden,
+        bool AutomationWorker,
+        int WorkspaceMode = 0,
+        int? WorkspaceSandboxId = null,
+        string? WorkspacePath = null,
+        string? WorkspaceBranch = null
     );
 
     public record EnvironmentListResponse(
@@ -731,7 +754,10 @@ namespace VibeRails.DTOs
         bool DataExportConfigured = false,
         // Git Guard commit-msg policy. Nullable so an older cached client that does not send the
         // field cannot reset the persisted choice when it saves unrelated settings.
-        bool? RemoveCoAuthorTrailers = null
+        bool? RemoveCoAuthorTrailers = null,
+        // HTTP-over-WSS proof toggle. Nullable on requests so a cached client that predates the
+        // field leaves the persisted choice untouched. Responses always contain an explicit value.
+        bool? RouteThroughVibeRailsAi = null
     );
     // Append new fields at the END of this record, with a default. Inserting one in the middle
     // shifts every positional argument after it: call sites only fail to compile when the types
@@ -1303,6 +1329,12 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(UpdateInfo))]
     [JsonSerializable(typeof(AppSettingsDto))]
     [JsonSerializable(typeof(UpdateComputerNameDto))]
+    [JsonSerializable(typeof(Services.HttpRelay.HttpRelayBody))]
+    [JsonSerializable(typeof(Services.HttpRelay.HttpRelayRequest))]
+    [JsonSerializable(typeof(Services.HttpRelay.HttpRelayResponse))]
+    [JsonSerializable(typeof(Services.HttpRelay.HttpRelayError))]
+    [JsonSerializable(typeof(Services.HttpRelay.HttpRelayCancel))]
+    [JsonSerializable(typeof(Dictionary<string, string[]>))]
     [JsonSerializable(typeof(ProxyActivityPingPayload))]
     [JsonSerializable(typeof(TokenSavingsDto))]
     [JsonSerializable(typeof(TokenSaverPausePayload))]

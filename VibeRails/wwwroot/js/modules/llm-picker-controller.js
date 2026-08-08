@@ -9,12 +9,14 @@ import {
 const PREFERENCES_ENDPOINT = '/api/v1/llm-picker/preferences';
 const BASE_GROUP = 'Base CLIs';
 const ENVIRONMENT_GROUP = 'Custom Environments';
-const CUSTOMIZABLE_CONTEXTS = new Set(['terminal', 'sandbox', 'automation', 'multi-run']);
+const CUSTOMIZABLE_CONTEXTS = new Set(['terminal', 'sandbox', 'multi-run']);
 
+// The automation editor is NOT a context here: its Worker picker is a separate
+// component (pickers/worker-picker.js) sourced from /api/v1/environments, because
+// Automation Workers are excluded from this catalog entirely.
 const CONTEXT_MATCHERS = Object.freeze({
     terminal: () => true,
     sandbox: (item) => item.kind === 'environment' || (item.kind === 'base' && item.cli !== 'shell'),
-    automation: (item) => item.kind === 'environment',
     'multi-run': (item) => item.kind === 'base' && item.cli !== 'shell',
     'environment-provider': (item) => item.kind === 'base' && item.cli !== 'shell'
 });
@@ -76,7 +78,8 @@ export class LlmPickerController {
                 environment?.id,
                 String(environment?.cli || '').toLowerCase(),
                 environment?.name || '',
-                environment?.hidden ? 1 : 0
+                environment?.hidden ? 1 : 0,
+                environment?.automationWorker ? 1 : 0
             ].join(':'))
             .join('|');
         if (fingerprint === this.lastEnvironmentsFingerprint
@@ -102,9 +105,7 @@ export class LlmPickerController {
             configuration: {
                 placeholder: 'Select LLM...',
                 searchable: true,
-                searchPlaceholder: context === 'automation'
-                    ? 'Search Environments...'
-                    : 'Search LLMs...',
+                searchPlaceholder: 'Search LLMs...',
                 includeGroups: context !== 'multi-run' && context !== 'environment-provider',
                 includeDefaultSuffix: context === 'terminal',
                 plainCliValues: context === 'environment-provider',
@@ -335,6 +336,9 @@ export class LlmPickerController {
         }));
         const environmentItems = (this.app.data.environments || [])
             .map((environment, order) => {
+                // Automation Workers never enter the launch catalog (the server-resolved
+                // catalog excludes them too — this fallback must agree).
+                if (environment?.automationWorker) return null;
                 const cli = String(environment?.cli || '').toLowerCase();
                 const environmentId = Number.parseInt(environment?.id, 10);
                 if (!cli || !Number.isFinite(environmentId)) return null;
