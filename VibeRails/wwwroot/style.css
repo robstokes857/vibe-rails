@@ -10,6 +10,10 @@
     --color-bg-surface: #1e1e1e;
     /* Card/Surface Background */
     --color-bg-surface-hover: #2c2c2c;
+    /* Raised cards (a step lighter than surface). Referenced across the Automation
+       screen — keep it defined in every theme scope, or those backgrounds silently
+       compute to transparent (an undefined var() invalidates the declaration). */
+    --color-bg-elevated: #232323;
 
     --color-primary: #3b82f6;
     /* Bright legible blue */
@@ -64,6 +68,7 @@ html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] {
     --color-bg-base: var(--vb-vscode-bg-base);
     --color-bg-surface: var(--vb-vscode-surface);
     --color-bg-surface-hover: var(--vb-vscode-surface-hover);
+    --color-bg-elevated: var(--vb-vscode-card-bg);
     --color-primary: var(--vb-vscode-primary);
     --color-primary-dark: var(--vb-vscode-primary-hover);
     --color-secondary: var(--vb-vscode-muted);
@@ -179,6 +184,7 @@ html[data-viberails-host="vscode"][data-viberails-vscode-theme="enabled"] body #
     --color-bg-base: #121212;
     --color-bg-surface: #1e1e1e;
     --color-bg-surface-hover: #2c2c2c;
+    --color-bg-elevated: #232323;
     --color-primary: #3b82f6;
     --color-primary-dark: #2563eb;
     --color-secondary: #64748b;
@@ -8067,102 +8073,6 @@ input.form-control:disabled {
     flex-shrink: 0;
 }
 
-/* ── HTTP relay test modal ───────────────────────────────────────────────── */
-.http-relay-test-modal {
-    display: grid;
-    gap: 1rem;
-}
-
-.http-relay-test-controls {
-    display: grid;
-    grid-template-columns: minmax(180px, 1fr) auto;
-    align-items: end;
-    gap: 1rem;
-}
-
-.http-relay-test-actions {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 0.5rem;
-}
-
-.http-relay-results {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
-}
-
-.http-relay-result {
-    min-width: 0;
-    padding: 0.75rem;
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
-    background: color-mix(in srgb, var(--color-bg-base) 72%, transparent);
-}
-
-.http-relay-result[data-state="running"] {
-    border-color: color-mix(in srgb, var(--color-primary) 58%, var(--color-border));
-}
-
-.http-relay-result[data-state="success"] {
-    border-color: color-mix(in srgb, var(--color-success) 58%, var(--color-border));
-}
-
-.http-relay-result[data-state="error"] {
-    border-color: color-mix(in srgb, var(--color-danger) 58%, var(--color-border));
-}
-
-.http-relay-result-heading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.75rem;
-    margin-bottom: 0.45rem;
-}
-
-.http-relay-result-heading span,
-.http-relay-result-target,
-.http-relay-result summary {
-    font-size: 0.75rem;
-    color: var(--color-text-muted);
-}
-
-.http-relay-result-target {
-    min-height: 2.2em;
-    margin-bottom: 0.5rem;
-    overflow-wrap: anywhere;
-    font-family: var(--vb-font-mono);
-}
-
-.http-relay-result details {
-    margin-bottom: 0.5rem;
-}
-
-.http-relay-result pre {
-    max-height: 14rem;
-    margin: 0.35rem 0 0;
-    padding: 0.6rem;
-    overflow: auto;
-    border-radius: 4px;
-    background: var(--color-bg-base);
-    color: var(--color-text);
-    font: 0.72rem/1.45 var(--vb-font-mono);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-}
-
-@media (max-width: 767px) {
-    .http-relay-test-controls,
-    .http-relay-results {
-        grid-template-columns: 1fr;
-    }
-
-    .http-relay-test-actions {
-        justify-content: flex-start;
-    }
-}
-
 /* ── PIN Entry Modal ──────────────────────────────────────────────────────── */
 .pin-modal-dialog {
     max-width: 420px;
@@ -8352,6 +8262,29 @@ input.form-control:disabled {
 }
 
 /* Toasts */
+/* Base title/body layout for EVERY app toast (toast-service.js injects these
+   spans into the library's message slot). Without an unscoped rule they render
+   as bare inline spans and concatenate: "ErrorName the automation first…".
+   The xrayOverlay rules below refine the terminal-toast variant only. */
+.vr-toast-title {
+    display: block;
+    margin-bottom: 0.12rem;
+    font-weight: 700;
+}
+
+.vr-toast-body {
+    display: block;
+    line-height: 1.4;
+}
+
+/* Compact toasts ("Ready", "Terminal is idle") stay one-liners. */
+.vr-toast-title.vr-toast-compact {
+    display: inline;
+    margin: 0 0.35rem 0 0;
+}
+
+.vr-toast-body.vr-toast-compact { display: inline; }
+
 .notAToasttoast-container.top-right {
     top: calc(var(--navbar-height) + 0.9rem) !important;
     right: 0.9rem !important;
@@ -10166,17 +10099,17 @@ button.git-guard-menu-button:focus-visible {
     }
 }
 
-/* ─── Rules workspace: local nav over a two-pane split ───────────────────
-   The Rules page used to stack every panel in one 2000px scroll, which buried
-   the agent terminal. It is now a fixed-height workspace: a local navigation
-   bar swaps ONE section into the top pane, and the terminal permanently owns
-   the bottom pane so a fix is always one keystroke away from a finding. */
+/* ─── Code quality page: one surface over the agent terminal ─────────────
+   The old Rules page time-shared three full surfaces (validation, the
+   code-quality workbench, the rule-file manager) behind a local tab strip.
+   Now: this page owns the checks — Git Guard, the VCA validation results,
+   the compact scan brief — with the agent terminal filling the rest of the
+   viewport. The file-by-file workbench is its own view, and the AGENTS.md
+   manager is the separate top-level RULES page (both .rules-subpage). */
 
-/* Flowing shell. app.js adds .vb-rules-workspace-active while the Rules view
-   is mounted. The page scrolls naturally — the active section expands to fit
-   its content and a substantial agent terminal dock sits at the bottom. No
-   viewport lock, so long reports breathe instead of being crammed into a
-   half-screen pane. */
+/* Flowing shell. app.js adds .vb-rules-workspace-active while this page is
+   mounted. The page scrolls naturally when the validation report is long;
+   otherwise the terminal grows to fill the viewport. */
 body.vb-rules-workspace-active .app-main {
     min-height: 100dvh;
 }
@@ -10260,127 +10193,14 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     line-height: 1.35;
 }
 
-/* ── Local navigation: a floating segmented control ─────────────────────
-   Deliberately detached from the section card — its own raised surface,
-   sized to its contents, with air underneath. Each item is a distinct pill
-   so the whole bar reads as a control rather than as a page heading. */
-.rules-localnav {
-    display: flex;
-    width: fit-content;
-    max-width: 100%;
-    flex: 0 1 auto;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.22rem;
-    margin: 0;
-    padding: 0.28rem;
-    border: 1px solid color-mix(in srgb, var(--color-border) 92%, var(--color-text));
-    border-radius: 11px;
-    /* A shade lighter than the card below, so it reads as sitting on top of the page. */
-    background: color-mix(in srgb, var(--color-text) 5%, var(--color-bg-surface));
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
-}
 
-.rules-localnav-item {
-    --nav-tone: var(--color-text-muted);
-    position: relative;
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.42rem 0.75rem;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--color-text-muted);
-    font-size: 0.83rem;
-    font-weight: 500;
-    white-space: nowrap;
-    transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-
-.rules-localnav-item[data-tone="success"] { --nav-tone: var(--color-success); }
-.rules-localnav-item[data-tone="warning"] { --nav-tone: var(--color-warning); }
-.rules-localnav-item[data-tone="danger"] { --nav-tone: var(--color-danger); }
-
-/* Hover draws the tab's own outline, so the whole strip reads as clickable the
-   moment the pointer crosses it. */
-.rules-localnav-item:hover:not(.is-active) {
-    border-color: color-mix(in srgb, var(--color-border) 75%, transparent);
-    background: color-mix(in srgb, var(--color-text) 9%, transparent);
-    color: var(--color-text);
-}
-
-.rules-localnav-item:hover .rules-localnav-icon {
-    color: var(--color-text);
-}
-
-/* Selected pill: recessed into the bar, the usual segmented-control read. */
-.rules-localnav-item.is-active {
-    border-color: color-mix(in srgb, var(--color-border) 85%, var(--color-text));
-    background: var(--color-bg-base);
-    color: var(--color-text);
-    font-weight: 600;
-}
-
-.rules-localnav-item:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-primary) 70%, transparent);
-    outline-offset: -2px;
-}
-
-.rules-localnav-icon {
-    flex: 0 0 auto;
-    color: var(--color-text-muted);
-    font-size: 0.85rem;
-}
-
-.rules-localnav-item.is-active .rules-localnav-icon {
-    color: var(--color-text);
-}
-
-.rules-localnav-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* The count/status each section publishes — a quiet notification pill. */
-.rules-localnav-badge {
-    padding: 0.1rem 0.42rem;
-    border: 1px solid color-mix(in srgb, var(--nav-tone) 32%, var(--color-border));
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--nav-tone) 12%, transparent);
-    color: color-mix(in srgb, var(--nav-tone) 80%, var(--color-text));
-    font-size: 0.68rem;
-    font-weight: 600;
-    line-height: 1.5;
-}
-
-.rules-localnav-item[data-tone="neutral"] .rules-localnav-badge {
-    background: color-mix(in srgb, var(--color-text) 5%, transparent);
-    color: var(--color-text-muted);
-}
-
-/* A check is running: fade the badge rather than flash or pulse it. */
-.rules-localnav-item.is-busy .rules-localnav-badge {
-    animation: rules-badge-breathe 1.6s ease-in-out infinite;
-}
-
-@keyframes rules-badge-breathe {
-    50% { opacity: 0.45; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .rules-localnav-item.is-busy .rules-localnav-badge {
-        animation: none;
-    }
-}
-
-/* ── The split: sections above, terminal below ─────────────────────────
-   The page scrolls, so the sections pane flows to fit its content and the
-   agent terminal owns a solid dock at the bottom — tall enough to actually
-   work in, not a cramped strip. */
+/* ── The split: hub content above, terminal below ──────────────────────
+   The hub content is compact (verdict, queue, door cards), so the terminal
+   takes everything that is left of the viewport. When a long finding list
+   pushes past the fold the page scrolls and the terminal keeps its floor. */
 .rules-panes {
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
     gap: 0.95rem;
 }
@@ -10391,16 +10211,42 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     min-width: 0;
 }
 
-/* The active section flows naturally; its content expands and the page
-   scrolls instead of an inner viewport. */
 .rules-pane-sections {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
 }
 
-/* A real working surface, not a 30dvh sliver. */
+/* A real working surface: fill the rest of the page, never shrink below a
+   height you can actually drive an agent in. */
 .rules-pane-terminal {
-    flex: 0 0 clamp(340px, 50dvh, 620px);
-    min-height: 0;
+    flex: 1 1 auto;
+    min-height: clamp(340px, 45dvh, 640px);
+}
+
+/* The compact scan brief rides directly under the validation card; its own
+   card look comes from .code-analyzer-brief. */
+.rules-pane-sections > .code-analyzer-brief-host {
+    margin-top: 0.95rem;
+}
+
+/* ── Subpages: the full-page workbench and the RULES page ───────────────
+   The same section cards as the Code quality page, with the whole page to
+   spread out in (and, on the workbench, a back control above). */
+.rules-subpage {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.rules-subpage-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.rules-subpage-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
 }
 
 /* ── Section cards ───────────────────────────────────────────────────── */
@@ -10414,10 +10260,6 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     border-radius: 10px;
     background: var(--color-bg-surface);
     overflow: hidden;
-}
-
-.rules-section[hidden] {
-    display: none !important;
 }
 
 .rules-section-header {
@@ -10628,11 +10470,12 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 
 /* The rule-files split keeps a bounded two-pane layout (file rail + editor)
    with its own scroll — browsing files is better as an independent surface
-   than a section that grows to match the tallest column. */
-.rules-section[data-rules-section="files"] .rules-section-body {
+   than a grid that grows to match the tallest column. On its own page the
+   bound tracks the viewport. */
+.rules-files-card .rules-section-body {
     display: grid;
     min-height: 420px;
-    height: clamp(420px, 62dvh, 680px);
+    height: clamp(420px, calc(100dvh - 240px), 860px);
     overflow: hidden;
 }
 
@@ -11011,10 +10854,6 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 }
 
 .vca-explanation + .rules-console-transcript,
-.code-analyzer-brief-host + .rules-console-transcript {
-    margin-top: 0.9rem;
-}
-
 .rules-vca-panel [hidden] {
     display: none !important;
 }
@@ -11073,22 +10912,6 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     }
 }
 
-/* The side rail reduces the Rules workspace width before the viewport itself is
-   narrow. Drop secondary status copy first so Git Guard and the section menu
-   remain one clean row on standard laptop screens. */
-@media (max-width: 1400px) {
-    html.nav-layout-side .rules-localnav-badge {
-        display: none;
-    }
-}
-
-@media (max-width: 820px) {
-    /* Labels before badges: the tab has to stay identifiable. */
-    .rules-localnav-badge {
-        display: none;
-    }
-}
-
 @media (max-width: 900px) {
     .rules-files-split {
         grid-template-columns: minmax(0, 1fr);
@@ -11104,22 +10927,6 @@ body.vb-rules-workspace-active .rules-dashboard-host {
 @media (max-width: 600px) {
     .rules-topbar {
         flex-wrap: wrap;
-    }
-
-    .rules-localnav {
-        width: 100%;
-    }
-
-    /* Icon-only tabs: four labels do not fit, but four targets do. */
-    .rules-localnav-label {
-        display: none;
-    }
-
-    .rules-localnav-item {
-        min-width: 0;
-        flex: 1 1 0;
-        justify-content: center;
-        padding-inline: 0.5rem;
     }
 
     .rules-section-header {
@@ -11140,14 +10947,9 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     }
 
     /* On a phone the dock shouldn't eat half the screen — keep it usable
-       while leaving room to read the section above it. */
+       while leaving room to read the results above it. */
     .rules-pane-terminal {
-        flex-basis: clamp(260px, 42dvh, 420px);
-    }
-
-    .rules-section[data-rules-section="files"] .rules-section-body {
-        height: auto;
-        min-height: 320px;
+        min-height: clamp(260px, 42dvh, 420px);
     }
 }
 
@@ -11732,15 +11534,11 @@ body.vb-rules-workspace-active .rules-dashboard-host {
     background: color-mix(in srgb, var(--color-bg-base) 42%, transparent);
 }
 
-/* ── Code quality brief (Validation screen) ──────────────────────────────
-   The survivor of the old Overview tab: score ring, grade, verdict, counts,
-   and the top risk categories in one compact wrapping row. It renders OUTSIDE
-   .code-analyzer-panel, so it defines its own --analyzer-tone locally (which
-   also feeds the reused .code-analyzer-rating-badge). */
-.code-analyzer-brief-host {
-    margin-top: 0.9rem;
-}
-
+/* ── Code quality brief (the hub's quality door card) ────────────────────
+   Score ring, grade, verdict, counts, and the top risk categories in one
+   compact wrapping row, plus the way into the full workbench. It renders
+   OUTSIDE .code-analyzer-panel, so it defines its own --analyzer-tone
+   locally (which also feeds the reused .code-analyzer-rating-badge). */
 .code-analyzer-brief {
     --analyzer-tone: var(--color-text-muted);
     display: flex;
@@ -13895,16 +13693,10 @@ body.git-guard-focus-active #app-content {
     align-items: center;
 }
 
-/* Uppercase action labels, tracked so the caps stay legible at small sizes. */
-.jobs-view .btn {
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-}
+.jobs-view .btn { font-weight: 600; }
 
-.jobs-view .btn:not(.btn-sm) { font-size: 0.78rem; }
-.jobs-view .btn-sm { font-size: 0.7rem; }
-.jobs-view .job-icon-action { letter-spacing: normal; }
+.jobs-view .btn:not(.btn-sm) { font-size: 0.84rem; }
+.jobs-view .btn-sm { font-size: 0.78rem; }
 
 @media (max-width: 720px) {
     .jobs-page-header {
@@ -13930,52 +13722,21 @@ body.git-guard-focus-active #app-content {
     line-height: 1.55;
 }
 
-.jobs-runtime-strip {
+/* One quiet line under the header instead of the old full-width banner; the
+   multi-instance detail lives in its title tooltip. Block-level on purpose: as
+   an inline box it inherited a stray hanging indent whenever the sentence
+   before it wrapped. */
+.jobs-runtime-note {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.78rem 0.9rem;
-    border: 1px solid color-mix(in srgb, var(--color-success) 32%, var(--color-border));
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--color-success) 6%, var(--color-bg-elevated));
-}
-
-.jobs-runtime-icon {
-    display: grid;
-    flex: 0 0 34px;
-    width: 34px;
-    height: 34px;
-    place-items: center;
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--color-success) 14%, transparent);
-    color: var(--color-success);
-}
-
-.jobs-runtime-copy {
-    display: grid;
-    gap: 0.1rem;
-    min-width: 0;
-}
-
-.jobs-runtime-copy strong {
-    color: var(--color-text);
-    font-size: 0.82rem;
-}
-
-.jobs-runtime-copy span {
+    gap: 0.35rem;
+    margin-top: 0.4rem;
     color: var(--color-text-muted);
-    font-size: 0.7rem;
-    line-height: 1.45;
+    font-size: 0.78rem;
+    cursor: help;
 }
 
-.jobs-eyebrow {
-    color: var(--color-accent);
-    font-family: var(--vb-font-mono, ui-monospace, monospace);
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 0.13em;
-    text-transform: uppercase;
-}
+.jobs-runtime-note i { color: var(--color-accent); }
 
 .jobs-section { margin-top: 1.55rem; }
 
@@ -14014,10 +13775,8 @@ body.git-guard-focus-active #app-content {
     padding: 1.2rem;
     border: 1px solid color-mix(in srgb, var(--color-accent) 44%, var(--color-border));
     border-radius: 14px;
-    background:
-        linear-gradient(145deg, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 44%),
-        var(--color-bg-elevated);
-    box-shadow: 0 18px 44px rgb(0 0 0 / 11%);
+    background: var(--color-bg-elevated, var(--color-bg-surface));
+    box-shadow: 0 18px 44px rgb(0 0 0 / 25%);
 }
 
 .job-inline-form-header,
@@ -14037,19 +13796,10 @@ body.git-guard-focus-active #app-content {
 }
 
 .job-inline-form-header h3 {
-    margin: 0.15rem 0 0;
+    margin: 0;
     color: var(--color-text);
     font-size: 1.1rem;
 }
-
-.job-inline-form-header p {
-    max-width: 820px;
-    margin: 0.3rem 0 0;
-    color: var(--color-text-muted);
-    font-size: 0.76rem;
-    line-height: 1.5;
-}
-
 .job-environment-picker-row {
     align-items: flex-start;
     gap: 0.5rem;
@@ -14159,13 +13909,10 @@ body.git-guard-focus-active #app-content {
     align-items: center;
     gap: 1rem;
     min-width: 0;
-    padding: 0.82rem 0.9rem;
-    border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
+    padding: 0.95rem 1.05rem;
+    border: 1px solid var(--color-border);
     border-radius: 10px;
-    background:
-        linear-gradient(150deg, color-mix(in srgb, var(--color-accent) 3%, transparent), transparent 45%),
-        var(--color-bg-elevated);
-    box-shadow: 0 10px 28px rgb(0 0 0 / 6%);
+    background: var(--color-bg-elevated, var(--color-bg-surface));
 }
 
 .job-card[data-enabled="false"] { opacity: 0.72; }
@@ -14182,7 +13929,7 @@ body.git-guard-focus-active #app-content {
     margin: 0;
     overflow: hidden;
     color: var(--color-text);
-    font-size: 0.94rem;
+    font-size: 1rem;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -14205,15 +13952,15 @@ body.git-guard-focus-active #app-content {
     align-items: center;
     gap: 0.28rem;
     color: var(--color-text-muted);
-    font-size: 0.6rem;
-    letter-spacing: 0.07em;
+    font-size: 0.68rem;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
 }
 
 .job-card-fact strong {
     overflow: hidden;
     color: var(--color-text);
-    font-size: 0.74rem;
+    font-size: 0.82rem;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -14234,8 +13981,8 @@ body.git-guard-focus-active #app-content {
     align-items: center;
     gap: 0.28rem;
     color: var(--color-text-muted);
-    font-size: 0.6rem;
-    letter-spacing: 0.07em;
+    font-size: 0.68rem;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
 }
 
@@ -14246,8 +13993,8 @@ body.git-guard-focus-active #app-content {
     margin: 0;
     overflow: hidden;
     color: var(--color-text);
-    font-size: 0.74rem;
-    line-height: 1.45;
+    font-size: 0.82rem;
+    line-height: 1.5;
 }
 
 .job-card-trigger .job-triggers {
@@ -14292,7 +14039,7 @@ body.git-guard-focus-active #app-content {
     width: fit-content;
     border-radius: 999px;
     font-family: var(--vb-font-mono, ui-monospace, monospace);
-    font-size: 0.62rem;
+    font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -14725,7 +14472,7 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 .job-run-status[data-tone="info"] { background: color-mix(in srgb, var(--color-accent) 13%, transparent); color: var(--color-accent); }
 
 .job-triggers { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.9rem 0; }
-.jobs-trigger-chip { padding: 0.3rem 0.48rem; border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border)); border-radius: 6px; color: color-mix(in srgb, var(--color-accent) 82%, var(--color-text)); background: color-mix(in srgb, var(--color-accent) 7%, transparent); font-size: 0.67rem; }
+.jobs-trigger-chip { padding: 0.3rem 0.48rem; border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border)); border-radius: 6px; color: color-mix(in srgb, var(--color-accent) 82%, var(--color-text)); background: color-mix(in srgb, var(--color-accent) 7%, transparent); font-size: 0.74rem; }
 
 .jobs-empty {
     display: flex;
@@ -14771,13 +14518,13 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
 .jobs-runs-table { margin: 0; color: var(--color-text); }
 .jobs-runs-table > :not(caption) > * > * { padding: 0.78rem 0.9rem; border-color: color-mix(in srgb, var(--color-border) 52%, transparent); background: transparent; color: inherit; }
-.jobs-runs-table thead th { color: var(--color-text-muted); font-size: 0.65rem; letter-spacing: 0.07em; text-transform: uppercase; }
-.jobs-runs-table td { font-size: 0.76rem; }
-.jobs-runs-table td:first-child small { display: block; color: var(--color-text-muted); font-size: 0.64rem; }
+.jobs-runs-table thead th { color: var(--color-text-muted); font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase; }
+.jobs-runs-table td { font-size: 0.82rem; }
+.jobs-runs-table td:first-child small { display: block; color: var(--color-text-muted); font-size: 0.7rem; }
 /* Why a run ended, under its status pill. Clamped because ErrorMessage carries whole
    sentences and an unbounded cell would set the width of the entire table; the full
    text stays reachable through the title attribute. */
-.job-run-detail { display: block; max-width: 22ch; margin-top: 0.25rem; overflow: hidden; color: var(--color-text-muted); font-size: 0.64rem; text-overflow: ellipsis; white-space: nowrap; }
+.job-run-detail { display: block; max-width: 22ch; margin-top: 0.25rem; overflow: hidden; color: var(--color-text-muted); font-size: 0.7rem; text-overflow: ellipsis; white-space: nowrap; }
 /* The name opens the recording, so it has to read as a link and not as bold text. */
 .job-run-link {
     padding: 0;
@@ -14818,12 +14565,9 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
 .job-history-bulk[hidden] { display: none; }
 
-/* Matches the uppercase treatment on the Automation screen this modal is opened from. */
 .job-history-bulk .btn {
-    font-size: 0.7rem;
+    font-size: 0.76rem;
     font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
 }
 
 .job-history-check { width: 1%; white-space: nowrap; }
@@ -14876,6 +14620,70 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 .job-run-detail-summary > div { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .job-run-detail-summary small { overflow-wrap: anywhere; color: var(--color-text-muted); font-family: var(--vb-font-mono, ui-monospace, monospace); }
 
+/* Advanced tuck-away inside the Worker modal (workspace mode + custom args). */
+.env-advanced-settings {
+    padding: 0.75rem 0.85rem;
+    border: 1px solid color-mix(in srgb, var(--color-border) 66%, transparent);
+    border-radius: 9px;
+}
+
+.env-advanced-settings > summary {
+    color: var(--color-text);
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.env-advanced-settings[open] > summary { margin-bottom: 0.75rem; }
+
+/* Bootstrap's .mb-3 (!important) on the tucked rows would stack a full 1rem onto
+   the box's own bottom padding when the details is open. */
+.env-advanced-settings > .mb-3:last-child { margin-bottom: 0 !important; }
+
+/* In-app confirm (utils.js confirmDialog): window.confirm is a silent no-op in the
+   VS Code webview. Sits above Bootstrap modals (z-index 1055) so a confirm launched
+   from inside one still lands on top. */
+.vb-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgb(0 0 0 / 55%);
+}
+
+.vb-confirm {
+    width: min(430px, 100%);
+    padding: 1.1rem 1.2rem;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: var(--color-bg-elevated, var(--color-bg-surface));
+    box-shadow: 0 18px 48px rgb(0 0 0 / 40%);
+}
+
+.vb-confirm-title {
+    margin: 0;
+    color: var(--color-text);
+    font-size: 0.95rem;
+    overflow-wrap: anywhere;
+}
+
+.vb-confirm-message {
+    margin: 0.45rem 0 0;
+    color: var(--color-text-muted);
+    font-size: 0.82rem;
+    line-height: 1.5;
+}
+
+.vb-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
 @media (max-width: 1120px) {
     .git-guard-hook-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -14894,7 +14702,6 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 @media (max-width: 720px) {
     .jobs-page-header { align-items: stretch; flex-direction: column; }
     .jobs-page-header .btn { width: 100%; }
-    .jobs-runtime-strip { align-items: flex-start; }
     .jobs-section-heading { align-items: flex-start; }
     .job-inline-form { padding: 1rem; }
     .job-inline-form-header { align-items: stretch; }

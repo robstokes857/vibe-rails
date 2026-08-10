@@ -1,6 +1,8 @@
 import {
     buildLlmSelectionValue,
+    confirmDialog,
     getLlmName,
+    isConfirmDialogOpen,
     parseLlmSelection
 } from './utils.js';
 import { mountWorkerPicker } from './pickers/worker-picker.js';
@@ -65,6 +67,10 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export class JobController {
     constructor(app) {
         this.app = app;
+        // window.confirm is a silent no-op inside the VS Code webview, so destructive
+        // actions confirm through this in-app dialog instead. Held as a field so tests
+        // can substitute a resolved value.
+        this.confirm = confirmDialog;
         this.root = null;
         this.jobs = [];
         // One entry per automation for the page-level table; the full run list is fetched per
@@ -143,6 +149,11 @@ export class JobController {
         const keydownTarget = typeof window !== 'undefined' ? window : document;
         const handleEscape = event => {
             if (event.key !== 'Escape') return;
+            // A confirm overlay owns Escape while it is up. Both listeners sit on
+            // window in the capture phase and this one registered first (FIFO), so
+            // its stopImmediatePropagation cannot shield us — without this check,
+            // Escape on "Delete?" would also silently wipe the open editor.
+            if (isConfirmDialogOpen()) return;
             const modalContainer = typeof document !== 'undefined' ? document.getElementById?.('modal-container') : null;
             if (modalContainer?.firstElementChild) return;
             this.closeEditor();
@@ -169,7 +180,9 @@ export class JobController {
                 <header class="jobs-page-header">
                     <div>
                         <h4 class="jobs-page-title text-uppercase fw-bold mb-0"><span class="text-gradient">Automation</span></h4>
-                        <p>Run a saved Environment on a schedule, after every commit, or on demand. Each run is a recorded terminal you can replay here.</p>
+                        <p>Run an agent on a schedule, after commits, or whenever you hit Run.
+                            <span class="jobs-runtime-note" title="Queued work is shared, and a single active instance claims each run."><i class="fa-regular fa-circle-question" aria-hidden="true"></i>Automations run only while VibeRails is open</span>
+                        </p>
                     </div>
                     <div class="jobs-page-actions">
                         <button class="btn btn-outline-secondary" type="button" data-job-action="import-recipe">
@@ -180,14 +193,6 @@ export class JobController {
                         </button>
                     </div>
                 </header>
-
-                <section class="jobs-runtime-strip" aria-label="Automation runtime">
-                    <span class="jobs-runtime-icon" aria-hidden="true"><i class="fa-solid fa-bolt"></i></span>
-                    <div class="jobs-runtime-copy">
-                        <strong>Automations run only while VibeRails is open</strong>
-                        <span>Queued work is shared, and a single active instance claims each run.</span>
-                    </div>
-                </section>
 
                 <section class="jobs-section" aria-labelledby="jobs-list-title">
                     <div class="jobs-section-heading">
@@ -324,7 +329,7 @@ export class JobController {
                 <div class="jobs-empty jobs-empty-large">
                     <i class="fa-regular fa-clock" aria-hidden="true"></i>
                     <strong>No automations yet</strong>
-                    <span>Choose an Environment and run it on a timer, after commits, or on demand.</span>
+                    <span>Run an agent on a timer, after commits, or on demand.</span>
                     <button class="btn btn-primary" type="button" data-job-action="new">Create your first automation</button>
                 </div>`;
         }
@@ -357,7 +362,7 @@ export class JobController {
                         </div>
                         <div class="job-card-facts">
                             <div class="job-card-fact" ${environment ? '' : 'data-tone="warning"'}>
-                                <span><i class="fa-solid fa-layer-group" aria-hidden="true"></i>Environment</span>
+                                <span><i class="fa-solid fa-layer-group" aria-hidden="true"></i>Worker</span>
                                 <strong>${this.escape(environmentName)}</strong>
                             </div>
                             <div class="job-card-fact job-card-trigger">
@@ -630,7 +635,13 @@ export class JobController {
         const modalGeneration = this.runModalGeneration;
         const jobId = this.historyJobId;
         const subject = ids.length === 1 ? 'this run' : `these ${ids.length} runs`;
-        if (!window.confirm(`Remove ${subject} from this automation’s history? Any recorded terminal and logs will be kept in Chat History.`)) return;
+        const confirmed = await this.confirm({
+            title: `Remove ${subject}?`,
+            message: 'Removed from this automation’s history only — the recorded terminal and logs stay in Chat History.',
+            confirmLabel: 'Remove',
+            danger: true
+        });
+        if (!confirmed) return;
 
         try {
             const response = await this.app.apiCall('/api/v1/jobs/runs/delete', 'POST', { runIds: ids });
@@ -777,7 +788,7 @@ export class JobController {
         editor.innerHTML = `
             <form data-job-form class="job-inline-form">
                 <div class="job-inline-form-header">
-                    <div><span class="jobs-eyebrow">${isEdit ? 'Edit automation' : 'New automation'}</span><h3>${isEdit ? this.escape(source.name) : 'Create an automation'}</h3><p>The Worker owns the CLI, model, arguments, and initial message. This automation controls when it runs and its timeout.</p></div>
+                    <h3>${isEdit ? `Edit — ${this.escape(source.name)}` : 'New automation'}</h3>
                     <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="cancel-editor" aria-label="Close automation editor"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 <div class="row g-3">
@@ -789,13 +800,13 @@ export class JobController {
                             <button class="btn btn-outline-primary text-nowrap" type="button" data-job-action="add-environment-from-editor"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add Worker</button>
                             <button class="btn btn-outline-secondary text-nowrap" type="button" data-job-action="edit-selected-environment" hidden disabled>Edit Worker</button>
                         </div>
-                        <small class="form-text text-muted">The saved model, arguments, CLI settings, and initial message stay synchronized with this Worker.</small>
+                        <small class="form-text text-muted">A Worker is the CLI, model, and initial message this automation runs.</small>
                     </div>
                     <div class="col-12"><div class="job-environment-preview" data-job-environment-preview aria-live="polite"></div></div>
                 </div>
 
                 <fieldset class="job-trigger-fieldset mt-4"><legend>When should it run?</legend>
-                    <label class="job-trigger-option"><input class="form-check-input" type="checkbox" id="job-trigger-schedule" ${scheduled ? 'checked' : ''}><span><strong>On a timer</strong><small>Run at an interval or at a local daily or weekly time.</small></span></label>
+                    <label class="job-trigger-option"><input class="form-check-input" type="checkbox" id="job-trigger-schedule" ${scheduled ? 'checked' : ''}><span><strong>On a timer</strong><small>Every N minutes, or daily/weekly at a set time.</small></span></label>
                     <div class="job-schedule-editor" data-schedule-editor ${scheduled ? '' : 'hidden'}>
                         <div class="row g-2">
                             <div class="col-md-4"><label class="form-label" for="job-schedule-kind">Schedule</label><select class="form-select" id="job-schedule-kind"><option value="0" ${scheduleKind === 0 ? 'selected' : ''}>Every interval</option><option value="1" ${scheduleKind === 1 ? 'selected' : ''}>Daily</option><option value="2" ${scheduleKind === 2 ? 'selected' : ''}>Weekly</option></select></div>
@@ -805,26 +816,28 @@ export class JobController {
                             <div class="col-12" data-timezone-field><label class="form-label" for="job-timezone">Time zone</label><input class="form-control" id="job-timezone" value="${this.escape(timezone)}"></div>
                         </div>
                     </div>
-                    <label class="job-trigger-option"><input class="form-check-input" type="checkbox" id="job-trigger-commit" ${hasCommit ? 'checked' : ''}><span><strong>After every successful commit</strong><small>Queued by the native post-commit hook and picked up by an active VibeRails instance.</small></span></label>
-                    <div class="job-manual-note"><i class="fa-solid fa-play" aria-hidden="true"></i>Run now is always available, even when no automatic trigger is selected.</div>
+                    <label class="job-trigger-option"><input class="form-check-input" type="checkbox" id="job-trigger-commit" ${hasCommit ? 'checked' : ''}><span><strong>After every successful commit</strong><small>Runs after each git commit in this repository.</small></span></label>
+                    <div class="job-manual-note"><i class="fa-solid fa-play" aria-hidden="true"></i>“Run now” always works — triggers are optional.</div>
                 </fieldset>
 
                 <details class="job-advanced-settings mt-3">
-                    <summary>Advanced automation settings</summary>
+                    <summary>Advanced</summary>
                     <div class="row g-3 mt-0">
                         <div class="col-md-5">
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="job-timeout-enabled" ${source.timeoutMinutes ? 'checked' : ''}><label class="form-check-label" for="job-timeout-enabled">Stop the run after a time limit</label></div>
                             <div class="input-group mt-2" data-timeout-field ${source.timeoutMinutes ? '' : 'hidden'}><input class="form-control" type="number" id="job-timeout" min="1" max="720" value="${source.timeoutMinutes || 60}"><span class="input-group-text">minutes</span></div>
-                            <small class="form-text text-muted">Off by default — the run stays open until the CLI finishes or you close its terminal window.</small>
+                            <small class="form-text text-muted">Off by default — the run stays open until the CLI finishes.</small>
                         </div>
                         <div class="col-md-7 d-flex flex-column justify-content-center gap-2">
-                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="job-enabled" ${source.enabled !== false ? 'checked' : ''}><label class="form-check-label" for="job-enabled">Enabled — allow this automation to run on its triggers</label></div>
-                            <div class="form-check"><input class="form-check-input" type="checkbox" id="job-launch-minimized" ${source.launchMinimized === true ? 'checked' : ''}><label class="form-check-label" for="job-launch-minimized">Launch minimized</label><small class="form-text text-muted d-block">Applied when the operating system supports minimized terminal launches.</small></div>
+                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="job-enabled" ${source.enabled !== false ? 'checked' : ''}><label class="form-check-label" for="job-enabled">Enabled</label></div>
+                            <div class="form-check"><input class="form-check-input" type="checkbox" id="job-launch-minimized" ${source.launchMinimized === true ? 'checked' : ''}><label class="form-check-label" for="job-launch-minimized">Launch minimized</label></div>
                         </div>
                     </div>
                 </details>
 
-                <div class="job-repository-context"><i class="fa-solid fa-code-branch" aria-hidden="true"></i><span>Runs in the current VibeRails repository</span><code>${this.escape(projectPath || 'No Git repository detected')}</code></div>
+                <div class="job-repository-context" title="Automations always run in the repository VibeRails is open in."><i class="fa-solid fa-code-branch" aria-hidden="true"></i>${projectPath
+                    ? `<span>Runs in</span><code>${this.escape(projectPath)}</code>`
+                    : '<span>No Git repository detected — open one to run automations.</span>'}</div>
                 <div class="job-inline-form-actions"><button class="btn btn-outline-secondary" type="button" data-job-action="cancel-editor">Cancel</button><button class="btn btn-primary" type="submit">${isEdit ? 'Save automation' : 'Create automation'}</button></div>
             </form>`;
 
@@ -929,40 +942,32 @@ export class JobController {
         const controller = this.app.environmentController;
         if (!controller) return;
 
-        // One-name rule: the Worker is named after its automation, so the automation
-        // name must exist first and must not collide with an existing environment
-        // (env names are case-insensitive backend identifiers).
-        const nameInput = this.root?.querySelector('[data-job-editor] #job-name');
-        const automationName = (nameInput?.value || '').trim();
-        if (!automationName) {
-            nameInput?.focus();
-            this.app.showError('Name the automation first — its Worker uses the same name.');
-            return;
-        }
-        // Mirror of the backend EnvironmentNameValidator charset, checked up front so
-        // the user hears about an unusable automation name before the modal opens.
-        if (!/^[A-Za-z0-9][A-Za-z0-9_\- ]{0,63}$/.test(automationName)) {
-            nameInput?.focus();
-            this.app.showError('The Worker reuses the automation name, so it must be 64 characters or fewer using only letters, digits, spaces, hyphens, and underscores.');
-            return;
-        }
-        const collision = this.environments.find(environment =>
-            (environment.name || '').toLowerCase() === automationName.toLowerCase());
-        if (collision) {
-            nameInput?.focus();
-            this.app.showError(`A Worker or Environment named "${collision.name}" already exists. Rename the automation, or select the existing one.`);
-            return;
-        }
+        // The Worker is named in its own modal. The automation name, when already
+        // typed and legal as an environment identifier (backend charset), rides
+        // along as an editable prefill — a convenient default, not a rule. An
+        // unusable or empty automation name simply means a blank name field.
+        const automationName = (this.root?.querySelector('[data-job-editor] #job-name')?.value || '').trim();
+        const prefill = /^[A-Za-z0-9][A-Za-z0-9_\- ]{0,63}$/.test(automationName)
+            && !this.environments.some(environment =>
+                (environment.name || '').toLowerCase() === automationName.toLowerCase())
+            ? automationName
+            : '';
 
         const knownIds = new Set(this.environments.map(environment => Number(environment.id)));
         const selection = this.root?.querySelector('[data-job-editor] #job-llm-selection');
         const current = parseLlmSelection(selection?.tomselect?.getValue?.() || selection?.value, this.environments);
         controller.createEnvironment({
-            presetName: automationName,
+            initialName: prefill,
             automationWorker: true,
             onChanged: async () => {
                 const latest = this.app.data.environments || [];
                 const created = latest.find(environment => !knownIds.has(Number(environment.id)));
+                // Starting nameless is fine: adopt the new Worker's name as the
+                // automation-name default, still editable before saving.
+                const nameInput = this.root?.querySelector('[data-job-editor] #job-name');
+                if (created?.name && nameInput && !nameInput.value.trim()) {
+                    nameInput.value = created.name;
+                }
                 await this.environmentChanged({ selectedEnvironmentId: created?.id ?? current.envId });
             }
         });
@@ -1073,7 +1078,7 @@ export class JobController {
         try {
             await this.app.apiCall(existingJob ? `/api/v1/jobs/${existingJob.id}` : '/api/v1/jobs', existingJob ? 'PUT' : 'POST', payload);
             this.closeEditor();
-            this.app.showToast('Automation', existingJob ? 'Automation updated.' : 'Automation created.', 'success');
+            this.app.showToast('Automation', existingJob ? 'Saved.' : 'Created.', 'success');
             await this.refreshAll({ quiet: true });
         } catch (error) {
             this.app.showError(error?.message || 'Could not save the automation.');
@@ -1118,10 +1123,17 @@ export class JobController {
 
     async deleteJob(jobId) {
         const job = this.jobs.find(item => item.id === jobId);
-        if (!job || !window.confirm(`Delete the automation “${job.name}”? Its run history will be kept.`)) return;
+        if (!job) return;
+        const confirmed = await this.confirm({
+            title: `Delete “${job.name}”?`,
+            message: 'The automation is removed. Its run history and recordings are kept.',
+            confirmLabel: 'Delete',
+            danger: true
+        });
+        if (!confirmed) return;
         try {
             await this.app.apiCall(`/api/v1/jobs/${jobId}`, 'DELETE');
-            this.app.showToast('Automation', 'Automation deleted.', 'info');
+            this.app.showToast('Automation', 'Deleted.', 'info');
             await this.refreshAll({ quiet: true });
         } catch (error) { this.app.showError(error?.message || 'Could not delete the automation.'); }
     }
@@ -1301,7 +1313,7 @@ export class JobController {
         if (!job) return;
         const environment = this.findEnvironment(job.environmentId);
         if (!environment) {
-            this.app.showError('This automation needs a valid Environment before it can be exported.');
+            this.app.showError('This automation needs a valid Worker before it can be exported.');
             return;
         }
         const cli = environment.cli;
@@ -1339,7 +1351,7 @@ export class JobController {
 
 ${prompt ? prompt.split('\n').map(line => `> ${line}`).join('\n') : '> _(none)_'}
 
-Import this file from the **Automation** screen in VibeRails to add the Environment and this automation.
+Import this file from the **Automation** screen in VibeRails to add the Worker and this automation.
 
 <!-- viberails-recipe
 ${JSON.stringify(recipe, null, 2)}
@@ -1407,15 +1419,15 @@ viberails-recipe -->
             <div class="job-recipe-import">
                 <p>Import <strong>${this.escape(recipe.name)}</strong> (${this.escape(recipe.llm || cli)}) into this repository?</p>
                 <ul class="text-muted small">
-                    <li>Environment: <strong>${this.escape(recipe.name)}</strong>${recipe.model ? ` · ${this.escape(recipe.model)}` : ''}${existingEnv ? ' <em>(already exists — will be reused)</em>' : ''}</li>
+                    <li>Worker: <strong>${this.escape(recipe.name)}</strong>${recipe.model ? ` · ${this.escape(recipe.model)}` : ''}${existingEnv ? ' <em>(already exists — will be reused)</em>' : ''}</li>
                     <li>Runs: ${this.escape(whenText)} · ${recipe.timeoutMinutes ? `${this.escape(String(recipe.timeoutMinutes))} min limit` : 'no time limit'}</li>
                 </ul>
                 <div class="alert alert-warning small" role="alert">
-                    <strong>Review the Environment content before importing.</strong>
+                    <strong>Review the Worker content before importing.</strong>
                     Custom arguments can change approval or sandbox permissions, and the initial message becomes instructions to the agent.
                     ${existingEnv
-                        ? 'The matching Environment already exists, so the recipe content below will not overwrite its settings.'
-                        : 'The new Environment will import these fields exactly as shown.'}
+                        ? 'A matching Worker already exists, so the recipe content below will not overwrite its settings.'
+                        : 'The new Worker will import these fields exactly as shown.'}
                 </div>
                 <div class="job-recipe-review">
                     <div>
@@ -1427,7 +1439,7 @@ viberails-recipe -->
                         <pre class="job-recipe-review-value" data-recipe-prompt>${this.escape(prompt || '(none)')}</pre>
                     </div>
                 </div>
-                <label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-env" ${existingEnv ? '' : 'checked'} ${existingEnv ? 'disabled' : ''}><span class="form-check-label">Add the Environment</span></label>
+                <label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-env" ${existingEnv ? '' : 'checked'} ${existingEnv ? 'disabled' : ''}><span class="form-check-label">Add the Worker</span></label>
                 <label class="form-check"><input class="form-check-input" type="checkbox" id="recipe-add-job" checked><span class="form-check-label">Add the automation (created disabled)</span></label>
                 ${hasReviewableContent
                     ? '<label class="form-check mt-2"><input class="form-check-input" type="checkbox" id="recipe-reviewed"><span class="form-check-label">I have read the custom arguments and initial message above</span></label>'
@@ -1459,11 +1471,14 @@ viberails-recipe -->
         return this.withBusy(button, 'Importing…', async () => {
             const cli = String(recipe.cli || '').toLowerCase();
             if (addEnv) {
+                // Recipes install through the Automation flow, so the imported record
+                // is a Worker: listed by the Worker picker, excluded from launch pickers.
                 await this.app.apiCall('/api/v1/environments', 'POST', {
                     name: recipe.name,
                     cli,
                     customArgs: recipe.customArgs || '',
-                    customPrompt: recipe.prompt || ''
+                    customPrompt: recipe.prompt || '',
+                    automationWorker: true
                 });
             }
             await this.refreshAll({ quiet: true });
@@ -1471,7 +1486,7 @@ viberails-recipe -->
             if (addJob) {
                 const environment = (this.environments || []).find(env => (env.name || '').toLowerCase() === String(recipe.name).toLowerCase() && (env.cli || '').toLowerCase() === cli)
                     || existingEnv;
-                if (!environment) throw new Error('The recipe Environment could not be created.');
+                if (!environment) throw new Error('The recipe Worker could not be created.');
                 const llm = getJobLlmForCli(cli);
                 await this.app.apiCall('/api/v1/jobs', 'POST', {
                     name: recipe.name,
@@ -1485,7 +1500,7 @@ viberails-recipe -->
                 });
             }
             this.app.closeModal();
-            this.app.showToast('Recipe imported', 'The Environment and automation were added.', 'success');
+            this.app.showToast('Recipe imported', 'The Worker and automation were added.', 'success');
             await this.refreshAll({ quiet: true });
         });
     }

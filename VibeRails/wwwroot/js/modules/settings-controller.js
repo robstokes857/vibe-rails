@@ -1,5 +1,5 @@
 import { showDataExportModal } from './data-export-modal.js';
-import { showHttpRelayTestModal } from './http-relay-test-modal.js';
+import { confirmDialog } from './utils.js';
 
 export class SettingsController {
     constructor(app) {
@@ -15,6 +15,11 @@ export class SettingsController {
         this._dataExportConfigured = false;
         this._dataExportSizeBytes = null;
         this._settingsRoot = null;
+        // In-app leave-confirm (window.confirm is a silent no-op in the VS Code
+        // webview). A field so tests can substitute a resolved value.
+        this.confirmLeave = confirmDialog;
+        this._leaveConfirmPending = false;
+        this._leaveSettingsConfirmed = false;
     }
 
     async loadSettings() {
@@ -78,7 +83,6 @@ export class SettingsController {
             const remoteAccessToggle = root.querySelector('#setting-remote-access');
             const apiKeyInput = root.querySelector('#setting-api-key');
             const routeThroughVibeRailsAiToggle = root.querySelector('#setting-route-through-viberails-ai');
-            const httpRelayTestButton = root.querySelector('#settings-http-relay-test-button');
             const exportDataButton = root.querySelector('#settings-export-data-button');
             const performanceModeToggle = root.querySelector('#setting-performance-mode');
             const useVsCodeThemeRow = root.querySelector('#setting-use-vscode-theme-row');
@@ -116,14 +120,6 @@ export class SettingsController {
                     settings.routeThroughVibeRailsAi === true
                 );
             }
-            if (httpRelayTestButton) {
-                httpRelayTestButton.addEventListener('click', () => {
-                    if (!httpRelayTestButton.disabled) {
-                        showHttpRelayTestModal(this.app);
-                    }
-                });
-            }
-            this._updateHttpRelayTestAvailability(root);
             this._dataExportConfigured = settings.dataExportConfigured === true;
             if (exportDataButton) {
                 exportDataButton.addEventListener('click', () => this._exportData(root));
@@ -305,20 +301,8 @@ export class SettingsController {
             input.addEventListener('change', () => this._updateDirtyState(root));
         });
 
-        this._removeNavigationGuard = this.app.registerNavigationGuard?.(({ from }) => {
-            if (from !== 'settings' || !this._settingsDirty) {
-                return true;
-            }
-
-            // window.confirm is suppressed (returns false) inside the sandboxed VS Code webview
-            // iframe, which would trap the user on a dirty form with no way to leave. Only block
-            // where confirm actually prompts; in the webview, allow navigation instead of trapping.
-            if (window.__viberails_VSCODE__) {
-                return true;
-            }
-
-            return window.confirm('You have unsaved settings changes. Leave without saving?');
-        }) || null;
+        this._removeNavigationGuard = this.app.registerNavigationGuard?.(
+            payload => this._guardSettingsNavigation(payload)) || null;
 
         this._beforeUnloadHandler = (event) => {
             if (!this._settingsDirty) {
@@ -330,6 +314,40 @@ export class SettingsController {
             return '';
         };
         window.addEventListener('beforeunload', this._beforeUnloadHandler);
+    }
+
+    // Guards are synchronous, but the in-app confirm is not (window.confirm is a
+    // silent no-op in the VS Code webview — it used to force a bypass here that
+    // silently discarded webview edits). So: block the navigation now, ask, and
+    // replay the exact navigation via `retry` if the user opts to leave.
+    _guardSettingsNavigation({ from, retry }) {
+        if (from !== 'settings' || !this._settingsDirty) {
+            return true;
+        }
+        if (this._leaveSettingsConfirmed) {
+            return true;
+        }
+        void this._confirmLeaveSettings(retry);
+        return false;
+    }
+
+    async _confirmLeaveSettings(retry) {
+        if (this._leaveConfirmPending) return;
+        this._leaveConfirmPending = true;
+        try {
+            const leave = await this.confirmLeave({
+                title: 'Leave Settings?',
+                message: 'You have unsaved settings changes that will be lost.',
+                confirmLabel: 'Leave without saving',
+                cancelLabel: 'Stay',
+                danger: true
+            });
+            if (!leave) return;
+            this._leaveSettingsConfirmed = true;
+            try { retry?.(); } finally { this._leaveSettingsConfirmed = false; }
+        } finally {
+            this._leaveConfirmPending = false;
+        }
     }
 
     _trackedSettingsSelector() {
@@ -377,14 +395,12 @@ export class SettingsController {
         this._settingsDirty = this._captureSettingsSnapshot(root) !== this._settingsSnapshot;
         this._updateSaveBar(root);
         this._updateDataExportAvailability(root);
-        this._updateHttpRelayTestAvailability(root);
     }
 
     _markSettingsClean(root) {
         this._settingsSnapshot = this._captureSettingsSnapshot(root);
         this._settingsDirty = false;
         this._updateSaveBar(root);
-        this._updateHttpRelayTestAvailability(root);
     }
 
     _updateSaveBar(root) {
@@ -463,7 +479,6 @@ export class SettingsController {
         if (removeCoAuthorTrailersToggle) removeCoAuthorTrailersToggle.checked = settings.removeCoAuthorTrailers !== false;
 
         this._updateDataExportAvailability(root);
-        this._updateHttpRelayTestAvailability(root);
     }
 
     _updateDataExportAvailability(root) {
@@ -484,35 +499,6 @@ export class SettingsController {
         if (button) {
             button.disabled = !available || this._dataExportInProgress;
             button.textContent = this._getDataExportButtonText();
-        }
-    }
-
-    _updateHttpRelayTestAvailability(root) {
-        const toggle = root.querySelector('#setting-route-through-viberails-ai');
-        const apiKeyInput = root.querySelector('#setting-api-key');
-        const button = root.querySelector('#settings-http-relay-test-button');
-        const hint = root.querySelector('#settings-http-relay-test-hint');
-        if (!toggle || !apiKeyInput || !button) return;
-
-        const savedEnabled = toggle.dataset.originalValue === 'true';
-        const savedApiKey = apiKeyInput.dataset.originalValue || '';
-        const controlsMatchSaved = toggle.checked === savedEnabled
-            && apiKeyInput.value === savedApiKey;
-        const available = savedEnabled
-            && savedApiKey.trim().length > 0
-            && controlsMatchSaved;
-
-        button.disabled = !available;
-        if (!hint) return;
-
-        if (available) {
-            hint.textContent = 'Send GET, POST, PUT, and DELETE through the saved relay connection.';
-        } else if (!controlsMatchSaved) {
-            hint.textContent = 'Save or discard your setting changes before testing the relay.';
-        } else if (!savedEnabled) {
-            hint.textContent = 'Turn on this setting and save it before testing the relay.';
-        } else {
-            hint.textContent = 'Save an API key before testing the relay.';
         }
     }
 

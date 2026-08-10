@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -108,6 +109,26 @@ test('code analyzer dashboard handles an empty report without inventing files', 
     assert.equal(model.health, 100);
     assert.equal(model.healthyFileCount, 0);
     assert.equal(model.skippedFileCount, 3);
+});
+
+test('code analyzer dashboard leaves a no-changed-code scan ungraded instead of failing it', () => {
+    // The real wire shape when nothing was analyzed: the backend omits the score
+    // details, so healthScore and report serialize as null (not absent). Number(null)
+    // is 0, so a naive coercion used to grade an empty scan "F / Change required".
+    const model = buildCodeAnalyzerDashboardModel({
+        healthScore: null,
+        rating: null,
+        analyzedFileCount: 0,
+        skippedFileCount: 6,
+        ignoredFileCount: 0,
+        report: null
+    });
+
+    assert.equal(model.health, null);
+    assert.equal(model.qualityGrade, '—');
+    assert.equal(model.healthLabel, 'No changed code');
+    assert.equal(model.tone, 'neutral');
+    assert.equal(model.analyzedFileCount, 0);
 });
 
 test('code analyzer dashboard selects Monaco languages from source paths', () => {
@@ -342,7 +363,7 @@ test('code analyzer file rail groups files by directory with collapse and kebab 
     disposeCodeAnalyzerDashboard(container);
 });
 
-test('code analyzer brief summarizes the scan for the Validation screen', () => {
+test('code analyzer brief summarizes the scan for the Rules hub door card', () => {
     const documentRef = { createElement: tagName => new FakeElement(tagName) };
     const host = new FakeElement('section');
     host.hidden = true;
@@ -373,4 +394,49 @@ test('code analyzer brief summarizes the scan for the Validation screen', () => 
     assert.equal(renderCodeAnalyzerBrief(host, null, documentRef), false);
     assert.equal(host.hidden, true);
     assert.equal(host.children.length, 0);
+});
+
+test('Code quality and RULES are separate nav destinations, each one surface', () => {
+    const index = readFileSync(path.resolve('VibeRails/wwwroot/index.html'), 'utf8');
+
+    // Two nav entries in BOTH nav layouts: RULES goes to the rule-files view, and the
+    // Code quality page is home (navigate-home).
+    const rulesNavLinks = index.match(/data-action="navigate" data-view="rule-files"/g) || [];
+    assert.equal(rulesNavLinks.length, 2, 'RULES appears once per nav layout');
+    assert.match(index, /CODE QUALITY<\/span>/);
+    assert.equal((index.match(/data-action="navigate-home"/g) || []).length, 2);
+
+    // The Code quality page: no local tab strip; Git Guard + validation + the compact
+    // brief + the terminal. The workbench and the rule manager are NOT on it.
+    const agentsTemplate = index.match(/<template id="agents-template">([\s\S]*?)<\/template>/)[1];
+    assert.doesNotMatch(agentsTemplate, /rules-localnav|role="tablist"|data-rules-tab/);
+    assert.match(agentsTemplate, /Code quality<\/h1>/);
+    assert.match(agentsTemplate, /data-vca-console\b/);
+    assert.match(agentsTemplate, /data-vca-quality-brief/);
+    assert.match(agentsTemplate, /data-terminal-section/);
+    assert.doesNotMatch(agentsTemplate, /data-code-analyzer-report|data-agent-file-tree|data-rules-files-door/);
+
+    // The workbench: a full-page view with a way back to the Code quality page.
+    const quality = index.match(/<template id="code-quality-template">([\s\S]*?)<\/template>/)[1];
+    assert.match(quality, /data-view="code-quality"/);
+    assert.match(quality, /data-action="go-back"/);
+    assert.match(quality, /data-code-analyzer-report/);
+    assert.match(quality, /data-code-analyzer-full-scan/);
+
+    // The RULES page: a top-level destination — no back button.
+    const files = index.match(/<template id="rule-files-template">([\s\S]*?)<\/template>/)[1];
+    assert.match(files, /data-view="rule-files"/);
+    assert.doesNotMatch(files, /data-action="go-back"/);
+    assert.match(files, /data-agent-file-tree/);
+    assert.match(files, /data-agent-rule-editor/);
+
+    // Routing: both views registered, and the old tab module stays gone.
+    const app = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
+    assert.match(app, /'code-quality': \(\) => this\.ruleController\.loadCodeQuality\(\)/);
+    assert.match(app, /'rule-files': \(\) => this\.agentController\.loadRuleFiles\(\)/);
+
+    const ruleController = readFileSync(path.resolve('VibeRails/wwwroot/js/modules/rule-controller.js'), 'utf8');
+    assert.match(ruleController, /loadCodeQuality\(\)/);
+    assert.match(ruleController, /this\.app\.navigate\('code-quality'\)/);
+    assert.doesNotMatch(ruleController, /data-rules-tab/);
 });

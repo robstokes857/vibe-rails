@@ -47,6 +47,7 @@ public sealed class DataExportService : IDataExportService
     // the process gate and the cross-process lock.
     private const int MaxMetadataBodyBytes = 64 * 1024;
     private const int MaxErrorBodyBytes = 4 * 1024;
+    private const int MaxDisplayedErrorCharacters = 600;
 
     // ResponseHeadersRead hands back the response once headers land, so the body is read outside
     // whatever the send itself was bounded by. These calls exchange a few hundred bytes; without
@@ -1077,21 +1078,66 @@ public sealed class DataExportService : IDataExportService
     private static int RetryDelayMs(int attempt) => 500 * (1 << (attempt - 1));
 
     /// <summary>
-    /// Prefers the server's own explanation. It returns { "error": "..." } for every failure —
-    /// a bad hash header, a missing computer name, storage being down — and reporting only the
-    /// status code throws all of that away.
+    /// Prefers the server's own explanation and keeps the HTTP status/reference alongside it.
+    /// The production endpoint uses RFC Problem Details, while older endpoints returned
+    /// { "error": "..." }; accepting both keeps a useful failure from collapsing to a generic
+    /// "upload failed" message.
     /// </summary>
     private static async Task<string> DescribeFailureAsync(
         HttpResponseMessage response,
         string? fallback,
         CancellationToken cancellationToken)
     {
-        var serverMessage = await TryReadErrorMessageAsync(response, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(serverMessage))
-            return serverMessage;
+        var serverFailure = await TryReadErrorMessageAsync(response, cancellationToken);
+        var httpStatus = FormatHttpStatus(response);
+        var message = serverFailure?.Message;
+        if (string.IsNullOrWhiteSpace(message) || IsGenericHttpTitle(message, response))
+            message = fallback ?? DescribeStatus(response.StatusCode);
 
-        return fallback ?? $"The export server returned HTTP {(int)response.StatusCode}.";
+        var detail = $"{message.Trim().TrimEnd('.', '!', '?')} ({httpStatus}).";
+        if (!string.IsNullOrWhiteSpace(serverFailure?.Reference))
+            detail += $" Reference: {serverFailure.Reference}";
+
+        // Status and request reference are safe to retain and make a remote failure diagnosable.
+        // Do not log the response message: an upstream must not be able to reflect secrets into
+        // the local log file.
+        Log.Warning(
+            "[DataExport] Export server returned {HttpStatus}. Reference={Reference}.",
+            httpStatus,
+            serverFailure?.Reference ?? "none");
+        return detail;
     }
+
+    private static string FormatHttpStatus(HttpResponseMessage response)
+    {
+        var reason = CleanServerText(response.ReasonPhrase, maxCharacters: 80);
+        return string.IsNullOrWhiteSpace(reason)
+            ? $"HTTP {(int)response.StatusCode}"
+            : $"HTTP {(int)response.StatusCode} {reason}";
+    }
+
+    private static bool IsGenericHttpTitle(string message, HttpResponseMessage response)
+    {
+        var normalized = message.Trim().TrimEnd('.', '!', '?');
+        var reason = response.ReasonPhrase?.Trim().TrimEnd('.', '!', '?');
+        return string.Equals(normalized, reason, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                normalized,
+                "An error occurred while processing your request",
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DescribeStatus(HttpStatusCode statusCode) => (int)statusCode switch
+    {
+        404 => "The configured export endpoint was not found",
+        408 or 504 => "The export server timed out while receiving the upload",
+        409 => "The export server could not assemble all uploaded blocks",
+        413 => "The compressed export is larger than the server accepts",
+        429 => "The export server is handling too many requests; wait a few minutes and retry",
+        500 or 502 or 503 => "The export service is temporarily unavailable; retry in a few minutes",
+        507 => "The export server does not have enough storage for this upload",
+        _ => "The export server rejected the upload"
+    };
 
     /// <summary>
     /// Bounds a metadata response body. Returns null when it is empty or larger than the caller
@@ -1124,7 +1170,9 @@ public sealed class DataExportService : IDataExportService
         return deadline;
     }
 
-    private static async Task<string?> TryReadErrorMessageAsync(
+    private sealed record RemoteFailure(string? Message, string? Reference);
+
+    private static async Task<RemoteFailure?> TryReadErrorMessageAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken)
     {
@@ -1134,16 +1182,48 @@ public sealed class DataExportService : IDataExportService
             if (body is null)
                 return null;
 
-            using var document = JsonDocument.Parse(body);
-            if (document.RootElement.ValueKind != JsonValueKind.Object
-                || !document.RootElement.TryGetProperty("error", out var error)
-                || error.ValueKind != JsonValueKind.String)
+            try
             {
-                return null;
-            }
+                using var document = JsonDocument.Parse(body);
+                var root = document.RootElement;
+                if (root.ValueKind == JsonValueKind.String)
+                {
+                    return new RemoteFailure(
+                        CleanServerText(root.GetString()),
+                        ReadResponseReference(response));
+                }
+                if (root.ValueKind != JsonValueKind.Object)
+                    return null;
 
-            var message = error.GetString();
-            return string.IsNullOrWhiteSpace(message) ? null : message.Trim();
+                var message = ReadJsonMessage(root);
+                var reference = ReadJsonString(root, "traceId")
+                    ?? ReadJsonString(root, "requestId")
+                    ?? ReadJsonString(root, "correlationId")
+                    ?? ReadResponseReference(response);
+                return string.IsNullOrWhiteSpace(message) && string.IsNullOrWhiteSpace(reference)
+                    ? null
+                    : new RemoteFailure(message, CleanServerText(reference, maxCharacters: 128));
+            }
+            catch (JsonException)
+            {
+                var rawText = Encoding.UTF8.GetString(body);
+                var reference = ReadHtmlRequestReference(rawText)
+                    ?? ReadResponseReference(response);
+                var mediaType = response.Content.Headers.ContentType?.MediaType;
+                if (mediaType?.StartsWith("text/", StringComparison.OrdinalIgnoreCase) != true)
+                {
+                    return string.IsNullOrWhiteSpace(reference)
+                        ? null
+                        : new RemoteFailure(null, reference);
+                }
+
+                var text = CleanServerText(rawText);
+                return string.IsNullOrWhiteSpace(text) || text.StartsWith('<')
+                    ? string.IsNullOrWhiteSpace(reference)
+                        ? null
+                        : new RemoteFailure(null, reference)
+                    : new RemoteFailure(text, reference);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1155,6 +1235,167 @@ public sealed class DataExportService : IDataExportService
             // caller still has a status-code message to fall back on.
             return null;
         }
+    }
+
+    private static string? ReadJsonMessage(JsonElement root)
+    {
+        var detail = ReadJsonString(root, "detail");
+        if (!string.IsNullOrWhiteSpace(detail))
+            return detail;
+
+        if (TryGetJsonProperty(root, "error", out var error))
+        {
+            if (error.ValueKind == JsonValueKind.String)
+                return CleanServerText(error.GetString());
+            if (error.ValueKind == JsonValueKind.Object)
+            {
+                var nested = ReadJsonString(error, "message")
+                    ?? ReadJsonString(error, "detail");
+                if (!string.IsNullOrWhiteSpace(nested))
+                    return nested;
+            }
+        }
+
+        var message = ReadJsonString(root, "message");
+        if (!string.IsNullOrWhiteSpace(message))
+            return message;
+
+        var validation = ReadValidationErrors(root);
+        return !string.IsNullOrWhiteSpace(validation)
+            ? validation
+            : ReadJsonString(root, "title");
+    }
+
+    private static string? ReadValidationErrors(JsonElement root)
+    {
+        if (!TryGetJsonProperty(root, "errors", out var errors)
+            || errors.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var messages = new List<string>(capacity: 3);
+        foreach (var property in errors.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.String)
+            {
+                AddValidationMessage(property.Name, property.Value.GetString(), messages);
+            }
+            else if (property.Value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in property.Value.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String)
+                        AddValidationMessage(property.Name, item.GetString(), messages);
+                    if (messages.Count == 3)
+                        break;
+                }
+            }
+
+            if (messages.Count == 3)
+                break;
+        }
+
+        return messages.Count == 0 ? null : string.Join(" ", messages);
+    }
+
+    private static void AddValidationMessage(
+        string field,
+        string? rawMessage,
+        ICollection<string> messages)
+    {
+        var message = CleanServerText(rawMessage, maxCharacters: 180);
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+
+        var label = CleanServerText(field, maxCharacters: 60);
+        messages.Add(string.IsNullOrWhiteSpace(label) ? message : $"{label}: {message}");
+    }
+
+    private static string? ReadJsonString(JsonElement root, string name)
+        => TryGetJsonProperty(root, name, out var value) && value.ValueKind == JsonValueKind.String
+            ? CleanServerText(value.GetString())
+            : null;
+
+    private static bool TryGetJsonProperty(
+        JsonElement root,
+        string name,
+        out JsonElement value)
+    {
+        foreach (var property in root.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string? ReadHtmlRequestReference(string html)
+    {
+        var marker = html.IndexOf("Request ID:", StringComparison.OrdinalIgnoreCase);
+        if (marker < 0)
+            return null;
+
+        var codeStart = html.IndexOf("<code>", marker, StringComparison.OrdinalIgnoreCase);
+        if (codeStart < 0)
+            return null;
+        codeStart += "<code>".Length;
+
+        var codeEnd = html.IndexOf("</code>", codeStart, StringComparison.OrdinalIgnoreCase);
+        if (codeEnd < 0)
+            return null;
+
+        return CleanServerText(
+            WebUtility.HtmlDecode(html[codeStart..codeEnd]),
+            maxCharacters: 128);
+    }
+
+    private static string? ReadResponseReference(HttpResponseMessage response)
+    {
+        foreach (var header in new[] { "x-request-id", "x-correlation-id" })
+        {
+            if (response.Headers.TryGetValues(header, out var values))
+                return CleanServerText(values.FirstOrDefault(), maxCharacters: 128);
+        }
+
+        return null;
+    }
+
+    private static string? CleanServerText(
+        string? value,
+        int maxCharacters = MaxDisplayedErrorCharacters)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var builder = new StringBuilder(Math.Min(value.Length, maxCharacters));
+        var pendingSpace = false;
+        foreach (var character in value.Trim())
+        {
+            if (char.IsWhiteSpace(character) || char.IsControl(character))
+            {
+                pendingSpace = builder.Length > 0;
+                continue;
+            }
+
+            if (pendingSpace && builder.Length < maxCharacters)
+                builder.Append(' ');
+            pendingSpace = false;
+            if (builder.Length >= maxCharacters)
+                break;
+            builder.Append(character);
+        }
+
+        if (builder.Length == 0)
+            return null;
+        if (builder.Length == maxCharacters && value.Length > maxCharacters)
+            builder.Append('…');
+        return builder.ToString();
     }
 
     private static string ResolveComputerName()

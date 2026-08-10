@@ -314,6 +314,36 @@ test('structured success and failure results use the backend message and toast t
     await expect(ui.exportButton).toBeEnabled();
 });
 
+test('upload failure identifies the stage, diagnostic, and safe retry behavior', async ({ page }) => {
+    await installSettingsApi(page, MASKED_API_KEY);
+    await page.route('**/api/v1/settings/export-data', async route => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                success: false,
+                status: 'upload_failed',
+                message: 'The export service is temporarily unavailable '
+                    + '(HTTP 503 Service Unavailable). Reference: retry-reference',
+                sha256: 'd'.repeat(64)
+            })
+        });
+    });
+
+    const ui = await openSettings(page);
+    await ui.exportButton.click();
+
+    const outcome = page.locator('#data-export-outcome');
+    await expect(outcome).toContainText('Upload failed');
+    await expect(outcome).toContainText('HTTP 503 Service Unavailable');
+    await expect(outcome).toContainText('Reference: retry-reference');
+    await expect(outcome).toContainText('Your local database was not changed');
+    await expect(outcome).toContainText('reuse any blocks the server already received');
+    await expect(outcome).toContainText('Error code: upload_failed');
+    await expect(page.locator('#data-export-retry')).toBeVisible();
+    await expect(page.locator('#data-export-close')).toBeVisible();
+});
+
 test('a thrown request error restores the button and shows an error toast', async ({ page }) => {
     await installSettingsApi(page, MASKED_API_KEY);
     const ui = await openSettings(page);

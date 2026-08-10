@@ -202,13 +202,16 @@ export class VibeControlApp {
                     // Repo created — re-render the current view in git mode. Route the in-place
                     // reload through the navigation guard so a dirty settings form isn't silently
                     // discarded; if the user opts to keep their edits, leave the view as-is.
-                    if (!this.canNavigateTo(this.currentView)) {
+                    const reloadView = () => {
+                        document.getElementById('git-helper-bar')?.remove();
+                        this.loadView(this.currentView);
+                    };
+                    if (!this.canNavigateTo(this.currentView, {}, reloadView)) {
                         btn.disabled = false;
                         btn.textContent = 'Initialize Git Here';
                         return;
                     }
-                    document.getElementById('git-helper-bar')?.remove();
-                    this.loadView(this.currentView);
+                    reloadView();
                 } else {
                     showError('Git was initialized but the repository could not be detected. Please refresh.');
                     btn.disabled = false;
@@ -352,10 +355,14 @@ export class VibeControlApp {
         return () => this.navigationGuards.delete(guard);
     }
 
-    canNavigateTo(view, data = {}) {
+    // `retry` re-runs the exact navigation that was blocked. Guards stay
+    // synchronous (return true/false), but one that needs to ASK first — the
+    // in-app confirm dialog is async, window.confirm doesn't work in the VS Code
+    // webview — can return false now, prompt, and call retry() on a yes.
+    canNavigateTo(view, data = {}, retry = null) {
         for (const guard of Array.from(this.navigationGuards)) {
             try {
-                if (guard({ from: this.currentView, to: view, data }) === false) {
+                if (guard({ from: this.currentView, to: view, data, retry }) === false) {
                     return false;
                 }
             } catch (error) {
@@ -599,15 +606,19 @@ export class VibeControlApp {
     }
 
     getDuplicateTabViewName(view) {
-        const normalizedView = ['agents', 'agent-edit', 'agent-create'].includes(view)
+        const normalizedView = view === 'agents'
             ? 'dashboard'
-            : view;
+            : ['agent-edit', 'agent-create'].includes(view)
+                ? 'rule-files'
+                : view;
         const duplicateableViews = new Set([
             'dashboard',
             'launch-cli',
             'agents',
             'check-violations',
             'git-guard',
+            'code-quality',
+            'rule-files',
             'environments',
             'config',
             'sessions',
@@ -746,7 +757,7 @@ export class VibeControlApp {
     // ============================================ 
 
     navigate(view, data = {}, { resetStack = false } = {}) {
-        if (!this.canNavigateTo(view, data)) {
+        if (!this.canNavigateTo(view, data, () => this.navigate(view, data, { resetStack }))) {
             return false;
         }
 
@@ -775,10 +786,17 @@ export class VibeControlApp {
     }
 
     updateActiveSubNav(view) {
+        // Two nav families: the Code quality page (home) owns the checks, the RULES
+        // entry owns the AGENTS.md editing views.
+        const highlightView = ['agents', 'code-quality'].includes(view)
+            ? 'dashboard'
+            : ['agent-edit', 'agent-create'].includes(view)
+                ? 'rule-files'
+                : view;
         document.querySelectorAll('.app-subnav-link').forEach(link => {
             const linkView = link.getAttribute('data-view') || (link.getAttribute('data-action') === 'navigate-home' ? 'dashboard' : (link.getAttribute('data-action') === 'navigate-settings' ? 'settings' : ''));
-            
-            if (linkView === view) {
+
+            if (linkView === highlightView) {
                 link.classList.add('active');
             } else {
                 link.classList.remove('active');
@@ -792,7 +810,7 @@ export class VibeControlApp {
             const previousView = previous.view || previous;
             const previousData = previous.data || {};
 
-            if (!this.canNavigateTo(previousView, previousData)) {
+            if (!this.canNavigateTo(previousView, previousData, () => this.goBack())) {
                 return false;
             }
 
@@ -825,9 +843,6 @@ export class VibeControlApp {
         this.jobController?.unload?.();
         this.environmentController?.unload?.();
         this.sandboxController?.unload?.();
-        // Tears down the Rules workspace's local-nav observers and listeners.
-        // mountAgentsOverview re-creates them, so this is safe when re-entering Rules.
-        this.agentController?.unload?.();
         this.updateActiveSubNav(view);
         this.terminalController?.resetLayoutStateForNavigation();
         // Tear down the MCP Explorer's global listener / xterm instances when navigating away
@@ -841,6 +856,8 @@ export class VibeControlApp {
             'agents': () => this.dashboardController.loadDashboard(data),
             'agent-edit': () => this.agentController.loadAgentEdit(data),
             'agent-create': () => this.agentController.loadAgentCreate(),
+            'code-quality': () => this.ruleController.loadCodeQuality(),
+            'rule-files': () => this.agentController.loadRuleFiles(),
             'check-violations': () => this.ruleController.loadCheckViolations(),
             'git-guard': () => this.ruleController.loadFocusedGitGuard(),
             'environments': () => this.environmentController.loadEnvironments(),

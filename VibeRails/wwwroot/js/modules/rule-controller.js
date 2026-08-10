@@ -202,7 +202,13 @@ function formatAnalyzerRating(value) {
 }
 
 export function buildCodeAnalyzerSummary(response = {}) {
-    const rawScore = Number(response?.healthScore);
+    // healthScore is null when the scan found no changed code to analyze. Number(null)
+    // is 0, so the null has to be rejected before coercion or an empty scan reports a
+    // zero score (and a danger-toned nav badge) rather than "not scored".
+    const health = response?.healthScore;
+    const rawScore = health === null || health === undefined || health === ''
+        ? Number.NaN
+        : Number(health);
     const hasScore = Number.isFinite(rawScore);
     const score = hasScore ? Math.min(100, Math.max(0, rawScore)) : null;
     const analyzedFileCount = Math.max(0, Number.parseInt(response?.analyzedFileCount, 10) || 0);
@@ -379,8 +385,49 @@ export class RuleController {
         this.unload();
         this.focusedMode = false;
         this.viewRoot = root;
-        this.bindHookControls(root);
+        // The hub hosts Git Guard and the validation console. The code-quality scan
+        // still runs from here — its compact brief is the hub's door card — but the
+        // full workbench (and its controls) live on the 'code-quality' view.
+        this.bindGuardControls(root);
+        this.bindValidationControls(root);
+        this.bindActionMenuAutoClose(root);
         void this.runRulesOverviewChecks(root);
+    }
+
+    // The full-page Code quality workbench (opened from the hub's brief card). Restores
+    // the last scan from cache so flipping hub <-> workbench never re-runs MintLint;
+    // a genuinely fresh visit starts one scan.
+    loadCodeQuality() {
+        this.unload();
+        const content = document.getElementById('app-content');
+        if (!content) return;
+
+        this.focusedMode = false;
+        content.innerHTML = '';
+        const fragment = this.app.cloneTemplate('code-quality-template');
+        const root = fragment.querySelector('[data-view="code-quality"]');
+        content.appendChild(fragment);
+        if (!root) return;
+
+        this.viewRoot = root;
+        this.bindCodeQualityControls(root);
+        this.bindActionMenuAutoClose(root);
+        return this.runCodeQualityChecks(root);
+    }
+
+    async runCodeQualityChecks(root) {
+        await this.refreshHookStatus();
+        if (this.viewRoot !== root || !this.hookStatus?.inGitRepo) return false;
+
+        // A scan the hub kicked off may still be running; when it completes it renders
+        // into whichever view is mounted, so starting another here would double-scan.
+        if (this.restoreCodeAnalyzerCache()) return true;
+        if (this.codeAnalyzerScanInProgress
+            && this.codeAnalyzerScanInProgress.repositoryPath === this.hookStatus?.repositoryPath) {
+            return true;
+        }
+        await this.runCodeAnalyzer();
+        return true;
     }
 
     async runRulesOverviewChecks(root) {
@@ -408,28 +455,48 @@ export class RuleController {
         return true;
     }
 
+    // Composition kept for the Git Guard views, which host all three concerns on one
+    // root. The Rules hub binds guard + validation; the Code quality view binds only
+    // its own controls. Every binder tolerates absent hosts.
     bindHookControls(root) {
-        this.app.bindAction(root, '[data-action="run-hook-preview"]', () => this.runHookPreview());
+        this.bindGuardControls(root);
+        this.bindValidationControls(root);
+        this.bindCodeQualityControls(root);
+        this.bindActionMenuAutoClose(root);
+    }
+
+    bindGuardControls(root) {
         this.app.bindAction(root, '[data-action="toggle-hooks"]', () => this.toggleHooks());
         this.app.bindAction(root, '[data-action="install-hooks"]', () => this.installHooks());
         this.app.bindAction(root, '[data-action="uninstall-hooks"]', () => this.confirmUninstallHooks());
+    }
+
+    bindValidationControls(root) {
+        this.app.bindAction(root, '[data-action="run-hook-preview"]', () => this.runHookPreview());
         this.app.bindAction(root, '[data-action="copy-hook-output"]', () => this.copyHookOutput());
         this.app.bindAction(root, '[data-action="clear-hook-output"]', () => this.clearHookOutput());
+        this.app.bindAction(root, '[data-action="open-fix-terminal"]', () => this.openFixTerminal());
+        this.app.bindAction(root, '[data-action="copy-fix-brief"]', () => this.copyVcaFixBrief());
+        this.vcaConsole = new VcaConsole(root.querySelector('[data-vca-console]'));
+    }
+
+    bindCodeQualityControls(root) {
         this.app.bindAction(root, '[data-action="run-code-analyzer"]', () => this.runCodeAnalyzer());
         this.app.bindAction(root, '[data-action="run-code-analyzer-unpushed"]', () => this.runCodeAnalyzer({ unpushed: true }));
         this.app.bindAction(root, '[data-action="copy-code-analyzer-output"]', () => this.copyCodeAnalyzerOutput());
         this.app.bindAction(root, '[data-action="clear-code-analyzer-output"]', () => this.clearCodeAnalyzerOutput());
-        this.app.bindAction(root, '[data-action="open-fix-terminal"]', () => this.openFixTerminal());
-        this.app.bindAction(root, '[data-action="copy-fix-brief"]', () => this.copyVcaFixBrief());
-        root.querySelectorAll('.rules-action-menu [data-action]').forEach(button => {
-            button.addEventListener('click', () => button.closest('details')?.removeAttribute('open'));
-        });
-        this.vcaConsole = new VcaConsole(root.querySelector('[data-vca-console]'));
         this.codeAnalyzerConsole = new VcaConsole(root.querySelector('[data-code-analyzer-console]'), {
             defaultMessage: 'Code quality scan ready.\nChange a supported source file, then run the scan.',
             runningMessage: 'Analyzing working-tree source changes…',
             failureMessage: 'The code quality scan could not be completed.',
             failureMeta: 'Code quality scan failed'
+        });
+    }
+
+    // Any click inside an action menu closes the menu it came from.
+    bindActionMenuAutoClose(root) {
+        root.querySelectorAll('.rules-action-menu [data-action]').forEach(button => {
+            button.addEventListener('click', () => button.closest('details')?.removeAttribute('open'));
         });
     }
 
@@ -848,7 +915,7 @@ export class RuleController {
         // section's nav badge reads the score from the report container's dataset.
         const summary = buildCodeAnalyzerSummary(response);
         renderCodeAnalyzerBrief(briefHost, response, undefined, {
-            onOpenDetails: () => this.query('[data-rules-tab="quality"]')?.click()
+            onOpenDetails: () => this.app.navigate('code-quality')
         });
 
         if (reportContainer) {

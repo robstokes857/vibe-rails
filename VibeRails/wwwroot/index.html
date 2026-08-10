@@ -81,9 +81,15 @@
                 <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="me-1 icon-light">
                 <span>Terminals</span>
             </button>
-            <button class="app-subnav-link" data-action="navigate-home" title="Rules and project safeguards">
+            <button class="app-subnav-link" data-action="navigate" data-view="rule-files"
+                title="The AGENTS.md rules this project enforces">
                 <i class="fa-solid fa-list-check me-1"></i>
                 <span>RULES</span>
+            </button>
+            <button class="app-subnav-link" data-action="navigate-home"
+                title="VCA validation and code quality for your changes">
+                <i class="fa-solid fa-chart-simple me-1"></i>
+                <span>CODE QUALITY</span>
             </button>
             <button class="app-subnav-link" data-action="navigate" data-view="environments"
                 title="Manage Environment / Workers & Sandboxes">
@@ -143,9 +149,15 @@
                     <img src="assets/img/icons/terminal-solid-full.svg" alt="" class="nav-icon icon-light">
                     <span class="nav-label">Terminals</span>
                 </button>
-                <button class="app-subnav-link" data-action="navigate-home" title="Rules and project safeguards">
+                <button class="app-subnav-link" data-action="navigate" data-view="rule-files"
+                    title="The AGENTS.md rules this project enforces">
                     <i class="fa-solid fa-list-check nav-icon"></i>
                     <span class="nav-label">RULES</span>
+                </button>
+                <button class="app-subnav-link" data-action="navigate-home"
+                    title="VCA validation and code quality for your changes">
+                    <i class="fa-solid fa-chart-simple nav-icon"></i>
+                    <span class="nav-label">CODE QUALITY</span>
                 </button>
                 <button class="app-subnav-link" data-action="navigate" data-view="environments"
                     title="Manage Environment / Workers & Sandboxes">
@@ -306,38 +318,21 @@
         </div>
     </template>
 
-    <!-- Rules workspace.
-         Local navigation swaps ONE section into the top pane; the agent terminal owns the
-         bottom pane and is never unmounted by a section switch (or by a rule-file save).
-         Every data-* hook below is bound by RuleController / JobController / AgentController —
+    <!-- Code quality page (view names 'dashboard'/'agents' for historical reasons).
+         One surface, no local tabs: Git Guard, the VCA validation results for your
+         uncommitted changes, and the compact scan brief — with the agent terminal
+         docked below so a fix is one keystroke away. The full file-by-file workbench
+         is its own view (code-quality-template); the AGENTS.md rules those checks
+         enforce live on the separate RULES page (rule-files-template).
+         Every data-* hook below is bound by RuleController / AgentController —
          keep the attributes even when the surrounding markup moves. -->
     <template id="agents-template">
         <div class="view rules-workspace" data-view="agents" data-rules-workspace>
 
             <header class="rules-topbar">
-                <!-- Local navigation: applies to this page only. One section is visible at a time. -->
-                <div class="rules-localnav" role="tablist" aria-label="Rules sections" data-rules-nav>
-                    <button class="rules-localnav-item" type="button" role="tab" id="rules-tab-validate"
-                        data-rules-tab="validate" aria-controls="rules-section-validate" aria-selected="true"
-                        data-tone="neutral">
-                        <i class="fa-regular fa-circle-check rules-localnav-icon" aria-hidden="true"></i>
-                        <span class="rules-localnav-label">Validation</span>
-                        <span class="rules-localnav-badge" data-rules-tab-meta>Checking</span>
-                    </button>
-                    <button class="rules-localnav-item" type="button" role="tab" id="rules-tab-quality"
-                        data-rules-tab="quality" aria-controls="rules-section-quality" aria-selected="false"
-                        tabindex="-1" data-tone="neutral">
-                        <i class="fa-solid fa-chart-simple rules-localnav-icon" aria-hidden="true"></i>
-                        <span class="rules-localnav-label">Code quality</span>
-                        <span class="rules-localnav-badge" data-rules-tab-meta>Waiting</span>
-                    </button>
-                    <button class="rules-localnav-item" type="button" role="tab" id="rules-tab-files"
-                        data-rules-tab="files" aria-controls="rules-section-files" aria-selected="false" tabindex="-1"
-                        data-tone="neutral">
-                        <i class="fa-regular fa-file-lines rules-localnav-icon" aria-hidden="true"></i>
-                        <span class="rules-localnav-label">Rule files</span>
-                        <span class="rules-localnav-badge" data-rules-tab-meta>AGENTS.md</span>
-                    </button>
+                <div class="rules-topbar-copy">
+                    <h1 class="rules-topbar-title">Code quality</h1>
+                    <p>Your changes, checked before they ship</p>
                 </div>
 
                 <section class="rules-git-setting" data-hook-health data-tone="neutral" aria-busy="true"
@@ -377,9 +372,8 @@
                 <div class="rules-pane rules-pane-sections" data-rules-sections>
 
                     <!-- Validate: what blocks the commit right now -->
-                    <section class="rules-section card vca-console-card rules-vca-panel" id="rules-section-validate"
-                        role="tabpanel" aria-labelledby="rules-tab-validate" tabindex="-1" data-rules-section="validate"
-                        data-vca-console data-tone="neutral" aria-busy="false">
+                    <section class="rules-section card vca-console-card rules-vca-panel"
+                        aria-label="Validation results" data-vca-console data-tone="neutral" aria-busy="false">
                         <header class="rules-section-header">
                             <div class="rules-section-heading">
                                 <h2>Validation results</h2>
@@ -455,10 +449,6 @@
                                     </button>
                                 </div>
                             </section>
-                            <!-- Compact Code quality summary — filled by RuleController after each
-                                 scan; the full report lives in the Code quality section. -->
-                            <section class="code-analyzer-brief-host" data-vca-quality-brief hidden
-                                aria-label="Code quality summary" aria-live="polite"></section>
                             <details class="rules-console-transcript">
                                 <summary>
                                     <span class="vca-console-pulse" aria-hidden="true"></span>
@@ -473,130 +463,15 @@
                         </div>
                     </section>
 
-                    <!-- Measure: working-tree code quality analysis -->
-                    <section class="rules-section card code-analyzer-panel vca-console-card" id="rules-section-quality"
-                        role="tabpanel" aria-labelledby="rules-tab-quality" tabindex="-1" data-rules-section="quality"
-                        data-code-analyzer-console data-tone="neutral" aria-busy="false" hidden>
-                        <header class="rules-section-header">
-                            <div class="rules-section-heading">
-                                <h2 id="code-analyzer-title">Code quality</h2>
-                                <span class="rules-section-note">Working tree analysis</span>
-                            </div>
-                            <div class="rules-section-actions" aria-label="Code quality actions">
-                                <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
-                                    <span class="spinner-border spinner-border-sm"></span>
-                                </span>
-                                <span class="vca-console-state" data-vca-console-state>Ready</span>
-                                <details class="rules-action-menu">
-                                    <summary aria-label="More code quality actions" title="More actions">
-                                        <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
-                                    </summary>
-                                    <div class="rules-action-menu-popover" role="group"
-                                        aria-label="Code quality utilities">
-                                        <label class="rules-action-menu-toggle"
-                                            title="Include every source file under the repository">
-                                            <span>
-                                                <i class="fa-solid fa-folder-tree" aria-hidden="true"></i>
-                                                Scan full repository
-                                            </span>
-                                            <input type="checkbox" data-code-analyzer-full-scan>
-                                        </label>
-                                        <button type="button" data-action="run-code-analyzer-unpushed"
-                                            data-idle-label="Scan unpushed commits">
-                                            <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                                                aria-hidden="true"></span>
-                                            <i class="fa-solid fa-cloud-arrow-up" data-button-icon aria-hidden="true"></i>
-                                            <span data-button-label>Scan unpushed commits</span>
-                                        </button>
-                                        <button type="button" data-action="copy-code-analyzer-output">
-                                            <i class="fa-regular fa-copy" aria-hidden="true"></i>
-                                            Copy scan summary
-                                        </button>
-                                        <button type="button" data-action="clear-code-analyzer-output">
-                                            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
-                                            Clear results
-                                        </button>
-                                    </div>
-                                </details>
-                                <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
-                                    type="button" data-action="run-code-analyzer" data-idle-label="Scan changes">
-                                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
-                                        aria-hidden="true"></span>
-                                    <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
-                                    <span data-button-label>Scan changes</span>
-                                </button>
-                            </div>
-                        </header>
-
-                        <div class="rules-section-body rules-section-body-flush">
-                            <div class="code-analyzer-empty" data-code-analyzer-empty>
-                                <span class="code-analyzer-empty-icon" aria-hidden="true">
-                                    <i class="fa-solid fa-chart-line"></i>
-                                </span>
-                                <div>
-                                    <strong>Preparing code quality</strong>
-                                    <p>Your staged, unstaged, and untracked changes will be organized into file
-                                        metrics and source evidence, with a summary on the Validation screen.</p>
-                                </div>
-                            </div>
-
-                            <div class="code-analyzer-dashboard" data-code-analyzer-report hidden></div>
-
-                            <details class="rules-console-transcript code-analyzer-transcript">
-                                <summary>
-                                    <span class="vca-console-pulse" aria-hidden="true"></span>
-                                    <span class="rules-console-transcript-label">Scan transcript</span>
-                                    <small data-vca-console-meta>Waiting for analysis</small>
-                                </summary>
-                                <div class="vca-console-shell">
-                                    <pre class="vca-console-output" data-vca-console-output role="log"
-                                        aria-live="polite" aria-atomic="false" tabindex="0"></pre>
-                                </div>
-                            </details>
-                        </div>
-
-                        <footer class="code-analyzer-note">
-                            <span>Risk scores are normalized so higher always means more risk.</span>
-                            <span class="code-analyzer-legend">
-                                <span><i data-tone="success"></i>Healthy</span>
-                                <span><i data-tone="warning"></i>Review</span>
-                                <span><i data-tone="danger"></i>Change required</span>
-                            </span>
-                        </footer>
-                    </section>
-
-                    <!-- Govern: the AGENTS.md files every check above enforces -->
-                    <section class="rules-section card rules-files-card" id="rules-section-files" role="tabpanel"
-                        aria-labelledby="rules-tab-files" tabindex="-1" data-rules-section="files" hidden>
-                        <header class="rules-section-header">
-                            <div class="rules-section-heading">
-                                <h2 id="rules-files-title">Rule files</h2>
-                                <span class="rules-section-note">The AGENTS.md policies every check here enforces</span>
-                            </div>
-                            <div class="rules-section-actions">
-                                <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
-                                    data-action="refresh-agent-files" title="Reload rule files"
-                                    aria-label="Reload rule files">
-                                    <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
-                                </button>
-                                <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
-                                    type="button" data-action="create-agent-file" title="Create a new AGENTS.md file">
-                                    <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                                    New AGENTS.md
-                                </button>
-                            </div>
-                        </header>
-                        <div class="rules-section-body rules-section-body-flush">
-                            <div class="rules-files-split">
-                                <div class="rules-files-rail" data-agent-file-tree></div>
-                                <div class="rules-files-detail" data-agent-rule-editor></div>
-                            </div>
-                        </div>
-                    </section>
+                    <!-- Compact scan summary — filled by RuleController after each scan.
+                         Its button opens the full file-by-file workbench view. -->
+                    <section class="code-analyzer-brief-host" data-vca-quality-brief hidden
+                        aria-label="Code quality summary" aria-live="polite"></section>
 
                 </div>
 
-                <!-- Fix: the agent terminal owns the bottom pane and survives every section switch. -->
+                <!-- Fix: the agent terminal fills the rest of the page and is never unmounted
+                     by anything the sections above do. -->
                 <div class="rules-pane rules-pane-terminal" data-terminal-section aria-label="Agent terminal">
                     <div class="rules-terminal-host" data-terminal-content>
                         <!-- Terminal panel rendered here -->
@@ -604,6 +479,144 @@
                 </div>
 
             </div>
+        </div>
+    </template>
+
+    <!-- Code quality workbench. Opened from the Code quality page's brief card; the
+         report gets the whole page instead of a half-height pane.
+         RuleController.loadCodeQuality restores the last scan from cache or starts one. -->
+    <template id="code-quality-template">
+        <div class="view rules-subpage" data-view="code-quality">
+            <div class="rules-subpage-bar">
+                <button class="btn btn-sm btn-outline-secondary rules-subpage-back" type="button"
+                    data-action="go-back" title="Back to the Code quality summary">
+                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+                    Back
+                </button>
+            </div>
+
+            <section class="rules-section card code-analyzer-panel vca-console-card"
+                data-code-analyzer-console data-tone="neutral" aria-busy="false">
+                <header class="rules-section-header">
+                    <div class="rules-section-heading">
+                        <h2 id="code-analyzer-title">Code quality</h2>
+                        <span class="rules-section-note">Working tree analysis</span>
+                    </div>
+                    <div class="rules-section-actions" aria-label="Code quality actions">
+                        <span class="rules-check-running" data-vca-console-spinner hidden aria-hidden="true">
+                            <span class="spinner-border spinner-border-sm"></span>
+                        </span>
+                        <span class="vca-console-state" data-vca-console-state>Ready</span>
+                        <details class="rules-action-menu">
+                            <summary aria-label="More code quality actions" title="More actions">
+                                <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+                            </summary>
+                            <div class="rules-action-menu-popover" role="group"
+                                aria-label="Code quality utilities">
+                                <label class="rules-action-menu-toggle"
+                                    title="Include every source file under the repository">
+                                    <span>
+                                        <i class="fa-solid fa-folder-tree" aria-hidden="true"></i>
+                                        Scan full repository
+                                    </span>
+                                    <input type="checkbox" data-code-analyzer-full-scan>
+                                </label>
+                                <button type="button" data-action="run-code-analyzer-unpushed"
+                                    data-idle-label="Scan unpushed commits">
+                                    <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                        aria-hidden="true"></span>
+                                    <i class="fa-solid fa-cloud-arrow-up" data-button-icon aria-hidden="true"></i>
+                                    <span data-button-label>Scan unpushed commits</span>
+                                </button>
+                                <button type="button" data-action="copy-code-analyzer-output">
+                                    <i class="fa-regular fa-copy" aria-hidden="true"></i>
+                                    Copy scan summary
+                                </button>
+                                <button type="button" data-action="clear-code-analyzer-output">
+                                    <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+                                    Clear results
+                                </button>
+                            </div>
+                        </details>
+                        <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
+                            type="button" data-action="run-code-analyzer" data-idle-label="Scan changes">
+                            <span class="spinner-border spinner-border-sm" data-button-spinner hidden
+                                aria-hidden="true"></span>
+                            <i class="fa-solid fa-rotate-right" data-button-icon aria-hidden="true"></i>
+                            <span data-button-label>Scan changes</span>
+                        </button>
+                    </div>
+                </header>
+
+                <div class="rules-section-body rules-section-body-flush">
+                    <div class="code-analyzer-empty" data-code-analyzer-empty>
+                        <span class="code-analyzer-empty-icon" aria-hidden="true">
+                            <i class="fa-solid fa-chart-line"></i>
+                        </span>
+                        <div>
+                            <strong>Preparing code quality</strong>
+                            <p>Your staged, unstaged, and untracked changes will be organized into file
+                                metrics and source evidence, with a summary on the Rules page.</p>
+                        </div>
+                    </div>
+
+                    <div class="code-analyzer-dashboard" data-code-analyzer-report hidden></div>
+
+                    <details class="rules-console-transcript code-analyzer-transcript">
+                        <summary>
+                            <span class="vca-console-pulse" aria-hidden="true"></span>
+                            <span class="rules-console-transcript-label">Scan transcript</span>
+                            <small data-vca-console-meta>Waiting for analysis</small>
+                        </summary>
+                        <div class="vca-console-shell">
+                            <pre class="vca-console-output" data-vca-console-output role="log"
+                                aria-live="polite" aria-atomic="false" tabindex="0"></pre>
+                        </div>
+                    </details>
+                </div>
+
+                <footer class="code-analyzer-note">
+                    <span>Risk scores are normalized so higher always means more risk.</span>
+                    <span class="code-analyzer-legend">
+                        <span><i data-tone="success"></i>Healthy</span>
+                        <span><i data-tone="warning"></i>Review</span>
+                        <span><i data-tone="danger"></i>Change required</span>
+                    </span>
+                </footer>
+            </section>
+        </div>
+    </template>
+
+    <!-- The RULES page: the AGENTS.md list and the inline rule editor, full page.
+         Its own top-level nav destination. AgentController.loadRuleFiles renders it. -->
+    <template id="rule-files-template">
+        <div class="view rules-subpage" data-view="rule-files">
+            <section class="rules-section card rules-files-card">
+                <header class="rules-section-header">
+                    <div class="rules-section-heading">
+                        <h2 id="rules-files-title">Rule files</h2>
+                        <span class="rules-section-note">The AGENTS.md policies every check enforces</span>
+                    </div>
+                    <div class="rules-section-actions">
+                        <button class="btn btn-sm btn-outline-secondary rules-icon-btn" type="button"
+                            data-action="refresh-agent-files" title="Reload rule files"
+                            aria-label="Reload rule files">
+                            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+                        </button>
+                        <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
+                            type="button" data-action="create-agent-file" title="Create a new AGENTS.md file">
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                            New AGENTS.md
+                        </button>
+                    </div>
+                </header>
+                <div class="rules-section-body rules-section-body-flush">
+                    <div class="rules-files-split">
+                        <div class="rules-files-rail" data-agent-file-tree></div>
+                        <div class="rules-files-detail" data-agent-rule-editor></div>
+                    </div>
+                </div>
+            </section>
         </div>
     </template>
 
@@ -1496,14 +1509,6 @@
                                 <small class="form-text text-muted d-block mb-3">
                                     Allow supported local HTTP requests to travel through an authenticated WSS
                                     connection to viberails.ai.
-                                </small>
-                                <button type="button" class="btn btn-outline-primary btn-sm"
-                                    id="settings-http-relay-test-button" disabled>
-                                    Test HTTP relay
-                                </button>
-                                <small class="form-text text-muted d-block mt-2"
-                                    id="settings-http-relay-test-hint">
-                                    Turn on this setting and save it before testing the relay.
                                 </small>
                             </div>
                             <div class="mb-4">

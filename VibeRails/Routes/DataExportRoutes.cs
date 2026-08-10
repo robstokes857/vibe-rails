@@ -48,7 +48,7 @@ public static class DataExportRoutes
             DataExportStatus.Busy =>
                 ("busy", "A data export is already in progress."),
             DataExportStatus.InvalidApiKey =>
-                ("invalid_api_key", "The export server rejected the API key."),
+                ("invalid_api_key", result.Detail ?? "The export server rejected the API key."),
             DataExportStatus.UploadFailed =>
                 ("upload_failed", result.Detail ?? "Failed to upload the data export."),
             _ =>

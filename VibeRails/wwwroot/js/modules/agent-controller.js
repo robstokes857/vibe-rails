@@ -1,5 +1,4 @@
 import { getFileTypeVisual } from './file-type-icons.js';
-import { RulesWorkspace } from './rules-workspace.js';
 
 const ENFORCEMENT_LEVELS = [
     { value: 'WARN', icon: '⚠️', blurb: 'Warn, but let the commit through.' },
@@ -12,8 +11,7 @@ export class AgentController {
         this.app = app;
         this.currentAgent = null;
         this.selectedRuleIndex = null;
-        this.rulesWorkspace = null;
-        // Path of the AGENTS.md open in the Rule files section's inline editor.
+        // Path of the AGENTS.md open in the Rule files view's inline editor.
         this.selectedAgentPath = null;
 
         // Wizard state for agent creation
@@ -42,21 +40,31 @@ export class AgentController {
     mountAgentsOverview(container) {
         if (!container) return null;
 
-        this.rulesWorkspace?.destroy();
-        this.rulesWorkspace = null;
-
         container.innerHTML = '';
         const fragment = this.app.cloneTemplate('agents-template');
         const root = fragment.querySelector('[data-view="agents"]');
 
+        container.appendChild(fragment);
         if (root) {
-            this.app.bindAction(root, '[data-action="go-back"]', () => this.app.goBack());
-            this.app.bindActions(root, '[data-action="navigate"]', (element) => {
-                const view = element.dataset.view;
-                if (view) {
-                    this.app.navigate(view);
-                }
-            });
+            this.app.ruleController.attachRulesOverview(root);
+        }
+        return root;
+    }
+
+    // The RULES page: the AGENTS.md list plus the inline rule editor, full page.
+    // Heavier markdown editing still goes to 'agent-edit'.
+    async loadRuleFiles() {
+        const content = document.getElementById('app-content');
+        if (!content) return;
+
+        // Re-read the agent list on every entry so rules added elsewhere (the full
+        // editor, another tab, the CLI) are visible without a manual refresh.
+        await this.app.refreshDashboardData();
+
+        content.innerHTML = '';
+        const fragment = this.app.cloneTemplate('rule-files-template');
+        const root = fragment.querySelector('[data-view="rule-files"]');
+        if (root) {
             this.app.bindAction(root, '[data-action="create-agent-file"]', () => this.app.navigate('agent-create'));
             this.app.bindAction(root, '[data-action="refresh-agent-files"]', async () => {
                 await this.app.refreshDashboardData();
@@ -64,29 +72,17 @@ export class AgentController {
             });
             this.renderAgentFileTree(root);
         }
-
-        container.appendChild(fragment);
-        if (root) {
-            this.rulesWorkspace = new RulesWorkspace(root, {
-                onLayoutChange: () => this.app.terminalController?.refreshLayout?.()
-            }).mount();
-            this.app.ruleController.attachRulesOverview(root);
-        }
-        return root;
+        content.appendChild(fragment);
     }
 
-    // Navigating away from the Rules workspace: drop the observers and listeners the
-    // local navigation installed. Idempotent — app.loadView calls it for every view.
-    unload() {
-        this.rulesWorkspace?.destroy();
-        this.rulesWorkspace = null;
-    }
-
-    // Paints (or repaints) just the Rule files list plus its inline editor. A rename or a
-    // rule edit must not remount the whole overview: the live agent terminal sits in this
-    // view, and rebuilding it would kill the running terminal and re-trigger both scans.
+    // Paints (or repaints) the RULES page's file list plus its inline editor. A rename
+    // or a rule edit must not remount the whole view — repainting these two hosts in
+    // place keeps the selection and never disturbs the rest of the page.
     renderAgentFileTree(root) {
-        const view = root || document.querySelector('[data-rules-workspace]');
+        const view = root
+            || document.querySelector('[data-view="rule-files"]')
+            || document.querySelector('[data-rules-workspace]');
+
         const fileTree = view?.querySelector('[data-agent-file-tree]');
         if (!fileTree) return;
 
@@ -146,7 +142,9 @@ export class AgentController {
     // The detail half of the Rule files section. Everything happens in place so the user
     // never leaves the workspace — and therefore never loses the terminal below it.
     renderInlineRuleEditor(root) {
-        const view = root || document.querySelector('[data-rules-workspace]');
+        const view = root
+            || document.querySelector('[data-view="rule-files"]')
+            || document.querySelector('[data-rules-workspace]');
         const host = view?.querySelector('[data-agent-rule-editor]');
         if (!host) return;
 

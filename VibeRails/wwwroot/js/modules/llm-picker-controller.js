@@ -1,6 +1,7 @@
 import {
     BASE_LLM_CHOICES,
     SHELL_LLM_CHOICE,
+    confirmDialog,
     escapeHtml,
     getCliBrand,
     populateLlmSelectionItemsSelect
@@ -644,8 +645,17 @@ export class LlmPickerController {
     async _resetPreferences() {
         const state = this.modalState;
         if (!state || state.pending) return;
-        if (state.dirty && !window.confirm('Discard these unsaved changes and reset the LLM list to defaults?')) {
-            return;
+        if (state.dirty) {
+            // In-app dialog — window.confirm is a silent no-op in the VS Code
+            // webview, which made this reset unreachable once the list was dirty.
+            const confirmed = await confirmDialog({
+                title: 'Reset the LLM list?',
+                message: 'Your unsaved changes are discarded and every launch target returns to the default order.',
+                confirmLabel: 'Reset',
+                danger: true
+            });
+            // The modal could have been torn down while the dialog was up.
+            if (!confirmed || this.modalState !== state || state.pending) return;
         }
         this._setModalPending(true);
         this._showModalError('');

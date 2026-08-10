@@ -240,6 +240,18 @@ test('code analyzer converts concern output into a bounded health summary', () =
     assert.equal(empty.scoreLabel, '—');
     assert.equal(empty.rating, 'No staged code');
     assert.equal(empty.tone, 'neutral');
+
+    // An explicit null is what the backend actually sends when nothing was analyzed;
+    // Number(null) is 0, so this must not read as a zero score.
+    const nulled = buildCodeAnalyzerSummary({
+        healthScore: null,
+        rating: null,
+        analyzedFileCount: 0,
+        skippedFileCount: 3
+    });
+    assert.equal(nulled.score, null);
+    assert.equal(nulled.scoreLabel, '—');
+    assert.equal(nulled.tone, 'neutral');
 });
 
 test('VCA STOP findings explain why the commit is blocked and how to fix it', () => {
