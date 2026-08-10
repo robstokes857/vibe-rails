@@ -6,8 +6,9 @@ import { pathToFileURL } from 'node:url';
 
 const modulePath = path.resolve('VibeRails/wwwroot/js/modules/jobs-controller.js');
 const environmentModulePath = path.resolve('VibeRails/wwwroot/js/modules/environment-controller.js');
+const utilsModulePath = path.resolve('VibeRails/wwwroot/js/modules/utils.js');
 const indexPath = path.resolve('VibeRails/wwwroot/index.html');
-const rulesWorkspacePath = path.resolve('VibeRails/wwwroot/js/modules/rules-workspace.js');
+const stylePath = path.resolve('VibeRails/wwwroot/style.css');
 const ruleControllerPath = path.resolve('VibeRails/wwwroot/js/modules/rule-controller.js');
 const {
     JobController,
@@ -15,6 +16,7 @@ const {
     getJobLlmForCli
 } = await import(pathToFileURL(modulePath).href);
 const { EnvironmentController } = await import(pathToFileURL(environmentModulePath).href);
+const { confirmDialog } = await import(pathToFileURL(utilsModulePath).href);
 
 function createApp() {
     const calls = [];
@@ -47,6 +49,9 @@ test('Automation page makes automations primary and explains its active-instance
     assert.match(html, /single active instance claims each run/);
     assert.match(html, /id="jobs-list-title">Automations/);
     assert.match(html, /Run history/);
+    // The runtime explanation is one quiet note, not the old full-width banner.
+    assert.match(html, /jobs-runtime-note/);
+    assert.doesNotMatch(html, /jobs-runtime-strip/);
     assert.doesNotMatch(html, /Run jobs while VibeRails is closed/);
     assert.doesNotMatch(html, /data-jobs-scheduler-status/);
     assert.doesNotMatch(html, /data-job-environments-table/);
@@ -54,7 +59,6 @@ test('Automation page makes automations primary and explains its active-instance
 
 test('Navigation calls the feature Automation and the Rules page stays out of it', () => {
     const index = readFileSync(indexPath, 'utf8');
-    const rulesWorkspace = readFileSync(rulesWorkspacePath, 'utf8');
     const ruleController = readFileSync(ruleControllerPath, 'utf8');
     const jobsController = readFileSync(modulePath, 'utf8');
 
@@ -63,19 +67,21 @@ test('Navigation calls the feature Automation and the Rules page stays out of it
     // The Rules page no longer hosts an Automation section — the standalone
     // Automation page owns the whole feature.
     assert.doesNotMatch(index, /data-rules-section="automate"|data-jobs-automation-host/);
-    assert.doesNotMatch(rulesWorkspace, /syncAutomate|automation-host/);
     assert.doesNotMatch(jobsController, /attachRulesAutomation/);
     assert.doesNotMatch(ruleController, /post-commit Jobs/);
 });
 
-test('Automation inline editor derives repository and prompt from its Environment', () => {
+test('Automation inline editor derives repository and prompt from its Worker', () => {
     const source = readFileSync(modulePath, 'utf8');
 
     assert.doesNotMatch(source, /id=["']job-project["']/);
     assert.doesNotMatch(source, /id=["']job-prompt["']/);
-    assert.match(source, /Runs in the current VibeRails repository/);
-    assert.match(source, /includeBase:\s*false/);
-    assert.match(source, />Environment<\/label>/);
+    // The repository is stated, not asked for.
+    assert.match(source, /job-repository-context/);
+    assert.match(source, /Runs in<\/span>/);
+    // The picker facade lists Workers only — no base-CLI entries.
+    assert.match(source, /mountWorkerPicker/);
+    assert.match(source, />Worker<\/label>/);
     assert.doesNotMatch(source, /Environment \/ Worker/);
 });
 
@@ -113,7 +119,7 @@ test('Automation editor does not promise read-only or clone isolation', () => {
     assert.doesNotMatch(source, /executionMode/);
 });
 
-test('Automation renderer escapes data and shows Environment, triggers, and next run', () => {
+test('Automation renderer escapes data and shows Worker, triggers, and next run', () => {
     const app = createApp();
     const controller = new JobController(app);
     const list = { innerHTML: '' };
@@ -154,7 +160,7 @@ test('Automation renderer escapes data and shows Environment, triggers, and next
     assert.match(list.innerHTML, /&lt;Security review&gt;/);
     assert.match(list.innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
     assert.doesNotMatch(list.innerHTML, /<script>/);
-    assert.match(list.innerHTML, />Environment</);
+    assert.match(list.innerHTML, />Worker</);
     assert.match(list.innerHTML, /Every 15 min/);
     assert.match(list.innerHTML, /After successful commit/);
     assert.match(list.innerHTML, /Manual/);
@@ -288,7 +294,7 @@ test('Automations require a saved Environment and do not retain legacy base-CLI 
 
     assert.throws(
         () => controller.captureEditorState(form, { validate: true }),
-        /Choose an Environment/
+        /Choose a Worker/
     );
 
     const legacyJob = {
@@ -307,7 +313,7 @@ test('Automations require a saved Environment and do not retain legacy base-CLI 
     controller.activeEditorSource = legacyJob;
     assert.throws(
         () => controller.captureEditorState(form, { validate: true }),
-        /Choose an Environment/
+        /Choose a Worker/
     );
 
     const source = readFileSync(modulePath, 'utf8');
@@ -513,6 +519,13 @@ function createEnvironmentControllerForForm(appOverrides = {}) {
         escapeHtml: value => String(value),
         showModal() {},
         closeModal() {},
+        // The form pulls the provider catalog and mounts the CLI picker through the
+        // shared controller; a minimal stub keeps these tests DOM-free.
+        llmPickerController: {
+            getEnabledItems: () => [],
+            mount: () => () => {},
+            setValue() {}
+        },
         ...appOverrides
     };
     const controller = new EnvironmentController(app);
@@ -633,7 +646,8 @@ test('Creating an environment uses one trimmed name for both the record and CLI 
     const cliSelect = { value: 'codex', addEventListener() {} };
     const dom = installEnvironmentFormDom({
         'env-name': { value: '  Nightly review  ' },
-        'env-cli': cliSelect
+        'env-cli': cliSelect,
+        'env-hidden': { checked: false }
     });
     globalThis.document = dom.document;
     globalThis.window = dom.document;
@@ -1352,7 +1366,7 @@ test('Recipe import confirmation discloses and escapes executable Environment co
     assert.match(modals[0].html, /Initial message/);
     assert.match(modals[0].html, /Ignore safeguards/);
     assert.match(modals[0].html, /approval or sandbox permissions/);
-    assert.match(modals[0].html, /Review the Environment content/);
+    assert.match(modals[0].html, /Review the Worker content/);
     assert.match(modals[0].html, /import these fields exactly as shown/);
     assert.match(modals[0].html, /created disabled/);
     assert.match(modals[0].html, /&lt;script&gt;/);
@@ -1387,4 +1401,197 @@ test('Automation frontend has no OS scheduler controls or API calls', () => {
     assert.doesNotMatch(html, /install-scheduler|uninstall-scheduler|Task Scheduler|background task/i);
     assert.doesNotMatch(source, /\/api\/v1\/jobs\/scheduler/);
     assert.doesNotMatch(source, /renderSchedulerStatus|setSchedulerInstalled|refreshSchedulerStatus/);
+});
+
+test('Deleting an automation confirms in-app — window.confirm is dead in the webview', async () => {
+    // window.confirm returns false without rendering anything inside the sandboxed
+    // VS Code webview, which made the Delete button look like a no-op.
+    const source = readFileSync(modulePath, 'utf8');
+    assert.doesNotMatch(source, /window\.confirm\s*\(/);
+
+    const app = createApp();
+    const controller = new JobController(app);
+    assert.equal(controller.confirm, confirmDialog);
+
+    controller.jobs = [{ id: 5, name: 'Doc drift check' }];
+    controller.confirm = async () => false;
+    await controller.deleteJob(5);
+    assert.equal(app.calls.some(call => call.method === 'DELETE'), false);
+
+    controller.confirm = async () => true;
+    await controller.deleteJob(5);
+    const deleteCall = app.calls.find(call => call.method === 'DELETE');
+    assert.equal(deleteCall?.url, '/api/v1/jobs/5');
+
+    // The inline editor's capture-phase Escape handler registered before the
+    // dialog's, so it must stand down while a confirm is open — otherwise Escape
+    // on "Delete?" also wipes the open editor.
+    assert.match(source, /if \(isConfirmDialogOpen\(\)\) return;/);
+});
+
+test('Add Worker opens with or without an automation name; the name is a prefill, not a rule', async () => {
+    const app = createApp();
+    let errorToasts = 0;
+    app.showError = () => { errorToasts += 1; };
+    const openings = [];
+    app.environmentController = { createEnvironment(options) { openings.push(options); } };
+    const controller = new JobController(app);
+    controller.environments = [{ id: 9, name: 'Taken Name', cli: 'claude' }];
+
+    const input = { value: '' };
+    controller.root = {
+        querySelector(selector) {
+            if (selector === '[data-job-editor] #job-name') return input;
+            return null;
+        }
+    };
+
+    // Nameless: the modal still opens, with a blank Worker name to fill in there.
+    await controller.createEnvironmentFromEditor();
+    // A typed name that is legal as an environment identifier rides along as a prefill.
+    input.value = '  Doc drift  ';
+    await controller.createEnvironmentFromEditor();
+    // Illegal-charset and already-taken names prefill nothing instead of pre-arming
+    // a doomed create.
+    input.value = 'Bad!!Name';
+    await controller.createEnvironmentFromEditor();
+    input.value = 'taken name';
+    await controller.createEnvironmentFromEditor();
+
+    assert.equal(errorToasts, 0, 'no name state is an error');
+    assert.deepEqual(openings.map(options => options.initialName), ['', 'Doc drift', '', '']);
+    assert.ok(openings.every(options => options.automationWorker === true));
+});
+
+test('A Worker created nameless hands its name back to the empty automation field', async () => {
+    const app = createApp();
+    app.data.environments = [{ id: 61, name: 'Fresh Worker', cli: 'claude', automationWorker: true }];
+    let opened = null;
+    app.environmentController = { createEnvironment(options) { opened = options; } };
+    const controller = new JobController(app);
+    controller.environments = [];
+    controller.environmentChanged = async () => {};
+
+    const input = { value: '' };
+    controller.root = {
+        querySelector(selector) {
+            if (selector === '[data-job-editor] #job-name') return input;
+            return null;
+        }
+    };
+
+    await controller.createEnvironmentFromEditor();
+    await opened.onChanged();
+    assert.equal(input.value, 'Fresh Worker');
+
+    // A name the user already typed is never overwritten.
+    input.value = 'My own name';
+    await opened.onChanged();
+    assert.equal(input.value, 'My own name');
+});
+
+test('No first-party frontend module calls window.confirm', async () => {
+    // window.confirm is suppressed inside the VS Code webview — a silent no-op
+    // that turns any confirm-gated button into a dead one. Every confirmation
+    // goes through confirmDialog (utils.js). Vendored assets/ are exempt.
+    const { readdirSync } = await import('node:fs');
+    const jsRoot = path.resolve('VibeRails/wwwroot/js');
+    const files = readdirSync(jsRoot, { recursive: true })
+        .filter(name => String(name).endsWith('.js'))
+        .map(name => path.join(jsRoot, String(name)));
+    files.push(path.resolve('VibeRails/wwwroot/app.js'));
+
+    for (const file of files) {
+        assert.doesNotMatch(
+            readFileSync(file, 'utf8'),
+            /window\.confirm\s*\(/,
+            `${file} calls window.confirm`);
+    }
+});
+
+test('Removing runs from history confirms in-app and posts only after a yes', async (t) => {
+    const originalDocument = globalThis.document;
+    t.after(() => { globalThis.document = originalDocument; });
+    // loadHistoryRuns looks its modal up by selector after the delete; a null hit
+    // makes it bail, which is all this test needs.
+    globalThis.document = { querySelector: () => null };
+
+    const app = createApp();
+    const controller = new JobController(app);
+    controller.historyJobId = 3;
+
+    controller.confirm = async () => false;
+    await controller.deleteRuns(['r1', 'r2']);
+    assert.equal(app.calls.some(call => call.url === '/api/v1/jobs/runs/delete'), false);
+
+    controller.confirm = async () => true;
+    await controller.deleteRuns(['r1', 'r2']);
+    const post = app.calls.find(call => call.url === '/api/v1/jobs/runs/delete');
+    assert.equal(post?.method, 'POST');
+    assert.deepEqual(post?.body, { runIds: ['r1', 'r2'] });
+});
+
+test('Automation surfaces have a defined elevated background in every theme scope', () => {
+    // An undefined --color-bg-elevated invalidated the whole background declaration,
+    // leaving the Automation cards, inline editor, and runs table transparent.
+    const css = readFileSync(stylePath, 'utf8');
+    // The definition must live in the :root block itself — a match elsewhere (the
+    // vscode-only #vb-terminal-panel scope also defines it) must not cover for a
+    // regressed browser-mode default. Comments inside :root contain no braces, so
+    // [^}]* safely spans the block.
+    assert.match(css, /:root\s*\{[^}]*--color-bg-elevated:\s*#232323/);
+    assert.match(css, /--color-bg-elevated:\s*var\(--vb-vscode-card-bg\)/);
+    const definitions = css.match(/--color-bg-elevated:/g) || [];
+    assert.ok(definitions.length >= 3, `expected the variable defined in all three theme scopes, found ${definitions.length}`);
+});
+
+test('The Worker modal keeps CLI and prompt primary; workspace and args are Advanced', (t) => {
+    const originalDocument = globalThis.document;
+    const originalWindow = globalThis.window;
+    t.after(() => {
+        globalThis.document = originalDocument;
+        globalThis.window = originalWindow;
+    });
+
+    const cliSelect = { value: 'claude', addEventListener() {} };
+    const dom = installEnvironmentFormDom({ 'env-cli': cliSelect });
+    globalThis.document = dom.document;
+    globalThis.window = dom.document;
+
+    let workerHtml = '';
+    const workerController = createEnvironmentControllerForForm({
+        data: { environments: [], isInGit: true },
+        showModal(_title, html) { workerHtml = html; }
+    });
+    workerController.showEnvironmentForm({
+        mode: 'create',
+        initialName: 'Doc drift',
+        automationWorker: true,
+        onChanged() {}
+    });
+
+    // The Worker is named IN the modal; a prefilled automation name is an editable
+    // default, so the name input must exist and carry the prefill.
+    assert.match(workerHtml, /id="env-name"[^>]*value="Doc drift"/);
+    assert.match(workerHtml, /Worker Name/);
+
+    // "Where it runs" and raw arguments still exist for Workers, but collapsed out
+    // of the main flow — the visible form is CLI + model + initial message. Assert
+    // CONTAINMENT (inside the details, before its close tag), not mere ordering.
+    const detailsStart = workerHtml.indexOf('<details class="env-advanced-settings');
+    const detailsEnd = workerHtml.indexOf('</details>');
+    assert.ok(detailsStart !== -1 && detailsEnd > detailsStart);
+    const detailsBlock = workerHtml.slice(detailsStart, detailsEnd);
+    assert.match(detailsBlock, /Where it runs/);
+    assert.match(detailsBlock, /Custom Arguments/);
+    // Collapsed by default: the details must not carry an open attribute.
+    assert.doesNotMatch(workerHtml, /<details[^>]*\sopen[\s>]/);
+
+    let environmentHtml = '';
+    const environmentController = createEnvironmentControllerForForm({
+        data: { environments: [], isInGit: true },
+        showModal(_title, html) { environmentHtml = html; }
+    });
+    environmentController.showEnvironmentForm({ mode: 'create', onChanged() {} });
+    assert.doesNotMatch(environmentHtml, /env-advanced-settings/);
 });

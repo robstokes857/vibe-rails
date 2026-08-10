@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using VibeRails;
@@ -209,6 +210,115 @@ public sealed class DataExportServiceTests : IDisposable
         Assert.Equal(expectedStatus, result.Status);
         Assert.Equal(1, handler.RequestCount);
         Assert.False(string.IsNullOrWhiteSpace(result.Sha256));
+        AssertExportTempRootIsEmpty();
+    }
+
+    [Fact]
+    public async Task ExportAsync_ProblemDetailsFailure_PreservesDetailStatusAndReference()
+    {
+        var statePath = await CreateSimpleStateDatabaseAsync();
+        ParserConfigs.SetApiKey(ConfiguredApiKey);
+        ParserConfigs.SetStatePath(statePath);
+        var handler = new CapturingHandler(
+            (HttpStatusCode)422,
+            _exportTempRoot,
+            """
+            {
+              "title": "Unprocessable Entity",
+              "status": 422,
+              "detail": "The account does not have enough storage for this export.",
+              "traceId": "00-safe-trace-00"
+            }
+            """);
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(httpClient, ValidExportUrl);
+
+        var result = await service.ExportAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DataExportStatus.UploadFailed, result.Status);
+        Assert.Equal(
+            "The account does not have enough storage for this export "
+            + "(HTTP 422 Unprocessable Entity). Reference: 00-safe-trace-00",
+            result.Detail);
+        AssertExportTempRootIsEmpty();
+    }
+
+    [Fact]
+    public async Task ExportAsync_GenericProblemTitle_UsesActionableStatusMessage()
+    {
+        var statePath = await CreateSimpleStateDatabaseAsync();
+        ParserConfigs.SetApiKey(ConfiguredApiKey);
+        ParserConfigs.SetStatePath(statePath);
+        var handler = new CapturingHandler(
+            HttpStatusCode.ServiceUnavailable,
+            _exportTempRoot,
+            """
+            { "title": "Service Unavailable", "status": 503, "traceId": "retry-reference" }
+            """);
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(httpClient, ValidExportUrl);
+
+        var result = await service.ExportAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DataExportStatus.UploadFailed, result.Status);
+        Assert.Equal(
+            "The export service is temporarily unavailable; retry in a few minutes "
+            + "(HTTP 503 Service Unavailable). Reference: retry-reference",
+            result.Detail);
+        AssertExportTempRootIsEmpty();
+    }
+
+    [Fact]
+    public async Task ExportAsync_PlainTextFailure_PreservesServerMessageAndStatus()
+    {
+        var statePath = await CreateSimpleStateDatabaseAsync();
+        ParserConfigs.SetApiKey(ConfiguredApiKey);
+        ParserConfigs.SetStatePath(statePath);
+        var handler = new CapturingHandler(
+            HttpStatusCode.BadRequest,
+            _exportTempRoot,
+            "Computer name is required.",
+            "text/plain");
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(httpClient, ValidExportUrl);
+
+        var result = await service.ExportAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DataExportStatus.UploadFailed, result.Status);
+        Assert.Equal(
+            "Computer name is required (HTTP 400 Bad Request).",
+            result.Detail);
+        AssertExportTempRootIsEmpty();
+    }
+
+    [Fact]
+    public async Task ExportAsync_HtmlErrorPage_PreservesServerRequestId()
+    {
+        var statePath = await CreateSimpleStateDatabaseAsync();
+        ParserConfigs.SetApiKey(ConfiguredApiKey);
+        ParserConfigs.SetStatePath(statePath);
+        var handler = new CapturingHandler(
+            HttpStatusCode.InternalServerError,
+            _exportTempRoot,
+            """
+            <!DOCTYPE html>
+            <html><body>
+              <h1>Error.</h1>
+              <p><strong>Request ID:</strong>
+                 <code>00-server-trace-parent-span-00</code></p>
+            </body></html>
+            """,
+            "text/html");
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(httpClient, ValidExportUrl);
+
+        var result = await service.ExportAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DataExportStatus.UploadFailed, result.Status);
+        Assert.Equal(
+            "The export service is temporarily unavailable; retry in a few minutes "
+            + "(HTTP 500 Internal Server Error). Reference: 00-server-trace-parent-span-00",
+            result.Detail);
         AssertExportTempRootIsEmpty();
     }
 
@@ -486,7 +596,9 @@ public sealed class DataExportServiceTests : IDisposable
 
     private sealed class CapturingHandler(
         HttpStatusCode statusCode,
-        string exportTempRoot) : HttpMessageHandler
+        string exportTempRoot,
+        string? responseBody = null,
+        string responseMediaType = "application/problem+json") : HttpMessageHandler
     {
         public int RequestCount { get; private set; }
         public HttpMethod? Method { get; private set; }
@@ -524,7 +636,15 @@ public sealed class DataExportServiceTests : IDisposable
                 ? null
                 : await request.Content.ReadAsByteArrayAsync(cancellationToken);
 
-            return new HttpResponseMessage(statusCode);
+            var response = new HttpResponseMessage(statusCode);
+            if (responseBody is not null)
+            {
+                response.Content = new StringContent(
+                    responseBody,
+                    Encoding.UTF8,
+                    responseMediaType);
+            }
+            return response;
         }
 
         private static string? GetSingleHeader(HttpRequestMessage request, string name) =>

@@ -49,10 +49,10 @@ public sealed class DataExportRoutesTests
     [InlineData(
         DataExportStatus.InvalidApiKey,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        "Service detail must not replace the route message.",
+        "The export server rejected the API key (HTTP 401 Unauthorized). Reference: auth-trace",
         false,
         "invalid_api_key",
-        "The export server rejected the API key.")]
+        "The export server rejected the API key (HTTP 401 Unauthorized). Reference: auth-trace")]
     [InlineData(
         DataExportStatus.UploadFailed,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",

@@ -655,3 +655,114 @@ export function escapeHtml(text) {
 export function escapeHtmlWithLineBreaks(text) {
     return escapeHtml(text).replace(/\n/g, '<br>');
 }
+
+// Open confirm overlays, newest last. Escape settles only the top-most dialog so
+// stacked confirms dismiss in visual order. Capture-phase Escape handlers that
+// were registered BEFORE a dialog opened (jobs inline editor, env modal) run
+// first regardless of stopImmediatePropagation — they must check
+// isConfirmDialogOpen() and stand down while any overlay is up.
+const openConfirmOverlays = [];
+
+export function isConfirmDialogOpen() {
+    return openConfirmOverlays.length > 0;
+}
+
+// In-app replacement for window.confirm, which the sandboxed VS Code webview
+// suppresses (it returns false without showing anything — see settings-controller).
+// Renders its own fixed overlay above any open Bootstrap modal, so callers inside
+// a modal (e.g. the run-history dialog) can confirm without their modal being torn
+// down by app.showModal's single shared container. Resolves true only on an
+// explicit confirm; Escape, the backdrop, and Cancel all resolve false.
+export function confirmDialog({
+    title = 'Are you sure?',
+    message = '',
+    confirmLabel = 'Confirm',
+    cancelLabel = 'Cancel',
+    danger = false
+} = {}) {
+    if (typeof document === 'undefined' || !document.body) return Promise.resolve(false);
+
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'vb-confirm-overlay';
+
+        const dialog = document.createElement('div');
+        dialog.className = 'vb-confirm';
+        dialog.setAttribute('role', 'alertdialog');
+        dialog.setAttribute('aria-modal', 'true');
+
+        const heading = document.createElement('h6');
+        heading.className = 'vb-confirm-title';
+        heading.textContent = title;
+
+        const body = document.createElement('p');
+        body.className = 'vb-confirm-message';
+        body.textContent = message;
+
+        const actions = document.createElement('div');
+        actions.className = 'vb-confirm-actions';
+
+        const cancelButton = document.createElement('button');
+        cancelButton.type = 'button';
+        cancelButton.className = 'btn btn-sm btn-outline-secondary';
+        cancelButton.textContent = cancelLabel;
+
+        const confirmButton = document.createElement('button');
+        confirmButton.type = 'button';
+        confirmButton.className = `btn btn-sm ${danger ? 'btn-danger' : 'btn-primary'}`;
+        confirmButton.textContent = confirmLabel;
+
+        actions.append(cancelButton, confirmButton);
+        dialog.append(heading, ...(message ? [body] : []), actions);
+        overlay.append(dialog);
+
+        const previousFocus = document.activeElement;
+        const openedAt = Date.now();
+        openConfirmOverlays.push(overlay);
+        let settled = false;
+        const settle = result => {
+            if (settled) return;
+            settled = true;
+            const at = openConfirmOverlays.indexOf(overlay);
+            if (at !== -1) openConfirmOverlays.splice(at, 1);
+            window.removeEventListener('keydown', handleKeydown, true);
+            overlay.remove();
+            if (previousFocus && typeof previousFocus.focus === 'function') {
+                try { previousFocus.focus(); } catch { /* detached */ }
+            }
+            resolve(result);
+        };
+        const handleKeydown = event => {
+            // With dialogs stacked, only the top-most one may react.
+            if (openConfirmOverlays[openConfirmOverlays.length - 1] !== overlay) return;
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                settle(false);
+                return;
+            }
+            // Two focusable controls: Tab and Shift+Tab both toggle between them,
+            // so keyboard focus can never wander into the page beneath the overlay.
+            if (event.key === 'Tab') {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                (document.activeElement === confirmButton ? cancelButton : confirmButton).focus();
+            }
+        };
+
+        confirmButton.addEventListener('click', () => settle(true));
+        cancelButton.addEventListener('click', () => settle(false));
+        overlay.addEventListener('mousedown', event => {
+            // The second press of a double-click on the triggering button lands on
+            // the overlay milliseconds after open and would instantly self-cancel —
+            // reproducing the very "delete does nothing" bug this dialog fixes.
+            // Ignore the backdrop for a beat.
+            if (event.target === overlay && Date.now() - openedAt > 300) settle(false);
+        });
+        window.addEventListener('keydown', handleKeydown, true);
+
+        document.body.appendChild(overlay);
+        // Destructive dialogs land focus on the safe action; Enter never deletes.
+        cancelButton.focus();
+    });
+}

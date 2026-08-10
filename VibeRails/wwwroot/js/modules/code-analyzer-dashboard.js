@@ -110,7 +110,14 @@ const METRIC_GUIDANCE = Object.freeze({
     }
 });
 
+/**
+ * Scores are optional on the wire: a scan that found no changed code sends
+ * `healthScore: null`. Number(null) is 0 — not NaN — so the null must be rejected
+ * before coercion, otherwise an empty scan reads as a hard zero (grade F,
+ * "Change required") instead of "no score".
+ */
 function clampScore(value) {
+    if (value === null || value === undefined || value === '') return null;
     const score = Number(value);
     return Number.isFinite(score) ? Math.min(100, Math.max(0, score)) : null;
 }
@@ -537,9 +544,9 @@ export function renderCodeAnalyzerBrief(host, response, documentRef = globalThis
     if (onOpenDetails) {
         const open = element(documentRef, 'button', 'code-analyzer-brief-open');
         open.type = 'button';
-        open.title = 'Open the Code quality section for the file-by-file report';
+        open.title = 'Open the file-by-file report';
         open.append(
-            element(documentRef, 'span', '', 'Open Code quality'),
+            element(documentRef, 'span', '', 'Open full report'),
             icon(documentRef, 'fa-solid fa-arrow-right'));
         open.addEventListener?.('click', () => onOpenDetails());
         brief.append(open);

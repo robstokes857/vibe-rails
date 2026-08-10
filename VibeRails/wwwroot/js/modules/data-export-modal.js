@@ -308,6 +308,9 @@ export function showDataExportModal(app, options = {}) {
 
     function renderFailure(message, status) {
         const active = elements.root?.querySelector('[data-state="active"]');
+        const failedStage = state.sawProgress
+            ? STAGES.find(stage => stage.key === active?.dataset.stage)
+            : null;
         if (active?.dataset.stage) {
             // Only blame a stage the server actually reported being in. An export that fails
             // before the first poll lands would otherwise pin the failure on Snapshot, which is
@@ -315,17 +318,24 @@ export function showDataExportModal(app, options = {}) {
             setStageState(active.dataset.stage, state.sawProgress ? 'failed' : 'pending');
         }
         tickElapsed(Date.now() - startedAt);
-        showTerminalButtons({ allowRetry: true });
+        const retryNeedsSettingsChange = ['invalid_api_key', 'no_api_key', 'not_configured']
+            .includes(status);
+        showTerminalButtons({ allowRetry: !retryNeedsSettingsChange });
 
         if (elements.outcome) {
+            const title = failureTitle(status, failedStage);
+            const guidance = failureGuidance(status);
             elements.outcome.innerHTML = `
                 <div class="alert alert-danger mb-0">
                     <div class="fw-semibold">
-                        <i class="fa-solid fa-circle-exclamation me-1"></i>Export failed
+                        <i class="fa-solid fa-circle-exclamation me-1"></i>${app.escapeHtml(title)}
                     </div>
                     <div class="mt-1">${app.escapeHtml(message)}</div>
+                    <div class="small mt-2">${app.escapeHtml(guidance)}</div>
                     ${status
-                        ? `<div class="small text-muted mt-2">${app.escapeHtml(status)}</div>`
+                        ? `<div class="small text-muted mt-2">
+                               Error code: <code>${app.escapeHtml(status)}</code>
+                           </div>`
                         : ''}
                 </div>
             `;
@@ -390,7 +400,7 @@ function buildMarkup(app, options) {
 
             <ul class="list-unstyled d-flex flex-column gap-2 mb-0">${rows}</ul>
 
-            <div id="data-export-outcome"></div>
+            <div id="data-export-outcome" role="status" aria-live="polite"></div>
 
             <div class="d-flex justify-content-between align-items-center">
                 <small class="text-muted font-monospace" id="data-export-elapsed">Elapsed 0:00</small>
@@ -402,6 +412,29 @@ function buildMarkup(app, options) {
             </div>
         </div>
     `;
+}
+
+function failureTitle(status, failedStage) {
+    if (status === 'upload_failed') return 'Upload failed';
+    if (status === 'invalid_api_key' || status === 'no_api_key') return 'Upload blocked';
+    if (status === 'busy') return 'Export already running';
+    return failedStage?.label ? `${failedStage.label} failed` : 'Export failed';
+}
+
+function failureGuidance(status) {
+    if (status === 'upload_failed') {
+        return 'Your local database was not changed. Retry will reuse any blocks the server already received.';
+    }
+    if (status === 'invalid_api_key' || status === 'no_api_key') {
+        return 'Close this dialog, update and save the API key in Settings, then try again.';
+    }
+    if (status === 'busy') {
+        return 'Wait for the other export to finish, or close any VibeRails window still exporting, then retry.';
+    }
+    if (status === 'not_configured') {
+        return 'Install a build with a configured export endpoint before trying again.';
+    }
+    return 'Your local database was not changed. Correct the problem above and retry.';
 }
 
 function formatDuration(milliseconds) {

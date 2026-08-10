@@ -54,3 +54,46 @@ test('saving settings sends the co-author removal choice', async () => {
     assert.equal(calls[0].method, 'POST');
     assert.equal(calls[0].body.removeCoAuthorTrailers, false);
 });
+
+test('a dirty settings form blocks navigation, asks in-app, and replays on yes', async () => {
+    globalThis.window = { VibeRailsPerformance: null };
+
+    // window.confirm is a silent no-op in the VS Code webview; the old guard
+    // bypassed itself there and silently discarded webview edits. Both the
+    // call and the bypass must stay gone.
+    const source = readFileSync(modulePath, 'utf8');
+    assert.doesNotMatch(source, /window\.confirm\s*\(/);
+    const appSource = readFileSync(path.resolve('VibeRails/wwwroot/app.js'), 'utf8');
+    assert.match(appSource, /guard\(\{ from: this\.currentView, to: view, data, retry \}\)/);
+
+    const controller = new SettingsController({});
+    controller._settingsDirty = true;
+
+    let retried = 0;
+    const retry = () => {
+        retried += 1;
+        // The replayed navigation consults the guard again mid-retry; the
+        // confirmed flag must let exactly that replay through.
+        assert.equal(controller._guardSettingsNavigation({ from: 'settings', retry }), true);
+    };
+
+    controller.confirmLeave = async () => false;
+    assert.equal(controller._guardSettingsNavigation({ from: 'settings', retry }), false);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(retried, 0, 'declining the dialog must not replay the navigation');
+
+    controller.confirmLeave = async () => true;
+    assert.equal(controller._guardSettingsNavigation({ from: 'settings', retry }), false);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(retried, 1, 'confirming replays the blocked navigation once');
+
+    // The confirmed flag must not leak: the next dirty navigation blocks again.
+    assert.equal(controller._guardSettingsNavigation({ from: 'settings', retry: () => {} }), false);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Clean form or foreign view: pass-through.
+    controller._settingsDirty = false;
+    assert.equal(controller._guardSettingsNavigation({ from: 'settings', retry }), true);
+    controller._settingsDirty = true;
+    assert.equal(controller._guardSettingsNavigation({ from: 'dashboard', retry }), true);
+});

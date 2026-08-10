@@ -1,4 +1,5 @@
 import { getEnabledLlmItems, mountLlmPicker } from './pickers/llm-picker.js';
+import { isConfirmDialogOpen } from './utils.js';
 
 // Mirrors EnvironmentWorkspaceMode in the backend. Persistent and PerRun are the same
 // mechanism — a git clone of the project — differing only in how long a clone survives.
@@ -474,13 +475,11 @@ export class EnvironmentController {
         return true;
     }
 
-    showEnvironmentForm({ mode, env = null, cliSettings = {}, presetName = null, automationWorker = false, onChanged = null, onCancel = null }) {
+    showEnvironmentForm({ mode, env = null, cliSettings = {}, initialName = null, automationWorker = false, onChanged = null, onCancel = null }) {
         this.disposeEnvironmentFormLifecycle();
         const isEdit = mode === 'edit';
-        // Automation Workers share this modal but are named after their automation
-        // (one-name rule) and are never launch-picker visible, so the name row and
-        // the "Hide from launch pickers" switch are meaningless for them. Names are
-        // immutable identifiers — a field the user can't edit is not displayed.
+        // Automation Workers share this modal but are never launch-picker visible,
+        // so the "Hide from launch pickers" switch is meaningless for them.
         const workerOnly = automationWorker === true || Boolean(env?.automationWorker);
 
         // Provider creation reuses the centralized catalog/order, but deliberately
@@ -490,7 +489,7 @@ export class EnvironmentController {
         // showModal escapes the title itself — pass it raw.
         const title = isEdit
             ? `${workerOnly ? 'Edit Worker' : 'Edit Environment / Worker'}: ${env.name}`
-            : (presetName ? `Create Worker: ${presetName}` : 'Create Environment / Worker');
+            : (workerOnly ? 'Create Worker' : 'Create Environment / Worker');
         // Say what will actually be created. Only the Automation editor's flow passes
         // automationWorker, so labelling this button "Create Worker" everywhere promised a
         // Worker while the Environments page produced a plain Environment — one that the
@@ -506,15 +505,17 @@ export class EnvironmentController {
                 <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
               </svg>`;
 
-        // The name is an immutable backend identifier, so the input renders only in
-        // the one state where it is actually editable: creating a regular environment.
-        // Edit mode and preset-named Worker creation carry the name in the title.
-        const nameRow = (!isEdit && !presetName)
-            ? `<div class="mb-3">
-                    <label class="form-label">Environment / Worker Name</label>
-                    <input type="text" class="form-control" id="env-name" required>
-                </div>`
-            : '';
+        // The name is an immutable backend identifier, so the input renders only at
+        // creation; edit mode carries the name in the title. A Worker created from
+        // the Automation editor may arrive with a prefill (the automation's name as
+        // a convenient default), but the field stays editable — the Worker's name
+        // belongs to this modal, not to the automation.
+        const nameRow = isEdit
+            ? ''
+            : `<div class="mb-3">
+                    <label class="form-label">${workerOnly ? 'Worker Name' : 'Environment / Worker Name'}</label>
+                    <input type="text" class="form-control" id="env-name" required value="${this.app.escapeHtml(initialName || '')}">
+                </div>`;
 
         const cliField = isEdit
             ? `<input type="text" class="form-control" value="${this.app.escapeHtml(env.cli)}" disabled>`
@@ -555,6 +556,31 @@ export class EnvironmentController {
                     <div class="form-control-plaintext text-muted small">This project is not a git repository, so it can only run in the project directory.</div>
                 </div>`;
 
+        const customArgsRow = `
+                <div class="mb-3" data-custom-args-group ${usesManagedArgs ? 'style="display: none;"' : ''}>
+                    <label class="form-label">Custom Arguments</label>
+                    <input type="text" class="form-control" id="env-custom-args" value="${customArgsValue}" placeholder="e.g., --yolo --sandbox">
+                    <small class="form-text text-muted">Arguments passed to the CLI when launching with this environment</small>
+                </div>`;
+
+        // A Worker only needs the CLI, model, and initial message up front — the
+        // workspace question ("Where it runs") and raw CLI arguments read as noise
+        // when all the user wants is "run claude on a timer". They stay available,
+        // collapsed, with sensible defaults (project directory, no extra args).
+        const formBody = workerOnly
+            ? `
+                <div data-cli-settings-slot>${this.buildCliSettingsHtml(initialCli, cliSettings || {})}</div>
+                <details class="env-advanced-settings mb-3">
+                    <summary>Advanced</summary>
+                    ${workspaceRow}
+                    ${customArgsRow}
+                </details>`
+            : `
+                ${hiddenRow}
+                ${workspaceRow}
+                ${customArgsRow}
+                <div data-cli-settings-slot>${this.buildCliSettingsHtml(initialCli, cliSettings || {})}</div>`;
+
         this.app.showModal(title, `
             <form id="env-form">
                 ${nameRow}
@@ -562,14 +588,7 @@ export class EnvironmentController {
                     <label class="form-label">CLI Type</label>
                     ${cliField}
                 </div>
-                ${hiddenRow}
-                ${workspaceRow}
-                <div class="mb-3" data-custom-args-group ${usesManagedArgs ? 'style="display: none;"' : ''}>
-                    <label class="form-label">Custom Arguments</label>
-                    <input type="text" class="form-control" id="env-custom-args" value="${customArgsValue}" placeholder="e.g., --yolo --sandbox">
-                    <small class="form-text text-muted">Arguments passed to the CLI when launching with this environment</small>
-                </div>
-                <div data-cli-settings-slot>${this.buildCliSettingsHtml(initialCli, cliSettings || {})}</div>
+                ${formBody}
                 <button type="submit" class="btn btn-primary d-flex align-items-center gap-2">
                     ${submitIcon}
                     ${submitLabel}
@@ -628,6 +647,10 @@ export class EnvironmentController {
         const handleClose = () => handleCancel();
         const handleEscape = event => {
             if (event.key !== 'Escape' || completed) return;
+            // A confirmDialog overlay owns Escape while it is up; this listener
+            // registered earlier on the same window/capture phase, so it must
+            // stand down itself (see utils.js).
+            if (isConfirmDialogOpen()) return;
             if (modalContainer && form && !modalContainer.contains(form)) {
                 completed = true;
                 cleanupLifecycle();
@@ -674,7 +697,7 @@ export class EnvironmentController {
                     await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(env.name)}`, 'PUT', payload);
                     await this.saveCliSettings(env.cli, env.name, settingsPayload);
                 } else {
-                    const name = presetName || document.getElementById('env-name').value.trim();
+                    const name = document.getElementById('env-name').value.trim();
                     const cli = document.getElementById('env-cli').value;
                     const settingsPayload = this.extractCliSettingsPayload(cli);
                     const payload = {

@@ -270,7 +270,7 @@ async function closeEnvironmentModal(page) {
 }
 
 test.describe('Jobs Worker / Environments integration', () => {
-    test('Add Worker opens the shared modal minus the name and visibility rows', async ({ page }) => {
+    test('Add Worker opens the shared modal with the automation name as an editable prefill', async ({ page }) => {
         await installStatefulApi(page);
         await openApp(page);
         await openJobs(page);
@@ -279,7 +279,7 @@ test.describe('Jobs Worker / Environments integration', () => {
         await expect(page.locator('[data-job-form]')).toBeVisible();
         await page.locator('#job-name').fill('Post-merge auditor');
         await page.locator('[data-job-action="add-environment-from-editor"]').click();
-        await expect(page.getByRole('heading', { name: 'Create Worker: Post-merge auditor', exact: true }))
+        await expect(page.getByRole('heading', { name: 'Create Worker', exact: true }))
             .toBeVisible();
         const jobsControls = await environmentControlSnapshot(page);
         await closeEnvironmentModal(page);
@@ -291,15 +291,16 @@ test.describe('Jobs Worker / Environments integration', () => {
         const workersControls = await environmentControlSnapshot(page);
         await closeEnvironmentModal(page);
 
-        // One shared modal: the Worker variant only drops the immutable name row and
-        // the launch-picker visibility switch; every CLI settings control is identical.
-        expect(Object.keys(jobsControls)).not.toContain('env-name');
+        // One shared modal: the Worker variant names the Worker in its own (prefilled,
+        // editable) field and only drops the launch-picker visibility switch; every
+        // CLI settings control is identical.
+        expect(jobsControls['env-name']).toBe('Post-merge auditor');
         expect(Object.keys(jobsControls)).not.toContain('env-hidden');
         expect(Object.keys(workersControls).sort()).toEqual(
-            [...Object.keys(jobsControls), 'env-name', 'env-hidden'].sort());
+            [...Object.keys(jobsControls), 'env-hidden'].sort());
     });
 
-    test('Add Worker requires the automation name and creates the worker with it', async ({ page }) => {
+    test('Add Worker works nameless: the Worker is named in the modal and the automation adopts it', async ({ page }) => {
         const { writes } = await installStatefulApi(page);
         await openApp(page);
         await openJobs(page);
@@ -307,15 +308,13 @@ test.describe('Jobs Worker / Environments integration', () => {
         await page.locator('[data-job-action="new"]').click();
         await expect(page.locator('[data-job-form]')).toBeVisible();
 
-        // One-name rule: without an automation name there is nothing to name the
-        // Worker after, so the modal must not open.
-        await page.locator('[data-job-action="add-environment-from-editor"]').click();
-        await expect(page.locator('#env-form')).toHaveCount(0);
-        await expect(page.getByText('Name the automation first')).toBeVisible();
-
-        await page.locator('#job-name').fill('Post-merge auditor');
+        // No automation name yet — the modal still opens, with a blank name field
+        // to fill in there.
         await page.locator('[data-job-action="add-environment-from-editor"]').click();
         await expect(page.locator('#env-form')).toBeVisible({ timeout: 5_000 });
+        await expect(page.locator('#env-name')).toHaveValue('');
+
+        await page.locator('#env-name').fill('Post-merge auditor');
         await page.locator('#codex-prompt').fill('Audit every merge.');
         await page.locator('#env-form button[type="submit"]').click();
         await expect(page.locator('#env-form')).toHaveCount(0);
@@ -326,9 +325,11 @@ test.describe('Jobs Worker / Environments integration', () => {
         expect(created.automationWorker).toBe(true);
         expect(created.hidden).toBeUndefined();
 
-        // The freshly created worker is auto-selected in the Worker picker.
+        // The freshly created worker is auto-selected in the Worker picker, and the
+        // empty automation name adopts the Worker's name as its editable default.
         await expect.poll(() => page.locator('#job-llm-selection').evaluate(
             element => element.tomselect?.getValue?.() || element.value)).toBe('env:60:codex');
+        await expect(page.locator('#job-name')).toHaveValue('Post-merge auditor');
     });
 
     test('editing a Worker from either screen stays synchronized', async ({ page }) => {
@@ -386,7 +387,7 @@ test.describe('Jobs Worker / Environments integration', () => {
         await expect(page.locator('[data-job-form]')).toBeVisible();
         await expect(page.locator('#job-project')).toHaveCount(0);
         await expect(page.locator('#job-prompt')).toHaveCount(0);
-        await expect(page.locator('[data-job-form]')).toContainText('Runs in the current VibeRails repository');
+        await expect(page.locator('[data-job-form]')).toContainText('Runs in');
         await expect(page.locator('[data-job-form]')).toContainText(CURRENT_REPOSITORY);
         await expect(page.locator('[data-job-form]')).toContainText('After every successful commit');
 
