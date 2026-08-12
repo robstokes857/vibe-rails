@@ -12,6 +12,8 @@ using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmClis.Launchers;
 using TokenSaver;
 using VibeRails.Services.AgentTools;
+using VibeRails.Services.Cli;
+using VibeRails.Services.Environments.Steps;
 using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
@@ -121,6 +123,13 @@ namespace VibeRails
             serviceCollection.AddSingleton<IJobStore>(_ => new JobStore(
                 $"Data Source={ParserConfigs.GetStatePath()};Mode=ReadWriteCreate;Cache=Shared"));
             serviceCollection.AddSingleton<IJobExecutableResolver, JobExecutableResolver>();
+            // General-purpose process runner (hidden+captured, or its own visible terminal window).
+            // Stateless, so one instance serves every caller. Environment Steps are its first
+            // consumer; GitProcessRunner and ShellService are the obvious later migrations.
+            serviceCollection.AddSingleton<ICliWrapper, CliWrapper>();
+            // Scoped because it reads steps through the scoped IRepository, matching TerminalRunner
+            // (its only launch-path consumer) so both live in the same scope.
+            serviceCollection.AddScoped<IEnvironmentStepRunner, EnvironmentStepRunner>();
             // Spawns a real OS terminal per queued run through the same scoped Environment launch
             // pipeline as the CLI launch API. JobRunner itself lives in the spawned process.
             serviceCollection.AddScoped<IJobLaunchService, JobLaunchService>();

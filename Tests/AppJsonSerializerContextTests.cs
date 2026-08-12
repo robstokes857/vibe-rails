@@ -230,4 +230,71 @@ public sealed class AppJsonSerializerContextTests
         Assert.DoesNotContain("\"xtermUiBytes\"", json);
     }
 
+    [Fact]
+    public void EnvironmentStepDto_KeepsTheNamesTheStepsEditorReads()
+    {
+        var json = JsonSerializer.Serialize(
+            new EnvironmentStepDto(4, 1, 0, "Push", "git push", true, 120, false),
+            AppJsonSerializerContext.Default.EnvironmentStepDto);
+
+        Assert.Equal(
+            """{"id":4,"phase":1,"position":0,"name":"Push","command":"git push","startMinimized":true,"timeoutSeconds":120,"enabled":false}""",
+            json);
+    }
+
+    [Fact]
+    public void EnvironmentStepRequest_OmittedOptionalFields_BindToTheDocumentedDefaults()
+    {
+        // A step the client sends with only a phase and a command must arrive enabled, windowed,
+        // and on the 10-minute default rather than as a disabled zero-timeout row.
+        var request = JsonSerializer.Deserialize(
+            """{"phase":0,"name":"","command":"npm ci"}""",
+            AppJsonSerializerContext.Default.EnvironmentStepRequest);
+
+        Assert.NotNull(request);
+        Assert.True(request!.Enabled);
+        Assert.False(request.StartMinimized);
+        Assert.Equal(EnvironmentStep.DefaultTimeoutSeconds, request.TimeoutSeconds);
+    }
+
+    [Fact]
+    public void UpdateEnvironmentRequest_OmittedSteps_BindToNullNotAnEmptyList()
+    {
+        // null is "leave them untouched" and [] is "clear them". Binding an absent key to an empty
+        // list would make every environment save wipe its steps.
+        var request = JsonSerializer.Deserialize(
+            """{"name":"review","customArgs":"--yolo"}""",
+            AppJsonSerializerContext.Default.UpdateEnvironmentRequest);
+
+        Assert.NotNull(request);
+        Assert.Null(request!.Steps);
+    }
+
+    [Fact]
+    public void EnvironmentStepTestEvent_UsesTheWireNamesTheConsoleReads()
+    {
+        var line = JsonSerializer.Serialize(
+            new EnvironmentStepTestEvent("line", "installing deps", IsError: true),
+            AppJsonSerializerContext.Default.EnvironmentStepTestEvent);
+        var done = JsonSerializer.Serialize(
+            new EnvironmentStepTestEvent("done", ExitCode: 3, DurationMs: 1200, Message: "exited with code 3"),
+            AppJsonSerializerContext.Default.EnvironmentStepTestEvent);
+
+        Assert.Contains("""{"type":"line","line":"installing deps","isError":true""", line);
+        Assert.Contains("""{"type":"done","line":null,"isError":false,"exitCode":3,"durationMs":1200""", done);
+    }
+
+    [Fact]
+    public void EnvironmentStepFailedPayload_CarriesWhatTheToastNeeds()
+    {
+        var json = JsonSerializer.Serialize(
+            new EnvironmentStepFailedPayload("s-1", "review", 0, "Install", 1, false, "Step \"Install\" exited with code 1."),
+            AppJsonSerializerContext.Default.EnvironmentStepFailedPayload);
+
+        Assert.Contains("\"sessionId\":\"s-1\"", json);
+        Assert.Contains("\"environmentName\":\"review\"", json);
+        Assert.Contains("\"stepName\":\"Install\"", json);
+        Assert.Contains("\"exitCode\":1", json);
+        Assert.Contains("\"timedOut\":false", json);
+    }
 }

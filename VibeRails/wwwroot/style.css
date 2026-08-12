@@ -381,6 +381,22 @@ code {
     transition: opacity 0.2s ease;
 }
 
+/* Keep the two edge groups stable. Without an explicit flex contract the
+   browser preserves the wide center menu by squeezing the brand group, which
+   wraps the product name and crowds the layout switch at laptop/webview widths. */
+.app-subnav-brand,
+.app-subnav-actions {
+    flex: 0 0 auto;
+}
+
+.app-subnav-links {
+    min-width: 0;
+}
+
+.app-subnav-brand .brand-text-sm {
+    white-space: nowrap;
+}
+
 .app-subnav-link {
     display: inline-flex;
     align-items: center;
@@ -473,6 +489,41 @@ code {
     color: #ffffff;
     background: rgba(6, 182, 212, 0.12);
     border-color: rgba(6, 182, 212, 0.4);
+}
+
+/* Compact the full-label top navigation before it reaches the icon-only mobile
+   treatment. This preserves the switch's square hit target in narrow editor
+   webviews without introducing horizontal page scrolling. */
+@media (max-width: 1500px) and (min-width: 993px) {
+    html.nav-layout-top .app-subnav {
+        padding: 0 0.75rem;
+        gap: 0.5rem;
+    }
+
+    html.nav-layout-top .app-subnav-links {
+        gap: 0 !important;
+    }
+
+    html.nav-layout-top .app-subnav .app-subnav-link {
+        padding-inline: 0.5rem;
+    }
+
+    html.nav-layout-top .top-layout-switch-btn {
+        margin-left: 0.2rem;
+    }
+}
+
+@media (max-width: 1200px) and (min-width: 993px) {
+    html.nav-layout-top .app-subnav-brand .brand-text-sm {
+        display: none;
+    }
+}
+
+@media (max-width: 1120px) and (min-width: 993px) {
+    html.nav-layout-top .app-subnav-link span,
+    html.nav-layout-top .nav-exit-btn-sm span {
+        display: none;
+    }
 }
 
 .brand-text-sm {
@@ -13661,9 +13712,9 @@ body.git-guard-focus-active #app-content {
    ============================================================ */
 
 .jobs-view {
-    width: min(1440px, 100%);
+    width: min(1120px, 100%);
     margin: 0 auto;
-    padding: 1.4rem 0 3rem;
+    padding: 0.75rem 0 3rem;
 }
 
 .jobs-page-header,
@@ -13675,10 +13726,10 @@ body.git-guard-focus-active #app-content {
 }
 
 .jobs-page-header {
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
-    gap: 1.5rem;
-    margin-bottom: 1.25rem;
+    gap: 1rem;
+    margin-bottom: 0.8rem;
 }
 
 .jobs-page-header > div:first-child { min-width: 0; }
@@ -13696,7 +13747,7 @@ body.git-guard-focus-active #app-content {
 .jobs-view .btn { font-weight: 600; }
 
 .jobs-view .btn:not(.btn-sm) { font-size: 0.84rem; }
-.jobs-view .btn-sm { font-size: 0.78rem; }
+.jobs-view .btn-sm { font-size: 0.82rem; }
 
 @media (max-width: 720px) {
     .jobs-page-header {
@@ -13708,7 +13759,11 @@ body.git-guard-focus-active #app-content {
 }
 
 .jobs-page-title {
-    letter-spacing: 0.05em;
+    margin: 0;
+    color: var(--color-text);
+    font-size: clamp(1.55rem, 3vw, 1.9rem);
+    font-weight: 700;
+    letter-spacing: -0.025em;
 }
 
 .jobs-page-title + p {
@@ -13716,67 +13771,94 @@ body.git-guard-focus-active #app-content {
 }
 
 .jobs-page-header p {
-    max-width: 760px;
+    max-width: 650px;
     margin: 0;
     color: var(--color-text-muted);
-    line-height: 1.55;
+    font-size: 0.88rem;
+    line-height: 1.5;
 }
 
-/* One quiet line under the header instead of the old full-width banner; the
-   multi-instance detail lives in its title tooltip. Block-level on purpose: as
-   an inline box it inherited a stray hanging indent whenever the sentence
-   before it wrapped. */
+/* Runtime behavior is important enough to state plainly. This is a fully opaque
+   note so it remains readable in browser and VS Code themes. */
 .jobs-runtime-note {
     display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    margin-top: 0.4rem;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-accent);
+    border-radius: 8px;
+    background-color: var(--color-bg-surface, #1e1e1e);
     color: var(--color-text-muted);
-    font-size: 0.78rem;
-    cursor: help;
+    font-size: 0.84rem;
+    line-height: 1.45;
 }
 
-.jobs-runtime-note i { color: var(--color-accent); }
+.jobs-runtime-note i { margin-top: 0.15rem; color: var(--color-accent); }
+.jobs-runtime-note strong { color: var(--color-text); }
 
-.jobs-section { margin-top: 1.55rem; }
+.jobs-section { margin-top: 1rem; }
+
+.jobs-panel {
+    padding: 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background-color: var(--color-bg-surface, #1e1e1e);
+}
 
 .jobs-section-heading {
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 0.85rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.85rem;
+    border-bottom: 1px solid var(--color-border);
 }
 
 .jobs-section-heading h2 {
     margin: 0;
     color: var(--color-text);
-    font-size: 1.05rem;
+    font-size: 1rem;
+}
+
+.jobs-section-heading p {
+    margin: 0.25rem 0 0;
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
+}
+
+.jobs-section-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.65rem;
 }
 
 .jobs-count {
     color: var(--color-text-muted);
     font-family: var(--vb-font-mono, ui-monospace, monospace);
-    font-size: 0.72rem;
+    font-size: 0.76rem;
 }
 
 .jobs-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.65rem;
+    display: block;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background-color: var(--color-bg-base, #121212);
 }
 
 .job-inline-editor {
-    margin-bottom: 1rem;
+    margin: 0;
     scroll-margin-top: 5rem;
 }
 
 .job-inline-editor[hidden] { display: none; }
 
 .job-inline-form {
-    padding: 1.2rem;
-    border: 1px solid color-mix(in srgb, var(--color-accent) 44%, var(--color-border));
-    border-radius: 14px;
-    background: var(--color-bg-elevated, var(--color-bg-surface));
-    box-shadow: 0 18px 44px rgb(0 0 0 / 25%);
+    width: min(820px, 100%);
+    margin: 0 auto;
+    padding: 1.25rem;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background-color: var(--color-bg-surface, #1e1e1e);
 }
 
 .job-inline-form-header,
@@ -13789,19 +13871,67 @@ body.git-guard-focus-active #app-content {
 }
 
 .job-inline-form-header {
-    align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 1rem;
+    margin-bottom: 1.15rem;
+    padding-bottom: 0.9rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.job-inline-form-header > div {
+    min-width: 0;
 }
 
 .job-inline-form-header h3 {
     margin: 0;
+    overflow-wrap: anywhere;
     color: var(--color-text);
     font-size: 1.1rem;
 }
+
+.job-inline-form-header p {
+    margin: 0.25rem 0 0;
+    color: var(--color-text-muted);
+    font-size: 0.82rem;
+}
+
+.job-inline-form-header > .btn {
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+}
+
+.job-form-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+}
+
+.job-form-fields > * {
+    min-width: 0;
+}
+
+.job-inline-form .form-label {
+    margin-bottom: 0.4rem;
+    color: var(--color-text);
+    font-size: 0.84rem;
+    font-weight: 650;
+}
+
+.job-inline-form .form-control,
+.job-inline-form .form-select,
+.job-inline-form .input-group-text {
+    min-height: 42px;
+    background-color: var(--color-bg-base, #121212);
+}
+
+.job-inline-form .input-group-text {
+    border-color: var(--color-border);
+    color: var(--color-text-muted);
+}
 .job-environment-picker-row {
-    align-items: flex-start;
+    align-items: stretch;
     gap: 0.5rem;
 }
 
@@ -13810,15 +13940,13 @@ body.git-guard-focus-active #app-content {
     min-width: 0;
 }
 
-/* Worker preview: a real card surface — the earlier translucent version was hard
-   to read against the editor gradient. */
+/* A compact, opaque read-back of the Worker's instructions. */
 .job-environment-preview {
-    min-height: 52px;
-    padding: 0.85rem 1rem;
+    min-height: 48px;
+    padding: 0.7rem 0.8rem;
     border: 1px solid var(--color-border);
     border-radius: 8px;
-    background: var(--color-bg-surface);
-    box-shadow: 0 1px 0 color-mix(in srgb, var(--color-text, #f8fafc) 4%, transparent) inset;
+    background-color: var(--color-bg-base, #121212);
     color: var(--color-text);
     font-size: 0.82rem;
 }
@@ -13829,7 +13957,7 @@ body.git-guard-focus-active #app-content {
 
 .job-environment-preview[data-tone="ready"] {
     border-color: color-mix(in srgb, var(--color-success) 34%, var(--color-border));
-    background: color-mix(in srgb, var(--color-success) 4%, var(--color-bg-surface));
+    background-color: var(--color-bg-base, #121212);
 }
 
 .job-environment-preview[data-tone="warning"] {
@@ -13849,10 +13977,13 @@ body.git-guard-focus-active #app-content {
 }
 
 .job-environment-preview pre {
-    max-height: 145px;
-    margin: 0.55rem 0 0;
-    overflow: auto;
-    color: color-mix(in srgb, var(--color-text) 88%, transparent);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    max-height: 4.5em;
+    margin: 0.45rem 0 0;
+    overflow: hidden;
+    color: var(--color-text-muted);
     font: inherit;
     line-height: 1.5;
     white-space: pre-wrap;
@@ -13862,31 +13993,258 @@ body.git-guard-focus-active #app-content {
     display: flex;
     align-items: center;
     gap: 0.45rem;
-    padding: 0.65rem 0 0.15rem;
+    padding: 0.7rem 0 0.1rem;
     color: var(--color-text-muted);
-    font-size: 0.7rem;
+    font-size: 0.78rem;
 }
 
-.job-advanced-settings {
-    padding: 0.75rem 0.85rem;
-    border: 1px solid color-mix(in srgb, var(--color-border) 66%, transparent);
-    border-radius: 9px;
-    background: color-mix(in srgb, var(--color-bg-base) 28%, transparent);
-}
-
-.job-advanced-settings > summary {
-    color: var(--color-text);
-    font-size: 0.8rem;
-    font-weight: 700;
+.job-switch-input,
+.env-worker-form .form-switch .form-check-input {
+    position: relative;
+    float: none;
+    flex: 0 0 auto;
+    width: 2.65rem;
+    height: 1.45rem;
+    margin: 0;
+    appearance: none;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background-color: var(--color-bg-base, #121212);
+    background-image: none;
     cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.job-switch-input::after,
+.env-worker-form .form-switch .form-check-input::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 0.95rem;
+    height: 0.95rem;
+    border-radius: 50%;
+    background-color: var(--color-text-muted);
+    transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.job-switch-input:checked,
+.env-worker-form .form-switch .form-check-input:checked {
+    border-color: var(--color-primary);
+    background-color: var(--color-primary);
+    background-image: none;
+}
+
+.job-switch-input:checked::after,
+.env-worker-form .form-switch .form-check-input:checked::after {
+    background-color: #fff;
+    transform: translateX(1.18rem);
+}
+
+.job-switch-input:focus-visible,
+.env-worker-form .form-switch .form-check-input:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+    outline-offset: 2px;
+}
+
+.env-worker-form [data-cli-settings-slot] > hr,
+.env-worker-form [data-cli-settings-slot] > h6 {
+    display: none;
+}
+
+.env-worker-form .form-label,
+.env-worker-form .form-check-label {
+    color: var(--color-text);
+    font-size: 0.86rem;
+    font-weight: 650;
+}
+
+.env-worker-form .form-control,
+.env-worker-form .form-select {
+    min-height: 42px;
+    background-color: var(--color-bg-base, #121212);
+}
+
+.env-worker-form textarea.form-control { min-height: 92px; }
+
+.env-workspace-fieldset {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+}
+
+.env-workspace-fieldset > legend {
+    float: none;
+    width: auto;
+}
+
+.env-workspace-choices {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+}
+
+.env-workspace-choice {
+    position: relative;
+    display: block;
+    min-width: 0;
+    margin: 0;
+    cursor: pointer;
+}
+
+.env-workspace-choice > input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+.env-workspace-choice-card {
+    display: grid;
+    grid-template-columns: 1.1rem minmax(0, 1fr);
+    align-items: flex-start;
+    gap: 0.65rem;
+    height: 100%;
+    min-height: 112px;
+    padding: 0.8rem;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background-color: var(--color-bg-base, #121212);
+    color: var(--color-text);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.env-workspace-choice-card::before {
+    content: '';
+    width: 1.05rem;
+    height: 1.05rem;
+    margin-top: 0.1rem;
+    border: 2px solid var(--color-text-muted);
+    border-radius: 50%;
+    background-color: var(--color-bg-base, #121212);
+}
+
+.env-workspace-choice-copy {
+    display: grid;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+.env-workspace-choice-copy strong {
+    font-size: 0.86rem;
+    line-height: 1.3;
+}
+
+.env-workspace-choice-copy small {
+    color: var(--color-text-muted);
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+
+.env-workspace-choice > input:checked + .env-workspace-choice-card {
+    border-color: var(--color-primary);
+    background-color: color-mix(in srgb, var(--color-primary) 10%, var(--color-bg-base, #121212));
+}
+
+.env-workspace-choice > input:checked + .env-workspace-choice-card::before {
+    border-color: var(--color-primary);
+    background-color: var(--color-primary);
+    box-shadow: inset 0 0 0 3px var(--color-bg-base, #121212);
+}
+
+.env-workspace-choice > input:focus-visible + .env-workspace-choice-card {
+    outline: 3px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+    outline-offset: 2px;
+}
+
+.env-workspace-choice:hover .env-workspace-choice-card {
+    border-color: color-mix(in srgb, var(--color-primary) 65%, var(--color-border));
+}
+
+.env-worker-form .mb-3:has(> .form-check.form-switch) {
+    margin-bottom: 0 !important;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.env-worker-form .form-check.form-switch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 1.5rem;
+    margin: 0;
+    padding: 0;
+}
+
+.env-worker-form .form-switch .form-check-input { order: 2; }
+.env-worker-form .form-switch .form-check-label { order: 1; }
+
+.env-worker-form .form-text {
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.env-worker-form > button[type="submit"] {
+    justify-content: center;
+    width: 100%;
+    min-height: 44px;
+}
+
+.job-run-options {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.8fr) minmax(190px, 1fr);
+    margin-top: 1rem;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: 9px;
+    background-color: var(--color-bg-base, #121212);
+}
+
+.job-run-options > * {
+    min-width: 0;
+    padding: 0.8rem;
+}
+
+.job-run-options > * + * {
+    border-left: 1px solid var(--color-border);
+}
+
+.job-timeout-option .input-group {
+    max-width: 190px;
+}
+
+.job-timeout-option small,
+.job-option-toggle small {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--color-text-muted);
+    font-size: 0.75rem;
+    line-height: 1.35;
+}
+
+.job-option-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    color: var(--color-text);
+    cursor: pointer;
+}
+
+.job-option-toggle strong {
+    font-size: 0.84rem;
 }
 
 .job-repository-context {
     flex-wrap: wrap;
     gap: 0.45rem;
-    margin-top: 1rem;
+    margin-top: 0.85rem;
     color: var(--color-text-muted);
-    font-size: 0.7rem;
+    font-size: 0.75rem;
 }
 
 .job-repository-context code {
@@ -13900,22 +14258,44 @@ body.git-guard-focus-active #app-content {
 .job-inline-form-actions {
     justify-content: flex-end;
     gap: 0.5rem;
-    margin-top: 1rem;
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--color-border);
+}
+
+/* Editing is a focused page state: keep the header for orientation, and hide the
+   list/history until the form is saved or cancelled. */
+.jobs-view[data-editor-open="true"] .jobs-page-header > .btn,
+.jobs-view[data-editor-open="true"] .jobs-runtime-note,
+.jobs-view[data-editor-open="true"] .jobs-section-heading,
+.jobs-view[data-editor-open="true"] .jobs-grid,
+.jobs-view[data-editor-open="true"] .jobs-history-panel {
+    display: none;
+}
+
+.jobs-view[data-editor-open="true"] .jobs-panel {
+    margin-top: 0;
+    padding: 0;
+    border: 0;
+    background-color: var(--color-bg-base, #121212);
 }
 
 .job-card {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 1rem;
+    gap: 1.25rem;
     min-width: 0;
-    padding: 0.95rem 1.05rem;
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    background: var(--color-bg-elevated, var(--color-bg-surface));
+    padding: 1rem;
+    border: 0;
+    border-bottom: 1px solid var(--color-border);
+    border-radius: 0;
+    background-color: var(--color-bg-base, #121212);
 }
 
-.job-card[data-enabled="false"] { opacity: 0.72; }
+.job-card:last-child { border-bottom: 0; }
+.job-card[data-enabled="false"] { border-left: 3px solid var(--color-border); }
+.job-card[data-enabled="false"] .job-card-title h3 { color: var(--color-text-muted); }
 .job-card-main { min-width: 0; }
 .job-card-topline { justify-content: space-between; gap: 0.75rem; }
 .job-card-title {
@@ -13926,75 +14306,75 @@ body.git-guard-focus-active #app-content {
 }
 
 .job-card-title h3 {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     margin: 0;
     overflow: hidden;
     color: var(--color-text);
-    font-size: 1rem;
+    font-size: 0.98rem;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.job-card-facts {
-    display: grid;
-    grid-template-columns: minmax(150px, 0.9fr) minmax(220px, 1.4fr) minmax(135px, 0.7fr);
-    gap: 0.65rem;
-    margin-top: 0.6rem;
-}
-
-.job-card-fact {
-    display: grid;
-    gap: 0.14rem;
+.job-card-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
     min-width: 0;
+    margin-top: 0.55rem;
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
 }
 
-.job-card-fact > span {
+.job-card-meta > span {
     display: inline-flex;
     align-items: center;
-    gap: 0.28rem;
+    gap: 0.35rem;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
+.job-card-meta-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.job-card-meta i {
+    width: 0.9rem;
     color: var(--color-text-muted);
-    font-size: 0.68rem;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+    text-align: center;
 }
 
-.job-card-fact strong {
-    overflow: hidden;
+.job-card-meta strong {
     color: var(--color-text);
-    font-size: 0.82rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-weight: 650;
 }
 
-.job-card-fact[data-tone="warning"] strong { color: var(--color-warning); }
+.job-card-meta [data-tone="warning"] { color: var(--color-warning); }
 
-/* The initial message is the automation's logic, so it gets room to be read rather than a
-   single ellipsised line. Clamped to two lines with the full text on hover. */
+/* One quiet line of the Worker's instructions helps identify the automation without
+   turning each CRUD row into a second editor. */
 .job-card-prompt {
-    display: grid;
-    gap: 0.14rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
     min-width: 0;
-    margin-top: 0.6rem;
-}
-
-.job-card-prompt > span {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.28rem;
-    color: var(--color-text-muted);
-    font-size: 0.68rem;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-}
-
-.job-card-prompt p {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    margin: 0;
+    margin: 0.5rem 0 0;
     overflow: hidden;
-    color: var(--color-text);
-    font-size: 0.82rem;
-    line-height: 1.5;
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
+    line-height: 1.45;
+}
+
+.job-card-prompt i { flex: 0 0 auto; }
+
+.job-card-prompt span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .job-card-trigger .job-triggers {
@@ -14002,17 +14382,17 @@ body.git-guard-focus-active #app-content {
 }
 
 .job-card-actions {
-    flex-wrap: nowrap;
-    gap: 0.36rem;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.4rem;
 }
 
-/* Hold delete off from Export so the destructive action isn't a neighbouring pixel. */
-.job-card-actions [data-job-action="delete"] { margin-left: 0.4rem; }
+.job-card-actions .btn { min-height: 40px; }
 
 .job-icon-action {
     display: inline-grid;
-    width: 32px;
-    height: 32px;
+    width: 40px;
+    height: 40px;
     padding: 0;
     place-items: center;
 }
@@ -14020,16 +14400,69 @@ body.git-guard-focus-active #app-content {
 /* Enabled/disabled toggle reads by color at a glance: green = enabled,
    red = disabled. A subtle fill keeps the state visible without hover. */
 .job-toggle-action.btn-outline-success {
-    background: color-mix(in srgb, var(--color-success, #22c55e) 12%, transparent);
+    background-color: color-mix(in srgb, var(--color-success, #22c55e) 12%, var(--color-bg-base, #121212));
 }
 
 .job-toggle-action.btn-outline-danger {
-    background: color-mix(in srgb, var(--color-danger, #ef4444) 12%, transparent);
+    background-color: color-mix(in srgb, var(--color-danger, #ef4444) 12%, var(--color-bg-base, #121212));
 }
 
 .job-toggle-action i {
     font-size: 1rem;
 }
+
+.job-more {
+    position: relative;
+}
+
+.job-more > summary {
+    list-style: none;
+    cursor: pointer;
+}
+
+.job-more > summary::-webkit-details-marker { display: none; }
+
+.job-more[open] > summary {
+    border-color: var(--color-primary);
+    color: var(--color-text);
+}
+
+.job-more-menu {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    display: grid;
+    width: max-content;
+    min-width: 165px;
+    padding: 0.3rem;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background-color: var(--color-bg-elevated, #232323);
+    box-shadow: 0 12px 30px rgb(0 0 0 / 35%);
+}
+
+.job-more-menu button {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    min-height: 40px;
+    padding: 0.55rem 0.65rem;
+    border: 0;
+    border-radius: 6px;
+    background-color: var(--color-bg-elevated, #232323);
+    color: var(--color-text);
+    font-size: 0.82rem;
+    text-align: left;
+}
+
+.job-more-menu button:hover,
+.job-more-menu button:focus-visible {
+    background-color: var(--color-bg-surface-hover, #2c2c2c);
+}
+
+.job-more-menu .job-more-danger { color: var(--color-danger); }
 
 .job-provider,
 .job-state,
@@ -14039,7 +14472,7 @@ body.git-guard-focus-active #app-content {
     width: fit-content;
     border-radius: 999px;
     font-family: var(--vb-font-mono, ui-monospace, monospace);
-    font-size: 0.68rem;
+    font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -14048,10 +14481,10 @@ body.git-guard-focus-active #app-content {
 .job-provider { color: var(--color-accent); }
 .job-provider[data-provider="claude"] { color: #e58b5b; }
 .job-state,
-.job-run-status { padding: 0.24rem 0.5rem; background: color-mix(in srgb, var(--color-text-muted) 10%, transparent); color: var(--color-text-muted); }
+.job-run-status { padding: 0.24rem 0.5rem; background-color: color-mix(in srgb, var(--color-text-muted) 10%, var(--color-bg-base, #121212)); color: var(--color-text-muted); }
 .job-state[data-tone="success"],
-.job-run-status[data-tone="success"] { background: color-mix(in srgb, var(--color-success) 13%, transparent); color: var(--color-success); }
-.job-run-status[data-tone="danger"] { background: color-mix(in srgb, var(--color-danger) 13%, transparent); color: var(--color-danger); }
+.job-run-status[data-tone="success"] { background-color: color-mix(in srgb, var(--color-success) 13%, var(--color-bg-base, #121212)); color: var(--color-success); }
+.job-run-status[data-tone="danger"] { background-color: color-mix(in srgb, var(--color-danger) 13%, var(--color-bg-base, #121212)); color: var(--color-danger); }
 
 /* ── App layout & navigation (side bar / top bar) ────────────────────────────
    Two nav surfaces live in the DOM: .app-sidebar (side) and .app-subnav (top).
@@ -14468,11 +14901,11 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 }
 
 
-.job-run-status[data-tone="warning"] { background: color-mix(in srgb, var(--color-warning) 14%, transparent); color: var(--color-warning); }
-.job-run-status[data-tone="info"] { background: color-mix(in srgb, var(--color-accent) 13%, transparent); color: var(--color-accent); }
+.job-run-status[data-tone="warning"] { background-color: color-mix(in srgb, var(--color-warning) 14%, var(--color-bg-base, #121212)); color: var(--color-warning); }
+.job-run-status[data-tone="info"] { background-color: color-mix(in srgb, var(--color-accent) 13%, var(--color-bg-base, #121212)); color: var(--color-accent); }
 
-.job-triggers { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.9rem 0; }
-.jobs-trigger-chip { padding: 0.3rem 0.48rem; border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border)); border-radius: 6px; color: color-mix(in srgb, var(--color-accent) 82%, var(--color-text)); background: color-mix(in srgb, var(--color-accent) 7%, transparent); font-size: 0.74rem; }
+.job-triggers { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0; }
+.jobs-trigger-chip { padding: 0.22rem 0.44rem; border: 1px solid var(--color-border); border-radius: 5px; color: var(--color-text); background-color: var(--color-bg-surface, #1e1e1e); font-size: 0.75rem; }
 
 .jobs-empty {
     display: flex;
@@ -14483,6 +14916,7 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     padding: 1.2rem;
     border: 1px dashed color-mix(in srgb, var(--color-border) 85%, transparent);
     border-radius: 10px;
+    background-color: var(--color-bg-base, #121212);
     color: var(--color-text-muted);
 }
 
@@ -14504,27 +14938,81 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     color: var(--color-text);
-    background: color-mix(in srgb, var(--color-bg-base) 72%, transparent);
+    background-color: var(--color-bg-base, #121212);
     border: 1px solid var(--color-border);
     border-radius: 0.5rem;
 }
 
+.jobs-history-panel {
+    margin-top: 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background-color: var(--color-bg-surface, #1e1e1e);
+}
+
+.jobs-history-panel > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.9rem 1rem;
+    list-style: none;
+    color: var(--color-text);
+    cursor: pointer;
+}
+
+.jobs-history-panel > summary::-webkit-details-marker { display: none; }
+
+.jobs-history-summary-title {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+}
+
+.jobs-history-summary-title > i { color: var(--color-text-muted); }
+.jobs-history-summary-title > span { display: grid; gap: 0.12rem; }
+.jobs-history-summary-title strong { font-size: 0.86rem; }
+.jobs-history-summary-title small { color: var(--color-text-muted); font-size: 0.75rem; }
+
+.jobs-history-chevron {
+    color: var(--color-text-muted);
+    font-size: 0.76rem;
+    transition: transform 0.15s ease;
+}
+
+.jobs-history-panel[open] .jobs-history-chevron { transform: rotate(180deg); }
+
+.jobs-history-body {
+    padding: 0 1rem 1rem;
+    border-top: 1px solid var(--color-border);
+}
+
+.jobs-history-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 0;
+    color: var(--color-text-muted);
+    font-size: 0.76rem;
+}
+
 .jobs-runs {
     overflow: hidden;
-    border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
-    border-radius: 12px;
-    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background-color: var(--color-bg-base, #121212);
 }
 
 .jobs-runs-table { margin: 0; color: var(--color-text); }
-.jobs-runs-table > :not(caption) > * > * { padding: 0.78rem 0.9rem; border-color: color-mix(in srgb, var(--color-border) 52%, transparent); background: transparent; color: inherit; }
-.jobs-runs-table thead th { color: var(--color-text-muted); font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase; }
+.jobs-runs-table > :not(caption) > * > * { padding: 0.78rem 0.9rem; border-color: var(--color-border); background-color: var(--color-bg-base, #121212); color: inherit; }
+.jobs-runs-table thead th { color: var(--color-text-muted); font-size: 0.74rem; letter-spacing: 0.05em; text-transform: uppercase; }
 .jobs-runs-table td { font-size: 0.82rem; }
-.jobs-runs-table td:first-child small { display: block; color: var(--color-text-muted); font-size: 0.7rem; }
+.jobs-runs-table td:first-child small { display: block; color: var(--color-text-muted); font-size: 0.75rem; }
 /* Why a run ended, under its status pill. Clamped because ErrorMessage carries whole
    sentences and an unbounded cell would set the width of the entire table; the full
    text stays reachable through the title attribute. */
-.job-run-detail { display: block; max-width: 22ch; margin-top: 0.25rem; overflow: hidden; color: var(--color-text-muted); font-size: 0.7rem; text-overflow: ellipsis; white-space: nowrap; }
+.job-run-detail { display: block; max-width: 22ch; margin-top: 0.25rem; overflow: hidden; color: var(--color-text-muted); font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
 /* The name opens the recording, so it has to read as a link and not as bold text. */
 .job-run-link {
     padding: 0;
@@ -14558,9 +15046,9 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     padding: 0.5rem 0.7rem;
     border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
     border-radius: 8px;
-    background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+    background-color: color-mix(in srgb, var(--color-accent) 7%, var(--color-bg-elevated, #232323));
     color: var(--color-text);
-    font-size: 0.74rem;
+    font-size: 0.78rem;
 }
 
 .job-history-bulk[hidden] { display: none; }
@@ -14572,6 +15060,68 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 
 .job-history-check { width: 1%; white-space: nowrap; }
 
+/* Automation uses its own high-contrast checkbox treatment for true multi-select
+   controls. Boolean form settings use the switch control above. */
+.job-history .form-check-input,
+.job-recipe-import .form-check-input {
+    position: static;
+    float: none;
+    flex: 0 0 auto;
+    width: 1.15rem;
+    height: 1.15rem;
+    margin: 0.1rem 0 0;
+    appearance: none;
+    border: 2px solid var(--color-text-muted);
+    border-radius: 0.3rem;
+    background-color: var(--color-bg-base, #121212);
+    background-image: none;
+    cursor: pointer;
+}
+
+.job-history .form-check-input:checked,
+.job-recipe-import .form-check-input:checked {
+    border-color: var(--color-primary);
+    background-color: var(--color-primary);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='m3.5 8 3 3 6-7'/%3E%3C/svg%3E");
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 0.8rem;
+}
+
+.job-history .form-check-input:indeterminate {
+    border-color: var(--color-primary);
+    background-color: var(--color-primary);
+    background-image: linear-gradient(#fff, #fff);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 0.65rem 2px;
+}
+
+.job-history .form-check-input:focus-visible,
+.job-recipe-import .form-check-input:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+    outline-offset: 2px;
+    box-shadow: none;
+}
+
+.job-history .form-check-input:disabled,
+.job-recipe-import .form-check-input:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.job-recipe-import .form-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    margin: 0 0 0.45rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--color-border);
+    border-radius: 7px;
+    background-color: var(--color-bg-base, #121212);
+    color: var(--color-text);
+}
+
 .job-history-pagination {
     display: flex;
     align-items: center;
@@ -14579,7 +15129,7 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     gap: 1rem;
     margin-top: 0.75rem;
     color: var(--color-text-muted);
-    font-size: 0.72rem;
+    font-size: 0.76rem;
 }
 
 .job-history-pagination > div { display: flex; align-items: center; gap: 0.55rem; }
@@ -14605,40 +15155,27 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
 .job-run-watch:hover [data-watch-live],
 .job-run-watch:focus-visible [data-watch-live] { display: inline; }
 
-.job-trigger-fieldset { padding: 1rem; border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent); border-radius: 10px; }
-.job-trigger-fieldset legend { float: none; width: auto; margin: 0; padding: 0 0.35rem; color: var(--color-text); font-size: 0.86rem; font-weight: 700; }
-.job-trigger-option { display: flex; align-items: flex-start; gap: 0.65rem; padding: 0.7rem 0; cursor: pointer; }
-.job-trigger-option + .job-trigger-option { border-top: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent); }
+.job-trigger-fieldset { margin-top: 1.15rem; padding: 1.05rem 0 0; border: 0; border-top: 1px solid var(--color-border); }
+.job-trigger-fieldset legend { float: none; width: 100%; margin: 0 0 0.35rem; padding: 0; color: var(--color-text); font-size: 0.86rem; font-weight: 700; }
+.job-trigger-fieldset legend small { margin-left: 0.4rem; color: var(--color-text-muted); font-size: 0.75rem; font-weight: 500; }
+.job-trigger-option { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 0; cursor: pointer; }
+.job-trigger-option + .job-trigger-option { border-top: 1px solid var(--color-border); }
 .job-trigger-option span { display: grid; gap: 0.1rem; }
-.job-trigger-option strong { color: var(--color-text); font-size: 0.82rem; }
-.job-trigger-option small { color: var(--color-text-muted); font-size: 0.72rem; }
-.job-schedule-editor { margin: 0.3rem 0 0.65rem 1.5rem; padding: 0.85rem; border-left: 2px solid color-mix(in srgb, var(--color-accent) 45%, transparent); background: color-mix(in srgb, var(--color-accent) 4%, transparent); }
+.job-trigger-option strong { color: var(--color-text); font-size: 0.86rem; }
+.job-trigger-option small { color: var(--color-text-muted); font-size: 0.76rem; }
+.job-schedule-editor { margin: 0.15rem 0 0.65rem; padding: 0.85rem; border: 1px solid var(--color-border); border-radius: 8px; background-color: var(--color-bg-base, #121212); }
+.job-weekday-fieldset { margin: 0; padding: 0; border: 0; }
+.job-weekday-fieldset legend { float: none; width: auto; margin-bottom: 0.4rem; }
 .job-weekdays { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.job-weekdays label { display: flex; align-items: center; gap: 0.28rem; padding: 0.28rem 0.45rem; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-text-muted); font-size: 0.7rem; }
+.job-weekdays label { position: relative; cursor: pointer; }
+.job-weekdays input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.job-weekdays span { display: block; min-width: 2.75rem; padding: 0.4rem 0.52rem; border: 1px solid var(--color-border); border-radius: 6px; background-color: var(--color-bg-surface, #1e1e1e); color: var(--color-text-muted); font-size: 0.76rem; text-align: center; }
+.job-weekdays input:checked + span { border-color: var(--color-primary); background-color: var(--color-primary); color: #fff; }
+.job-weekdays input:focus-visible + span { outline: 3px solid color-mix(in srgb, var(--color-accent) 35%, transparent); outline-offset: 2px; }
 
 .job-run-detail-summary { display: grid; gap: 0.35rem; margin-bottom: 0.75rem; }
 .job-run-detail-summary > div { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .job-run-detail-summary small { overflow-wrap: anywhere; color: var(--color-text-muted); font-family: var(--vb-font-mono, ui-monospace, monospace); }
-
-/* Advanced tuck-away inside the Worker modal (workspace mode + custom args). */
-.env-advanced-settings {
-    padding: 0.75rem 0.85rem;
-    border: 1px solid color-mix(in srgb, var(--color-border) 66%, transparent);
-    border-radius: 9px;
-}
-
-.env-advanced-settings > summary {
-    color: var(--color-text);
-    font-size: 0.85rem;
-    font-weight: 700;
-    cursor: pointer;
-}
-
-.env-advanced-settings[open] > summary { margin-bottom: 0.75rem; }
-
-/* Bootstrap's .mb-3 (!important) on the tucked rows would stack a full 1rem onto
-   the box's own bottom padding when the details is open. */
-.env-advanced-settings > .mb-3:last-child { margin-bottom: 0 !important; }
 
 /* In-app confirm (utils.js confirmDialog): window.confirm is a silent no-op in the
    VS Code webview. Sits above Bootstrap modals (z-index 1055) so a confirm launched
@@ -14694,30 +15231,216 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
     }
 
     .job-card-actions {
+        justify-content: flex-start;
         padding-top: 0.7rem;
-        border-top: 1px solid color-mix(in srgb, var(--color-border) 52%, transparent);
+        border-top: 1px solid var(--color-border);
     }
 }
 
 @media (max-width: 720px) {
     .jobs-page-header { align-items: stretch; flex-direction: column; }
     .jobs-page-header .btn { width: 100%; }
-    .jobs-section-heading { align-items: flex-start; }
+    .jobs-panel { padding: 0.75rem; }
+    .jobs-section-heading { align-items: flex-start; flex-wrap: wrap; }
     .job-inline-form { padding: 1rem; }
-    .job-inline-form-header { align-items: stretch; }
+    .job-inline-form-header { align-items: flex-start; }
     .job-environment-picker-row { align-items: stretch; flex-direction: column; }
     .job-environment-picker,
     .job-environment-picker-row .btn { width: 100%; }
     .job-environment-preview > div { align-items: flex-start; flex-direction: column; }
     .job-repository-context code { flex-basis: 100%; }
     .job-inline-form-actions .btn { flex: 1 1 0; }
-    .job-card-facts { grid-template-columns: minmax(0, 1fr); }
     .job-card-topline { align-items: flex-start; }
     .job-card-title { align-items: flex-start; flex-direction: column; gap: 0.25rem; }
-    .job-card-actions .btn-primary { flex: 1 1 auto; }
-    .jobs-runs-table th:nth-child(2),
-    .jobs-runs-table td:nth-child(2),
-    .jobs-runs-table th:nth-child(5),
-    .jobs-runs-table td:nth-child(5) { display: none; }
+    .job-card-meta { align-items: flex-start; flex-direction: column; }
+    .job-card-meta > span { width: 100%; }
+    .job-card-actions .btn-primary { flex: 1 1 100%; }
+    .job-card-actions .btn:not(.btn-primary),
+    .job-card-actions .job-more { flex: 1 1 0; }
+    .job-card-actions .job-more > summary { width: 100%; }
+    .job-run-options { grid-template-columns: minmax(0, 1fr); }
+    .job-run-options > * + * { border-top: 1px solid var(--color-border); border-left: 0; }
+    .jobs-history-toolbar { align-items: flex-start; flex-direction: column; }
+    .jobs-runs-table th:nth-child(3),
+    .jobs-runs-table td:nth-child(3),
+    .jobs-runs-table th:nth-child(4),
+    .jobs-runs-table td:nth-child(4) { display: none; }
     .job-schedule-editor { margin-left: 0; }
+    .env-workspace-choices { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ==========================================================================
+   Environment Steps editor
+   Opens as a nested modal layer over the environment form (see
+   environment-steps.js), so it reuses .llm-picker-modal-layer's stacking and
+   only adds the step-row chrome here.
+
+   Every color is written with an explicit fallback: an undefined custom
+   property invalidates the whole declaration, which is the documented cause of
+   the transparent-background bug (see the note at the top of this file).
+   ========================================================================== */
+
+.env-steps-summary-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    text-align: left;
+}
+
+.env-steps-summary-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.env-steps-summary-count {
+    color: var(--color-text-muted, #9aa4b2);
+    font: 0.72rem/1.2 var(--vb-font-mono, ui-monospace, monospace);
+}
+
+.env-steps-section + .env-steps-section {
+    margin-top: 1.75rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--color-border, #2c2c2c);
+}
+
+.env-steps-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.env-steps-section-note {
+    margin: 0.35rem 0 0.85rem;
+}
+
+.env-steps-list {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.env-steps-empty {
+    padding: 0.9rem;
+    border: 1px dashed var(--color-border, #2c2c2c);
+    border-radius: 8px;
+}
+
+.env-step-row {
+    /* Local tone var switched by [data-tone], same pattern as .git-preflight-step. */
+    --step-tone: var(--color-text-muted, #9aa4b2);
+    display: grid;
+    gap: 0.6rem;
+    padding: 0.8rem;
+    border: 1px solid var(--color-border, #2c2c2c);
+    border-left: 3px solid color-mix(in srgb, var(--step-tone) 55%, transparent);
+    border-radius: 9px;
+    background: var(--color-bg-elevated, #232323);
+}
+
+.env-step-row[data-tone="success"] { --step-tone: var(--color-success, #3fb950); }
+.env-step-row[data-tone="warning"] { --step-tone: var(--color-warning, #d29922); }
+.env-step-row[data-tone="danger"] { --step-tone: var(--color-danger, #f85149); }
+
+.env-step-row.is-disabled { opacity: 0.55; }
+.env-step-row.is-dragging { opacity: 0.4; }
+
+.env-step-row.is-drag-target {
+    border-color: var(--color-primary, #4c8dff);
+    background: color-mix(in srgb, var(--color-primary, #4c8dff) 10%, var(--color-bg-elevated, #232323));
+}
+
+.env-step-row-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.env-step-drag-handle {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    color: var(--color-text-muted, #9aa4b2);
+    cursor: grab;
+}
+
+.env-step-drag-handle:focus-visible {
+    outline: 2px solid var(--color-primary, #4c8dff);
+    outline-offset: 1px;
+}
+
+.env-step-name { flex: 1 1 auto; min-width: 0; }
+
+.env-step-row-buttons {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0.3rem;
+}
+
+.env-step-command {
+    font: 0.78rem/1.5 var(--vb-font-mono, ui-monospace, monospace);
+    resize: vertical;
+}
+
+.env-step-row-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+}
+
+.env-step-row-options .form-check { margin-bottom: 0; }
+
+.env-step-timeout {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-text-muted, #9aa4b2);
+    font-size: 0.78rem;
+}
+
+.env-step-timeout input { width: 6.5rem; }
+
+.env-step-console {
+    padding: 0.65rem;
+    border: 1px solid color-mix(in srgb, var(--step-tone) 35%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--step-tone) 8%, transparent);
+}
+
+.env-step-console-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.45rem;
+    color: var(--color-text-muted, #9aa4b2);
+}
+
+.env-step-console .vca-console-state {
+    color: var(--step-tone);
+    font: 700 0.68rem/1 var(--vb-font-mono, ui-monospace, monospace);
+    text-transform: uppercase;
+}
+
+.env-step-console .vca-console-output {
+    max-height: 200px;
+    margin: 0;
+    padding: 0.6rem;
+    overflow: auto;
+    border-radius: 6px;
+    background: var(--color-bg-inset, #101010);
+    color: var(--color-text, #e6e6e6);
+    font: 0.7rem/1.5 var(--vb-font-mono, ui-monospace, monospace);
+    white-space: pre-wrap;
+}
+
+@media (max-width: 768px) {
+    .env-step-row-head { flex-wrap: wrap; }
+    .env-step-name { flex-basis: 100%; order: 3; }
+    .env-step-row-buttons { margin-left: auto; }
+    .env-step-timeout input { width: 5rem; }
 }

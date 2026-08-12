@@ -252,6 +252,29 @@ public sealed class Terminal : IAsyncDisposable
     }
 
     /// <summary>
+    /// True while a local web viewer (a <see cref="WebSocketConsumer"/>) is subscribed.
+    /// While one is attached it owns the PTY geometry: xterm.js is never told about
+    /// geometry changes it didn't request (there is no resize rebroadcast to viewers),
+    /// so a foreign resize makes it wrap frames composed for a different width —
+    /// shredded chrome + stranded cursor (TERMINAL.md "## 2026-08-10").
+    /// </summary>
+    public bool HasLocalWebViewer
+    {
+        get
+        {
+            lock (_subscriberLock)
+            {
+                foreach (var consumer in _consumers)
+                {
+                    if (consumer is WebSocketConsumer)
+                        return true;
+                }
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
     /// Write a string to the PTY stdin (encoded as UTF-8).
     /// </summary>
     public async Task WriteAsync(string input, CancellationToken ct = default)

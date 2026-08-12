@@ -44,13 +44,15 @@ test('Automation page makes automations primary and explains its active-instance
     const controller = new JobController(createApp());
     const html = controller.renderPage();
 
-    assert.match(html, /text-gradient">Automation/);
-    assert.match(html, /Automations run only while VibeRails is open/);
-    assert.match(html, /single active instance claims each run/);
-    assert.match(html, /id="jobs-list-title">Automations/);
+    assert.match(html, /<h1 class="jobs-page-title">Automation<\/h1>/);
+    assert.match(html, /VibeRails must stay open/);
+    assert.match(html, /only start while this app is running/);
+    assert.match(html, /id="jobs-list-title">Your automations/);
     assert.match(html, /Run history/);
-    // The runtime explanation is one quiet note, not the old full-width banner.
+    // Runtime behavior is a readable note, not hidden in a title tooltip.
     assert.match(html, /jobs-runtime-note/);
+    assert.match(html, /role="note"/);
+    assert.doesNotMatch(html, /text-gradient/);
     assert.doesNotMatch(html, /jobs-runtime-strip/);
     assert.doesNotMatch(html, /Run jobs while VibeRails is closed/);
     assert.doesNotMatch(html, /data-jobs-scheduler-status/);
@@ -160,11 +162,11 @@ test('Automation renderer escapes data and shows Worker, triggers, and next run'
     assert.match(list.innerHTML, /&lt;Security review&gt;/);
     assert.match(list.innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
     assert.doesNotMatch(list.innerHTML, /<script>/);
-    assert.match(list.innerHTML, />Worker</);
+    assert.match(list.innerHTML, /title="Worker"/);
     assert.match(list.innerHTML, /Every 15 min/);
     assert.match(list.innerHTML, /After successful commit/);
     assert.match(list.innerHTML, /Manual/);
-    assert.match(list.innerHTML, /Next run/);
+    assert.match(list.innerHTML, /title="Next run"/);
     assert.match(list.innerHTML, /in 12 min/);
     assert.match(list.innerHTML, /Run now/);
 });
@@ -700,6 +702,7 @@ test('Run now and enable actions call the durable Automation API with Environmen
         environmentId: 42,
         timeoutMinutes: 30,
         enabled: false,
+        launchMinimized: true,
         triggers: [{
             id: 99,
             kind: 0,
@@ -726,6 +729,7 @@ test('Run now and enable actions call the durable Automation API with Environmen
     assert.equal(app.calls[1].body.enabled, true);
     assert.equal(app.calls[1].body.environmentId, 42);
     assert.equal(app.calls[1].body.prompt, 'Review changes.');
+    assert.equal(app.calls[1].body.launchMinimized, true);
     assert.deepEqual(app.calls[1].body.triggers, [{
         kind: 0,
         scheduleKind: 1,
@@ -993,7 +997,7 @@ test('The runs table distinguishes "no project open" from "no runs yet"', () => 
     assert.match(controller.renderRunsHtml(), /Open a project/);
 });
 
-test('A long initial message is truncated in the hover tooltip but not in the card', () => {
+test('A long initial message is truncated in the hover tooltip but retained in the row markup', () => {
     const controller = new JobController(createApp());
     controller.environments = [{ id: 3, name: 'Env', cli: 'claude' }];
     controller.jobs = [{
@@ -1002,11 +1006,11 @@ test('A long initial message is truncated in the hover tooltip but not in the ca
     }];
 
     const html = controller.renderJobsListHtml();
-    const title = html.match(/<p title="([^"]*)"/)[1];
+    const title = html.match(/class="job-card-prompt" title="([^"]*)"/)[1];
 
     assert.ok(title.length < 500, `tooltip was ${title.length} chars`);
     assert.ok(title.endsWith('…'));
-    assert.match(html, new RegExp(`>${'x'.repeat(1200)}</p>`));
+    assert.match(html, new RegExp(`<span>${'x'.repeat(1200)}</span>`));
 });
 
 test('The five-second summary request is scoped to the current repository', async () => {
@@ -1040,13 +1044,13 @@ test('An automation card shows the initial message that carries its logic', () =
 
     const html = controller.renderJobsListHtml();
 
-    assert.match(html, /Initial message/);
+    assert.match(html, /class="job-card-prompt"/);
     assert.match(html, /Review the diff for &lt;script&gt;/);
     assert.doesNotMatch(html, /<script>alert/);
 
-    // An Environment with no initial message must not leave an empty labelled block behind.
+    // An Environment with no initial message must not leave an empty prompt row behind.
     controller.jobs[0].prompt = '   ';
-    assert.doesNotMatch(controller.renderJobsListHtml(), /Initial message/);
+    assert.doesNotMatch(controller.renderJobsListHtml(), /job-card-prompt/);
 });
 
 test('Retry is offered on failures but never on a run that already succeeded', () => {
@@ -1276,7 +1280,7 @@ test('A finished session-less run offers retry instead of cancel', async (t) => 
     assert.doesNotMatch(html, /data-run-cancel/);
 });
 
-test('A time limit is opt-in: unchecked sends null, checked sends the number', () => {
+test('A time limit is optional: blank sends null and a number opts in', () => {
     // The default is no limit — the run lives until its CLI exits or the user closes its window.
     const app = createApp();
     app.data = { configs: { rootPath: '/derived/current-repo' }, isInGit: true };
@@ -1290,8 +1294,7 @@ test('A time limit is opt-in: unchecked sends null, checked sends the number', (
         ['#job-trigger-schedule', { checked: false }],
         ['#job-trigger-commit', { checked: false }],
         ['#job-name', { value: 'Nightly review' }],
-        ['#job-timeout', { value: '45' }],
-        ['#job-timeout-enabled', { checked: false }],
+        ['#job-timeout', { value: '' }],
         ['#job-enabled', { checked: true }]
     ]);
     const form = {
@@ -1301,7 +1304,7 @@ test('A time limit is opt-in: unchecked sends null, checked sends the number', (
 
     assert.equal(controller.captureEditorState(form, { validate: true }).timeoutMinutes, null);
 
-    controls.get('#job-timeout-enabled').checked = true;
+    controls.get('#job-timeout').value = '45';
     assert.equal(controller.captureEditorState(form, { validate: true }).timeoutMinutes, 45);
 });
 
@@ -1373,15 +1376,12 @@ test('Recipe import confirmation discloses and escapes executable Environment co
     assert.doesNotMatch(modals[0].html, /<script>/);
 });
 
-test('The editor defaults the time-limit checkbox off and hides its input', () => {
+test('The editor keeps time limit visible and simple, with blank meaning no limit', () => {
     const source = readFileSync(modulePath, 'utf8');
 
-    assert.match(source, /id="job-timeout-enabled"/);
-    // The checkbox reflects the saved value, so an Automation with no limit renders it unchecked.
-    assert.match(source, /\$\{source\.timeoutMinutes \? 'checked' : ''\}/);
-    assert.match(source, /data-timeout-field \$\{source\.timeoutMinutes \? '' : 'hidden'\}/);
-    // The old copy promised a stop that no longer happens by default.
-    assert.doesNotMatch(source, /The run is stopped if it hasn't finished in this long/);
+    assert.match(source, /id="job-timeout"[^>]*value="\$\{source\.timeoutMinutes \|\| ''\}"[^>]*placeholder="No limit"/);
+    assert.doesNotMatch(source, /id="job-timeout-enabled"|data-timeout-field/);
+    assert.doesNotMatch(source, /job-advanced-settings/);
 });
 
 test('The editor exposes and persists the Launch minimized option', () => {
@@ -1397,7 +1397,7 @@ test('Automation frontend has no OS scheduler controls or API calls', () => {
     const html = controller.renderPage();
     const source = readFileSync(modulePath, 'utf8');
 
-    assert.match(html, /Automations run only while VibeRails is open/);
+    assert.match(html, /VibeRails must stay open/);
     assert.doesNotMatch(html, /install-scheduler|uninstall-scheduler|Task Scheduler|background task/i);
     assert.doesNotMatch(source, /\/api\/v1\/jobs\/scheduler/);
     assert.doesNotMatch(source, /renderSchedulerStatus|setSchedulerInstalled|refreshSchedulerStatus/);
@@ -1545,7 +1545,29 @@ test('Automation surfaces have a defined elevated background in every theme scop
     assert.ok(definitions.length >= 3, `expected the variable defined in all three theme scopes, found ${definitions.length}`);
 });
 
-test('The Worker modal keeps CLI and prompt primary; workspace and args are Advanced', (t) => {
+test('Automation CRUD surfaces stay opaque, including disabled rows', () => {
+    const css = readFileSync(stylePath, 'utf8');
+
+    assert.match(css, /\.jobs-panel\s*\{[^}]*background-color:\s*var\(--color-bg-surface/);
+    assert.match(css, /\.job-inline-form\s*\{[^}]*background-color:\s*var\(--color-bg-surface/);
+    assert.match(css, /\.job-card\s*\{[^}]*background-color:\s*var\(--color-bg-base/);
+    assert.match(css, /\.jobs-runs\s*\{[^}]*background-color:\s*var\(--color-bg-base/);
+    assert.match(css, /\.job-recipe-review-value\s*\{[^}]*background-color:\s*var\(--color-bg-base/);
+    assert.match(css, /\.job-history-bulk\s*\{[^}]*background-color:[^}]*var\(--color-bg-elevated/);
+    assert.doesNotMatch(css, /\.job-card\[data-enabled="false"\]\s*\{[^}]*opacity:/);
+});
+
+test('Automation boolean and multi-select controls replace native checkbox styling', () => {
+    const css = readFileSync(stylePath, 'utf8');
+
+    assert.match(css, /\.job-switch-input,\s*\.env-worker-form \.form-switch \.form-check-input\s*\{[^}]*appearance:\s*none/);
+    assert.match(css, /\.job-history \.form-check-input,\s*\.job-recipe-import \.form-check-input\s*\{[^}]*appearance:\s*none/);
+    assert.match(css, /\.job-weekdays input\s*\{[^}]*opacity:\s*0/);
+    assert.match(css, /\.env-workspace-choice > input\s*\{[^}]*clip:\s*rect/);
+    assert.match(css, /\.env-workspace-choice > input:checked \+ \.env-workspace-choice-card\s*\{/);
+});
+
+test('The Worker modal is one plain form with no two-field Advanced disclosure', (t) => {
     const originalDocument = globalThis.document;
     const originalWindow = globalThis.window;
     t.after(() => {
@@ -1574,18 +1596,15 @@ test('The Worker modal keeps CLI and prompt primary; workspace and args are Adva
     // default, so the name input must exist and carry the prefill.
     assert.match(workerHtml, /id="env-name"[^>]*value="Doc drift"/);
     assert.match(workerHtml, /Worker Name/);
-
-    // "Where it runs" and raw arguments still exist for Workers, but collapsed out
-    // of the main flow — the visible form is CLI + model + initial message. Assert
-    // CONTAINMENT (inside the details, before its close tag), not mere ordering.
-    const detailsStart = workerHtml.indexOf('<details class="env-advanced-settings');
-    const detailsEnd = workerHtml.indexOf('</details>');
-    assert.ok(detailsStart !== -1 && detailsEnd > detailsStart);
-    const detailsBlock = workerHtml.slice(detailsStart, detailsEnd);
-    assert.match(detailsBlock, /Where it runs/);
-    assert.match(detailsBlock, /Custom Arguments/);
-    // Collapsed by default: the details must not carry an open attribute.
-    assert.doesNotMatch(workerHtml, /<details[^>]*\sopen[\s>]/);
+    assert.match(workerHtml, /id="env-form" class="env-worker-form"/);
+    assert.match(workerHtml, /<legend class="form-label">Workspace<\/legend>/);
+    assert.match(workerHtml, /id="env-workspace-project"[^>]*value="0"[^>]*checked/);
+    assert.match(workerHtml, /id="env-workspace-per-run"[^>]*value="2"/);
+    assert.match(workerHtml, /Run in the project directory on whatever Git branch is checked out when the automation starts/);
+    assert.match(workerHtml, /Changes from one run do not carry into the next/);
+    assert.doesNotMatch(workerHtml, /<select[^>]*id="env-workspace-mode"|Its own clone/);
+    assert.match(workerHtml, />Extra CLI arguments<\/label>/);
+    assert.doesNotMatch(workerHtml, /env-advanced-settings|<summary>Advanced<\/summary>/);
 
     let environmentHtml = '';
     const environmentController = createEnvironmentControllerForForm({
@@ -1594,4 +1613,6 @@ test('The Worker modal keeps CLI and prompt primary; workspace and args are Adva
     });
     environmentController.showEnvironmentForm({ mode: 'create', onChanged() {} });
     assert.doesNotMatch(environmentHtml, /env-advanced-settings/);
+    assert.match(environmentHtml, /<select[^>]*id="env-workspace-mode"/);
+    assert.match(environmentHtml, /Its own clone/);
 });

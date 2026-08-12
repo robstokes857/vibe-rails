@@ -700,6 +700,13 @@ public class TerminalSessionService : ITerminalSessionService
                     exitCode: exitCode,
                     closeReason: "Terminal session exited",
                     requireExternalOwnership: false);
+
+                // The browser-tab path's end of a session. Deliberately outside
+                // ShutdownActiveSessionAsync: that method holds s_lifecycleGate, and a post-exit
+                // step can legitimately run for minutes. No-ops unless the environment registered
+                // post-exit steps, and is idempotent with TerminalRunner.CompleteSessionAsync.
+                await _runner.RunPostStepsAsync(sessionId, exitCode, CancellationToken.None);
+
                 Log.Information("[Terminal] Session exit cleanup complete. sessionId={SessionId}", sessionId);
             }
             catch (Exception ex)

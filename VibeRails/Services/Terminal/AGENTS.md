@@ -65,6 +65,16 @@ Validation:
 - resize range: cols `10..1000`, rows `5..500`
 - disconnect reasons are sanitized and truncated to 120 chars before sending
 
+Authorization:
+- Every remote-triggered handler in `TerminalRunner` — input, replay, resize, `__cmd__` — is gated
+  behind the shared `IsRemoteViewerAuthorized()` check (held under `takeoverGate`). While a PIN is
+  configured and unverified, inbound frames are dropped and the viewer only receives `__LOCKED__`.
+  Output fan-out is separately gated by `RemoteOutputConsumer`'s `canForward`.
+- Any NEW handler wired to a `RemoteTerminalConnection` event MUST take `takeoverGate` and consult
+  `IsRemoteViewerAuthorized()` before acting. A locked remote viewer must not be able to cause any
+  effect on the session: this is a web-facing terminal, so every capability leak here is at best a
+  stepping stone to RCE.
+
 ## Component Responsibilities
 
 ### `Terminal.cs`
@@ -120,6 +130,7 @@ gate state); the Claude/Codex proxy URL/auth env vars are built inside `CommandS
 
 `CreateSessionAsync(...)`
 1. Creates DB/logging session via `ITerminalStateService.CreateSessionAsync`.
+1b. **Runs the environment's pre-launch Environment Steps** (see below).
 2. Spawns PTY via `Terminal.CreateAsync`.
 3. Subscribes `DbLoggingConsumer`.
 4. If remote access is enabled and API key exists:
@@ -137,6 +148,52 @@ gate state); the Claude/Codex proxy URL/auth env vars are built inside `CommandS
 `RunCliWithWebAsync(...)`
 - Same as `RunCliAsync` plus external registration for local web viewer access.
 - If remote connection exists, remote takeover disconnects local viewer on replay or remote input activity.
+
+#### Environment Steps hook points
+
+All three launch paths (browser tab, native launch, Job/Worker run) converge on
+`CreateSessionAsync`, so both hooks live in this one file. The runner itself is
+`IEnvironmentStepRunner` (`Services/Environments/Steps/`), which is thin on top of `ICliWrapper`
+(`Services/Cli/AGENTS.md`).
+
+**Pre-launch** — between `PublishSessionStart` and `Terminal.CreateAsync`. It has to be *before*
+`CreateAsync`, not after: on the Job path `spawnCliDirectly` makes the PTY process **be** the CLI,
+so there is no "PTY exists, LLM hasn't started yet" window to slot the steps into. A non-zero exit
+throws `EnvironmentStepFailedException`, which lands in this method's existing startup-rollback
+`catch` — that already disposes the remote connection and the terminal and closes the DB session,
+so there is nothing new to unwind. The environment id is resolved from `envName` here, exact
+`(name, LLM)` first with a name-only fallback; a lookup failure means "no steps", never a failed
+launch.
+
+**Post-exit** — deliberately **not** `terminal.Exited`. That is a synchronous
+`EventHandler<int>`, and on the Job path `JobRunner` finishes and the process exits immediately
+after it fires, so async work started there would be killed mid-flight. Instead
+`CreateSessionAsync` stashes `(environmentId, envName, workDir)` in a **static**
+`ConcurrentDictionary` keyed by session id — static because the TerminalRunner instance that ends
+a session is frequently not the one that created it (it is scoped, and the browser-tab path
+finalizes from a background task after its request scope is gone). `RunPostStepsAsync(sessionId,
+exitCode, ct)` consumes the entry with `TryRemove`, so it is idempotent, and is awaited from
+exactly the two places that own a session's end:
+
+- `TerminalRunner.CompleteSessionAsync` — the CLI and Job paths. Runs **before** the session is
+  stamped complete, so a Worker's "the agent finished" steps land before the run is marked done.
+- `TerminalSessionService.ScheduleExitCleanup` — the browser-tab path. Called from that method's
+  existing background `Task.Run`, **after** `ShutdownActiveSessionAsync` returns, because that
+  method holds `s_lifecycleGate` and a post-exit step can legitimately run for minutes.
+
+The entry is also removed in the rollback `catch`, so a launch that never started cannot fire its
+post-exit steps when the DB session is closed.
+
+Two things that will bite if you change them:
+
+- `TerminalTabHostService.StartSessionAsync` proxies to the tab child over
+  `IHttpClientFactory.CreateClient()`, whose default timeout is 100 s. That call now passes
+  `Timeout.InfiniteTimeSpan`: a pre-step chain longer than 100 s would otherwise fail the tab
+  start even though the steps succeeded. The real bound is each step's own `TimeoutSeconds`, plus
+  the browser's `RequestAborted`.
+- The user can see each step's window, but not *why the tab never started*. That is what the
+  `environment_step_failed` `AppEvent` is for; `RelayChildAppEventsAsync` already carries it from
+  a tab child to the parent and on to the browser, where `terminal-multitab.js` raises the toast.
 
 ### `TerminalSessionService.cs`
 Owns active local terminal session state for `/api/v1/terminal/*`.
@@ -411,4 +468,4 @@ These issues regressed in production-like usage and should be treated as guardra
 
 ---
 
-*Last checked: 2026-08-06T17:22:10Z by opencode (glm-5.2)*
+*Last checked: 2026-08-11T00:00:00Z by claude (opus-5)*

@@ -579,6 +579,182 @@ namespace VibeRails.DB
 
         #endregion
 
+        #region EnvironmentStep CRUD
+
+        public async Task<List<EnvironmentStep>> GetStepsForEnvironmentAsync(
+            int environmentId,
+            CancellationToken cancellationToken = default)
+        {
+            var steps = new List<EnvironmentStep>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectStepsByEnvironmentId;
+            cmd.Parameters.AddWithValue("$environmentId", environmentId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                steps.Add(ReadEnvironmentStep(reader));
+            }
+
+            return steps;
+        }
+
+        /// <summary>
+        /// One query for every listed environment's steps, indexed by owner — the list endpoint
+        /// renders a step count per row and must not pay an N+1 for it.
+        /// </summary>
+        public async Task<Dictionary<int, List<EnvironmentStep>>> GetStepsForEnvironmentsAsync(
+            IReadOnlyList<int> environmentIds,
+            CancellationToken cancellationToken = default)
+        {
+            var result = new Dictionary<int, List<EnvironmentStep>>();
+            if (environmentIds.Count == 0)
+            {
+                return result;
+            }
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+
+            // Parameterized IN list rather than an interpolated one. These ids come from rows we
+            // just read, but the habit is what keeps the next caller safe.
+            var placeholders = new string[environmentIds.Count];
+            for (var i = 0; i < environmentIds.Count; i++)
+            {
+                placeholders[i] = $"$id{i}";
+                cmd.Parameters.AddWithValue($"$id{i}", environmentIds[i]);
+            }
+
+            cmd.CommandText = string.Format(
+                SqlStrings.SelectStepsByEnvironmentIdsTemplate,
+                string.Join(", ", placeholders));
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var step = ReadEnvironmentStep(reader);
+                if (!result.TryGetValue(step.EnvironmentId, out var list))
+                {
+                    list = [];
+                    result[step.EnvironmentId] = list;
+                }
+
+                list.Add(step);
+            }
+
+            return result;
+        }
+
+        public async Task<List<EnvironmentStep>> GetEnabledStepsAsync(
+            int environmentId,
+            EnvironmentStepPhase phase,
+            CancellationToken cancellationToken = default)
+        {
+            var steps = new List<EnvironmentStep>();
+
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectEnabledStepsByEnvironmentIdAndPhase;
+            cmd.Parameters.AddWithValue("$environmentId", environmentId);
+            cmd.Parameters.AddWithValue("$phase", (int)phase);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                steps.Add(ReadEnvironmentStep(reader));
+            }
+
+            return steps;
+        }
+
+        /// <summary>
+        /// Cheap "is this phase worth wiring up at all" probe. The launch path uses it to decide
+        /// whether to remember a session's post-step context, so it runs on every session created.
+        /// </summary>
+        public async Task<bool> HasEnabledStepsAsync(
+            int environmentId,
+            EnvironmentStepPhase phase,
+            CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.CountStepsByEnvironmentIdAndPhase;
+            cmd.Parameters.AddWithValue("$environmentId", environmentId);
+            cmd.Parameters.AddWithValue("$phase", (int)phase);
+
+            var count = await cmd.ExecuteScalarAsync(cancellationToken);
+            return Convert.ToInt64(count) > 0;
+        }
+
+        /// <summary>
+        /// Replaces an environment's entire step list in one transaction, stamping Position from
+        /// array order. Same shape as JobStore.ReplaceTriggersAsync: BEGIN IMMEDIATE, delete, then
+        /// re-insert, so a concurrent editor cannot interleave with a partially applied list.
+        /// </summary>
+        public async Task ReplaceStepsAsync(
+            int environmentId,
+            IReadOnlyList<EnvironmentStep> steps,
+            CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable,
+                cancellationToken);
+
+            await using (var delete = connection.CreateCommand())
+            {
+                delete.Transaction = transaction;
+                delete.CommandText = SqlStrings.DeleteStepsByEnvironmentId;
+                delete.Parameters.AddWithValue("$environmentId", environmentId);
+                await delete.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            // Position is per (EnvironmentId, Phase), so each phase counts from zero independently.
+            var positions = new Dictionary<EnvironmentStepPhase, int>();
+            var now = DateTime.UtcNow.ToString("O");
+
+            foreach (var step in steps)
+            {
+                positions.TryGetValue(step.Phase, out var position);
+                positions[step.Phase] = position + 1;
+
+                await using var insert = connection.CreateCommand();
+                insert.Transaction = transaction;
+                insert.CommandText = SqlStrings.InsertEnvironmentStep;
+                insert.Parameters.AddWithValue("$environmentId", environmentId);
+                insert.Parameters.AddWithValue("$phase", (int)step.Phase);
+                insert.Parameters.AddWithValue("$position", position);
+                insert.Parameters.AddWithValue("$name", step.Name ?? "");
+                insert.Parameters.AddWithValue("$command", step.Command ?? "");
+                insert.Parameters.AddWithValue("$startMinimized", step.StartMinimized ? 1 : 0);
+                insert.Parameters.AddWithValue("$timeoutSeconds", step.TimeoutSeconds);
+                insert.Parameters.AddWithValue("$enabled", step.Enabled ? 1 : 0);
+                // A replace rewrites every row, so CreatedUTC is preserved when the caller carried
+                // it over from the previous read and stamped fresh otherwise.
+                insert.Parameters.AddWithValue(
+                    "$createdUTC",
+                    step.CreatedUTC == default ? now : step.CreatedUTC.ToString("O"));
+                insert.Parameters.AddWithValue("$updatedUTC", now);
+                await insert.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        #endregion
+
         #region Agent Metadata
 
         public async Task<string?> GetAgentCustomNameAsync(string path, CancellationToken cancellationToken = default)
@@ -963,6 +1139,26 @@ namespace VibeRails.DB
                 SourceBranch = reader.IsDBNull(7) ? null : reader.GetString(7),
                 CreatedUTC = DateTime.Parse(reader.GetString(8), null, System.Globalization.DateTimeStyles.RoundtripKind),
                 EnvironmentId = reader.IsDBNull(9) ? null : reader.GetInt32(9)
+            };
+        }
+
+        // Positional, like every other mapper here: always APPEND to the SELECT lists in
+        // SqlStrings, never insert into the middle.
+        private static EnvironmentStep ReadEnvironmentStep(SqliteDataReader reader)
+        {
+            return new EnvironmentStep
+            {
+                Id = reader.GetInt32(0),
+                EnvironmentId = reader.GetInt32(1),
+                Phase = (EnvironmentStepPhase)reader.GetInt32(2),
+                Position = reader.GetInt32(3),
+                Name = reader.GetString(4),
+                Command = reader.GetString(5),
+                StartMinimized = reader.GetBoolean(6),
+                TimeoutSeconds = reader.GetInt32(7),
+                Enabled = reader.GetBoolean(8),
+                CreatedUTC = DateTime.Parse(reader.GetString(9), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                UpdatedUTC = DateTime.Parse(reader.GetString(10), null, System.Globalization.DateTimeStyles.RoundtripKind)
             };
         }
 

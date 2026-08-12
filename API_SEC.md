@@ -1,6 +1,6 @@
 # API authentication coverage
 
-Audit date: 2026-08-07
+Audit date: 2026-08-11
 
 Jobs inventory re-checked: 2026-08-03 (three run-history routes added; see § 3).
 
@@ -10,6 +10,10 @@ LLM proxy posture re-audited: 2026-08-05 (`/llm/openai` and `/llm/zai` removed f
 
 Route inventory re-checked: 2026-08-07 (five authenticated HTTP-relay proof mappings
 added; see § 3).
+
+Route inventory and authentication coverage re-checked: 2026-08-11 (no endpoint
+additions or removals; the 151 mapped surfaces and frozen three-case middleware bypass
+remain unchanged).
 
 Scope: the current working tree, including uncommitted changes.
 

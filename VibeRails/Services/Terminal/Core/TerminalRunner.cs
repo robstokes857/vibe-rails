@@ -1,6 +1,11 @@
+using System.Collections.Concurrent;
 using Serilog;
+using VibeRails.DB;
+using VibeRails.DTOs;
+using VibeRails.Interfaces;
 using VibeRails.Services.Terminal.Consumers;
 using VibeRails.Services.AgentTools;
+using VibeRails.Services.Environments.Steps;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmProxy;
 
@@ -11,6 +16,19 @@ namespace VibeRails.Services.Terminal;
 public class TerminalRunner
 {
     private static int s_emergencyShutdownRequested;
+
+    /// <summary>
+    /// What a finished session needs in order to run its post-exit steps. Static because the
+    /// instance that ends a session is frequently not the instance that created it — TerminalRunner
+    /// is scoped, and the browser-tab path finalizes from a background task long after its request
+    /// scope is gone. Same reasoning as <see cref="TerminalResizeCoordinator"/>'s static state.
+    ///
+    /// Only populated when the environment actually has enabled post-exit steps, so an ordinary
+    /// session adds nothing to it.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, PostStepContext> s_postStepContexts = new();
+
+    private sealed record PostStepContext(int EnvironmentId, string? EnvironmentName, string WorkingDirectory);
 
     /// <summary>
     /// How often the native console's geometry is re-read while a CLI session runs. Matches the
@@ -24,6 +42,9 @@ public class TerminalRunner
     private readonly ILocalToolApiContext _toolApiContext;
     private readonly ILlmProxySessionState _llmProxySessionState;
     private readonly IAutomationConsumer _automationConsumer;
+    private readonly IRepository _repository;
+    private readonly IEnvironmentStepRunner _stepRunner;
+    private readonly IAppEventBus _appEventBus;
     private readonly IHostApplicationLifetime? _appLifetime;
 
     public TerminalRunner(
@@ -32,6 +53,9 @@ public class TerminalRunner
         ILocalToolApiContext toolApiContext,
         ILlmProxySessionState llmProxySessionState,
         IAutomationConsumer automationConsumer,
+        IRepository repository,
+        IEnvironmentStepRunner stepRunner,
+        IAppEventBus appEventBus,
         IHostApplicationLifetime? appLifetime = null)
     {
         _stateService = stateService;
@@ -39,6 +63,9 @@ public class TerminalRunner
         _toolApiContext = toolApiContext;
         _llmProxySessionState = llmProxySessionState;
         _automationConsumer = automationConsumer;
+        _repository = repository;
+        _stepRunner = stepRunner;
+        _appEventBus = appEventBus;
         _appLifetime = appLifetime;
     }
 
@@ -104,6 +131,37 @@ public class TerminalRunner
                 preparedSession.Environment[kvp.Key] = kvp.Value;
             }
             _stateService.PublishSessionStart(sessionId, LlmParser.ToWireName(llm), workDir, envName, preparedSession.SetupCommands, preparedSession.LaunchCommand);
+
+            // Environment Steps run here — after the session row exists (so a failure is recorded
+            // against a real session) and BEFORE Terminal.CreateAsync. It has to be before rather
+            // than after: on the Job path spawnCliDirectly makes the PTY process *be* the CLI, so
+            // there is no "PTY exists, LLM hasn't started yet" window to slot them into.
+            //
+            // workDir is the already-workspace-resolved directory, so a Persistent/PerRun
+            // environment runs its steps inside the clone rather than the project root.
+            var environmentId = await ResolveEnvironmentIdAsync(llm, envName, ct);
+            if (environmentId is int preStepEnvId)
+            {
+                var preSteps = await _stepRunner.RunPhaseAsync(
+                    preStepEnvId,
+                    EnvironmentStepPhase.PreLaunch,
+                    workDir,
+                    cancellationToken: ct);
+
+                if (!preSteps.Success)
+                {
+                    PublishStepFailure(sessionId, envName, EnvironmentStepPhase.PreLaunch, preSteps);
+                    throw new EnvironmentStepFailedException(preSteps, envName);
+                }
+
+                // Remembered only when there is something to run, and consumed exactly once by
+                // RunPostStepsAsync. Registered after the pre-steps pass so an aborted launch never
+                // leaves an entry behind (the rollback catch clears it either way).
+                if (await _repository.HasEnabledStepsAsync(preStepEnvId, EnvironmentStepPhase.PostExit, ct))
+                {
+                    s_postStepContexts[sessionId] = new PostStepContext(preStepEnvId, envName, workDir);
+                }
+            }
 
             // A Job's PTY runs the CLI itself rather than an interactive shell we type into. The run
             // is over when the CLI exits, and a shell would simply return to its prompt — keeping
@@ -222,6 +280,21 @@ public class TerminalRunner
                         RequestEmergencyShutdown("3 failed pins.. Killing app.");
                     }
 
+                    // Single authorization gate for every remote-triggered handler.
+                    // Call only while holding takeoverGate. Re-reads RemoteConfig each
+                    // time (a PIN can be configured or cleared mid-session) and opens
+                    // the no-PIN fast path as a side effect. Anything a remote frame
+                    // can cause — input, replay, resize, __cmd__ — must pass this
+                    // first: a locked viewer's frames are dropped, never acted on.
+                    bool IsRemoteViewerAuthorized()
+                    {
+                        var pinRequired = RemoteConfig.IsPinConfigured;
+                        if (!pinRequired)
+                            System.Threading.Volatile.Write(ref remoteViewerAuthorized, 1);
+
+                        return System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 1;
+                    }
+
                     async Task HandleRemoteInputAsync(byte[] bytes)
                     {
                         try
@@ -229,11 +302,7 @@ public class TerminalRunner
                             await takeoverGate.WaitAsync(CancellationToken.None);
                             try
                             {
-                                var pinRequired = RemoteConfig.IsPinConfigured;
-                                if (!pinRequired)
-                                    System.Threading.Volatile.Write(ref remoteViewerAuthorized, 1);
-
-                                if (pinRequired && System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 0)
+                                if (!IsRemoteViewerAuthorized())
                                 {
                                     var text = System.Text.Encoding.UTF8.GetString(bytes).Trim();
                                     if (text.StartsWith(TerminalControlProtocol.PinResponse, StringComparison.Ordinal))
@@ -313,14 +382,15 @@ public class TerminalRunner
                     {
                         try
                         {
+                            // A replay request is the "a remote viewer attached / woke up" marker —
+                            // logged unconditionally for the same reason as the resize request above.
+                            Log.Information(
+                                "[Remote] Replay requested by remote viewer for session {SessionId}",
+                                sessionId);
                             await takeoverGate.WaitAsync(CancellationToken.None);
                             try
                             {
-                                var pinRequired = RemoteConfig.IsPinConfigured;
-                                if (!pinRequired)
-                                    System.Threading.Volatile.Write(ref remoteViewerAuthorized, 1);
-
-                                if (pinRequired && System.Threading.Volatile.Read(ref remoteViewerAuthorized) == 0)
+                                if (!IsRemoteViewerAuthorized())
                                 {
                                     await SendLockedAsync();
                                     return;
@@ -349,9 +419,31 @@ public class TerminalRunner
                     {
                         try
                         {
+                            // Log every remote resize request unconditionally — before the auth
+                            // check, the same-size early-return, and the local-viewer authority
+                            // gate, all of which can swallow it silently. Session b92fb476
+                            // (TERMINAL.md "## 2026-08-10") was resized over this path with zero
+                            // log evidence; "did anything remote touch this session" must be
+                            // answerable from the log alone.
+                            Log.Information(
+                                "[Remote] Resize request from remote viewer: {Cols}x{Rows} for session {SessionId}",
+                                cols, rows, sessionId);
                             await takeoverGate.WaitAsync(CancellationToken.None);
                             try
                             {
+                                // Resize reaches the real PTY (reflow, and the child sees
+                                // the new dimensions) just like input does, so it rides
+                                // the same authorization gate.
+                                if (!IsRemoteViewerAuthorized())
+                                {
+                                    Log.Warning(
+                                        "[Remote] Dropped resize from unauthorized viewer ({Cols}x{Rows})",
+                                        cols,
+                                        rows);
+                                    await SendLockedAsync();
+                                    return;
+                                }
+
                                 TerminalResizeCoordinator.ApplyResize(
                                     terminal,
                                     _stateService,
@@ -368,6 +460,37 @@ public class TerminalRunner
                         catch (Exception ex)
                         {
                             Log.Error(ex, "[Remote] Failed to resize PTY to {Cols}x{Rows}", cols, rows);
+                        }
+                    }
+
+                    async Task HandleRemoteCommandAsync(string command, string? payload)
+                    {
+                        try
+                        {
+                            await takeoverGate.WaitAsync(CancellationToken.None);
+                            try
+                            {
+                                // __cmd__ frames feed session activity state and the
+                                // ITerminalIoObserver hook pipeline — same trust boundary
+                                // as input, so same gate. The command/payload are NOT
+                                // logged here: they're attacker-controlled while locked.
+                                if (!IsRemoteViewerAuthorized())
+                                {
+                                    Log.Warning("[Remote] Dropped command from unauthorized viewer");
+                                    await SendLockedAsync();
+                                    return;
+                                }
+
+                                _stateService.RecordRemoteCommand(sessionId, command, payload, TerminalIoSource.RemoteWebUi);
+                            }
+                            finally
+                            {
+                                takeoverGate.Release();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error(ex, "[Remote] Failed to handle custom command {Command}", command);
                         }
                     }
 
@@ -445,16 +568,7 @@ public class TerminalRunner
                     remoteConn.OnResizeRequested += (cols, rows) =>
                         _ = HandleRemoteResizeAsync(cols, rows);
                     remoteConn.OnCommandReceived += (command, payload) =>
-                    {
-                        try
-                        {
-                            _stateService.RecordRemoteCommand(sessionId, command, payload, TerminalIoSource.RemoteWebUi);
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Error(ex, "[Remote] Failed to handle custom command {Command}", command);
-                        }
-                    };
+                        _ = HandleRemoteCommandAsync(command, payload);
                     remoteConn.OnReplayRequested += () =>
                     {
                         _ = HandleRemoteReplayRequestAsync();
@@ -490,6 +604,10 @@ public class TerminalRunner
         }
         catch
         {
+            // The session never started, so its post-exit steps must not fire when the DB session
+            // is closed a few lines below.
+            s_postStepContexts.TryRemove(sessionId, out _);
+
             if (activeRemoteConn != null)
             {
                 try
@@ -531,7 +649,109 @@ public class TerminalRunner
     public async Task CompleteSessionAsync(string sessionId, int exitCode)
     {
         TerminalResizeCoordinator.ClearSession(sessionId);
+        // Before the session is stamped complete: on the Job path this is the last thing that runs
+        // inside the run, so "the agent finished" steps must land before the run is marked done.
+        await RunPostStepsAsync(sessionId, exitCode, CancellationToken.None);
         await _stateService.CompleteSessionAsync(sessionId, exitCode);
+    }
+
+    /// <summary>
+    /// Runs the environment's post-exit steps for a session that has ended, if it registered any.
+    /// Idempotent: the context is removed on the first call, so the two callers that own a
+    /// session's end can both call it without double-firing.
+    ///
+    /// Deliberately NOT hung off <c>terminal.Exited</c>. That is a synchronous
+    /// <c>EventHandler&lt;int&gt;</c>, and on the Job path JobRunner finishes and the process exits
+    /// immediately after it fires — async work started there would be killed mid-flight.
+    /// </summary>
+    public async Task RunPostStepsAsync(string sessionId, int exitCode, CancellationToken ct = default)
+    {
+        if (!s_postStepContexts.TryRemove(sessionId, out var context))
+            return;
+
+        Log.Information(
+            "[Steps] Running post-exit steps for session {SessionId} (environment {EnvironmentId}, exit code {ExitCode})",
+            sessionId,
+            context.EnvironmentId,
+            exitCode);
+
+        try
+        {
+            var summary = await _stepRunner.RunPhaseAsync(
+                context.EnvironmentId,
+                EnvironmentStepPhase.PostExit,
+                context.WorkingDirectory,
+                cancellationToken: ct);
+
+            if (!summary.Success)
+            {
+                // Nothing is left to abort — the session is already over — so a failed post-step is
+                // reported and nothing more. The step's own window stays open with the error.
+                PublishStepFailure(sessionId, context.EnvironmentName, EnvironmentStepPhase.PostExit, summary);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[Steps] Post-exit steps failed for session {SessionId}", sessionId);
+        }
+    }
+
+    /// <summary>
+    /// CreateSessionAsync is handed an environment <em>name</em>, so the id the steps are keyed by
+    /// has to be resolved here. The exact (name, LLM) unique key first; a name-only fallback covers
+    /// launches that name an environment belonging to a different CLI row, which is what every
+    /// other environment lookup in the app does.
+    /// </summary>
+    private async Task<int?> ResolveEnvironmentIdAsync(LLM llm, string? envName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(envName))
+            return null;
+
+        try
+        {
+            var environment = await _repository.GetEnvironmentByNameAndLlmAsync(envName, llm, ct)
+                ?? await _repository.FindEnvironmentByNameAsync(envName, ct);
+            return environment?.Id;
+        }
+        catch (Exception ex)
+        {
+            // A launch must not die because the steps lookup did. No id means no steps, which is
+            // exactly the behaviour every environment had before steps existed.
+            Log.Warning(ex, "[Steps] Could not resolve environment '{EnvironmentName}' for step lookup", envName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Every step already opens a visible window, so the user can see what happened. What they
+    /// cannot see is why the tab never started — that is what this event is for. It rides
+    /// IAppEventBus, which TerminalTabHostService already relays from tab children to the parent
+    /// and on to the browser.
+    /// </summary>
+    private void PublishStepFailure(
+        string sessionId,
+        string? environmentName,
+        EnvironmentStepPhase phase,
+        StepRunSummary summary)
+    {
+        try
+        {
+            _appEventBus.Publish(
+                "environment_step_failed",
+                new EnvironmentStepFailedPayload(
+                    sessionId,
+                    environmentName,
+                    (int)phase,
+                    summary.FailedStep?.DisplayName ?? "(unknown step)",
+                    summary.FailedResult?.ExitCode ?? -1,
+                    summary.FailedResult?.TimedOut ?? false,
+                    summary.FailureMessage),
+                AppJsonSerializerContext.Default.EnvironmentStepFailedPayload);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[Steps] Could not publish the step-failure event for session {SessionId}", sessionId);
+        }
     }
 
     // TODO: re-enable once the interactive alerting layer is in place to notify
