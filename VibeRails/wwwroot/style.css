@@ -15280,6 +15280,22 @@ html.sidebar-collapsed .app-sidebar .nav-exit-btn-sm .nav-label {
    the transparent-background bug (see the note at the top of this file).
    ========================================================================== */
 
+/* The editor opens above the environment form's own modal, which stays mounted so Cancel can
+   restore focus to the button that opened this. */
+.env-steps-modal-layer > .env-steps-modal { z-index: 1070; }
+.env-steps-modal-layer > .env-steps-modal-backdrop { z-index: 1065; }
+
+/* The editor's <form> wraps .modal-body + .modal-footer inside the flex-column .modal-content,
+   which breaks modal-dialog-scrollable: the form is a flex item with min-height: auto, so it
+   refuses to shrink and a long step list gets clipped by .modal-content's overflow: hidden
+   instead of scrolling. Extend the flex chain through the form so .modal-body's overflow-y: auto
+   works again. Same break, and the same fix, as .llm-picker-customization-modal's form. */
+.env-steps-modal [data-env-steps-form] {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
 .env-steps-summary-button {
     display: flex;
     align-items: center;

@@ -256,6 +256,40 @@ test.describe('Environment Steps editor', () => {
         await expect(page.locator('.env-steps-modal')).toBeVisible();
     });
 
+    test('a long step list scrolls inside the modal body instead of running off screen', async ({ page }) => {
+        await installStatefulApi(page);
+        await page.setViewportSize({ width: 1280, height: 700 });
+        await openEnvironments(page);
+        await openStepsEditor(page);
+
+        // Enough rows to overflow any reasonable viewport.
+        for (let index = 0; index < 5; index++) {
+            await page.locator('[data-env-steps-add="0"]').click();
+        }
+        await expect(page.locator('[data-env-steps-section="0"] .env-step-row')).toHaveCount(6);
+
+        const body = page.locator('.env-steps-modal .modal-body');
+        const metrics = await body.evaluate(element => ({
+            scrollHeight: element.scrollHeight,
+            clientHeight: element.clientHeight,
+            overflowY: getComputedStyle(element).overflowY
+        }));
+
+        // The <form> wrapping body + footer is a flex item with min-height: auto; without the
+        // flex-chain rule it refuses to shrink and .modal-content clips the list with no
+        // scrollbar anywhere.
+        expect(metrics.overflowY).toBe('auto');
+        expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+
+        await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
+        expect(await body.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+
+        // And the dialog itself stays inside the viewport, so the footer buttons remain reachable.
+        const dialog = await page.locator('.env-steps-modal .modal-content').boundingBox();
+        expect(dialog.y + dialog.height).toBeLessThanOrEqual(700);
+        await expect(page.locator('[data-env-steps-action="save"]')).toBeInViewport();
+    });
+
     test('a step with no command blocks Done instead of saving a broken list', async ({ page }) => {
         await installStatefulApi(page);
         await openEnvironments(page);
