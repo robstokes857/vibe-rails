@@ -54,6 +54,32 @@ namespace VibeRails.DB
         // instead of failing startup.
         public const string CreateEnvironmentsNameNoCaseUniqueIndex = "CREATE UNIQUE INDEX IF NOT EXISTS idx_environments_name_nocase_llm ON Environments(CustomName COLLATE NOCASE, LLM)";
 
+        // EnvironmentSteps Table — ordered shell commands run before an environment's LLM launches
+        // (Phase 0) or after its PTY exits (Phase 1). Unlike PreparedTerminalSession.SetupCommands
+        // these are user-authored, individually waited on, and a failed pre-step aborts the launch.
+        //
+        // ON DELETE CASCADE rather than the FK-less orphan pattern Sandboxes uses: a step is part of
+        // its environment and owns no filesystem resource, so there is no multi-GB directory delete
+        // to keep out of the delete transaction. PRAGMA foreign_keys=ON is set at Repository.cs:53-63.
+        public const string CreateEnvironmentStepsTable = """
+            CREATE TABLE IF NOT EXISTS EnvironmentSteps (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                EnvironmentId INTEGER NOT NULL,
+                Phase INTEGER NOT NULL,
+                Position INTEGER NOT NULL,
+                Name TEXT NOT NULL DEFAULT '',
+                Command TEXT NOT NULL,
+                StartMinimized INTEGER NOT NULL DEFAULT 0,
+                TimeoutSeconds INTEGER NOT NULL DEFAULT 600,
+                Enabled INTEGER NOT NULL DEFAULT 1,
+                CreatedUTC TEXT NOT NULL,
+                UpdatedUTC TEXT NOT NULL,
+                FOREIGN KEY (EnvironmentId) REFERENCES Environments(Id) ON DELETE CASCADE
+            )
+            """;
+        public const string CreateEnvironmentStepsIndex =
+            "CREATE INDEX IF NOT EXISTS idx_environment_steps_env ON EnvironmentSteps(EnvironmentId, Phase, Position)";
+
         // AgentMetadata Table
         public const string CreateAgentMetadataTable = """
             CREATE TABLE IF NOT EXISTS AgentMetadata (
@@ -512,6 +538,11 @@ namespace VibeRails.DB
             CreateCodeAnalyzerIgnoresTable,
             CreateEnvironmentsTable,
             CreateEnvironmentsIndex,
+            // A brand-new CREATE TABLE IF NOT EXISTS is correct for fresh AND legacy databases, so
+            // this belongs here rather than in MigrationStatements. Only later ALTER TABLEs on
+            // EnvironmentSteps go there.
+            CreateEnvironmentStepsTable,
+            CreateEnvironmentStepsIndex,
             CreateAgentMetadataTable,
             CreateAgentMetadataPathIndex,
             CreateSandboxesTable,
@@ -699,6 +730,38 @@ namespace VibeRails.DB
         // work is never destroyed by a delete the user aimed at the environment.
         public const string OrphanSandboxesByEnvironmentId = "UPDATE Sandboxes SET EnvironmentId = NULL WHERE EnvironmentId = $environmentId;";
         public const string DeleteSandbox = "DELETE FROM Sandboxes WHERE Id = $id;";
+
+        // EnvironmentStep CRUD. Position is assigned by ReplaceStepsAsync from array order, never
+        // sent by a client, so ORDER BY Position is the authoring order the user saw.
+        public const string SelectStepsByEnvironmentId = """
+            SELECT Id, EnvironmentId, Phase, Position, Name, Command, StartMinimized, TimeoutSeconds, Enabled, CreatedUTC, UpdatedUTC
+            FROM EnvironmentSteps
+            WHERE EnvironmentId = $environmentId
+            ORDER BY Phase, Position;
+            """;
+        // Bulk read for the list endpoint. The id set is built from rows we just read, so
+        // interpolating it into an IN (...) list is not user input — see BuildInClause.
+        public const string SelectStepsByEnvironmentIdsTemplate = """
+            SELECT Id, EnvironmentId, Phase, Position, Name, Command, StartMinimized, TimeoutSeconds, Enabled, CreatedUTC, UpdatedUTC
+            FROM EnvironmentSteps
+            WHERE EnvironmentId IN ({0})
+            ORDER BY EnvironmentId, Phase, Position;
+            """;
+        public const string SelectEnabledStepsByEnvironmentIdAndPhase = """
+            SELECT Id, EnvironmentId, Phase, Position, Name, Command, StartMinimized, TimeoutSeconds, Enabled, CreatedUTC, UpdatedUTC
+            FROM EnvironmentSteps
+            WHERE EnvironmentId = $environmentId AND Phase = $phase AND Enabled = 1
+            ORDER BY Position;
+            """;
+        public const string CountStepsByEnvironmentIdAndPhase =
+            "SELECT COUNT(*) FROM EnvironmentSteps WHERE EnvironmentId = $environmentId AND Phase = $phase AND Enabled = 1;";
+        public const string DeleteStepsByEnvironmentId = "DELETE FROM EnvironmentSteps WHERE EnvironmentId = $environmentId;";
+        public const string InsertEnvironmentStep = """
+            INSERT INTO EnvironmentSteps
+                (EnvironmentId, Phase, Position, Name, Command, StartMinimized, TimeoutSeconds, Enabled, CreatedUTC, UpdatedUTC)
+            VALUES
+                ($environmentId, $phase, $position, $name, $command, $startMinimized, $timeoutSeconds, $enabled, $createdUTC, $updatedUTC);
+            """;
 
         // AgentMetadata CRUD
         public const string UpsertAgentMetadata = """

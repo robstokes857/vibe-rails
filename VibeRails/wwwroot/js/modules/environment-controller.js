@@ -1,5 +1,12 @@
 import { getEnabledLlmItems, mountLlmPicker } from './pickers/llm-picker.js';
 import { isConfirmDialogOpen } from './utils.js';
+import {
+    normalizeSteps,
+    openStepsEditor,
+    renderStepsSummaryButton,
+    serializeSteps,
+    summarizeSteps
+} from './environment-steps.js';
 
 // Mirrors EnvironmentWorkspaceMode in the backend. Persistent and PerRun are the same
 // mechanism — a git clone of the project — differing only in how long a clone survives.
@@ -535,54 +542,85 @@ export class EnvironmentController {
                     <small class="form-text text-muted">Keeps this environment out of the terminal/sandbox LLM dropdowns when they get too full. It can still be launched from here and used by Automations, and you can change this later from the picker's "Customize LLM list".</small>
                 </div>`;
 
-        // Workspace mode applies to Workers exactly as it does to Environments — an automation
-        // that clones fresh every night is the clearest case for it. Both clone modes need a
-        // git repo, so outside one the control is replaced by an explanation.
+        // Automation Workers only need two honest choices: run in the live project or start
+        // from a clean checkout for every run. Persistent clones remain supported by the
+        // backend and the regular Environment editor, but are intentionally not offered here.
         const currentWorkspaceMode = isEdit
             ? (env.workspaceMode || WORKSPACE_MODE.PROJECT)
             : WORKSPACE_MODE.PROJECT;
+        const workspaceLabel = workerOnly ? 'Workspace' : 'Where it runs';
+        const workspaceHelp = 'A clone is made on first launch, on its own branch, and gets Diff / Merge / Push buttons on this list. Fresh each run clones the last commit only — no uncommitted work and no gitignored files such as .env — and only the newest few runs are kept. Changing this later releases the old workspace as a standalone sandbox rather than deleting it.';
         const workspaceRow = this.app.data.isInGit
-            ? `<div class="mb-3">
-                    <label class="form-label" for="env-workspace-mode">Where it runs</label>
-                    <select class="form-select" id="env-workspace-mode">
-                        <option value="${WORKSPACE_MODE.PROJECT}" ${currentWorkspaceMode === WORKSPACE_MODE.PROJECT ? 'selected' : ''}>Project directory — run directly in this project</option>
-                        <option value="${WORKSPACE_MODE.PERSISTENT}" ${currentWorkspaceMode === WORKSPACE_MODE.PERSISTENT ? 'selected' : ''}>Its own clone — one workspace, reused every launch</option>
-                        <option value="${WORKSPACE_MODE.PER_RUN}" ${currentWorkspaceMode === WORKSPACE_MODE.PER_RUN ? 'selected' : ''}>Git clone and start fresh each run</option>
-                    </select>
-                    <small class="form-text text-muted d-block">A clone is made on first launch, on its own branch, and gets Diff / Merge / Push buttons on this list. <strong>Fresh each run</strong> clones the last commit only — no uncommitted work and no gitignored files such as <code>.env</code>, and only the newest few runs are kept. Changing this later releases the old workspace as a standalone sandbox rather than deleting it.</small>
-                </div>`
+            ? (workerOnly
+                ? `<fieldset class="mb-3 env-workspace-fieldset">
+                        <legend class="form-label">Workspace</legend>
+                        <div class="env-workspace-choices">
+                            <label class="env-workspace-choice">
+                                <input type="radio" name="env-workspace-mode" id="env-workspace-project" value="${WORKSPACE_MODE.PROJECT}" ${currentWorkspaceMode === WORKSPACE_MODE.PROJECT ? 'checked' : ''} required>
+                                <span class="env-workspace-choice-card">
+                                    <span class="env-workspace-choice-copy">
+                                        <strong>Project directory</strong>
+                                        <small>Run in the project directory on whatever Git branch is checked out when the automation starts.</small>
+                                    </span>
+                                </span>
+                            </label>
+                            <label class="env-workspace-choice">
+                                <input type="radio" name="env-workspace-mode" id="env-workspace-per-run" value="${WORKSPACE_MODE.PER_RUN}" ${currentWorkspaceMode === WORKSPACE_MODE.PER_RUN ? 'checked' : ''} required>
+                                <span class="env-workspace-choice-card">
+                                    <span class="env-workspace-choice-copy">
+                                        <strong>Clean Git checkout every run</strong>
+                                        <small>Create a clean checkout of the current branch for every run. Changes from one run do not carry into the next.</small>
+                                    </span>
+                                </span>
+                            </label>
+                        </div>
+                    </fieldset>`
+                : `<div class="mb-3">
+                        <label class="form-label" for="env-workspace-mode">${workspaceLabel}</label>
+                        <select class="form-select" id="env-workspace-mode">
+                            <option value="${WORKSPACE_MODE.PROJECT}" ${currentWorkspaceMode === WORKSPACE_MODE.PROJECT ? 'selected' : ''}>Project directory — run directly in this project</option>
+                            <option value="${WORKSPACE_MODE.PERSISTENT}" ${currentWorkspaceMode === WORKSPACE_MODE.PERSISTENT ? 'selected' : ''}>Its own clone — one workspace, reused every launch</option>
+                            <option value="${WORKSPACE_MODE.PER_RUN}" ${currentWorkspaceMode === WORKSPACE_MODE.PER_RUN ? 'selected' : ''}>Git clone and start fresh each run</option>
+                        </select>
+                        <small class="form-text text-muted d-block">${workspaceHelp}</small>
+                    </div>`)
             : `<div class="mb-3">
-                    <label class="form-label">Where it runs</label>
+                    <label class="form-label">${workspaceLabel}</label>
                     <div class="form-control-plaintext text-muted small">This project is not a git repository, so it can only run in the project directory.</div>
                 </div>`;
 
         const customArgsRow = `
                 <div class="mb-3" data-custom-args-group ${usesManagedArgs ? 'style="display: none;"' : ''}>
-                    <label class="form-label">Custom Arguments</label>
+                    <label class="form-label">${workerOnly ? 'Extra CLI arguments' : 'Custom Arguments'}</label>
                     <input type="text" class="form-control" id="env-custom-args" value="${customArgsValue}" placeholder="e.g., --yolo --sandbox">
-                    <small class="form-text text-muted">Arguments passed to the CLI when launching with this environment</small>
+                    <small class="form-text text-muted">Optional arguments passed directly to the CLI.</small>
                 </div>`;
 
-        // A Worker only needs the CLI, model, and initial message up front — the
-        // workspace question ("Where it runs") and raw CLI arguments read as noise
-        // when all the user wants is "run claude on a timer". They stay available,
-        // collapsed, with sensible defaults (project directory, no extra args).
+        // Steps are edited in their own nested modal — this form is dense enough already, and a
+        // step list with drag-reordering and a test console does not belong inlined in it.
+        // `editedSteps` stays null until that editor is actually opened and saved, which is what
+        // lets the PUT's nullable guard leave stored steps untouched.
+        const initialSteps = isEdit ? normalizeSteps(env.steps) : [];
+        let editedSteps = null;
+        const stepsRow = renderStepsSummaryButton(initialSteps);
+
+        // Worker creation is already a small CRUD form. Keep every field in one clear
+        // flow instead of hiding two ordinary settings behind an "Advanced" disclosure.
         const formBody = workerOnly
             ? `
                 <div data-cli-settings-slot>${this.buildCliSettingsHtml(initialCli, cliSettings || {})}</div>
-                <details class="env-advanced-settings mb-3">
-                    <summary>Advanced</summary>
-                    ${workspaceRow}
-                    ${customArgsRow}
-                </details>`
+                ${workspaceRow}
+                ${customArgsRow}
+                ${stepsRow}`
             : `
                 ${hiddenRow}
                 ${workspaceRow}
                 ${customArgsRow}
+                ${stepsRow}
                 <div data-cli-settings-slot>${this.buildCliSettingsHtml(initialCli, cliSettings || {})}</div>`;
 
         this.app.showModal(title, `
-            <form id="env-form">
+            <form id="env-form" class="${workerOnly ? 'env-worker-form' : ''}">
                 ${nameRow}
                 <div class="mb-3">
                     <label class="form-label">CLI Type</label>
@@ -627,12 +665,33 @@ export class EnvironmentController {
         const keydownTarget = typeof window !== 'undefined' ? window : document;
         let completed = false;
         let lifecycleDisposed = false;
+        let stepsEditor = null;
+
+        document.querySelector('[data-env-steps-open]')?.addEventListener('click', () => {
+            stepsEditor = openStepsEditor(this.app, {
+                steps: editedSteps ?? initialSteps,
+                // An environment with a clone runs its steps inside the clone, so a test should
+                // too. Null lets the server fall back to the project root.
+                workingDirectory: isEdit ? (env.workspacePath || null) : null,
+                onSave: steps => {
+                    editedSteps = steps;
+                    stepsEditor = null;
+                    const summary = document.querySelector('[data-env-steps-summary]');
+                    if (summary) summary.textContent = summarizeSteps(steps);
+                }
+            });
+        });
+
         const cleanupLifecycle = () => {
             if (lifecycleDisposed) return;
             lifecycleDisposed = true;
             keydownTarget.removeEventListener('keydown', handleEscape, true);
             closeButtons.forEach(button => button.removeEventListener('click', handleClose));
             cliPickerDisposer?.();
+            // The nested layer lives in #modal-container beside this form; closing the form
+            // without it would leave an orphan modal (and a live test stream) behind.
+            stepsEditor?.close({ restoreFocus: false });
+            stepsEditor = null;
             if (this.environmentFormLifecycleCleanup === disposeLifecycle) {
                 this.environmentFormLifecycleCleanup = null;
             }
@@ -687,13 +746,17 @@ export class EnvironmentController {
                 // Absent outside a git repo, where the only legal mode is Project. Omitting it
                 // means the PUT's nullable guard leaves the stored mode alone, so opening the
                 // editor in a non-git project can never silently downgrade a clone environment.
-                const workspaceInput = document.getElementById('env-workspace-mode');
+                const workspaceInput = document.querySelector('input[name="env-workspace-mode"]:checked')
+                    || document.getElementById('env-workspace-mode');
                 const workspaceMode = workspaceInput ? Number(workspaceInput.value) : null;
                 if (isEdit) {
                     const settingsPayload = this.extractCliSettingsPayload(env.cli);
                     const payload = this.buildEnvironmentSavePayload(env.cli, settingsPayload);
                     if (hiddenInput) payload.hidden = hiddenInput.checked;
                     if (workspaceMode !== null) payload.workspaceMode = workspaceMode;
+                    // Omitted entirely when the steps editor was never opened, so the PUT's
+                    // nullable guard leaves the stored list alone.
+                    if (editedSteps) payload.steps = serializeSteps(editedSteps);
                     await this.app.apiCall(`/api/v1/environments/${encodeURIComponent(env.name)}`, 'PUT', payload);
                     await this.saveCliSettings(env.cli, env.name, settingsPayload);
                 } else {
@@ -706,6 +769,7 @@ export class EnvironmentController {
                         ...this.buildEnvironmentSavePayload(cli, settingsPayload),
                         ...(hiddenInput ? { hidden: hiddenInput.checked } : {}),
                         ...(workspaceMode !== null ? { workspaceMode } : {}),
+                        ...(editedSteps ? { steps: serializeSteps(editedSteps) } : {}),
                         ...(automationWorker === true ? { automationWorker: true } : {})
                     };
                     await this.app.apiCall('/api/v1/environments', 'POST', payload);
@@ -1960,6 +2024,13 @@ export class EnvironmentController {
     }
 
     async removeEnvironment(name, { onChanged = null } = {}) {
+        // Steps cascade with the environment row, so say so rather than letting a configured
+        // setup chain disappear silently behind a generic "delete this profile".
+        const stepCount = (this.app.data.environments.find(env => env.name === name)?.steps || []).length;
+        const stepNote = stepCount === 0
+            ? ''
+            : ` and its ${stepCount} step${stepCount === 1 ? '' : 's'}`;
+
         this.app.showModal('Remove Environment', `
             <div class="text-center py-3">
                 <div class="mb-3 text-danger">
@@ -1968,7 +2039,7 @@ export class EnvironmentController {
                     </svg>
                 </div>
                 <h5>Remove environment "${this.app.escapeHtml(name)}"?</h5>
-                <p class="text-muted small px-4">This will permanently delete this environment profile. This action cannot be undone.</p>
+                <p class="text-muted small px-4">This will permanently delete this environment profile${stepNote}. This action cannot be undone.</p>
             </div>
             <div class="d-flex gap-2 justify-content-end">
                 <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
@@ -2062,6 +2133,9 @@ export class EnvironmentController {
             workspaceSandboxId: env.workspaceSandboxId ?? null,
             workspacePath: env.workspacePath || null,
             workspaceBranch: env.workspaceBranch || null,
+            // Normalized here so the edit form and the delete confirm both read the same shape,
+            // whether the row came from the list endpoint or a single-environment fetch.
+            steps: normalizeSteps(env.steps),
             lastUsed: env.lastUsed || this.app.formatRelativeTime(env.lastUsedUTC)
         }));
         return this.app.data.environments;

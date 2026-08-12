@@ -221,7 +221,8 @@ namespace VibeRails.DTOs
         string? CustomPrompt = null,
         bool Hidden = false,
         bool AutomationWorker = false,
-        int WorkspaceMode = 0
+        int WorkspaceMode = 0,
+        List<EnvironmentStepRequest>? Steps = null
     );
 
     // Hidden is nullable so a stale client that omits it leaves the stored value untouched
@@ -233,7 +234,53 @@ namespace VibeRails.DTOs
         string? CustomArgs = null,
         string? CustomPrompt = null,
         bool? Hidden = null,
-        int? WorkspaceMode = null
+        int? WorkspaceMode = null,
+        // Same nullable guard, and it matters more here than anywhere else: the steps editor is a
+        // separate modal, so an env form saved without ever opening it must leave them alone
+        // rather than replace them with an empty list.
+        List<EnvironmentStepRequest>? Steps = null
+    );
+
+    // Environment Step DTOs. Steps ride on the environment endpoints as a child collection, the
+    // same way JobTriggers ride on Jobs, rather than getting their own CRUD surface.
+    // Position is implied by array order and is never sent by the client.
+    public record EnvironmentStepDto(
+        int Id,
+        int Phase,
+        int Position,
+        string Name,
+        string Command,
+        bool StartMinimized,
+        int TimeoutSeconds,
+        bool Enabled
+    );
+
+    public record EnvironmentStepRequest(
+        int Phase,
+        string Name,
+        string Command,
+        bool StartMinimized = false,
+        int TimeoutSeconds = 600,
+        bool Enabled = true
+    );
+
+    /// <summary>Runs one command exactly as a real step would, but hidden and captured so the
+    /// output can render in the editor. Takes the command inline so an unsaved step is testable
+    /// before you commit to it.</summary>
+    public record TestEnvironmentStepRequest(
+        string Command,
+        string? WorkingDirectory = null,
+        int TimeoutSeconds = 600
+    );
+
+    /// <summary>One SSE frame from the step test stream. Type is "line" | "done" | "error".</summary>
+    public record EnvironmentStepTestEvent(
+        string Type,
+        string? Line = null,
+        bool IsError = false,
+        int? ExitCode = null,
+        long? DurationMs = null,
+        string? Message = null
     );
 
     // WorkspacePath/WorkspaceBranch are null until the clone actually exists — a clone-mode
@@ -253,7 +300,8 @@ namespace VibeRails.DTOs
         int WorkspaceMode = 0,
         int? WorkspaceSandboxId = null,
         string? WorkspacePath = null,
-        string? WorkspaceBranch = null
+        string? WorkspaceBranch = null,
+        List<EnvironmentStepDto>? Steps = null
     );
 
     public record EnvironmentListResponse(
@@ -1145,6 +1193,20 @@ namespace VibeRails.DTOs
     public record SessionWaitingForUserPayload(string SessionId);
     public record SessionCompletedPayload(string SessionId, string Cli, int? ExitCode);
 
+    /// <summary>
+    /// A pre-launch Environment Step failed and took the launch with it. The step's own window is
+    /// on screen with the error, but nothing on that screen explains why the tab never started —
+    /// this is what the browser raises a toast from.
+    /// </summary>
+    public record EnvironmentStepFailedPayload(
+        string SessionId,
+        string? EnvironmentName,
+        int Phase,
+        string StepName,
+        int ExitCode,
+        bool TimedOut,
+        string Message);
+
     [JsonSerializable(typeof(AppToastNotification))]
     [JsonSerializable(typeof(AppEvent))]
     [JsonSerializable(typeof(SessionStartedPayload))]
@@ -1153,6 +1215,7 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(SessionInputPayload))]
     [JsonSerializable(typeof(SessionWaitingForUserPayload))]
     [JsonSerializable(typeof(SessionCompletedPayload))]
+    [JsonSerializable(typeof(EnvironmentStepFailedPayload))]
     [JsonSerializable(typeof(HealthResponse))]
     [JsonSerializable(typeof(FileResponse))]
     [JsonSerializable(typeof(ErrorResponse))]
@@ -1265,6 +1328,12 @@ namespace VibeRails.DTOs
     [JsonSerializable(typeof(EnvironmentResponse))]
     [JsonSerializable(typeof(EnvironmentListResponse))]
     [JsonSerializable(typeof(List<EnvironmentResponse>))]
+    [JsonSerializable(typeof(EnvironmentStepDto))]
+    [JsonSerializable(typeof(List<EnvironmentStepDto>))]
+    [JsonSerializable(typeof(EnvironmentStepRequest))]
+    [JsonSerializable(typeof(List<EnvironmentStepRequest>))]
+    [JsonSerializable(typeof(TestEnvironmentStepRequest))]
+    [JsonSerializable(typeof(EnvironmentStepTestEvent))]
     // Shared LLM picker preferences
     [JsonSerializable(typeof(LlmPickerPreferenceItem))]
     [JsonSerializable(typeof(List<LlmPickerPreferenceItem>))]

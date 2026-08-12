@@ -184,7 +184,12 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             HttpMethod.Post,
             "/api/v1/terminal/start",
             request,
-            cancellationToken);
+            cancellationToken,
+            // HttpClient's default 100 s would fail a tab start whose Environment Steps ran longer
+            // than that, even though the steps themselves succeeded. The real bound belongs to the
+            // work being waited on: each step carries its own TimeoutSeconds, and the browser's
+            // RequestAborted still cancels the whole thing.
+            timeout: System.Threading.Timeout.InfiniteTimeSpan);
     }
 
     /// <summary>
@@ -777,7 +782,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         HttpMethod method,
         string path,
         StartTerminalRequest? payload,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan? timeout = null)
     {
         if (child.Process.HasExited)
         {
@@ -787,6 +793,12 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
         using var request = CreateChildRequest(child, method, path, payload);
         var http = _httpClientFactory.CreateClient();
+        if (timeout.HasValue)
+        {
+            // Safe on a factory client: CreateClient hands back a fresh HttpClient over a pooled
+            // handler, and Timeout is only immutable once a request has been sent on it.
+            http.Timeout = timeout.Value;
+        }
         HttpResponseMessage response;
         try
         {

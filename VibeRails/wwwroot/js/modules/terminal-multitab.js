@@ -2807,6 +2807,22 @@ export class TerminalController {
                 this.app.showToast(cli, `Headless session completed${exitText}`, exitCode === 0 ? 'success' : 'info');
             }
         });
+
+        // An Environment Step opened its own terminal window, so the user has already seen the
+        // error there. What that window cannot tell them is why the tab never started.
+        appEventClient.on('environment_step_failed', (payload) => {
+            const phase = Number(payload?.phase) === 1 ? 'After it exits' : 'Before launch';
+            const stepName = payload?.stepName || 'A step';
+            const detail = payload?.timedOut
+                ? 'timed out'
+                : `exited with code ${payload?.exitCode ?? '?'}`;
+            const scope = payload?.environmentName ? ` for "${payload.environmentName}"` : '';
+            this.app.showToast(
+                `${phase} step failed`,
+                `"${stepName}"${scope} ${detail}. ${payload?.message || ''}`.trim(),
+                'error',
+                { requireDismiss: true });
+        });
     }
 
     refreshLayout() {

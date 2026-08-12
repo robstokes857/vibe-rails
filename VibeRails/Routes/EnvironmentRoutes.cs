@@ -31,11 +31,21 @@ public static class EnvironmentRoutes
                 .GroupBy(s => s.EnvironmentId!.Value)
                 .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.CreatedUTC).First());
 
-            var response = environments
+            var visible = environments
                 .Where(e => ProjectPathComparer.IsVisibleIn(e.ProjectPath, projectPath))
+                .ToList();
+
+            // One bulk read for every visible environment's steps, indexed by owner — same reason
+            // as the workspace lookup above: the list must not become an N+1.
+            var stepsByEnvironment = await repository.GetStepsForEnvironmentsAsync(
+                visible.Select(e => e.Id).ToList(),
+                cancellationToken);
+
+            var response = visible
                 .Select(e => ToResponse(
                     e,
-                    workspacesByEnvironment.TryGetValue(e.Id, out var workspace) ? workspace : null))
+                    workspacesByEnvironment.TryGetValue(e.Id, out var workspace) ? workspace : null,
+                    stepsByEnvironment.TryGetValue(e.Id, out var steps) ? steps : null))
                 .ToList();
 
             return Results.Ok(new EnvironmentListResponse(response));
@@ -58,7 +68,8 @@ public static class EnvironmentRoutes
             }
 
             var workspace = await workspaceService.GetWorkspaceAsync(environment, cancellationToken);
-            return Results.Ok(ToResponse(environment, workspace));
+            var steps = await repository.GetStepsForEnvironmentAsync(environment.Id, cancellationToken);
+            return Results.Ok(ToResponse(environment, workspace, steps));
         }).WithName("GetEnvironmentByName");
 
         // POST /api/v1/environments - Create new environment
@@ -114,6 +125,13 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse(UnknownWorkspaceModeMessage(request.WorkspaceMode)));
             }
 
+            // Validated before the environment directory is created, so a bad step list cannot
+            // leave a half-made environment behind.
+            if (!EnvironmentStepRoutes.TryBuildSteps(request.Steps, out var newSteps, out var stepError))
+            {
+                return Results.BadRequest(new ErrorResponse(stepError!));
+            }
+
             var projectPath = ParserConfigs.GetRootPath();
             if (workspaceMode != EnvironmentWorkspaceMode.Project && !ParserConfigs.GetIsInGit())
             {
@@ -153,10 +171,21 @@ public static class EnvironmentRoutes
             await envService.CreateEnvironmentAsync(environment, cancellationToken);
             await repository.SaveEnvironmentAsync(environment, cancellationToken);
 
+            // After SaveEnvironmentAsync: the steps carry the FK, so the environment row has to
+            // exist first. Skipped entirely when the client sent no steps.
+            if (request.Steps != null)
+            {
+                await repository.ReplaceStepsAsync(environment.Id, newSteps, cancellationToken);
+            }
+
+            var savedSteps = request.Steps != null
+                ? await repository.GetStepsForEnvironmentAsync(environment.Id, cancellationToken)
+                : [];
+
             // The clone itself is deliberately NOT made here. Creating an environment stays a
             // fast, local operation; the first launch pays the clone, where there is already a
             // progress surface and where a failure can be reported against that launch.
-            return Results.Ok(ToResponse(environment));
+            return Results.Ok(ToResponse(environment, workspace: null, savedSteps));
         }).WithName("CreateEnvironment");
 
         // PUT /api/v1/environments/{name} - Update environment
@@ -205,6 +234,14 @@ public static class EnvironmentRoutes
                 environment.Hidden = request.Hidden.Value;
             }
 
+            // null means "leave them untouched" — the steps editor is a separate modal, so an env
+            // form saved without opening it must not silently wipe the list. Validated before any
+            // write so a bad step list rejects the whole update rather than half-applying it.
+            if (!EnvironmentStepRoutes.TryBuildSteps(request.Steps, out var updatedSteps, out var stepError))
+            {
+                return Results.BadRequest(new ErrorResponse(stepError!));
+            }
+
             var workspaceModeChanged = false;
             if (request.WorkspaceMode.HasValue)
             {
@@ -226,6 +263,11 @@ public static class EnvironmentRoutes
             environment.LastUsedUTC = DateTime.UtcNow;
             await repository.UpdateEnvironmentAsync(environment, cancellationToken);
 
+            if (request.Steps != null)
+            {
+                await repository.ReplaceStepsAsync(environment.Id, updatedSteps, cancellationToken);
+            }
+
             // A mode change detaches the old workspace but never deletes it. The user may have
             // uncommitted work in there, and changing a dropdown is not consent to destroy it —
             // it becomes a standalone sandbox they can diff, push, or delete deliberately.
@@ -236,7 +278,8 @@ public static class EnvironmentRoutes
             }
 
             var workspace = await workspaceService.GetWorkspaceAsync(environment, cancellationToken);
-            return Results.Ok(ToResponse(environment, workspace));
+            var steps = await repository.GetStepsForEnvironmentAsync(environment.Id, cancellationToken);
+            return Results.Ok(ToResponse(environment, workspace, steps));
         }).WithName("UpdateEnvironment");
 
         // DELETE /api/v1/environments/{name} - Delete environment
@@ -346,7 +389,10 @@ public static class EnvironmentRoutes
     private static bool IsVisibleHere(LLM_Environment environment) =>
         ProjectPathComparer.IsVisibleIn(environment.ProjectPath, ParserConfigs.GetRootPath());
 
-    private static EnvironmentResponse ToResponse(LLM_Environment environment, Sandbox? workspace = null) =>
+    private static EnvironmentResponse ToResponse(
+        LLM_Environment environment,
+        Sandbox? workspace = null,
+        IEnumerable<EnvironmentStep>? steps = null) =>
         new(
             environment.Id,
             environment.CustomName,
@@ -361,7 +407,8 @@ public static class EnvironmentRoutes
             (int)environment.WorkspaceMode,
             workspace?.Id,
             workspace?.Path,
-            workspace?.Branch);
+            workspace?.Branch,
+            EnvironmentStepRoutes.ToDtos(steps));
 
     /// <summary>
     /// Parses a wire workspace mode. Explicit rather than casting the int straight to the enum:

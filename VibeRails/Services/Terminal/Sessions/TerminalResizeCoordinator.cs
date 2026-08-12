@@ -39,6 +39,20 @@ internal static class TerminalResizeCoordinator
             return;
         }
 
+        // Geometry authority: while a local web viewer is attached, remote resizes are
+        // ignored. There is no geometry rebroadcast to viewers, so honoring one repaints
+        // the PTY at a width the local xterm.js will wrap — shredded chrome + stranded
+        // cursor (TERMINAL.md "## 2026-08-10", session b92fb476). Remote-only sessions
+        // keep full remote resize authority, and LocalCli (native console poll) is
+        // deliberately exempt so native-console + web-viewer coexistence is unchanged.
+        if (ShouldIgnoreResize(source, terminal.HasLocalWebViewer))
+        {
+            Log.Information(
+                "[Terminal] Ignored {Source} resize to {Cols}x{Rows} for session {SessionId} — local web viewer attached and owns geometry (PTY stays {CurrentCols}x{CurrentRows})",
+                source, cols, rows, sessionId, terminal.Cols, terminal.Rows);
+            return;
+        }
+
         if (terminal.IsSyncOutputActive)
         {
             ScheduleDeferredResize(terminal, stateService, sessionId, cols, rows, source);
@@ -143,14 +157,37 @@ internal static class TerminalResizeCoordinator
         if (terminal.Cols == cols && terminal.Rows == rows)
             return;
 
+        var oldCols = terminal.Cols;
+        var oldRows = terminal.Rows;
         terminal.Resize(cols, rows);
         stateService.RecordResize(sessionId, cols, rows, source);
+
+        // Every applied resize names its sender. The b92fb476 shred was only attributable
+        // by DB forensics because neither resize path logged anything — keep this at
+        // Information so the next foreign resize self-identifies.
+        Log.Information(
+            "[Terminal] Resized PTY {OldCols}x{OldRows} -> {Cols}x{Rows} (source={Source}, localWebViewer={LocalWebViewer}) session={SessionId}",
+            oldCols, oldRows, cols, rows, source, terminal.HasLocalWebViewer, sessionId);
 
         var nativeConsoleRepaint = NeedsNativeConsoleRepaint(terminal, source);
         if (EnableDebouncedRedrawOnResize || nativeConsoleRepaint)
         {
             ScheduleDebouncedRedraw(terminal, sessionId, requireAlternateScreen: nativeConsoleRepaint);
         }
+    }
+
+    /// <summary>
+    /// Resize authority policy (TERMINAL.md "## 2026-08-10"). Only <see
+    /// cref="TerminalIoSource.RemoteWebUi"/> is ever ignored, and only while a local web
+    /// viewer is attached: the local viewer is the primary work surface and cannot render
+    /// frames composed for someone else's geometry. Everything else — the local viewer's
+    /// own resizes, the native-console poll (<c>LocalCli</c>), and remote resizes on
+    /// remote-only sessions — applies as before. Kept as a pure function so the policy
+    /// is unit-testable without constructing a PTY.
+    /// </summary>
+    internal static bool ShouldIgnoreResize(TerminalIoSource source, bool hasLocalWebViewer)
+    {
+        return source == TerminalIoSource.RemoteWebUi && hasLocalWebViewer;
     }
 
     /// <summary>

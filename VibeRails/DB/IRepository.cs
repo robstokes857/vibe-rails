@@ -73,6 +73,16 @@ namespace VibeRails.DB
         Task TouchEnvironmentLastUsedAsync(int environmentId, CancellationToken cancellationToken = default);
         Task DeleteEnvironmentAsync(int id, CancellationToken cancellationToken = default);
 
+        // Environment step operations (child collection of Environments; FK cascades on delete)
+        Task<List<EnvironmentStep>> GetStepsForEnvironmentAsync(int environmentId, CancellationToken cancellationToken = default);
+        /// <summary>One query for many environments' steps, indexed by owner. Avoids an N+1 in the list endpoint.</summary>
+        Task<Dictionary<int, List<EnvironmentStep>>> GetStepsForEnvironmentsAsync(IReadOnlyList<int> environmentIds, CancellationToken cancellationToken = default);
+        /// <summary>Enabled steps for one phase, in Position order — exactly what the runner executes.</summary>
+        Task<List<EnvironmentStep>> GetEnabledStepsAsync(int environmentId, EnvironmentStepPhase phase, CancellationToken cancellationToken = default);
+        Task<bool> HasEnabledStepsAsync(int environmentId, EnvironmentStepPhase phase, CancellationToken cancellationToken = default);
+        /// <summary>Atomically replaces the whole list, stamping Position from array order.</summary>
+        Task ReplaceStepsAsync(int environmentId, IReadOnlyList<EnvironmentStep> steps, CancellationToken cancellationToken = default);
+
         // Sandbox operations (project-scoped)
         Task<Sandbox> SaveSandboxAsync(Sandbox sandbox, CancellationToken cancellationToken = default);
         Task<List<Sandbox>> GetSandboxesByProjectAsync(string projectPath, CancellationToken cancellationToken = default);

@@ -32,6 +32,51 @@ The terminal dropdown shows two groups:
 - **Base CLIs**: Claude, Codex, GLM 5.2, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
 - **Custom Environments**: User-created environments — spawned directly via the tab start endpoint
 
+## Environment Steps editor
+
+`environment-steps.js` is the editor for an Environment's ordered shell commands — the ones that
+run in their own native terminal window before the CLI launches or after its PTY exits.
+
+`environment-controller.js` is one ~2,150-line class and `showEnvironmentForm` already composes
+CLI settings, workspace mode, and args, so steps are **not** inlined into it. The form gets a
+`Steps (2 before · 1 after)` summary button; the editor lives in its own module and opens over the
+form.
+
+**It opens as a nested modal layer, not a second `app.showModal`.** `app.showModal` rebuilds
+`#modal-container`'s `innerHTML` wholesale (`app.js`), so a second call would destroy the
+environment form underneath. `openStepsEditor` follows `llm-picker-controller.js`'s
+`openCustomizationModal`: append an own `.llm-picker-modal-layer`, set `inert` + `aria-hidden` on
+the existing `#modal-container` children, trap focus, restore all of it on close. Reordering
+copies the same hand-rolled HTML5 DnD — drag handle only, `is-dragging` / `is-drag-target`, drop
+side from `clientY > rect.top + height/2` — plus its ArrowUp/ArrowDown handling and explicit move
+buttons. (The vendored `sortable.min.js` in `index.html` is still unused by any first-party
+module. Keep it that way.)
+
+Things that will otherwise bite:
+
+- **`null` vs `[]` on the wire.** `editedSteps` stays `null` until the editor is opened *and*
+  saved, and the PUT omits `steps` entirely in that case. `null` means "leave them untouched" —
+  sending `[]` from a form whose steps modal was never opened would wipe a configured setup chain.
+- **No `window.confirm`.** Step deletion uses `confirmDialog` from `utils.js`; a sweep test over
+  every first-party JS file enforces this.
+- Any capture-phase Escape listener starts with `if (isConfirmDialogOpen()) return;` — asserted as
+  a literal string by the jobs-controller tests.
+- Text fields write straight into state with no re-render, so the caret survives typing. Only
+  structural changes (add / delete / move) re-render, and a re-render aborts any in-flight test
+  stream because it replaces the row elements.
+- Test output reuses `VcaConsole` (`vca-console.js`) — `begin()` / `writeLine()` /
+  `finishStream()`, tone via `data-tone`. It is `textContent`-only, which is what arbitrary
+  command output needs. The stream is read with `createSseParser` from `git-guard-preflight.js`
+  over an authenticated POST, with an `AbortController` for cancel.
+- CSS is prefixed `env-step-*` and every colour is written `var(--token, #fallback)`: an undefined
+  custom property invalidates the whole declaration, which is the documented cause of the
+  transparent-background bug.
+
+A failed **pre-launch** step aborts the launch, and the reason arrives separately as an
+`environment_step_failed` AppEvent handled in `terminal-multitab.js` beside the `session_*`
+handlers — the step's own window shows the error, but nothing in it explains why the tab never
+started.
+
 ## Customizable LLM Pickers
 
 `LlmPickerController` loads the resolved machine-wide catalog from
@@ -155,4 +200,4 @@ See also: [Services/Terminal/AGENTS.md](../Services/Terminal/AGENTS.md) for back
 
 ---
 
-*Last checked: 2026-08-06T17:22:10Z by opencode (glm-5.2)*
+*Last checked: 2026-08-11T00:00:00Z by claude (opus-5)*

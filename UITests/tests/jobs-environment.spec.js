@@ -259,9 +259,14 @@ async function environmentControlSnapshot(page) {
     return page.locator('#env-form [id]').evaluateAll(elements => Object.fromEntries(
         elements.map(element => [
             element.id,
-            element.type === 'checkbox' ? element.checked : element.value
+            element.type === 'checkbox' || element.type === 'radio' ? element.checked : element.value
         ])
     ));
+}
+
+function withoutWorkspaceControls(controls) {
+    return Object.fromEntries(Object.entries(controls)
+        .filter(([id]) => !id.startsWith('env-workspace')));
 }
 
 async function closeEnvironmentModal(page) {
@@ -281,6 +286,16 @@ test.describe('Jobs Worker / Environments integration', () => {
         await page.locator('[data-job-action="add-environment-from-editor"]').click();
         await expect(page.getByRole('heading', { name: 'Create Worker', exact: true }))
             .toBeVisible();
+        await expect(page.locator('#env-form')).toHaveClass(/env-worker-form/);
+        await expect(page.locator('#env-form')).not.toContainText('Advanced');
+        await expect(page.locator('#env-form')).toContainText('Workspace');
+        await expect(page.locator('#env-workspace-mode')).toHaveCount(0);
+        await expect(page.locator('input[name="env-workspace-mode"]')).toHaveCount(2);
+        await expect(page.getByRole('radio', { name: /Project directory/ })).toBeChecked();
+        await expect(page.getByRole('radio', { name: /Clean Git checkout every run/ })).not.toBeChecked();
+        await expect(page.locator('#env-form')).not.toContainText('Its own clone');
+        await expect(page.locator('#env-form .form-switch .form-check-input').first())
+            .toHaveCSS('appearance', 'none');
         const jobsControls = await environmentControlSnapshot(page);
         await closeEnvironmentModal(page);
 
@@ -292,12 +307,13 @@ test.describe('Jobs Worker / Environments integration', () => {
         await closeEnvironmentModal(page);
 
         // One shared modal: the Worker variant names the Worker in its own (prefilled,
-        // editable) field and only drops the launch-picker visibility switch; every
-        // CLI settings control is identical.
+        // editable) field, drops the launch-picker visibility switch, and replaces the
+        // general three-mode Workspace select with its two automation-safe choices.
+        // Provider-specific settings remain identical.
         expect(jobsControls['env-name']).toBe('Post-merge auditor');
         expect(Object.keys(jobsControls)).not.toContain('env-hidden');
-        expect(Object.keys(workersControls).sort()).toEqual(
-            [...Object.keys(jobsControls), 'env-hidden'].sort());
+        expect(Object.keys(withoutWorkspaceControls(workersControls)).sort()).toEqual(
+            [...Object.keys(withoutWorkspaceControls(jobsControls)), 'env-hidden'].sort());
     });
 
     test('Add Worker works nameless: the Worker is named in the modal and the automation adopts it', async ({ page }) => {
@@ -316,6 +332,9 @@ test.describe('Jobs Worker / Environments integration', () => {
 
         await page.locator('#env-name').fill('Post-merge auditor');
         await page.locator('#codex-prompt').fill('Audit every merge.');
+        const cleanCheckout = page.getByRole('radio', { name: /Clean Git checkout every run/ });
+        await page.locator('label.env-workspace-choice', { has: cleanCheckout }).click();
+        await expect(cleanCheckout).toBeChecked();
         await page.locator('#env-form button[type="submit"]').click();
         await expect(page.locator('#env-form')).toHaveCount(0);
 
@@ -324,6 +343,7 @@ test.describe('Jobs Worker / Environments integration', () => {
         expect(created.name).toBe('Post-merge auditor');
         expect(created.automationWorker).toBe(true);
         expect(created.hidden).toBeUndefined();
+        expect(created.workspaceMode).toBe(2);
 
         // The freshly created worker is auto-selected in the Worker picker, and the
         // empty automation name adopts the Worker's name as its editable default.
@@ -389,7 +409,7 @@ test.describe('Jobs Worker / Environments integration', () => {
         await expect(page.locator('#job-prompt')).toHaveCount(0);
         await expect(page.locator('[data-job-form]')).toContainText('Runs in');
         await expect(page.locator('[data-job-form]')).toContainText(CURRENT_REPOSITORY);
-        await expect(page.locator('[data-job-form]')).toContainText('After every successful commit');
+        await expect(page.locator('[data-job-form]')).toContainText('After each commit');
 
         const picker = page.locator('#job-llm-selection');
         await expect.poll(() => picker.evaluate(element => Boolean(element.tomselect)))
@@ -434,5 +454,75 @@ test.describe('Jobs Worker / Environments integration', () => {
         const enabledToggle = page.locator('[data-job-action="toggle"][data-job-id="17"]');
         await expect(enabledToggle).toHaveClass(/btn-outline-success/);
         await expect(enabledToggle.locator('.fa-toggle-on')).toBeVisible();
+    });
+
+    test('Automation uses opaque rows and a focused form without an Advanced disclosure', async ({ page }) => {
+        await installStatefulApi(page);
+        await openApp(page);
+        await openJobs(page);
+
+        const disabledRow = page.locator('.job-card[data-enabled="false"]');
+        await expect(disabledRow).toHaveCSS('opacity', '1');
+        expect(await disabledRow.evaluate(element => getComputedStyle(element).backgroundColor))
+            .not.toBe('rgba(0, 0, 0, 0)');
+
+        await page.locator('[data-job-action="edit"][data-job-id="17"]').click();
+        await expect(page.locator('[data-job-form]')).toBeVisible();
+        await expect(page.locator('[data-jobs-list]')).toBeHidden();
+        await expect(page.locator('.jobs-history-panel')).toBeHidden();
+        await expect(page.locator('[data-job-form]')).not.toContainText('Advanced');
+        await expect(page.locator('#job-timeout')).toBeVisible();
+        await expect(page.locator('#job-timeout-enabled')).toHaveCount(0);
+        await expect(page.locator('#job-trigger-schedule')).toHaveCSS('appearance', 'none');
+    });
+
+    test('Automation More actions stay inside a narrow viewport', async ({ page }) => {
+        await page.setViewportSize({ width: 320, height: 800 });
+        const { state } = await installStatefulApi(page);
+        const longName = 'AutomationWithAnIntentionallyLongUnbrokenNameThatMustWrapWithoutMakingThePageScrollSideways';
+        const longWorkerName = 'WorkerWithAnIntentionallyLongUnbrokenNameThatMustAlsoStayInsideTheAutomationRow';
+        state.environments.push({
+            id: 44,
+            name: longWorkerName,
+            cli: 'codex',
+            path: 'C:\\test-envs\\long-name-worker',
+            customArgs: '',
+            customPrompt: 'Check narrow viewport wrapping.',
+            hidden: false,
+            automationWorker: true,
+            lastUsedUTC: '2026-07-21T12:00:00Z'
+        });
+        state.jobs.push({
+            id: 18,
+            name: longName,
+            projectPath: CURRENT_REPOSITORY,
+            llm: 1,
+            environmentId: 44,
+            environmentName: longWorkerName,
+            prompt: 'Check narrow viewport wrapping.',
+            executionMode: 0,
+            timeoutMinutes: null,
+            enabled: true,
+            triggers: []
+        });
+        await openApp(page);
+        await openJobs(page);
+
+        const row = page.locator('.job-card').filter({ hasText: 'Environment review' });
+        await row.locator('.job-more > summary').click();
+        const menu = row.locator('.job-more-menu');
+        await expect(menu).toBeVisible();
+        const bounds = await menu.boundingBox();
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+
+        await expect(page.locator('.job-card').filter({ hasText: longName })).toBeVisible();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth))
+            .toBeLessThanOrEqual(320);
+
+        await page.locator('[data-job-action="edit"][data-job-id="18"]').click();
+        await expect(page.locator('.job-inline-form-header h3')).toContainText(longName);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth))
+            .toBeLessThanOrEqual(320);
     });
 });

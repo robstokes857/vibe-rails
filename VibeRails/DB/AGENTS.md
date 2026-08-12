@@ -146,6 +146,78 @@ existence in another project is not itself disclosed.
 
 ---
 
+## EnvironmentSteps
+
+### Business Logic
+
+A **Step** is one shell command attached to an Environment, run in its own native terminal window
+*before* the LLM launches or *after* its PTY exits. Steps are the user-editable counterpart to
+`PreparedTerminalSession.SetupCommands`, which is system-generated (MCP registration), `;`-joined
+so failures are ignored, and not exposed anywhere.
+
+| Rule | Details |
+|---|---|
+| **Ordering** | `ORDER BY Phase, Position`. `Position` is 0-based and unique within `(EnvironmentId, Phase)` — each phase counts from zero independently. |
+| **Position is server-assigned** | Clients send an array; `ReplaceStepsAsync` stamps `Position` from array order. A client never sends a position, so it can never disagree with what the editor showed. |
+| **One at a time, blocking** | Steps run sequentially in their own OS terminal windows, each waited on before the next fires. Deliberately outside the PTY pipeline — the user watches them in a real window. |
+| **A failed pre-step aborts the launch** | No per-step override. A step exists to make a launch's preconditions true, so a launch that proceeds without them is worse than one that does not happen. |
+| **Post-exit steps are advisory** | Nothing is left to abort by then; the failure is reported and the step's window stays open with the error. |
+| **What "after it exits" means** | For a Worker or Job it is "the agent finished"; for a browser tab it is "the tab closed". Stated in the editor in those words. |
+| **Cascade** | Deleting an Environment deletes its steps (`ON DELETE CASCADE`). |
+
+### Technical Details
+
+**Schema:**
+```sql
+CREATE TABLE IF NOT EXISTS EnvironmentSteps (
+    Id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    EnvironmentId  INTEGER NOT NULL,
+    Phase          INTEGER NOT NULL,               -- 0 = before launch, 1 = after the PTY exits
+    Position       INTEGER NOT NULL,               -- 0-based, unique within (EnvironmentId, Phase)
+    Name           TEXT    NOT NULL DEFAULT '',
+    Command        TEXT    NOT NULL,
+    StartMinimized INTEGER NOT NULL DEFAULT 0,
+    TimeoutSeconds INTEGER NOT NULL DEFAULT 600,
+    Enabled        INTEGER NOT NULL DEFAULT 1,
+    CreatedUTC     TEXT    NOT NULL,
+    UpdatedUTC     TEXT    NOT NULL,
+    FOREIGN KEY (EnvironmentId) REFERENCES Environments(Id) ON DELETE CASCADE
+);
+```
+
+**Index:** `idx_environment_steps_env` on `(EnvironmentId, Phase, Position)`
+
+**Model:** `EnvironmentStep` class + `EnvironmentStepPhase` enum in `DTOs/EnvironmentStep.cs`
+
+Registered in **`SqlStrings.InitStatements`, not `MigrationStatements`** — a brand-new
+`CREATE TABLE IF NOT EXISTS` is correct for fresh and legacy databases alike, and
+`MigrationStatements` swallows benign failures, which is exactly how a silently missing table
+would happen. Only later `ALTER TABLE`s on this table belong in the migration list.
+
+`ON DELETE CASCADE` rather than the FK-less orphan pattern `Sandboxes` uses: a step is *part of*
+its environment and owns no filesystem resource, so there is no multi-GB directory delete to keep
+out of the delete transaction. `PRAGMA foreign_keys=ON` is set at `Repository.cs:53-63`, and
+`SQLitePCLRaw.bundle_e_sqlite3` compiles it on by default, so it holds on every connection.
+
+`StartMinimized` (0/1) starts the step's window minimized so it does not steal focus. Honoured on
+Windows; the macOS and Linux terminal launchers have no equivalent and ignore it.
+
+`TimeoutSeconds` is clamped to 1..3600 on write (`EnvironmentStepRoutes.ClampTimeout`) **and**
+again on read by `EnvironmentStepRunner`, so a row written by an older build or edited by hand
+cannot produce a zero timeout that fails every step instantly.
+
+**Key operations:**
+
+| Method | Behavior |
+|---|---|
+| `GetStepsForEnvironmentAsync(id)` | All steps for one environment, `Phase, Position` order |
+| `GetStepsForEnvironmentsAsync(ids)` | Bulk read indexed by owner — the list endpoint renders a step count per row and must not pay an N+1. Parameterized `IN (...)`, never interpolated. |
+| `GetEnabledStepsAsync(id, phase)` | Exactly what `IEnvironmentStepRunner` executes: enabled only, `Position` order. The runner never re-filters or re-sorts. |
+| `HasEnabledStepsAsync(id, phase)` | Cheap probe. The launch path uses it to decide whether to remember a session's post-exit context, so it runs on every session created. |
+| `ReplaceStepsAsync(id, steps)` | `BEGIN IMMEDIATE`, delete-all, re-INSERT in array order stamping `Position`. Same shape as `JobStore.ReplaceTriggersAsync`. |
+
+---
+
 ## Sandboxes
 
 ### Business Logic
@@ -697,37 +769,49 @@ CREATE TABLE IF NOT EXISTS JobSchedulerLease (
 Sandboxes, AgentMetadata, TokenSavings, CompressionCaptures, CodeAnalyzerIgnores,
 ProjectCache, and GlobalCache have **no foreign key relationships** — they are fully independent
 tables. `Environments` is referenced by `Jobs.EnvironmentId` (`ON DELETE SET NULL` — see the
-Automated Jobs Tables above). Sessions reference environments and working directories by string
+Automated Jobs Tables above) and by `EnvironmentSteps.EnvironmentId` (`ON DELETE CASCADE` — a
+step is part of its environment and owns no filesystem resource). Sessions reference environments and working directories by string
 value only — no FK constraints. Sandboxes reference projects by `ProjectPath` string value — no
 FK to any project table.
 
 The tables with actual FK constraints point at `Sessions.Id` (`SessionLogs`, `sessionOutPut`
 with `ON DELETE CASCADE`, `TerminalSessionLogs`, `UserInputs`) and at `UserInputs.Id`
 (`InputFileChanges`, whose `PreviousInputId` is a second FK to `UserInputs.Id` — not
-self-referential). The Automated Jobs tables add two more FK chains: `Jobs.EnvironmentId →
-Environments(Id)` (`ON DELETE SET NULL`) and `JobTriggers.JobId` / `JobRuns.JobId → Jobs(Id)`.
+self-referential). `EnvironmentSteps.EnvironmentId → Environments(Id)` is the one
+`ON DELETE CASCADE` pointing at Environments. The Automated Jobs tables add two more FK chains:
+`Jobs.EnvironmentId → Environments(Id)` (`ON DELETE SET NULL`) and `JobTriggers.JobId` /
+`JobRuns.JobId → Jobs(Id)`.
 
 ```
 Environments              AgentMetadata
 +--------------+          +-------------+
-| Id (PK)      |          | Id (PK)     |
-| CustomName   |          | Path (UQ)   |
-| LLM          |          | CustomName  |
-| Path         |          +-------------+
-| CustomArgs   |
-| CustomPrompt |          Sandboxes
-| CreatedUTC   |          +-------------------+
-| LastUsedUTC  |          | Id (PK)           |
-| Hidden       |          | Name              |
+| Id (PK)      |<---+     | Id (PK)     |
+| CustomName   |    |     | Path (UQ)   |
+| LLM          |    |     | CustomName  |
+| Path         |    |     +-------------+
+| CustomArgs   |    |
+| CustomPrompt |    |     Sandboxes
+| CreatedUTC   |    |     +-------------------+
+| LastUsedUTC  |    |     | Id (PK)           |
+| Hidden       |    |     | Name              |
 | AutomationWorker* |     | Path              |
-+--------------+          | ProjectPath       |  <-- string, not FK
-UQ(CustomName, LLM)      | Branch            |
-                          | CommitHash        |
-                          | RemoteUrl         |
-                          | SourceBranch      |
-                          | CreatedUTC        |
-                          +-------------------+
-                          UQ(Name, ProjectPath)
++--------------+    |     | ProjectPath       |  <-- string, not FK
+UQ(CustomName, LLM) |     | Branch            |
+                    |     | CommitHash        |
+EnvironmentSteps    |     | RemoteUrl         |
++-------------------+     | SourceBranch      |
+| Id (PK)           |     | CreatedUTC        |
+| EnvironmentId(FK)-+     +-------------------+
+| Phase             |     UQ(Name, ProjectPath)
+| Position          |
+| Name / Command    |     (ON DELETE CASCADE)
+| StartMinimized    |
+| TimeoutSeconds    |
+| Enabled           |
+| CreatedUTC        |
+| UpdatedUTC        |
++-------------------+
+UQ-by-convention(EnvironmentId, Phase, Position)
 
 Sessions                  +-------------------+
 +-------------------+     | Id (PK)           |
@@ -791,4 +875,4 @@ ChatSummary               TokenSavings / CompressionCaptures
 
 ---
 
-*Last checked: 2026-08-06T17:54:34Z by opencode (glm-5.2)*
+*Last checked: 2026-08-11T00:00:00Z by claude (opus-5)*

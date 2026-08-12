@@ -17,6 +17,10 @@
     <EnableUnsupportedPlatformTargetCheck>false</EnableUnsupportedPlatformTargetCheck>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Already on the graph transitively via PyBridge (which is IsAotCompatible/IsTrimmable);
+         referenced directly here because Services/Cli/CliWrapper.cs uses it as a first-party
+         dependency rather than through PyBridge's Python-specific surface. -->
+    <PackageReference Include="CliWrap" Version="3.10.4" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
     <PackageReference Include="Serilog" Version="4.4.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.*" />

@@ -1,5 +1,40 @@
 # TERMINAL.md
 
+> ## 🔴 Open — tab-activation resize shred ("cursor messed up", session b92fb476) = the 2026-05-15 xterm.js render race with a new trigger (2026-08-10)
+>
+> **Where we left off (end of 2026-08-10 session).** Root cause is settled
+> after three attribution passes: Rob's window grew at ~05:35, each tab
+> synced its new 145x29 geometry **when he activated it** (hidden tabs don't
+> observe container changes — all three tabs stepped to 145x29 in sequence,
+> human-paced), and on the heavy tab (full conversation + 20k-line
+> scrollback) the ConPTY resize-redraw + Claude SIGWINCH repaint (2 full
+> frames 24 ms apart) landed mid-buffer-reflow → the **known-open 2026-05-15
+> xterm.js live-render race** kept stale rows and displaced the cursor.
+> Bytes and converged buffer are provably clean (emulator replay F2); the
+> damage is render-side. Heals via font-size ± / tab re-activate (forces
+> clear + refit + fresh repaint). NOT remote (retracted — Rob never uses
+> viberails.ai, and its frontend never sends `__resize__` at all), NOT a
+> foreign-geometry parse (retracted — the cols/rows getters send xterm's
+> actual post-fit dims). The 2s "extended" resize debounce does NOT prevent
+> this variant (single activation resize, not a SIGWINCH storm).
+>
+> **Shipped (uncommitted in the working tree, needs ext rebuild):**
+> INF attribution log on every applied PTY resize (`Resized PTY old→new
+> source=…`), unconditional INF on any remote resize/replay touch, and a
+> defense-in-depth gate ignoring RemoteWebUi resizes while a local web
+> viewer is attached (NOT this incident's fix; costs Rob nothing). Tests
+> 154/154. Plus forensic artifacts: `Session_b92fb476_ReprintDiagnostic.cs`
+> + fixtures.
+>
+> **Next occurrence, BEFORE the font-size jiggle (this picks the fix):**
+> 1) select+copy the broken region — correct clipboard + wrong pixels =
+> renderer-only ⇒ build the one-shot deferred `term.refresh()` after
+> activation fits that changed geometry; garbled clipboard = buffer diverged
+> ⇒ headless-xterm experiment + upstream report. 2) grep `vb-*.log` for
+> `Resized PTY` at the timestamp — expect `source=LocalWebUi` right after a
+> tab switch / window change. Full entry:
+> **"## 2026-08-10 Tab-activation resize shred…"** below.
+
 > ## 🟡 Fixed, awaiting Rob's test — Automation runs shredded in the native terminal (2026-08-02)
 >
 > Root-caused with byte evidence **and a measured probe**, fixed, unit-tested —
@@ -163,6 +198,352 @@
 > nothing. Harmless to leave in (and may help once Claude Code's
 > wrapping is fixed upstream), but it's belt-only — not the
 > suspenders. Full triage below.
+
+## 2026-08-10 Tab-activation resize shred — stranded cursor + broken input-box chrome (session b92fb476; formerly titled "Passive-viewer resize shreds the webview")
+
+**Status:** 🔴 **OPEN (root cause = the 2026-05-15 xterm.js live-render race,
+new trigger identified: tab-activation resize) — with same-day server-side
+logging + hardening applied, awaiting Rob's rebuild.** This entry went through
+THREE attribution passes in one day; read the top-of-entry corrected
+attribution before trusting any single section, and see "Lessons" at the
+bottom. Rob's directive: "the app is usable today… whatever changes you make
+please make sure they're SAFE — least risk most reward first." Reported by Rob
+2026-08-10 (~00:37 local) as "the reprint and the cursor is messed up… if I
+increased and decreased the text size it would probably fix it but then it
+might come back. These have been happening randomly recently." Two
+screenshots = two different bugs; this entry is the **cursor** one. (The
+"reprint" — a doubled Claude banner in scrollback — is upstream Claude Code
+and is covered in the sub-note at the bottom.)
+
+**Reference session:** `b92fb476-392d-4291-8952-d0cc8535842f` (Claude Code
+v2.1.225 tab, ext 1.9.13, VS Code webview, started 2026-08-10T05:28:47.66Z).
+
+### Symptom
+
+The live webview shows Claude's UI with the input-box chrome broken (divider
+rows split into a full-width rule plus a short 16-`─` stub, prompt/status rows
+displaced) and the **block cursor stranded at the left edge of a blank row**
+several rows below where the prompt actually is. It does not self-correct.
+Changing font size (or anything that re-fits) fixes it instantly.
+
+### The chain (every link byte-verified)
+
+Authoritative DB timeline at 05:37:09Z (the session's ONLY mid-session
+geometry change; TerminalSessionLogs + SessionLogs, single-reader channel so
+DB order = real order):
+
+| Time (05:37:09.x Z) | What |
+|---|---|
+| .1440682 | TerminalSessionLogs seq 4 — buffered-output flush stamped **129x26** (old geometry) |
+| .1457892 | TerminalSessionLogs seq 5 — zero-byte geometry marker **145x29** |
+| .1467389 | SessionLogs 45431472 — **repaint#1**, 2578 B: ConPTY's `ResizePseudoConsole` redraw. No `?2026` bracket (unique in session). Old 129-wide cell content reflowed into 29 rows (both dividers exactly 129 glyphs; recap soft-wrap re-joined 3→2 rows), ends `\e[22;3H` |
+| .1695930 | SessionLogs 45431477 — empty `\e[?2026h\e[?2026l` pair (Claude's paint fingerprint) |
+| .1708066 / .1718935 | SessionLogs 45431478/79 — **repaint#2**, 4269 B: Claude Code's SIGWINCH repaint, fully re-composed for **145x29** (dividers exactly 145 glyphs, 3 extra transcript rows now visible, zero scroll), ends `\e[26;3H\e[?25h` = cursor after `> ` |
+| — | **Nothing further, ever** (through Rob's screenshots and beyond) |
+
+Write-order proof: `TerminalResizeCoordinator.ApplyResizeNow` calls
+`terminal.Resize(...)` (= ResizePseudoConsole) at
+`TerminalResizeCoordinator.cs:146` and only **then** `RecordResize` (line 147)
+→ so the PTY resize precedes all the repaint bytes. The pair is
+**ConPTY redraw + Claude repaint** — both correct, both composed for 145x29.
+
+**On the surface that requested the resize, this renders as a clean resize.**
+On Rob's webview — still **129x26**, because VibeRails never rebroadcasts
+geometry to other viewers (`Observers/MyTerminalObserver.cs:21/62`
+`OnTerminalResizeAsync` is a **no-op stub**; `WebSocketConsumer` streams bytes
+only) — the same bytes wrap at 129 cols: each 145-glyph divider becomes a full
+rule row + a 16-`─` orphan stub, ~14 rows scroll (duplicating fresh content
+into scrollback), and the final `\e[26;3H\e[?25h` parks the visible cursor at
+col 3 of a blank erased bottom row, four rows below the displaced prompt.
+**That is the screenshot, exactly.**
+
+### Emulator replay (diagnostic left in the tree, uncommitted)
+
+`TerminalEmulator.Tests/Session_b92fb476_ReprintDiagnostic.cs` + fixtures
+`session_b92fb476_pre_resize.bin` / `session_b92fb476_tail.bin`. Run:
+`dotnet test TerminalEmulator.Tests --filter "FullyQualifiedName~Session_b92fb476"`.
+
+- **F2** (pre-resize bytes → `Resize(145,29)` → tail bytes): pixel-perfect
+  frame, cursor row 25 col 2 (0-indexed) **on the `>` input row**, chrome
+  intact. The bytes are clean at the right geometry.
+- **F3** (same bytes, geometry never changed — what the webview effectively
+  did): dividers wrap into row+stub pairs, prompt displaced, status line
+  mid-screen, **cursor on a blank row below the status line at the left
+  edge** — byte-for-byte Rob's photo.
+- Replay note: the emulator honors in-band `\e[8;rows;cols t`
+  (`AnsiParser.cs:537`), so the boot chunk's `8;25;129t` sizes F1/F3 grids to
+  129x25 regardless of ctor args.
+
+### Where did 145x29 come from? (the open question)
+
+Excluded with evidence:
+- **Not Rob's webview**: any local gesture (drag, panel snap, font-size ±)
+  resizes the *local* xterm first (`_debounceFit(100)` → `fitAddon.fit()` →
+  then `scheduleResizeToPty`, 140 ms default) — the sender always renders the
+  repaints cleanly. The shred proves the screenshotted surface was still 129
+  cols when it parsed the bytes.
+- **Not a second local attach**: parent log `vb-20260810_002.log` shows exactly
+  ONE `GET …/terminal/tabs/883ad628…/ws?cols=129&rows=25` (05:28:47.908Z) for
+  the whole session; re-attaches are reliably logged (control case: tab
+  `ec0f72bc`, 3 cycles). No `__resize__:129,26` re-assert bytes ever appear —
+  the webview tab was never re-activated/refit after the event.
+- **Nothing in the logs at 05:37:09** — both resize paths
+  (`TerminalSessionService.cs:461` local frame, `TerminalRunner.cs:355`
+  `HandleRemoteResizeAsync`) are silent at INF.
+
+**ANSWERED (third pass, same day): the sender was Rob's own webview —
+tab-activation sync after the window grew.** The clincher, from
+`TerminalSessionLogs` across all sessions live that night:
+
+| Session | 129x26 → 145x29* at | What it was |
+|---|---|---|
+| `4abd3718` (Claude tab 2) | 05:35:30 (145x31 → 145x29 at :32) | active tab when the window/panel grew |
+| `250a754c` (Codex tab) | 05:36:18 | Rob switched to it |
+| `b92fb476` (this session) | 05:37:09 | Rob switched back to it |
+
+Three tabs, same target geometry, ~50 s apart, human-paced = **Rob cycling
+tabs after a window/zoom change at ~05:35**. Hidden tabs don't observe
+container changes (`setupResizeHandling` only runs while active), so each tab
+learned the new size on activation: `handleActiveStateChanged(active)` →
+`fitAndSyncTerminal()` = `fit({force})` **then** `sendResizeToPty({force})`,
+and the cols/rows getters (`vibe-terminal.js:389-395`) return the *actual*
+xterm dims — so the 145x29 that reached the PTY is proof the webview xterm
+**was** 145x29 at send time. Source was `LocalWebUi` all along.
+
+**Why the screen still broke (and the correction to the F3 claim):** the
+activation resize means xterm has just executed a 129→145 buffer resize —
+a full reflow of a ~20k-line scrollback — and ~30–100 ms later ConPTY's
+resize redraw + Claude's SIGWINCH repaint land as two full-screen frames
+24 ms apart. That is the **2026-05-15 open xterm.js live-render race**
+(clean bytes, converged buffer, broken *render*): stale 129-era rows stay
+painted, chrome rows go missing, the cursor draws displaced. F3's "parsed
+at 129" replay produces a *similar-looking* wreck, which misled the second
+pass into "the client parsed 145-wide frames at 129 cols" — but the getters
+rule that out; the damage is renderer-side, not parse-side. Consistent with:
+tab2 and Codex surviving the same transition (near-empty buffer / compact
+idle UI — much smaller reflow+repaint collision window), the font-size
+jiggle healing it (clear + refit + fresh SIGWINCH repaint), and "happening
+randomly recently" (needs tab-switch-after-resize + a heavy double repaint).
+
+**Buffer-vs-renderer: not yet proven.** F2 proves the *C# emulator* buffer
+converges; whether xterm's buffer also converges (renderer-only damage) or
+diverges too was never tested (the 2026-05-15 headless-xterm experiment is
+still undone). Cheap live discriminator for the next occurrence, BEFORE the
+font-size jiggle: select/copy the broken region — xterm selection reads the
+buffer, so correct copied text + wrong pixels = renderer; garbled copy =
+buffer/parser. Do that once and the fix target is known.
+
+**The dead remote theory (second pass — kept for the audit trail, conclusions
+retracted).** Rob: *"No remote viewer connected… I never use the viberails.ai
+connection."* He was right. The sender audit below remains individually
+accurate (nothing else could resize the PTY), but its conclusion — "relay leg
+is the only possible sender, likely a stale viewer tab" — was wrong because
+the webview exclusion had a hole: "the sender refits its own xterm first"
+is true *and* the refit itself arms the render race, so the sender CAN be
+the surface that breaks. Also note the viberails.ai frontend's own terminal
+client never sends `__resize__` at all (pinned by its Playwright spec,
+`tests/terminal.spec.js` "does not send __resize__ control frames from
+browser"), so the stale-tab mechanism didn't even exist:
+
+| Candidate | Verdict | Evidence |
+|---|---|---|
+| Webview JS (`LocalWebUi`) | ⚠️ wrongly excluded here — see corrected attribution above | the exclusion logic ("sender refits its own xterm first, so it renders its own resize cleanly") assumed rendering is sound; the xterm.js live-render race breaks exactly that assumption |
+| Second local attach (URL-hint pre-resize) | ❌ excluded | exactly one `GET …/terminal/ws` ever, both logs |
+| VS Code extension host (TypeScript) | ❌ excluded | `grep resize vscode-viberails/src/*.ts` → zero hits; the extension has no resize code at all |
+| Native-console poll (`LocalCli`) | ❌ excluded | `ConsoleInputLoopAsync` runs only on the native-CLI and job paths (TerminalRunner.cs:663/742, paired with `ConsoleOutputConsumer` + `RegisterExternalTerminal`); tab children start via the web tabs API |
+| Direct `terminal.Resize` bypass | ❌ excluded | no callers outside the coordinator (repo-wide grep) |
+| viberails.ai server C# machinery | ❌ excluded | zero `__resize__` senders in VibeRails-Front C#; the only `__resize__` hits are the remote *viewer's* browser JS |
+| Remote/relay leg (`RemoteWebUi`) | ❌ excluded (third pass) | briefly blamed by elimination in the second pass; refuted by the three-tab timeline AND by the remote frontend never sending `__resize__` at all. Still true and worth knowing: with **no remote PIN, `IsRemoteViewerAuthorized` auto-authorizes everything** (TerminalRunner.cs:231-238), and the path was log-silent until this entry's fix |
+| **Webview tab-activation sync (`LocalWebUi`)** | ✅ **the sender** | wrongly excluded in the first pass ("sender refits its own xterm first" — true, but the refit itself arms the xterm.js render race); confirmed by the three-tab 145x29 timeline |
+
+(The table's per-row facts stand; the "remote is the only possible sender"
+conclusion drawn from it does not — see the corrected attribution above. The
+`RemoteWebUi` row is additionally moot because the remote frontend never
+sends `__resize__`. The log line `[Remote] WebSocket connected to server for
+session …` is the child's *outbound* link, always opened — it never meant a
+viewer.)
+
+### Why "font size ± fixes it" and why it "comes back randomly"
+
+Any local re-fit (font-size change via `applyFontSize` → `fitAndSyncTerminal`
+force-send, or tab re-activation) sends `__resize__:129,26` → ConPTY redraw +
+Claude repaint at the webview's own geometry → screen heals. It "comes back"
+whenever the other surface re-asserts its different size while the webview
+sits passive. So the randomness is: *whenever the other viewer's geometry
+lands while you're not interacting.*
+
+### What we applied (2026-08-10) — attribution logging + a defense-in-depth gate, server-side only
+
+> **Post-correction framing:** items 3–4 (the logging) are the load-bearing
+> part — the next occurrence will print `Resized PTY … source=LocalWebUi`
+> right before the shred and confirm the corrected attribution in one grep.
+> Items 1–2 (the remote gate) do **not** address this incident (the sender
+> was local); they stay as cheap defense-in-depth because a remote resize
+> genuinely would shred the local viewer, and Rob never uses remote so the
+> gate costs him nothing. **The actual bug — the xterm.js live-render race —
+> remains open**; next steps at the bottom of this entry.
+
+Chosen for Rob's "SAFE, least risk most reward" directive: **zero frontend
+changes** (the client receive path — historically the landmine field — is
+byte-identical), a few dozen server-side lines, all behavior-off unless the
+exact failure scenario occurs.
+
+1. **`Terminal.HasLocalWebViewer`** (`Pty/Terminal.cs`, after `Unsubscribe`) —
+   true while a `WebSocketConsumer` is in the subscriber list, i.e. exactly
+   "a local web viewer is attached". Read under `_subscriberLock`, same idiom
+   as `IsSyncOutputActive`.
+2. **Authority gate** in `TerminalResizeCoordinator.ApplyResize` (after the
+   same-size early-return): `ShouldIgnoreResize(source, hasLocalWebViewer)` —
+   a pure, unit-testable predicate that is true **only** for
+   `RemoteWebUi && localWebViewerAttached`. When it fires, the resize is
+   dropped with an INF log
+   (`[Terminal] Ignored RemoteWebUi resize to {c}x{r} … local web viewer
+   attached and owns geometry`). Scope deliberately narrow:
+   - `LocalWebUi` (the webview's own resizes) — always applies.
+   - `LocalCli` (native-console geometry poll) — **exempt on purpose**;
+     gating it would regress native-console + web-viewer coexistence
+     (dragging a native console window while a browser tab watches the same
+     session must keep reflowing the PTY).
+   - `RemoteWebUi` with **no** local viewer (remote-only viewing, VS Code
+     closed) — applies as before; remote UX unchanged.
+3. **Attribution logging** in `ApplyResizeNow`: every applied resize logs
+   `old→new + source + localWebViewer` at INF. The b92fb476 shred was only
+   attributable via DB forensics because both resize paths were silent — the
+   next foreign resize names its sender in `vb-*.log` directly.
+4. **Remote-touch logging** (added same day, after Rob reported "no remote
+   viewer ever connected" — which was unverifiable precisely because this
+   path was silent): `HandleRemoteResizeAsync` and
+   `HandleRemoteReplayRequestAsync` (`TerminalRunner.cs`) now log at INF
+   **unconditionally at handler entry** — before the auth check, the
+   same-size early-return, and the authority gate, all of which can swallow
+   the request without a trace. `[Remote] Resize request from remote viewer…`
+   / `[Remote] Replay requested by remote viewer…` = definitive "a remote
+   viewer touched this session" markers.
+
+**Security-adjacent observation (not a bug, worth knowing):** with no remote
+PIN configured, `IsRemoteViewerAuthorized` auto-authorizes every remote frame
+(TerminalRunner.cs:231-238). The relay is keyed to Rob's cloud API key so the
+surface is Rob's own devices, but it means any stale logged-in viewer tab
+anywhere can silently drive a session. Configuring the remote PIN would make
+remote touches opt-in per session.
+
+**Accepted trade-off:** while VS Code (or a browser tab) is attached, a
+viberails.ai / phone viewer can no longer resize the PTY — it renders the
+local viewer's geometry, possibly wrapped on its screen. That is the tmux
+"primary client wins" model, and strictly better than today's inverse (the
+casual viewer wins and the primary work surface shreds permanently). If a
+stale-but-undetached local socket ever wrongly blocks a legitimate remote
+resize, the INF drop log makes it visible; the 2-min WS idle timeout bounds
+the window.
+
+**Tests:** `Tests/Services/Terminal/TerminalResizeCoordinatorTests.cs` — the
+b92fb476 case ignored, remote-only applies, and every non-remote source never
+ignored regardless of viewer state. `Tests.Services.Terminal` **154/154**.
+
+### Deferred fix directions (do NOT build these without a new failing case)
+
+1. **Geometry rebroadcast** — implement the no-op `OnTerminalResizeAsync`
+   observer: push a control frame (e.g. `__resized__:cols,rows`) to every
+   attached viewer; passive viewers call `term.resize(cols,rows)` before the
+   repaint bytes arrive (applied without re-fitting — the container didn't
+   change, so the canvas letterboxes/scrolls). The *complete* multi-viewer
+   fix, but it adds a new server→client protocol surface on the terminal
+   socket and a client receive-path change — exactly the risk class Rob's
+   safety directive vetoed while the gate covers the observed failure.
+   Revisit only if a shred recurs **with the gate in place** and the new INF
+   logs name a source the gate doesn't cover.
+2. **Client re-assert (self-healing)** — rebroadcast (as in #1) but instead
+   of adopting, a passive *local* viewer answers with its own forced
+   `__resize__` → fresh SIGWINCH repaint at local geometry. Same protocol
+   surface, plus ping-pong risk if two surfaces both re-assert; needs an
+   authority rule anyway. Same bar to revisit.
+
+This is the classic tmux multi-client size problem (tmux: smallest-client wins
+/ latest-active wins); the applied gate is "primary client wins". Whatever is
+ever built here: **do not** strip or rewrite the repaint bytes (no-stripping
+rule), and remember `ResizePseudoConsole` itself emits a full redraw — two
+repaints per resize is normal.
+
+### Rob's playbook for the next occurrence (post-rebuild)
+
+1. Rebuild + reinstall the extension (the logging + gate live in `vb.exe`).
+   Normal day of use must be exactly as before — drags, panel snaps,
+   font-size ± are all `LocalWebUi` and untouched.
+2. **When the shred recurs** (it can, the render race is still open), do two
+   things BEFORE the font-size jiggle:
+   - **Select + copy a few lines of the broken region.** Correct text in the
+     clipboard + wrong pixels on screen ⇒ renderer-only damage (fix target:
+     a post-repaint `term.refresh()` pass). Garbled clipboard ⇒ xterm's
+     buffer/parser diverged too (fix target: deeper, parser-side). This one
+     observation picks the fix.
+   - Grep `vb-*.log` for `Resized PTY` around the timestamp. Expected:
+     `… source=LocalWebUi, localWebViewer=True` moments before the shred,
+     matching a tab switch / window change you just made. Anything else
+     (`RemoteWebUi`, `Ignored …`, or no line at all) reopens the attribution
+     question — bring the log line to the next session.
+3. The font-size jiggle (or switching away and back) remains the safe manual
+   heal; it forces clear + refit + a fresh SIGWINCH repaint.
+
+### Next steps for the actual fix (the open render race)
+
+Candidates, cheapest first — **none applied yet; pick after the
+buffer-vs-renderer discriminator from step 2 lands**:
+
+1. **One-shot deferred `term.refresh(0, rows-1)`** after an activation fit
+   that *changed* geometry (i.e. a resize sync was sent) — ~300–500 ms later,
+   after the SIGWINCH repaints have landed. Pure client render-layer, no
+   protocol change, no receive-path timers (does not violate the
+   queueMicrotask guardrail — it's a one-shot UI redraw, not output
+   coalescing). Heals renderer-only damage deterministically; useless if the
+   buffer diverges. DO NOT build until the clipboard test says "renderer".
+2. The 2026-05-15 headless-xterm experiment (`@xterm/headless` replay of the
+   b92fb476 tail at 145x29 after a live 129→145 resize) — settles
+   buffer-vs-renderer without waiting for a recurrence, if anyone wants it
+   sooner.
+3. Upstream xterm.js report once (1)/(2) pin the layer.
+
+### Lessons (attribution, three passes in one day)
+
+1. **"The sender renders its own resize cleanly" is only true if rendering
+   is sound.** With a known-open live-render race in the codebase, sender
+   self-consistency arguments cannot exclude the sender.
+2. **Check sibling sessions FIRST.** The three-tab 145x29 timeline settled in
+   one query what two elimination passes argued about. When a geometry event
+   looks foreign, diff it against every other live session's geometry before
+   theorizing.
+3. **Absence of logs was doing all the misleading work.** Both wrong passes
+   leaned on "the remote path is silent, so silence proves nothing / so it
+   must be remote". The attribution logging added today removes that entire
+   failure mode.
+4. Also worth doing once, independent of this bug: consider configuring the
+   remote PIN — with none set, `IsRemoteViewerAuthorized` auto-authorizes
+   every remote frame (TerminalRunner.cs:231-238).
+
+### Discriminator for future reports (corrected)
+
+"Chrome shredded + cursor stranded/displaced; font-size ± or tab-switch heals
+it" ⇒ grep `vb-*.log` for `Resized PTY` at the timestamp (post-fix it names
+the source) and check `TerminalSessionLogs` for a geometry step just before
+the damage. `source=LocalWebUi` right after a tab switch / window change =
+this bug (activation resize → ConPTY + CLI double repaint → xterm live-render
+race). It IS the same underlying race as the 2026-05-15 stacked-repaints
+entry — different trigger (one activation resize colliding with the reflow,
+not a SIGWINCH storm), so the 2s `RESIZE_SYNC_DEBOUNCE_MS` "extended" setting
+does NOT prevent it. Bytes are clean in every variant of this class.
+
+### Sub-note: the doubled banner in the same session (Rob deprioritized)
+
+Byte-proven upstream Claude Code behavior, `28d4bf6f` class, worse in
+v2.1.225: three menu overflows (slash-command dropdown, /model selector,
+@-mention pill) emitted 10 bottom-row LFs, scrolling banner#1 (original rows
+8–10) into scrollback; Claude's next full `\e[H` frame (+16.27s, chunk
+45416094) re-painted the banner at rows 1–3 → two adjacent identical banners
+in history. Emulator replay converges to exactly two banners in **every**
+variant → any correct terminal shows this; not fixable downstream without
+violating the no-stripping rule. If it grates, it's an upstream report
+(banner re-render after frame-overflow scrolling).
+
+---
 
 ## 2026-08-02 Typing lag on 1.9.6+ (maybe-bug) — NOT reproduced, do not chase without a fresh repro
 

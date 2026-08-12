@@ -179,41 +179,56 @@ export class JobController {
             <div class="view jobs-view" data-view="jobs">
                 <header class="jobs-page-header">
                     <div>
-                        <h4 class="jobs-page-title text-uppercase fw-bold mb-0"><span class="text-gradient">Automation</span></h4>
-                        <p>Run an agent on a schedule, after commits, or whenever you hit Run.
-                            <span class="jobs-runtime-note" title="Queued work is shared, and a single active instance claims each run."><i class="fa-regular fa-circle-question" aria-hidden="true"></i>Automations run only while VibeRails is open</span>
-                        </p>
+                        <h1 class="jobs-page-title">Automation</h1>
+                        <p>Create and manage agent runs for this repository.</p>
                     </div>
-                    <div class="jobs-page-actions">
-                        <button class="btn btn-outline-secondary" type="button" data-job-action="import-recipe">
-                            <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Import recipe
-                        </button>
-                        <button class="btn btn-primary" type="button" data-job-action="new">
-                            <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New automation
-                        </button>
-                    </div>
+                    <button class="btn btn-primary" type="button" data-job-action="new">
+                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New automation
+                    </button>
                 </header>
 
-                <section class="jobs-section" aria-labelledby="jobs-list-title">
+                <div class="jobs-runtime-note" role="note">
+                    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                    <span><strong>VibeRails must stay open.</strong> Scheduled and commit-triggered runs only start while this app is running.</span>
+                </div>
+
+                <section class="jobs-section jobs-panel" aria-labelledby="jobs-list-title">
                     <div class="jobs-section-heading">
-                        <div><h2 id="jobs-list-title">Automations</h2></div>
-                        <span class="jobs-count" data-jobs-count>0 automations</span>
+                        <div>
+                            <div class="jobs-section-title-row">
+                                <h2 id="jobs-list-title">Your automations</h2>
+                                <span class="jobs-count" data-jobs-count>0 automations</span>
+                            </div>
+                            <p>Run, edit, pause, or remove an automation from one place.</p>
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="import-recipe">
+                            <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>Import recipe
+                        </button>
                     </div>
                     <div class="job-inline-editor" data-job-editor hidden></div>
                     <div class="jobs-grid" data-jobs-list>
-                        <div class="jobs-empty"><span class="spinner-border spinner-border-sm"></span> Loading automations…</div>
+                        <div class="jobs-empty" role="status"><span class="spinner-border spinner-border-sm"></span> Loading automations…</div>
                     </div>
                 </section>
 
-                <section class="jobs-section" aria-labelledby="job-runs-title">
-                    <div class="jobs-section-heading">
-                        <div><h2 id="job-runs-title">Run history</h2></div>
-                        <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="refresh">
-                            <i class="fa-solid fa-rotate-right me-1" aria-hidden="true"></i>Refresh
-                        </button>
+                <details class="jobs-history-panel">
+                    <summary>
+                        <span class="jobs-history-summary-title">
+                            <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
+                            <span><strong>Run history</strong><small>Latest result for each automation</small></span>
+                        </span>
+                        <i class="fa-solid fa-chevron-down jobs-history-chevron" aria-hidden="true"></i>
+                    </summary>
+                    <div class="jobs-history-body">
+                        <div class="jobs-history-toolbar">
+                            <span>Select an automation to see all of its runs.</span>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="refresh">
+                                <i class="fa-solid fa-rotate-right me-1" aria-hidden="true"></i>Refresh
+                            </button>
+                        </div>
+                        <div class="jobs-runs" data-job-runs></div>
                     </div>
-                    <div class="jobs-runs" data-job-runs></div>
-                </section>
+                </details>
             </div>`;
     }
 
@@ -224,6 +239,7 @@ export class JobController {
             const action = actionElement.dataset.jobAction;
             const jobId = Number(actionElement.dataset.jobId);
             const runId = actionElement.dataset.runId;
+            actionElement.closest('.job-more')?.removeAttribute('open');
 
             if (action === 'new') return this.openEditor();
             if (action === 'refresh') return this.refreshAll();
@@ -360,32 +376,25 @@ export class JobController {
                             </div>
                             <span class="job-state" data-tone="${job.enabled ? 'success' : 'neutral'}">${job.enabled ? 'Enabled' : 'Disabled'}</span>
                         </div>
-                        <div class="job-card-facts">
-                            <div class="job-card-fact" ${environment ? '' : 'data-tone="warning"'}>
-                                <span><i class="fa-solid fa-layer-group" aria-hidden="true"></i>Worker</span>
-                                <strong>${this.escape(environmentName)}</strong>
-                            </div>
-                            <div class="job-card-fact job-card-trigger">
-                                <span><i class="fa-regular fa-clock" aria-hidden="true"></i>Trigger</span>
-                                <div class="job-triggers">${triggers || '<span class="jobs-trigger-chip">On demand</span>'}</div>
-                            </div>
-                            <div class="job-card-fact">
-                                <span><i class="fa-solid fa-forward" aria-hidden="true"></i>Next run</span>
-                                <strong${nextRunTitle}>${this.escape(nextRun.label)}</strong>
-                            </div>
+                        <div class="job-card-meta">
+                            <span ${environment ? '' : 'data-tone="warning"'} title="Worker"><i class="fa-solid fa-robot" aria-hidden="true"></i><span class="job-card-meta-text">${this.escape(environmentName)}</span></span>
+                            <span class="job-card-trigger" title="When it runs"><i class="fa-regular fa-clock" aria-hidden="true"></i><span class="job-triggers">${triggers || '<span class="jobs-trigger-chip">On demand</span>'}</span></span>
+                            <span title="Next run"><i class="fa-solid fa-forward" aria-hidden="true"></i><span>Next: <strong${nextRunTitle}>${this.escape(nextRun.label)}</strong></span></span>
                         </div>
                         ${prompt ? `
-                        <div class="job-card-prompt">
-                            <span><i class="fa-regular fa-message" aria-hidden="true"></i>Initial message</span>
-                            <p title="${this.escape(this.truncate(prompt, 400))}">${this.escape(prompt)}</p>
-                        </div>` : ''}
+                        <p class="job-card-prompt" title="${this.escape(this.truncate(prompt, 400))}"><i class="fa-regular fa-message" aria-hidden="true"></i><span>${this.escape(prompt)}</span></p>` : ''}
                     </div>
                     <div class="job-card-actions">
-                        <button class="btn btn-sm btn-primary" type="button" data-job-action="run" data-job-id="${jobId}"><i class="fa-solid fa-play me-1"></i>Run now</button>
-                        <button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="edit" data-job-id="${jobId}" title="Edit automation" aria-label="Edit ${safeName}"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
-                        <button class="btn btn-sm ${job.enabled ? 'btn-outline-success' : 'btn-outline-danger'} job-icon-action job-toggle-action" type="button" data-job-action="toggle" data-job-id="${jobId}" title="${job.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable'}" aria-label="${job.enabled ? 'Disable' : 'Enable'} ${safeName}"><i class="fa-solid ${job.enabled ? 'fa-toggle-on' : 'fa-toggle-off'}" aria-hidden="true"></i></button>
-                        <button class="btn btn-sm btn-outline-secondary job-icon-action" type="button" data-job-action="export-recipe" data-job-id="${jobId}" title="Export as recipe" aria-label="Export ${safeName} as recipe"><i class="fa-solid fa-file-export" aria-hidden="true"></i></button>
-                        <button class="btn btn-sm btn-outline-danger job-icon-action" type="button" data-job-action="delete" data-job-id="${jobId}" title="Delete automation" aria-label="Delete ${safeName}"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
+                        <button class="btn btn-sm btn-primary" type="button" data-job-action="run" data-job-id="${jobId}" aria-label="Run ${safeName} now"><i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run now</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="edit" data-job-id="${jobId}" aria-label="Edit ${safeName}"><i class="fa-solid fa-pen me-1" aria-hidden="true"></i>Edit</button>
+                        <button class="btn btn-sm ${job.enabled ? 'btn-outline-success' : 'btn-outline-danger'} job-toggle-action" type="button" data-job-action="toggle" data-job-id="${jobId}" title="${job.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable'}" aria-label="${job.enabled ? 'Disable' : 'Enable'} ${safeName}"><i class="fa-solid ${job.enabled ? 'fa-toggle-on' : 'fa-toggle-off'} me-1" aria-hidden="true"></i>${job.enabled ? 'Disable' : 'Enable'}</button>
+                        <details class="job-more">
+                            <summary class="btn btn-sm btn-outline-secondary" aria-label="More actions for ${safeName}">More<i class="fa-solid fa-chevron-down ms-1" aria-hidden="true"></i></summary>
+                            <div class="job-more-menu">
+                                <button type="button" data-job-action="export-recipe" data-job-id="${jobId}" aria-label="Export ${safeName} as a recipe"><i class="fa-solid fa-file-export" aria-hidden="true"></i>Export recipe</button>
+                                <button class="job-more-danger" type="button" data-job-action="delete" data-job-id="${jobId}" aria-label="Delete ${safeName}"><i class="fa-solid fa-trash" aria-hidden="true"></i>Delete</button>
+                            </div>
+                        </details>
                     </div>
                 </article>`;
         }).join('');
@@ -769,6 +778,7 @@ export class JobController {
         this.activeEditorJob = job;
         this.activeEditorSource = source;
         this.activeEditorPreferredTrigger = preferredTrigger;
+        this.root.dataset.editorOpen = 'true';
 
         const triggers = source.triggers || [];
         const scheduled = triggers.find(trigger => Number(trigger.kind) === TRIGGER.SCHEDULE);
@@ -788,52 +798,50 @@ export class JobController {
         editor.innerHTML = `
             <form data-job-form class="job-inline-form">
                 <div class="job-inline-form-header">
-                    <h3>${isEdit ? `Edit — ${this.escape(source.name)}` : 'New automation'}</h3>
+                    <div>
+                        <h3>${isEdit ? `Edit ${this.escape(source.name)}` : 'New automation'}</h3>
+                        <p>Name it, choose a Worker, and decide when it runs.</p>
+                    </div>
                     <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="cancel-editor" aria-label="Close automation editor"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
                 </div>
-                <div class="row g-3">
-                    <div class="col-lg-5"><label class="form-label" for="job-name">Automation name</label><input class="form-control" id="job-name" maxlength="100" required value="${this.escape(source.name || '')}" placeholder="Security review after commit"></div>
-                    <div class="col-lg-7">
+                <div class="job-form-fields">
+                    <div><label class="form-label" for="job-name">Name</label><input class="form-control" id="job-name" maxlength="100" required value="${this.escape(source.name || '')}" placeholder="Security review after commit"></div>
+                    <div>
                         <label class="form-label" for="job-llm-selection">Worker</label>
                         <div class="job-environment-picker-row">
                             <div class="job-environment-picker"><select class="form-select" id="job-llm-selection" required></select></div>
-                            <button class="btn btn-outline-primary text-nowrap" type="button" data-job-action="add-environment-from-editor"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>Add Worker</button>
-                            <button class="btn btn-outline-secondary text-nowrap" type="button" data-job-action="edit-selected-environment" hidden disabled>Edit Worker</button>
+                            <button class="btn btn-outline-primary text-nowrap" type="button" data-job-action="add-environment-from-editor"><i class="fa-solid fa-plus me-1" aria-hidden="true"></i>New Worker</button>
+                            <button class="btn btn-outline-secondary text-nowrap" type="button" data-job-action="edit-selected-environment" hidden disabled>Edit</button>
                         </div>
-                        <small class="form-text text-muted">A Worker is the CLI, model, and initial message this automation runs.</small>
+                        <small class="form-text text-muted">The Worker contains the CLI, model, and instructions to run.</small>
                     </div>
-                    <div class="col-12"><div class="job-environment-preview" data-job-environment-preview aria-live="polite"></div></div>
+                    <div class="job-environment-preview" data-job-environment-preview aria-live="polite"></div>
                 </div>
 
-                <fieldset class="job-trigger-fieldset mt-4"><legend>When should it run?</legend>
-                    <label class="job-trigger-option"><input class="form-check-input" type="checkbox" id="job-trigger-schedule" ${scheduled ? 'checked' : ''}><span><strong>On a timer</strong><small>Every N minutes, or daily/weekly at a set time.</small></span></label>
+                <fieldset class="job-trigger-fieldset"><legend>Run automatically <small>Optional</small></legend>
+                    <label class="job-trigger-option"><span><strong>On a schedule</strong><small>Run every few minutes, daily, or weekly.</small></span><input class="job-switch-input" type="checkbox" id="job-trigger-schedule" ${scheduled ? 'checked' : ''}></label>
                     <div class="job-schedule-editor" data-schedule-editor ${scheduled ? '' : 'hidden'}>
                         <div class="row g-2">
                             <div class="col-md-4"><label class="form-label" for="job-schedule-kind">Schedule</label><select class="form-select" id="job-schedule-kind"><option value="0" ${scheduleKind === 0 ? 'selected' : ''}>Every interval</option><option value="1" ${scheduleKind === 1 ? 'selected' : ''}>Daily</option><option value="2" ${scheduleKind === 2 ? 'selected' : ''}>Weekly</option></select></div>
                             <div class="col-md-4" data-interval-field><label class="form-label" for="job-interval">Every</label><div class="input-group"><input class="form-control" type="number" id="job-interval" min="5" max="43200" value="${scheduled?.intervalMinutes || 60}"><span class="input-group-text">min</span></div></div>
                             <div class="col-md-4" data-clock-field><label class="form-label" for="job-local-time">Local time</label><input class="form-control" type="time" id="job-local-time" value="${this.escape(scheduled?.localTime || '09:00')}"></div>
-                            <div class="col-12" data-weekdays-field><label class="form-label">Weekdays</label><div class="job-weekdays">${WEEKDAYS.map((day, index) => `<label><input class="form-check-input" type="checkbox" data-weekday="${index}" ${(Number(scheduled?.daysOfWeekMask || 0) & (1 << index)) !== 0 ? 'checked' : ''}><span>${day}</span></label>`).join('')}</div></div>
+                            <fieldset class="col-12 job-weekday-fieldset" data-weekdays-field><legend class="form-label">Days</legend><div class="job-weekdays">${WEEKDAYS.map((day, index) => `<label><input type="checkbox" data-weekday="${index}" ${(Number(scheduled?.daysOfWeekMask || 0) & (1 << index)) !== 0 ? 'checked' : ''}><span>${day}</span></label>`).join('')}</div></fieldset>
                             <div class="col-12" data-timezone-field><label class="form-label" for="job-timezone">Time zone</label><input class="form-control" id="job-timezone" value="${this.escape(timezone)}"></div>
                         </div>
                     </div>
-                    <label class="job-trigger-option"><input class="form-check-input" type="checkbox" id="job-trigger-commit" ${hasCommit ? 'checked' : ''}><span><strong>After every successful commit</strong><small>Runs after each git commit in this repository.</small></span></label>
-                    <div class="job-manual-note"><i class="fa-solid fa-play" aria-hidden="true"></i>“Run now” always works — triggers are optional.</div>
+                    <label class="job-trigger-option"><span><strong>After each commit</strong><small>Run after a successful Git commit in this repository.</small></span><input class="job-switch-input" type="checkbox" id="job-trigger-commit" ${hasCommit ? 'checked' : ''}></label>
+                    <div class="job-manual-note"><i class="fa-solid fa-play" aria-hidden="true"></i>You can always use Run now, even with both switches off.</div>
                 </fieldset>
 
-                <details class="job-advanced-settings mt-3">
-                    <summary>Advanced</summary>
-                    <div class="row g-3 mt-0">
-                        <div class="col-md-5">
-                            <div class="form-check"><input class="form-check-input" type="checkbox" id="job-timeout-enabled" ${source.timeoutMinutes ? 'checked' : ''}><label class="form-check-label" for="job-timeout-enabled">Stop the run after a time limit</label></div>
-                            <div class="input-group mt-2" data-timeout-field ${source.timeoutMinutes ? '' : 'hidden'}><input class="form-control" type="number" id="job-timeout" min="1" max="720" value="${source.timeoutMinutes || 60}"><span class="input-group-text">minutes</span></div>
-                            <small class="form-text text-muted">Off by default — the run stays open until the CLI finishes.</small>
-                        </div>
-                        <div class="col-md-7 d-flex flex-column justify-content-center gap-2">
-                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="job-enabled" ${source.enabled !== false ? 'checked' : ''}><label class="form-check-label" for="job-enabled">Enabled</label></div>
-                            <div class="form-check"><input class="form-check-input" type="checkbox" id="job-launch-minimized" ${source.launchMinimized === true ? 'checked' : ''}><label class="form-check-label" for="job-launch-minimized">Launch minimized</label></div>
-                        </div>
+                <div class="job-run-options">
+                    <div class="job-timeout-option">
+                        <label class="form-label" for="job-timeout">Time limit</label>
+                        <div class="input-group"><input class="form-control" type="number" id="job-timeout" min="1" max="720" value="${source.timeoutMinutes || ''}" placeholder="No limit"><span class="input-group-text">min</span></div>
+                        <small>Leave blank to let the CLI finish on its own.</small>
                     </div>
-                </details>
+                    <label class="job-option-toggle" for="job-enabled"><span><strong>Enabled</strong><small>Allow automatic runs</small></span><input class="job-switch-input" type="checkbox" id="job-enabled" ${source.enabled !== false ? 'checked' : ''}></label>
+                    <label class="job-option-toggle" for="job-launch-minimized"><span><strong>Launch minimized</strong><small>Keep the run in the background</small></span><input class="job-switch-input" type="checkbox" id="job-launch-minimized" ${source.launchMinimized === true ? 'checked' : ''}></label>
+                </div>
 
                 <div class="job-repository-context" title="Automations always run in the repository VibeRails is open in."><i class="fa-solid fa-code-branch" aria-hidden="true"></i>${projectPath
                     ? `<span>Runs in</span><code>${this.escape(projectPath)}</code>`
@@ -857,13 +865,6 @@ export class JobController {
             form.querySelector('#job-local-time').disabled = !enabled || kind === SCHEDULE.INTERVAL;
             form.querySelector('#job-timezone').disabled = !enabled || kind === SCHEDULE.INTERVAL;
         };
-        const updateTimeoutField = () => {
-            const enabled = form.querySelector('#job-timeout-enabled')?.checked === true;
-            const field = form.querySelector('[data-timeout-field]');
-            if (field) field.hidden = !enabled;
-        };
-        form?.querySelector('#job-timeout-enabled')?.addEventListener('change', updateTimeoutField);
-        updateTimeoutField();
         selection?.addEventListener('change', () => this.updateEditorEnvironmentPreview());
         form?.querySelector('[data-job-action="add-environment-from-editor"]')?.addEventListener('click', () => this.createEnvironmentFromEditor());
         form?.querySelector('[data-job-action="edit-selected-environment"]')?.addEventListener('click', () => this.editSelectedEnvironment());
@@ -926,8 +927,8 @@ export class JobController {
             const prompt = (environment.customPrompt || '').trim();
             preview.dataset.tone = prompt ? 'ready' : 'warning';
             preview.innerHTML = prompt
-                ? `<div><span><i class="fa-solid fa-layer-group" aria-hidden="true"></i><strong>${this.escape(environment.name)}</strong> owns this initial message</span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-environment">Edit Worker</button></div><pre></pre>`
-                : `<div><span><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><strong>${this.escape(environment.name)}</strong> needs an Initial Message before it can run as an Automation.</span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-environment">Add initial message</button></div>`;
+                ? `<div><span><i class="fa-regular fa-message" aria-hidden="true"></i><strong>Initial message</strong></span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-environment">Edit Worker</button></div><pre></pre>`
+                : `<div><span><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>This Worker needs an initial message.</span><button class="btn btn-link btn-sm p-0" type="button" data-job-action="edit-preview-environment">Add message</button></div>`;
             const promptTarget = preview.querySelector('pre');
             if (promptTarget) promptTarget.textContent = prompt;
             preview.querySelector('[data-job-action="edit-preview-environment"]')?.addEventListener('click', () => this.editSelectedEnvironment());
@@ -935,7 +936,7 @@ export class JobController {
         }
 
         preview.dataset.tone = 'empty';
-        preview.innerHTML = '<span>Select a Worker, or add one without leaving this editor.</span>';
+        preview.innerHTML = '<span>Choose a Worker to continue.</span>';
     }
 
     async createEnvironmentFromEditor() {
@@ -993,6 +994,7 @@ export class JobController {
         if (!editor) return;
         editor.innerHTML = '';
         editor.hidden = true;
+        delete this.root.dataset.editorOpen;
     }
 
     captureEditorState(form, { validate = false } = {}) {
@@ -1056,8 +1058,8 @@ export class JobController {
             llm,
             environmentId: Number(selectedEnvironment.id),
             prompt,
-            // null = no time limit, which is the default. Only send a number when the user opted in.
-            timeoutMinutes: form.querySelector('#job-timeout-enabled')?.checked
+            // A blank field is the simple default: no time limit.
+            timeoutMinutes: form.querySelector('#job-timeout')?.value
                 ? Number(form.querySelector('#job-timeout').value)
                 : null,
             enabled: form.querySelector('#job-enabled').checked,
@@ -1113,6 +1115,7 @@ export class JobController {
             environmentId: Number(environment.id), prompt: environment.customPrompt || '',
             timeoutMinutes: job.timeoutMinutes,
             enabled: !job.enabled,
+            launchMinimized: job.launchMinimized === true,
             triggers: (job.triggers || []).map(({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }) => ({ kind, scheduleKind, intervalMinutes, localTime, daysOfWeekMask, timeZoneId }))
         };
         return this.withBusy(button, job.enabled ? 'Disabling…' : 'Enabling…', async () => {
@@ -1280,7 +1283,7 @@ export class JobController {
         const originalTitle = button?.getAttribute?.('title');
         if (button) {
             button.disabled = true;
-            // Icon actions are a fixed 32px square, so a text label ("Queueing…") overflows
+            // Icon actions are a fixed square, so a text label ("Queueing…") overflows
             // the box. Spin in place instead and put the wording in the tooltip, which is
             // already where an icon-only button explains itself.
             if (button.classList?.contains?.('job-icon-action')) {
