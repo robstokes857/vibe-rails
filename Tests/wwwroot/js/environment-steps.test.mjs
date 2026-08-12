@@ -252,6 +252,22 @@ test('step rows do not exceed the server-side maximum', () => {
     assert.match(source, /state\.steps\.length >= MAX_STEPS/);
 });
 
+test('the editor body scrolls: the form must not break the modal flex chain', () => {
+    // modal-dialog-scrollable only reaches .modal-body through .modal-content's flex column. The
+    // <form> wrapping body + footer is a flex item with min-height: auto, so without this it
+    // refuses to shrink and a long step list is clipped by overflow: hidden with no scrollbar.
+    const css = readFileSync(stylePath, 'utf8');
+    const rule = css.match(/\.env-steps-modal \[data-env-steps-form\]\s*\{[^}]*\}/);
+
+    assert.ok(rule, 'expected a flex-chain rule for the steps editor form');
+    assert.match(rule[0], /display:\s*flex/);
+    assert.match(rule[0], /flex-direction:\s*column/);
+    assert.match(rule[0], /min-height:\s*0/);
+
+    const source = readFileSync(modulePath, 'utf8');
+    assert.match(source, /modal-dialog-scrollable/);
+});
+
 test('every env-step colour has a fallback so the panel is never transparent', () => {
     // An undefined custom property invalidates the whole declaration, which is the documented
     // cause of the transparent-background bug.
