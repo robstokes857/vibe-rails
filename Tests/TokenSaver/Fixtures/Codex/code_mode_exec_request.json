@@ -1,0 +1,32 @@
+{
+  "model": "gpt-5.5-codex",
+  "input": [
+    {
+      "type": "custom_tool_call",
+      "call_id": "call_exec_1",
+      "name": "exec",
+      "input": "const result = await tools.shell_command({\"command\":\"Get-ChildItem\"});\ntext(result);"
+    },
+    {
+      "type": "custom_tool_call_output",
+      "call_id": "call_exec_1",
+      "output": [
+        {
+          "type": "input_text",
+          "text": "\u001b[31mdiagnostic exec output\u001b[0m  \r\n"
+        },
+        {
+          "type": "input_image",
+          "image_url": "data:image/png;base64,NOT_CAPTURED_IMAGE"
+        },
+        {
+          "type": "input_audio",
+          "audio_url": "data:audio/wav;base64,NOT_CAPTURED_AUDIO"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "preserve": "byte-for-byte"
+  }
+}

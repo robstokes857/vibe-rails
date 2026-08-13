@@ -43,7 +43,10 @@ public static class LlmProxyRoutes
             var captureSink = settings.TokenSaverCaptureEnabled
                 ? context.RequestServices.GetService<ICompressionCaptureSink>()
                 : null;
-            var transform = settings.CodexTokenSaverEnabled && saverHasWork
+            // Capture is independent of whether this plan can rewrite anything, but it remains
+            // behind the Codex saver switch so a pause still means strict wire passthrough.
+            var transform = settings.CodexTokenSaverEnabled
+                && (saverHasWork || captureSink is not null)
                 ? new CodexBodyTransform(plan, captureSink)
                 : null;
             // Every authenticated request relayed through a proxy is an exchange. This is

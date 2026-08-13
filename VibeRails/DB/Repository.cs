@@ -9,7 +9,17 @@ namespace VibeRails.DB
 {
     public class Repository : IRepository
     {
-        private static bool _initialized;
+        /// <summary>
+        /// Databases whose schema this process has already created and migrated.
+        ///
+        /// Keyed by connection string rather than a single process-wide bool: the flag version
+        /// meant the first Repository built in a process claimed initialization for every
+        /// database, so a Repository handed a different file came up against whatever shape that
+        /// file already had — no tables on a fresh one, and no EnvironmentSteps rebuild on a
+        /// legacy one. Initialization is idempotent, so the worst a near-miss key (the same file
+        /// reached through two differently-spelled connection strings) costs is a second pass.
+        /// </summary>
+        private static readonly HashSet<string> _initializedDatabases = new(StringComparer.Ordinal);
         private static readonly object _initLock = new();
         private readonly string _connectionString;
         private readonly IGitDiffCaptureService? _gitDiffCaptureService;
@@ -41,11 +51,12 @@ namespace VibeRails.DB
 
         private void EnsureInitialized()
         {
-            if (_initialized) return;
-
             lock (_initLock)
             {
-                if (_initialized) return;
+                // Membership is recorded at the end, not here: a throw partway through
+                // migrations must leave the database open to another attempt rather than
+                // marked done.
+                if (_initializedDatabases.Contains(_connectionString)) return;
 
                 using var connection = new SqliteConnection(_connectionString);
                 connection.Open();
@@ -61,6 +72,8 @@ namespace VibeRails.DB
                     fkCmd.CommandText = SqlStrings.PragmaForeignKeys;
                     fkCmd.ExecuteNonQuery();
                 }
+
+                MaybeRebuildEnvironmentStepsTable(connection);
 
                 foreach (var sql in SqlStrings.InitStatements)
                 {
@@ -104,8 +117,34 @@ namespace VibeRails.DB
                 MaybeRebuildUserInputsFts(connection);
                 BackfillUserInputsFts(connection);
 
-                _initialized = true;
+                _initializedDatabases.Add(_connectionString);
             }
+        }
+
+        /// <summary>
+        /// EnvironmentSteps originally shipped with an INTEGER AUTOINCREMENT Id; step ids are now
+        /// client-generated GUID strings (TEXT PK) so {{step:&lt;id&gt;}} prompt references survive the
+        /// delete-all + reinsert save path. SQLite cannot ALTER a PK type, so a DB holding the old
+        /// shape gets its (deliberately unported — the feature shipped days ago with no adopters)
+        /// table dropped here, before InitStatements recreates it with the new shape. Runs before
+        /// the init loop because CREATE TABLE IF NOT EXISTS would otherwise keep the old table.
+        /// </summary>
+        private static void MaybeRebuildEnvironmentStepsTable(SqliteConnection connection)
+        {
+            using (var idTypeCheck = connection.CreateCommand())
+            {
+                idTypeCheck.CommandText =
+                    "SELECT type FROM pragma_table_info('EnvironmentSteps') WHERE name = 'Id';";
+                if (idTypeCheck.ExecuteScalar() is not string idType
+                    || !idType.Equals("INTEGER", StringComparison.OrdinalIgnoreCase))
+                {
+                    return; // Table absent (fresh DB) or already TEXT-keyed.
+                }
+            }
+
+            using var drop = connection.CreateCommand();
+            drop.CommandText = "DROP TABLE EnvironmentSteps;";
+            drop.ExecuteNonQuery();
         }
 
         // Bump when the FTS pre-filter rules change in a way that means previously
@@ -676,6 +715,28 @@ namespace VibeRails.DB
         }
 
         /// <summary>
+        /// Resolves one step by its GUID, scoped to the environment being launched — a
+        /// {{step:&lt;id&gt;}} prompt reference must not be able to reach another environment's
+        /// commands. Null means the step was deleted (or never belonged to this environment).
+        /// </summary>
+        public async Task<EnvironmentStep?> GetStepByIdAsync(
+            int environmentId,
+            string stepId,
+            CancellationToken cancellationToken = default)
+        {
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = SqlStrings.SelectStepByIdAndEnvironmentId;
+            cmd.Parameters.AddWithValue("$id", stepId);
+            cmd.Parameters.AddWithValue("$environmentId", environmentId);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            return await reader.ReadAsync(cancellationToken) ? ReadEnvironmentStep(reader) : null;
+        }
+
+        /// <summary>
         /// Cheap "is this phase worth wiring up at all" probe. The launch path uses it to decide
         /// whether to remember a session's post-step context, so it runs on every session created.
         /// </summary>
@@ -721,6 +782,22 @@ namespace VibeRails.DB
                 await delete.ExecuteNonQueryAsync(cancellationToken);
             }
 
+            // The delete above cleared this environment's rows, so any id still in the table
+            // belongs to a different environment — and Id is the table-wide primary key, so
+            // reusing one would fail the insert and 500 the whole save. Read inside the
+            // transaction: at Serializable nobody else can add rows between here and the commit.
+            var takenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var existing = connection.CreateCommand())
+            {
+                existing.Transaction = transaction;
+                existing.CommandText = SqlStrings.SelectAllStepIds;
+                await using var reader = await existing.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    takenIds.Add(reader.GetString(0));
+                }
+            }
+
             // Position is per (EnvironmentId, Phase), so each phase counts from zero independently.
             var positions = new Dictionary<EnvironmentStepPhase, int>();
             var now = DateTime.UtcNow.ToString("O");
@@ -733,6 +810,26 @@ namespace VibeRails.DB
                 await using var insert = connection.CreateCommand();
                 insert.Transaction = transaction;
                 insert.CommandText = SqlStrings.InsertEnvironmentStep;
+                // Ids are client-generated GUIDs preserved across replaces; {{step:<id>}} prompt
+                // references depend on that stability. A blank one (older client, hand-built
+                // request) gets a fresh GUID here rather than failing the whole save.
+                var id = Guid.TryParse(step.Id, out var stepId) ? stepId.ToString() : Guid.NewGuid().ToString();
+                // A collision only happens through a hand-built request or a copy-pasted export,
+                // and the id is bookkeeping the client normally handles invisibly. Same call as
+                // the route makes for a malformed id: regenerate rather than reject the save. The
+                // cost is that any {{step:<id>}} written against the old id stops resolving, which
+                // beats refusing to save at all.
+                if (!takenIds.Add(id))
+                {
+                    var replacement = Guid.NewGuid().ToString();
+                    Log.Warning(
+                        "[Steps] Step id {StepId} already belongs to another environment — saving step " +
+                        "{StepName} under {Replacement} instead",
+                        id, step.Name ?? "", replacement);
+                    id = replacement;
+                    takenIds.Add(id);
+                }
+                insert.Parameters.AddWithValue("$id", id);
                 insert.Parameters.AddWithValue("$environmentId", environmentId);
                 insert.Parameters.AddWithValue("$phase", (int)step.Phase);
                 insert.Parameters.AddWithValue("$position", position);
@@ -1148,7 +1245,7 @@ namespace VibeRails.DB
         {
             return new EnvironmentStep
             {
-                Id = reader.GetInt32(0),
+                Id = reader.GetString(0),
                 EnvironmentId = reader.GetInt32(1),
                 Phase = (EnvironmentStepPhase)reader.GetInt32(2),
                 Position = reader.GetInt32(3),

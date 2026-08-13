@@ -113,6 +113,52 @@ public sealed class EnvironmentStepRoutesTests
     }
 
     [Fact]
+    public void Steps_KeepAClientSuppliedGuidAndGenerateOneWhenMissing()
+    {
+        // The id is what {{step:<id>}} prompt references point at, so a valid client GUID must
+        // survive the build verbatim (normalized to Guid's canonical form).
+        var supplied = Guid.NewGuid().ToString().ToUpperInvariant();
+        var requests = new List<EnvironmentStepRequest>
+        {
+            new(0, "keep", "git pull", Id: supplied),
+            new(0, "generate", "npm ci"),
+            new(0, "garbage", "dotnet build", Id: "not-a-guid")
+        };
+
+        Assert.True(EnvironmentStepRoutes.TryBuildSteps(requests, out var steps, out _));
+        Assert.Equal(supplied.ToLowerInvariant(), steps[0].Id);
+        Assert.True(Guid.TryParse(steps[1].Id, out _));
+        Assert.True(Guid.TryParse(steps[2].Id, out _));
+        Assert.NotEqual(steps[1].Id, steps[2].Id);
+    }
+
+    [Fact]
+    public void Steps_RegenerateADuplicatedIdRatherThanRejectTheSave()
+    {
+        var shared = Guid.NewGuid().ToString();
+        var requests = new List<EnvironmentStepRequest>
+        {
+            new(0, "first", "git pull", Id: shared),
+            new(0, "second", "npm ci", Id: shared)
+        };
+
+        Assert.True(EnvironmentStepRoutes.TryBuildSteps(requests, out var steps, out _));
+        Assert.Equal(shared, steps[0].Id);
+        Assert.NotEqual(shared, steps[1].Id);
+        Assert.True(Guid.TryParse(steps[1].Id, out _));
+    }
+
+    [Fact]
+    public void Steps_AcceptTheManualPhase()
+    {
+        // Phase 2 = "only when referenced" from the Initial Message; it must save like any other.
+        var requests = new List<EnvironmentStepRequest> { new(2, "capture", "git log -1") };
+
+        Assert.True(EnvironmentStepRoutes.TryBuildSteps(requests, out var steps, out _));
+        Assert.Equal(EnvironmentStepPhase.Manual, Assert.Single(steps).Phase);
+    }
+
+    [Fact]
     public void Steps_TrimTheNameButPreserveTheCommandVerbatim()
     {
         // The command is a shell script: leading whitespace can be significant, so only the label
@@ -145,7 +191,6 @@ public sealed class EnvironmentStepRoutesTests
             .Setup(item => item.GetStepsForEnvironmentAsync(environment.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => (replaced ?? []).Select((step, index) =>
             {
-                step.Id = index + 1;
                 step.Position = index;
                 return step;
             }).ToList());
@@ -183,7 +228,7 @@ public sealed class EnvironmentStepRoutesTests
         var repository = NewRepositoryMock(environment);
         repository
             .Setup(item => item.GetStepsForEnvironmentAsync(environment.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([new EnvironmentStep { Id = 1, EnvironmentId = environment.Id, Name = "Pull", Command = "git pull" }]);
+            .ReturnsAsync([new EnvironmentStep { Id = Guid.NewGuid().ToString(), EnvironmentId = environment.Id, Name = "Pull", Command = "git pull" }]);
 
         await WithEnvironmentHostAsync(repository, async baseUrl =>
         {

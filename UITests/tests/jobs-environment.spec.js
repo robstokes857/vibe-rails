@@ -331,7 +331,7 @@ test.describe('Jobs Worker / Environments integration', () => {
         await expect(page.locator('#env-name')).toHaveValue('');
 
         await page.locator('#env-name').fill('Post-merge auditor');
-        await page.locator('#codex-prompt').fill('Audit every merge.');
+        await page.locator('#env-initial-message').fill('Audit every merge.');
         const cleanCheckout = page.getByRole('radio', { name: /Clean Git checkout every run/ });
         await page.locator('label.env-workspace-choice', { has: cleanCheckout }).click();
         await expect(cleanCheckout).toBeChecked();
@@ -364,12 +364,12 @@ test.describe('Jobs Worker / Environments integration', () => {
         await expect(page.getByRole('heading', { name: 'Edit Worker: Nightly Codex', exact: true }))
             .toBeVisible();
         const jobsControls = await environmentControlSnapshot(page);
-        expect(jobsControls['codex-prompt']).toBe('Use the nightly security-review profile.');
+        expect(jobsControls['env-initial-message']).toBe('Use the nightly security-review profile.');
         expect(jobsControls['codex-model']).toBe('gpt-5.6-sol');
         expect(Object.keys(jobsControls)).not.toContain('env-name');
         expect(Object.keys(jobsControls)).not.toContain('env-hidden');
 
-        await page.locator('#codex-prompt').fill('Security review configured from Jobs.');
+        await page.locator('#env-initial-message').fill('Security review configured from Jobs.');
         await page.locator('#codex-model').selectOption('gpt-5.6-luna');
         await page.locator('#env-form button[type="submit"]').click();
         await expect(page.locator('#env-form')).toHaveCount(0);
@@ -386,10 +386,10 @@ test.describe('Jobs Worker / Environments integration', () => {
         await expect(page.getByRole('heading', { name: 'Edit Worker: Nightly Codex', exact: true }))
             .toBeVisible();
         const workersControls = await environmentControlSnapshot(page);
-        expect(workersControls['codex-prompt']).toBe('Security review configured from Jobs.');
+        expect(workersControls['env-initial-message']).toBe('Security review configured from Jobs.');
         expect(workersControls['codex-model']).toBe('gpt-5.6-luna');
 
-        await page.locator('#codex-prompt').fill('Security review updated from Workers.');
+        await page.locator('#env-initial-message').fill('Security review updated from Workers.');
         await page.locator('#env-form button[type="submit"]').click();
         await expect(page.locator('#env-form')).toHaveCount(0);
 

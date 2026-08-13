@@ -1,7 +1,9 @@
 using Serilog;
 using TokenSaver;
+using VibeRails.Services.Environments;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.LlmProxy;
+using VibeRails.Utils;
 using static VibeRails.Utils.ShellArgSanitizer;
 
 namespace VibeRails.Services.Terminal;
@@ -36,6 +38,15 @@ public class CommandService : ICommandService
     private readonly ILlmProxySettingsService _llmProxySettings;
     private readonly ILlmProxySessionState _llmProxySessionState;
     private const string VibeRailsMcpServerName = "viberails-mcp";
+
+    /// <summary>
+    /// Ceiling on the assembled launch command on Windows. CreateProcess rejects a command line
+    /// over 32,767 chars, and the shell this gets typed into hits that limit when it execs the
+    /// CLI — surfacing as "The filename or extension is too long", which points at nothing the
+    /// user can act on. The margin leaves room for the shell's own wrapping.
+    /// </summary>
+    private const int MaxWindowsCommandChars = 32_000;
+
     private static int _fakeCliWarningEmitted;
 
     /// <summary>
@@ -141,6 +152,12 @@ public class CommandService : ICommandService
                 LLM.OpenCode or LLM.Glm52 => $"{cliCommand} --prompt={quoted}",
                 _ => $"{cliCommand} {quoted}"
             };
+
+            // Checked after escaping, not before: every ` " $ in the prompt doubles on Windows and
+            // every ' quadruples on POSIX, so a message that passed the resolver's char limit can
+            // still assemble into a command the OS refuses.
+            if (OperatingSystem.IsWindows() && cliCommand.Length > MaxWindowsCommandChars)
+                throw PromptTooLongException.ForCommandLine(cliCommand.Length, MaxWindowsCommandChars);
         }
 
         var builder = new ShellCommandBuilder()
@@ -515,8 +532,14 @@ public class CommandService : ICommandService
     /// literal argument in a shell command. Strips control characters,
     /// collapses to one line, enforces a length limit, then wraps in
     /// platform-appropriate quotes.
+    ///
+    /// <para>The cap matches <see cref="PromptPlaceholderService.MaxResolvedPromptChars"/>, so for
+    /// an Initial Message — which the resolver has already refused above that length — truncation
+    /// here can never fire. It still guards the paths that skip the resolver (a pasted job summary
+    /// most of all), and those are exactly the ones where a silent cut would be invisible, hence
+    /// the warning.</para>
     /// </summary>
-    private static string SafeShellArg(string text, int maxLength = 6000)
+    private static string SafeShellArg(string text, int maxLength = PromptPlaceholderService.MaxResolvedPromptChars)
     {
         if (string.IsNullOrWhiteSpace(text))
             return "\"\"";
@@ -535,7 +558,14 @@ public class CommandService : ICommandService
         clean = new string(clean.Where(c => !char.IsControl(c) || c == ' ').ToArray()).Trim();
 
         if (clean.Length > maxLength)
-            clean = clean[..maxLength];
+        {
+            Log.Warning(
+                "[Terminal] Launch text truncated from {ActualChars} to {MaxChars} chars before quoting",
+                clean.Length, maxLength);
+            // Slicing by code unit would leave a lone surrogate at the cut, which the PTY writes
+            // out as a replacement character.
+            clean = TextTruncation.Truncate(clean, maxLength);
+        }
 
         if (OperatingSystem.IsWindows())
         {

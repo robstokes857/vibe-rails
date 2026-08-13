@@ -1,6 +1,6 @@
 # API authentication coverage
 
-Audit date: 2026-08-11
+Audit date: 2026-08-13
 
 Jobs inventory re-checked: 2026-08-03 (three run-history routes added; see § 3).
 
@@ -11,9 +11,9 @@ LLM proxy posture re-audited: 2026-08-05 (`/llm/openai` and `/llm/zai` removed f
 Route inventory re-checked: 2026-08-07 (five authenticated HTTP-relay proof mappings
 added; see § 3).
 
-Route inventory and authentication coverage re-checked: 2026-08-11 (no endpoint
-additions or removals; the 151 mapped surfaces and frozen three-case middleware bypass
-remain unchanged).
+Route inventory and authentication coverage re-checked: 2026-08-13 (one authenticated
+environment-step test endpoint added; the 152 mapped surfaces and frozen three-case
+middleware bypass remain unchanged).
 
 Scope: the current working tree, including uncommitted changes.
 
@@ -38,8 +38,8 @@ session-scoped browser credential (`viberails_tab`), which the implementation ca
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 151 mapped route
-surfaces in this inventory: 141 `/api/v1` method/path mappings, seven non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 152 mapped route
+surfaces in this inventory: 142 `/api/v1` method/path mappings, seven non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -232,7 +232,7 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `GET /api/v1/sessions/{sessionId}/inputs`
 - `GET /api/v1/sessions/{sessionId}/output`
 
-### CLI, environment, and LLM-picker management (15)
+### CLI, environment, and LLM-picker management (16)
 
 - `GET /api/v1/environments`
 - `POST /api/v1/environments`
@@ -240,6 +240,7 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
 - `PUT /api/v1/environments/{name}`
 - `DELETE /api/v1/environments/{name}`
 - `GET /api/v1/environments/{name}/launch`
+- `POST /api/v1/environments/steps/test`
 - `POST /api/v1/cli/launch/{cli}`
 - `POST /api/v1/cli/launch/vscode`
 - `GET /api/v1/codex/settings/{envName}`

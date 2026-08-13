@@ -153,11 +153,12 @@ public static class EnvironmentStepRoutes
             return false;
         }
 
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var request in requests)
         {
             if (!Enum.IsDefined(typeof(EnvironmentStepPhase), request.Phase))
             {
-                error = $"Unknown step phase: {request.Phase}. Expected 0 (before launch) or 1 (after it exits).";
+                error = $"Unknown step phase: {request.Phase}. Expected 0 (before launch), 1 (after it exits), or 2 (only when referenced).";
                 return false;
             }
 
@@ -168,8 +169,19 @@ public static class EnvironmentStepRoutes
                 return false;
             }
 
+            // A malformed or duplicated id gets regenerated rather than 400ing the save — the id
+            // is bookkeeping the client normally handles invisibly, and losing one reference beats
+            // refusing the whole step list. Normalized to Guid's canonical form so the stored id
+            // always matches what {{step:<id>}} tokens embed.
+            var id = Guid.TryParse(request.Id, out var parsedId)
+                ? parsedId.ToString()
+                : Guid.NewGuid().ToString();
+            if (!seenIds.Add(id))
+                id = Guid.NewGuid().ToString();
+
             steps.Add(new EnvironmentStep
             {
+                Id = id,
                 Phase = (EnvironmentStepPhase)request.Phase,
                 Name = (request.Name ?? string.Empty).Trim(),
                 Command = request.Command,

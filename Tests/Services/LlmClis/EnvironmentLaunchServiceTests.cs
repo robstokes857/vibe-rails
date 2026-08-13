@@ -38,6 +38,9 @@ public sealed class EnvironmentLaunchServiceTests
             .Returns(Task.CompletedTask);
 
         var launcher = new Mock<ILaunchLLMService>(MockBehavior.Strict);
+        // CustomArgs ride the argv; the Initial Message deliberately does not. LaunchInTerminal
+        // always spawns vb, and CliLoop resolves the prompt ({{step:...}}/{{datetime}} included)
+        // in the process that owns the PTY, exactly once per launch.
         launcher
             .Setup(l => l.LaunchInTerminal(
                 LLM.Claude,
@@ -46,9 +49,12 @@ public sealed class EnvironmentLaunchServiceTests
                 It.Is<string[]>(args => args.SequenceEqual(new[]
                 {
                     "--model", "opus", "--dangerously-skip-permissions",
-                    "--caller-flag", "Review this repository."
+                    "--caller-flag"
                 })),
-                null,
+                // The resolved row's id, not its name: this process already checked the
+                // environment against the project, and `--env <name>` over in the child would
+                // be an unscoped second lookup of a value that is unique but not project-keyed.
+                It.Is<string[]>(args => args.SequenceEqual(new[] { "--env-id", "7" })),
                 true,
                 false))
             .Returns(new LaunchResult(true, "launched"));
@@ -89,7 +95,7 @@ public sealed class EnvironmentLaunchServiceTests
                 "nightly",
                 AppContext.BaseDirectory,
                 It.IsAny<string[]>(),
-                null,
+                It.Is<string[]>(args => args.SequenceEqual(new[] { "--env-id", "7" })),
                 true,
                 false))
             .Returns(new LaunchResult(true, "launched"));
@@ -157,13 +163,17 @@ public sealed class EnvironmentLaunchServiceTests
             .Setup(r => r.TouchEnvironmentLastUsedAsync(7, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         var launcher = new Mock<ILaunchLLMService>(MockBehavior.Strict);
+        // The env's Initial Message ("Run it.") is not in the argv: the spawned vb (CliLoop)
+        // resolves and appends it at run time, so prompt placeholders execute exactly once.
         launcher
             .Setup(l => l.LaunchInTerminal(
                 LLM.Claude,
                 "renamed-worker",
                 AppContext.BaseDirectory,
-                It.Is<string[]>(args => args.SequenceEqual(new[] { "Run it." })),
-                It.Is<string[]>(args => args.SequenceEqual(new[] { "--job-run", "run-1" })),
+                It.Is<string[]>(args => args.Length == 0),
+                // The caller's own launcher args survive; --env-id is appended to them rather
+                // than replacing them, so an Automation run keeps its --job-run correlation.
+                It.Is<string[]>(args => args.SequenceEqual(new[] { "--job-run", "run-1", "--env-id", "7" })),
                 false,
                 false))
             .Returns(new LaunchResult(true, "launched"));
@@ -244,7 +254,9 @@ public sealed class EnvironmentLaunchServiceTests
                 null,
                 AppContext.BaseDirectory,
                 It.Is<string[]>(args => args.SequenceEqual(new[] { "--model", "gpt-5.6-sol" })),
-                null,
+                // No environment was resolved, so there is no id to hand down — an empty array
+                // rather than null, which BuildVbArgv treats identically.
+                It.Is<string[]>(args => args.Length == 0),
                 true,
                 false))
             .Returns(new LaunchResult(true, "launched"));
@@ -271,7 +283,7 @@ public sealed class EnvironmentLaunchServiceTests
                 null,
                 AppContext.BaseDirectory,
                 Array.Empty<string>(),
-                null,
+                Array.Empty<string>(),
                 true,
                 false))
             .Returns(new LaunchResult(true, "launched"));
@@ -344,7 +356,9 @@ public sealed class EnvironmentLaunchServiceTests
         launcher
             .Setup(l => l.LaunchInTerminal(
                 LLM.Claude, "legacy", AppContext.BaseDirectory,
-                It.IsAny<string[]>(), null, true, false))
+                It.IsAny<string[]>(),
+                It.Is<string[]>(args => args.SequenceEqual(new[] { "--env-id", "8" })),
+                true, false))
             .Returns(new LaunchResult(true, "launched"));
 
         var result = await new EnvironmentLaunchService(repository.Object, launcher.Object, NoWorkspace()).LaunchAsync(

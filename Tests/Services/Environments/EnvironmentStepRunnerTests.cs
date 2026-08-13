@@ -179,7 +179,7 @@ public class EnvironmentStepRunnerTests
 
     private static EnvironmentStep Step(int position, string command, string name = "") => new()
     {
-        Id = position + 1,
+        Id = Guid.NewGuid().ToString(),
         EnvironmentId = EnvironmentId,
         Phase = EnvironmentStepPhase.PreLaunch,
         Position = position,

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
@@ -47,6 +48,7 @@ public sealed class EnvironmentLaunchService(
             ? fallbackWorkingDirectory
             : request.WorkingDirectory;
         var args = request.Args?.ToList() ?? [];
+        var launcherArgs = vbArgs?.ToList() ?? [];
         var environmentName = string.IsNullOrWhiteSpace(request.EnvironmentName)
             ? null
             : request.EnvironmentName;
@@ -74,6 +76,13 @@ public sealed class EnvironmentLaunchService(
 
                 environmentName = environment.CustomName;
 
+                // Hand the spawned `vb` the row it must launch. ResolveEnvironmentAsync has already
+                // checked this environment against the project, and the workspace swap below can
+                // move workingDirectory into a clone — so the child cannot repeat either check from
+                // --env alone, and resolving the name a second time over there would be both
+                // ambiguous and unscoped.
+                launcherArgs.AddRange(["--env-id", environment.Id.ToString(CultureInfo.InvariantCulture)]);
+
                 // Workspace resolution happens before anything is spawned, so a failed clone
                 // is a launch that never started rather than a terminal opened in the wrong
                 // directory. Project mode returns the incoming directory untouched.
@@ -89,9 +98,12 @@ public sealed class EnvironmentLaunchService(
                     workingDirectory = workspace.WorkingDirectory;
                 }
 
+                // CustomArgs are static and stay host-side; the Initial Message deliberately does
+                // not ride along. LaunchInTerminal always spawns vb, and CliLoop resolves the
+                // prompt there ({{step:...}} runs a command, so it must execute exactly once, in
+                // the process that owns the PTY and records the seq-1 input).
                 if (!string.IsNullOrWhiteSpace(environment.CustomArgs))
                     args.InsertRange(0, ShellArgSanitizer.ParseAndValidate(environment.CustomArgs));
-                LlmPromptArgvBuilder.AppendInitialPrompt(args, llm, environment.CustomPrompt);
 
                 try
                 {
@@ -116,7 +128,7 @@ public sealed class EnvironmentLaunchService(
                 environmentName,
                 workingDirectory,
                 args.ToArray(),
-                vbArgs,
+                launcherArgs.ToArray(),
                 keepTerminalOpen,
                 launchMinimized);
         }

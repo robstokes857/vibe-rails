@@ -55,15 +55,20 @@ namespace VibeRails.DB
         public const string CreateEnvironmentsNameNoCaseUniqueIndex = "CREATE UNIQUE INDEX IF NOT EXISTS idx_environments_name_nocase_llm ON Environments(CustomName COLLATE NOCASE, LLM)";
 
         // EnvironmentSteps Table — ordered shell commands run before an environment's LLM launches
-        // (Phase 0) or after its PTY exits (Phase 1). Unlike PreparedTerminalSession.SetupCommands
+        // (Phase 0), after its PTY exits (Phase 1), or only when referenced from the environment's
+        // Initial Message via {{step:<guid>}} (Phase 2). Unlike PreparedTerminalSession.SetupCommands
         // these are user-authored, individually waited on, and a failed pre-step aborts the launch.
+        //
+        // Id is a client-generated GUID string, not an autoincrement: saves are delete-all +
+        // reinsert (ReplaceStepsAsync), so a server-assigned rowid would churn on every save and
+        // {{step:<id>}} references in Environments.CustomPrompt would dangle after each edit.
         //
         // ON DELETE CASCADE rather than the FK-less orphan pattern Sandboxes uses: a step is part of
         // its environment and owns no filesystem resource, so there is no multi-GB directory delete
         // to keep out of the delete transaction. PRAGMA foreign_keys=ON is set at Repository.cs:53-63.
         public const string CreateEnvironmentStepsTable = """
             CREATE TABLE IF NOT EXISTS EnvironmentSteps (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Id TEXT PRIMARY KEY,
                 EnvironmentId INTEGER NOT NULL,
                 Phase INTEGER NOT NULL,
                 Position INTEGER NOT NULL,
@@ -756,11 +761,21 @@ namespace VibeRails.DB
         public const string CountStepsByEnvironmentIdAndPhase =
             "SELECT COUNT(*) FROM EnvironmentSteps WHERE EnvironmentId = $environmentId AND Phase = $phase AND Enabled = 1;";
         public const string DeleteStepsByEnvironmentId = "DELETE FROM EnvironmentSteps WHERE EnvironmentId = $environmentId;";
+        // Id is the primary key across the whole table, not per environment, so a replace has to
+        // know which ids other environments already hold. Unfiltered on purpose: the table is
+        // bounded at a couple of dozen rows per environment, and a WHERE Id IN (...) would need
+        // the same round trip anyway.
+        public const string SelectAllStepIds = "SELECT Id FROM EnvironmentSteps;";
+        public const string SelectStepByIdAndEnvironmentId = """
+            SELECT Id, EnvironmentId, Phase, Position, Name, Command, StartMinimized, TimeoutSeconds, Enabled, CreatedUTC, UpdatedUTC
+            FROM EnvironmentSteps
+            WHERE Id = $id AND EnvironmentId = $environmentId;
+            """;
         public const string InsertEnvironmentStep = """
             INSERT INTO EnvironmentSteps
-                (EnvironmentId, Phase, Position, Name, Command, StartMinimized, TimeoutSeconds, Enabled, CreatedUTC, UpdatedUTC)
+                (Id, EnvironmentId, Phase, Position, Name, Command, StartMinimized, TimeoutSeconds, Enabled, CreatedUTC, UpdatedUTC)
             VALUES
-                ($environmentId, $phase, $position, $name, $command, $startMinimized, $timeoutSeconds, $enabled, $createdUTC, $updatedUTC);
+                ($id, $environmentId, $phase, $position, $name, $command, $startMinimized, $timeoutSeconds, $enabled, $createdUTC, $updatedUTC);
             """;
 
         // AgentMetadata CRUD

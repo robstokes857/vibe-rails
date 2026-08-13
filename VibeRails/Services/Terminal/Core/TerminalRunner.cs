@@ -92,10 +92,12 @@ public class TerminalRunner
         // enabled. A remote viewer of an agent session can already Ctrl+C out of the prompt
         // into the underlying shell, so a dedicated shell tab is no more sensitive to share.
         var shouldEnableRemote = ShouldEnableRemote(makeRemote, isNativeCli);
-        // Web flow passes the env's CustomPrompt as initialPrompt and we record the
-        // same text. CLI flow bakes the prompt into extraArgs so initialPrompt is
-        // null; that path passes initialUserInput explicitly to record without
-        // double-encoding the prompt into the launch command.
+        // Both flows pass the env's (already placeholder-resolved) CustomPrompt as
+        // initialPrompt — the web flow via TerminalRoutes, the spawned-vb flow via
+        // CliLoop → RunCliWithWebAsync — so the recorded seq-1 text and the prompt
+        // PrepareSessionAsync bakes into the launch are the same string.
+        // initialUserInput remains for callers that record something other than the
+        // launched prompt.
         var userInputToRecord = initialUserInput ?? initialPrompt;
         var initialSize = isNativeCli && NativeConsoleGeometry.TryGetSize(out var nativeSize)
             ? nativeSize
@@ -861,7 +863,8 @@ public class TerminalRunner
     public async Task<int> RunCliWithWebAsync(
         LLM llm, string workDir, string? envName, string[]? extraArgs,
         ITerminalSessionService sessionService, bool makeRemote = false, CancellationToken ct = default,
-        string? initialUserInput = null, string? jobRunId = null, Action<string>? onSessionCreated = null)
+        string? initialUserInput = null, string? initialPrompt = null, string? jobRunId = null,
+        Action<string>? onSessionCreated = null)
     {
         var (terminal, sessionId, remoteConn) = await CreateSessionAsync(
             llm,
@@ -871,6 +874,7 @@ public class TerminalRunner
             ct,
             makeRemote: makeRemote,
             isNativeCli: true,
+            initialPrompt: initialPrompt,
             initialUserInput: initialUserInput,
             jobRunId: jobRunId,
             onRemoteTakeoverAuthorized: trigger =>

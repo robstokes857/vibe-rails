@@ -167,6 +167,33 @@ How to verify what's current:
   `copilot -p "Reply with just: ok" --model <id>` (a reply proves the ID), but a
   "not available" error is inconclusive — it also fires for plan-gated models.
 
+## Initial Message placeholders
+
+The Initial Message (one shared field under the CLI picker, stored in
+`Environments.CustomPrompt`) supports `{{...}}` placeholders. Three families:
+
+- **User variables** — `{{branch_name}}`, `{{path default="docs/runbook.md"}}`.
+  A dashboard launch pops the fill-values modal (`prompt-template-modal.js`);
+  headless paths ship them literally, as always.
+- **Built-ins, auto-resolved at launch** — `{{datetime}}` (`2026-08-12 14:35`,
+  local), `{{date}}`, `{{time}}`, `{{git_branch}}` (branch of the
+  workspace-resolved working directory), `{{env_name}}`. Case-insensitive;
+  `default=` is ignored on them; these names are reserved and never become
+  fill-in fields.
+- **Step output** — `{{step:<guid>}}`, inserted by the field's "Insert step
+  output" picker. Runs the referenced step (any phase; "Only when referenced" =
+  Phase 2 exists for exactly this) hidden and captured, and splices its output
+  in — trimmed, capped at 4000 chars. Best-effort: deleted step →
+  `(user deleted this step function)`; non-zero exit keeps the output and
+  appends the exit note; timeout notes itself. The launch always continues.
+
+Resolution happens exactly once per launch, in the process that owns the PTY
+(`PromptPlaceholderService`; called from `TerminalRoutes` for web tabs and
+`CliLoop` for spawned terminals). Spawning routes deliberately do NOT bake the
+prompt into argv anymore — `{{step:...}}` runs a command, so a second
+resolution pass would run it twice. The resolved text is also what UserInputs
+seq-1 records, so the recording always matches what the CLI received.
+
 ## Current Managed Settings
 
 This is the inventory VibeRails currently manages in the custom environment UI.

@@ -3,7 +3,9 @@ using TokenSaver.Pipeline;
 namespace TokenSaver;
 
 /// <summary>
-/// Where the proxy sends a full before/after record of every tool_result it considered rewriting.
+/// Where the proxy sends a full before/after record of textual tool output it observed for
+/// diagnostics. Compression-eligible output carries the pipeline candidate; a recognized output
+/// outside the provider allowlist can be recorded unchanged without being considered for rewrite.
 ///
 /// This is the deliberate exception to <see cref="ILlmProxyEventSink"/>'s "never carries bodies"
 /// rule, and the exception is the whole point: the savings tally can tell you THAT 40% came off,
@@ -19,22 +21,23 @@ namespace TokenSaver;
 /// </summary>
 public interface ICompressionCaptureSink
 {
-    /// <summary>Records one tool_result's compression. Fire-and-forget; never throws.</summary>
+    /// <summary>Records one textual tool-output observation. Fire-and-forget; never throws.</summary>
     void Capture(CompressionCapture capture);
 }
 
 /// <summary>
-/// One tool_result's full compression record — the unit the compress runbook judges.
+/// One textual tool-output observation — the unit the compress runbook judges.
 ///
 /// <paramref name="Id"/> is the handle: it is what you paste at an LLM reviewer, what the Vibe AI
 /// capture view looks up, and what runbooks/compress_runbook.md is organized around. It is minted
-/// per tool_result, not per request, because "this Bash output compressed wrong" is the actual
-/// grain of every bug report — one request carries many tool_results and blaming the request tells
-/// you nothing about which one broke.
+/// per textual output string, not per request, because "this Bash output compressed wrong" is the
+/// actual grain of every bug report. One request carries many tool results, and an array-form
+/// result can carry multiple text blocks, each of which is captured separately.
 ///
-/// <paramref name="RawText"/> and <paramref name="CompressedText"/> are the unescaped strings the
-/// pipeline saw and produced, NOT wire bytes. That means they are directly re-runnable: feed
-/// RawText back through a different <see cref="CompressionPlan"/> and you get an honest what-if.
+/// <paramref name="RawText"/> and <paramref name="CompressedText"/> are unescaped strings, NOT wire
+/// bytes. For compression-eligible output they are what the pipeline saw and produced; for a
+/// diagnostic-only observation they are identical because the pipeline did not run. RawText is
+/// directly re-runnable: feed it through a different <see cref="CompressionPlan"/> for a what-if.
 /// This is what makes the Vibe AI preview real rather than a simulation.
 ///
 /// <paramref name="RewriteAccepted"/> distinguishes a changed pipeline candidate from bytes that

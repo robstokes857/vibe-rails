@@ -10,6 +10,7 @@ namespace VibeRails.Utils
     ///   vb --help | -h                               → print help and exit
     ///   vb --vs-code-v1 [--parent-pid &lt;pid&gt;]         → VS Code extension / new-tab child mode
     ///   vb --env &lt;name|llm&gt; --workdir &lt;path&gt; [-- ...]  → LMBootstrap (CLI + web concurrent)
+    ///   vb --env &lt;name&gt; --env-id &lt;id&gt; ...             → same, but launching an exact environment row
     /// </summary>
     public static class ArgumentParser
     {
@@ -72,6 +73,17 @@ namespace VibeRails.Utils
                         if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
                         {
                             parsed.LMBootstrapCli = args[++i];
+                        }
+                        break;
+
+                    case "--env-id":
+                        // Companion to --env: the name stays for logging and display, this is what
+                        // the launch actually resolves. A non-numeric value is ignored rather than
+                        // fatal so the name fallback still runs.
+                        if (i + 1 < args.Length && int.TryParse(args[i + 1], out var envId) && envId > 0)
+                        {
+                            parsed.EnvId = envId;
+                            i++;
                         }
                         break;
 

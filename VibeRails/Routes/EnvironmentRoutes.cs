@@ -90,6 +90,18 @@ public static class EnvironmentRoutes
                 return Results.BadRequest(new ErrorResponse(nameError));
             }
 
+            // `vb --env <value>` resolves a CLI name before it ever looks up an environment, so an
+            // environment named after one is unreachable: the launch silently starts the base CLI
+            // with none of the environment's config. Note that ILlmParser accepts the enum's
+            // numeric values too, so a name of "3" shadows a CLI just as effectively as "Claude".
+            var shadowedCli = llmParser.Parse(request.Name.Trim());
+            if (shadowedCli != LLM.NotSet)
+            {
+                return Results.BadRequest(new ErrorResponse(
+                    $"'{request.Name.Trim()}' is the name of a built-in CLI ({shadowedCli}), so an environment " +
+                    "with that name could never be launched. Pick a different name."));
+            }
+
             if (string.IsNullOrEmpty(request.Cli))
             {
                 return Results.BadRequest(new ErrorResponse("CLI type is required"));

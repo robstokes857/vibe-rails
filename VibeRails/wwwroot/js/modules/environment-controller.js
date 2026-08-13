@@ -5,6 +5,7 @@ import {
     openStepsEditor,
     renderStepsSummaryButton,
     serializeSteps,
+    stepDisplayName,
     summarizeSteps
 } from './environment-steps.js';
 
@@ -604,6 +605,15 @@ export class EnvironmentController {
         let editedSteps = null;
         const stepsRow = renderStepsSummaryButton(initialSteps);
 
+        // One shared Initial Message field, rendered directly under the CLI picker rather than
+        // inside the per-CLI settings block: it maps to the single Environments.CustomPrompt
+        // column whichever CLI is chosen, and it is the first thing a Worker exists to say.
+        // Living outside [data-cli-settings-slot] also means typed text survives switching CLI.
+        // Codex's settings payload calls the same concept "prompt" — accept either key.
+        const initialMessageValue = this.app.escapeHtml(
+            cliSettings?.initialMessage ?? cliSettings?.prompt ?? '');
+        const initialMessageRow = this.renderInitialMessageField(initialCli, initialMessageValue);
+
         // Worker creation is already a small CRUD form. Keep every field in one clear
         // flow instead of hiding two ordinary settings behind an "Advanced" disclosure.
         const formBody = workerOnly
@@ -626,6 +636,7 @@ export class EnvironmentController {
                     <label class="form-label">CLI Type</label>
                     ${cliField}
                 </div>
+                ${initialMessageRow}
                 ${formBody}
                 <button type="submit" class="btn btn-primary d-flex align-items-center gap-2">
                     ${submitIcon}
@@ -654,10 +665,17 @@ export class EnvironmentController {
                 }
                 slot.innerHTML = this.buildCliSettingsHtml(cli, {});
                 this.bindCliSettingsInteractions(cli);
+                // The shared Initial Message field lives outside the slot, so its typed text
+                // survives the switch; only the CLI-specific wording follows the picker.
+                const initialMessage = document.getElementById('env-initial-message');
+                if (initialMessage) initialMessage.placeholder = this.initialMessagePlaceholder(cli);
+                const cliNameSpan = document.querySelector('[data-initial-message-cli]');
+                if (cliNameSpan) cliNameSpan.textContent = this.cliDisplayName(cli);
             });
         }
 
         this.bindCliSettingsInteractions(initialCli);
+        const refreshInitialMessageRefs = this.bindInitialMessageField(() => editedSteps ?? initialSteps);
 
         const form = document.getElementById('env-form');
         const modalContainer = document.getElementById('modal-container');
@@ -678,6 +696,8 @@ export class EnvironmentController {
                     stepsEditor = null;
                     const summary = document.querySelector('[data-env-steps-summary]');
                     if (summary) summary.textContent = summarizeSteps(steps);
+                    // Step names/deletions may have changed what the Initial Message references.
+                    refreshInitialMessageRefs();
                 }
             });
         });
@@ -1660,9 +1680,13 @@ export class EnvironmentController {
 
     extractCliSettingsPayload(cli) {
         const cliLower = (cli || '').toLowerCase();
+        // The Initial Message is one shared field under the CLI picker (see
+        // renderInitialMessageField); every payload keeps its historical key — `prompt` for
+        // Codex, `initialMessage` elsewhere — so the settings PUT endpoints stay untouched.
+        const initialMessage = document.getElementById('env-initial-message')?.value ?? '';
         if (cliLower === 'antigravity') {
             return {
-                initialMessage: document.getElementById('antigravity-initial-message').value,
+                initialMessage,
                 model: document.getElementById('antigravity-model').value,
                 sandboxEnabled: document.getElementById('antigravity-sandbox').checked,
                 yoloMode: document.getElementById('antigravity-yolo').checked,
@@ -1674,7 +1698,7 @@ export class EnvironmentController {
             return {
                 yolo: document.getElementById('codex-yolo').checked,
                 noAltScreen: document.getElementById('codex-no-alt-screen').checked,
-                prompt: document.getElementById('codex-prompt').value,
+                prompt: initialMessage,
                 model,
                 effort: this.normalizeCodexEffort(model, document.getElementById('codex-effort').value),
                 fastMode: document.getElementById('codex-fast-mode').checked
@@ -1685,7 +1709,7 @@ export class EnvironmentController {
                 model: this.normalizeClaudeModel(document.getElementById('claude-model').value),
                 effort: document.getElementById('claude-effort').value,
                 fastMode: document.getElementById('claude-fast-mode').checked,
-                initialMessage: document.getElementById('claude-initial-message').value,
+                initialMessage,
                 noSessionPersistence: document.getElementById('claude-no-session-persistence').checked,
                 systemPrompt: document.getElementById('claude-system-prompt').value,
                 dangerouslySkipPermissions: document.getElementById('claude-dangerously-skip-permissions').checked,
@@ -1695,7 +1719,7 @@ export class EnvironmentController {
         }
         if (cliLower === 'copilot') {
             return {
-                initialMessage: document.getElementById('copilot-initial-message').value,
+                initialMessage,
                 mode: this.normalizeCopilotMode(document.getElementById('copilot-mode').value),
                 model: document.getElementById('copilot-model').value.trim(),
                 permissionPreset: this.normalizeCopilotPermissionPreset(document.getElementById('copilot-permission-preset').value),
@@ -1705,7 +1729,7 @@ export class EnvironmentController {
         }
         if (this.isOpencodeBackedCli(cliLower)) {
             return {
-                initialMessage: document.getElementById('opencode-initial-message').value,
+                initialMessage,
                 model: document.getElementById('opencode-model').value.trim(),
                 agent: document.getElementById('opencode-agent').value.trim(),
                 yoloMode: document.getElementById('opencode-yolo').checked,
@@ -1719,20 +1743,13 @@ export class EnvironmentController {
     buildCliSettingsHtml(cli, settings) {
         const s = settings || {};
         const cliLower = (cli || '').toLowerCase();
-        const initialMessageHelp = this.renderInitialMessageHelpText();
 
         if (cliLower === 'antigravity') {
-            const antigravityInitialMessage = this.app.escapeHtml(s.initialMessage || '');
             const antigravityYoloMode = Boolean(s.yoloMode);
             const antigravityAdditionalArgs = this.app.escapeHtml(s.additionalArgs || '');
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Antigravity CLI Settings</h6>
-                <div class="mb-3">
-                    <label class="form-label">Initial Message</label>
-                    <textarea class="form-control" id="antigravity-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to agy as soon as the session starts.">${antigravityInitialMessage}</textarea>
-                    ${initialMessageHelp}
-                </div>
                 <div class="mb-3">
                     <label class="form-label">Model</label>
                     <select class="form-select" id="antigravity-model">
@@ -1763,18 +1780,12 @@ export class EnvironmentController {
         }
 
         if (cliLower === 'codex') {
-            const promptValue = this.app.escapeHtml(s.prompt || '');
             const codexModel = this.normalizeCodexModel(s.model);
             const codexEffort = this.normalizeCodexEffort(codexModel, s.effort);
             const codexMaxEffortDisabled = !this.codexModelSupportsMaxEffort(codexModel);
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Codex CLI Settings</h6>
-                <div class="mb-3">
-                    <label class="form-label">Initial Message</label>
-                    <textarea class="form-control" id="codex-prompt" rows="3" maxlength="6000" placeholder="Please review the code changes. Look for bugs, code smells, and security issues.">${promptValue}</textarea>
-                    ${initialMessageHelp}
-                </div>
                 <div class="mb-3">
                     <label class="form-label">Model</label>
                     <select class="form-select" id="codex-model">
@@ -1821,7 +1832,6 @@ export class EnvironmentController {
         }
 
         if (cliLower === 'copilot') {
-            const initialMessage = this.app.escapeHtml(s.initialMessage || '');
             const mode = this.normalizeCopilotMode(s.mode);
             const permissionPreset = this.normalizeCopilotPermissionPreset(s.permissionPreset);
             const model = s.model || '';
@@ -1830,11 +1840,6 @@ export class EnvironmentController {
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">Copilot CLI Settings</h6>
-                <div class="mb-3">
-                    <label class="form-label">Initial Message</label>
-                    <textarea class="form-control" id="copilot-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to Copilot as soon as the session starts.">${initialMessage}</textarea>
-                    ${initialMessageHelp}
-                </div>
                 <div class="mb-3">
                     <label class="form-label">Mode</label>
                     <select class="form-select" id="copilot-mode">
@@ -1877,7 +1882,6 @@ export class EnvironmentController {
         }
 
         if (this.isOpencodeBackedCli(cliLower)) {
-            const initialMessage = this.app.escapeHtml(s.initialMessage || '');
             const pinnedModel = this.pinnedModelForCli(cliLower);
             // For the GLM 5.2 pseudo-CLI the model is pinned — show a read-only
             // display of the pinned provider/model instead of the editable dropdown, so
@@ -1899,11 +1903,6 @@ export class EnvironmentController {
             return `
                 <hr class="my-4">
                 <h6 class="text-muted mb-3">${headerLabel}</h6>
-                <div class="mb-3">
-                    <label class="form-label">Initial Message</label>
-                    <textarea class="form-control" id="opencode-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to OpenCode as soon as the session starts.">${initialMessage}</textarea>
-                    ${initialMessageHelp}
-                </div>
                 <div class="mb-3">
                     <label class="form-label">Model</label>
                     ${modelField}
@@ -1938,7 +1937,6 @@ export class EnvironmentController {
         if (cliLower === 'claude') {
             const effort = s.effort || '';
             const claudeModel = this.normalizeClaudeModel(s.model);
-            const initialMessage = this.app.escapeHtml(s.initialMessage || '');
             const systemPrompt = this.app.escapeHtml(s.systemPrompt || '');
 
             return `
@@ -1978,11 +1976,6 @@ export class EnvironmentController {
                     <small class="form-text text-muted">Sets <code>fastMode</code> in settings.json (same as <code>/fast</code>). Opus-only — Claude switches to Opus when on. Research preview; billed via usage credits.</small>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Initial Message</label>
-                    <textarea class="form-control" id="claude-initial-message" rows="3" maxlength="6000" placeholder="Optional. Sent to Claude as soon as the session starts.">${initialMessage}</textarea>
-                    ${initialMessageHelp}
-                </div>
-                <div class="mb-3">
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" id="claude-no-session-persistence" ${s.noSessionPersistence ? 'checked' : ''}>
                         <label class="form-check-label" for="claude-no-session-persistence">No Session Persistence</label>
@@ -2014,13 +2007,154 @@ export class EnvironmentController {
         return '';
     }
 
-    renderInitialMessageHelpText() {
+    // The display names the Initial Message wording uses — matching the product's own voice
+    // (the Antigravity CLI is spoken of as "agy", GLM 5.2 is not called OpenCode).
+    cliDisplayName(cli) {
+        const cliLower = (cli || '').toLowerCase();
+        if (cliLower === 'claude') return 'Claude';
+        if (cliLower === 'codex') return 'Codex';
+        if (cliLower === 'copilot') return 'Copilot';
+        if (cliLower === 'antigravity') return 'agy';
+        if (cliLower === 'glm-5.2') return 'GLM 5.2';
+        if (cliLower === 'opencode') return 'OpenCode';
+        return 'the CLI';
+    }
+
+    initialMessagePlaceholder(cli) {
+        return `Optional. Sent to ${this.cliDisplayName(cli)} as soon as the session starts.`;
+    }
+
+    /**
+     * The one shared Initial Message block, rendered directly under the CLI picker for every
+     * CLI (it backs the single Environments.CustomPrompt column). `escapedValue` is already
+     * HTML-escaped by the caller.
+     */
+    renderInitialMessageField(cli, escapedValue) {
+        const cliName = this.app.escapeHtml(this.cliDisplayName(cli));
         return `
-            <small class="form-text text-muted">
-                Optional startup message. Use <code>{{branch_name}}</code> placeholders to fill values when launching.
-                Defaults use <code>{{path default=&quot;docs/runbook.md&quot;}}</code>.
-            </small>
-        `;
+                <div class="mb-3">
+                    <div class="env-initial-message-head">
+                        <label class="form-label" for="env-initial-message">Initial Message</label>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-insert-step-output aria-haspopup="menu">
+                            Insert step output
+                        </button>
+                    </div>
+                    <textarea class="form-control" id="env-initial-message" rows="6" maxlength="6000"
+                              placeholder="${this.app.escapeHtml(this.initialMessagePlaceholder(cli))}">${escapedValue}</textarea>
+                    <div class="env-initial-message-refs text-muted small d-none" data-initial-message-refs></div>
+                    <small class="form-text text-muted">
+                        Sent to <span data-initial-message-cli>${cliName}</span> as your first chat message the moment the session starts — exactly as if you typed it.
+                        <code>{{name}}</code> asks you for a value at launch (<code>{{name default=&quot;…&quot;}}</code> pre-fills it);
+                        <code>{{datetime}}</code>, <code>{{date}}</code>, <code>{{time}}</code>, <code>{{git_branch}}</code> and <code>{{env_name}}</code> fill in automatically.
+                    </small>
+                </div>`;
+    }
+
+    /**
+     * Wires the shared Initial Message field: the referenced-steps caption (refreshed on typing)
+     * and the "Insert step output" picker. `getSteps` is a closure over the form's live step list
+     * (editedSteps ?? initialSteps) so steps added in the editor are insertable before saving.
+     * Returns the caption refresher so the steps editor's onSave can re-run it.
+     */
+    bindInitialMessageField(getSteps) {
+        const textarea = document.getElementById('env-initial-message');
+        if (!textarea) return () => { };
+
+        const refresh = () => this.updateInitialMessageStepRefs(textarea.value, getSteps());
+        textarea.addEventListener('input', refresh);
+        refresh();
+
+        document.querySelector('[data-insert-step-output]')?.addEventListener('click', event => {
+            this.toggleStepOutputMenu(event.currentTarget, textarea, getSteps, refresh);
+        });
+
+        return refresh;
+    }
+
+    /** "Uses step output: Run Tests" under the textarea, with a warning for dangling references. */
+    updateInitialMessageStepRefs(value, steps) {
+        const refs = document.querySelector('[data-initial-message-refs]');
+        if (!refs) return;
+
+        const tokens = [...String(value ?? '').matchAll(/\{\{\s*step\s*:\s*([0-9a-fA-F-]+)\s*\}\}/gi)];
+        if (tokens.length === 0) {
+            refs.classList.add('d-none');
+            refs.innerHTML = '';
+            return;
+        }
+
+        const list = Array.isArray(steps) ? steps : [];
+        const names = [];
+        let missing = 0;
+        const seen = new Set();
+        for (const match of tokens) {
+            const id = match[1].toLowerCase();
+            if (seen.has(id)) continue;
+            seen.add(id);
+            const step = list.find(candidate => String(candidate?.id ?? '').toLowerCase() === id);
+            if (step) names.push(this.app.escapeHtml(stepDisplayName(step)));
+            else missing++;
+        }
+
+        const parts = [];
+        if (names.length > 0) parts.push(`Uses step output: <strong>${names.join('</strong>, <strong>')}</strong>`);
+        if (missing > 0) parts.push(`<span class="text-warning">references ${missing === 1 ? 'a deleted step' : `${missing} deleted steps`}</span>`);
+        refs.innerHTML = parts.join(' · ');
+        refs.classList.remove('d-none');
+    }
+
+    /**
+     * A small menu under the "Insert step output" button listing the form's current steps by
+     * name; picking one inserts {{step:<id>}} at the cursor. Plain DOM rather than a Bootstrap
+     * dropdown so it works inside the modal without extra plumbing.
+     */
+    toggleStepOutputMenu(button, textarea, getSteps, onInserted) {
+        const existing = document.querySelector('.env-step-output-menu');
+        if (existing) {
+            existing.remove();
+            return;
+        }
+
+        const steps = (getSteps() || []).filter(step => step?.id);
+        const menu = document.createElement('div');
+        menu.className = 'env-step-output-menu';
+        menu.setAttribute('role', 'menu');
+        menu.innerHTML = steps.length === 0
+            ? '<div class="env-step-output-empty text-muted small">No steps yet — add one with the Steps button below, then insert its output here.</div>'
+            : steps.map(step => `
+                <button type="button" class="env-step-output-item" role="menuitem"
+                        data-step-id="${this.app.escapeHtml(step.id)}">${this.app.escapeHtml(stepDisplayName(step))}</button>`).join('');
+        button.closest('.env-initial-message-head')?.appendChild(menu);
+
+        const close = () => {
+            menu.remove();
+            document.removeEventListener('click', onDocClick, true);
+            document.removeEventListener('keydown', onKeydown, true);
+        };
+        const onDocClick = event => {
+            if (!menu.contains(event.target) && !button.contains(event.target)) close();
+        };
+        const onKeydown = event => {
+            if (event.key !== 'Escape') return;
+            // Swallowed so Escape closes the menu, not the whole environment modal.
+            event.stopPropagation();
+            close();
+            button.focus();
+        };
+        document.addEventListener('click', onDocClick, true);
+        document.addEventListener('keydown', onKeydown, true);
+
+        menu.addEventListener('click', event => {
+            const item = event.target.closest('[data-step-id]');
+            if (!item) return;
+            const token = `{{step:${item.dataset.stepId}}}`;
+            const start = textarea.selectionStart ?? textarea.value.length;
+            const end = textarea.selectionEnd ?? start;
+            textarea.setRangeText(token, start, end, 'end');
+            textarea.focus();
+            close();
+            onInserted();
+        });
     }
 
     async removeEnvironment(name, { onChanged = null } = {}) {

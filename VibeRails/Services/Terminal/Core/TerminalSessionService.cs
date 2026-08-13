@@ -88,7 +88,7 @@ public class TerminalSessionService : ITerminalSessionService
         _localClientTracker = localClientTracker;
     }
 
-    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, string? initialPrompt = null, string summary = "")
+    public async Task<bool> StartSessionAsync(LLM llm, string workingDirectory, string? environmentName = null, string[]? extraArgs = null, string? title = null, bool makeRemote = false, Func<Task<string?>>? resolveInitialPrompt = null, string summary = "")
     {
         await s_lifecycleGate.WaitAsync();
 
@@ -99,6 +99,12 @@ public class TerminalSessionService : ITerminalSessionService
                 if (s_terminal != null)
                     return false;
             }
+
+            // Past the gate and past the occupancy check, so this call owns the slot and no
+            // concurrent start can also reach here. That is what makes it safe to run the
+            // Initial Message's {{step:<id>}} commands: a loser blocks on the gate above, sees
+            // the winner's terminal, and returns false without executing anything.
+            var initialPrompt = resolveInitialPrompt is null ? null : await resolveInitialPrompt();
 
             var (terminal, sessionId, _) = await _runner.CreateSessionAsync(
                 llm,

@@ -18,8 +18,11 @@ const {
     serializeSteps,
     summarizeSteps,
     renderStepsSummaryButton,
-    streamStepTest
+    streamStepTest,
+    newStepId
 } = await import(pathToFileURL(modulePath).href);
+
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ---------------------------------------------------------------------------------------
 //  normalizeSteps
@@ -45,6 +48,15 @@ test('normalizeSteps fills in the documented defaults and drops the server posit
     // Position is a server concern, restated from array order on save.
     assert.equal('position' in step, false);
     assert.match(step.clientId, /^step-\d+$/);
+    // A step arriving without a server id (older shape) still gets a durable identity.
+    assert.match(step.id, GUID_PATTERN);
+});
+
+test('normalizeSteps keeps the server GUID — {{step:<id>}} references depend on it', () => {
+    const id = newStepId();
+    const [step] = normalizeSteps([{ phase: 0, command: 'npm ci', id }]);
+
+    assert.equal(step.id, id);
 });
 
 test('normalizeSteps clamps a stored timeout instead of trusting it', () => {
@@ -85,12 +97,35 @@ test('serializeSteps emits pre-launch steps first so array order becomes Positio
     assert.deepEqual(wire.map(step => step.phase), [0, 0, 1, 1]);
 });
 
-test('serializeSteps never sends position — the server stamps it', () => {
-    const [step] = serializeSteps([{ phase: 0, command: 'npm ci', position: 7, clientId: 'step-1', id: 12 }]);
+test('serializeSteps never sends position or clientId — the server stamps position', () => {
+    const [step] = serializeSteps([{ phase: 0, command: 'npm ci', position: 7, clientId: 'step-1', id: newStepId() }]);
 
     assert.deepEqual(Object.keys(step).sort(), [
-        'command', 'enabled', 'name', 'phase', 'startMinimized', 'timeoutSeconds'
+        'command', 'enabled', 'id', 'name', 'phase', 'startMinimized', 'timeoutSeconds'
     ]);
+});
+
+test('serializeSteps round-trips a string id and regenerates a non-string one', () => {
+    const id = newStepId();
+    const wire = serializeSteps([
+        { phase: 0, command: 'git pull', id },
+        { phase: 0, command: 'npm ci', id: 12 }
+    ]);
+
+    assert.equal(wire[0].id, id);
+    assert.match(wire[1].id, GUID_PATTERN);
+});
+
+test('manual-phase steps survive serialization and sort last', () => {
+    // Phase 2 = "only when referenced" from the Initial Message. A filter that only knew
+    // phases 0 and 1 would silently drop them from every save.
+    const wire = serializeSteps([
+        { phase: STEP_PHASE.MANUAL, command: 'git log -1' },
+        { phase: 0, command: 'git pull' },
+        { phase: 1, command: 'git push' }
+    ]);
+
+    assert.deepEqual(wire.map(step => step.phase), [0, 1, STEP_PHASE.MANUAL]);
 });
 
 test('serializeSteps drops empty rows but keeps the command verbatim', () => {
@@ -120,6 +155,9 @@ test('summarizeSteps reads as a count per phase', () => {
     assert.equal(summarizeSteps([{ phase: 0 }, { phase: 0 }, { phase: 1 }]), '2 before · 1 after');
     assert.equal(summarizeSteps([{ phase: 1 }]), '1 after');
     assert.equal(summarizeSteps([{ phase: 0 }]), '1 before');
+    assert.equal(
+        summarizeSteps([{ phase: 0 }, { phase: STEP_PHASE.MANUAL }]),
+        '1 before · 1 referenced');
 });
 
 test('the summary button carries an escaped count and the hook the form binds to', () => {

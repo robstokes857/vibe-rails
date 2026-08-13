@@ -1,10 +1,51 @@
 import { escapeHtml } from './utils.js';
+import { stepDisplayName } from './environment-steps.js';
 
 const TOKEN_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_.-]*)([^{}]*)\s*\}\}/g;
 const DEFAULT_PATTERN = /\bdefault\s*=\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s}]+))/i;
 
+// Reserved names that never become fill-in fields. Mirrors PromptPlaceholderService in the
+// backend, which owns the authoritative resolution pass at launch. datetime/date/time/env_name
+// resolve here too (for the preview and the submitted text); git_branch and step need the server
+// (a git call / a shell run), so their tokens are deliberately left literal for it.
+// "step" is on this list because {{step:<id>}} parses under TOKEN_PATTERN as name "step" with
+// ":<id>" falling into the argument capture.
+const BUILTIN_TOKEN_NAMES = Object.freeze(['datetime', 'date', 'time', 'git_branch', 'env_name']);
+const STEP_ID_PATTERN = /step\s*:\s*([0-9a-fA-F-]+)/i;
+
 function lower(value) {
     return (value || '').toString().trim().toLowerCase();
+}
+
+function isReservedToken(name) {
+    const key = lower(name);
+    return key === 'step' || BUILTIN_TOKEN_NAMES.includes(key);
+}
+
+function pad2(value) {
+    return String(value).padStart(2, '0');
+}
+
+function formatLocalDate(now) {
+    return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+function formatLocalTime(now) {
+    return `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+}
+
+/**
+ * Client-side value for a built-in token, or null for the ones only the server can resolve
+ * (git_branch, step) — null means "leave the token literal and let the launch pass finish it".
+ */
+function builtinTokenValue(name, context = {}, now = new Date()) {
+    switch (lower(name)) {
+        case 'datetime': return `${formatLocalDate(now)} ${formatLocalTime(now)}`;
+        case 'date': return formatLocalDate(now);
+        case 'time': return formatLocalTime(now);
+        case 'env_name': return String(context.environmentName ?? '');
+        default: return null;
+    }
 }
 
 function unescapeQuotedValue(value) {
@@ -34,7 +75,7 @@ export function extractPromptTemplateVariables(template) {
 
     for (const match of text.matchAll(TOKEN_PATTERN)) {
         const token = parseToken(match);
-        if (!token.name) {
+        if (!token.name || isReservedToken(token.name)) {
             continue;
         }
 
@@ -66,9 +107,14 @@ export function hasPromptTemplateVariables(template) {
     return extractPromptTemplateVariables(template).length > 0;
 }
 
-export function renderPromptTemplate(template, values = {}) {
+export function renderPromptTemplate(template, values = {}, context = {}) {
     return String(template ?? '').replace(TOKEN_PATTERN, (...args) => {
         const token = parseToken(args);
+        if (isReservedToken(token.name)) {
+            // git_branch and {{step:...}} come back as the literal token — the server's
+            // launch-time pass (PromptPlaceholderService) resolves them.
+            return builtinTokenValue(token.name, context) ?? token.token;
+        }
         return values[token.name] ?? '';
     });
 }
@@ -109,6 +155,8 @@ export async function resolvePromptTemplateForLaunch(app, options = {}) {
         template: sourcePrompt,
         variables,
         environmentName: options.environmentName || environment?.name || '',
+        // For the preview's {{step:<id>}} chips — EnvironmentResponse already carries steps.
+        steps: environment?.steps || [],
         title: options.title || environment?.name || ''
     });
 
@@ -143,7 +191,22 @@ function buildValues(variables, container) {
     return values;
 }
 
-function buildPreviewHtml(template, values = {}) {
+/** Preview text for a reserved token: the resolved value, or a described stand-in for the
+ *  server-resolved ones. */
+function reservedTokenPreview(token, context = {}) {
+    if (lower(token.name) === 'step') {
+        const stepId = STEP_ID_PATTERN.exec(token.token)?.[1]?.toLowerCase() ?? '';
+        const steps = Array.isArray(context.steps) ? context.steps : [];
+        const step = steps.find(candidate => String(candidate?.id ?? '').toLowerCase() === stepId);
+        return step ? `(output of step: ${stepDisplayName(step)})` : '(output of a deleted step)';
+    }
+    if (lower(token.name) === 'git_branch') {
+        return '(current git branch)';
+    }
+    return builtinTokenValue(token.name, context) ?? token.token;
+}
+
+function buildPreviewHtml(template, values = {}, context = {}) {
     const text = String(template ?? '');
     let html = '';
     let lastIndex = 0;
@@ -152,10 +215,15 @@ function buildPreviewHtml(template, values = {}) {
         const token = parseToken(match);
         html += escapeHtml(text.slice(lastIndex, match.index));
 
-        const value = values[token.name] ?? '';
-        const display = value.length > 0 ? value : token.token;
-        const emptyClass = value.length > 0 ? '' : ' vb-prompt-template-token-empty';
-        html += `<span class="vb-prompt-template-token${emptyClass}" role="button" tabindex="0" data-prompt-template-focus="${escapeHtml(token.name)}">${escapeHtml(display)}</span>`;
+        if (isReservedToken(token.name)) {
+            // Auto-filled — rendered as a chip but not clickable: there is no input to focus.
+            html += `<span class="vb-prompt-template-token vb-prompt-template-token-builtin">${escapeHtml(reservedTokenPreview(token, context))}</span>`;
+        } else {
+            const value = values[token.name] ?? '';
+            const display = value.length > 0 ? value : token.token;
+            const emptyClass = value.length > 0 ? '' : ' vb-prompt-template-token-empty';
+            html += `<span class="vb-prompt-template-token${emptyClass}" role="button" tabindex="0" data-prompt-template-focus="${escapeHtml(token.name)}">${escapeHtml(display)}</span>`;
+        }
 
         lastIndex = match.index + token.token.length;
     }
@@ -164,7 +232,7 @@ function buildPreviewHtml(template, values = {}) {
     return html;
 }
 
-function renderModalHtml({ template, variables, environmentName }) {
+function renderModalHtml({ template, variables, environmentName, context }) {
     const envSuffix = environmentName
         ? `<span class="text-muted"> for </span><code>${escapeHtml(environmentName)}</code>`
         : '';
@@ -196,7 +264,7 @@ function renderModalHtml({ template, variables, environmentName }) {
                         <label class="form-label mb-0">Resolved initial message</label>
                         <span class="text-muted x-small">Click highlighted text to edit it</span>
                     </div>
-                    <pre class="vb-prompt-template-preview" data-prompt-template-preview>${buildPreviewHtml(template, Object.fromEntries(variables.map(v => [v.name, v.defaultValue])))}</pre>
+                    <pre class="vb-prompt-template-preview" data-prompt-template-preview>${buildPreviewHtml(template, Object.fromEntries(variables.map(v => [v.name, v.defaultValue])), context)}</pre>
                 </div>
             </div>
             <div class="d-flex justify-content-end gap-2 mt-3">
@@ -217,7 +285,10 @@ function showPromptTemplateModal(app, options) {
         const title = options.title
             ? `Fill Prompt Values: ${options.title}`
             : 'Fill Prompt Values';
-        app.showModal(title, renderModalHtml(options));
+        // Context for auto-filled tokens: env_name resolves client-side; steps give the
+        // {{step:<id>}} preview chips their names.
+        const context = { environmentName: options.environmentName, steps: options.steps };
+        app.showModal(title, renderModalHtml({ ...options, context }));
 
         const modalContainer = document.getElementById('modal-container');
         const form = modalContainer?.querySelector('#vb-prompt-template-form');
@@ -245,7 +316,7 @@ function showPromptTemplateModal(app, options) {
             if (!preview || !form) {
                 return;
             }
-            preview.innerHTML = buildPreviewHtml(options.template, buildValues(variables, form));
+            preview.innerHTML = buildPreviewHtml(options.template, buildValues(variables, form), context);
         };
 
         const focusInput = (name) => {
@@ -284,7 +355,7 @@ function showPromptTemplateModal(app, options) {
                 return;
             }
 
-            const resolved = renderPromptTemplate(options.template, buildValues(variables, form));
+            const resolved = renderPromptTemplate(options.template, buildValues(variables, form), context);
             if (!resolved.trim()) {
                 app.showError?.('Resolved initial message is empty.');
                 return;

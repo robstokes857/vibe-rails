@@ -12,7 +12,14 @@ namespace VibeRails.DTOs
         /// After the PTY exits. For a Worker or Job that is "the agent finished"; for a browser tab
         /// it is "the tab closed".
         /// </summary>
-        PostExit = 1
+        PostExit = 1,
+
+        /// <summary>
+        /// Never runs on its own. Executes only when the environment's Initial Message references
+        /// it via <c>{{step:&lt;id&gt;}}</c>, hidden and captured, with its output substituted into
+        /// the prompt. Lifecycle runs query by phase, so these are excluded automatically.
+        /// </summary>
+        Manual = 2
     }
 
     /// <summary>
@@ -22,7 +29,12 @@ namespace VibeRails.DTOs
     /// </summary>
     public class EnvironmentStep
     {
-        public int Id { get; set; }
+        /// <summary>
+        /// GUID string, generated client-side at step creation and preserved across saves (the
+        /// save path is delete-all + reinsert, so stability comes from round-tripping the value,
+        /// not from the row surviving). {{step:&lt;id&gt;}} prompt references rely on this.
+        /// </summary>
+        public string Id { get; set; } = "";
         public int EnvironmentId { get; set; }
         public EnvironmentStepPhase Phase { get; set; } = EnvironmentStepPhase.PreLaunch;
 
