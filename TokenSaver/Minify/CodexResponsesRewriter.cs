@@ -10,7 +10,9 @@ namespace TokenSaver.Minify;
 /// Rewrites shell-tool outputs in an OpenAI Responses API request body. Codex represents its
 /// conversation as <c>input[]</c> items: a tool call carries <c>name</c> + <c>call_id</c>, and the
 /// corresponding output carries the same <c>call_id</c>. This rewriter correlates those items and
-/// raw-byte-splices only output strings belonging to an allowlisted shell tool.
+/// raw-byte-splices only output strings belonging to an allowlisted shell tool. When diagnostic
+/// capture is enabled, recognized non-allowlisted outputs are recorded unchanged without becoming
+/// eligible for rewriting.
 ///
 /// Both ordinary <c>function_call(_output)</c> and <c>custom_tool_call(_output)</c> pairs are
 /// supported, including array-form output content containing <c>input_text</c>. Provider-native
@@ -57,7 +59,8 @@ public static class CodexResponsesRewriter
         var unchanged = new ToolOutputRewriteResult(
             false, utf8Body.Length, utf8Body.Length, 0, 0, stats);
         var toolAllowlist = plan.CodexAllowlist;
-        if (utf8Body.IsEmpty || plan.IsNoOp || toolAllowlist.Count == 0)
+        if (utf8Body.IsEmpty
+            || (captures is null && (plan.IsNoOp || toolAllowlist.Count == 0)))
             return unchanged;
 
         List<ResponseItem> items;
@@ -86,13 +89,7 @@ public static class CodexResponsesRewriter
                 continue;
 
             seen++;
-            var use = default(ToolUseInfo);
-            var allowed = item.IsIntrinsicShellOutput
-                ? IsAllowed(toolAllowlist, "shell_command")
-                : item.CallId is not null
-                    && toolUses.TryGetValue(item.CallId, out use)
-                    && IsAllowed(toolAllowlist, use.Name);
-            if (!allowed || item.Ranges.Count == 0)
+            if (item.Ranges.Count == 0)
                 continue;
 
             if (item.IsIntrinsicShellOutput)
@@ -100,25 +97,48 @@ public static class CodexResponsesRewriter
                 item.Name = "shell_command";
                 item.Command = null;
             }
-            else
+            else if (item.CallId is not null && toolUses.TryGetValue(item.CallId, out var use))
             {
                 item.Name = use.Name;
                 item.Command = use.Command;
             }
-            qualifying.Add(item);
+            else
+            {
+                // A recognized output shape without a correlated call has no trustworthy tool
+                // identity. It remains counted, but cannot be compressed or captured honestly.
+                continue;
+            }
+
+            if (!plan.IsNoOp && IsAllowed(toolAllowlist, item.Name))
+                qualifying.Add(item);
+
             foreach (var (start, end) in item.Ranges)
                 maxTokenLength = Math.Max(maxTokenLength, end - start);
         }
 
-        if (qualifying.Count == 0)
+        if (qualifying.Count == 0 && captures is null)
             return unchanged with { ToolResultsSeen = seen };
 
-        var unescaped = ArrayPool<char>.Shared.Rent(maxTokenLength);
-        using var buffers = new PipelineScratch(maxTokenLength);
-        using var scratch = new PooledBufferWriter(maxTokenLength);
-        using var writer = new Utf8JsonWriter(scratch, StringWriterOptions);
+        var unescaped = ArrayPool<char>.Shared.Rent(Math.Max(maxTokenLength, 1));
         try
         {
+            if (captures is not null)
+            {
+                CaptureDiagnosticOnly(
+                    utf8Body,
+                    items,
+                    toolAllowlist,
+                    plan,
+                    captures,
+                    unescaped);
+            }
+
+            if (qualifying.Count == 0)
+                return unchanged with { ToolResultsSeen = seen };
+
+            using var buffers = new PipelineScratch(maxTokenLength);
+            using var scratch = new PooledBufferWriter(maxTokenLength);
+            using var writer = new Utf8JsonWriter(scratch, StringWriterOptions);
             var cursor = 0;
             var bytesWritten = 0;
             var minifiedResults = 0;
@@ -227,8 +247,59 @@ public static class CodexResponsesRewriter
 
     private readonly record struct ToolUseInfo(string Name, string? Command);
 
-    private static bool IsAllowed(IReadOnlyCollection<string> allowlist, string name)
+    private static void CaptureDiagnosticOnly(
+        ReadOnlySpan<byte> utf8Body,
+        IReadOnlyList<ResponseItem> items,
+        IReadOnlyCollection<string> toolAllowlist,
+        CompressionPlan plan,
+        ICompressionCaptureSink captures,
+        Span<char> unescaped)
     {
+        foreach (var item in items)
+        {
+            if (!item.IsToolOutput
+                || item.Ranges.Count == 0
+                || item.Name is null
+                || (!plan.IsNoOp && IsAllowed(toolAllowlist, item.Name)))
+            {
+                continue;
+            }
+
+            foreach (var (start, end) in item.Ranges)
+            {
+                try
+                {
+                    var tokenReader = new Utf8JsonReader(utf8Body[start..end]);
+                    tokenReader.Read();
+                    var charLength = tokenReader.CopyString(unescaped);
+                    var raw = unescaped[..charLength].ToString();
+
+                    captures.Capture(new CompressionCapture(
+                        Guid.NewGuid(),
+                        "openai",
+                        item.Name!,
+                        item.Command,
+                        raw,
+                        raw,
+                        [],
+                        [.. plan.EnabledIds],
+                        RewriteAccepted: false));
+                }
+                catch (Exception ex) when (
+                    ex is JsonException or InvalidOperationException or ArgumentException)
+                {
+                    // Per-string fail-open: malformed/untranscodable text is neither captured nor
+                    // rewritten, and must not suppress diagnostics for the remaining ranges.
+                }
+            }
+        }
+    }
+
+    private static bool IsAllowed(IReadOnlyCollection<string> allowlist, string? name)
+    {
+        if (name is null)
+            return false;
+
         foreach (var allowed in allowlist)
         {
             if (string.Equals(allowed, name, StringComparison.Ordinal))

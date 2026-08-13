@@ -24,7 +24,8 @@ function createFixtureState() {
                 workspaceMode: 0,
                 steps: [
                     {
-                        id: 1, phase: 0, position: 0, name: 'Pull',
+                        // Ids are client-generated GUID strings, round-tripped through every save.
+                        id: '5f0f70a5-2f6d-4c8e-9a3b-0d1e2f3a4b5c', phase: 0, position: 0, name: 'Pull',
                         command: 'git pull', startMinimized: false, timeoutSeconds: 600, enabled: true
                     }
                 ],
@@ -95,8 +96,9 @@ async function installStatefulApi(page) {
             if (!environment) return respond({ error: `Unknown environment: ${name}` });
             writes.environments.push({ name, body });
             if (Array.isArray(body.steps)) {
+                // Like the real server: the client's GUID is kept; only Position is stamped.
                 environment.steps = body.steps.map((step, index) => ({
-                    ...step, id: index + 1, position: index
+                    ...step, id: step.id || require('node:crypto').randomUUID(), position: index
                 }));
             }
             Object.assign(environment, body, {

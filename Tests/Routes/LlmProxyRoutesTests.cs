@@ -184,6 +184,67 @@ public class LlmProxyRoutesTests
             ping.Payload.GetProperty("bytesSaved").GetInt64());
     }
 
+    [Fact]
+    public async Task OpenAiProxy_DiagnosticCaptureWithoutCompressionWork_CapturesExecAndForwardsOriginalBytes()
+    {
+        const string body = """
+            {"model":"gpt-5.5-codex","input":[
+              {"type":"custom_tool_call","name":"exec","call_id":"c1","input":"pwd"},
+              {"type":"custom_tool_call_output","call_id":"c1","output":[
+                {"type":"input_text","text":"diagnostic only  \r\n"},
+                {"type":"input_image","image_url":"data:image/png;base64,NOT_CAPTURED"}
+              ]}
+            ]}
+            """;
+
+        var result = await SendThroughProxyAsync(
+            enabled: true,
+            authenticated: true,
+            TestContext.Current.CancellationToken,
+            requestBody: body,
+            tokenSaverEnabled: true,
+            captureEnabled: true);
+
+        Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal(Encoding.UTF8.GetBytes(body), result.UpstreamBody);
+        var measurement = Assert.Single(result.SavingsRecords);
+        Assert.Equal(measurement.BytesBefore, measurement.BytesAfter);
+
+        var capture = Assert.Single(result.Captures);
+        Assert.Equal("openai", capture.Provider);
+        Assert.Equal("exec", capture.ToolName);
+        Assert.Equal("pwd", capture.Command);
+        Assert.Equal("diagnostic only  \r\n", capture.RawText);
+        Assert.Equal(capture.RawText, capture.CompressedText);
+        Assert.False(capture.RewriteAccepted);
+        Assert.Empty(capture.Trace);
+        Assert.DoesNotContain("NOT_CAPTURED", capture.RawText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OpenAiProxy_CaptureToggleAlone_DoesNotBypassDisabledSaver()
+    {
+        const string body = """
+            {"input":[
+              {"type":"function_call","name":"shell_command","call_id":"c1","arguments":"{\"command\":\"pwd\"}"},
+              {"type":"function_call_output","call_id":"c1","output":"\u001b[31mkeep exactly\u001b[0m  \r\n"}
+            ]}
+            """;
+
+        var result = await SendThroughProxyAsync(
+            enabled: true,
+            authenticated: true,
+            TestContext.Current.CancellationToken,
+            requestBody: body,
+            tokenSaverEnabled: false,
+            captureEnabled: true,
+            tokenSaverFlags: MinifyFlags.Default);
+
+        Assert.Equal(Encoding.UTF8.GetBytes(body), result.UpstreamBody);
+        Assert.Empty(result.Captures);
+        Assert.Empty(result.SavingsRecords);
+    }
+
     private static HttpRequest CreateRequest(string path, string query)
     {
         var context = new DefaultHttpContext();
@@ -200,6 +261,7 @@ public class LlmProxyRoutesTests
         bool failSendWithTransportError = false,
         string requestBody = "{\"input\":\"body-secret\"}",
         bool tokenSaverEnabled = false,
+        bool captureEnabled = false,
         MinifyFlags tokenSaverFlags = default,
         CondenseOptions tokenSaverCondense = default)
     {
@@ -225,9 +287,11 @@ public class LlmProxyRoutesTests
         builder.Services.AddSingleton<ILlmProxyAuthGate>(new LlmProxyAuthGateAdapter(authService.Object));
         var savingsStore = new StubTokenSavingsStore();
         var exchanges = new RecordingExchangeSink();
+        var captures = new RecordingCaptureSink();
         builder.Services.AddSingleton<ILlmProxyEventSink>(
             new LlmProxyEventSinkAdapter(eventBus, savingsStore));
         builder.Services.AddSingleton<ILlmProxyExchangeSink>(exchanges);
+        builder.Services.AddSingleton<ICompressionCaptureSink>(captures);
         builder.Services.AddSingleton<IHttpClientFactory>(clientFactory);
         builder.Services.AddSingleton<ILlmProxySettingsService>(
             new StubProxySettingsService(new LlmProxySettings(
@@ -238,7 +302,8 @@ public class LlmProxyRoutesTests
                 TokenSaverPlan: CompressionPlan.FromLegacy(
                     tokenSaverFlags,
                     tokenSaverCondense,
-                    codexAllowlist: CodexResponsesRewriter.DefaultToolAllowlist))));
+                    codexAllowlist: CodexResponsesRewriter.DefaultToolAllowlist),
+                TokenSaverCaptureEnabled: captureEnabled)));
 
         await using var app = builder.Build();
         LlmProxyRoutes.Map(app);
@@ -266,6 +331,7 @@ public class LlmProxyRoutesTests
                 upstreamHandler.RequestBody,
                 [.. savingsStore.Records],
                 [.. exchanges.Records],
+                [.. captures.Captures],
                 [.. events]);
         }
         finally
@@ -282,6 +348,7 @@ public class LlmProxyRoutesTests
         byte[] UpstreamBody,
         List<(string Provider, int BytesBefore, int BytesAfter)> SavingsRecords,
         List<LlmProxyExchange> Exchanges,
+        List<CompressionCapture> Captures,
         List<AppEvent> Events);
 
     private sealed class StubProxySettingsService(LlmProxySettings settings)
@@ -295,6 +362,13 @@ public class LlmProxyRoutesTests
         public List<LlmProxyExchange> Records { get; } = [];
 
         public void Record(LlmProxyExchange exchange) => Records.Add(exchange);
+    }
+
+    private sealed class RecordingCaptureSink : ICompressionCaptureSink
+    {
+        public List<CompressionCapture> Captures { get; } = [];
+
+        public void Capture(CompressionCapture capture) => Captures.Add(capture);
     }
 
     // Keeps the sink adapter off the real state.db: these tests assert relay/event behavior, not

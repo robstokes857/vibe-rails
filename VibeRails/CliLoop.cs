@@ -3,6 +3,7 @@ using Serilog;
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.Environments;
 using VibeRails.Services.Jobs;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
@@ -56,34 +57,8 @@ public static class CliLoop
         var runner = scopedServices.GetRequiredService<TerminalRunner>();
         var llmParser = scopedServices.GetRequiredService<ILlmParser>();
 
-        // Resolve LLM type (smart resolution: LLM enum name → base CLI, otherwise → DB lookup).
-        // Use ILlmParser instead of Enum.TryParse so pseudo-CLI strings like "glm-5.2"
-        // (which can't be a C# enum name due to punctuation) resolve correctly.
-        LLM llm;
-        string? environmentName = null;
-        string? environmentInitialMessage = null;
-
-        var parsedLlm = llmParser.Parse(parsedArgs.LMBootstrapCli);
-        if (parsedLlm != LLM.NotSet)
-        {
-            llm = parsedLlm;
-        }
-        else
-        {
-            var env = await repository.FindEnvironmentByNameAsync(parsedArgs.LMBootstrapCli ?? "");
-            if (env == null)
-                throw new InvalidOperationException($"Unknown CLI or environment: {parsedArgs.LMBootstrapCli}");
-
-            llm = env.LLM;
-            environmentName = env.CustomName;
-            // Carry the env's initial message into the session as UserInputs sequence=1.
-            // The launch command already embeds the prompt in extraArgs (via the spawning
-            // route's AppendInitialPrompt), so this value is for DB recording only —
-            // CreateSessionAsync passes it to the state service, not to PrepareSession.
-            environmentInitialMessage = env.CustomPrompt;
-        }
-
-        // Resolve working directory.
+        // Resolve working directory first: an --env-id launch may already have swapped this to a
+        // workspace clone, so it is not a safe stand-in for the project an environment belongs to.
         var workingDirectory = parsedArgs.WorkDir;
         if (string.IsNullOrEmpty(workingDirectory))
         {
@@ -98,6 +73,79 @@ public static class CliLoop
             }
         }
 
+        // Resolve LLM type (smart resolution: --env-id → exact row, LLM enum name → base CLI,
+        // otherwise → DB lookup by name). Use ILlmParser instead of Enum.TryParse so pseudo-CLI
+        // strings like "glm-5.2" (which can't be a C# enum name due to punctuation) resolve
+        // correctly.
+        LLM llm;
+        string? environmentName = null;
+        LLM_Environment? environment = null;
+
+        var parsedLlm = llmParser.Parse(parsedArgs.LMBootstrapCli);
+        if (parsedArgs.EnvId is int envId)
+        {
+            // The spawning process resolved this row and already checked it against the project,
+            // so it is taken as-is. This is also the only branch that can launch an environment
+            // whose name happens to match a CLI — EnvironmentRoutes rejects such names now, but
+            // rows created before that check exist.
+            environment = await repository.GetEnvironmentByIdAsync(envId, cancellationToken)
+                ?? throw new InvalidOperationException($"Unknown environment id: {envId}");
+
+            llm = environment.LLM;
+            environmentName = environment.CustomName;
+        }
+        else if (parsedLlm != LLM.NotSet)
+        {
+            llm = parsedLlm;
+
+            // A pre-existing environment named after a CLI is unreachable by name, and silently
+            // launching the base CLI instead would hand the user a session with none of the
+            // environment's arguments or credentials. Say so rather than let it look like it worked.
+            var shadowed = await repository.FindEnvironmentByNameAsync(parsedArgs.LMBootstrapCli ?? "");
+            if (shadowed is not null)
+            {
+                Log.Warning(
+                    "[CLI] Environment {EnvironmentId} is named '{Name}', which is also the built-in CLI " +
+                    "'{Llm}' — launching the base CLI. Rename the environment to make it launchable by name.",
+                    shadowed.Id, shadowed.CustomName, parsedLlm);
+            }
+        }
+        else
+        {
+            // Hand-typed `vb --env <name>`. FindEnvironmentByNameAsync is global — names are unique
+            // across the table but not scoped to a project — so without this check, typing a name
+            // learned from anywhere launches that environment's arguments, permission flags, and
+            // per-environment credential directory against whatever repository you are standing in.
+            // No workspace swap has happened on this path, so the working directory IS the project.
+            environment = await repository.FindEnvironmentByNameAsync(parsedArgs.LMBootstrapCli ?? "");
+            if (environment == null)
+                throw new InvalidOperationException($"Unknown CLI or environment: {parsedArgs.LMBootstrapCli}");
+
+            if (!ProjectPathComparer.IsVisibleIn(environment.ProjectPath, workingDirectory))
+                throw new InvalidOperationException(
+                    $"Environment '{environment.CustomName}' belongs to another project and cannot be launched from {workingDirectory}.");
+
+            llm = environment.LLM;
+            environmentName = environment.CustomName;
+        }
+
+        // This process owns the PTY, so this is where the env's Initial Message is resolved —
+        // exactly once per launch. Spawning routes deliberately no longer bake the prompt into
+        // extraArgs: {{step:<id>}} references run a shell command here, and resolving where the
+        // launch happens keeps the recorded seq-1 input identical to what the CLI receives
+        // (RunCliWithWebAsync passes the same string to both). Uses the workingDirectory resolved
+        // at the top on purpose: {{git_branch}} and step commands must see the workspace-resolved
+        // directory.
+        string? initialPrompt = null;
+        if (environment is not null && !string.IsNullOrWhiteSpace(environment.CustomPrompt))
+        {
+            var promptPlaceholders = scopedServices.GetRequiredService<IPromptPlaceholderService>();
+            initialPrompt = await promptPlaceholders.ResolveAsync(
+                environment.CustomPrompt,
+                new PromptPlaceholderContext(workingDirectory, environment.Id, environment.CustomName),
+                cancellationToken);
+        }
+
         var exitCode = await runner.RunCliWithWebAsync(
             llm,
             workingDirectory,
@@ -106,9 +154,9 @@ public static class CliLoop
             sessionService,
             makeRemote: false,
             cancellationToken,
-            environmentInitialMessage,
-            jobRunId,
-            onSessionCreated);
+            initialPrompt: initialPrompt,
+            jobRunId: jobRunId,
+            onSessionCreated: onSessionCreated);
         Environment.ExitCode = exitCode;
         return exitCode;
     }

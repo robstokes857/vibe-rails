@@ -80,6 +80,8 @@ namespace VibeRails.DB
         /// <summary>Enabled steps for one phase, in Position order — exactly what the runner executes.</summary>
         Task<List<EnvironmentStep>> GetEnabledStepsAsync(int environmentId, EnvironmentStepPhase phase, CancellationToken cancellationToken = default);
         Task<bool> HasEnabledStepsAsync(int environmentId, EnvironmentStepPhase phase, CancellationToken cancellationToken = default);
+        /// <summary>One step by GUID, scoped to its environment — backs {{step:&lt;id&gt;}} prompt references. Null = deleted.</summary>
+        Task<EnvironmentStep?> GetStepByIdAsync(int environmentId, string stepId, CancellationToken cancellationToken = default);
         /// <summary>Atomically replaces the whole list, stamping Position from array order.</summary>
         Task ReplaceStepsAsync(int environmentId, IReadOnlyList<EnvironmentStep> steps, CancellationToken cancellationToken = default);
 

@@ -1,6 +1,7 @@
 using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.Environments;
 using VibeRails.Services.LlmClis;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
@@ -27,6 +28,7 @@ public static class TerminalRoutes
             ILlmParser llmParser,
             IRepository repository,
             ISessionResumeService sessionResumeService,
+            IPromptPlaceholderService promptPlaceholders,
             StartTerminalRequest? request,
             CancellationToken cancellationToken) =>
         {
@@ -60,6 +62,7 @@ public static class TerminalRoutes
             // Get custom args if environment specified
             string[]? extraArgs = null;
             string? environmentPrompt = null;
+            int? environmentId = null;
             if (!string.IsNullOrEmpty(request.EnvironmentName))
             {
                 var environment = await repository.GetEnvironmentByNameAndLlmAsync(request.EnvironmentName, llm, cancellationToken);
@@ -70,6 +73,7 @@ public static class TerminalRoutes
                         extraArgs = ShellArgSanitizer.ParseAndValidate(environment.CustomArgs);
                     }
                     environmentPrompt = environment.CustomPrompt;
+                    environmentId = environment.Id;
                     environment.LastUsedUTC = DateTime.UtcNow;
                     await repository.UpdateEnvironmentAsync(environment, cancellationToken);
                 }
@@ -84,14 +88,31 @@ public static class TerminalRoutes
             if (string.IsNullOrEmpty(summary) && !string.IsNullOrEmpty(request.ResumeSessionId))
                 summary = await sessionResumeService.GetResumeSummaryAsync(request.ResumeSessionId, cancellationToken);
 
-            var initialPrompt = request.InitialPrompt;
-            if (string.IsNullOrWhiteSpace(initialPrompt) && !string.IsNullOrWhiteSpace(environmentPrompt))
-                initialPrompt = environmentPrompt;
+            var requestedPrompt = request.InitialPrompt;
+            if (string.IsNullOrWhiteSpace(requestedPrompt) && !string.IsNullOrWhiteSpace(environmentPrompt))
+                requestedPrompt = environmentPrompt;
+
+            // The once-only placeholder pass for every in-process launch (web tabs, Multi Run,
+            // the agent terminal tool): {{datetime}}-style built-ins fill in and {{step:<id>}}
+            // references execute, and the same string then feeds both the seq-1 UserInputs
+            // recording and the CLI argv. The resume summary below is generated text and is
+            // deliberately never resolved.
+            //
+            // Deferred into StartSessionAsync rather than run here: the HasActiveSession check
+            // above is a courtesy, not a reservation, so resolving at this point would let two
+            // simultaneous requests both execute the referenced step commands even though only
+            // one of them can end up owning a terminal.
+            Func<Task<string?>>? resolveInitialPrompt = string.IsNullOrWhiteSpace(requestedPrompt)
+                ? null
+                : () => promptPlaceholders.ResolveAsync(
+                    requestedPrompt,
+                    new PromptPlaceholderContext(workDir, environmentId, request.EnvironmentName),
+                    cancellationToken);
 
             // Start the terminal session with the LLM CLI
             try
             {
-                var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote, initialPrompt, summary);
+                var success = await terminalService.StartSessionAsync(llm, workDir, request.EnvironmentName, extraArgs, request.Title, request.MakeRemote, resolveInitialPrompt, summary);
 
                 if (!success)
                 {
@@ -109,6 +130,12 @@ public static class TerminalRoutes
                     terminalService.ActiveSessionId,
                     terminalService.ActiveCli,
                     terminalService.ActiveWorkingDirectory));
+            }
+            catch (PromptTooLongException ex)
+            {
+                // Written for the user and naming the limit that was hit — surface it verbatim
+                // rather than wrapping it in the generic launch-failure text below.
+                return Results.BadRequest(new ErrorResponse(ex.Message));
             }
             catch (Exception ex)
             {
@@ -234,7 +261,10 @@ public static class TerminalRoutes
                     {
                         extraArgs.AddRange(ShellArgSanitizer.ParseAndValidate(environment.CustomArgs));
                     }
-                    LlmPromptArgvBuilder.AppendInitialPrompt(extraArgs, llm, environment.CustomPrompt);
+                    // The Initial Message is deliberately NOT baked into this command. This route
+                    // returns a copyable string that may run later, repeatedly, or never — the
+                    // spawned vb (CliLoop) resolves the prompt at actual run time, so
+                    // {{step:...}}/{{datetime}} placeholders execute exactly once per real launch.
                     environment.LastUsedUTC = DateTime.UtcNow;
                     await repository.UpdateEnvironmentAsync(environment, cancellationToken);
                 }

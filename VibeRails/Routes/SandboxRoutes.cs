@@ -230,7 +230,10 @@ public static class SandboxRoutes
             var args = request?.Args?.ToList() ?? new List<string>();
             var envName = request?.EnvironmentName;
 
-            // If using a custom environment, look up its custom args
+            // If using a custom environment, look up its custom args. The Initial Message is NOT
+            // appended here: LaunchInTerminal always spawns vb, and CliLoop resolves the prompt
+            // ({{step:...}}/{{datetime}} placeholders included) in the process that owns the PTY,
+            // exactly once per launch.
             if (!string.IsNullOrEmpty(envName))
             {
                 var environment = await repository.GetEnvironmentByNameAndLlmAsync(envName, llm, cancellationToken);
@@ -241,7 +244,6 @@ public static class SandboxRoutes
                         var customArgs = ShellArgSanitizer.ParseAndValidate(environment.CustomArgs);
                         args.InsertRange(0, customArgs);
                     }
-                    LlmPromptArgvBuilder.AppendInitialPrompt(args, llm, environment.CustomPrompt);
                 }
             }
 

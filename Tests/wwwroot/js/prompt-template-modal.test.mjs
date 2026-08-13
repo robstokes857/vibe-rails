@@ -74,3 +74,50 @@ test('helpers handle non-template prompts and environment lookup', () => {
 
     assert.equal(env.customPrompt, 'x');
 });
+
+// ---------------------------------------------------------------------------------------
+//  Auto-filled (reserved) tokens
+// ---------------------------------------------------------------------------------------
+
+test('built-in and step tokens never become fill-in variables', () => {
+    const variables = extractPromptTemplateVariables(
+        'On {{datetime}} ({{date}} {{time}}) in {{env_name}} on {{git_branch}}: '
+        + '{{step:b7e3f2a1-0000-4000-8000-000000000000}} and {{DateTime}} but ask for {{ticket}}.'
+    );
+
+    assert.deepEqual(variables.map(v => v.name), ['ticket']);
+    assert.equal(
+        hasPromptTemplateVariables('Only {{datetime}} and {{step:b7e3f2a1-0000-4000-8000-000000000000}}'),
+        false);
+});
+
+test('renderPromptTemplate resolves the client-side built-ins', () => {
+    const rendered = renderPromptTemplate('{{datetime}} | {{date}} | {{time}} | {{env_name}}', {}, {
+        environmentName: 'Nightly'
+    });
+
+    // The clock is live, so assert shape rather than value.
+    const [datetime, date, time, envName] = rendered.split(' | ');
+    assert.match(datetime, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    assert.match(date, /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(time, /^\d{2}:\d{2}$/);
+    assert.equal(envName, 'Nightly');
+});
+
+test('renderPromptTemplate leaves server-resolved tokens literal for the launch pass', () => {
+    // git_branch needs a git call and step tokens run a shell command — only the backend
+    // (PromptPlaceholderService) may resolve those, exactly once per launch.
+    const template = 'On {{git_branch}}: {{step:b7e3f2a1-0000-4000-8000-000000000000}} for {{ticket}}';
+    const rendered = renderPromptTemplate(template, { ticket: 'T-123' });
+
+    assert.equal(
+        rendered,
+        'On {{git_branch}}: {{step:b7e3f2a1-0000-4000-8000-000000000000}} for T-123');
+});
+
+test('a user variable value containing a reserved-looking token is not blanked', () => {
+    // {{step:...}} parses under TOKEN_PATTERN as name "step"; before the reserved list existed
+    // it would have been swallowed as an unknown variable and replaced with ''.
+    const rendered = renderPromptTemplate('{{step:not-a-guid}}', {});
+    assert.equal(rendered, '{{step:not-a-guid}}');
+});

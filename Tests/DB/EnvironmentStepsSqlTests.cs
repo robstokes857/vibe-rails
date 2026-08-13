@@ -15,6 +15,7 @@ public class EnvironmentStepsSqlTests
         await using var connection = await OpenSchemaAsync(cancellationToken);
         var environmentId = await InsertEnvironmentAsync(connection, "Nightly", LLM.Claude, cancellationToken);
 
+        var stepId = Guid.NewGuid().ToString();
         await InsertStepAsync(
             connection,
             environmentId,
@@ -25,7 +26,8 @@ public class EnvironmentStepsSqlTests
             startMinimized: true,
             timeoutSeconds: 900,
             enabled: false,
-            cancellationToken);
+            cancellationToken,
+            id: stepId);
 
         await using var select = connection.CreateCommand();
         select.CommandText = SqlStrings.SelectStepsByEnvironmentId;
@@ -35,6 +37,8 @@ public class EnvironmentStepsSqlTests
         Assert.True(await reader.ReadAsync(cancellationToken));
         // Ordinals matter: Repository.ReadEnvironmentStep reads these positionally, so a column
         // added in the wrong place in one statement silently misreads every step.
+        // Id is the client-generated GUID string, stored verbatim.
+        Assert.Equal(stepId, reader.GetString(0));
         Assert.Equal(environmentId, reader.GetInt32(1));
         Assert.Equal((int)EnvironmentStepPhase.PreLaunch, reader.GetInt32(2));
         Assert.Equal(0, reader.GetInt32(3));
@@ -186,6 +190,94 @@ public class EnvironmentStepsSqlTests
     }
 
     [Fact]
+    public async Task LegacyIntKeyedTable_IsRebuiltToTheGuidShapeOnInit()
+    {
+        // EnvironmentSteps shipped briefly with an INTEGER AUTOINCREMENT Id. SQLite cannot ALTER
+        // a PK type, so Repository.EnsureInitialized drops the old-shape table (deliberately
+        // without porting rows — the feature had no adopters) before InitStatements recreates it
+        // TEXT-keyed. This exercises the real Repository, guard included.
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var databasePath = Path.Combine(Path.GetTempPath(), $"viberails-guid-steps-{Guid.NewGuid():N}.db");
+        var connectionString = $"Data Source={databasePath};Mode=ReadWriteCreate";
+
+        try
+        {
+            await using (var legacy = new SqliteConnection(connectionString))
+            {
+                await legacy.OpenAsync(cancellationToken);
+                await using var create = legacy.CreateCommand();
+                create.CommandText = """
+                    CREATE TABLE EnvironmentSteps (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        EnvironmentId INTEGER NOT NULL,
+                        Phase INTEGER NOT NULL,
+                        Position INTEGER NOT NULL,
+                        Name TEXT NOT NULL DEFAULT '',
+                        Command TEXT NOT NULL,
+                        StartMinimized INTEGER NOT NULL DEFAULT 0,
+                        TimeoutSeconds INTEGER NOT NULL DEFAULT 600,
+                        Enabled INTEGER NOT NULL DEFAULT 1,
+                        CreatedUTC TEXT NOT NULL,
+                        UpdatedUTC TEXT NOT NULL
+                    );
+                    INSERT INTO EnvironmentSteps
+                        (EnvironmentId, Phase, Position, Name, Command, CreatedUTC, UpdatedUTC)
+                    VALUES (1, 0, 0, 'old', 'git pull', '2026-01-01', '2026-01-01');
+                    """;
+                await create.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            _ = new Repository(connectionString);
+
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using (var idType = connection.CreateCommand())
+            {
+                idType.CommandText = "SELECT type FROM pragma_table_info('EnvironmentSteps') WHERE name = 'Id'";
+                Assert.Equal("TEXT", Convert.ToString(await idType.ExecuteScalarAsync(cancellationToken)));
+            }
+            await using (var rowCount = connection.CreateCommand())
+            {
+                rowCount.CommandText = "SELECT COUNT(*) FROM EnvironmentSteps";
+                Assert.Equal(0L, Convert.ToInt64(await rowCount.ExecuteScalarAsync(cancellationToken)));
+            }
+
+            // A second init must be a no-op — the guard keys on the Id column's type, and a
+            // TEXT-keyed table holding rows has to survive every later boot. (This build's SQLite
+            // enforces foreign keys on every connection, so the step needs a real parent row.)
+            var environmentId = await InsertEnvironmentAsync(connection, "Survivor", LLM.Claude, cancellationToken);
+            await using (var seed = connection.CreateCommand())
+            {
+                seed.CommandText = SqlStrings.InsertEnvironmentStep;
+                seed.Parameters.AddWithValue("$id", Guid.NewGuid().ToString());
+                seed.Parameters.AddWithValue("$environmentId", environmentId);
+                seed.Parameters.AddWithValue("$phase", 0);
+                seed.Parameters.AddWithValue("$position", 0);
+                seed.Parameters.AddWithValue("$name", "keep");
+                seed.Parameters.AddWithValue("$command", "git pull");
+                seed.Parameters.AddWithValue("$startMinimized", 0);
+                seed.Parameters.AddWithValue("$timeoutSeconds", 600);
+                seed.Parameters.AddWithValue("$enabled", 1);
+                seed.Parameters.AddWithValue("$createdUTC", DateTime.UtcNow.ToString("O"));
+                seed.Parameters.AddWithValue("$updatedUTC", DateTime.UtcNow.ToString("O"));
+                await seed.ExecuteNonQueryAsync(cancellationToken);
+            }
+            SqliteConnection.ClearAllPools();
+
+            _ = new Repository(connectionString);
+
+            await using var recheck = connection.CreateCommand();
+            recheck.CommandText = "SELECT COUNT(*) FROM EnvironmentSteps";
+            Assert.Equal(1L, Convert.ToInt64(await recheck.ExecuteScalarAsync(cancellationToken)));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { File.Delete(databasePath); } catch { /* best effort */ }
+        }
+    }
+
+    [Fact]
     public async Task CreateTable_IsRegisteredInInitStatementsNotMigrations()
     {
         // A brand-new CREATE TABLE IF NOT EXISTS is correct for fresh and legacy databases alike.
@@ -257,10 +349,12 @@ public class EnvironmentStepsSqlTests
         bool startMinimized,
         int timeoutSeconds,
         bool enabled,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? id = null)
     {
         await using var insert = connection.CreateCommand();
         insert.CommandText = SqlStrings.InsertEnvironmentStep;
+        insert.Parameters.AddWithValue("$id", id ?? Guid.NewGuid().ToString());
         insert.Parameters.AddWithValue("$environmentId", environmentId);
         insert.Parameters.AddWithValue("$phase", (int)phase);
         insert.Parameters.AddWithValue("$position", position);

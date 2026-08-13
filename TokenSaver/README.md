@@ -268,11 +268,17 @@ individually **schedulable**. Same story for stages 11–12 in `OutputCondenser`
 
 ## Captures
 
-When diagnostic capture is explicitly enabled, every allowlisted tool result the pipeline
-considers is written to the `CompressionCaptures` table in `state.db` with a **GUID**, the raw
-text, the compressed candidate, whether that candidate was actually forwarded, the stage trace,
-and the exact enabled-id set it ran under. Capture is off by default because these values can
-contain source code, paths, secrets printed by commands, and other sensitive local content.
+When diagnostic capture is explicitly enabled, textual output from every recognized Codex tool
+and every allowlisted tool result for the other providers is written to the `CompressionCaptures`
+table in `state.db` with a **GUID**, the raw text, the compressed candidate, whether that candidate
+was actually forwarded, and the exact enabled-id set active for the request. Array-form outputs
+produce one row per textual block. The legacy trace column is retained but new persisted rows leave
+it empty; live in-memory captures still carry a trace while an allowlisted pipeline run executes.
+Codex tools outside its compression allowlist are diagnostic-only: raw and compressed text are
+identical, `RewriteAccepted` is false, the trace is empty, and the original request bytes are
+forwarded unchanged. Images and other non-text blocks are never captured. Capture is off by
+default because these values can contain source code, paths, secrets printed by commands, and
+other sensitive local content.
 
 This is the deliberate exception to the "proxy never logs bodies" rule, and the
 exception is the point: the savings tally tells you *that* 40% came off; only a raw
@@ -281,9 +287,10 @@ compression correct", which is not a question byte counts can answer.
 
 - **The GUID is the handle.** Paste it at an LLM reviewer, look it up in Vibe AI, cite
   it in a bug report. See [`runbooks/compress_runbook.md`](../runbooks/compress_runbook.md).
-- **Grain is per tool_result, not per request.** "This Bash output compressed wrong" is
-  the real grain of every bug; one request carries many tool_results.
-- **`RawText` is re-runnable.** It is the unescaped string the pipeline saw, so feeding
+- **Grain is per textual output string, not per request.** "This Bash output compressed wrong" is
+  the real grain of every bug; one request carries many tool results, and an array result can carry
+  multiple text blocks that are captured separately.
+- **`RawText` is re-runnable.** It is the unescaped string the rewriter observed, so feeding
   it back through a different `CompressionPlan` gives an honest what-if — which is
   exactly what `POST /api/v1/compression/preview` and the Vibe AI preview do. They call
   the real pipeline; they do not simulate it.
@@ -324,6 +331,9 @@ that provider's proxy is on), the pipeline runs `CompressionCatalog.DefaultSelec
   curated set. The old key and the pre-2026-07 tier/bool knobs are ignored on read
   and dropped on the next save.
 - `TokenSaverCaptureEnabled` independently opts into raw diagnostic captures; it defaults off.
+  For Codex requests processed by the saver, this also observes recognized textual tool output
+  when the tool is outside the compression allowlist; observation alone never makes that output
+  eligible for rewriting.
 
 The per-tab toggle that used to sit on each terminal tab was removed 2026-07-19 (the tab action
 strip was overcrowded, and per-LLM is the granularity that matters). The three settings switches

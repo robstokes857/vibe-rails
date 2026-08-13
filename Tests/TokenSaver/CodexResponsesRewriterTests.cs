@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using global::TokenSaver;
@@ -10,6 +11,8 @@ namespace Tests.TokenSaver;
 
 public class CodexResponsesRewriterTests
 {
+    private static readonly string CodexFixtureDir = GetCodexFixtureDir();
+
     [Fact]
     public void Rewrite_ShellFunctionOutput_MinifiesAndPreservesUnrelatedBytes()
     {
@@ -33,7 +36,7 @@ public class CodexResponsesRewriterTests
     }
 
     [Fact]
-    public void Rewrite_NonShellFunctionOutput_PassesThroughByteIdentical()
+    public void Rewrite_NonShellFunctionOutput_CapturesButPassesThroughByteIdentical()
     {
         const string body = """
             {"input":[
@@ -41,13 +44,212 @@ public class CodexResponsesRewriterTests
               {"type":"function_call_output","call_id":"c1","output":"\u001b[31mkeep me\u001b[0m  \n"}
             ]}
             """;
+        var plan = CompressionCatalog.Resolve(null);
+        var captures = new RecordingCaptureSink();
 
-        var (result, rewritten, writtenCount) = RewriteIncludingNoOp(body);
+        var (result, rewritten, writtenCount) = RewriteIncludingNoOp(
+            body, plan: plan, captures: captures);
+
+        Assert.False(result.Rewritten);
+        Assert.Equal(1, result.ToolResultsSeen);
+        Assert.Equal(0, result.ToolResultsMinified);
+        Assert.Equal(result.BytesBefore, result.BytesAfter);
+        Assert.Equal(0, writtenCount);
+        Assert.Equal(body, rewritten);
+
+        var capture = Assert.Single(captures.Captures);
+        Assert.Equal("openai", capture.Provider);
+        Assert.Equal("apply_patch", capture.ToolName);
+        Assert.Null(capture.Command);
+        Assert.Equal("\u001b[31mkeep me\u001b[0m  \n", capture.RawText);
+        Assert.Equal(capture.RawText, capture.CompressedText);
+        Assert.False(capture.Changed);
+        Assert.False(capture.RewriteAccepted);
+        Assert.Empty(capture.Trace);
+    }
+
+    [Fact]
+    public void Rewrite_CurrentCodeModeExec_CapturesTextWithoutRewritingOrCapturingBinaryBlocks()
+    {
+        var body = File.ReadAllBytes(
+            Path.Combine(CodexFixtureDir, "code_mode_exec_request.json"));
+        var original = body.ToArray();
+        var plan = CompressionCatalog.Resolve(null);
+        var writer = new ArrayBufferWriter<byte>();
+        var captures = new RecordingCaptureSink();
+
+        Assert.DoesNotContain("exec", plan.CodexAllowlist);
+
+        var result = CodexResponsesRewriter.Rewrite(body, plan, writer, captures);
+
+        Assert.False(result.Rewritten);
+        Assert.Equal(1, result.ToolResultsSeen);
+        Assert.Equal(0, result.ToolResultsMinified);
+        Assert.Equal(result.BytesBefore, result.BytesAfter);
+        Assert.Equal(0, writer.WrittenCount);
+        Assert.Equal(original, body);
+
+        var capture = Assert.Single(captures.Captures);
+        Assert.Equal("openai", capture.Provider);
+        Assert.Equal("exec", capture.ToolName);
+        Assert.Equal(
+            "const result = await tools.shell_command({\"command\":\"Get-ChildItem\"});\ntext(result);",
+            capture.Command);
+        Assert.Equal("\u001b[31mdiagnostic exec output\u001b[0m  \r\n", capture.RawText);
+        Assert.Equal(capture.RawText, capture.CompressedText);
+        Assert.False(capture.Changed);
+        Assert.False(capture.RewriteAccepted);
+        Assert.Empty(capture.Trace);
+
+        var requestText = Encoding.UTF8.GetString(body);
+        Assert.Contains("NOT_CAPTURED_IMAGE", requestText, StringComparison.Ordinal);
+        Assert.Contains("NOT_CAPTURED_AUDIO", requestText, StringComparison.Ordinal);
+        Assert.DoesNotContain("NOT_CAPTURED_IMAGE", capture.RawText, StringComparison.Ordinal);
+        Assert.DoesNotContain("NOT_CAPTURED_AUDIO", capture.RawText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Rewrite_CurrentCodeModeExec_ImageOnlyOutput_IsNotCaptured()
+    {
+        const string body = """
+            {"input":[
+              {"type":"custom_tool_call","call_id":"c1","name":"exec","input":"image-only"},
+              {"type":"custom_tool_call_output","call_id":"c1","output":[
+                {"type":"input_image","image_url":"data:image/png;base64,NOT_CAPTURED_IMAGE"},
+                {"type":"input_audio","audio_url":"data:audio/wav;base64,NOT_CAPTURED_AUDIO"}
+              ]}
+            ]}
+            """;
+        var plan = CompressionCatalog.Resolve(null);
+        var captures = new RecordingCaptureSink();
+
+        var (result, rewritten, writtenCount) = RewriteIncludingNoOp(
+            body, plan: plan, captures: captures);
+
+        Assert.False(result.Rewritten);
+        Assert.Equal(1, result.ToolResultsSeen);
+        Assert.Equal(0, result.ToolResultsMinified);
+        Assert.Equal(result.BytesBefore, result.BytesAfter);
+        Assert.Equal(0, writtenCount);
+        Assert.Equal(body, rewritten);
+        Assert.Empty(captures.Captures);
+    }
+
+    [Fact]
+    public void Rewrite_CurrentCodeModeExec_MultipleTextBlocks_AreCapturedSeparately()
+    {
+        const string body = """
+            {"input":[
+              {"type":"custom_tool_call","call_id":"c1","name":"exec","input":"pwd"},
+              {"type":"custom_tool_call_output","call_id":"c1","output":[
+                {"type":"input_text","text":"first  \n"},
+                {"type":"input_image","image_url":"data:image/png;base64,NOT_CAPTURED"},
+                {"type":"input_text","text":"second  \n"}
+              ]}
+            ]}
+            """;
+        var plan = CompressionCatalog.Resolve(null);
+        var captures = new RecordingCaptureSink();
+
+        var (result, rewritten, writtenCount) = RewriteIncludingNoOp(
+            body, plan: plan, captures: captures);
+
+        Assert.False(result.Rewritten);
+        Assert.Equal(0, writtenCount);
+        Assert.Equal(body, rewritten);
+        Assert.Collection(
+            captures.Captures,
+            capture => Assert.Equal("first  \n", capture.RawText),
+            capture => Assert.Equal("second  \n", capture.RawText));
+        Assert.All(captures.Captures, capture =>
+        {
+            Assert.Equal("exec", capture.ToolName);
+            Assert.Equal(capture.RawText, capture.CompressedText);
+            Assert.False(capture.RewriteAccepted);
+            Assert.Empty(capture.Trace);
+        });
+    }
+
+    [Fact]
+    public void Rewrite_DiagnosticCapture_WithNoCompressionWork_StillCapturesWithoutRewriting()
+    {
+        const string body = """
+            {"input":[
+              {"type":"custom_tool_call","call_id":"c1","name":"exec","input":"pwd"},
+              {"type":"custom_tool_call_output","call_id":"c1","output":[
+                {"type":"input_text","text":"diagnostic only  \n"}
+              ]}
+            ]}
+            """;
+        var plan = CompressionCatalog.Resolve([]);
+        var captures = new RecordingCaptureSink();
+
+        Assert.True(plan.IsNoOp);
+        Assert.Empty(plan.CodexAllowlist);
+
+        var (result, rewritten, writtenCount) = RewriteIncludingNoOp(
+            body, plan: plan, captures: captures);
 
         Assert.False(result.Rewritten);
         Assert.Equal(1, result.ToolResultsSeen);
         Assert.Equal(0, writtenCount);
         Assert.Equal(body, rewritten);
+
+        var capture = Assert.Single(captures.Captures);
+        Assert.Equal("exec", capture.ToolName);
+        Assert.Equal("pwd", capture.Command);
+        Assert.Equal("diagnostic only  \n", capture.RawText);
+        Assert.Equal(capture.RawText, capture.CompressedText);
+        Assert.False(capture.RewriteAccepted);
+        Assert.Empty(capture.Trace);
+        Assert.Empty(capture.EnabledIds);
+    }
+
+    [Fact]
+    public void Rewrite_MixedExecAndShellOutputs_CapturesExecAndOnlyRewritesShell()
+    {
+        const string body = """
+            {"input":[
+              {"type":"custom_tool_call","call_id":"exec-1","name":"exec","input":"pwd"},
+              {"type":"custom_tool_call_output","call_id":"exec-1","output":[
+                {"type":"input_text","text":"exec \\u263a  \n"}
+              ]},
+              {"type":"function_call","name":"shell_command","call_id":"shell-1","arguments":"{\"command\":\"pwd\"}"},
+              {"type":"function_call_output","call_id":"shell-1","output":"shell output  \n"}
+            ],"metadata":{"keep":"exact"}}
+            """;
+        var plan = CompressionCatalog.Resolve([
+            CompressionCatalog.TrailingWhitespace,
+            CompressionCatalog.ScopeShell]);
+        var captures = new RecordingCaptureSink();
+
+        var (result, rewritten, _) = RewriteIncludingNoOp(
+            body, plan: plan, captures: captures);
+
+        Assert.True(result.Rewritten);
+        Assert.Equal(2, result.ToolResultsSeen);
+        Assert.Equal(1, result.ToolResultsMinified);
+        Assert.Contains("\"text\":\"exec \\\\u263a  \\n\"", rewritten, StringComparison.Ordinal);
+        Assert.Equal("shell output\n", ReadOutput(rewritten, 3));
+        Assert.Contains("\"metadata\":{\"keep\":\"exact\"}", rewritten, StringComparison.Ordinal);
+
+        Assert.Collection(
+            captures.Captures,
+            capture =>
+            {
+                Assert.Equal("exec", capture.ToolName);
+                Assert.Equal("exec \\u263a  \n", capture.RawText);
+                Assert.Equal(capture.RawText, capture.CompressedText);
+                Assert.False(capture.RewriteAccepted);
+                Assert.Empty(capture.Trace);
+            },
+            capture =>
+            {
+                Assert.Equal("shell_command", capture.ToolName);
+                Assert.Equal("shell output  \n", capture.RawText);
+                Assert.Equal("shell output\n", capture.CompressedText);
+                Assert.True(capture.RewriteAccepted);
+            });
     }
 
     [Fact]
@@ -113,7 +315,11 @@ public class CodexResponsesRewriterTests
         Assert.Contains(" M:\n", ReadFirstOutput(rewritten), StringComparison.Ordinal);
         var capture = Assert.Single(captures.Captures);
         Assert.Equal("openai", capture.Provider);
+        Assert.Equal("shell_command", capture.ToolName);
         Assert.Equal("git status --short", capture.Command);
+        Assert.True(capture.Changed);
+        Assert.NotEqual(capture.RawText, capture.CompressedText);
+        Assert.Equal(ReadFirstOutput(rewritten), capture.CompressedText);
         Assert.True(capture.RewriteAccepted);
         Assert.Contains(capture.Trace, trace =>
             trace.StageId == CompressionCatalog.GitStatusGroup
@@ -166,12 +372,21 @@ public class CodexResponsesRewriterTests
         return document.RootElement.GetProperty("input")[1].GetProperty("output").GetString();
     }
 
+    private static string? ReadOutput(string body, int index)
+    {
+        using var document = JsonDocument.Parse(body);
+        return document.RootElement.GetProperty("input")[index].GetProperty("output").GetString();
+    }
+
     private static string? ReadFirstOutputText(string body)
     {
         using var document = JsonDocument.Parse(body);
         return document.RootElement.GetProperty("input")[1].GetProperty("output")[0]
             .GetProperty("text").GetString();
     }
+
+    private static string GetCodexFixtureDir([CallerFilePath] string? callerPath = null) =>
+        Path.Combine(Path.GetDirectoryName(callerPath)!, "Fixtures", "Codex");
 
     private static (ToolOutputRewriteResult Result, string Output) Rewrite(
         string body,

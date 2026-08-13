@@ -11,6 +11,14 @@ namespace VibeRails.Utils
         public string? WorkDir { get; set; }
         public string[] ExtraArgs { get; set; } = [];
 
+        // Exact row id of the environment to launch, passed by every caller that already resolved
+        // one (the dashboard, the VS Code extension, Multi Run, jobs). It wins over
+        // <see cref="LMBootstrapCli"/> because a name is ambiguous: names are unique in the table
+        // but not scoped to a project, so resolving one here would happily reach an environment
+        // belonging to a different repository. Null on a hand-typed `vb --env <name>`, which falls
+        // back to a name lookup that is filtered by project.
+        public int? EnvId { get; set; }
+
         // Automated Job run: vb --env <worker> --workdir <repo> --job-run <runId> [--max-runtime <min>].
         // Runs the worker's env exactly as configured, interactively, in whatever terminal window
         // spawned this process, while reporting the run's lifecycle back to the JobRuns table.

@@ -234,11 +234,11 @@ public sealed class AppJsonSerializerContextTests
     public void EnvironmentStepDto_KeepsTheNamesTheStepsEditorReads()
     {
         var json = JsonSerializer.Serialize(
-            new EnvironmentStepDto(4, 1, 0, "Push", "git push", true, 120, false),
+            new EnvironmentStepDto("5f0f70a5-2f6d-4c8e-9a3b-0d1e2f3a4b5c", 1, 0, "Push", "git push", true, 120, false),
             AppJsonSerializerContext.Default.EnvironmentStepDto);
 
         Assert.Equal(
-            """{"id":4,"phase":1,"position":0,"name":"Push","command":"git push","startMinimized":true,"timeoutSeconds":120,"enabled":false}""",
+            """{"id":"5f0f70a5-2f6d-4c8e-9a3b-0d1e2f3a4b5c","phase":1,"position":0,"name":"Push","command":"git push","startMinimized":true,"timeoutSeconds":120,"enabled":false}""",
             json);
     }
 

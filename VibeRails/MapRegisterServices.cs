@@ -13,6 +13,7 @@ using VibeRails.Services.LlmClis.Launchers;
 using TokenSaver;
 using VibeRails.Services.AgentTools;
 using VibeRails.Services.Cli;
+using VibeRails.Services.Environments;
 using VibeRails.Services.Environments.Steps;
 using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Mcp.HostShell;
@@ -130,6 +131,9 @@ namespace VibeRails
             // Scoped because it reads steps through the scoped IRepository, matching TerminalRunner
             // (its only launch-path consumer) so both live in the same scope.
             serviceCollection.AddScoped<IEnvironmentStepRunner, EnvironmentStepRunner>();
+            // Resolves {{datetime}}-style built-ins and {{step:<id>}} output injection in an
+            // environment's Initial Message. Scoped for the same IRepository reason as above.
+            serviceCollection.AddScoped<IPromptPlaceholderService, PromptPlaceholderService>();
             // Spawns a real OS terminal per queued run through the same scoped Environment launch
             // pipeline as the CLI launch API. JobRunner itself lives in the spawned process.
             serviceCollection.AddScoped<IJobLaunchService, JobLaunchService>();

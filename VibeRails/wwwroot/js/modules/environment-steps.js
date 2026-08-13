@@ -5,7 +5,10 @@ import { createSseParser } from './git-guard-preflight.js';
 // Mirrors EnvironmentStepPhase in the backend.
 export const STEP_PHASE = Object.freeze({
     PRE_LAUNCH: 0,
-    POST_EXIT: 1
+    POST_EXIT: 1,
+    // Never runs on its own — only when the Initial Message references it via {{step:<id>}},
+    // hidden and captured, with the output substituted into the prompt.
+    MANUAL: 2
 });
 
 // Mirrors EnvironmentStepRoutes.MaxStepsPerEnvironment and EnvironmentStep's timeout bounds.
@@ -25,11 +28,28 @@ const SECTIONS = Object.freeze([
         phase: STEP_PHASE.POST_EXIT,
         title: 'After it exits',
         note: 'Runs when the terminal closes — for a Worker that is when the agent finishes; for a tab it is when you close the tab.'
+    },
+    {
+        phase: STEP_PHASE.MANUAL,
+        title: 'Only when referenced',
+        note: 'Never runs on its own. Reference it from the Initial Message with {{step:…}} (use "Insert step output") and it runs hidden at launch, with its output pasted into the message.'
     }
 ]);
 
 let clientIdCounter = 0;
 const nextClientId = () => `step-${++clientIdCounter}`;
+
+// The durable identity, generated client-side and round-tripped through every save —
+// {{step:<id>}} references in the Initial Message stay valid because this never changes.
+// (clientId above is only a per-render DOM key and is never persisted.)
+export function newStepId() {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    // Ancient-webview fallback; format matches Guid.ToString() so the server keeps it.
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, ch => {
+        const r = Math.floor(Math.random() * 16);
+        return (ch === 'x' ? r : ((r & 0x3) | 0x8)).toString(16);
+    });
+}
 
 function clampTimeout(value) {
     const parsed = Number(value);
@@ -38,7 +58,9 @@ function clampTimeout(value) {
 }
 
 function normalizePhase(value) {
-    return Number(value) === STEP_PHASE.POST_EXIT ? STEP_PHASE.POST_EXIT : STEP_PHASE.PRE_LAUNCH;
+    const parsed = Number(value);
+    if (parsed === STEP_PHASE.POST_EXIT || parsed === STEP_PHASE.MANUAL) return parsed;
+    return STEP_PHASE.PRE_LAUNCH;
 }
 
 /**
@@ -53,6 +75,9 @@ export function normalizeSteps(rawSteps) {
         .filter(step => step && typeof step === 'object')
         .map((step, index) => ({
             clientId: step.clientId || nextClientId(),
+            // The server GUID; a step that arrives without one (older row shape) gets a fresh
+            // identity here so a later save always round-trips something stable.
+            id: typeof step.id === 'string' && step.id ? step.id : newStepId(),
             phase: normalizePhase(step.phase),
             // Position is a server concern; keep the incoming value only to sort by.
             position: Number.isFinite(Number(step.position)) ? Number(step.position) : index,
@@ -75,12 +100,14 @@ export function serializeSteps(steps) {
 
     const ordered = [
         ...steps.filter(step => normalizePhase(step?.phase) === STEP_PHASE.PRE_LAUNCH),
-        ...steps.filter(step => normalizePhase(step?.phase) === STEP_PHASE.POST_EXIT)
+        ...steps.filter(step => normalizePhase(step?.phase) === STEP_PHASE.POST_EXIT),
+        ...steps.filter(step => normalizePhase(step?.phase) === STEP_PHASE.MANUAL)
     ];
 
     return ordered
         .filter(step => String(step?.command ?? '').trim().length > 0)
         .map(step => ({
+            id: typeof step.id === 'string' && step.id ? step.id : newStepId(),
             phase: normalizePhase(step.phase),
             name: String(step.name ?? '').trim(),
             command: String(step.command ?? ''),
@@ -90,16 +117,18 @@ export function serializeSteps(steps) {
         }));
 }
 
-/** "2 before · 1 after", or "None yet" when there is nothing to summarize. */
+/** "2 before · 1 after · 1 referenced", or "None yet" when there is nothing to summarize. */
 export function summarizeSteps(steps) {
     const list = Array.isArray(steps) ? steps : [];
     const before = list.filter(step => normalizePhase(step?.phase) === STEP_PHASE.PRE_LAUNCH).length;
-    const after = list.length - before;
-    if (!before && !after) return 'None yet';
+    const referenced = list.filter(step => normalizePhase(step?.phase) === STEP_PHASE.MANUAL).length;
+    const after = list.length - before - referenced;
+    if (!before && !after && !referenced) return 'None yet';
 
     const parts = [];
     if (before) parts.push(`${before} before`);
     if (after) parts.push(`${after} after`);
+    if (referenced) parts.push(`${referenced} referenced`);
     return parts.join(' · ');
 }
 
@@ -116,11 +145,12 @@ export function renderStepsSummaryButton(steps) {
                 </span>
                 <span class="env-steps-summary-count" data-env-steps-summary>${escapeHtml(summarizeSteps(steps))}</span>
             </button>
-            <small class="form-text text-muted d-block">Shell commands run in their own terminal window before this launches, or after it exits.</small>
+            <small class="form-text text-muted d-block">Shell commands run before this launches, after it exits, or only when the Initial Message references their output.</small>
         </div>`;
 }
 
-function stepDisplayName(step) {
+/** Exported for the Initial Message field's step-reference caption and insert picker. */
+export function stepDisplayName(step) {
     const name = String(step?.name ?? '').trim();
     if (name) return name;
 
@@ -134,6 +164,7 @@ function stepDisplayName(step) {
 function createStep(phase) {
     return {
         clientId: nextClientId(),
+        id: newStepId(),
         phase: normalizePhase(phase),
         name: '',
         command: '',
@@ -297,6 +328,9 @@ export function openStepsEditor(app, { steps = [], workingDirectory = null, onSa
     function renderRow(step, index, count) {
         const label = escapeHtml(stepDisplayName(step));
         const id = escapeHtml(step.clientId);
+        // Referenced steps run hidden and captured, so a window-minimize switch would be a
+        // dead control on their rows.
+        const showMinimized = step.phase !== STEP_PHASE.MANUAL;
         return `
             <div class="env-step-row${step.enabled ? '' : ' is-disabled'}" data-env-step-id="${id}" data-tone="neutral">
                 <div class="env-step-row-head">
@@ -333,11 +367,11 @@ export function openStepsEditor(app, { steps = [], workingDirectory = null, onSa
                                id="env-step-enabled-${id}" data-env-step-field="enabled" ${step.enabled ? 'checked' : ''}>
                         <label class="form-check-label" for="env-step-enabled-${id}">Enabled</label>
                     </div>
-                    <div class="form-check form-switch">
+                    ${showMinimized ? `<div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" role="switch"
                                id="env-step-minimized-${id}" data-env-step-field="startMinimized" ${step.startMinimized ? 'checked' : ''}>
                         <label class="form-check-label" for="env-step-minimized-${id}">Start minimized</label>
-                    </div>
+                    </div>` : ''}
                     <label class="env-step-timeout">
                         <span>Timeout</span>
                         <input type="number" class="form-control form-control-sm" data-env-step-field="timeoutSeconds"

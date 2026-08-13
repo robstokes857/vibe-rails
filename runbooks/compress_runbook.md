@@ -17,9 +17,11 @@ Everything below is written for the agent that gets that message.
 
 When diagnostic capture is enabled, every allowlisted `tool_result` string the token saver
 *considers* — rewritten or not — is offered to the background writer for the
-`CompressionCaptures` table in `~/.vibe_rails/state.db`. Capture is best-effort: the bounded
-in-memory queue drops diagnostics under sustained database backpressure rather than blocking the
-proxy relay.
+`CompressionCaptures` table in `~/.vibe_rails/state.db`. When the Codex saver is active, it also
+offers recognized textual outputs from non-allowlisted tools as unchanged diagnostic observations;
+those rows have identical raw/compressed text, `RewriteAccepted = false`, and an empty trace.
+Images and other non-text blocks are excluded. Capture is best-effort: the bounded in-memory queue
+drops diagnostics under sustained database backpressure rather than blocking the proxy relay.
 
 A capture holds:
 
@@ -29,11 +31,11 @@ A capture holds:
 | `Provider` | `anthropic` / `openai`. |
 | `ToolName` | `Bash`, `PowerShell`, `Read`, … The tool whose output this is. |
 | `Command` | The shell command, when we could see it. **`NULL` is meaningful** — see §4. |
-| `RawText` | The unescaped string the pipeline saw. Re-runnable. |
+| `RawText` | The unescaped string the rewriter observed. Re-runnable. |
 | `CompressedText` | The pipeline's candidate output. It was forwarded only when `RewriteAccepted` is true. |
-| `RewriteAccepted` | Whether that candidate was actually forwarded. `false` with changed text means the wire-size guard rejected it and sent `RawText`. |
-| `Trace` | One entry per catalog stage: `{stageId, outcome, charsRemoved}`. |
-| `EnabledIds` | The exact stage/scope set this ran under. |
+| `RewriteAccepted` | Whether that candidate was actually forwarded. `false` with changed text means the wire-size guard rejected it and sent `RawText`; `false` with unchanged text can be a diagnostic-only Codex observation. |
+| `Trace` | Legacy persisted column; new DB rows leave it empty. Live in-memory captures carry pipeline entries when compression runs and an empty list for diagnostic-only observations. |
+| `EnabledIds` | The exact stage/scope set active for this observation. |
 
 Background: [`TokenSaver/README.md`](../TokenSaver/README.md). Read it first if you
 have not — you cannot judge a stage without knowing its invariants.

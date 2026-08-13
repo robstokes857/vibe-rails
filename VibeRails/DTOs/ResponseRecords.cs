@@ -245,7 +245,7 @@ namespace VibeRails.DTOs
     // same way JobTriggers ride on Jobs, rather than getting their own CRUD surface.
     // Position is implied by array order and is never sent by the client.
     public record EnvironmentStepDto(
-        int Id,
+        string Id,
         int Phase,
         int Position,
         string Name,
@@ -255,13 +255,16 @@ namespace VibeRails.DTOs
         bool Enabled
     );
 
+    // Id is the client-generated GUID; round-tripping it is what keeps {{step:<id>}} prompt
+    // references stable across the delete-all + reinsert save. Null/invalid → server generates.
     public record EnvironmentStepRequest(
         int Phase,
         string Name,
         string Command,
         bool StartMinimized = false,
         int TimeoutSeconds = 600,
-        bool Enabled = true
+        bool Enabled = true,
+        string? Id = null
     );
 
     /// <summary>Runs one command exactly as a real step would, but hidden and captured so the
