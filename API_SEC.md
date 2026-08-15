@@ -1,6 +1,6 @@
 # API authentication coverage
 
-Audit date: 2026-08-13
+Audit date: 2026-08-15
 
 Jobs inventory re-checked: 2026-08-03 (three run-history routes added; see § 3).
 
@@ -15,7 +15,90 @@ Route inventory and authentication coverage re-checked: 2026-08-13 (one authenti
 environment-step test endpoint added; the 152 mapped surfaces and frozen three-case
 middleware bypass remain unchanged).
 
-Scope: the current working tree, including uncommitted changes.
+Listener topology re-checked: 2026-08-15. The only approved production request listener
+is the main Kestrel host. An uncommitted Grok integration's second `HttpListener` was
+rejected and is logged below; no other production request listener was found.
+
+Scope: the current working tree, including uncommitted changes. Approved inventory counts
+describe the surfaces allowed to remain. Rejected working-tree changes are logged separately
+and must be removed before merge rather than normalized into the approved inventory.
+
+## Listener topology and discovery (FROZEN — review gate)
+
+The authentication inventory is valid only if it finds **every way the process can accept a
+network request**, not merely endpoints mapped on the main ASP.NET application. A second
+loopback listener is a second security boundary: it does not pass through
+`CookieAuthMiddleware`, the normal pipeline ordering, request logging/redaction, CORS, or the
+main server's lifecycle controls merely because it eventually forwards to an authenticated
+route. Loopback binding limits reachability; it is not authentication and does not make a
+listener part of the existing gate.
+
+### Approved production listener set
+
+The closed set is:
+
+1. The Kestrel host created in `VibeRails/Program.cs`, configured with `ListenLocalhost`.
+   Each VibeRails backend process may create that host once.
+2. `VibeRails/Utils/PortFinder.cs` may briefly start and stop a loopback `TcpListener` to
+   test whether a port is available. It has no accept loop, reads no requests, and is not a
+   serving surface.
+
+There is no approved secondary HTTP server, sidecar listener, raw socket accept loop, or
+provider-specific listener in production code. Test-only Kestrel hosts under `Tests/**` are
+not shipped and are outside this production closed set.
+
+**This set must not grow as an implementation detail.** A new production `HttpListener`,
+`TcpListener` accept loop, bound/listening `Socket`, additional Kestrel/WebApplication host, or
+server in another runtime is a STOP finding, including when it binds only to loopback or uses a
+random capability URL. It must be rejected unless the owner explicitly approves a topology
+change and this document is amended with the threat model, authentication, exposure, lifecycle,
+and necessity **before** the listener implementation is accepted.
+
+### Mandatory listener-discovery pass
+
+Every re-audit of this file must perform both route enumeration and a repository-wide listener
+search. Do not infer “all APIs” from `Map*` calls, and do not ignore untracked files. At minimum,
+run these searches from the repository root and inspect every result:
+
+```powershell
+rg -n -i --hidden -g '!.git/**' -g '!**/bin/**' -g '!**/obj/**' -g '*.cs' -g '*.fs' -g '*.vb' 'HttpListener|TcpListener|UdpClient|new\s+Socket|\.Bind\s*\(|\.Listen\s*\(|Listen(?:Localhost|AnyIP|UnixSocket)|GetContextAsync|Accept(?:TcpClient|Socket|Async)|ConfigureKestrel|UseUrls|WebApplication\.Create'
+rg -n -i --hidden -g '!.git/**' -g '!**/node_modules/**' -g '!**/assets/**' -g '*.js' -g '*.mjs' -g '*.cjs' -g '*.ts' -g '*.py' -g '*.ps1' -g '*.psm1' -g '*.sh' -g '*.go' -g '*.rs' -g '*.java' -g '*.rb' 'HttpListener|TcpListener|(?:http|https|http2|net)\.createServer|HTTPServer|ThreadingHTTPServer|TCPServer|serve_forever|\.listen\s*\(|ListenAndServe|net\.Listen|TcpListener::bind|axum::serve|ServerSocket|HttpServer\.create|WEBrick'
+```
+
+Classify test servers, outbound clients, port probes, and real request acceptors separately.
+Any production acceptor outside the closed set above invalidates the route/authentication audit
+until it is removed or explicitly approved. Record the listener result whenever the route count
+or audit date is updated.
+
+### Rejected listener incident — Grok loopback bridge (2026-08-15)
+
+An uncommitted Grok integration added `GrokLoopbackBridge`, which constructed a separate
+`HttpListener` on `127.0.0.1` ports 6000–6999. Its inbound leg was outside the main ASP.NET
+pipeline and used a random path capability instead of the normal middleware credentials. The
+bridge later attached the process credentials when forwarding inference to `/llm/grok`, and it
+included meaningful mitigations (loopback-only binding, a 32-byte random capability, pinned
+destinations, and header stripping), but those mitigations did not change the architectural
+fact that VibeRails was operating a second HTTP server outside its established auth boundary.
+
+Disposition: **rejected and removed from the working tree; do not reintroduce, merge, or ship
+the listener.**
+The rejected `/llm/grok` route and listener are deliberately not added to the approved surface
+counts in this document.
+
+The accompanying auth-gate audit did search for listener APIs, listed the Grok listener as an
+expected result, and then concluded there was no bypass. That exposed the process failure:
+discovery alone is insufficient if the same feature change is allowed to expand its own expected
+set. The production listener set is now frozen above so a new match starts as a finding, not as
+an expectation.
+
+### Repository-wide listener result — 2026-08-15
+
+- Approved serving implementation: the main Kestrel host in `VibeRails/Program.cs`.
+- Rejected and removed before merge: `GrokLoopbackBridge`'s `HttpListener`.
+- Non-serving production match: `PortFinder`'s transient loopback `TcpListener` port probe.
+- Test-only matches: isolated Kestrel hosts under `Tests/**`.
+- No other production .NET accept loop and no JavaScript/TypeScript, Python, or PowerShell
+  server/listener implementation was found.
 
 ## Terminology used in this report
 
