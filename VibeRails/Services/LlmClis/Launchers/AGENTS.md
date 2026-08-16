@@ -17,7 +17,7 @@ All launchers build commands using the unified `--env` flag:
 Only `--env` is supported for environment bootstrap mode. `ILlmParser.Parse()` does steps 1–2
 and returns `LLM.NotSet` for anything else; the caller (`CliLoop.RunTerminalWithWebAsync`) then
 performs step 3:
-1. The special-case string `"glm-5.2"` (can't be a C# enum name) → OpenCode-backed
+1. The special-case strings `"glm-5.2"` / `"grok-4.6"` (can't be a C# enum name) → OpenCode-backed
    pseudo-CLI base launch
 2. If it matches an LLM enum name (claude/codex/antigravity/copilot/shell/opencode, case-insensitive)
    → base CLI launch
@@ -41,10 +41,13 @@ IBaseLlmCliLauncher (Interface)
     └── LaunchLLMService (Orchestrator - selects launcher by LLM type)
 ```
 
-> **Pseudo-CLI:** `LLM.Glm52` (OpenCode launched with a pinned `--model` flag)
+> **Pseudo-CLIs:** `LLM.Glm52` and `LLM.Grok46` (OpenCode launched with a pinned `--model` flag)
 > reuse `IOpencodeLlmCliLauncher`. Their binary is `opencode` (mapped in
 > `CommandService.PrepareSessionAsync`), and the model arg is injected server-side. `LLM.Shell` is a
 > plain shell terminal with no launcher (handled specially in `CommandService.PrepareSessionAsync`).
+> Grok 4.6 attaches the OpenCode Token Saver proxy: `OPENCODE_CONFIG_CONTENT` remaps the
+> `xai` provider to `/llm/xai` on the main Kestrel host (not a second listener). Auth stays
+> in OpenCode's global `auth.json`.
 
 ## Launcher Implementations
 

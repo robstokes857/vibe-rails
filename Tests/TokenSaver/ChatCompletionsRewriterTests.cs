@@ -80,6 +80,7 @@ public sealed class ChatCompletionsRewriterTests
         context.Request.ContentLength = bytes.Length;
         context.Request.Body = new MemoryStream(bytes);
         var transform = new ZaiBodyTransform(FullLosslessPlan);
+        Assert.Equal("zai", transform.Provider);
 
         var transformed = await transform.TryTransformAsync(
             context.Request,
@@ -94,6 +95,39 @@ public sealed class ChatCompletionsRewriterTests
                 TestContext.Current.CancellationToken);
             Assert.Contains("hi\\ndone", forwarded, StringComparison.Ordinal);
             Assert.DoesNotContain("u001b", forwarded, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            transformed.BufferLease?.Dispose();
+            transformed.Content.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ZaiBodyTransform_RewritesXaiChatCompletionsAndReportsXaiProvider()
+    {
+        var body = BuildBody(("call_1", "bash", "printf hi", DirtyOutput));
+        var bytes = Encoding.UTF8.GetBytes(body);
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Path = "/llm/xai/v1/chat/completions";
+        context.Request.ContentType = "application/json";
+        context.Request.ContentLength = bytes.Length;
+        context.Request.Body = new MemoryStream(bytes);
+        var captures = new RecordingCaptureSink();
+        var transform = new ZaiBodyTransform(FullLosslessPlan, captures, provider: "xai");
+
+        Assert.Equal("xai", transform.Provider);
+        var transformed = await transform.TryTransformAsync(
+            context.Request,
+            NullEventSink.Instance,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(transformed);
+        try
+        {
+            Assert.True(transformed.Savings?.Rewritten);
+            Assert.Equal("xai", Assert.Single(captures.Captures).Provider);
         }
         finally
         {

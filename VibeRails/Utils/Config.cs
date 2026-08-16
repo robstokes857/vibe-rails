@@ -23,9 +23,10 @@ public class Settings
     public bool CodexLlmProxyEnabled { get; set; } = false;
     public string CodexLlmProxyMode { get; set; } = "subscription";
     public bool ClaudeLlmProxyEnabled { get; set; } = false;
-    // OpenCode (zai/Z.AI GLM) LLM proxy. Routes OpenCode's zai provider traffic through the local
-    // token-saver proxy via the OPENCODE_CONFIG_CONTENT env var (see LlmProxyZaiConfig). Off by
-    // default, like the Claude/Codex proxy toggles. Launch-flag-only — no opencode.json is written.
+    // OpenCode (zai/Z.AI GLM + xai/Grok) LLM proxy. Routes OpenCode's zai and xai provider
+    // traffic through the local token-saver proxy via the OPENCODE_CONFIG_CONTENT env var
+    // (see LlmProxyZaiConfig / LlmProxyXaiConfig). Off by default, like the Claude/Codex
+    // proxy toggles. Launch-flag-only — no opencode.json is written.
     public bool OpenCodeLlmProxyEnabled { get; set; } = false;
     // ---- Token saver: on/off per LLM is the whole user-facing surface (2026-07-18). ----
     // When a provider's saver is on (and that provider's proxy is on), the pipeline runs

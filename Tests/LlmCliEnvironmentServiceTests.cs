@@ -365,6 +365,30 @@ public class LlmCliEnvironmentServiceTests
     }
 
     [Fact]
+    public void GetEnvironmentVariables_Grok46UsesIsolatedXdgConfigRoot()
+    {
+        var originalEnvPath = ParserConfigs.GetEnvPath();
+        var configuredEnvRoot = Path.Combine(Path.GetTempPath(), $"viberails-grok-{Guid.NewGuid():N}");
+        var expectedPath = Path.GetFullPath(Path.Combine(configuredEnvRoot, "review"));
+        var service = CreateService(Mock.Of<IFileService>());
+
+        ParserConfigs.SetEnvPath(configuredEnvRoot);
+
+        try
+        {
+            var variables = service.GetEnvironmentVariables("review", LLM.Grok46);
+
+            Assert.Equal(expectedPath, variables["XDG_CONFIG_HOME"]);
+            Assert.DoesNotContain("OPENCODE_CONFIG_DIR", variables.Keys);
+            Assert.DoesNotContain("XDG_DATA_HOME", variables.Keys);
+        }
+        finally
+        {
+            ParserConfigs.SetEnvPath(originalEnvPath);
+        }
+    }
+
+    [Fact]
     public void OpencodeLauncher_UsesIsolatedXdgConfigRoot()
     {
         var originalEnvPath = ParserConfigs.GetEnvPath();

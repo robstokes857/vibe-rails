@@ -29,7 +29,9 @@ public sealed class JobStoreOverlapTests : IDisposable
     public void Dispose()
     {
         // Release pooled connections before deleting, or the file handle survives on Windows.
-        SqliteConnection.ClearAllPools();
+        // Scoped to this class's connection string: a process-wide ClearAllPools() disposes handles
+        // out from under DB test classes running in parallel.
+        SqliteConnection.ClearPool(new SqliteConnection(_connectionString));
         try { File.Delete(_dbPath); }
         catch (IOException) { /* best-effort temp cleanup */ }
     }

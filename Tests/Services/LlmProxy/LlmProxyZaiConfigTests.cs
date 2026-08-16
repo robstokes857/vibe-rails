@@ -16,7 +16,7 @@ public sealed class LlmProxyZaiConfigTests
     }
 
     [Fact]
-    public void BuildOpencodeConfigContent_EmitsOnlyZaiProxyOptionsAndEscapesTokens()
+    public void BuildOpencodeConfigContent_EmitsZaiAndXaiProxyOptionsAndEscapesTokens()
     {
         var json = LlmProxyZaiConfig.BuildOpencodeConfigContent(
             "http://127.0.0.1:4321/",
@@ -26,13 +26,23 @@ public sealed class LlmProxyZaiConfigTests
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         Assert.Single(root.EnumerateObject());
-        var zai = root.GetProperty("provider").GetProperty("zai");
-        var options = zai.GetProperty("options");
+        var provider = root.GetProperty("provider");
+        Assert.Equal(2, provider.EnumerateObject().Count());
+
+        var zai = provider.GetProperty("zai").GetProperty("options");
         Assert.Equal(
             "http://127.0.0.1:4321/llm/zai/api/paas/v4",
-            options.GetProperty("baseURL").GetString());
-        var headers = options.GetProperty("headers");
-        Assert.Equal("session-\"quoted", headers.GetProperty("viberails_session").GetString());
-        Assert.Equal("tab\\slash", headers.GetProperty("viberails_tab").GetString());
+            zai.GetProperty("baseURL").GetString());
+        var zaiHeaders = zai.GetProperty("headers");
+        Assert.Equal("session-\"quoted", zaiHeaders.GetProperty("viberails_session").GetString());
+        Assert.Equal("tab\\slash", zaiHeaders.GetProperty("viberails_tab").GetString());
+
+        var xai = provider.GetProperty("xai").GetProperty("options");
+        Assert.Equal(
+            "http://127.0.0.1:4321/llm/xai/v1",
+            xai.GetProperty("baseURL").GetString());
+        var xaiHeaders = xai.GetProperty("headers");
+        Assert.Equal("session-\"quoted", xaiHeaders.GetProperty("viberails_session").GetString());
+        Assert.Equal("tab\\slash", xaiHeaders.GetProperty("viberails_tab").GetString());
     }
 }

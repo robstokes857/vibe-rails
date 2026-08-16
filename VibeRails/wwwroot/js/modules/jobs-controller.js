@@ -14,7 +14,8 @@ const LLM = Object.freeze({
     ANTIGRAVITY: 3,
     COPILOT: 4,
     OPENCODE: 6,
-    GLM_52: 7
+    GLM_52: 7,
+    GROK_46: 8
 });
 
 const LLM_BY_CLI = Object.freeze({
@@ -23,7 +24,8 @@ const LLM_BY_CLI = Object.freeze({
     antigravity: LLM.ANTIGRAVITY,
     copilot: LLM.COPILOT,
     opencode: LLM.OPENCODE,
-    'glm-5.2': LLM.GLM_52
+    'glm-5.2': LLM.GLM_52,
+    'grok-4.6': LLM.GROK_46
 });
 
 const CLI_BY_LLM = Object.freeze(Object.fromEntries(

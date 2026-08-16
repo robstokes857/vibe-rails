@@ -17,7 +17,7 @@ public sealed class JobExecutableResolver : IJobExecutableResolver
             LLM.Claude => "claude",
             LLM.Antigravity => "agy",
             LLM.Copilot => "copilot",
-            LLM.OpenCode or LLM.Glm52 => "opencode",
+            LLM.OpenCode or LLM.Glm52 or LLM.Grok46 => "opencode",
             _ => null
         };
         if (command is null)

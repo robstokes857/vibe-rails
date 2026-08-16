@@ -12,17 +12,18 @@ public sealed class JobStoreSchedulerLeaseTests : IDisposable
 
     private readonly string _dbPath = Path.Combine(
         Path.GetTempPath(), $"viberails-job-scheduler-lease-{Guid.NewGuid():N}.db");
+    private readonly string _connectionString;
     private readonly JobStore _first;
     private readonly JobStore _second;
 
     public JobStoreSchedulerLeaseTests()
     {
-        var connectionString = $"Data Source={_dbPath};Mode=ReadWriteCreate;Cache=Shared";
+        _connectionString = $"Data Source={_dbPath};Mode=ReadWriteCreate;Cache=Shared";
 
         // Construct sequentially so this test is about lease contention, not concurrent schema
         // initialization. Each operation below still uses its own SQLite connection.
-        _first = new JobStore(connectionString);
-        _second = new JobStore(connectionString);
+        _first = new JobStore(_connectionString);
+        _second = new JobStore(_connectionString);
     }
 
     [Fact]
@@ -82,7 +83,10 @@ public sealed class JobStoreSchedulerLeaseTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        // Release only this class's pooled connections. A process-wide ClearAllPools() disposes
+        // handles out from under DB test classes running in parallel (intermittent
+        // ObjectDisposedException on SQLitePCL.sqlite3).
+        SqliteConnection.ClearPool(new SqliteConnection(_connectionString));
         foreach (var path in new[] { _dbPath, _dbPath + "-wal", _dbPath + "-shm" })
         {
             try { File.Delete(path); }

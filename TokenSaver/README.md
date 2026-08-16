@@ -51,7 +51,7 @@ And the three files that decide **which strings ever reach the pipeline**:
 | ---- | ---------- |
 | `Minify/AnthropicMessagesRewriter.cs` | Walks the Anthropic JSON body, finds `tool_result` blocks, matches each to the `tool_use` that produced it (for the tool name **and the command text**), and splices rewritten strings back in. |
 | `Minify/CodexResponsesRewriter.cs` | Same job for Codex's `/responses` shape. |
-| `Minify/ChatCompletionsRewriter.cs` | Same job for the OpenAI Chat Completions shape used by the zai/Z.AI (GLM) provider routed through OpenCode. |
+| `Minify/ChatCompletionsRewriter.cs` | Same job for the OpenAI Chat Completions shape used by OpenCode's zai/Z.AI (GLM) and xai (Grok) providers. |
 
 Everything else in this project is plumbing: relays, buffers, auth gates, settings
 seams. If you are debugging *compression*, it is one of the eight files above.
@@ -407,8 +407,8 @@ TokenSaver/
 │  ├─ AnthropicBodyTransform.cs     ← Buffering + fail-open (Claude).
 │  ├─ CodexResponsesRewriter.cs     ← JSON walk + splice (Codex).
 │  ├─ CodexBodyTransform.cs
-│  ├─ ChatCompletionsRewriter.cs    ← JSON walk + splice (zai/Z.AI via OpenCode).
-│  ├─ ZaiBodyTransform.cs           ← Buffering + fail-open (zai/Z.AI).
+│  ├─ ChatCompletionsRewriter.cs    ← JSON walk + splice (zai/Z.AI + xai/Grok via OpenCode).
+│  ├─ ZaiBodyTransform.cs           ← Buffering + fail-open (OpenCode Chat Completions).
 │  ├─ PooledBufferWriter.cs      ← Plumbing.
 │  ├─ PrefixedBodyStream.cs      ← Plumbing (the over-cap stitch-back).
 │  └─ ToolOutputRewriteResult.cs
@@ -419,13 +419,14 @@ TokenSaver/
 ├─ LlmProxyRoutes.cs             ← Codex proxy endpoints.
 ├─ LlmAnthropicProxyRoutes.cs    ← Claude proxy endpoints.
 ├─ LlmZaiProxyRoutes.cs          ← zai/Z.AI (GLM) proxy endpoints (via OpenCode).
+├─ LlmXaiProxyRoutes.cs          ← xai (Grok) proxy endpoints (via OpenCode).
 ├─ ILlmProxySettingsService.cs   ← Settings seam (impl lives in VibeRails).
 ├─ ILlmProxyEventSink.cs         ← Telemetry seam. Counts only, never content.
 ├─ ILlmProxyExchangeSink.cs      ← Whole-request/response exchange log seam.
 ├─ ICompressionCaptureSink.cs    ← Capture seam. Content, deliberately.
 ├─ ILlmProxyAuthGate.cs
 ├─ ILlmProxyBodyTransform.cs
-└─ LlmProxyBaseUrl.cs / LlmProxyClaudeConfig.cs / LlmProxyCodexConfig.cs / LlmProxyZaiConfig.cs
+└─ LlmProxyBaseUrl.cs / LlmProxyClaudeConfig.cs / LlmProxyCodexConfig.cs / LlmProxyZaiConfig.cs / LlmProxyXaiConfig.cs
 ```
 
 Host-side implementations live in `VibeRails/`:

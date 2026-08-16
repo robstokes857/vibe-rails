@@ -15,6 +15,8 @@ namespace VibeRails.Services.LlmClis.Launchers
         string ConfigEnvVarName { get; }
         /// <summary>
         /// Opens a real OS terminal window running <c>vb --env …</c>.
+        /// <paramref name="launchLlm"/> is the requested CLI identity written to <c>--env</c> for
+        /// base launches; it can differ from this launcher's type for OpenCode-backed pseudo-CLIs.
         /// <paramref name="args"/> are passed through to the underlying CLI (after <c>--</c>);
         /// <paramref name="vbArgs"/> are vb's own flags (e.g. <c>--job-run</c>, <c>--max-runtime</c>)
         /// and must precede <c>--</c>, because ArgumentParser stops parsing there.
@@ -25,6 +27,7 @@ namespace VibeRails.Services.LlmClis.Launchers
         /// operating system supports it. It is currently honored on Windows and ignored elsewhere.
         /// </summary>
         LaunchResult LaunchInTerminal(
+            LLM launchLlm,
             string? envName,
             string workingDirectory,
             string[] args,
@@ -55,6 +58,7 @@ namespace VibeRails.Services.LlmClis.Launchers
         }
 
         public LaunchResult LaunchInTerminal(
+            LLM launchLlm,
             string? envName,
             string workingDirectory,
             string[] args,
@@ -67,6 +71,7 @@ namespace VibeRails.Services.LlmClis.Launchers
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
                     return LaunchInWindowsTerminal(
+                        launchLlm,
                         workingDirectory,
                         args,
                         envName,
@@ -76,11 +81,13 @@ namespace VibeRails.Services.LlmClis.Launchers
                 }
                 else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
                 {
-                    return LaunchInMacTerminal(workingDirectory, args, envName, vbArgs, keepTerminalOpen);
+                    return LaunchInMacTerminal(
+                        launchLlm, workingDirectory, args, envName, vbArgs, keepTerminalOpen);
                 }
                 else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
                 {
-                    return LaunchInLinuxTerminal(workingDirectory, args, envName, vbArgs, keepTerminalOpen);
+                    return LaunchInLinuxTerminal(
+                        launchLlm, workingDirectory, args, envName, vbArgs, keepTerminalOpen);
                 }
                 else
                 {
@@ -101,12 +108,20 @@ namespace VibeRails.Services.LlmClis.Launchers
             }
         }
 
-        private string[] BuildVbArgv(string workingDirectory, string[] args, string? envName, string[]? vbArgs = null)
+        internal static string[] BuildVbArgv(
+            LLM launchLlm,
+            string workingDirectory,
+            string[] args,
+            string? envName,
+            string[]? vbArgs = null)
         {
-            // Base-CLI launches pass the LLM enum name as --env (that's what the bootstrap
-            // resolves), NOT the executable. These coincide for claude/codex/copilot, but
-            // Antigravity's binary is `agy` while its env/enum name is `antigravity`.
-            var envValue = !string.IsNullOrEmpty(envName) ? envName : LlmType.ToString().ToLowerInvariant();
+            // Base-CLI launches pass the requested LLM's wire name as --env (that's what the
+            // bootstrap resolves), NOT the selected launcher's type or executable. These coincide
+            // for most CLIs, but Antigravity's binary is `agy` and the OpenCode-backed pseudo-CLIs
+            // reuse an OpenCode launcher while retaining wire names such as `grok-4.6`.
+            var envValue = !string.IsNullOrEmpty(envName)
+                ? envName
+                : LlmParser.ToWireName(launchLlm).ToLowerInvariant();
             var argv = new List<string> { "--env", envValue, "--workdir", workingDirectory };
             // vb's own flags must land BEFORE the `--` separator: ArgumentParser treats everything
             // after `--` as CLI passthrough and stops parsing entirely.
@@ -123,6 +138,7 @@ namespace VibeRails.Services.LlmClis.Launchers
         }
 
         private LaunchResult LaunchInWindowsTerminal(
+            LLM launchLlm,
             string workingDirectory,
             string[] args,
             string? envName,
@@ -131,7 +147,7 @@ namespace VibeRails.Services.LlmClis.Launchers
             bool launchMinimized)
         {
             var exePath = Environment.ProcessPath ?? "vb";
-            var argv = BuildVbArgv(workingDirectory, args, envName, vbArgs);
+            var argv = BuildVbArgv(launchLlm, workingDirectory, args, envName, vbArgs);
 
             // Build a temp .ps1 script and let PowerShell's call operator (`&`) plus
             // splatting (`@argv`) pass each arg as its own argv element. This avoids
@@ -193,6 +209,7 @@ namespace VibeRails.Services.LlmClis.Launchers
         }
 
         private LaunchResult LaunchInMacTerminal(
+            LLM launchLlm,
             string workingDirectory,
             string[] args,
             string? envName,
@@ -200,7 +217,7 @@ namespace VibeRails.Services.LlmClis.Launchers
             bool keepTerminalOpen)
         {
             var exePath = Environment.ProcessPath ?? "vb";
-            var argv = BuildVbArgv(workingDirectory, args, envName, vbArgs);
+            var argv = BuildVbArgv(launchLlm, workingDirectory, args, envName, vbArgs);
 
             // Build a zsh-targeted Terminal.app command with POSIX single-quote escaping per arg.
             var commandLine = BuildPosixCommandLine(exePath, argv);
@@ -219,6 +236,7 @@ namespace VibeRails.Services.LlmClis.Launchers
         }
 
         private LaunchResult LaunchInLinuxTerminal(
+            LLM launchLlm,
             string workingDirectory,
             string[] args,
             string? envName,
@@ -226,7 +244,7 @@ namespace VibeRails.Services.LlmClis.Launchers
             bool keepTerminalOpen)
         {
             var exePath = Environment.ProcessPath ?? "vb";
-            var argv = BuildVbArgv(workingDirectory, args, envName, vbArgs);
+            var argv = BuildVbArgv(launchLlm, workingDirectory, args, envName, vbArgs);
 
             // POSIX-quoted single command line for `<shell> -c <fullCommand>`.
             var shell = ShellDefaults.LinuxShell;

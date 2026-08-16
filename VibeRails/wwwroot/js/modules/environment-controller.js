@@ -470,7 +470,7 @@ export class EnvironmentController {
                 cliSettings.initialMessage = env.customPrompt;
             }
             this.mergeOpencodeSettingsFromCustomArgs(cliSettings, env.customArgs || '');
-            // For the GLM 5.2 pseudo-CLI, force the model to the pinned value so
+            // For OpenCode-backed pseudo-CLIs, force the model to the pinned value so
             // the form always reflects the env type's contract — a saved --model that
             // drifted to a different provider would otherwise mislead the user.
             const pinnedModel = this.pinnedModelForCli(cliLower);
@@ -831,12 +831,12 @@ export class EnvironmentController {
         return null;
     }
 
-    // GLM 5.2 is an OpenCode-backed pseudo-CLI: it launches `opencode` with a
+    // GLM 5.2 and Grok 4.6 are OpenCode-backed pseudo-CLIs: they launch `opencode` with a
     // pinned --model flag. They share the OpenCode settings form, env handling, and arg
     // builder, so most call sites route through this helper instead of checking === 'opencode'.
     isOpencodeBackedCli(cli) {
         const cliLower = (cli || '').toLowerCase();
-        return cliLower === 'opencode' || cliLower === 'glm-5.2';
+        return cliLower === 'opencode' || cliLower === 'glm-5.2' || cliLower === 'grok-4.6';
     }
 
     // Returns the pinned provider/model ID for a pseudo-CLI, or null for plain OpenCode
@@ -844,6 +844,7 @@ export class EnvironmentController {
     pinnedModelForCli(cli) {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'glm-5.2') return 'zai/glm-5.2';
+        if (cliLower === 'grok-4.6') return 'xai/grok-4.6';
         return null;
     }
 
@@ -1435,6 +1436,7 @@ export class EnvironmentController {
             ['openai/gpt-5.1-codex', 'openai/gpt-5.1-codex'],
             ['google/gemini-3-pro', 'google/gemini-3-pro'],
             ['zai/glm-5.2', 'zai/glm-5.2'],
+            ['xai/grok-4.6', 'xai/grok-4.6'],
             ['opencode/gpt-5.1-codex', 'opencode/gpt-5.1-codex (Zen)'],
         ];
         const known = new Set(options.map(([value]) => value));
@@ -1883,9 +1885,9 @@ export class EnvironmentController {
 
         if (this.isOpencodeBackedCli(cliLower)) {
             const pinnedModel = this.pinnedModelForCli(cliLower);
-            // For the GLM 5.2 pseudo-CLI the model is pinned — show a read-only
+            // For OpenCode-backed pseudo-CLIs the model is pinned — show a read-only
             // display of the pinned provider/model instead of the editable dropdown, so
-            // users can't accidentally switch a "GLM 5.2" env to a different model.
+            // users can't accidentally switch the env to a different model.
             const model = pinnedModel || (s.model || '');
             const modelField = pinnedModel
                 ? `<input type="text" class="form-control" id="opencode-model" value="${this.app.escapeHtml(pinnedModel)}" disabled>
@@ -1894,9 +1896,7 @@ export class EnvironmentController {
                        ${this.renderOpencodeModelOptions(model)}
                    </select>
                    <small class="form-text text-muted">Passed as <code>--model provider/model</code>; leave blank for OpenCode's default</small>`;
-            const headerLabel = pinnedModel
-                ? 'GLM 5.2 CLI Settings'
-                : 'OpenCode CLI Settings';
+            const headerLabel = `${this.cliDisplayName(cliLower)} CLI Settings`;
             const agent = this.app.escapeHtml(s.agent || '');
             const additionalArgs = this.app.escapeHtml(s.additionalArgs || '');
 
@@ -2016,6 +2016,7 @@ export class EnvironmentController {
         if (cliLower === 'copilot') return 'Copilot';
         if (cliLower === 'antigravity') return 'agy';
         if (cliLower === 'glm-5.2') return 'GLM 5.2';
+        if (cliLower === 'grok-4.6') return 'Grok 4.6';
         if (cliLower === 'opencode') return 'OpenCode';
         return 'the CLI';
     }

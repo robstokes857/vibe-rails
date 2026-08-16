@@ -13,8 +13,8 @@ namespace TokenSaver;
 /// rather than a dedicated base-URL env var or CLI <c>--config</c> args. That keeps VibeRails on
 /// its launch-flag/env-var-only contract: no <c>opencode.json</c> file is written or managed.
 ///
-/// The inline config overrides ONLY the <c>zai</c> provider's <c>options.baseURL</c> and
-/// <c>options.headers</c>; everything else (apiKey from global <c>auth.json</c>, models, etc.)
+/// The inline config overrides the <c>zai</c> and <c>xai</c> providers' <c>options.baseURL</c>
+/// and <c>options.headers</c>; everything else (apiKey from global <c>auth.json</c>, models, etc.)
 /// merges from the user's existing global/project OpenCode config. Credentials stay isolated:
 /// <c>XDG_DATA_HOME</c> is left unchanged, per the OpenCode integration policy in
 /// <c>runbooks/custom_envs/CLI_OPTIONS.md</c>.
@@ -56,12 +56,13 @@ public static class LlmProxyZaiConfig
         string.Concat(LlmProxyBaseUrl.Normalize(apiBaseUrl), ZaiProxyPath, UpstreamApiPath);
 
     /// <summary>
-    /// Builds the <c>OPENCODE_CONFIG_CONTENT</c> JSON payload: overrides the <c>zai</c> provider's
-    /// <c>baseURL</c> to point at the local proxy and injects the session/tab auth headers the proxy
-    /// validates. Token values are embedded literally (not via <c>{env:...}</c> substitution) so the
-    /// contract does not depend on OpenCode resolving env refs inside <c>options.headers</c> — the
-    /// same approach Claude's <c>ANTHROPIC_CUSTOM_HEADERS</c> takes. The value rides an env var, so
-    /// the tokens never surface in the process command line.
+    /// Builds the <c>OPENCODE_CONFIG_CONTENT</c> JSON payload: overrides the <c>zai</c> and
+    /// <c>xai</c> providers' <c>baseURL</c> to point at the local proxy and injects the session/tab
+    /// auth headers the proxy validates. Token values are embedded literally (not via
+    /// <c>{env:...}</c> substitution) so the contract does not depend on OpenCode resolving env
+    /// refs inside <c>options.headers</c> — the same approach Claude's
+    /// <c>ANTHROPIC_CUSTOM_HEADERS</c> takes. The value rides an env var, so the tokens never
+    /// surface in the process command line.
     ///
     /// Emitted with a <see cref="Utf8JsonWriter"/> rather than <c>JsonSerializer.Serialize</c> on an
     /// anonymous object: the TokenSaver library is AOT-conscious (see the rewriters' no-DOM/no-
@@ -71,9 +72,10 @@ public static class LlmProxyZaiConfig
     {
         var baseUrl = BuildZaiBaseUrl(apiBaseUrl);
 
-        // Sized for the payload skeleton plus the two tokens (512-bit → 86 base64url chars each) and
-        // a generous baseURL; grows if needed via the pooled writer.
-        using var buffer = new PooledBufferWriter(512);
+        // Sized for the two provider blocks: each carries a baseURL plus the session and tab tokens
+        // (512-bit → 86 base64url chars each), so the payload embeds four token copies in total.
+        // Grows if needed via the pooled writer.
+        using var buffer = new PooledBufferWriter(1024);
         using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
         {
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -83,7 +85,28 @@ public static class LlmProxyZaiConfig
         writer.WriteStartObject();
         writer.WritePropertyName("provider"u8);
         writer.WriteStartObject();
-        writer.WritePropertyName("zai"u8);
+        WriteProviderOverride(writer, "zai"u8, baseUrl, sessionToken, tabToken);
+        WriteProviderOverride(
+            writer,
+            "xai"u8,
+            LlmProxyXaiConfig.BuildXaiBaseUrl(apiBaseUrl),
+            sessionToken,
+            tabToken);
+        writer.WriteEndObject();
+        writer.WriteEndObject();
+        writer.Flush();
+
+        return Encoding.UTF8.GetString(buffer.WrittenMemory.Span);
+    }
+
+    private static void WriteProviderOverride(
+        Utf8JsonWriter writer,
+        ReadOnlySpan<byte> providerName,
+        string baseUrl,
+        string sessionToken,
+        string tabToken)
+    {
+        writer.WritePropertyName(providerName);
         writer.WriteStartObject();
         writer.WritePropertyName("options"u8);
         writer.WriteStartObject();
@@ -95,10 +118,5 @@ public static class LlmProxyZaiConfig
         writer.WriteEndObject();
         writer.WriteEndObject();
         writer.WriteEndObject();
-        writer.WriteEndObject();
-        writer.WriteEndObject();
-        writer.Flush();
-
-        return Encoding.UTF8.GetString(buffer.WrittenMemory.Span);
     }
 }

@@ -60,7 +60,7 @@ public class CookieAuthMiddleware
             }
 
             // API, MCP and /llm calls should not be redirected (fetch/XHR/MCP clients and CLI
-            // HTTP clients expect status codes). Every /llm/** surface — the three proxy trees
+            // HTTP clients expect status codes). Every /llm/** surface — the four proxy trees
             // and the token-saver control routes — is machine-facing: an MCP tool surfaces the
             // body verbatim and a CLI logs it, so an HTML page there is unreadable noise.
             if (path.StartsWith("/api/") || IsMcpPath(path) || IsLlmPath(path))

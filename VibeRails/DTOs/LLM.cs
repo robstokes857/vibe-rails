@@ -21,7 +21,8 @@ namespace VibeRails.Services
         // Pseudo-CLIs: OpenCode launched with a pinned --model flag. The binary is
         // `opencode` (mapped in CommandService.PrepareSession), and the model arg is
         // injected server-side. Enum names can't contain hyphens/periods, so LlmParser
-        // special-cases the string "glm-5.2" to this value.
-        Glm52
+        // special-cases the hyphenated wire names to these values.
+        Glm52,
+        Grok46
     }
 }

@@ -75,7 +75,7 @@ public static class CliLoop
 
         // Resolve LLM type (smart resolution: --env-id → exact row, LLM enum name → base CLI,
         // otherwise → DB lookup by name). Use ILlmParser instead of Enum.TryParse so pseudo-CLI
-        // strings like "glm-5.2" (which can't be a C# enum name due to punctuation) resolve
+        // strings like "glm-5.2" / "grok-4.6" (which can't be a C# enum name due to punctuation) resolve
         // correctly.
         LLM llm;
         string? environmentName = null;

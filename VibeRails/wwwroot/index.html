@@ -1372,9 +1372,9 @@
                         <div class="mb-4">
                             <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" id="setting-opencode-llm-proxy-enabled">
-                                <label class="form-check-label" for="setting-opencode-llm-proxy-enabled">Enable OpenCode proxy (zai / GLM)</label>
+                                <label class="form-check-label" for="setting-opencode-llm-proxy-enabled">Enable OpenCode proxy (zai / xai)</label>
                             </div>
-                            <small class="form-text text-muted">Route OpenCode's <code>zai</code> provider (GLM models, e.g. <code>zai/glm-5.2</code>) through the local VibeRails proxy. Rides the <code>OPENCODE_CONFIG_CONTENT</code> env var — no <code>opencode.json</code> is written. Required for the Token Saver to act on OpenCode traffic.</small>
+                            <small class="form-text text-muted">Route OpenCode's <code>zai</code> (GLM) and <code>xai</code> (Grok) providers through the local VibeRails proxy. Rides the <code>OPENCODE_CONFIG_CONTENT</code> env var — no <code>opencode.json</code> is written. Required for the Token Saver to act on OpenCode traffic.</small>
                         </div>
                         <small class="form-text text-muted">Changes apply the next time an OpenCode terminal starts.</small>
                     </div>

@@ -184,7 +184,9 @@ public class EnvironmentStepsSqlTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            // Scoped to this test's connection string: a process-wide ClearAllPools() disposes
+            // handles out from under DB test classes running in parallel.
+            SqliteConnection.ClearPool(new SqliteConnection(connectionString));
             try { File.Delete(databasePath); } catch { /* best effort */ }
         }
     }
@@ -262,7 +264,9 @@ public class EnvironmentStepsSqlTests
                 seed.Parameters.AddWithValue("$updatedUTC", DateTime.UtcNow.ToString("O"));
                 await seed.ExecuteNonQueryAsync(cancellationToken);
             }
-            SqliteConnection.ClearAllPools();
+            // Force the next Repository to reopen rather than reuse a pooled handle. Scoped to this
+            // test's connection string so parallel DB test classes keep their own pools.
+            SqliteConnection.ClearPool(new SqliteConnection(connectionString));
 
             _ = new Repository(connectionString);
 
@@ -272,7 +276,9 @@ public class EnvironmentStepsSqlTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            // Scoped to this test's connection string: a process-wide ClearAllPools() disposes
+            // handles out from under DB test classes running in parallel.
+            SqliteConnection.ClearPool(new SqliteConnection(connectionString));
             try { File.Delete(databasePath); } catch { /* best effort */ }
         }
     }
