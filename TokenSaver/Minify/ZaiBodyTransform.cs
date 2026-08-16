@@ -5,18 +5,19 @@ using Microsoft.AspNetCore.Http.Features;
 namespace TokenSaver.Minify;
 
 /// <summary>
-/// Buffers qualifying OpenAI Chat Completions POST bodies (the zai/Z.AI provider's wire format as
-/// routed through OpenCode) and applies <see cref="ChatCompletionsRewriter"/>. As with the Anthropic
-/// and Codex transforms, every rewrite failure fails open to the original buffered request — the
-/// proxy must never be able to break a request.
+/// Buffers qualifying OpenAI Chat Completions POST bodies (the wire format OpenCode uses for
+/// both the zai/Z.AI and xai/Grok providers) and applies <see cref="ChatCompletionsRewriter"/>.
+/// As with the Anthropic and Codex transforms, every rewrite failure fails open to the original
+/// buffered request — the proxy must never be able to break a request.
 /// </summary>
 internal sealed class ZaiBodyTransform(
     Pipeline.CompressionPlan plan,
-    ICompressionCaptureSink? captures = null) : ILlmProxyBodyTransform
+    ICompressionCaptureSink? captures = null,
+    string provider = "zai") : ILlmProxyBodyTransform
 {
     internal const int MaxBufferedBodyBytes = 10 * 1024 * 1024;
 
-    public string Provider => "zai";
+    public string Provider => provider;
 
     public async ValueTask<TransformedRequestBody?> TryTransformAsync(
         HttpRequest request, ILlmProxyEventSink events, CancellationToken cancellationToken)
@@ -46,7 +47,8 @@ internal sealed class ZaiBodyTransform(
                     lease.Buffered(length).Span,
                     plan,
                     lease.Output,
-                    captures);
+                    captures,
+                    provider);
             }
             catch (Exception ex)
             {

@@ -129,6 +129,7 @@ public class CliSpawnCommandBuilderTests
     [InlineData(LLM.Copilot)]
     [InlineData(LLM.OpenCode)]
     [InlineData(LLM.Glm52)]
+    [InlineData(LLM.Grok46)]
     public void ResolvedExecutableMatchesTheNativeLauncher(LLM llm)
     {
         var launchService = new LaunchLLMService(
@@ -139,6 +140,21 @@ public class CliSpawnCommandBuilderTests
             new OpencodeLlmCliLauncher());
 
         Assert.Equal(launchService.GetLauncher(llm).CliExecutable, CommandService.ResolveCliExecutable(llm));
+    }
+
+    [Theory]
+    [InlineData(LLM.OpenCode, "opencode")]
+    [InlineData(LLM.Glm52, "glm-5.2")]
+    [InlineData(LLM.Grok46, "grok-4.6")]
+    public void NativeLauncherBootstrapPreservesRequestedLlmWireName(LLM llm, string expectedEnv)
+    {
+        var argv = BaseLlmCliLauncher.BuildVbArgv(
+            llm,
+            "C:\\project",
+            [],
+            envName: null);
+
+        Assert.Equal(["--env", expectedEnv, "--workdir", "C:\\project"], argv);
     }
 
     private static (string App, string[] Argv, string Script) BuildWindows(

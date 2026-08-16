@@ -29,6 +29,7 @@ public sealed class LlmPickerPreferenceService(IRepository repository) : ILlmPic
         new("claude", "Claude"),
         new("codex", "Codex"),
         new("glm-5.2", "GLM 5.2"),
+        new("grok-4.6", "Grok 4.6"),
         new("opencode", "OpenCode"),
         new("copilot", "Copilot"),
         new("antigravity", "Antigravity"),

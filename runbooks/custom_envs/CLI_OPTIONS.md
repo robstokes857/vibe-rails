@@ -6,7 +6,7 @@ This describes the entire custom env option workflow but it has mainly been used
 
 This runbook explains how to change, add, or delete custom environment options
 for the managed TUI CLIs: Claude, Codex, Antigravity, Copilot, OpenCode, and the
-the OpenCode-backed pseudo-CLI GLM 5.2.
+OpenCode-backed pseudo-CLIs GLM 5.2 and Grok 4.6.
 
 Use it when editing the Environments page's create/edit modal, the per-CLI
 settings APIs, or the generated launch arguments stored in `CustomArgs`.
@@ -127,12 +127,13 @@ Current pinned values (Claude refreshed 2026-07-24; Codex 2026-07-10; all others
   follows the docs' supported-in-CLI table, not one account's entitlements.
 - OpenCode: `anthropic/claude-opus-4-5`, `anthropic/claude-sonnet-4-5`,
   `openai/gpt-5.2`, `openai/gpt-5.1-codex`, `google/gemini-3-pro`,
-  `zai/glm-5.2`, `opencode/gpt-5.1-codex` (Zen), plus an empty "Default (OpenCode recommended)" entry.
+  `zai/glm-5.2`, `xai/grok-4.6`, `opencode/gpt-5.1-codex` (Zen), plus an empty "Default (OpenCode recommended)" entry.
   OpenCode model IDs are `provider/model` (the format `--model` and `opencode models` use).
   Refresh via `opencode models` (optionally `--refresh` to update the cache from models.dev).
   Added 2026-07-16 alongside the OpenCode CLI integration; `zai/glm-5.2` added 2026-07-17;
-  `zai/glm-5.2` is also exposed as a first-class base CLI and custom
-  env type (see the "GLM 5.2" section below) — it launches `opencode` with the
+  `xai/grok-4.6` added 2026-08-15.
+  `zai/glm-5.2` and `xai/grok-4.6` are also exposed as first-class base CLIs and custom
+  env types (see the "GLM 5.2" and "Grok 4.6" sections below) — each launches `opencode` with the
   model pinned via `--model`, so users get a dedicated dropdown entry instead of picking the
   model from the OpenCode list.
 
@@ -399,9 +400,48 @@ UI-managed launch and prompt settings (same as OpenCode, with Model pinned):
 
 Frontend helpers (environment-controller.js):
 
-- `isOpencodeBackedCli(cli)` returns true for `opencode`, `glm-5.2` — use this
+- `isOpencodeBackedCli(cli)` returns true for `opencode`, `glm-5.2`, `grok-4.6` — use this
   instead of `=== 'opencode'` when routing to the OpenCode settings form / arg builder.
-- `pinnedModelForCli(cli)` returns `'zai/glm-5.2'` for `glm-5.2` and `null` for plain OpenCode.
+- `pinnedModelForCli(cli)` returns `'zai/glm-5.2'` for `glm-5.2`, `'xai/grok-4.6'` for
+  `grok-4.6`, and `null` for plain OpenCode.
+
+### Grok 4.6
+
+Grok 4.6 is an **OpenCode-backed pseudo-CLI**: it launches `opencode` with `--model=xai/grok-4.6`
+pinned. It exists as a first-class base CLI (dropdown entry in the terminal launcher) and as a
+custom env type, so users get a dedicated entry instead of picking `xai/grok-4.6` from the
+OpenCode model list every time.
+
+Backend wiring (added 2026-08-15):
+
+- Enum: `LLM.Grok46` (value 8). C# enum names can't contain hyphens/periods, so `LlmParser`
+  special-cases the string `"grok-4.6"` → `LLM.Grok46` via a `SpecialCaseMap` dictionary.
+- Executable: `opencode` (mapped in `CommandService.PrepareSessionAsync`, like `agy` for
+  Antigravity and `opencode` for GLM 5.2). The enum name lowercased (`grok46`) is NOT the executable.
+- Model injection: for **base CLI launches** (no envName), `CommandService` prepends
+  `--model=xai/grok-4.6` to the launch args. For **custom env launches**, the model is already
+  in `CustomArgs` (emitted by `buildOpencodeCustomArgs`), so no injection happens — this avoids
+  a duplicate `--model` flag.
+- Prompt convention: `--prompt=<text>` (same as OpenCode).
+- Proxy: the OpenCode Token Saver proxy (`OpenCodeLlmProxyLaunchEnabled`) applies. Grok is the
+  `xai` provider; `OPENCODE_CONFIG_CONTENT` remaps `xai.options.baseURL` to
+  `{apiBase}/llm/xai/v1` and `LlmXaiProxyRoutes` relays to `https://api.x.ai`. Auth stays
+  OpenCode's native xAI connection (`/connect` → xAI, stored in the user's global
+  `auth.json`). Do **not** add a second `HttpListener`, a `/llm/grok` sidecar, or a
+  middleware skip-list entry (rejected 2026-08-15; see `API_SEC.md`).
+- Env isolation: `XDG_CONFIG_HOME` (same as OpenCode).
+- Launcher: `IOpencodeLlmCliLauncher` (reused from OpenCode).
+- `getLlmName()` (frontend) maps `8` → `'Grok 4.6'`.
+
+UI-managed launch and prompt settings (same as OpenCode, with Model pinned):
+
+- Initial Message: stored in `CustomPrompt`; sent as `--prompt=<text>`.
+- Model: **pinned to `xai/grok-4.6`** — the model field is a read-only display, not a dropdown.
+  To use a different model, create a plain OpenCode env instead.
+- Agent: `--agent <name>`; free text.
+- YOLO Mode: `--auto`.
+- Run Without Plugins: `--pure`.
+- Additional Arguments: preserved in `CustomArgs`.
 
 ## Mental Model
 
@@ -410,16 +450,22 @@ Custom environments have two layers:
 1. `CustomArgs` and `CustomPrompt` live in the `Environments` table and apply
    to every launch path.
 2. Per-CLI settings files exist for Claude and Codex only. Antigravity, Copilot, OpenCode,
-   and GLM 5.2 are frontend-managed through `CustomArgs` and `CustomPrompt`.
+   GLM 5.2, and Grok 4.6 are frontend-managed through `CustomArgs` and `CustomPrompt`.
 
 The important rule: a visible control is not enough. Every CLI option must
 round-trip through render, read, save, parse existing args, and launch.
 
-GLM 5.2 is an **OpenCode-backed pseudo-CLI**: it reuses OpenCode's settings form,
-arg builder, env isolation (`XDG_CONFIG_HOME`), and launcher, but pins `--model` to a specific
-provider/model. In the frontend, `isOpencodeBackedCli(cli)` routes it to the OpenCode branch;
+GLM 5.2 and Grok 4.6 are **OpenCode-backed pseudo-CLIs**: they reuse OpenCode's settings form,
+arg builder, env isolation (`XDG_CONFIG_HOME`), and launcher, but pin `--model` to a specific
+provider/model. In the frontend, `isOpencodeBackedCli(cli)` routes them to the OpenCode branch;
 in the backend, `CommandService.PrepareSession` maps the enum to `opencode` and injects the
 pinned `--model` for base CLI launches.
+
+The OpenCode Token Saver proxy remaps both the `zai` and `xai` providers via
+`OPENCODE_CONFIG_CONTENT` (plain OpenCode + GLM 5.2 + Grok 4.6). GLM rides `/llm/zai` →
+`api.z.ai`; Grok rides `/llm/xai` → `api.x.ai`. Both are Kestrel routes on the main host.
+Auth stays in OpenCode's global `auth.json`. Do not add a second listener or a `/llm/grok`
+sidecar (rejected 2026-08-15; see `API_SEC.md`).
 
 ## Environment Visibility (Hidden + AutomationWorker flags)
 
@@ -695,6 +741,21 @@ GLM 5.2 :
 - Settings form reuses OpenCode's (`isOpencodeBackedCli()` routes `glm-5.2` to the OpenCode
   branch); the Model field is a read-only display pinned to `zai/glm-5.2`.
 - The Z.AI proxy applies (GLM 5.2 IS the `zai` provider model).
+- `customPrompt` is populated from the initial message.
+- No MCP auto-registration (inherited from OpenCode).
+
+Grok 4.6 :
+
+- Pseudo-CLI backed by OpenCode. Enum `LLM.Grok46` (8); `LlmParser` special-cases `"grok-4.6"`.
+- Executable is `opencode` (remapped in `CommandService.PrepareSession` — the enum name
+  lowercased `grok46` is NOT the executable). `--model=xai/grok-4.6` is injected for base CLI
+  launches; custom envs carry it in `CustomArgs`.
+- Settings form reuses OpenCode's (`isOpencodeBackedCli()` routes `grok-4.6` to the OpenCode
+  branch); the Model field is a read-only display pinned to `xai/grok-4.6`.
+- The OpenCode Token Saver proxy applies. Grok is the `xai` provider; traffic goes through
+  `/llm/xai` on the main Kestrel host (not a second listener). Auth stays in OpenCode's
+  native xAI credentials (`~/.local/share/opencode/auth.json`). Do not reintroduce
+  `GrokLoopbackBridge` or `/llm/grok`.
 - `customPrompt` is populated from the initial message.
 - No MCP auto-registration (inherited from OpenCode).
 

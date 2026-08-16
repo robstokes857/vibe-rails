@@ -149,7 +149,9 @@ public sealed class LlmExchangeLogStoreTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        // Scoped to this class's connection string: a process-wide ClearAllPools() disposes handles
+        // out from under DB test classes running in parallel.
+        SqliteConnection.ClearPool(new SqliteConnection(ConnectionString));
         foreach (var path in new[] { _dbPath, _dbPath + "-wal", _dbPath + "-shm" })
         {
             try

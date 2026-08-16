@@ -314,7 +314,9 @@ public sealed class TokenSavingsStoreTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        // Scoped to this class's connection string: a process-wide ClearAllPools() disposes handles
+        // out from under DB test classes running in parallel.
+        SqliteConnection.ClearPool(new SqliteConnection(ConnectionString));
         try
         {
             File.Delete(_dbPath);

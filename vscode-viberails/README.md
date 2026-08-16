@@ -40,6 +40,7 @@ VibeRails is the control layer for AI coding inside VS Code. Work faster with Cl
 - Copilot
 - OpenCode
 - GLM-5.2 (via OpenCode)
+- Grok 4.6 (via OpenCode)
 - VS Code
 
 ## See It in Action

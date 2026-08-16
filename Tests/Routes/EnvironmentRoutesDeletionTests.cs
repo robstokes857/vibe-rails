@@ -138,7 +138,9 @@ public sealed class EnvironmentRoutesDeletionTests
         finally
         {
             ParserConfigs.SetEnvPath(originalEnvRoot);
-            SqliteConnection.ClearAllPools();
+            // Scoped to this test's connection string: a process-wide ClearAllPools() disposes
+            // handles out from under DB test classes running in parallel.
+            SqliteConnection.ClearPool(new SqliteConnection(connectionString));
             Directory.Delete(testRoot, recursive: true);
         }
     }

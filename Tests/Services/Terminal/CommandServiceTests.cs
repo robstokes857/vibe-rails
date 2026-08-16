@@ -184,6 +184,7 @@ public class CommandServiceTests : IDisposable
     [InlineData(LLM.Copilot)]
     [InlineData(LLM.OpenCode)]
     [InlineData(LLM.Glm52)]
+    [InlineData(LLM.Grok46)]
     public async Task PrepareSession_NonClaude_DoesNotSetForceSyncOutputEnvVar(LLM llm)
     {
         var service = CreateService();
@@ -234,6 +235,7 @@ public class CommandServiceTests : IDisposable
     [Theory]
     [InlineData(LLM.OpenCode)]
     [InlineData(LLM.Glm52)]
+    [InlineData(LLM.Grok46)]
     public async Task PrepareSession_OpenCodeBackedClis_AddVibeRailsMcpBeforeLaunch(LLM llm)
     {
         var service = CreateService();
@@ -280,6 +282,7 @@ public class CommandServiceTests : IDisposable
             prepared.Environment[LocalLlmProxyContext.TabTokenVariable]);
         var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
         Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
+        Assert.Contains("http://127.0.0.1:4321/llm/xai/v1", config);
         Assert.Contains("test-session-token", config);
         Assert.Contains("test-tab-token", config);
     }
@@ -387,6 +390,77 @@ public class CommandServiceTests : IDisposable
         Assert.True(
             prepared.Environment.ContainsKey("XDG_CONFIG_HOME"),
             "GLM 5.2 must share OpenCode's XDG_CONFIG_HOME env isolation.");
+    }
+
+    [Fact]
+    public async Task PrepareSession_Grok46_UsesOpencodeExecutableWithPinnedModel()
+    {
+        var service = CreateService();
+
+        // Grok 4.6 is a pseudo-CLI backed by OpenCode. The binary is `opencode` (not `grok46`),
+        // and base CLI launches inject --model=xai/grok-4.6 so the session picks the right model.
+        var prepared = await service.PrepareSessionAsync(LLM.Grok46, envName: null, extraArgs: null);
+
+        Assert.Equal("opencode --model=xai/grok-4.6", prepared.LaunchCommand);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Grok46_PassesPromptViaPromptFlag()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Grok46, envName: null, extraArgs: null, initialPrompt: "hello world");
+
+        Assert.StartsWith("opencode --model=xai/grok-4.6 --prompt=", prepared.LaunchCommand);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Grok46_InjectsXaiProxyConfig()
+    {
+        var service = CreateService(openCodeLlmProxyEnabled: true);
+
+        var prepared = await service.PrepareSessionAsync(LLM.Grok46, envName: null, extraArgs: null);
+
+        Assert.True(prepared.OpenCodeProxyActive);
+        Assert.Equal(
+            "test-session-token",
+            prepared.Environment[LocalLlmProxyContext.SessionTokenVariable]);
+        Assert.Equal(
+            "test-tab-token",
+            prepared.Environment[LocalLlmProxyContext.TabTokenVariable]);
+        var config = prepared.Environment[LlmProxyZaiConfig.ConfigContentVariable];
+        Assert.Contains("http://127.0.0.1:4321/llm/xai/v1", config);
+        Assert.Contains("http://127.0.0.1:4321/llm/zai/api/paas/v4", config);
+    }
+
+    [Fact]
+    public async Task PrepareSession_Grok46_DoesNotInjectModelWhenEnvIsSet()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Grok46,
+            envName: "my-grok-env",
+            extraArgs: ["--model=xai/grok-4.6", "--auto"]);
+
+        Assert.Equal("opencode --model=xai/grok-4.6 --auto", prepared.LaunchCommand);
+        Assert.Equal(
+            1,
+            prepared.LaunchCommand.Split(' ').Count(tok => tok.StartsWith("--model")));
+    }
+
+    [Fact]
+    public async Task PrepareSession_Grok46_SetsXdgConfigHomeForEnvIsolation()
+    {
+        var service = CreateService();
+
+        var prepared = await service.PrepareSessionAsync(
+            LLM.Grok46, envName: "my-grok-env", extraArgs: null);
+
+        Assert.True(
+            prepared.Environment.ContainsKey("XDG_CONFIG_HOME"),
+            "Grok 4.6 must share OpenCode's XDG_CONFIG_HOME env isolation.");
     }
 
     [Fact]

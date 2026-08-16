@@ -10,8 +10,8 @@ namespace TokenSaver.Minify;
 /// <summary>
 /// Rewrites an OpenAI Chat Completions (<c>/v1/chat/completions</c>) request body, minifying ONLY
 /// the tool output strings that came from an allowlisted OpenCode shell tool — never the system
-/// prompt, user messages, or the model's replies. This is the zai/Z.AI (GLM) provider's wire
-/// format as routed through OpenCode, and is a third shape distinct from both the Anthropic
+/// prompt, user messages, or the model's replies. This is the Chat Completions wire format
+/// OpenCode uses for zai/Z.AI (GLM) and xai (Grok), and is a third shape distinct from both the Anthropic
 /// Messages API (<see cref="AnthropicMessagesRewriter"/>) and the OpenAI Responses API
 /// (<see cref="CodexResponsesRewriter"/>).
 ///
@@ -66,11 +66,13 @@ public static class ChatCompletionsRewriter
     /// Optional before/after recorder. Null skips materializing raw strings entirely, which is why
     /// the check is inside the loop rather than at the call site.
     /// </param>
+    /// <param name="provider">Stable provider tag stored with optional captures.</param>
     public static ToolOutputRewriteResult Rewrite(
         ReadOnlySpan<byte> utf8Body,
         CompressionPlan plan,
         IBufferWriter<byte> output,
-        ICompressionCaptureSink? captures = null)
+        ICompressionCaptureSink? captures = null,
+        string provider = "zai")
     {
         ArgumentNullException.ThrowIfNull(plan);
         var stats = new MinifyStats();
@@ -186,7 +188,7 @@ public static class ChatCompletionsRewriter
                         {
                             captures!.Capture(new CompressionCapture(
                                 Guid.NewGuid(),
-                                "zai",
+                                provider,
                                 entry.ToolName,
                                 entry.Command,
                                 raw.ToString(),

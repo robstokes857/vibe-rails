@@ -6,7 +6,8 @@ export function getLlmName(llmEnum) {
         3: 'Antigravity',
         4: 'Copilot',
         6: 'OpenCode',
-        7: 'GLM 5.2'
+        7: 'GLM 5.2',
+        8: 'Grok 4.6'
     };
     return names[llmEnum] || 'Unknown';
 }
@@ -111,6 +112,14 @@ export function getCliBrand(cli) {
             // throughout the SVG's style block).
             accentColor: '#1F63EC'
         },
+        'grok-4.6': {
+            label: 'Grok 4.6',
+            logo: getAssetPath('assets/img/grok.svg'),
+            className: 'badge-cli-grok',
+            // Cool off-white so the mark reads on the dark tab strip without
+            // colliding with OpenCode's warmer silver.
+            accentColor: '#e8e8e8'
+        },
         shell: {
             label: 'Terminal',
             logo: getAssetPath('assets/img/terminal.svg'),
@@ -127,6 +136,7 @@ export const BASE_LLM_CHOICES = Object.freeze([
     { cli: 'claude', label: 'Claude' },
     { cli: 'codex', label: 'Codex' },
     { cli: 'glm-5.2', label: 'GLM 5.2' },
+    { cli: 'grok-4.6', label: 'Grok 4.6' },
     { cli: 'opencode', label: 'OpenCode' },
     { cli: 'copilot', label: 'Copilot' },
     { cli: 'antigravity', label: 'Antigravity' }

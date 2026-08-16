@@ -59,19 +59,22 @@ public sealed class EnvironmentRoutesNameCollisionTests
         }
     }
 
-    [Fact]
-    public async Task CreateEnvironment_RefusesThePseudoCliName_ViaTheCharacterRulesThatRunFirst()
+    [Theory]
+    [InlineData("glm-5.2")]
+    [InlineData("grok-4.6")]
+    public async Task CreateEnvironment_RefusesThePseudoCliName_ViaTheCharacterRulesThatRunFirst(string name)
     {
-        // "glm-5.2" also resolves to a CLI, but its period is already outside the character set
-        // a name may use (it becomes a directory under ~/.vibe_rails/envs). Asserted explicitly
-        // so that relaxing those character rules later cannot quietly make this name creatable.
+        // Hyphenated pseudo-CLI wire names also resolve to a CLI, but their period is already
+        // outside the character set a name may use (it becomes a directory under
+        // ~/.vibe_rails/envs). Asserted explicitly so that relaxing those character rules later
+        // cannot quietly make this name creatable.
         var (app, repository) = await StartAppAsync();
         try
         {
             using var client = new HttpClient();
             using var response = await client.PostAsJsonAsync(
                 new Uri(new Uri(app.Urls.First()), "/api/v1/environments"),
-                new CreateEnvironmentRequest("glm-5.2", "Claude"),
+                new CreateEnvironmentRequest(name, "Claude"),
                 TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);

@@ -170,6 +170,7 @@ public sealed class CookieAuthMiddlewareTests
     [InlineData("/llm/openai/v1/responses")]
     [InlineData("/llm/openai/backend-api/codex/responses")]
     [InlineData("/llm/zai/api/paas/v4/chat/completions")]
+    [InlineData("/llm/xai/v1/chat/completions")]
     [InlineData("/llm/anthropic/v1/messages")]
     [InlineData("/llm/control/token-saver/pause")]
     public async Task LlmSurfaces_WithNoTokens_AreRejectedWithPlainStatus(string path)
@@ -192,6 +193,7 @@ public sealed class CookieAuthMiddlewareTests
     [Theory]
     [InlineData("/llm/openai/v1/responses")]
     [InlineData("/llm/anthropic/v1/messages")]
+    [InlineData("/llm/xai/v1/chat/completions")]
     public async Task LlmProxyPaths_WithSessionHeader_PassTheMiddleware(string path)
     {
         // The CLIs authenticate with the same session secret as everyone else, sent as a header

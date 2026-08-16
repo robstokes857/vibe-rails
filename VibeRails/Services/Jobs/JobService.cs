@@ -318,7 +318,7 @@ public sealed class JobService(
         else if (requireEnvironmentPrompt)
             throw JobServiceException.BadRequest("The selected Environment needs an Initial Message before it can run as an Automation.");
 
-        if (resolvedLlm is not (LLM.Codex or LLM.Claude or LLM.Antigravity or LLM.Copilot or LLM.OpenCode or LLM.Glm52))
+        if (resolvedLlm is not (LLM.Codex or LLM.Claude or LLM.Antigravity or LLM.Copilot or LLM.OpenCode or LLM.Glm52 or LLM.Grok46))
             throw JobServiceException.BadRequest("The selected LLM cannot run as an Automation.");
         if (resolvedPrompt.Length > MaximumPromptLength)
             throw JobServiceException.BadRequest($"Initial message must be at most {MaximumPromptLength} characters.");

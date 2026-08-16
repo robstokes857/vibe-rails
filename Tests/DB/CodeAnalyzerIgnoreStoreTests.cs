@@ -24,7 +24,9 @@ public sealed class CodeAnalyzerIgnoreStoreTests : IDisposable
     {
         // Release pooled SQLite connections before deleting: without this the file handle survives,
         // File.Delete throws, and the swallowed exception leaks a temp .db per test on Windows.
-        SqliteConnection.ClearAllPools();
+        // Scoped to this class's connection string: a process-wide ClearAllPools() disposes handles
+        // out from under DB test classes running in parallel.
+        SqliteConnection.ClearPool(new SqliteConnection(_connectionString));
         try
         {
             File.Delete(_dbPath);

@@ -106,6 +106,8 @@ export class SandboxController {
     _reloadCurrentView() {
         if (this.app.currentView === 'sandboxes') {
             this.loadSandboxes();
+        } else if (this.app.currentView === 'environments') {
+            this.app.environmentController.loadEnvironments();
         } else {
             this.app.dashboardController.loadDashboard();
         }

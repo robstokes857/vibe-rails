@@ -2,6 +2,11 @@
 
 Audit date: 2026-08-15
 
+Full production route/authentication reconciliation completed: 2026-08-15. All 142
+`/api/v1` method/path surfaces, eight protected non-`/api` API surfaces, and the three
+bootstrap/page/probe mappings match the current working tree. The only middleware bypasses
+remain exact `GET /health`, exact `GET /auth/bootstrap`, and global `OPTIONS` requests.
+
 Jobs inventory re-checked: 2026-08-03 (three run-history routes added; see § 3).
 
 LLM proxy posture re-audited: 2026-08-05 (`/llm/openai` and `/llm/zai` removed from the
@@ -12,8 +17,13 @@ Route inventory re-checked: 2026-08-07 (five authenticated HTTP-relay proof mapp
 added; see § 3).
 
 Route inventory and authentication coverage re-checked: 2026-08-13 (one authenticated
-environment-step test endpoint added; the 152 mapped surfaces and frozen three-case
-middleware bypass remain unchanged).
+environment-step test endpoint added; the frozen three-case middleware bypass remains
+unchanged).
+
+Route inventory updated: 2026-08-15 (`ANY /llm/xai/{**rest}` added as a fourth Kestrel-mapped
+LLM proxy tree for OpenCode's xAI/Grok provider). This is not the rejected `/llm/grok`
+sidecar. The 153 mapped surfaces and frozen three-case middleware bypass remain otherwise
+unchanged.
 
 Listener topology re-checked: 2026-08-15. The only approved production request listener
 is the main Kestrel host. An uncommitted Grok integration's second `HttpListener` was
@@ -121,8 +131,8 @@ session-scoped browser credential (`viberails_tab`), which the implementation ca
 Authentication is enforced primarily by
 [`CookieAuthMiddleware`](VibeRails/Middleware/CookieAuthMiddleware.cs). The LLM proxy
 routes additionally use
-[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 152 mapped route
-surfaces in this inventory: 142 `/api/v1` method/path mappings, seven non-`/api` protected
+[`ILlmProxyAuthGate`](TokenSaver/ILlmProxyAuthGate.cs). There are 153 mapped route
+surfaces in this inventory: 142 `/api/v1` method/path mappings, eight non-`/api` protected
 API surfaces, and three bootstrap/page/probe routes. Static-file middleware and the
 global `OPTIONS` behavior are noted separately because they are not finite mapped-route
 lists.
@@ -199,6 +209,9 @@ There are **no mapped business `/api/v1` endpoints** in this category.
 - `ANY /llm/zai/{**rest}` — only for nonstandard catch-all paths that do not contain
   `/api/`; normal OpenCode requests use `/llm/zai/api/paas/v4/...` and therefore receive
   both middleware checks.
+- `ANY /llm/xai/{**rest}` — same shape as Claude/Codex: real OpenCode requests use
+  `/llm/xai/v1/chat/completions`, which contains no `/api/` segment, so the middleware
+  enforces the session credential only. The in-handler proxy gate then requires both.
 
 No `/llm` path is on the middleware skip list, so a valid `viberails_session` credential
 (sent as a header by the CLIs) is always required before the handler runs. The
@@ -222,7 +235,7 @@ Unless a proxy-specific note says otherwise, every route in this section is prot
 `viberails_session` cookie (or same-named header) plus the `viberails_tab` header.
 WebSocket handshakes use the session cookie/subprotocol plus the tab-token subprotocol.
 
-### Non-`/api/v1` API surfaces (7)
+### Non-`/api/v1` API surfaces (8)
 
 - `MCP /mcp` — the Streamable HTTP MCP endpoint. The middleware also protects `/mcp/**`.
 - `ANY /llm/openai/{**rest}` — `CookieAuthMiddleware` checks the session credential
@@ -235,6 +248,10 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
   middleware's tab rule applies too — both credentials are enforced before the handler
   runs. When enabled, the proxy gate re-checks both; the nonstandard catch-all-path nuance
   is documented in section 2.
+- `ANY /llm/xai/{**rest}` — same shape as `/llm/anthropic` and `/llm/openai`: the
+  middleware checks the session credential (the real path is `/llm/xai/v1/...`, no
+  `/api/`); when enabled, the proxy gate requires both headers. This is a main-host
+  Kestrel mapping, not the rejected `GrokLoopbackBridge` / `/llm/grok` sidecar.
 - `POST /llm/control/token-saver/pause` — both headers are required by the control
   handler's proxy auth gate.
 - `POST /llm/control/token-saver/resume` — both headers are required by the control
@@ -435,7 +452,7 @@ WebSocket handshakes use the session cookie/subprotocol plus the tab-token subpr
   `viberails_tab`.
 - The normal `/api/v1/**` invariant is strong and simple: every mapped HTTP and WebSocket
   API is behind both session and tab validation before its handler runs.
-- As of 2026-08-05, no `/llm` path bypasses `CookieAuthMiddleware`. All three proxy trees
+- As of 2026-08-05, no `/llm` path bypasses `CookieAuthMiddleware`. All four proxy trees
   clear the middleware with the same header-borne credentials the in-handler gate checks,
   making the gate defense in depth rather than the only line. The feature-disabled `404`
   is now observable only by callers that already hold valid credentials; unauthenticated
