@@ -156,7 +156,8 @@ public static class CliLoop
             cancellationToken,
             initialPrompt: initialPrompt,
             jobRunId: jobRunId,
-            onSessionCreated: onSessionCreated);
+            onSessionCreated: onSessionCreated,
+            renderConsoleOutput: !parsedArgs.IsVsCodeMode);
         Environment.ExitCode = exitCode;
         return exitCode;
     }

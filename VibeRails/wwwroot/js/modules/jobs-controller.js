@@ -389,7 +389,7 @@ export class JobController {
                     <div class="job-card-actions">
                         <button class="btn btn-sm btn-primary" type="button" data-job-action="run" data-job-id="${jobId}" aria-label="Run ${safeName} now"><i class="fa-solid fa-play me-1" aria-hidden="true"></i>Run now</button>
                         <button class="btn btn-sm btn-outline-secondary" type="button" data-job-action="edit" data-job-id="${jobId}" aria-label="Edit ${safeName}"><i class="fa-solid fa-pen me-1" aria-hidden="true"></i>Edit</button>
-                        <button class="btn btn-sm ${job.enabled ? 'btn-outline-success' : 'btn-outline-danger'} job-toggle-action" type="button" data-job-action="toggle" data-job-id="${jobId}" title="${job.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable'}" aria-label="${job.enabled ? 'Disable' : 'Enable'} ${safeName}"><i class="fa-solid ${job.enabled ? 'fa-toggle-on' : 'fa-toggle-off'} me-1" aria-hidden="true"></i>${job.enabled ? 'Disable' : 'Enable'}</button>
+                        <button class="btn btn-sm job-toggle-action ${job.enabled ? 'is-enabled' : 'is-paused'}" type="button" data-job-action="toggle" data-job-id="${jobId}" title="${job.enabled ? 'Pause scheduled and commit-triggered runs' : 'Enable scheduled and commit-triggered runs'}" aria-label="${job.enabled ? 'Pause' : 'Enable'} ${safeName}"><i class="fa-solid ${job.enabled ? 'fa-pause' : 'fa-power-off'}" aria-hidden="true"></i><span>${job.enabled ? 'Pause' : 'Enable'}</span></button>
                         <details class="job-more">
                             <summary class="btn btn-sm btn-outline-secondary" aria-label="More actions for ${safeName}">More<i class="fa-solid fa-chevron-down ms-1" aria-hidden="true"></i></summary>
                             <div class="job-more-menu">
@@ -1092,9 +1092,30 @@ export class JobController {
     }
 
     async runNow(jobId, button) {
-        return this.withBusy(button, 'Queueing…', async () => {
+        const job = this.jobs.find(item => item.id === jobId);
+        const environment = this.findEnvironment(job?.environmentId);
+        return this.withBusy(button, 'Starting…', async () => {
             const response = await this.app.apiCall(`/api/v1/jobs/${jobId}/run`, 'POST');
-            this.app.showToast('Automation queued', response?.message || 'The automation will start shortly.', 'success');
+            const tabId = String(response?.tabId || '').trim();
+            if (tabId && job && environment) {
+                const selection = buildLlmSelectionValue(environment.cli, environment.id);
+                this.app.terminalController?.rememberTabLaunch?.(tabId, {
+                    selection,
+                    label: job.name,
+                    title: `${job.name} Automation`,
+                    icon: '🤖',
+                    taskKey: `automation:${response?.runId || jobId}`,
+                    workingDirectory: this.currentProjectPath()
+                });
+                this.app.showToast('Automation started', response?.message || 'Interactive terminal ready.', 'success');
+                this.app.navigate('terminal-focus', {
+                    preferredSelection: selection,
+                    preferredTabId: tabId
+                });
+                return;
+            }
+
+            this.app.showToast('Automation started', response?.message || 'The automation is running.', 'success');
             await this.refreshRuns({ quiet: true });
         });
     }

@@ -97,8 +97,14 @@ public sealed class JobService(
 
         var runId = await store.EnqueueManualRunAsync(id, cancellationToken)
             ?? throw JobServiceException.Conflict("The Automation could not be queued.");
-        scheduler.Kick();
-        return new JobActionResponse(true, "Automation queued.", runId);
+
+        // Manual runs are handed directly to an interactive Web UI terminal by JobRoutes. Mark
+        // the launch before that potentially-slow terminal bootstrap so the background scheduler
+        // cannot race it and open a second native terminal for the same run.
+        if (!await store.TryMarkLaunchedAsync(runId, cancellationToken))
+            throw JobServiceException.Conflict("The Automation could not reserve an interactive terminal.");
+
+        return new JobActionResponse(true, "Automation is starting.", runId);
     }
 
     public async Task<JobRunListResponse> GetRunsAsync(long? jobId, int limit, CancellationToken cancellationToken = default)

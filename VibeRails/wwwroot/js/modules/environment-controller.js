@@ -203,26 +203,7 @@ export class EnvironmentController {
         }
 
         const escape = (value) => this.app.escapeHtml(value);
-
-        return `
-            <div class="table-responsive">
-                <table class="table table-hover align-middle environments-table">
-                    <colgroup>
-                        <col class="env-col-name">
-                        <col class="env-col-commands">
-                        <col class="env-col-last-used">
-                        <col class="env-col-actions">
-                    </colgroup>
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Custom Args</th>
-                            <th>Last Used</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${this.app.data.environments.map(env => {
+        const renderRows = environments => environments.map(env => {
                             const brand = this.app.getCliBrand(env.cli);
                             const safeName = escape(env.name);
                             const safeCli = escape(env.cli);
@@ -316,11 +297,49 @@ export class EnvironmentController {
                                     </div>
                                 </td>
                             </tr>
-                        `}).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
+                        `}).join('');
+
+        const renderTable = (title, description, environments, workerList = false) => `
+            <section class="environment-list-group${workerList ? ' is-workers' : ''}" aria-label="${escape(title)}">
+                <header class="environment-list-heading">
+                    <span class="environment-list-heading-icon" aria-hidden="true"><i class="fa-solid ${workerList ? 'fa-robot' : 'fa-layer-group'}"></i></span>
+                    <div>
+                        <h5>${escape(title)} <span>${environments.length}</span></h5>
+                        <p>${escape(description)}</p>
+                    </div>
+                </header>
+                ${environments.length > 0 ? `
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle environments-table">
+                            <colgroup>
+                                <col class="env-col-name">
+                                <col class="env-col-commands">
+                                <col class="env-col-last-used">
+                                <col class="env-col-actions">
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Custom Args</th>
+                                    <th>Last Used</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>${renderRows(environments)}</tbody>
+                        </table>
+                    </div>` : `<p class="environment-list-empty">No regular environments configured.</p>`}
+            </section>`;
+
+        const regularEnvironments = this.app.data.environments.filter(environment => environment.automationWorker !== true);
+        const workers = this.app.data.environments.filter(environment => environment.automationWorker === true);
+
+        return `
+            <div class="environment-list-groups">
+                ${renderTable('Environments', 'Profiles you launch directly from terminals and sandboxes.', regularEnvironments)}
+                ${workers.length > 0
+                    ? renderTable('Workers', 'Robot-marked profiles used by Automations.', workers, true)
+                    : ''}
+            </div>`;
     }
 
     /**

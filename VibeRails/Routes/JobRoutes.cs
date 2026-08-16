@@ -2,6 +2,7 @@ using Serilog;
 using VibeRails.DTOs;
 using VibeRails.Services;
 using VibeRails.Services.Jobs;
+using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 
 namespace VibeRails.Routes;
@@ -59,11 +60,31 @@ public static class JobRoutes
             });
         }).WithName("DeleteJob");
 
-        app.MapPost("/api/v1/jobs/{id:long}/run", (
+        app.MapPost("/api/v1/jobs/{id:long}/run", async (
             IJobService service,
+            ITerminalTabHostService tabHost,
             long id,
             CancellationToken cancellationToken) =>
-            ExecuteAsync(() => service.RunNowAsync(id, cancellationToken)))
+            await ExecuteAsync(async () =>
+            {
+                var queued = await service.RunNowAsync(id, cancellationToken);
+                TerminalTabStatusResponse tab;
+                try
+                {
+                    tab = await tabHost.CreateAutomationTabAsync(queued.RunId!, cancellationToken);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    // Interactive launch validation (tab capacity, missing Worker/workspace,
+                    // startup failure) is actionable client input/state, not an opaque 500.
+                    throw JobServiceException.BadRequest(ex.Message);
+                }
+                return queued with
+                {
+                    Message = "Automation started in an interactive terminal.",
+                    TabId = tab.TabId
+                };
+            }))
             .WithName("RunJobNow");
 
         app.MapGet("/api/v1/jobs/runs", (

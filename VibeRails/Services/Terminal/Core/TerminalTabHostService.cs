@@ -9,7 +9,10 @@ using VibeRails.DB;
 using VibeRails.DTOs;
 using VibeRails.Interfaces;
 using VibeRails.Services.AgentTools;
+using VibeRails.Services.Jobs;
+using VibeRails.Services.LlmClis.Launchers;
 using VibeRails.Services.Workspaces;
+using VibeRails.Utils;
 
 namespace VibeRails.Services.Terminal;
 
@@ -26,7 +29,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         string BootstrapUrl,
         string SessionToken,
         string TabToken,
-        DateTime CreatedUtc);
+        DateTime CreatedUtc,
+        string? AutomationRunId = null);
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILocalClientTracker _localClientTracker;
@@ -81,8 +85,145 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     }
 
     public async Task<TerminalTabStatusResponse> CreateTabAsync(CancellationToken cancellationToken = default)
+        => await CreateTabCoreAsync(null, null, waitForActiveSession: false, cancellationToken);
+
+    /// <summary>
+    /// Starts a manually-triggered Automation inside a terminal-tab child instead of opening a
+    /// separate native terminal. The child still runs <see cref="JobRunner"/>, so cancellation,
+    /// deadlines, idle completion, session linking, and run history stay identical to scheduled
+    /// runs; only the viewer is the bidirectional Web UI terminal.
+    /// </summary>
+    public async Task<TerminalTabStatusResponse> CreateAutomationTabAsync(
+        string runId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+            throw new InvalidOperationException("Automation run id is required.");
+
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IJobStore>();
+        var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
+
+        var run = await store.GetRunAsync(runId, cancellationToken)
+            ?? throw new InvalidOperationException("Automation run not found.");
+        if (run.Status != JobRunStatus.Queued)
+            throw new InvalidOperationException("Only a queued Automation run can open an interactive terminal.");
+        if (run.EnvironmentId is not int environmentId)
+            throw new InvalidOperationException("The Automation no longer has a Worker.");
+
+        var environment = await repository.GetEnvironmentByIdAsync(environmentId, cancellationToken);
+        if (environment is null
+            || environment.LLM != run.Llm
+            || !ProjectPathComparer.IsVisibleIn(environment.ProjectPath, run.ProjectPath))
+        {
+            await store.CompleteRunAsync(
+                runId,
+                JobRunStatus.Failed,
+                null,
+                "The Automation Worker no longer exists in this project.",
+                CancellationToken.None);
+            throw new InvalidOperationException("The Automation Worker no longer exists in this project.");
+        }
+
+        try
+        {
+            var workingDirectory = run.ProjectPath;
+            if (environment.UsesWorkspaceClone)
+            {
+                var workspaceService = scope.ServiceProvider.GetRequiredService<IRunWorkspaceService>();
+                var workspace = await workspaceService.ResolveAsync(
+                    environment,
+                    run.ProjectPath,
+                    cancellationToken);
+                if (!workspace.Success)
+                    throw new InvalidOperationException(workspace.Error);
+
+                workingDirectory = workspace.WorkingDirectory;
+            }
+
+            try
+            {
+                await repository.TouchEnvironmentLastUsedAsync(environment.Id, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(
+                    ex,
+                    "[TerminalTabs] Could not update LastUsedUTC for Automation Worker {EnvironmentId}",
+                    environment.Id);
+            }
+
+            var childArguments = BuildAutomationChildArguments(
+                run,
+                environment,
+                workingDirectory,
+                Environment.ProcessId);
+            return await CreateTabCoreAsync(
+                childArguments,
+                run.Id,
+                waitForActiveSession: true,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await store.CompleteRunAsync(
+                runId,
+                JobRunStatus.Cancelled,
+                JobRunOutcome.ToExitCode(JobRunStatus.Cancelled),
+                JobRunOutcome.CancelledMessage,
+                CancellationToken.None);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await store.CompleteRunAsync(
+                runId,
+                JobRunStatus.Failed,
+                null,
+                $"Could not open an interactive terminal for this Automation: {ex.Message}",
+                CancellationToken.None);
+            throw;
+        }
+    }
+
+    internal static string[] BuildAutomationChildArguments(
+        JobRunRecord run,
+        LLM_Environment environment,
+        string workingDirectory,
+        int parentProcessId)
+    {
+        var vbArgs = JobLaunchService.BuildVbArgs(run).ToList();
+        vbArgs.AddRange(
+        [
+            "--env-id", environment.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "--vs-code-v1",
+            "--parent-pid", parentProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        ]);
+
+        var cliArgs = string.IsNullOrWhiteSpace(environment.CustomArgs)
+            ? []
+            : ShellArgSanitizer.ParseAndValidate(environment.CustomArgs);
+
+        return BaseLlmCliLauncher.BuildVbArgv(
+            run.Llm,
+            workingDirectory,
+            cliArgs,
+            environment.CustomName,
+            vbArgs.ToArray());
+    }
+
+    private async Task<TerminalTabStatusResponse> CreateTabCoreAsync(
+        IReadOnlyList<string>? childArguments,
+        string? automationRunId,
+        bool waitForActiveSession,
+        CancellationToken cancellationToken)
     {
         await _createGate.WaitAsync(cancellationToken);
+        var gateHeld = true;
 
         TerminalChildProcess? child = null;
         try
@@ -95,7 +236,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 }
             }
 
-            child = await SpawnChildAsync(cancellationToken);
+            child = await SpawnChildAsync(childArguments, automationRunId, cancellationToken);
 
             lock (_lock)
             {
@@ -105,8 +246,17 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 EnsureTabsOwnerLocked();
             }
 
+            // A Worker's pre-launch steps can run for minutes before its PTY becomes active. Tab
+            // capacity is reserved now, so no reason remains to serialize every other new-tab
+            // request behind that wait.
+            _createGate.Release();
+            gateHeld = false;
+
             var relayToken = _tabRelayCts[child.TabId].Token;
             _ = RelayChildAppEventsAsync(child, relayToken);
+            if (waitForActiveSession)
+                return await WaitForActiveSessionAsync(child, cancellationToken);
+
             return await BuildTabStatusAsync(child, cancellationToken);
         }
         catch
@@ -119,8 +269,34 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
         finally
         {
-            _createGate.Release();
+            if (gateHeld)
+                _createGate.Release();
         }
+    }
+
+    private async Task<TerminalTabStatusResponse> WaitForActiveSessionAsync(
+        TerminalChildProcess child,
+        CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested && !child.Process.HasExited)
+        {
+            var status = await GetTerminalStatusFromChildAsync(child, cancellationToken);
+            if (status?.HasActiveSession == true)
+            {
+                return new TerminalTabStatusResponse(
+                    child.TabId,
+                    child.CreatedUtc,
+                    true,
+                    status.SessionId,
+                    status.Cli,
+                    status.WorkingDirectory);
+            }
+
+            await Task.Delay(100, cancellationToken);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        throw new InvalidOperationException("The Automation terminal exited before its TUI was ready.");
     }
 
     public async Task<bool> DeleteTabAsync(string tabId, CancellationToken cancellationToken = default)
@@ -538,7 +714,10 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             status?.WorkingDirectory);
     }
 
-    private async Task<TerminalChildProcess> SpawnChildAsync(CancellationToken cancellationToken)
+    private async Task<TerminalChildProcess> SpawnChildAsync(
+        IReadOnlyList<string>? childArguments,
+        string? automationRunId,
+        CancellationToken cancellationToken)
     {
         var exePath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(exePath))
@@ -554,7 +733,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             StartInfo = new ProcessStartInfo
             {
                 FileName = exePath,
-                Arguments = $"--vs-code-v1 --parent-pid {Environment.ProcessId}",
                 WorkingDirectory = _launchDirectory,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
@@ -566,6 +744,11 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             },
             EnableRaisingEvents = true
         };
+
+        var arguments = childArguments
+            ?? ["--vs-code-v1", "--parent-pid", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)];
+        foreach (var argument in arguments)
+            process.StartInfo.ArgumentList.Add(argument);
 
         foreach (var kvp in _toolApiContext.BuildEnvironment())
         {
@@ -680,7 +863,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                 bootstrapUrl,
                 sessionToken,
                 tabToken,
-                DateTime.UtcNow);
+                DateTime.UtcNow,
+                automationRunId);
         }
         catch
         {
@@ -1010,6 +1194,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
         if (stopSessionFirst && !child.Process.HasExited)
         {
+            var stopRequested = false;
             try
             {
                 Log.Information("[TerminalTabs] Sending graceful /terminal/stop before kill. tabId={TabId} pid={Pid}", child.TabId, pid);
@@ -1019,10 +1204,22 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                     "/api/v1/terminal/stop",
                     payload: null,
                     cancellationToken);
+                stopRequested = true;
             }
             catch (Exception ex)
             {
                 Log.Warning(ex, "[TerminalTabs] Graceful stop request failed (best-effort). tabId={TabId} pid={Pid}", child.TabId, pid);
+            }
+
+            // An Automation child owns its normal cancellation path: /terminal/stop sets the
+            // durable cancel flag and JobRunner's watcher records Cancelled before terminating its
+            // process tree. Give that bounded path one poll interval before falling back to the
+            // generic hard kill, or closing the tab would turn a deliberate stop into Interrupted.
+            if (stopRequested
+                && child.AutomationRunId is not null
+                && await WaitForExitAsync(child.Process, 3500, cancellationToken))
+            {
+                return;
             }
         }
 

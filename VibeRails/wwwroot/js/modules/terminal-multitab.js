@@ -2642,6 +2642,30 @@ export class TerminalController {
         this.managerGeneration = 0;
     }
 
+    rememberTabLaunch(tabId, metadata = {}) {
+        const id = cleanString(tabId);
+        if (!id) return;
+
+        try {
+            const selection = cleanString(metadata.selection);
+            const title = cleanString(metadata.title);
+            if (selection) window.sessionStorage.setItem(`${TAB_SELECTION_PREFIX}${id}`, selection);
+            if (title) window.sessionStorage.setItem(`${TAB_TITLE_PREFIX}${id}`, title);
+            window.sessionStorage.setItem(`${TAB_META_PREFIX}${id}`, JSON.stringify({
+                label: cleanString(metadata.label) || null,
+                icon: cleanString(metadata.icon) || null,
+                accentColor: cleanString(metadata.accentColor) || null,
+                taskKey: cleanString(metadata.taskKey) || null,
+                customLabel: cleanString(metadata.label) != null,
+                minimized: false,
+                pinned: false,
+                notifyEnabled: false,
+                workingDirectory: cleanString(metadata.workingDirectory) || null
+            }));
+            window.sessionStorage.setItem(ACTIVE_TAB_KEY, id);
+        } catch { /* sessionStorage is best-effort (private browsing / webview policies). */ }
+    }
+
     resetLayoutStateForNavigation() {
         this.managerGeneration += 1;
         this.managerInitPromise = null;

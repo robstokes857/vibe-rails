@@ -4649,6 +4649,81 @@ body.vb-terminal-focus-active .vb-terminal-element .xterm-viewport {
     background-color: var(--color-bg-surface-hover);
 }
 
+.environment-list-groups {
+    display: grid;
+    gap: 1.2rem;
+}
+
+.environment-list-group {
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background-color: var(--color-bg-base, #121212);
+}
+
+.environment-list-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.75rem 0.9rem;
+    border-bottom: 1px solid var(--color-border);
+    background-color: var(--color-bg-elevated, #232323);
+}
+
+.environment-list-heading-icon {
+    display: inline-grid;
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    border: 1px solid color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
+    border-radius: 9px;
+    background-color: color-mix(in srgb, var(--color-primary) 10%, var(--color-bg-base, #121212));
+    color: var(--color-primary);
+    place-items: center;
+}
+
+.environment-list-group.is-workers .environment-list-heading-icon {
+    border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+    background-color: color-mix(in srgb, var(--color-accent) 11%, var(--color-bg-base, #121212));
+    color: var(--color-accent);
+}
+
+.environment-list-heading h5,
+.environment-list-heading p {
+    margin: 0;
+}
+
+.environment-list-heading h5 {
+    color: var(--color-text);
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.environment-list-heading h5 span {
+    margin-left: 0.3rem;
+    color: var(--color-text-muted);
+    font: 600 0.72rem/1 var(--vb-font-mono, ui-monospace, monospace);
+}
+
+.environment-list-heading p {
+    margin-top: 0.18rem;
+    color: var(--color-text-muted);
+    font-size: 0.76rem;
+}
+
+.environment-list-group .table-responsive,
+.environment-list-group .environments-table {
+    margin-bottom: 0;
+}
+
+.environment-list-empty {
+    margin: 0;
+    padding: 1rem;
+    color: var(--color-text-muted);
+    font-size: 0.82rem;
+    text-align: center;
+}
+
 .environments-table {
     table-layout: fixed;
     min-width: 760px;
@@ -14465,19 +14540,40 @@ body.git-guard-focus-active #app-content {
     place-items: center;
 }
 
-/* Enabled/disabled toggle reads by color at a glance: green = enabled,
-   red = disabled. A subtle fill keeps the state visible without hover. */
-.job-toggle-action.btn-outline-success {
+/* This control describes the action, not the current state: an active Automation gets a
+   calm Pause button, while a paused one gets the stronger green Enable affordance. */
+.job-toggle-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    min-width: 82px;
+    border-color: color-mix(in srgb, var(--color-text-muted) 55%, var(--color-border));
+    background-color: color-mix(in srgb, var(--color-text-muted) 8%, var(--color-bg-base, #121212));
+    color: var(--color-text);
+}
+
+.job-toggle-action:hover,
+.job-toggle-action:focus-visible {
+    border-color: var(--color-warning);
+    background-color: color-mix(in srgb, var(--color-warning) 12%, var(--color-bg-base, #121212));
+    color: var(--color-warning);
+}
+
+.job-toggle-action.is-paused {
+    border-color: color-mix(in srgb, var(--color-success, #22c55e) 58%, var(--color-border));
     background-color: color-mix(in srgb, var(--color-success, #22c55e) 12%, var(--color-bg-base, #121212));
+    color: var(--color-success, #22c55e);
 }
 
-.job-toggle-action.btn-outline-danger {
-    background-color: color-mix(in srgb, var(--color-danger, #ef4444) 12%, var(--color-bg-base, #121212));
+.job-toggle-action.is-paused:hover,
+.job-toggle-action.is-paused:focus-visible {
+    border-color: var(--color-success, #22c55e);
+    background-color: color-mix(in srgb, var(--color-success, #22c55e) 20%, var(--color-bg-base, #121212));
+    color: var(--color-success, #22c55e);
 }
 
-.job-toggle-action i {
-    font-size: 1rem;
-}
+.job-toggle-action i { font-size: 0.84rem; }
 
 .job-more {
     position: relative;

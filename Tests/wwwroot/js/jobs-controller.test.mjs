@@ -1341,6 +1341,77 @@ test('Automation rows show the next scheduled run and disabled state', () => {
     assert.doesNotMatch(list.innerHTML, /No time limit/);
 });
 
+test('Automation cards use Pause and Enable actions instead of state-colored toggle icons', () => {
+    const controller = new JobController(createApp());
+    controller.environments = [{ id: 42, name: 'Worker', cli: 'codex', customPrompt: 'Review.' }];
+    controller.jobs = [
+        { id: 1, name: 'Active review', llm: 1, environmentId: 42, enabled: true, triggers: [] },
+        { id: 2, name: 'Paused review', llm: 1, environmentId: 42, enabled: false, triggers: [] }
+    ];
+
+    const html = controller.renderJobsListHtml();
+
+    assert.match(html, /job-toggle-action is-enabled[^>]*title="Pause scheduled/);
+    assert.match(html, /fa-pause[^>]*><\/i><span>Pause<\/span>/);
+    assert.match(html, /job-toggle-action is-paused[^>]*title="Enable scheduled/);
+    assert.match(html, /fa-power-off[^>]*><\/i><span>Enable<\/span>/);
+    assert.doesNotMatch(html, /fa-toggle-on|fa-toggle-off|btn-outline-danger/);
+});
+
+test('Run now opens the tracked Automation in its interactive terminal tab', async () => {
+    const remembered = [];
+    const navigations = [];
+    const app = createApp();
+    app.data = { configs: { rootPath: '/repo' }, isInGit: true };
+    app.apiCall = async () => ({
+        success: true,
+        message: 'Automation started in an interactive terminal.',
+        runId: 'run-123',
+        tabId: 'tab-456'
+    });
+    app.terminalController = {
+        rememberTabLaunch(tabId, metadata) { remembered.push({ tabId, metadata }); }
+    };
+    app.navigate = (view, data) => navigations.push({ view, data });
+
+    const controller = new JobController(app);
+    controller.jobs = [{ id: 7, name: 'Nightly review', environmentId: 42 }];
+    controller.environments = [{ id: 42, name: 'Worker', cli: 'codex' }];
+
+    await controller.runNow(7, null);
+
+    assert.equal(remembered.length, 1);
+    assert.equal(remembered[0].tabId, 'tab-456');
+    assert.equal(remembered[0].metadata.selection, 'env:42:codex');
+    assert.equal(remembered[0].metadata.taskKey, 'automation:run-123');
+    assert.deepEqual(navigations, [{
+        view: 'terminal-focus',
+        data: { preferredSelection: 'env:42:codex', preferredTabId: 'tab-456' }
+    }]);
+});
+
+test('Environment UI groups robot-marked Workers below regular Environments', () => {
+    const app = createApp();
+    app.getCliBrand = cli => ({ label: cli, logo: '' });
+    app.data.environments = [
+        { id: 2, name: 'Automation Worker', cli: 'claude', automationWorker: true },
+        { id: 1, name: 'Daily Environment', cli: 'codex', automationWorker: false }
+    ];
+    const html = new EnvironmentController(app).renderEnvironmentsTable();
+
+    const environmentsHeading = html.indexOf('<h5>Environments');
+    const regularRow = html.indexOf('Daily Environment');
+    const workersHeading = html.indexOf('<h5>Workers');
+    const workerRow = html.indexOf('Automation Worker');
+
+    assert.ok(environmentsHeading >= 0);
+    assert.ok(environmentsHeading < regularRow);
+    assert.ok(regularRow < workersHeading);
+    assert.ok(workersHeading < workerRow);
+    assert.match(html, /environment-list-group is-workers/);
+    assert.match(html, /env-worker-badge/);
+});
+
 test('Recipe import confirmation discloses and escapes executable Environment content', (t) => {
     const originalDocument = globalThis.document;
     t.after(() => { globalThis.document = originalDocument; });

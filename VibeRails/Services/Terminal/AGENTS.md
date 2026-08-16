@@ -343,7 +343,8 @@ Flow:
 
 Stop:
 - `POST /api/v1/terminal/stop`
-- allowed only if not externally owned
+- allowed when web-owned; an externally-owned interactive Automation maps Stop to its durable
+  Job cancellation flag, while other CLI-owned sessions still reject it
 
 ### 2) CLI-owned session with web viewer
 Entry:
@@ -353,6 +354,22 @@ Flow:
 1. runner starts PTY + console I/O
 2. `RegisterExternalTerminal(...)` exposes same PTY to local web viewer endpoint
 3. on CLI exit: `UnregisterTerminalAsync()` closes local viewer socket if connected
+
+### 3) Interactive manual Automation
+Entry:
+- `POST /api/v1/jobs/{id}/run` in `Routes/JobRoutes.cs`
+
+Flow:
+1. `JobService.RunNowAsync` enqueues the manual run and marks its launch reserved so the scheduler
+   cannot race it into a native terminal.
+2. `TerminalTabHostService.CreateAutomationTabAsync` resolves the Worker's workspace and starts a
+   hidden child with `--env-id ... --job-run ... --vs-code-v1 --parent-pid ...`.
+3. The child prints its one-time bootstrap URL before entering `JobRunner`; the parent authenticates
+   and proxies the ordinary terminal-tab WebSocket.
+4. `JobRunner` still owns claim, timeout, cancellation, idle completion, session linking, and final
+   history status. The hidden child omits `ConsoleOutputConsumer`; xterm is its renderer and input.
+5. Closing/stopping the tab sets the run's cancellation flag and gives `JobRunner` time to record
+   `Cancelled` before the parent uses its normal hard-kill fallback.
 
 ## Local API Surface
 From `Routes/TerminalRoutes.cs`:

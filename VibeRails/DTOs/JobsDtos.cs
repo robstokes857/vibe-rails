@@ -201,7 +201,11 @@ public sealed record JobRunPageRecord(
     int PageSize,
     IReadOnlyList<JobRunRecord> Runs);
 
-public sealed record JobActionResponse(bool Success, string Message, string? RunId = null);
+public sealed record JobActionResponse(
+    bool Success,
+    string Message,
+    string? RunId = null,
+    string? TabId = null);
 
 public sealed record JobDefinitionRecord(
     long Id,
