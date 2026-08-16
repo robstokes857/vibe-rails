@@ -137,6 +137,12 @@ History remains unfiltered so launch preferences never hide historical sessions.
 
 Both base CLI and custom environment launches share one unified tab API; the only difference is whether `environmentName` is included in the start body.
 
+Automation's manual **Run now** also lands in this terminal surface, but the backend creates that
+tab because it must spawn a `JobRunner` child rather than an ordinary blank terminal child. The
+response carries `tabId`; `jobs-controller.js` stores the Worker's selection + Automation label in
+the normal per-tab session metadata, then navigates to `terminal-focus` with `preferredTabId`.
+Scheduled/commit/retry runs remain native background launches.
+
 ### Flow: "Web UI" Button
 
 1. User clicks "Web UI" on environments page

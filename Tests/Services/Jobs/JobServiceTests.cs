@@ -286,6 +286,30 @@ public sealed class JobServiceTests : IDisposable
             Times.Never);
     }
 
+    [Fact]
+    public async Task RunNow_ReservesTheRunForAnInteractiveTab_InsteadOfKickingNativeLauncher()
+    {
+        _store
+            .Setup(s => s.GetJobAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Record() with { Id = 7 });
+        _store
+            .Setup(s => s.EnqueueManualRunAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("manual-run");
+        _store
+            .Setup(s => s.TryMarkLaunchedAsync("manual-run", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _executableResolver.Setup(r => r.Resolve(LLM.Claude)).Returns("claude");
+
+        var response = await Service().RunNowAsync(7, TestContext.Current.CancellationToken);
+
+        Assert.Equal("manual-run", response.RunId);
+        Assert.Contains("starting", response.Message, StringComparison.OrdinalIgnoreCase);
+        _store.Verify(
+            s => s.TryMarkLaunchedAsync("manual-run", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _scheduler.Verify(s => s.Kick(), Times.Never);
+    }
+
     private JobService Service() => new(
         _store.Object, _repository.Object, _executableResolver.Object, _scheduler.Object);
 
