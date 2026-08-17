@@ -224,6 +224,7 @@ jobs:
   publish_extension:
     name: Publish VS Code Extension
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: package_extension
     env:
       VSCE_PAT: ${{ secrets.VS_PAT }}
@@ -259,8 +260,31 @@ jobs:
             exit 1
           fi
 
+          publish_with_retry() {
+            local package="$1"
+            local max_attempts=5
+            local retry_delay_seconds=15
+            local attempt
+
+            for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+              echo "Publishing $(basename "$package") (attempt ${attempt}/${max_attempts})..."
+              if npx --yes @vscode/vsce publish --packagePath "$package" --skip-duplicate; then
+                return 0
+              fi
+
+              if (( attempt == max_attempts )); then
+                echo "Publishing $(basename "$package") failed after ${max_attempts} attempts." >&2
+                return 1
+              fi
+
+              echo "::warning::Marketplace publish failed for $(basename "$package"); retrying in ${retry_delay_seconds} seconds."
+              sleep "$retry_delay_seconds"
+              retry_delay_seconds=$((retry_delay_seconds * 2))
+            done
+          }
+
           for package in "${packages[@]}"; do
-            npx --yes @vscode/vsce publish --packagePath "$package" --skip-duplicate
+            publish_with_retry "$package"
           done
 
   upload:
