@@ -333,7 +333,6 @@ See [VibeRails/Services/Mcp/AGENTS.md](VibeRails/Services/Mcp/AGENTS.md) for the
 ## Vibe Rails Rules
 - Cyclomatic complexity < 20 (COMMIT)
 
-- Log all file changes (WARN)
 ```
 
 The heading must be `## Vibe Rails Rules` (`## Vibe Control Rules` is still read for older files).
