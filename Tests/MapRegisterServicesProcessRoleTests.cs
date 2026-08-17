@@ -32,6 +32,26 @@ public sealed class MapRegisterServicesProcessRoleTests
         Assert.Equal(expected, MapRegisterServices.IsActiveRootBackendProcess(args));
     }
 
+    /// <summary>
+    /// Route mapping reads this singleton instead of re-deriving the role from
+    /// <see cref="Environment.GetCommandLineArgs"/>, which is a different array than the one
+    /// Register is handed. Publishing it is what keeps "is this route mapped" and "is its service
+    /// registered" from ever being able to disagree.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ProcessRoles))]
+    public void Register_PublishesTheResolvedProcessRole(string[] args, bool expectedActiveRoot)
+    {
+        var services = new ServiceCollection();
+        MapRegisterServices.Register(services, args, "http://127.0.0.1:12345");
+        using var provider = services.BuildServiceProvider();
+
+        var role = provider.GetRequiredService<ProcessRole>();
+
+        Assert.Equal(expectedActiveRoot, role.IsActiveRootBackend);
+        Assert.Equal(MapRegisterServices.IsTerminalTabChildProcess(args), role.IsTerminalTabChild);
+    }
+
     [Fact]
     public async Task RetiredJobTick_IsRecognizedButPerformsNoWork()
     {

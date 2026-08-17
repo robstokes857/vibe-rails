@@ -31,6 +31,8 @@ public class RulesTool
         string FullPath,
         int? ChangedLineCount,
         bool ExistsInIndex,
+        GitStagedChangeKind ChangeKind,
+        string? PreviousRelativePath = null,
         string? Content = null);
 
     private sealed record AgentFileSnapshot(
@@ -122,6 +124,8 @@ public class RulesTool
                     file.FullPath,
                     file.ChangedLineCount,
                     file.ExistsInIndex,
+                    file.ChangeKind,
+                    file.PreviousRelativePath,
                     file.Content)).ToList();
             if (stagedFiles.Count == 0 && !validateCommitMessage)
             {
@@ -486,7 +490,8 @@ public class RulesTool
                 path,
                 ToFullPath(gitRoot, path),
                 lineCounts.GetValueOrDefault(path),
-                indexPaths.Contains(path)))
+                indexPaths.Contains(path),
+                indexPaths.Contains(path) ? GitStagedChangeKind.Unknown : GitStagedChangeKind.Deleted))
             .ToList();
     }
 
@@ -575,6 +580,56 @@ public class RulesTool
         CancellationToken cancellationToken)
     {
         var ruleLower = ruleText.ToLowerInvariant();
+
+        if (PathLockRule.LooksLikePathLock(ruleText))
+        {
+            // Unrecognized, not Violation. A lock that will not parse or resolve has no path to
+            // compare the staged files against, so a violation here fires on every commit
+            // regardless of what changed — and at STOP that blocks all work until AGENTS.md is
+            // hand-edited, possibly the very file the lock covers. Unrecognized still surfaces
+            // the rule (with UNSUPPORTED: guidance) but only ever as a warning.
+            if (!PathLockRule.TryParse(ruleText, out var pathLock))
+            {
+                return RuleValidationResult.Unrecognized(
+                    "UNSUPPORTED: path locks must use File Lock('path/to/file') or "
+                    + "Directory Lock('path/to/directory').");
+            }
+
+            if (!PathLockRule.TryResolveRepositoryPath(
+                    pathLock,
+                    sourceAgent.FullPath,
+                    gitRoot,
+                    out var lockedPath,
+                    out var error))
+            {
+                return RuleValidationResult.Unrecognized($"UNSUPPORTED: {error}.");
+            }
+
+            var lockedChanges = stagedFiles
+                .Where(file => PathLockRule.Matches(
+                    pathLock,
+                    lockedPath,
+                    file.RelativePath,
+                    file.PreviousRelativePath,
+                    sourceAgent.RelativePath,
+                    GitPathComparison))
+                .ToList();
+
+            if (lockedChanges.Count == 0)
+            {
+                var targetType = pathLock.Kind == PathLockKind.File ? "file" : "directory";
+                return RuleValidationResult.Pass($"Locked {targetType} '{lockedPath}' was not changed");
+            }
+
+            var changedPaths = lockedChanges
+                .Select(DescribePathLockChange)
+                .Distinct(GitPathComparer)
+                .Take(3);
+            var lockLabel = pathLock.Kind == PathLockKind.File ? "file" : "directory";
+            return RuleValidationResult.Violation(
+                $"Locked {lockLabel} '{lockedPath}' has {lockedChanges.Count} change(s): "
+                + string.Join(", ", changedPaths));
+        }
 
         if (ruleLower.Contains("log all file changes", StringComparison.Ordinal))
         {
@@ -739,6 +794,20 @@ public class RulesTool
     private static bool IsCommitMessageRule(string ruleText) =>
         ruleText.Contains("check commit message for", StringComparison.OrdinalIgnoreCase);
 
+    private static string DescribePathLockChange(StagedFileSnapshot file)
+    {
+        if (file.ChangeKind == GitStagedChangeKind.Renamed
+            && !string.IsNullOrWhiteSpace(file.PreviousRelativePath))
+        {
+            return $"{file.PreviousRelativePath} -> {file.RelativePath} (renamed)";
+        }
+
+        var kind = file.ChangeKind == GitStagedChangeKind.Unknown
+            ? "changed"
+            : file.ChangeKind.ToString().ToLowerInvariant();
+        return $"{file.RelativePath} ({kind})";
+    }
+
     private static HashSet<string> ParseDocumentedFiles(
         AgentFileSnapshot agentFile,
         string gitRoot)
@@ -836,7 +905,8 @@ public class RulesTool
 
         var prefix = relativeDirectory.TrimEnd('/') + "/";
         return stagedFiles
-            .Where(file => file.RelativePath.StartsWith(prefix, GitPathComparison))
+            .Where(file => file.RelativePath.StartsWith(prefix, GitPathComparison)
+                || file.PreviousRelativePath?.StartsWith(prefix, GitPathComparison) == true)
             .ToList();
     }
 

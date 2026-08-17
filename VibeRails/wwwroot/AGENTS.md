@@ -18,6 +18,19 @@ Vanilla JavaScript SPA using Bootstrap 5 and xterm.js. No build step required.
 | [js/modules/dashboard-controller.js](js/modules/dashboard-controller.js) | Dashboard layout with state passing for preselection |
 | [js/modules/code-analyzer-dashboard.js](js/modules/code-analyzer-dashboard.js) | Interactive MintLint scan dashboard with Monaco code evidence for the Rules page |
 
+## Reusable local File Explorer
+
+Call `await app.pickFileSystemEntry({ mode, initialPath?, title?, includeHidden?, triggerElement? })`
+from any view. `mode` is `file`, `directory`, or `any`. A selection resolves to
+`{ canceled: false, path, kind, name }`; every dismissal resolves (rather than rejects) to
+`{ canceled: true, path: null, kind: null, name: null }`. The component is a nested modal layer,
+so it can safely open over an existing `app.showModal` form.
+
+The authenticated root backend serves one metadata-only level at
+`GET /api/v1/filesystem/entries`. Cursor paging and debounced server search keep every item in a
+large directory reachable. Network/device paths and navigation through links/reparse points are
+rejected; linked rows are shown for context but cannot be opened or selected.
+
 ## Token Saver Integration
 
 The token-savings meter sits at the far right of the terminal controls bar and is owned by
@@ -29,7 +42,7 @@ paused via the `pause_token_saver` / `resume_token_saver` MCP tools.
 ## Terminal Environment Integration
 
 The terminal dropdown shows two groups:
-- **Base CLIs**: Claude, Codex, GLM 5.2, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
+- **Base CLIs**: Claude, Codex, GLM 5.2, GLM 5.3, OpenCode, Copilot, Antigravity (each shown as "(default)") — resolved to its executable server-side (Antigravity → `agy`)
 - **Custom Environments**: User-created environments — spawned directly via the tab start endpoint
 
 ## Environment Steps editor

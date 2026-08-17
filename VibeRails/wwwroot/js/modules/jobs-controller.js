@@ -15,7 +15,8 @@ const LLM = Object.freeze({
     COPILOT: 4,
     OPENCODE: 6,
     GLM_52: 7,
-    GROK_46: 8
+    GROK_46: 8,
+    GLM_53: 9
 });
 
 const LLM_BY_CLI = Object.freeze({
@@ -25,6 +26,7 @@ const LLM_BY_CLI = Object.freeze({
     copilot: LLM.COPILOT,
     opencode: LLM.OPENCODE,
     'glm-5.2': LLM.GLM_52,
+    'glm-5.3': LLM.GLM_53,
     'grok-4.6': LLM.GROK_46
 });
 
@@ -1095,7 +1097,12 @@ export class JobController {
         const job = this.jobs.find(item => item.id === jobId);
         const environment = this.findEnvironment(job?.environmentId);
         return this.withBusy(button, 'Starting…', async () => {
-            const response = await this.app.apiCall(`/api/v1/jobs/${jobId}/run`, 'POST');
+            const response = await this.app.apiCall(
+                `/api/v1/jobs/${jobId}/run`,
+                'POST',
+                null,
+                { preferErrorResponseMessage: true }
+            );
             const tabId = String(response?.tabId || '').trim();
             if (tabId && job && environment) {
                 const selection = buildLlmSelectionValue(environment.cli, environment.id);
@@ -1108,6 +1115,9 @@ export class JobController {
                     workingDirectory: this.currentProjectPath()
                 });
                 this.app.showToast('Automation started', response?.message || 'Interactive terminal ready.', 'success');
+                // Refresh before navigating away so the Automations list is current when the
+                // user comes back, rather than showing the run's pre-launch state.
+                await this.refreshRuns({ quiet: true });
                 this.app.navigate('terminal-focus', {
                     preferredSelection: selection,
                     preferredTabId: tabId

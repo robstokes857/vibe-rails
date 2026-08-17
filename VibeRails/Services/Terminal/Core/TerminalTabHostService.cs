@@ -22,6 +22,18 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
     private const int HealthAttempts = 30;
     private const int HealthDelayMs = 500;
 
+    // An Automation's pre-launch steps run inside the child and can legitimately take minutes, so
+    // the ceiling is generous. It exists because "slow" and "wedged" look identical from here: a
+    // CLI sitting on an auth prompt never exits, so HasExited alone would poll forever.
+    private static readonly TimeSpan ActiveSessionTimeout = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan ActiveSessionPollMin = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan ActiveSessionPollMax = TimeSpan.FromSeconds(2);
+
+    // Teardown runs without the caller's token (see TerminateChildAsync), so the graceful stop
+    // needs a bound of its own rather than HttpClient's 100-second default. A child that cannot
+    // answer within this is one the hard kill below is for.
+    private static readonly TimeSpan GracefulStopRequestTimeout = TimeSpan.FromSeconds(5);
+
     private sealed record TerminalChildProcess(
         string TabId,
         Process Process,
@@ -104,29 +116,36 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         var store = scope.ServiceProvider.GetRequiredService<IJobStore>();
         var repository = scope.ServiceProvider.GetRequiredService<IRepository>();
 
-        var run = await store.GetRunAsync(runId, cancellationToken)
-            ?? throw new InvalidOperationException("Automation run not found.");
-        if (run.Status != JobRunStatus.Queued)
-            throw new InvalidOperationException("Only a queued Automation run can open an interactive terminal.");
-        if (run.EnvironmentId is not int environmentId)
-            throw new InvalidOperationException("The Automation no longer has a Worker.");
-
-        var environment = await repository.GetEnvironmentByIdAsync(environmentId, cancellationToken);
-        if (environment is null
-            || environment.LLM != run.Llm
-            || !ProjectPathComparer.IsVisibleIn(environment.ProjectPath, run.ProjectPath))
-        {
-            await store.CompleteRunAsync(
-                runId,
-                JobRunStatus.Failed,
-                null,
-                "The Automation Worker no longer exists in this project.",
-                CancellationToken.None);
-            throw new InvalidOperationException("The Automation Worker no longer exists in this project.");
-        }
-
+        var finalizeReservedRun = true;
         try
         {
+            var run = await store.GetRunAsync(runId, cancellationToken)
+                ?? throw new InvalidOperationException("Automation run not found.");
+
+            // A run that is not Queued is already owned by something else (the scheduler, or a
+            // completed attempt). Report it without clobbering that owner's state.
+            if (run.Status != JobRunStatus.Queued)
+            {
+                finalizeReservedRun = false;
+                throw new InvalidOperationException(
+                    "Only a queued Automation run can open an interactive terminal.");
+            }
+
+            // RunNowAsync has already stamped LaunchedUTC, so the scheduler will not pick this
+            // run back up. Every failure after that reservation, including the read above, must
+            // finalize it here instead of leaving it Queued-but-launched for the stalled-launch
+            // sweeper.
+            if (run.EnvironmentId is not int environmentId)
+                throw new InvalidOperationException("The Automation no longer has a Worker.");
+
+            var environment = await repository.GetEnvironmentByIdAsync(environmentId, cancellationToken);
+            if (environment is null
+                || environment.LLM != run.Llm
+                || !ProjectPathComparer.IsVisibleIn(environment.ProjectPath, run.ProjectPath))
+            {
+                throw new InvalidOperationException("The Automation Worker no longer exists in this project.");
+            }
+
             var workingDirectory = run.ProjectPath;
             if (environment.UsesWorkspaceClone)
             {
@@ -170,22 +189,28 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await store.CompleteRunAsync(
-                runId,
-                JobRunStatus.Cancelled,
-                JobRunOutcome.ToExitCode(JobRunStatus.Cancelled),
-                JobRunOutcome.CancelledMessage,
-                CancellationToken.None);
+            if (finalizeReservedRun)
+            {
+                await store.CompleteRunAsync(
+                    runId,
+                    JobRunStatus.Cancelled,
+                    JobRunOutcome.ToExitCode(JobRunStatus.Cancelled),
+                    JobRunOutcome.CancelledMessage,
+                    CancellationToken.None);
+            }
             throw;
         }
         catch (Exception ex)
         {
-            await store.CompleteRunAsync(
-                runId,
-                JobRunStatus.Failed,
-                null,
-                $"Could not open an interactive terminal for this Automation: {ex.Message}",
-                CancellationToken.None);
+            if (finalizeReservedRun)
+            {
+                await store.CompleteRunAsync(
+                    runId,
+                    JobRunStatus.Failed,
+                    null,
+                    $"Could not open an interactive terminal for this Automation: {ex.Message}",
+                    CancellationToken.None);
+            }
             throw;
         }
     }
@@ -238,11 +263,16 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
             child = await SpawnChildAsync(childArguments, automationRunId, cancellationToken);
 
+            CancellationToken relayToken;
             lock (_lock)
             {
                 _tabs[child.TabId] = child;
                 var relayCts = new CancellationTokenSource();
                 _tabRelayCts[child.TabId] = relayCts;
+                // Read the token here, not after the lock. DeleteTabAsync removes and disposes
+                // this CTS under the same lock, so a later lookup can miss the entry or touch a
+                // disposed source if the tab is closed while this method is still setting up.
+                relayToken = relayCts.Token;
                 EnsureTabsOwnerLocked();
             }
 
@@ -252,7 +282,6 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             _createGate.Release();
             gateHeld = false;
 
-            var relayToken = _tabRelayCts[child.TabId].Token;
             _ = RelayChildAppEventsAsync(child, relayToken);
             if (waitForActiveSession)
                 return await WaitForActiveSessionAsync(child, cancellationToken);
@@ -263,7 +292,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         {
             if (child != null)
             {
-                await TerminateChildAsync(child, cancellationToken, stopSessionFirst: false);
+                await TerminateChildAsync(child, stopSessionFirst: false);
             }
             throw;
         }
@@ -274,10 +303,19 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
     }
 
+    /// <summary>
+    /// Polls the child until its PTY reports an active session, with a bounded deadline and a
+    /// backoff. Each probe is a real HTTP round-trip to the child, so the interval widens from
+    /// <see cref="ActiveSessionPollMin"/> to <see cref="ActiveSessionPollMax"/> rather than
+    /// hammering a Worker whose pre-launch steps are still running.
+    /// </summary>
     private async Task<TerminalTabStatusResponse> WaitForActiveSessionAsync(
         TerminalChildProcess child,
         CancellationToken cancellationToken)
     {
+        var deadline = DateTime.UtcNow + ActiveSessionTimeout;
+        var delay = ActiveSessionPollMin;
+
         while (!cancellationToken.IsCancellationRequested && !child.Process.HasExited)
         {
             var status = await GetTerminalStatusFromChildAsync(child, cancellationToken);
@@ -292,7 +330,16 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                     status.WorkingDirectory);
             }
 
-            await Task.Delay(100, cancellationToken);
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new InvalidOperationException(
+                    $"The Automation terminal did not become ready within {ActiveSessionTimeout.TotalMinutes:0} minutes.");
+            }
+
+            await Task.Delay(delay, cancellationToken);
+            delay = delay < ActiveSessionPollMax
+                ? TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, ActiveSessionPollMax.Ticks))
+                : ActiveSessionPollMax;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -317,7 +364,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             ReleaseTabsOwnerIfNeededLocked();
         }
 
-        await TerminateChildAsync(child, cancellationToken, stopSessionFirst: true);
+        await TerminateChildAsync(child, stopSessionFirst: true);
         return true;
     }
 
@@ -655,7 +702,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             return;
         }
 
-        var stopTasks = snapshot.Select(child => TerminateChildAsync(child, cancellationToken, stopSessionFirst: true));
+        var stopTasks = snapshot.Select(child => TerminateChildAsync(child, stopSessionFirst: true));
         await Task.WhenAll(stopTasks);
     }
 
@@ -869,7 +916,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         catch
         {
             // Ensure failed handshakes never leave orphaned vb child processes.
-            await TerminateRawProcessAsync(process, CancellationToken.None);
+            await TerminateRawProcessAsync(process);
             throw;
         }
     }
@@ -1179,7 +1226,16 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
     }
 
-    private async Task TerminateChildAsync(TerminalChildProcess child, CancellationToken cancellationToken, bool stopSessionFirst)
+    /// <summary>
+    /// Tears a tab's child process down.
+    ///
+    /// Deliberately takes no <see cref="CancellationToken"/>. Every wait below is already bounded
+    /// by an explicit timeout, so a token could only ever cut teardown short — and the callers hold
+    /// the aborting request's own token. Threading it through meant a browser that cancelled its
+    /// DELETE skipped the graceful-stop window immediately below, turning a deliberate Automation
+    /// stop into an Interrupted run: the exact outcome that window exists to prevent.
+    /// </summary>
+    private async Task TerminateChildAsync(TerminalChildProcess child, bool stopSessionFirst)
     {
         var pid = -1;
         try { pid = child.Process.Id; } catch { }
@@ -1203,7 +1259,8 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
                     HttpMethod.Post,
                     "/api/v1/terminal/stop",
                     payload: null,
-                    cancellationToken);
+                    CancellationToken.None,
+                    timeout: GracefulStopRequestTimeout);
                 stopRequested = true;
             }
             catch (Exception ex)
@@ -1217,16 +1274,16 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             // generic hard kill, or closing the tab would turn a deliberate stop into Interrupted.
             if (stopRequested
                 && child.AutomationRunId is not null
-                && await WaitForExitAsync(child.Process, 3500, cancellationToken))
+                && await WaitForExitAsync(child.Process, 3500))
             {
                 return;
             }
         }
 
-        await TerminateRawProcessAsync(child.Process, cancellationToken);
+        await TerminateRawProcessAsync(child.Process);
     }
 
-    private static async Task TerminateRawProcessAsync(Process process, CancellationToken cancellationToken)
+    private static async Task TerminateRawProcessAsync(Process process)
     {
         var pid = -1;
         try { pid = process.Id; } catch { }
@@ -1247,7 +1304,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
             Log.Warning(ex, "[TerminalTabs] process.Kill(entireProcessTree) failed; falling back to taskkill. pid={Pid}", pid);
         }
 
-        if (await WaitForExitAsync(process, 3000, cancellationToken))
+        if (await WaitForExitAsync(process, 3000))
         {
             Log.Information("[TerminalTabs] Child exited after process.Kill. pid={Pid}", pid);
             return;
@@ -1256,12 +1313,12 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         if (OperatingSystem.IsWindows() && process.Id > 0)
         {
             Log.Warning("[TerminalTabs] Invoking taskkill /T /F fallback. pid={Pid}", pid);
-            await KillProcessTreeWindowsAsync(process.Id, cancellationToken);
-            await WaitForExitAsync(process, 3000, cancellationToken);
+            await KillProcessTreeWindowsAsync(process.Id);
+            await WaitForExitAsync(process, 3000);
         }
     }
 
-    private static async Task<bool> WaitForExitAsync(Process process, int timeoutMs, CancellationToken cancellationToken)
+    private static async Task<bool> WaitForExitAsync(Process process, int timeoutMs)
     {
         if (process.HasExited)
         {
@@ -1270,7 +1327,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
 
         try
         {
-            return await Task.Run(() => process.WaitForExit(timeoutMs), cancellationToken);
+            return await Task.Run(() => process.WaitForExit(timeoutMs));
         }
         catch
         {
@@ -1278,7 +1335,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         }
     }
 
-    private static async Task KillProcessTreeWindowsAsync(int pid, CancellationToken cancellationToken)
+    private static async Task KillProcessTreeWindowsAsync(int pid)
     {
         using var killer = new Process
         {
@@ -1296,7 +1353,7 @@ public sealed class TerminalTabHostService : ITerminalTabHostService, IAsyncDisp
         try
         {
             killer.Start();
-            await killer.WaitForExitAsync(cancellationToken);
+            await killer.WaitForExitAsync();
         }
         catch
         {

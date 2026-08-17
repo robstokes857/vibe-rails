@@ -7,7 +7,8 @@ export function getLlmName(llmEnum) {
         4: 'Copilot',
         6: 'OpenCode',
         7: 'GLM 5.2',
-        8: 'Grok 4.6'
+        8: 'Grok 4.6',
+        9: 'GLM 5.3'
     };
     return names[llmEnum] || 'Unknown';
 }
@@ -112,6 +113,12 @@ export function getCliBrand(cli) {
             // throughout the SVG's style block).
             accentColor: '#1F63EC'
         },
+        'glm-5.3': {
+            label: 'GLM 5.3',
+            logo: getAssetPath('assets/img/z-ai.svg'),
+            className: 'badge-cli-glm',
+            accentColor: '#1F63EC'
+        },
         'grok-4.6': {
             label: 'Grok 4.6',
             logo: getAssetPath('assets/img/grok.svg'),
@@ -136,6 +143,7 @@ export const BASE_LLM_CHOICES = Object.freeze([
     { cli: 'claude', label: 'Claude' },
     { cli: 'codex', label: 'Codex' },
     { cli: 'glm-5.2', label: 'GLM 5.2' },
+    { cli: 'glm-5.3', label: 'GLM 5.3' },
     { cli: 'grok-4.6', label: 'Grok 4.6' },
     { cli: 'opencode', label: 'OpenCode' },
     { cli: 'copilot', label: 'Copilot' },

@@ -72,6 +72,7 @@ function createFixtureState() {
         ['claude', 'Claude'],
         ['opencode', 'OpenCode'],
         ['glm-5.2', 'GLM 5.2'],
+        ['glm-5.3', 'GLM 5.3'],
         ['grok-4.6', 'Grok 4.6'],
         ['antigravity', 'Antigravity'],
         ['copilot', 'Copilot'],

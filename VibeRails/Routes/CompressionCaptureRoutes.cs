@@ -19,6 +19,13 @@ public static class CompressionCaptureRoutes
 {
     private const int DefaultTake = 50;
 
+    /// <summary>
+    /// Ceiling on caller-supplied preview text. The captureId form is bounded by what the proxy
+    /// actually stored; the text form is bounded only by the request body limit, and the pipeline
+    /// allocates scratch proportional to its input. Well above any real tool_result.
+    /// </summary>
+    private const int MaxPreviewTextLength = 2_000_000;
+
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/v1/compression/captures", async (
@@ -61,23 +68,63 @@ public static class CompressionCaptureRoutes
                 [.. CompressionCatalog.DefaultSelection]));
         }).WithName("GetCompressionCatalog");
 
-        app.MapPost("/api/v1/compression/preview", async (
+        app.MapPost("/api/v1/compression/preview", (
             CompressionPreviewRequest request, ICompressionCaptureStore store, CancellationToken ct) =>
-        {
-            var capture = await store.GetAsync(request.CaptureId, ct);
-            if (capture is null)
-                return Results.NotFound(new ErrorResponse($"No compression capture {request.CaptureId:D}."));
+            PreviewAsync(request, store, ct)).WithName("PreviewCompression");
+    }
 
-            var (output, trace, scopeAllowed) = RunPipeline(
-                capture.RawText,
-                capture.Command,
-                capture.Provider,
-                capture.ToolName,
-                request.EnabledIds);
-            return Results.Ok(new CompressionPreviewResponse(
-                output, ToTraceResponses(trace), capture.RawText.Length, output.Length,
-                scopeAllowed));
-        }).WithName("PreviewCompression");
+    /// <summary>
+    /// The preview handler: two mutually exclusive request forms over one pipeline call.
+    /// {captureId} replays a stored capture's RawText; {text, toolName, provider[, command]}
+    /// (plan_1A A3) runs caller-supplied text, so an exchange-mined candidate string can be
+    /// judged against the real pipeline without first being reproduced as live traffic.
+    /// Extracted from the route lambda so the form validation is testable without a host.
+    /// </summary>
+    internal static async Task<IResult> PreviewAsync(
+        CompressionPreviewRequest request, ICompressionCaptureStore store, CancellationToken ct)
+    {
+        // Whitespace-only counts as "not supplied": an empty string here would otherwise be read
+        // as the text form, rejecting {captureId, text: ""} as "both" and running the pipeline
+        // over nothing for {text: ""}.
+        if (!string.IsNullOrWhiteSpace(request.Text))
+        {
+            var text = request.Text;
+            if (request.CaptureId is not null)
+                return TypedResults.BadRequest(new ErrorResponse(
+                    "Provide captureId or text, not both."));
+            if (text.Length > MaxPreviewTextLength)
+                return TypedResults.BadRequest(new ErrorResponse(
+                    $"text is {text.Length} characters; the preview accepts at most "
+                    + $"{MaxPreviewTextLength}."));
+            if (string.IsNullOrEmpty(request.ToolName) || string.IsNullOrEmpty(request.Provider))
+                return TypedResults.BadRequest(new ErrorResponse(
+                    "The text form requires toolName and provider (capture wire keys, e.g. "
+                    + "\"anthropic\", \"openai\", \"zai\", \"xai\")."));
+
+            var (textOutput, textTrace, textScopeAllowed) = RunPipeline(
+                text, request.Command, request.Provider, request.ToolName, request.EnabledIds);
+            return TypedResults.Ok(new CompressionPreviewResponse(
+                textOutput, ToTraceResponses(textTrace), text.Length, textOutput.Length,
+                textScopeAllowed));
+        }
+
+        if (request.CaptureId is not { } captureId)
+            return TypedResults.BadRequest(new ErrorResponse(
+                "Provide captureId (replay a stored capture) or text (preview supplied text)."));
+
+        var capture = await store.GetAsync(captureId, ct);
+        if (capture is null)
+            return TypedResults.NotFound(new ErrorResponse($"No compression capture {captureId:D}."));
+
+        var (output, trace, scopeAllowed) = RunPipeline(
+            capture.RawText,
+            capture.Command,
+            capture.Provider,
+            capture.ToolName,
+            request.EnabledIds);
+        return TypedResults.Ok(new CompressionPreviewResponse(
+            output, ToTraceResponses(trace), capture.RawText.Length, output.Length,
+            scopeAllowed));
     }
 
     /// <summary>

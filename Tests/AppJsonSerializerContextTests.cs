@@ -200,6 +200,53 @@ public sealed class AppJsonSerializerContextTests
     }
 
     [Fact]
+    public void FileSystemBrowseResponse_UsesTheAotContextAndStableWireNames()
+    {
+        var response = new FileSystemBrowseResponse(
+            DefaultPath: "/repo",
+            CurrentPath: "/repo/src",
+            CurrentName: "src",
+            ParentPath: "/repo",
+            Breadcrumbs: [new FileSystemLocationResponse("src", "/repo/src")],
+            Roots: [new FileSystemLocationResponse("/", "/")],
+            Entries:
+            [
+                new FileSystemEntryResponse(
+                    "index.js",
+                    "/repo/src/index.js",
+                    "file",
+                    IsHidden: false,
+                    IsSymbolicLink: false,
+                    Size: 42,
+                    LastModifiedUtc: DateTimeOffset.UnixEpoch,
+                    Extension: ".js")
+            ],
+            Truncated: true,
+            NextCursor: "cursor-value",
+            TotalCount: 42,
+            Search: "index");
+
+        var json = JsonSerializer.Serialize(
+            response,
+            AppJsonSerializerContext.Default.FileSystemBrowseResponse);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var entry = root.GetProperty("entries")[0];
+
+        Assert.Equal("/repo/src", root.GetProperty("currentPath").GetString());
+        Assert.Equal("/repo", root.GetProperty("parentPath").GetString());
+        Assert.Equal("index.js", entry.GetProperty("name").GetString());
+        Assert.Equal("file", entry.GetProperty("kind").GetString());
+        Assert.False(entry.GetProperty("isSymbolicLink").GetBoolean());
+        Assert.Equal(42, entry.GetProperty("size").GetInt64());
+        Assert.Equal("cursor-value", root.GetProperty("nextCursor").GetString());
+        Assert.Equal(42, root.GetProperty("totalCount").GetInt64());
+        Assert.Equal("index", root.GetProperty("search").GetString());
+        Assert.True(root.TryGetProperty("breadcrumbs", out _));
+        Assert.True(root.TryGetProperty("roots", out _));
+    }
+
+    [Fact]
     public void TerminalSnapshotResponse_UsesReservedXtermRendererFieldNames()
     {
         var json = JsonSerializer.Serialize(

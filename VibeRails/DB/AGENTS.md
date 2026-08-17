@@ -133,6 +133,7 @@ existence in another project is not itself disclosed.
 | 6 | OpenCode | Binary is `opencode`; config isolation via `XDG_CONFIG_HOME` |
 | 7 | Glm52 | Pseudo-CLI: OpenCode launched with a pinned `--model` flag. `LlmParser` special-cases the string `"glm-5.2"` |
 | 8 | Grok46 | Pseudo-CLI: OpenCode launched with `--model=xai/grok-4.6`. `LlmParser` special-cases the string `"grok-4.6"`. Token Saver rides the OpenCode proxy's <c>xai</c> override (`/llm/xai` → `api.x.ai`). |
+| 9 | Glm53 | Pseudo-CLI: OpenCode launched with `--model=zai-coding-plan/glm-5.3` (glm-5.3 exists only under the `zai-coding-plan` provider). `LlmParser` special-cases the string `"glm-5.3"`. Traffic goes direct to Z.AI — the OpenCode proxy does not remap `zai-coding-plan`. |
 
 **Key operations:**
 

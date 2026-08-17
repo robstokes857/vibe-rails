@@ -297,7 +297,7 @@ HTTP registration with relay server:
 Owns session preparation (`PrepareSessionAsync`) — builds the `PreparedTerminalSession` record
 (launch command, setup commands, environment, optional executable/argv) for terminal sessions.
 - Adds the VibeRails MCP stdio registration setup command for managed CLIs
-  (Claude, Codex, Antigravity, Copilot, and OpenCode-backed CLIs incl. GLM 5.2).
+  (Claude, Codex, Antigravity, Copilot, and OpenCode-backed CLIs incl. GLM 5.2 / GLM 5.3 / Grok 4.6).
 - Builds base env vars (`LANG`, `LC_ALL`, `PYTHONIOENCODING`).
 - Merges CLI-specific env vars via `LlmCliEnvironmentService` when an environment name is provided.
 - Resolves the MCP stdio server command path (published `vb.exe mcp` vs `dotnet <dll> mcp`).

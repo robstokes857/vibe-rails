@@ -60,7 +60,8 @@ public class CommandService : ICommandService
         LLM.Copilot,
         LLM.OpenCode,
         LLM.Glm52,
-        LLM.Grok46
+        LLM.Grok46,
+        LLM.Glm53
     };
 
     public CommandService(
@@ -124,6 +125,7 @@ public class CommandService : ICommandService
             {
                 LLM.Glm52 => WithPinnedModel(extraArgs, "zai/glm-5.2"),
                 LLM.Grok46 => WithPinnedModel(extraArgs, "xai/grok-4.6"),
+                LLM.Glm53 => WithPinnedModel(extraArgs, "zai-coding-plan/glm-5.3"),
                 _ => extraArgs
             };
         }
@@ -149,8 +151,8 @@ public class CommandService : ICommandService
                 LLM.Antigravity => $"{cliCommand} --prompt-interactive={quoted}",
                 // OpenCode's TUI treats a positional arg as the [project] path, not a prompt,
                 // so the initial prompt must ride on --prompt (never the default branch).
-                // Glm52 / Grok46 are OpenCode under the hood and share the --prompt convention.
-                LLM.OpenCode or LLM.Glm52 or LLM.Grok46 => $"{cliCommand} --prompt={quoted}",
+                // Glm52 / Grok46 / Glm53 are OpenCode under the hood and share the --prompt convention.
+                LLM.OpenCode or LLM.Glm52 or LLM.Grok46 or LLM.Glm53 => $"{cliCommand} --prompt={quoted}",
                 _ => $"{cliCommand} {quoted}"
             };
 
@@ -230,12 +232,14 @@ public class CommandService : ICommandService
         // env-var-only — no opencode.json is written: OPENCODE_CONFIG_CONTENT carries an inline
         // JSON override of both providers' baseURL + auth headers (see LlmProxyZaiConfig).
         // Skip if the caller already set OPENCODE_CONFIG_CONTENT, so an explicit value is
-        // respected rather than clobbered. Glm52 and Grok46 are included because they are
-        // OpenCode-backed pseudo-CLIs of those two providers.
+        // respected rather than clobbered. Glm52, Grok46, and Glm53 are included because they
+        // are OpenCode-backed pseudo-CLIs. Note the injected config only remaps the zai/xai
+        // providers, so Glm53's pinned zai-coding-plan model is NOT proxied — it talks to
+        // Z.AI directly (deliberate; see runbooks/custom_envs/CLI_OPTIONS.md "GLM 5.3").
         var inheritedOpenCodeConfig = Environment.GetEnvironmentVariable(
             LlmProxyZaiConfig.ConfigContentVariable);
         var openCodeProxyActive = proxySettings.OpenCodeLlmProxyLaunchEnabled
-            && (llm == LLM.OpenCode || llm == LLM.Glm52 || llm == LLM.Grok46)
+            && (llm == LLM.OpenCode || llm == LLM.Glm52 || llm == LLM.Grok46 || llm == LLM.Glm53)
             && !environment.ContainsKey(LlmProxyZaiConfig.ConfigContentVariable)
             && string.IsNullOrEmpty(inheritedOpenCodeConfig);
         if (openCodeProxyActive)
@@ -294,7 +298,7 @@ public class CommandService : ICommandService
 
     /// <summary>
     /// Every CLI's enum name lowercased is its executable — except Antigravity (binary <c>agy</c>)
-    /// and the OpenCode-backed pseudo-CLIs Glm52 / Grok46 (binary <c>opencode</c>).
+    /// and the OpenCode-backed pseudo-CLIs Glm52 / Grok46 / Glm53 (binary <c>opencode</c>).
     ///
     /// Must stay in step with <c>IBaseLlmCliLauncher.CliExecutable</c>, which is the same mapping
     /// expressed per-launcher for the native-terminal path. The two agree today; Antigravity is the
@@ -303,7 +307,7 @@ public class CommandService : ICommandService
     public static string ResolveCliExecutable(LLM llm) => llm switch
     {
         LLM.Antigravity => "agy",
-        LLM.Glm52 or LLM.Grok46 => "opencode",
+        LLM.Glm52 or LLM.Grok46 or LLM.Glm53 => "opencode",
         _ => llm.ToString().ToLower()
     };
 
@@ -452,7 +456,7 @@ public class CommandService : ICommandService
             LLM.Copilot => (
                 SuppressCommandOutput($"copilot mcp remove {VibeRailsMcpServerName}"),
                 $"copilot mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
-            LLM.OpenCode or LLM.Glm52 or LLM.Grok46 => (
+            LLM.OpenCode or LLM.Glm52 or LLM.Grok46 or LLM.Glm53 => (
                 null,
                 $"{openCodeExecutable} mcp add {VibeRailsMcpServerName} -- {serverCommand}"),
             _ => (null, null)

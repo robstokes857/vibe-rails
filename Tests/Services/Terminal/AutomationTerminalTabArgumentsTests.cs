@@ -1,5 +1,10 @@
+using Microsoft.Extensions.DependencyInjection;
+using Moq;
+using VibeRails.DB;
 using VibeRails.DTOs;
+using VibeRails.Interfaces;
 using VibeRails.Services;
+using VibeRails.Services.AgentTools;
 using VibeRails.Services.Terminal;
 using VibeRails.Utils;
 using Xunit;
@@ -48,6 +53,48 @@ public sealed class AutomationTerminalTabArgumentsTests
         Assert.Equal(19, parsed.EnvId);
         Assert.Equal(45, parsed.MaxRuntimeMinutes);
         Assert.Equal(["--model", "gpt-5.6"], parsed.ExtraArgs);
+    }
+
+    [Fact]
+    public async Task InteractiveAutomation_CancelledDuringInitialRead_FinalizesReservedRun()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var store = new Mock<IJobStore>();
+        store
+            .Setup(s => s.GetRunAsync("run-123", cancellation.Token))
+            .ThrowsAsync(new OperationCanceledException(cancellation.Token));
+        store
+            .Setup(s => s.CompleteRunAsync(
+                "run-123",
+                JobRunStatus.Cancelled,
+                JobRunOutcome.ToExitCode(JobRunStatus.Cancelled),
+                JobRunOutcome.CancelledMessage,
+                CancellationToken.None))
+            .Returns(Task.CompletedTask);
+
+        using var services = new ServiceCollection()
+            .AddSingleton(store.Object)
+            .AddSingleton(new Mock<IRepository>().Object)
+            .BuildServiceProvider();
+        await using var host = new TerminalTabHostService(
+            new Mock<IHttpClientFactory>().Object,
+            new Mock<ILocalClientTracker>().Object,
+            new Mock<IAppEventBus>().Object,
+            new Mock<ILocalToolApiContext>().Object,
+            new Mock<ITokenSavingsStore>().Object,
+            services.GetRequiredService<IServiceScopeFactory>());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            host.CreateAutomationTabAsync("run-123", cancellation.Token));
+
+        store.Verify(s => s.CompleteRunAsync(
+            "run-123",
+            JobRunStatus.Cancelled,
+            JobRunOutcome.ToExitCode(JobRunStatus.Cancelled),
+            JobRunOutcome.CancelledMessage,
+            CancellationToken.None), Times.Once);
     }
 
     private static string ValueAfter(string[] args, string key)

@@ -31,8 +31,13 @@ function createApp() {
                 .replaceAll('"', '&quot;');
         },
         formatRelativeTime() { return 'just now'; },
-        async apiCall(url, method = 'GET', body = null) {
-            calls.push({ url, method, body });
+        async apiCall(url, method = 'GET', body = null, requestOptions = undefined) {
+            calls.push({
+                url,
+                method,
+                body,
+                ...(requestOptions === undefined ? {} : { requestOptions })
+            });
             return { success: true, message: 'Queued.' };
         },
         showToast() {},
@@ -94,7 +99,9 @@ test('Automation maps every non-shell Environment CLI to the shared LLM enum val
         ['antigravity', 3],
         ['copilot', 4],
         ['opencode', 6],
-        ['glm-5.2', 7]
+        ['glm-5.2', 7],
+        ['grok-4.6', 8],
+        ['glm-5.3', 9]
     ];
 
     for (const [cli, llm] of expected) {
@@ -209,7 +216,7 @@ test('Automation rows display every supported Environment provider', () => {
     };
     const providers = [
         [1, 'Codex'], [2, 'Claude'], [3, 'Antigravity'], [4, 'Copilot'],
-        [6, 'OpenCode'], [7, 'GLM 5.2']
+        [6, 'OpenCode'], [7, 'GLM 5.2'], [8, 'Grok 4.6'], [9, 'GLM 5.3']
     ];
     controller.environments = providers.map(([llm, name], index) => ({
         id: index + 1,
@@ -230,7 +237,7 @@ test('Automation rows display every supported Environment provider', () => {
 
     controller.renderJobs();
 
-    for (const name of ['Codex', 'Claude', 'Antigravity', 'Copilot', 'OpenCode', 'GLM 5.2']) {
+    for (const name of ['Codex', 'Claude', 'Antigravity', 'Copilot', 'OpenCode', 'GLM 5.2', 'Grok 4.6', 'GLM 5.3']) {
         assert.match(list.innerHTML, new RegExp(`>${name}<`));
     }
 });
@@ -722,7 +729,8 @@ test('Run now and enable actions call the durable Automation API with Environmen
     assert.deepEqual(app.calls[0], {
         url: '/api/v1/jobs/12/run',
         method: 'POST',
-        body: null
+        body: null,
+        requestOptions: { preferErrorResponseMessage: true }
     });
     assert.equal(app.calls[1].url, '/api/v1/jobs/12');
     assert.equal(app.calls[1].method, 'PUT');

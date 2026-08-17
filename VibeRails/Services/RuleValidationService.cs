@@ -1,3 +1,5 @@
+using VibeRails.Services.VCA;
+
 namespace VibeRails.Services
 {
     public interface IRuleValidationService
@@ -70,6 +72,11 @@ namespace VibeRails.Services
                     Rule.RequireTestCoverageMinimum100 => ValidateTestCoverage(files, 100, rule),
                     Rule.SkipTestCoverage => new ValidationResult(rule.RuleText, rule.Enforcement, true, "Coverage check skipped"),
                     Rule.PackageChangeDetected => ValidatePackageChanges(files, rule),
+                    Rule.FileLock or Rule.DirectoryLock => ValidatePathLock(
+                        files,
+                        rule,
+                        Path.Combine(rootPath, "AGENTS.md"),
+                        rootPath),
                     _ => new ValidationResult(rule.RuleText, rule.Enforcement, true, "Rule not implemented for pre-commit")
                 };
 
@@ -119,6 +126,11 @@ namespace VibeRails.Services
                     Rule.RequireTestCoverageMinimum100 => ValidateTestCoverage(scopedFiles, 100, rule),
                     Rule.SkipTestCoverage => new ValidationResult(rule.RuleText, rule.Enforcement, true, "Coverage check skipped"),
                     Rule.PackageChangeDetected => ValidatePackageChanges(scopedFiles, rule),
+                    Rule.FileLock or Rule.DirectoryLock => ValidatePathLock(
+                        scopedFiles,
+                        rule,
+                        sourceFile,
+                        rootPath),
                     _ => new ValidationResult(rule.RuleText, rule.Enforcement, true, "Rule not implemented for pre-commit")
                 };
 
@@ -243,6 +255,71 @@ namespace VibeRails.Services
             path = path.Replace('\\', '/');
 
             return path;
+        }
+
+        private static ValidationResult ValidatePathLock(
+            List<string> files,
+            RuleWithEnforcement rule,
+            string sourceFile,
+            string rootPath)
+        {
+            // A lock that cannot be parsed or resolved is inert, not violated. It has no path to
+            // compare against, so failing it would report on every file of every commit — and at
+            // STOP enforcement that blocks all work until the AGENTS.md is hand-edited, possibly
+            // the very file the lock covers. The message still names the problem so a hand-edited
+            // typo is visible in the hook output instead of silently disabling the lock.
+            if (!PathLockRule.TryParse(rule.RuleText, out var pathLock))
+            {
+                return new ValidationResult(
+                    rule.RuleText,
+                    rule.Enforcement,
+                    true,
+                    "Path lock ignored - invalid syntax. Use File Lock('path/to/file') or Directory Lock('path/to/directory').");
+            }
+
+            if (!PathLockRule.TryResolveRepositoryPath(
+                    pathLock,
+                    sourceFile,
+                    rootPath,
+                    out var lockedPath,
+                    out var error))
+            {
+                return new ValidationResult(
+                    rule.RuleText,
+                    rule.Enforcement,
+                    true,
+                    $"Path lock ignored - {error}");
+            }
+
+            var sourcePath = Path.GetRelativePath(rootPath, sourceFile).Replace('\\', '/');
+            var comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            var affectedFiles = files
+                .Where(file => PathLockRule.Matches(
+                    pathLock,
+                    lockedPath,
+                    file,
+                    previousRepositoryPath: null,
+                    sourcePath,
+                    comparison))
+                .ToList();
+
+            if (affectedFiles.Count == 0)
+            {
+                return new ValidationResult(
+                    rule.RuleText,
+                    rule.Enforcement,
+                    true,
+                    $"Locked path '{lockedPath}' was not changed");
+            }
+
+            return new ValidationResult(
+                rule.RuleText,
+                rule.Enforcement,
+                false,
+                $"Locked path '{lockedPath}' has {affectedFiles.Count} change(s)",
+                affectedFiles);
         }
 
         private ValidationResult ValidateLogAllFileChanges(

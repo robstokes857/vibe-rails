@@ -310,6 +310,35 @@ public sealed class JobServiceTests : IDisposable
         _scheduler.Verify(s => s.Kick(), Times.Never);
     }
 
+    [Fact]
+    public async Task RunNow_WhenInteractiveReservationFails_FinalizesTheQueuedRun()
+    {
+        _store
+            .Setup(s => s.GetJobAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Record() with { Id = 7 });
+        _store
+            .Setup(s => s.EnqueueManualRunAsync(7, CancellationToken.None))
+            .ReturnsAsync("manual-run");
+        _store
+            .Setup(s => s.TryMarkLaunchedAsync("manual-run", CancellationToken.None))
+            .ReturnsAsync(false);
+        _executableResolver.Setup(r => r.Resolve(LLM.Claude)).Returns("claude");
+
+        var error = await Assert.ThrowsAsync<JobServiceException>(() =>
+            Service().RunNowAsync(7, TestContext.Current.CancellationToken));
+
+        Assert.Equal(409, error.StatusCode);
+        _store.Verify(
+            s => s.CompleteRunAsync(
+                "manual-run",
+                JobRunStatus.Failed,
+                null,
+                It.Is<string>(message => message.Contains("reserve", StringComparison.OrdinalIgnoreCase)),
+                CancellationToken.None),
+            Times.Once);
+        _scheduler.Verify(s => s.Kick(), Times.Never);
+    }
+
     private JobService Service() => new(
         _store.Object, _repository.Object, _executableResolver.Object, _scheduler.Object);
 

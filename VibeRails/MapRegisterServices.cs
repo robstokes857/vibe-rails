@@ -15,6 +15,7 @@ using VibeRails.Services.AgentTools;
 using VibeRails.Services.Cli;
 using VibeRails.Services.Environments;
 using VibeRails.Services.Environments.Steps;
+using VibeRails.Services.FileSystem;
 using VibeRails.Services.LlmProxy;
 using VibeRails.Services.Mcp.HostShell;
 using VibeRails.Services.Mcp.Tools;
@@ -47,6 +48,11 @@ namespace VibeRails
                 StringComparison.Ordinal);
             localApiBaseUrl ??= "http://127.0.0.1:0";
 
+            // Published so route mapping gates on the answer resolved here rather than deriving its
+            // own from a different argv array. See <see cref="ProcessRole"/>.
+            serviceCollection.AddSingleton(
+                new ProcessRole(isActiveRootBackendProcess, isTerminalTabChildProcess));
+
             serviceCollection.AddHttpClient<ISummaryService, SummaryService>(
                 x =>
                 {
@@ -54,6 +60,11 @@ namespace VibeRails
                 });
 
             serviceCollection.AddScoped<IFileService, FileService>();
+
+            // Host filesystem metadata is exposed only by an active root backend. Terminal-tab
+            // children and `vb --env` hosts never map the corresponding route.
+            if (isActiveRootBackendProcess)
+                serviceCollection.AddSingleton<IFileSystemBrowserService, FileSystemBrowserService>();
 
             // BERT (V2) — write path, read path, and search strategies are registered separately.
             serviceCollection.AddSingleton<IBertSettings, BertV2BgeSmallEnSettings>();

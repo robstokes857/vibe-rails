@@ -49,6 +49,14 @@ public class LlmParserTests
         Assert.Equal(LLM.Grok46, result);
     }
 
+    [Fact]
+    public void Parse_ReturnsGlm53_ForGlm53String()
+    {
+        var result = _parser.Parse("glm-5.3");
+
+        Assert.Equal(LLM.Glm53, result);
+    }
+
     [Theory]
     [InlineData("GLM-5.2")]
     [InlineData("Glm-5.2")]
@@ -71,6 +79,17 @@ public class LlmParserTests
         Assert.Equal(LLM.Grok46, result);
     }
 
+    [Theory]
+    [InlineData("GLM-5.3")]
+    [InlineData("Glm-5.3")]
+    [InlineData(" glm-5.3 ")]
+    public void Parse_HandlesGlm53CaseInsensitiveAndWhitespace(string input)
+    {
+        var result = _parser.Parse(input);
+
+        Assert.Equal(LLM.Glm53, result);
+    }
+
     [Fact]
     public void Normalize_ReturnsWireFormat_ForGlm52()
     {
@@ -87,6 +106,14 @@ public class LlmParserTests
         var result = _parser.Normalize("grok-4.6");
 
         Assert.Equal("grok-4.6", result);
+    }
+
+    [Fact]
+    public void Normalize_ReturnsWireFormat_ForGlm53()
+    {
+        var result = _parser.Normalize("glm-5.3");
+
+        Assert.Equal("glm-5.3", result);
     }
 
     [Fact]
@@ -116,11 +143,13 @@ public class LlmParserTests
         Assert.Contains(LLM.OpenCode, _parser.All);
         Assert.Contains(LLM.Glm52, _parser.All);
         Assert.Contains(LLM.Grok46, _parser.All);
+        Assert.Contains(LLM.Glm53, _parser.All);
     }
 
     [Theory]
     [InlineData(LLM.Glm52, "glm-5.2")]
     [InlineData(LLM.Grok46, "grok-4.6")]
+    [InlineData(LLM.Glm53, "glm-5.3")]
     [InlineData(LLM.Claude, "Claude")]
     [InlineData(LLM.Codex, "Codex")]
     public void ToWireName_ReturnsWireFormat_ForEnumValue(LLM llm, string expected)

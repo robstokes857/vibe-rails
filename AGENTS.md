@@ -86,7 +86,7 @@ vibe-rails/
 │   ├── DTOs/                       # Data transfer objects
 │   │   ├── ResponseRecords.cs      # API response types
 │   │   ├── Sandbox.cs              # Sandbox entity model
-│   │   ├── LLM.cs                  # LLM enum (NotSet, Codex, Claude, Antigravity, Copilot, Shell, OpenCode, Glm52, Grok46)
+│   │   ├── LLM.cs                  # LLM enum (NotSet, Codex, Claude, Antigravity, Copilot, Shell, OpenCode, Glm52, Grok46, Glm53)
 │   │   ├── LLM_Environment.cs      # Environment configuration
 │   │   ├── McpDtos.cs              # MCP protocol DTOs
 │   │   └── StateFileObject.cs
@@ -342,7 +342,7 @@ example of a rule is never itself a rule.
 #### RulesService ([Services/RulesService.cs](VibeRails/Services/RulesService.cs))
 **Purpose**: Define available rules and enforcement logic
 
-**Available Rules** (14 total):
+**Available Rules** (16 total):
 1. `LogAllFileChanges` - Log all file changes
 2. `LogFileChangesOver5Lines` - Log file changes > 5 lines
 3. `LogFileChangesOver10Lines` - Log file changes > 10 lines
@@ -357,6 +357,8 @@ example of a rule is never itself a rule.
 12. `SkipTestCoverage` - Skip test coverage
 13. `PackageChangeDetected` - Package file changes
 14. `CheckCommitMessageForWords` - Check commit message for
+15. `FileLock` - File Lock('path to file')
+16. `DirectoryLock` - Directory Lock('path to directory')
 
 **Enforcement Levels**:
 - `WARN` - Log warning, allow continuation

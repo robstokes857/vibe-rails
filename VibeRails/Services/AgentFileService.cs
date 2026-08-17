@@ -29,19 +29,87 @@ namespace VibeRails.Services
         }
 
         /// <summary>
-        /// Ensures the rules section header exists in the file. If not, adds it at the end.
-        /// Returns the index of the header in the lines list.
+        /// Returns an insertion point in the first live rules section, creating a canonical
+        /// section when none exists. Discovery owns the Markdown parsing so fenced examples and
+        /// legacy headings cannot send writes to a section the Rules page does not display.
+        ///
+        /// Adds target the first section only; update and delete deliberately span all of them.
+        /// A new rule has to land in exactly one place, but an existing rule may already be
+        /// declared in several, and leaving the other copies alone is what made a rule the Rules
+        /// page had just changed or removed still fire from the hook.
         /// </summary>
-        private static int EnsureRulesSection(List<string> lines)
+        private static int EnsureRulesSectionAndGetInsertIndex(List<string> lines)
         {
-            int index = lines.IndexOf(STRINGS.RULE_HEADER);
-            if (index == -1)
+            var document = AgentRuleSectionReader.ParseDocument(string.Join("\n", lines));
+            var section = document.Sections.FirstOrDefault();
+            if (section is null)
             {
                 lines.Add("");
                 lines.Add(STRINGS.RULE_HEADER);
-                index = lines.Count - 1;
+                return lines.Count;
             }
-            return index;
+
+            var lastRule = document.Rules.LastOrDefault(
+                rule => rule.SectionHeadingLineIndex == section.HeadingLineIndex);
+            return lastRule?.LineIndex + 1 ?? section.HeadingLineIndex + 1;
+        }
+
+        /// <summary>
+        /// Rejects rule text AGENTS.md cannot hold on a single line.
+        ///
+        /// Every writer below emits the rule as one "- {rule}" list item, so a line break in the
+        /// text becomes two real lines on disk. A second line beginning with '#' closes the rules
+        /// section — <see cref="AgentRuleSectionReader"/> ends one at any non-rules heading — which
+        /// drops every rule below it from the Git hook and the Rules page at once. That reads as an
+        /// empty section rather than as tampering, so it is refused at the boundary instead.
+        /// </summary>
+        private static void EnsureSingleLineRule(string ruleText)
+        {
+            if (ruleText is not null && ruleText.AsSpan().ContainsAny('\r', '\n', '\0'))
+            {
+                throw new ArgumentException(
+                    "A rule may not contain a line break or null character.");
+            }
+        }
+
+        /// <summary>
+        /// Rejects rule text the validator will not be able to parse later.
+        ///
+        /// This is the only place that can stop malformed rule text from reaching AGENTS.md, so it
+        /// fails closed: text that merely looks like a path lock but does not parse — a missing
+        /// argument, an empty path, an embedded line break — is refused rather than written.
+        /// Persisting it instead would leave a rule the Git hook can see, cannot resolve, and
+        /// reports on every commit.
+        /// </summary>
+        private async Task ValidateRuleTextForWriteAsync(
+            string agentPath,
+            string ruleText,
+            CancellationToken cancellationToken)
+        {
+            EnsureSingleLineRule(ruleText);
+
+            if (!PathLockRule.TryParse(ruleText, out var pathLock))
+            {
+                if (PathLockRule.LooksLikePathLock(ruleText))
+                {
+                    throw new ArgumentException(
+                        $"Invalid path lock '{ruleText}': use "
+                        + $"{PathLockRule.FileTemplate} or {PathLockRule.DirectoryTemplate}.");
+                }
+
+                return;
+            }
+
+            var rootPath = await _gitService.GetRootPathAsync(cancellationToken);
+            if (!PathLockRule.TryResolveRepositoryPath(
+                    pathLock,
+                    agentPath,
+                    rootPath,
+                    out _,
+                    out var error))
+            {
+                throw new ArgumentException($"Invalid path lock '{ruleText}': {error}.");
+            }
         }
 
         public async Task<List<string>> GetAgentFiles(CancellationToken cancellationToken)
@@ -64,6 +132,11 @@ namespace VibeRails.Services
 
         public async Task CreateAgentFileAsync(string path, CancellationToken cancellationToken, params string[] rules)
         {
+            foreach (var rule in rules)
+            {
+                await ValidateRuleTextForWriteAsync(path, rule, cancellationToken);
+            }
+
             StringBuilder sb = new StringBuilder();
             sb.AppendLine(STRINGS.AGENT_FILE_HEADER);
             sb.AppendLine();
@@ -118,20 +191,14 @@ namespace VibeRails.Services
         public async Task AddRulesAsync(string path, CancellationToken cancellationToken, params string[] rules)
         {
             var lines = (await File.ReadAllLinesAsync(path, cancellationToken)).ToList();
-            int index = EnsureRulesSection(lines);
+            int insertIndex = EnsureRulesSectionAndGetInsertIndex(lines);
 
-            // Find the insertion point (after existing rules, before next section or empty line)
-            int insertIndex = index + 1;
-            while (insertIndex < lines.Count &&
-                   !lines[insertIndex].StartsWith("##") &&
-                   (lines[insertIndex].StartsWith("-") || string.IsNullOrWhiteSpace(lines[insertIndex])))
-            {
-                insertIndex++;
-            }
-
-            // Insert new rules before the next section
+            // Insert new rules before the next section. Path locks are validated before the
+            // TryParse gate so malformed lock syntax reports an error instead of being silently
+            // dropped as an unknown rule.
             foreach (var rule in rules)
             {
+                await ValidateRuleTextForWriteAsync(path, rule, cancellationToken);
                 if (_rulesService.TryParse(rule, out Rule _))
                 {
                     lines.Insert(insertIndex, $"- {rule}");
@@ -144,20 +211,15 @@ namespace VibeRails.Services
 
         public async Task AddRuleWithEnforcementAsync(string path, string ruleText, Enforcement enforcement, CancellationToken cancellationToken)
         {
+            // Path-lock validation runs first so malformed lock syntax reports what is actually
+            // wrong with it rather than the generic "not one of the allowed rules".
+            await ValidateRuleTextForWriteAsync(path, ruleText, cancellationToken);
+
             if (!_rulesService.TryParse(ruleText, out Rule _))
                 throw new ArgumentException($"Invalid rule text: '{ruleText}'. Rule must be one of the allowed rules.");
 
             var lines = (await File.ReadAllLinesAsync(path, cancellationToken)).ToList();
-            int index = EnsureRulesSection(lines);
-
-            // Find the insertion point (after existing rules, before next section)
-            int insertIndex = index + 1;
-            while (insertIndex < lines.Count &&
-                   !lines[insertIndex].StartsWith("##") &&
-                   (lines[insertIndex].StartsWith("-") || string.IsNullOrWhiteSpace(lines[insertIndex])))
-            {
-                insertIndex++;
-            }
+            int insertIndex = EnsureRulesSectionAndGetInsertIndex(lines);
 
             // Insert the rule with enforcement level
             string formattedRule = EnforcementParser.FormatRuleWithEnforcement(ruleText, enforcement);
@@ -169,63 +231,55 @@ namespace VibeRails.Services
         public async Task DeleteRulesAsync(string path, CancellationToken cancellationToken, params string[] rules)
         {
             var lines = (await File.ReadAllLinesAsync(path, cancellationToken)).ToList();
-            int index = EnsureRulesSection(lines);
-
             var rulesToDelete = new HashSet<string>(rules, StringComparer.OrdinalIgnoreCase);
+            var document = AgentRuleSectionReader.ParseDocument(string.Join("\n", lines));
+            var lineIndexes = document.Rules
+                .Where(rule => rulesToDelete.Contains(rule.Rule.RuleText))
+                .Select(rule => rule.LineIndex)
+                .Distinct()
+                .OrderDescending();
 
-            // Find the end of the rules section
-            int endIndex = index + 1;
-            while (endIndex < lines.Count && !lines[endIndex].StartsWith("##"))
+            // Iterate backwards so source locations remain valid while rows are removed.
+            var changed = false;
+            foreach (var lineIndex in lineIndexes)
             {
-                endIndex++;
+                lines.RemoveAt(lineIndex);
+                changed = true;
             }
 
-            // Iterate backwards within the rules section to safely remove items
-            for (int i = endIndex - 1; i > index; i--)
+            if (changed)
             {
-                if (lines[i].StartsWith("-"))
-                {
-                    string lineContent = lines[i].TrimStart('-', ' ').Trim();
-                    // Parse to extract just the rule text (without enforcement)
-                    var (ruleText, _) = EnforcementParser.ParseRuleWithEnforcement(lineContent);
-                    if (rulesToDelete.Contains(ruleText))
-                    {
-                        lines.RemoveAt(i);
-                    }
-                }
+                await File.WriteAllLinesAsync(path, lines, cancellationToken);
             }
-
-            await File.WriteAllLinesAsync(path, lines, cancellationToken);
         }
 
+        /// <summary>
+        /// Retargets every occurrence of the rule, not just the first.
+        ///
+        /// A file may declare more than one rules section, and the Git hook enforces the rules it
+        /// finds in all of them. Updating only the first left the other copies at their old
+        /// enforcement, so a rule the Rules page showed as WARN could still block a commit at
+        /// STOP. This matches <see cref="DeleteRulesAsync"/>, which already removes every copy.
+        /// </summary>
         public async Task UpdateRuleEnforcementAsync(string path, string ruleText, Enforcement enforcement, CancellationToken cancellationToken)
         {
             var lines = (await File.ReadAllLinesAsync(path, cancellationToken)).ToList();
-            int index = EnsureRulesSection(lines);
-
-            // Find the end of the rules section
-            int endIndex = index + 1;
-            while (endIndex < lines.Count && !lines[endIndex].StartsWith("##"))
+            var document = AgentRuleSectionReader.ParseDocument(string.Join("\n", lines));
+            var matches = document.Rules
+                .Where(rule => rule.Rule.RuleText.Equals(ruleText, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (matches.Count == 0)
             {
-                endIndex++;
+                return;
             }
 
-            // Find and update the rule
-            for (int i = index + 1; i < endIndex; i++)
+            foreach (var match in matches)
             {
-                if (lines[i].StartsWith("-"))
-                {
-                    string lineContent = lines[i].TrimStart('-', ' ').Trim();
-                    var (existingRuleText, _) = EnforcementParser.ParseRuleWithEnforcement(lineContent);
-
-                    if (existingRuleText.Equals(ruleText, StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Update the line with new enforcement level
-                        string formattedRule = EnforcementParser.FormatRuleWithEnforcement(ruleText, enforcement);
-                        lines[i] = $"- {formattedRule}";
-                        break;
-                    }
-                }
+                var originalLine = lines[match.LineIndex];
+                var indentationLength = originalLine.Length - originalLine.TrimStart().Length;
+                var indentation = originalLine[..indentationLength];
+                string formattedRule = EnforcementParser.FormatRuleWithEnforcement(match.Rule.RuleText, enforcement);
+                lines[match.LineIndex] = $"{indentation}- {formattedRule}";
             }
 
             await File.WriteAllLinesAsync(path, lines, cancellationToken);

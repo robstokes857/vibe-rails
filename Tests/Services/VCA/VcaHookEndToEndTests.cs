@@ -353,6 +353,85 @@ public sealed class VcaHookEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task FileLock_BlocksARealStagedModification()
+    {
+        await WriteAsync("AGENTS.md", "# Agent Instructions\n");
+        await WriteAsync("src/app.cs", "class App { }\n");
+        await RunGitAsync("add", "AGENTS.md", "src/app.cs");
+        await RunGitAsync("commit", "-m", "Add baseline");
+
+        await WriteAsync("AGENTS.md", """
+            # Agent Instructions
+            ## Vibe Rails Rules
+            - File Lock('src/app.cs') (STOP)
+            """);
+        await RunGitAsync("add", "AGENTS.md");
+        await RunGitAsync("commit", "-m", "Lock app file");
+
+        await WriteAsync("src/app.cs", "class App { public int Changed => 1; }\n");
+        await RunGitAsync("add", "src/app.cs");
+
+        var result = await RunHookAsync("pre-commit");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("[STOP] File Lock('src/app.cs')", result.Output);
+        Assert.Contains("Locked file 'src/app.cs'", result.Output);
+    }
+
+    [Fact]
+    public async Task DirectoryLock_BlocksRealStagedAddsAndDeletes()
+    {
+        await WriteAsync("AGENTS.md", "# Agent Instructions\n");
+        await WriteAsync("locked/existing.txt", "baseline\n");
+        await RunGitAsync("add", "AGENTS.md", "locked/existing.txt");
+        await RunGitAsync("commit", "-m", "Add locked directory baseline");
+
+        await WriteAsync("AGENTS.md", """
+            # Agent Instructions
+            ## Vibe Rails Rules
+            - Directory Lock('locked') (STOP)
+            """);
+        await RunGitAsync("add", "AGENTS.md");
+        await RunGitAsync("commit", "-m", "Lock directory");
+
+        File.Delete(Path.Combine(_repositoryPath, "locked", "existing.txt"));
+        await WriteAsync("locked/new.txt", "new file\n");
+        await RunGitAsync("add", "-A");
+
+        var result = await RunHookAsync("pre-commit");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Locked directory 'locked' has 2 change(s)", result.Output);
+        Assert.Contains("locked/existing.txt", result.Output);
+        Assert.Contains("locked/new.txt", result.Output);
+    }
+
+    [Fact]
+    public async Task DirectoryLock_BlocksARenameOutOfTheLockedDirectory()
+    {
+        await WriteAsync("AGENTS.md", "# Agent Instructions\n");
+        await WriteAsync("locked/moved.txt", "baseline\n");
+        await RunGitAsync("add", "AGENTS.md", "locked/moved.txt");
+        await RunGitAsync("commit", "-m", "Add rename baseline");
+
+        await WriteAsync("AGENTS.md", """
+            # Agent Instructions
+            ## Vibe Rails Rules
+            - Directory Lock('locked') (STOP)
+            """);
+        await RunGitAsync("add", "AGENTS.md");
+        await RunGitAsync("commit", "-m", "Lock directory");
+
+        Directory.CreateDirectory(Path.Combine(_repositoryPath, "outside"));
+        await RunGitAsync("mv", "locked/moved.txt", "outside/moved.txt");
+
+        var result = await RunHookAsync("pre-commit");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("locked/moved.txt -> outside/moved.txt (renamed)", result.Output);
+    }
+
+    [Fact]
     public async Task AttachedPopup_ClosesWithoutEnter_WhenOnlyWarningsWereFound()
     {
         await WriteAsync("AGENTS.md", """

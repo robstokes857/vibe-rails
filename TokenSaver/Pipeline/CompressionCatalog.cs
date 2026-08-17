@@ -200,14 +200,19 @@ public static class CompressionCatalog
         new(ScopeShell, "Shell output",
             "Output of Bash and PowerShell tool calls.",
             AnthropicTools: ["Bash", "PowerShell"],
-            CodexTools: ["shell_command", "exec_command"],
+            // "exec" is Codex code-mode (plan_1A A1, 2026-08-16): 61% of all tool-output wire
+            // chars rode on it unrewritten. Its command is JavaScript source, which never
+            // classifies a CommandShape, so only minify + condense ever run on exec output.
+            CodexTools: ["shell_command", "exec_command", "exec"],
             OpenCodeTools: ["bash"],
             OnByDefault: true),
 
         new(ScopeShellBackground, "Background shell output",
             "Output of background shell reads (BashOutput). Same content class as Bash.",
             AnthropicTools: ["BashOutput"],
-            CodexTools: ["write_stdin"],
+            // "wait" reads background-job output — Codex's moral equivalent of BashOutput
+            // (plan_1A A2, 2026-08-16). Its arguments carry no command, so shapes never fire.
+            CodexTools: ["write_stdin", "wait"],
             OpenCodeTools: [],
             OnByDefault: true),
 

@@ -1,5 +1,6 @@
 using VibeRails.DTOs;
 using VibeRails.Services;
+using VibeRails.Services.VCA;
 using Xunit;
 
 namespace Tests;
@@ -215,6 +216,107 @@ public class AgentFileServiceTests : IDisposable
         Assert.Contains("Custom prompt here", content);
     }
 
+    [Fact]
+    public async Task AddRulesAsync_IgnoresFencedRuleExamplesBeforeTheLiveSection()
+    {
+        var filePath = await CreateTestAgentFile("""
+            # Agent File Header
+
+            ```markdown
+            ## Vibe Rails Rules
+            - Require test coverage minimum 80% (STOP)
+            ```
+
+            ## Vibe Control Rules
+            - Log all file changes (WARN)
+            """);
+
+        await _service.AddRulesAsync(filePath, CancellationToken.None, "Package file changes");
+
+        var rules = await _service.GetRulesWithEnforcementAsync(filePath, CancellationToken.None);
+        Assert.Equal(2, rules.Count);
+        Assert.Contains(rules, rule => rule.RuleText == "Package file changes");
+
+        var content = await File.ReadAllTextAsync(filePath, TestContext.Current.CancellationToken);
+        Assert.Contains("- Require test coverage minimum 80% (STOP)", content);
+    }
+
+    [Fact]
+    public async Task AddRuleWithEnforcementAsync_AddsAResolvedPathLock()
+    {
+        var filePath = await CreateTestAgentFile("""
+            # Agent File Header
+            ## Vibe Rails Rules
+            """);
+
+        await _service.AddRuleWithEnforcementAsync(
+            filePath,
+            "Directory Lock('generated')",
+            Enforcement.STOP,
+            CancellationToken.None);
+
+        var rule = Assert.Single(await _service.GetRulesWithEnforcementAsync(filePath, CancellationToken.None));
+        Assert.Equal("Directory Lock('generated')", rule.RuleText);
+        Assert.Equal(Enforcement.STOP, rule.Enforcement);
+    }
+
+    [Fact]
+    public async Task AddRuleWithEnforcementAsync_RejectsAPathLockThatEscapesTheAgentDirectory()
+    {
+        var nestedDirectory = Path.Combine(_testDirectory, "nested");
+        Directory.CreateDirectory(nestedDirectory);
+        var filePath = Path.Combine(nestedDirectory, "AGENTS.md");
+        await File.WriteAllTextAsync(
+            filePath,
+            "## Vibe Rails Rules\n",
+            TestContext.Current.CancellationToken);
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.AddRuleWithEnforcementAsync(
+                filePath,
+                "File Lock('../outside.txt')",
+                Enforcement.STOP,
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("may not escape", error.Message);
+    }
+
+    /// <summary>
+    /// The lock path is the only place caller-supplied text reaches AGENTS.md verbatim — every
+    /// other rule must match a known name exactly. Left unchecked, a line break in it is written
+    /// back as two lines, and the second one opening with '#' closes the rules section: every rule
+    /// below stops being enforced by the hook AND stops being listed here, so the tampering shows
+    /// up as an empty section rather than an error. Refused at the boundary instead.
+    /// </summary>
+    [Theory]
+    [InlineData("File Lock('x\n## Injected')")]
+    [InlineData("File Lock('x\r\n## Injected')")]
+    [InlineData("Directory Lock('x\n## Vibe Rails Rules')")]
+    public async Task AddRuleWithEnforcementAsync_RejectsALockPathCarryingALineBreak(string ruleText)
+    {
+        var filePath = await CreateTestAgentFile("""
+            # Agent File Header
+            ## Vibe Rails Rules
+            - Never Commit Secrets (STOP)
+            """);
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.AddRuleWithEnforcementAsync(
+                filePath,
+                ruleText,
+                Enforcement.WARN,
+                TestContext.Current.CancellationToken));
+
+        // Nothing was written, so the pre-existing rule is still both present and enforced.
+        var rule = Assert.Single(
+            await _service.GetRulesWithEnforcementAsync(filePath, TestContext.Current.CancellationToken));
+        Assert.Equal("Never Commit Secrets", rule.RuleText);
+        Assert.Equal(Enforcement.STOP, rule.Enforcement);
+        Assert.DoesNotContain(
+            "## Injected",
+            await File.ReadAllTextAsync(filePath, TestContext.Current.CancellationToken));
+    }
+
     // ===========================================
     // DeleteRulesAsync Tests
     // ===========================================
@@ -343,6 +445,57 @@ public class AgentFileServiceTests : IDisposable
         Assert.Empty(rules);
     }
 
+    [Fact]
+    public async Task DeleteRulesAsync_IgnoresFencedRuleExamplesBeforeTheLiveSection()
+    {
+        var filePath = await CreateTestAgentFile("""
+            # Agent File Header
+
+            ```markdown
+            ## Vibe Rails Rules
+            - Log all file changes (STOP)
+            ```
+
+            ## Vibe Rails Rules
+            - Log all file changes (WARN)
+            """);
+
+        await _service.DeleteRulesAsync(filePath, CancellationToken.None, "Log all file changes");
+
+        Assert.Empty(await _service.GetRulesAsync(filePath, CancellationToken.None));
+        var content = await File.ReadAllTextAsync(filePath, TestContext.Current.CancellationToken);
+        Assert.Contains("- Log all file changes (STOP)", content);
+    }
+
+    [Fact]
+    public async Task UpdateRuleEnforcementAsync_IgnoresFencedRuleExamplesBeforeTheLiveSection()
+    {
+        var filePath = await CreateTestAgentFile("""
+            # Agent File Header
+
+            ```markdown
+            ## Vibe Rails Rules
+            - Log all file changes (STOP)
+            ```
+
+            ## Vibe Rails Rules
+              - [WARN] Log all file changes
+            """);
+
+        await _service.UpdateRuleEnforcementAsync(
+            filePath,
+            "Log all file changes",
+            Enforcement.COMMIT,
+            CancellationToken.None);
+
+        var rule = Assert.Single(await _service.GetRulesWithEnforcementAsync(filePath, CancellationToken.None));
+        Assert.Equal(Enforcement.COMMIT, rule.Enforcement);
+
+        var content = await File.ReadAllTextAsync(filePath, TestContext.Current.CancellationToken);
+        Assert.Contains("- Log all file changes (STOP)", content);
+        Assert.Contains("  - Log all file changes (COMMIT)", content);
+    }
+
     // ===========================================
     // Integration Tests - Combined Operations
     // ===========================================
@@ -400,10 +553,10 @@ public class AgentFileServiceTests : IDisposable
             "Cyclomatic complexity < 35",
             "Cyclomatic complexity < 60",
             "Cyclomatic complexity disabled",
-            "Require test coverage minimum 80% minimum 50%",
-            "Require test coverage minimum 80% minimum 70%",
-            "Require test coverage minimum 80% minimum 80%",
-            "Require test coverage minimum 80% minimum 100%",
+            "Require test coverage minimum 50%",
+            "Require test coverage minimum 70%",
+            "Require test coverage minimum 80%",
+            "Require test coverage minimum 100%",
             "Skip test coverage",
             "Package file changes"
         };
@@ -419,20 +572,20 @@ public class AgentFileServiceTests : IDisposable
 
         public bool TryParse(string value, out Rule rule)
         {
+            if (PathLockRule.TryParse(value, out var pathLock))
+            {
+                rule = pathLock.Kind == PathLockKind.File ? Rule.FileLock : Rule.DirectoryLock;
+                return true;
+            }
+
             rule = default;
             var trimmed = value?.Trim();
             if (string.IsNullOrEmpty(trimmed))
                 return false;
 
-            // Match the real RulesService behavior - use Contains for fuzzy matching
-            foreach (var r in _rules)
-            {
-                if (r.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-            return false;
+            // Mirrors the real RuleParser: exact match on the allowed-rule text. Matching a
+            // template that merely contains the input let any prefix parse as that rule.
+            return _rules.Any(r => r.Equals(trimmed, StringComparison.OrdinalIgnoreCase));
         }
     }
 

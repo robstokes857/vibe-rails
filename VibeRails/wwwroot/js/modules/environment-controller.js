@@ -299,7 +299,7 @@ export class EnvironmentController {
                             </tr>
                         `}).join('');
 
-        const renderTable = (title, description, environments, workerList = false) => `
+        const renderTable = (title, description, environments, workerList = false, emptyText = 'No regular environments configured.') => `
             <section class="environment-list-group${workerList ? ' is-workers' : ''}" aria-label="${escape(title)}">
                 <header class="environment-list-heading">
                     <span class="environment-list-heading-icon" aria-hidden="true"><i class="fa-solid ${workerList ? 'fa-robot' : 'fa-layer-group'}"></i></span>
@@ -327,7 +327,7 @@ export class EnvironmentController {
                             </thead>
                             <tbody>${renderRows(environments)}</tbody>
                         </table>
-                    </div>` : `<p class="environment-list-empty">No regular environments configured.</p>`}
+                    </div>` : `<p class="environment-list-empty">${escape(emptyText)}</p>`}
             </section>`;
 
         const regularEnvironments = this.app.data.environments.filter(environment => environment.automationWorker !== true);
@@ -337,7 +337,7 @@ export class EnvironmentController {
             <div class="environment-list-groups">
                 ${renderTable('Environments', 'Profiles you launch directly from terminals and sandboxes.', regularEnvironments)}
                 ${workers.length > 0
-                    ? renderTable('Workers', 'Robot-marked profiles used by Automations.', workers, true)
+                    ? renderTable('Workers', 'Robot-marked profiles used by Automations.', workers, true, 'No Workers configured.')
                     : ''}
             </div>`;
     }
@@ -850,12 +850,12 @@ export class EnvironmentController {
         return null;
     }
 
-    // GLM 5.2 and Grok 4.6 are OpenCode-backed pseudo-CLIs: they launch `opencode` with a
-    // pinned --model flag. They share the OpenCode settings form, env handling, and arg
+    // GLM 5.2, GLM 5.3, and Grok 4.6 are OpenCode-backed pseudo-CLIs: they launch `opencode`
+    // with a pinned --model flag. They share the OpenCode settings form, env handling, and arg
     // builder, so most call sites route through this helper instead of checking === 'opencode'.
     isOpencodeBackedCli(cli) {
         const cliLower = (cli || '').toLowerCase();
-        return cliLower === 'opencode' || cliLower === 'glm-5.2' || cliLower === 'grok-4.6';
+        return cliLower === 'opencode' || cliLower === 'glm-5.2' || cliLower === 'glm-5.3' || cliLower === 'grok-4.6';
     }
 
     // Returns the pinned provider/model ID for a pseudo-CLI, or null for plain OpenCode
@@ -863,6 +863,7 @@ export class EnvironmentController {
     pinnedModelForCli(cli) {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'glm-5.2') return 'zai/glm-5.2';
+        if (cliLower === 'glm-5.3') return 'zai-coding-plan/glm-5.3';
         if (cliLower === 'grok-4.6') return 'xai/grok-4.6';
         return null;
     }
@@ -1455,6 +1456,7 @@ export class EnvironmentController {
             ['openai/gpt-5.1-codex', 'openai/gpt-5.1-codex'],
             ['google/gemini-3-pro', 'google/gemini-3-pro'],
             ['zai/glm-5.2', 'zai/glm-5.2'],
+            ['zai-coding-plan/glm-5.3', 'zai-coding-plan/glm-5.3'],
             ['xai/grok-4.6', 'xai/grok-4.6'],
             ['opencode/gpt-5.1-codex', 'opencode/gpt-5.1-codex (Zen)'],
         ];
@@ -2027,7 +2029,7 @@ export class EnvironmentController {
     }
 
     // The display names the Initial Message wording uses — matching the product's own voice
-    // (the Antigravity CLI is spoken of as "agy", GLM 5.2 is not called OpenCode).
+    // (the Antigravity CLI is spoken of as "agy", GLM 5.2 / GLM 5.3 are not called OpenCode).
     cliDisplayName(cli) {
         const cliLower = (cli || '').toLowerCase();
         if (cliLower === 'claude') return 'Claude';
@@ -2035,6 +2037,7 @@ export class EnvironmentController {
         if (cliLower === 'copilot') return 'Copilot';
         if (cliLower === 'antigravity') return 'agy';
         if (cliLower === 'glm-5.2') return 'GLM 5.2';
+        if (cliLower === 'glm-5.3') return 'GLM 5.3';
         if (cliLower === 'grok-4.6') return 'Grok 4.6';
         if (cliLower === 'opencode') return 'OpenCode';
         return 'the CLI';
